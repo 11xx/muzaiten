@@ -39,9 +39,8 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
     for (const Track &track : tracks) {
         QList<QStandardItem *> row;
 
-        auto *rating = new QStandardItem(track.rating0To100 >= 0 ? QString::number(track.rating0To100) : QString());
+        auto *rating = new QStandardItem(track.rating0To100 >= 0 ? QString::number(track.rating0To100) : QStringLiteral("-"));
         rating->setData(track.rating0To100, Qt::UserRole);
-        rating->setData(track.rating0To100, Qt::EditRole);
         row << rating;
 
         auto *trackNumber = new QStandardItem(QString::number(track.trackNumber));
