@@ -3,6 +3,7 @@
 #include "Version.h"
 #include "db/Database.h"
 #include "scanner/ScanWorker.h"
+#include "scanner/ArtworkResolver.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/PlayerBar.h"
@@ -87,7 +88,8 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
-    connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::playTrack);
+    connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::stopRequested, m_player, &QMediaPlayer::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_player, &QMediaPlayer::setPosition);
@@ -229,9 +231,11 @@ void MainWindow::refreshArtists()
 
 void MainWindow::selectArtist(const QString &artistName)
 {
+    rememberTrackTableViewState();
     m_currentArtist = artistName;
     m_albumGrid->setAlbums(m_database->albumsForArtist(artistName));
     m_trackTable->setTracks(m_database->tracksForArtist(artistName));
+    restoreTrackTableViewState();
 }
 
 void MainWindow::playTrack(const Track &track)
@@ -241,12 +245,35 @@ void MainWindow::playTrack(const Track &track)
     }
 
     m_currentTrack = track;
+    updateCurrentAlbumArt();
     const QString label = QStringLiteral("%1 - %2").arg(track.artistName, track.title);
     m_playerBar->setTrackText(label);
     m_playerBar->setPosition(0, track.durationMs);
     m_player->setSource(QUrl::fromLocalFile(track.path));
     m_player->play();
     statusBar()->showMessage(QStringLiteral("Playing %1").arg(label), 3000);
+}
+
+void MainWindow::appendAndPlayTrack(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+
+    m_queue.push_back(track);
+    m_rightSidebar->setQueue(m_queue);
+    playQueueIndex(static_cast<int>(m_queue.size() - 1));
+}
+
+void MainWindow::playQueueIndex(int index)
+{
+    if (index < 0 || index >= m_queue.size()) {
+        return;
+    }
+
+    m_queueIndex = index;
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    playTrack(m_queue.at(m_queueIndex));
 }
 
 void MainWindow::togglePlayback()
@@ -265,6 +292,29 @@ void MainWindow::togglePlayback()
 void MainWindow::updatePlaybackPosition()
 {
     m_playerBar->setPosition(m_player->position(), m_player->duration());
+}
+
+void MainWindow::rememberTrackTableViewState()
+{
+    if (m_trackTable == nullptr) {
+        return;
+    }
+
+    m_trackSortColumn = m_trackTable->sortColumn();
+    m_trackSortOrder = m_trackTable->sortOrder();
+    m_trackScrollValue = m_trackTable->verticalScrollValue();
+}
+
+void MainWindow::restoreTrackTableViewState()
+{
+    m_trackTable->restoreViewState(m_trackSortColumn, m_trackSortOrder, m_trackScrollValue);
+}
+
+void MainWindow::updateCurrentAlbumArt()
+{
+    const ArtworkResolver resolver(cacheRoot());
+    const ArtworkResult artwork = resolver.resolveForDirectory(m_currentTrack.parentDir);
+    m_rightSidebar->setAlbumArt(artwork.cachePath);
 }
 
 QString MainWindow::databasePath() const
