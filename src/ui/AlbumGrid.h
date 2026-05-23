@@ -11,5 +11,12 @@ class AlbumGrid final : public QListView {
 public:
     explicit AlbumGrid(QWidget *parent = nullptr);
 
+    void setArtworkCacheRoot(const QString &cacheRoot);
     void setAlbums(const QVector<Album> &albums);
+
+signals:
+    void albumSelected(const QString &albumTitle);
+
+private:
+    QString m_artworkCacheRoot;
 };
