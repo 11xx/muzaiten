@@ -13,8 +13,7 @@ public:
     explicit LibraryScanner(QObject *parent = nullptr);
 
     QVector<Track> scan(const QString &rootPath) const;
+    static bool isSupportedAudioFile(const QString &path);
 
 private:
-    static bool isSupportedAudioFile(const QString &path);
 };
-

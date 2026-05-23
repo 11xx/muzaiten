@@ -101,6 +101,24 @@ QString Database::lastError() const
     return m_lastError;
 }
 
+bool Database::beginTransaction()
+{
+    if (!m_db.transaction()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::commitTransaction()
+{
+    if (!m_db.commit()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 qint64 Database::upsertArtist(const QString &name, const QString &sortName)
 {
     const QString safeName = name.trimmed().isEmpty() ? QStringLiteral("[unknown]") : name.trimmed();

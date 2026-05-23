@@ -20,6 +20,8 @@ public:
     bool migrate();
     QString lastError() const;
 
+    bool beginTransaction();
+    bool commitTransaction();
     bool upsertTrack(const Track &track);
     QVector<Artist> albumArtists() const;
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
@@ -33,4 +35,3 @@ private:
     QSqlDatabase m_db;
     QString m_lastError;
 };
-

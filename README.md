@@ -30,3 +30,31 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+## Development state
+
+When run as `./build/muzaiten`, development state is kept under:
+
+```text
+build/dev-state/
+```
+
+That includes the SQLite database and artwork cache, so the current dev state
+can be cleared with:
+
+```sh
+rm -rf build/dev-state
+```
+
+Use normal XDG paths with `--xdg-state`, or force a specific location with:
+
+```sh
+./build/muzaiten --state-root /tmp/muzaiten-state
+```
+
+Verbose scanner and TagLib diagnostics are disabled by default. Enable them
+with:
+
+```sh
+./build/muzaiten --verbose
+MUZAITEN_VERBOSE=1 ./build/muzaiten
+```

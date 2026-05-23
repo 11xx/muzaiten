@@ -5,6 +5,8 @@
 
 #include <QString>
 #include <QtTypes>
+#include <QMetaType>
+#include <QVector>
 
 struct Track {
     QString path;
@@ -29,3 +31,6 @@ struct Track {
     qint64 fileMtime = 0;
     QString scanError;
 };
+
+Q_DECLARE_METATYPE(Track)
+Q_DECLARE_METATYPE(QVector<Track>)

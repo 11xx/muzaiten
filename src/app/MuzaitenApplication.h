@@ -9,5 +9,8 @@ public:
     MuzaitenApplication(int &argc, char **argv);
 
     int run();
-};
 
+private:
+    void configureCommandLine();
+    void configureLogging(bool verbose);
+};
