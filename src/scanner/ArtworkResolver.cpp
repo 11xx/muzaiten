@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
+#include <QPainter>
 
 namespace {
 
@@ -55,9 +56,15 @@ ArtworkResult ArtworkResolver::resolveForDirectory(const QString &directoryPath)
         QDir().mkpath(m_cacheRoot);
         const QString cachePath = QDir(m_cacheRoot).filePath(cacheNameFor(source));
         if (!QFileInfo::exists(cachePath)) {
-            QImage image(source.absoluteFilePath());
+            const QImage image(source.absoluteFilePath());
             if (!image.isNull()) {
-                image.scaled(320, 320, Qt::KeepAspectRatio, Qt::SmoothTransformation).save(cachePath, "JPG", 88);
+                QImage square(320, 320, QImage::Format_ARGB32);
+                square.fill(Qt::transparent);
+                const QImage scaled = image.scaled(320, 320, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                QPainter painter(&square);
+                painter.drawImage((320 - scaled.width()) / 2, (320 - scaled.height()) / 2, scaled);
+                painter.end();
+                square.save(cachePath, "PNG");
             }
         }
 
@@ -71,4 +78,3 @@ QString ArtworkResolver::cacheRoot() const
 {
     return m_cacheRoot;
 }
-

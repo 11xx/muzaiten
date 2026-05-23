@@ -38,11 +38,13 @@ set(MUZAITEN_SOURCES
     src/scanner/LibraryScanner.cpp
     src/scanner/TagReader.cpp
     src/ui/AlbumGrid.cpp
+    src/ui/AlbumGridDelegate.cpp
     src/ui/ArtistSidebar.cpp
     src/ui/MainWindow.cpp
     src/ui/RightSidebar.cpp
     src/ui/StarRatingDelegate.cpp
     src/ui/TrackTable.cpp
+    resources/resources.qrc
 )
 
 set(MUZAITEN_HEADERS
@@ -59,6 +61,7 @@ set(MUZAITEN_HEADERS
     src/scanner/ScanWorker.h
     src/scanner/TagReader.h
     src/ui/AlbumGrid.h
+    src/ui/AlbumGridDelegate.h
     src/ui/ArtistSidebar.h
     src/ui/MainWindow.h
     src/ui/RightSidebar.h

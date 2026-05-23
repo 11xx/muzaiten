@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/artwork">
+    <file>album-fallback-dark.svg</file>
+    <file>album-fallback-light.svg</file>
+  </qresource>
+</RCC>

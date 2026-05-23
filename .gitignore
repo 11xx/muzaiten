@@ -6,3 +6,4 @@ build-arch*/
 *.autosave
 compile_commands.json
 musicbee-wine/
+resources/*.png
