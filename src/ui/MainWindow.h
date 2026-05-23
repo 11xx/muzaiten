@@ -9,6 +9,7 @@
 class Database;
 class AlbumGrid;
 class ArtistSidebar;
+class ListenBrainzWorker;
 class PlayerBar;
 class QAudioOutput;
 class QMediaPlayer;
@@ -41,6 +42,9 @@ private:
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
     void applySharedTableSettings();
+    void configureListenBrainz();
+    void setListenBrainzEnabled(bool enabled);
+    void setListenBrainzToken();
     void playTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
     void playQueueIndex(int index);
@@ -78,5 +82,7 @@ private:
     int m_trackScrollValue = 0;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_scanWorker = nullptr;
+    QThread *m_listenBrainzThread = nullptr;
+    ListenBrainzWorker *m_listenBrainzWorker = nullptr;
     qint64 m_lastUiRefreshIndexedTracks = 0;
 };

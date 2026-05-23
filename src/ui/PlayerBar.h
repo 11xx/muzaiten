@@ -13,10 +13,14 @@ public:
 
     void setTrackText(const QString &text);
     void setTrackInfo(const QString &title, const QString &subtitle, int rating0To100);
+    void setListenBrainzEnabled(bool enabled);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
 
 signals:
+    void openLibraryRequested();
+    void listenBrainzEnabledChanged(bool enabled);
+    void listenBrainzTokenRequested();
     void previousRequested();
     void playPauseRequested();
     void nextRequested();
@@ -27,6 +31,7 @@ signals:
 
 private:
     class QToolButton *m_playPause = nullptr;
+    class QAction *m_listenBrainzEnabled = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_subtitle = nullptr;
     QLabel *m_nowPlaying = nullptr;
