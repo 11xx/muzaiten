@@ -44,6 +44,8 @@ private:
     void playTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
     void playQueueIndex(int index);
+    void playPreviousTrack();
+    void playNextTrack();
     void togglePlayback();
     void updatePlaybackPosition();
     void startScan(const QString &rootPath);

@@ -52,14 +52,15 @@ Qt::Alignment alignmentFromString(const QString &value)
 
 QRect alignedRatingCell(const QRect &anchorRect, const QRect &textRect, int starSize, Qt::Alignment alignment)
 {
-    const int width = starSize * 5 + 12;
-    int left = anchorRect.left();
+    const int starsWidth = starSize * 5;
+    const int hitPadding = 6;
+    int left = anchorRect.left() - hitPadding;
     if (alignment & Qt::AlignRight) {
-        left = anchorRect.right() - width + 1;
+        left = anchorRect.right() - starsWidth + 1 - hitPadding;
     } else if (alignment & Qt::AlignHCenter) {
-        left = anchorRect.left() + ((anchorRect.width() - width) / 2);
+        left = anchorRect.left() + ((anchorRect.width() - starsWidth) / 2) - hitPadding;
     }
-    return {left, textRect.bottom() + 4, width, starSize};
+    return {left, textRect.bottom() + 4, starsWidth + (hitPadding * 2), starSize};
 }
 
 } // namespace

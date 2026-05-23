@@ -10,6 +10,7 @@
 #include <QPixmap>
 #include <QTableWidget>
 #include <QVBoxLayout>
+#include <QByteArray>
 
 #include <algorithm>
 
@@ -66,6 +67,9 @@ RightSidebar::RightSidebar(QWidget *parent)
         emit queueTrackActivated(row);
     });
     connect(m_queueTable->horizontalHeader(), &QHeaderView::customContextMenuRequested, this, &RightSidebar::showHeaderMenu);
+    connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
+        emit viewSettingsChanged();
+    });
 
     m_albumArt = new QLabel(this);
     m_albumArt->setMinimumSize(220, 220);
@@ -126,6 +130,7 @@ QString RightSidebar::viewSettingsJson() const
     root.insert(QStringLiteral("visibleColumns"), visibleColumns);
     root.insert(QStringLiteral("headerHeight"), m_queueTable->horizontalHeader()->height());
     root.insert(QStringLiteral("rowHeight"), m_queueTable->verticalHeader()->defaultSectionSize());
+    root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_queueTable->horizontalHeader()->saveState().toBase64()));
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -149,6 +154,10 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(22));
     m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(24), 22, 48));
+    const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
+    if (!headerState.isEmpty()) {
+        m_queueTable->horizontalHeader()->restoreState(headerState);
+    }
 }
 
 void RightSidebar::setHeaderHeight(int height)

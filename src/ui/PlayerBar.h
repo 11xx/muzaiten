@@ -12,17 +12,24 @@ public:
     explicit PlayerBar(QWidget *parent = nullptr);
 
     void setTrackText(const QString &text);
+    void setTrackInfo(const QString &title, const QString &subtitle, int rating0To100);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
 
 signals:
+    void previousRequested();
     void playPauseRequested();
+    void nextRequested();
     void stopRequested();
     void seekRequested(qint64 positionMs);
+    void volumeChanged(int volume0To100);
 
 private:
     class QToolButton *m_playPause = nullptr;
+    QLabel *m_title = nullptr;
+    QLabel *m_subtitle = nullptr;
     QLabel *m_nowPlaying = nullptr;
+    QWidget *m_rating = nullptr;
     QLabel *m_elapsed = nullptr;
     QLabel *m_duration = nullptr;
     QSlider *m_progress = nullptr;
