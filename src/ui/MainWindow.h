@@ -7,6 +7,7 @@
 class Database;
 class AlbumGrid;
 class ArtistSidebar;
+class PlayerBar;
 class QProgressBar;
 class QThread;
 class RightSidebar;
@@ -35,6 +36,7 @@ private:
     bool useDevState() const;
 
     ArtistSidebar *m_artistSidebar = nullptr;
+    PlayerBar *m_playerBar = nullptr;
     AlbumGrid *m_albumGrid = nullptr;
     TrackTable *m_trackTable = nullptr;
     RightSidebar *m_rightSidebar = nullptr;

@@ -41,6 +41,7 @@ set(MUZAITEN_SOURCES
     src/ui/AlbumGridDelegate.cpp
     src/ui/ArtistSidebar.cpp
     src/ui/MainWindow.cpp
+    src/ui/PlayerBar.cpp
     src/ui/RightSidebar.cpp
     src/ui/StarRatingDelegate.cpp
     src/ui/TrackTable.cpp
@@ -64,6 +65,7 @@ set(MUZAITEN_HEADERS
     src/ui/AlbumGridDelegate.h
     src/ui/ArtistSidebar.h
     src/ui/MainWindow.h
+    src/ui/PlayerBar.h
     src/ui/RightSidebar.h
     src/ui/StarRatingDelegate.h
     src/ui/TrackTable.h
