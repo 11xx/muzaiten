@@ -9,6 +9,7 @@ Current target version: `2026.5.23`.
 ## First version scope
 
 - C++26 and Qt 6 Widgets.
+- Qt Multimedia playback.
 - SQLite-backed read-only library index.
 - Album artist sidebar.
 - Album grid with cover art.

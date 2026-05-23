@@ -18,7 +18,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include(CheckPIESupported)
 check_pie_supported()
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Sql Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Multimedia Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 
@@ -80,6 +80,7 @@ target_include_directories(muzaiten PRIVATE
 
 target_link_libraries(muzaiten PRIVATE
     Qt6::Core
+    Qt6::Multimedia
     Qt6::Widgets
     Qt6::Sql
     PkgConfig::TAGLIB
