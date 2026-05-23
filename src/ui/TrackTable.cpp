@@ -14,6 +14,7 @@
 #include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTime>
+#include <QByteArray>
 
 namespace {
 
@@ -100,6 +101,9 @@ TrackTable::TrackTable(QWidget *parent)
     connect(horizontalHeader(), &QHeaderView::sortIndicatorChanged, this, [this]() {
         emit viewSettingsChanged();
     });
+    connect(horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
+        emit viewSettingsChanged();
+    });
 
     connect(this, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
         const QModelIndex ratingIndex = this->model()->index(index.row(), 0);
@@ -148,6 +152,7 @@ QString TrackTable::viewSettingsJson() const
     root.insert(QStringLiteral("sortOrder"), sortOrder() == Qt::DescendingOrder ? QStringLiteral("descending") : QStringLiteral("ascending"));
     root.insert(QStringLiteral("rowHeight"), verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), horizontalHeader()->height());
+    root.insert(QStringLiteral("headerState"), QString::fromLatin1(horizontalHeader()->saveState().toBase64()));
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -176,6 +181,10 @@ void TrackTable::applyViewSettingsJson(const QString &json)
     const int column = columnFromKey(root.value(QStringLiteral("sortColumn")).toString(QStringLiteral("rating")));
     const Qt::SortOrder order = root.value(QStringLiteral("sortOrder")).toString() == QStringLiteral("descending") ? Qt::DescendingOrder : Qt::AscendingOrder;
     sortByColumn(column, order);
+    const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
+    if (!headerState.isEmpty()) {
+        horizontalHeader()->restoreState(headerState);
+    }
 }
 
 void TrackTable::setHeaderHeight(int height)

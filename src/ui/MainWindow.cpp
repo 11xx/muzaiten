@@ -31,6 +31,8 @@
 #include <QVBoxLayout>
 #include <QUuid>
 
+#include <algorithm>
+
 Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 
 MainWindow::MainWindow(QWidget *parent)
@@ -99,9 +101,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
+    connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
+    connect(m_playerBar, &PlayerBar::nextRequested, this, &MainWindow::playNextTrack);
     connect(m_playerBar, &PlayerBar::stopRequested, m_player, &QMediaPlayer::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_player, &QMediaPlayer::setPosition);
+    connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
+        m_audioOutput->setVolume(static_cast<float>(std::clamp(volume, 0, 100)) / 100.0f);
+    });
     connect(m_player, &QMediaPlayer::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
@@ -297,6 +304,12 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     if (m_currentTrack.path == track.path) {
         m_currentTrack.hasUserRating = rating0To100 >= 0;
         m_currentTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : m_currentTrack.rating0To100;
+        const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
+        QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
+        if (!m_currentTrack.date.isEmpty()) {
+            subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
+        }
+        m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
@@ -366,12 +379,16 @@ void MainWindow::playTrack(const Track &track)
 
     m_currentTrack = track;
     updateCurrentAlbumArt();
-    const QString label = QStringLiteral("%1 - %2").arg(track.artistName, track.title);
-    m_playerBar->setTrackText(label);
+    const QString title = track.title.isEmpty() ? track.filename : track.title;
+    QString subtitle = QStringLiteral("%1 - %2").arg(track.artistName, track.albumTitle);
+    if (!track.date.isEmpty()) {
+        subtitle += QStringLiteral(" (%1)").arg(track.date.left(4));
+    }
+    m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_playerBar->setPosition(0, track.durationMs);
     m_player->setSource(QUrl::fromLocalFile(track.path));
     m_player->play();
-    statusBar()->showMessage(QStringLiteral("Playing %1").arg(label), 3000);
+    statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
 }
 
 void MainWindow::appendAndPlayTrack(const Track &track)
@@ -394,6 +411,22 @@ void MainWindow::playQueueIndex(int index)
     m_queueIndex = index;
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     playTrack(m_queue.at(m_queueIndex));
+}
+
+void MainWindow::playPreviousTrack()
+{
+    if (m_queue.isEmpty()) {
+        return;
+    }
+    playQueueIndex(std::max(0, m_queueIndex - 1));
+}
+
+void MainWindow::playNextTrack()
+{
+    if (m_queue.isEmpty()) {
+        return;
+    }
+    playQueueIndex(std::min(static_cast<int>(m_queue.size() - 1), m_queueIndex + 1));
 }
 
 void MainWindow::togglePlayback()
