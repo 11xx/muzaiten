@@ -59,7 +59,7 @@ TrackTable::TrackTable(QWidget *parent)
     : QTableView(parent)
 {
     auto *itemModel = new QStandardItemModel(0, 7, this);
-    itemModel->setSortRole(Qt::EditRole);
+    itemModel->setSortRole(Qt::UserRole);
     itemModel->setHorizontalHeaderLabels({
         QStringLiteral("Rating"),
         QStringLiteral("#"),
@@ -199,25 +199,25 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
         row << rating;
 
         auto *trackNumber = new QStandardItem(QString::number(track.trackNumber));
-        trackNumber->setData(track.trackNumber, Qt::EditRole);
+        trackNumber->setData(track.trackNumber, Qt::UserRole);
         row << trackNumber;
 
         auto *title = new QStandardItem(track.title);
-        title->setData(track.title, Qt::EditRole);
+        title->setData(track.title, Qt::UserRole);
         row << title;
         auto *album = new QStandardItem(track.albumTitle);
-        album->setData(track.albumTitle, Qt::EditRole);
+        album->setData(track.albumTitle, Qt::UserRole);
         row << album;
         auto *artist = new QStandardItem(track.artistName);
-        artist->setData(track.artistName, Qt::EditRole);
+        artist->setData(track.artistName, Qt::UserRole);
         row << artist;
 
         const QTime duration = QTime(0, 0).addMSecs(static_cast<int>(track.durationMs));
         auto *durationItem = new QStandardItem(duration.hour() > 0 ? duration.toString(QStringLiteral("h:mm:ss")) : duration.toString(QStringLiteral("m:ss")));
-        durationItem->setData(track.durationMs, Qt::EditRole);
+        durationItem->setData(track.durationMs, Qt::UserRole);
         row << durationItem;
         auto *year = new QStandardItem(track.date.left(4));
-        year->setData(track.date.left(4), Qt::EditRole);
+        year->setData(track.date.left(4), Qt::UserRole);
         row << year;
 
         for (QStandardItem *item : row) {

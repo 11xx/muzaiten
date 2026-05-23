@@ -43,6 +43,6 @@ private:
     int m_artSize = 176;
     int m_spacing = 6;
     int m_padding = 8;
-    int m_starSize = 16;
+    int m_starSize = 18;
     Qt::Alignment m_textAlignment = Qt::AlignHCenter;
 };

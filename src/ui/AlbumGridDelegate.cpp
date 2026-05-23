@@ -19,14 +19,14 @@ enum Roles {
     StarSizeRole = Qt::UserRole + 8,
 };
 
-QRect alignedRatingCell(const QRect &content, const QRect &textRect, int starSize, Qt::Alignment alignment)
+QRect alignedRatingCell(const QRect &anchorRect, const QRect &textRect, int starSize, Qt::Alignment alignment)
 {
     const int width = starSize * 5 + 12;
-    int left = content.left();
+    int left = anchorRect.left();
     if (alignment & Qt::AlignRight) {
-        left = content.right() - width + 1;
+        left = anchorRect.right() - width + 1;
     } else if (alignment & Qt::AlignHCenter) {
-        left = content.left() + ((content.width() - width) / 2);
+        left = anchorRect.left() + ((anchorRect.width() - width) / 2);
     }
     return {left, textRect.bottom() + 4, width, starSize};
 }
@@ -59,19 +59,19 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     const int padding = index.data(CellPaddingRole).toInt() > 0 ? index.data(CellPaddingRole).toInt() : 8;
     const int artSize = index.data(ArtSizeRole).toInt() > 0 ? index.data(ArtSizeRole).toInt() : 176;
-    const int starSize = index.data(StarSizeRole).toInt() > 0 ? index.data(StarSizeRole).toInt() : 16;
+    const int starSize = index.data(StarSizeRole).toInt() > 0 ? index.data(StarSizeRole).toInt() : 18;
     const QRect content = option.rect.adjusted(padding, padding, -padding, -padding);
     const QRect artRect(content.left() + ((content.width() - artSize) / 2), content.top(), artSize, artSize);
 
     const QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
     icon.paint(painter, artRect, Qt::AlignCenter, QIcon::Normal, QIcon::Off);
 
-    QRect textRect(content.left(), artRect.bottom() + 6, content.width(), 44);
+    QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 44);
     painter->setPen(opt.palette.color(QPalette::Text));
     const auto alignment = static_cast<Qt::Alignment>(index.data(TextAlignmentRole).toInt());
     painter->drawText(textRect, alignment | Qt::AlignTop | Qt::TextWordWrap, index.data(Qt::DisplayRole).toString());
 
-    const QRect ratingCell = alignedRatingCell(content, textRect, starSize, alignment);
+    const QRect ratingCell = alignedRatingCell(artRect, textRect, starSize, alignment);
     StarRating::paint(painter,
                       StarRating::ratingRect(ratingCell, starSize),
                       index.data(RatingRole).toInt(),

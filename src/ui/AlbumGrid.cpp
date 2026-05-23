@@ -50,14 +50,14 @@ Qt::Alignment alignmentFromString(const QString &value)
     return Qt::AlignHCenter;
 }
 
-QRect alignedRatingCell(const QRect &content, const QRect &textRect, int starSize, Qt::Alignment alignment)
+QRect alignedRatingCell(const QRect &anchorRect, const QRect &textRect, int starSize, Qt::Alignment alignment)
 {
     const int width = starSize * 5 + 12;
-    int left = content.left();
+    int left = anchorRect.left();
     if (alignment & Qt::AlignRight) {
-        left = content.right() - width + 1;
+        left = anchorRect.right() - width + 1;
     } else if (alignment & Qt::AlignHCenter) {
-        left = content.left() + ((content.width() - width) / 2);
+        left = anchorRect.left() + ((anchorRect.width() - width) / 2);
     }
     return {left, textRect.bottom() + 4, width, starSize};
 }
@@ -160,7 +160,7 @@ void AlbumGrid::applyViewSettingsJson(const QString &json)
         m_cellHeight = std::clamp(root.value(QStringLiteral("cellHeight")).toInt(278), 220, 380);
         m_artSize = std::clamp(root.value(QStringLiteral("artSize")).toInt(176), 96, 260);
         m_spacing = std::clamp(root.value(QStringLiteral("spacing")).toInt(6), 0, 24);
-        m_starSize = std::clamp(root.value(QStringLiteral("starSize")).toInt(16), 12, 28);
+        m_starSize = std::clamp(root.value(QStringLiteral("starSize")).toInt(18), 18, 28);
         m_textAlignment = alignmentFromString(root.value(QStringLiteral("textAlignment")).toString(QStringLiteral("center")));
     }
     applySettingsToView();
@@ -219,8 +219,8 @@ QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
 {
     const QRect cell = visualRect(index).adjusted(m_padding, m_padding, -m_padding, -m_padding);
     const QRect artRect(cell.left() + ((cell.width() - m_artSize) / 2), cell.top(), m_artSize, m_artSize);
-    const QRect textRect(cell.left(), artRect.bottom() + 6, cell.width(), 44);
-    const QRect ratingCell = alignedRatingCell(cell, textRect, m_starSize, m_textAlignment);
+    const QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 44);
+    const QRect ratingCell = alignedRatingCell(artRect, textRect, m_starSize, m_textAlignment);
     return StarRating::ratingRect(ratingCell, m_starSize);
 }
 
