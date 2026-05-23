@@ -1,0 +1,6 @@
+#pragma once
+
+#define MUZAITEN_VERSION "@PROJECT_VERSION@"
+#define MUZAITEN_APP_ID "io.github.local.muzaiten"
+#define MUZAITEN_APP_NAME "muzaiten"
+
