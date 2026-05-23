@@ -57,7 +57,7 @@ void paint(QPainter *painter, const QRect &rect, int rating0To100, int hoverRati
 {
     const int activeRating = hoverRating0To100 >= 0 ? hoverRating0To100 : rating0To100;
     const int normalized = activeRating >= 0 ? Rating::normalized0To100(activeRating) : unset;
-    const QColor fillColor = palette.color(QPalette::Highlight);
+    const QColor fillColor = palette.color(QPalette::Window).lightness() < 128 ? QColor(QStringLiteral("#cccccc")) : QColor(QStringLiteral("#333333"));
     QColor emptyColor = palette.color(QPalette::Disabled, QPalette::Text);
     emptyColor.setAlpha(110);
 
