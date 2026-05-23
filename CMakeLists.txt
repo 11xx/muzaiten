@@ -33,12 +33,14 @@ set(MUZAITEN_SOURCES
     src/app/MuzaitenApplication.cpp
     src/core/Rating.cpp
     src/db/Database.cpp
+    src/scanner/ScanWorker.cpp
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
     src/scanner/TagReader.cpp
     src/ui/AlbumGrid.cpp
     src/ui/ArtistSidebar.cpp
     src/ui/MainWindow.cpp
+    src/ui/RightSidebar.cpp
     src/ui/StarRatingDelegate.cpp
     src/ui/TrackTable.cpp
 )
@@ -54,10 +56,12 @@ set(MUZAITEN_HEADERS
     src/db/Schema.h
     src/scanner/ArtworkResolver.h
     src/scanner/LibraryScanner.h
+    src/scanner/ScanWorker.h
     src/scanner/TagReader.h
     src/ui/AlbumGrid.h
     src/ui/ArtistSidebar.h
     src/ui/MainWindow.h
+    src/ui/RightSidebar.h
     src/ui/StarRatingDelegate.h
     src/ui/TrackTable.h
 )

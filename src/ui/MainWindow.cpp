@@ -2,20 +2,28 @@
 
 #include "Version.h"
 #include "db/Database.h"
-#include "scanner/LibraryScanner.h"
+#include "scanner/ScanWorker.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/RightSidebar.h"
 #include "ui/TrackTable.h"
 
 #include <QAction>
+#include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
+#include <QLoggingCategory>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QProgressBar>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
+#include <QThread>
 #include <QUuid>
+
+Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -33,13 +41,22 @@ MainWindow::MainWindow(QWidget *parent)
     center->setStretchFactor(0, 55);
     center->setStretchFactor(1, 45);
 
+    m_rightSidebar = new RightSidebar(root);
+
     root->addWidget(m_artistSidebar);
     root->addWidget(center);
+    root->addWidget(m_rightSidebar);
     root->setStretchFactor(0, 0);
     root->setStretchFactor(1, 1);
-    root->setSizes({260, 1180});
+    root->setStretchFactor(2, 0);
+    root->setSizes({260, 900, 300});
 
     setCentralWidget(root);
+
+    m_scanProgress = new QProgressBar(this);
+    m_scanProgress->setRange(0, 0);
+    m_scanProgress->setVisible(false);
+    statusBar()->addPermanentWidget(m_scanProgress);
 
     auto *libraryMenu = menuBar()->addMenu(QStringLiteral("&Library"));
     auto *openAction = libraryMenu->addAction(QStringLiteral("&Open Folder..."));
@@ -55,7 +72,16 @@ MainWindow::MainWindow(QWidget *parent)
     loadExistingLibrary();
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow()
+{
+    if (m_scanWorker != nullptr) {
+        m_scanWorker->cancel();
+    }
+    if (m_scanThread != nullptr) {
+        m_scanThread->quit();
+        m_scanThread->wait(3000);
+    }
+}
 
 void MainWindow::openLibraryFolder()
 {
@@ -64,17 +90,80 @@ void MainWindow::openLibraryFolder()
         return;
     }
 
-    LibraryScanner scanner(this);
-    const QVector<Track> tracks = scanner.scan(root);
+    startScan(root);
+}
 
+void MainWindow::startScan(const QString &rootPath)
+{
+    if (m_scanThread != nullptr) {
+        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
+        return;
+    }
+
+    qCInfo(uiLog) << "starting scan" << rootPath;
+    statusBar()->showMessage(QStringLiteral("Scanning %1").arg(rootPath));
+    m_scanProgress->setVisible(true);
+    m_lastUiRefreshIndexedTracks = 0;
+
+    m_scanThread = new QThread(this);
+    m_scanWorker = new ScanWorker(rootPath, 128);
+    m_scanWorker->moveToThread(m_scanThread);
+
+    connect(m_scanThread, &QThread::started, m_scanWorker, &ScanWorker::run);
+    connect(m_scanWorker, &ScanWorker::batchReady, this, &MainWindow::ingestScanBatch);
+    connect(m_scanWorker, &ScanWorker::progress, this, [this](qint64 visitedFiles, qint64 indexedTracks, const QString &currentPath) {
+        statusBar()->showMessage(QStringLiteral("Scanning: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks));
+        qCDebug(uiLog) << "scan progress" << visitedFiles << indexedTracks << currentPath;
+    });
+    connect(m_scanWorker, &ScanWorker::finished, this, &MainWindow::finishScan);
+    connect(m_scanWorker, &ScanWorker::finished, m_scanThread, &QThread::quit);
+    connect(m_scanThread, &QThread::finished, m_scanWorker, &QObject::deleteLater);
+    connect(m_scanThread, &QThread::finished, m_scanThread, &QObject::deleteLater);
+    connect(m_scanThread, &QThread::finished, this, [this]() {
+        m_scanThread = nullptr;
+        m_scanWorker = nullptr;
+    });
+
+    m_scanThread->start();
+}
+
+void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty()) {
+        return;
+    }
+
+    if (!m_database->beginTransaction()) {
+        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
+        return;
+    }
     for (const Track &track : tracks) {
         if (!m_database->upsertTrack(track)) {
             QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
             break;
         }
     }
+    if (!m_database->commitTransaction()) {
+        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
+        return;
+    }
 
-    statusBar()->showMessage(QStringLiteral("Indexed %1 tracks read-only").arg(tracks.size()), 5000);
+    m_lastUiRefreshIndexedTracks += tracks.size();
+    if (m_lastUiRefreshIndexedTracks >= 512) {
+        m_lastUiRefreshIndexedTracks = 0;
+        refreshArtists();
+    }
+}
+
+void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled)
+{
+    qCInfo(uiLog) << "scan finished" << visitedFiles << indexedTracks << "canceled" << canceled;
+    m_scanProgress->setVisible(false);
+    statusBar()->showMessage(
+        canceled
+            ? QStringLiteral("Scan canceled: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks)
+            : QStringLiteral("Scan complete: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks),
+        10000);
     refreshArtists();
 }
 
@@ -101,14 +190,39 @@ void MainWindow::selectArtist(const QString &artistName)
 
 QString MainWindow::databasePath() const
 {
-    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString root = stateRoot() + QStringLiteral("/data");
     QDir().mkpath(root);
     return QDir(root).filePath(QStringLiteral("library.sqlite"));
 }
 
 QString MainWindow::cacheRoot() const
 {
-    const QString root = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    const QString root = stateRoot() + QStringLiteral("/cache");
     QDir().mkpath(root);
     return QDir(root).filePath(QStringLiteral("artwork"));
+}
+
+QString MainWindow::stateRoot() const
+{
+    const QString overrideRoot = qApp->property("muzaiten.stateRoot").toString();
+    if (!overrideRoot.isEmpty()) {
+        QDir().mkpath(overrideRoot);
+        return overrideRoot;
+    }
+
+    if (useDevState()) {
+        const QString root = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("dev-state"));
+        QDir().mkpath(root);
+        return root;
+    }
+
+    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(root);
+    return root;
+}
+
+bool MainWindow::useDevState() const
+{
+    return qApp->property("muzaiten.devState").toBool()
+        || QCoreApplication::applicationDirPath().endsWith(QStringLiteral("/build"));
 }
