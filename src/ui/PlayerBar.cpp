@@ -2,6 +2,7 @@
 
 #include "ui/StarRating.h"
 
+#include <QAction>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
@@ -9,6 +10,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QStyle>
 #include <QToolButton>
@@ -126,6 +128,17 @@ QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QStr
     return button;
 }
 
+QToolButton *menuButton(QWidget *parent)
+{
+    auto *button = new QToolButton(parent);
+    button->setText(QStringLiteral("☰"));
+    button->setToolTip(QStringLiteral("Menu"));
+    button->setAutoRaise(true);
+    button->setPopupMode(QToolButton::InstantPopup);
+    button->setFixedSize(34, 34);
+    return button;
+}
+
 QIcon shuffleIcon(const QPalette &palette)
 {
     QPixmap pixmap(24, 24);
@@ -187,6 +200,18 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *root = new QHBoxLayout(this);
     root->setContentsMargins(10, 8, 10, 8);
     root->setSpacing(10);
+
+    auto *menu = new QMenu(this);
+    QAction *openLibrary = menu->addAction(QStringLiteral("Open library folder..."));
+    menu->addSeparator();
+    menu->addSection(QStringLiteral("Scrobblers"));
+    m_listenBrainzEnabled = menu->addAction(QStringLiteral("ListenBrainz scrobbling"));
+    m_listenBrainzEnabled->setCheckable(true);
+    QAction *listenBrainzToken = menu->addAction(QStringLiteral("Set ListenBrainz token..."));
+
+    auto *hamburger = menuButton(this);
+    hamburger->setMenu(menu);
+    root->addWidget(hamburger);
 
     auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
     root->addWidget(previous);
@@ -269,6 +294,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     root->addWidget(shuffle);
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
+    connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
+    connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
+    connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
@@ -288,6 +316,15 @@ void PlayerBar::setTrackInfo(const QString &title, const QString &subtitle, int 
     m_subtitle->setText(subtitle);
     static_cast<RatingStrip *>(m_rating)->setRating(rating0To100);
     m_progress->setEnabled(m_hasTrack);
+}
+
+void PlayerBar::setListenBrainzEnabled(bool enabled)
+{
+    if (m_listenBrainzEnabled == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_listenBrainzEnabled);
+    m_listenBrainzEnabled->setChecked(enabled);
 }
 
 void PlayerBar::setPlaying(bool playing)

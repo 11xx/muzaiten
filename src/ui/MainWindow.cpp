@@ -4,6 +4,7 @@
 #include "db/Database.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
+#include "scrobble/ListenBrainzWorker.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/PlayerBar.h"
@@ -15,10 +16,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineEdit>
 #include <QLoggingCategory>
-#include <QMenuBar>
 #include <QMessageBox>
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -82,14 +84,16 @@ MainWindow::MainWindow(QWidget *parent)
     m_player = new QMediaPlayer(this);
     m_player->setAudioOutput(m_audioOutput);
 
-    auto *libraryMenu = menuBar()->addMenu(QStringLiteral("&Library"));
-    auto *openAction = libraryMenu->addAction(QStringLiteral("&Open Folder..."));
-    connect(openAction, &QAction::triggered, this, &MainWindow::openLibraryFolder);
-
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
         QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
     }
+
+    m_listenBrainzThread = new QThread(this);
+    m_listenBrainzWorker = new ListenBrainzWorker;
+    m_listenBrainzWorker->moveToThread(m_listenBrainzThread);
+    connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzWorker, &QObject::deleteLater);
+    m_listenBrainzThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
@@ -101,6 +105,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
+    connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
+    connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
+    connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::nextRequested, this, &MainWindow::playNextTrack);
@@ -117,7 +124,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &QMediaPlayer::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
-        m_playerBar->setPlaying(state == QMediaPlayer::PlayingState);
+        const bool playing = state == QMediaPlayer::PlayingState;
+        m_playerBar->setPlaying(playing);
+        QMetaObject::invokeMethod(m_listenBrainzWorker, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
     });
     connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &errorString) {
         if (!errorString.isEmpty()) {
@@ -127,6 +136,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
     loadViewSettings();
+    configureListenBrainz();
     loadExistingLibrary();
 }
 
@@ -138,6 +148,10 @@ MainWindow::~MainWindow()
     if (m_scanThread != nullptr) {
         m_scanThread->quit();
         m_scanThread->wait(3000);
+    }
+    if (m_listenBrainzThread != nullptr) {
+        m_listenBrainzThread->quit();
+        m_listenBrainzThread->wait(3000);
     }
 }
 
@@ -376,6 +390,50 @@ void MainWindow::applySharedTableSettings()
     m_database->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
 }
 
+void MainWindow::configureListenBrainz()
+{
+    const bool enabled = m_database->setting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false")) == QStringLiteral("true");
+    QString token = m_database->setting(QStringLiteral("listenbrainz.token"));
+    if (token.isEmpty()) {
+        token = QString::fromLocal8Bit(qgetenv("LISTENBRAINZ_TOKEN")).trimmed();
+    }
+
+    m_playerBar->setListenBrainzEnabled(enabled);
+    QMetaObject::invokeMethod(m_listenBrainzWorker,
+                              "configure",
+                              Qt::QueuedConnection,
+                              Q_ARG(bool, enabled),
+                              Q_ARG(QString, token),
+                              Q_ARG(QString, stateRoot() + QStringLiteral("/listenbrainz-pending.json")));
+}
+
+void MainWindow::setListenBrainzEnabled(bool enabled)
+{
+    m_database->setSetting(QStringLiteral("listenbrainz.enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
+    configureListenBrainz();
+    statusBar()->showMessage(enabled ? QStringLiteral("ListenBrainz scrobbling enabled") : QStringLiteral("ListenBrainz scrobbling disabled"), 3000);
+}
+
+void MainWindow::setListenBrainzToken()
+{
+    const QString current = m_database->setting(QStringLiteral("listenbrainz.token"));
+    bool ok = false;
+    const QString token = QInputDialog::getText(this,
+                                                QStringLiteral("ListenBrainz token"),
+                                                QStringLiteral("User token"),
+                                                QLineEdit::Password,
+                                                current,
+                                                &ok)
+                              .trimmed();
+    if (!ok) {
+        return;
+    }
+
+    m_database->setSetting(QStringLiteral("listenbrainz.token"), token);
+    configureListenBrainz();
+    statusBar()->showMessage(QStringLiteral("ListenBrainz token updated"), 3000);
+}
+
 void MainWindow::playTrack(const Track &track)
 {
     if (track.path.isEmpty()) {
@@ -393,6 +451,7 @@ void MainWindow::playTrack(const Track &track)
     m_playerBar->setPosition(0, track.durationMs);
     m_player->setSource(QUrl::fromLocalFile(track.path));
     m_player->play();
+    QMetaObject::invokeMethod(m_listenBrainzWorker, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
     statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
 }
 

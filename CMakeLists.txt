@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 
 project(muzaiten
-    VERSION 2026.5.23.5
+    VERSION 2026.5.23.6
     DESCRIPTION "Native Linux music player inspired by MusicBee and ncmpcpp"
     LANGUAGES CXX
 )
@@ -18,7 +18,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include(CheckPIESupported)
 check_pie_supported()
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Multimedia Widgets Sql Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 
@@ -37,6 +37,7 @@ set(MUZAITEN_SOURCES
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
     src/scanner/TagReader.cpp
+    src/scrobble/ListenBrainzWorker.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumGridDelegate.cpp
     src/ui/ArtistSidebar.cpp
@@ -62,6 +63,7 @@ set(MUZAITEN_HEADERS
     src/scanner/LibraryScanner.h
     src/scanner/ScanWorker.h
     src/scanner/TagReader.h
+    src/scrobble/ListenBrainzWorker.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
     src/ui/ArtistSidebar.h
@@ -82,6 +84,7 @@ target_include_directories(muzaiten PRIVATE
 
 target_link_libraries(muzaiten PRIVATE
     Qt6::Core
+    Qt6::Network
     Qt6::Multimedia
     Qt6::Widgets
     Qt6::Sql
