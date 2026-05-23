@@ -1,0 +1,7 @@
+build/
+.cache/
+.qt/
+*.user
+*.autosave
+compile_commands.json
+musicbee-wine/
