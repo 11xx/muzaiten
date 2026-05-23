@@ -176,8 +176,20 @@ void MainWindow::refreshArtists()
 {
     const QVector<Artist> artists = m_database->albumArtists();
     m_artistSidebar->setArtists(artists);
-    if (!artists.isEmpty()) {
+
+    if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
+        selectArtist(m_currentArtist);
+        return;
+    }
+
+    if (!artists.isEmpty() && m_currentArtist.isEmpty()) {
         selectArtist(artists.first().name);
+        m_artistSidebar->selectArtist(artists.first().name);
+        return;
+    }
+
+    if (artists.isEmpty()) {
+        m_currentArtist.clear();
     }
 }
 

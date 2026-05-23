@@ -4,6 +4,7 @@
 
 #include <QLineEdit>
 #include <QListView>
+#include <QSignalBlocker>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
 
@@ -40,4 +41,25 @@ void ArtistSidebar::setArtists(const QVector<Artist> &artists)
         item->setData(artist.name, Qt::UserRole);
         m_model->appendRow(item);
     }
+}
+
+bool ArtistSidebar::selectArtist(const QString &artistName)
+{
+    if (artistName.isEmpty()) {
+        return false;
+    }
+
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        const QModelIndex index = m_model->index(row, 0);
+        if (index.data(Qt::UserRole).toString() != artistName) {
+            continue;
+        }
+
+        const QSignalBlocker blocker(m_view->selectionModel());
+        m_view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        m_view->setCurrentIndex(index);
+        m_view->scrollTo(index, QAbstractItemView::PositionAtCenter);
+        return true;
+    }
+    return false;
 }
