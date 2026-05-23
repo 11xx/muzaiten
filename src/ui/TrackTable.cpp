@@ -80,6 +80,7 @@ TrackTable::TrackTable(QWidget *parent)
     viewport()->setMouseTracking(true);
     horizontalHeader()->setStretchLastSection(false);
     horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    horizontalHeader()->setSectionsMovable(true);
     horizontalHeader()->setFixedHeight(22);
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     verticalHeader()->setDefaultSectionSize(24);
@@ -146,6 +147,7 @@ QString TrackTable::viewSettingsJson() const
     root.insert(QStringLiteral("sortColumn"), columnKey(sortColumn()));
     root.insert(QStringLiteral("sortOrder"), sortOrder() == Qt::DescendingOrder ? QStringLiteral("descending") : QStringLiteral("ascending"));
     root.insert(QStringLiteral("rowHeight"), verticalHeader()->defaultSectionSize());
+    root.insert(QStringLiteral("headerHeight"), horizontalHeader()->height());
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -169,10 +171,16 @@ void TrackTable::applyViewSettingsJson(const QString &json)
 
     const int rowHeight = root.value(QStringLiteral("rowHeight")).toInt(24);
     verticalHeader()->setDefaultSectionSize(std::clamp(rowHeight, 22, 48));
+    setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(22));
 
     const int column = columnFromKey(root.value(QStringLiteral("sortColumn")).toString(QStringLiteral("rating")));
     const Qt::SortOrder order = root.value(QStringLiteral("sortOrder")).toString() == QStringLiteral("descending") ? Qt::DescendingOrder : Qt::AscendingOrder;
     sortByColumn(column, order);
+}
+
+void TrackTable::setHeaderHeight(int height)
+{
+    horizontalHeader()->setFixedHeight(std::clamp(height, 20, 40));
 }
 
 void TrackTable::setTracks(const QVector<Track> &tracks)

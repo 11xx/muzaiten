@@ -58,8 +58,8 @@ void paint(QPainter *painter, const QRect &rect, int rating0To100, int hoverRati
     const int activeRating = hoverRating0To100 >= 0 ? hoverRating0To100 : rating0To100;
     const int normalized = activeRating >= 0 ? Rating::normalized0To100(activeRating) : unset;
     const QColor fillColor = palette.color(QPalette::Highlight);
-    const QColor emptyColor = palette.color(QPalette::Disabled, QPalette::Text);
-    const QPen outlinePen(emptyColor, 1.0);
+    QColor emptyColor = palette.color(QPalette::Disabled, QPalette::Text);
+    emptyColor.setAlpha(110);
 
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
@@ -69,8 +69,8 @@ void paint(QPainter *painter, const QRect &rect, int rating0To100, int hoverRati
         const QRectF starRect(rect.left() + i * starSize + 2, rect.top() + 2, starSize - 4, starSize - 4);
         const QPainterPath path = starPath(starRect);
 
-        painter->setPen(outlinePen);
-        painter->setBrush(Qt::NoBrush);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(emptyColor);
         painter->drawPath(path);
 
         if (normalized <= i * 20) {

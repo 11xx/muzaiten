@@ -18,6 +18,18 @@ enum Roles {
     CellPaddingRole = Qt::UserRole + 7,
     StarSizeRole = Qt::UserRole + 8,
 };
+
+QRect alignedRatingCell(const QRect &content, const QRect &textRect, int starSize, Qt::Alignment alignment)
+{
+    const int width = starSize * 5 + 12;
+    int left = content.left();
+    if (alignment & Qt::AlignRight) {
+        left = content.right() - width + 1;
+    } else if (alignment & Qt::AlignHCenter) {
+        left = content.left() + ((content.width() - width) / 2);
+    }
+    return {left, textRect.bottom() + 4, width, starSize};
+}
 }
 
 AlbumGridDelegate::AlbumGridDelegate(QObject *parent)
@@ -59,7 +71,7 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
     const auto alignment = static_cast<Qt::Alignment>(index.data(TextAlignmentRole).toInt());
     painter->drawText(textRect, alignment | Qt::AlignTop | Qt::TextWordWrap, index.data(Qt::DisplayRole).toString());
 
-    const QRect ratingCell(content.left() + ((content.width() - (starSize * 5)) / 2) - 6, textRect.bottom() + 4, starSize * 5 + 12, starSize);
+    const QRect ratingCell = alignedRatingCell(content, textRect, starSize, alignment);
     StarRating::paint(painter,
                       StarRating::ratingRect(ratingCell, starSize),
                       index.data(RatingRole).toInt(),

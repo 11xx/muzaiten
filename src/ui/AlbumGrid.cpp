@@ -50,6 +50,18 @@ Qt::Alignment alignmentFromString(const QString &value)
     return Qt::AlignHCenter;
 }
 
+QRect alignedRatingCell(const QRect &content, const QRect &textRect, int starSize, Qt::Alignment alignment)
+{
+    const int width = starSize * 5 + 12;
+    int left = content.left();
+    if (alignment & Qt::AlignRight) {
+        left = content.right() - width + 1;
+    } else if (alignment & Qt::AlignHCenter) {
+        left = content.left() + ((content.width() - width) / 2);
+    }
+    return {left, textRect.bottom() + 4, width, starSize};
+}
+
 } // namespace
 
 AlbumGrid::AlbumGrid(QWidget *parent)
@@ -208,13 +220,14 @@ QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
     const QRect cell = visualRect(index).adjusted(m_padding, m_padding, -m_padding, -m_padding);
     const QRect artRect(cell.left() + ((cell.width() - m_artSize) / 2), cell.top(), m_artSize, m_artSize);
     const QRect textRect(cell.left(), artRect.bottom() + 6, cell.width(), 44);
-    const QRect ratingCell(cell.left() + ((cell.width() - (m_starSize * 5)) / 2) - 6, textRect.bottom() + 4, m_starSize * 5 + 12, m_starSize);
+    const QRect ratingCell = alignedRatingCell(cell, textRect, m_starSize, m_textAlignment);
     return StarRating::ratingRect(ratingCell, m_starSize);
 }
 
 void AlbumGrid::showContextMenu(const QPoint &pos)
 {
     QMenu menu(this);
+    menu.setMinimumWidth(180);
     QMenu *alignment = menu.addMenu(QStringLiteral("Text alignment"));
     for (const auto &[label, value] : {std::pair{QStringLiteral("Left"), Qt::AlignLeft}, std::pair{QStringLiteral("Center"), Qt::AlignHCenter}, std::pair{QStringLiteral("Right"), Qt::AlignRight}}) {
         QAction *action = alignment->addAction(label);

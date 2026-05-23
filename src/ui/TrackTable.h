@@ -18,6 +18,7 @@ public:
     void setTracks(const QVector<Track> &tracks);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
+    void setHeaderHeight(int height);
     int sortColumn() const;
     Qt::SortOrder sortOrder() const;
     int verticalScrollValue() const;

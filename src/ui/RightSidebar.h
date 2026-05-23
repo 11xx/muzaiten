@@ -16,9 +16,16 @@ public:
     void setQueue(const QVector<Track> &tracks);
     void setCurrentIndex(int index);
     void setAlbumArt(const QString &imagePath);
+    QString viewSettingsJson() const;
+    void applyViewSettingsJson(const QString &json);
+    void setHeaderHeight(int height);
 
 signals:
     void queueTrackActivated(int index);
+    void viewSettingsChanged();
+
+private:
+    void showHeaderMenu(const QPoint &pos);
 
 private:
     QTableWidget *m_queueTable = nullptr;
