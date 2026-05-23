@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QStringList>
 
+#include <cmath>
+
 #include <taglib/audioproperties.h>
 #include <taglib/fileref.h>
 #include <taglib/tpropertymap.h>
@@ -39,6 +41,35 @@ int firstIntProperty(const TagLib::PropertyMap &properties, const QStringList &k
     bool ok = false;
     const int parsed = value.toInt(&ok);
     return ok ? parsed : 0;
+}
+
+int ratingProperty0To100(const TagLib::PropertyMap &properties, Rating::Source *source)
+{
+    const QString rating = firstProperty(properties, {QStringLiteral("RATING")});
+    if (!rating.isEmpty()) {
+        bool ok = false;
+        const int parsed = rating.toInt(&ok);
+        if (ok) {
+            if (source != nullptr) {
+                *source = Rating::Source::MusicBeeCompatible;
+            }
+            return Rating::normalized0To100(parsed);
+        }
+    }
+
+    const QString fmps = firstProperty(properties, {QStringLiteral("FMPS_RATING")});
+    if (!fmps.isEmpty()) {
+        bool ok = false;
+        const double parsed = fmps.toDouble(&ok);
+        if (ok) {
+            if (source != nullptr) {
+                *source = Rating::Source::VorbisRating;
+            }
+            return Rating::normalized0To100(static_cast<int>(std::lround(parsed * 100.0)));
+        }
+    }
+
+    return Rating::unset;
 }
 
 int firstTrackPart(const TagLib::PropertyMap &properties, const QStringList &keys)
@@ -91,13 +122,11 @@ Track TagReader::read(const QString &path) const
         track.albumArtistName = track.artistName;
     }
 
-    const int rating = firstIntProperty(properties, {
-        QStringLiteral("RATING"),
-        QStringLiteral("FMPS_RATING"),
-    });
-    if (rating > 0 || firstProperty(properties, {QStringLiteral("RATING")}) == QStringLiteral("0")) {
-        track.rating0To100 = Rating::normalized0To100(rating);
-        track.ratingSource = Rating::Source::VorbisRating;
+    Rating::Source ratingSource = Rating::Source::None;
+    const int rating = ratingProperty0To100(properties, &ratingSource);
+    if (rating >= 0) {
+        track.rating0To100 = rating;
+        track.ratingSource = ratingSource;
     }
 
     track.trackNumber = track.trackNumber == 0 ? firstTrackPart(properties, {QStringLiteral("TRACKNUMBER"), QStringLiteral("TRACK")}) : track.trackNumber;
