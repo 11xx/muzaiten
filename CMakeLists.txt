@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 
 project(muzaiten
-    VERSION 2026.5.23
+    VERSION 2026.5.23.1
     DESCRIPTION "Native Linux music player inspired by MusicBee and ncmpcpp"
     LANGUAGES CXX
 )
@@ -43,6 +43,7 @@ set(MUZAITEN_SOURCES
     src/ui/MainWindow.cpp
     src/ui/PlayerBar.cpp
     src/ui/RightSidebar.cpp
+    src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
     src/ui/TrackTable.cpp
     resources/resources.qrc
@@ -67,6 +68,7 @@ set(MUZAITEN_HEADERS
     src/ui/MainWindow.h
     src/ui/PlayerBar.h
     src/ui/RightSidebar.h
+    src/ui/StarRating.h
     src/ui/StarRatingDelegate.h
     src/ui/TrackTable.h
 )

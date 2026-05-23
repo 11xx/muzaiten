@@ -24,7 +24,9 @@ struct Track {
     int discTotal = 0;
     qint64 durationMs = 0;
     int rating0To100 = Rating::unset;
+    int effectiveRating0To100 = Rating::unset;
     Rating::Source ratingSource = Rating::Source::None;
+    bool hasUserRating = false;
     int playCount = 0;
     MusicBrainzIds musicBrainz;
     qint64 fileSize = 0;

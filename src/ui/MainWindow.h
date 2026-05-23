@@ -30,6 +30,15 @@ private:
     void loadExistingLibrary();
     void refreshArtists();
     void selectArtist(const QString &artistName);
+    void selectAlbumFilter(const QString &albumTitle);
+    void refreshAlbumGrid();
+    void refreshTrackTable();
+    void applyTrackRating(const Track &track, int rating0To100);
+    void applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
+    void loadViewSettings();
+    void saveTrackTableViewSettings();
+    void saveAlbumGridViewSettings();
+    void saveArtistSidebarViewSettings();
     void playTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
     void playQueueIndex(int index);
@@ -56,6 +65,7 @@ private:
     QAudioOutput *m_audioOutput = nullptr;
     std::unique_ptr<Database> m_database;
     QString m_currentArtist;
+    QString m_selectedAlbumTitle;
     Track m_currentTrack;
     QVector<Track> m_queue;
     int m_queueIndex = -1;
