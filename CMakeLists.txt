@@ -14,7 +14,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Widgets Sql Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 
@@ -80,4 +80,3 @@ include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
-

@@ -13,3 +13,22 @@ endfunction()
 
 add_muzaiten_test(test_rating test_rating.cpp)
 
+add_executable(test_schema
+    test_schema.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+)
+target_include_directories(test_schema PRIVATE ../src)
+target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_schema PRIVATE cxx_std_26)
+add_test(NAME test_schema COMMAND test_schema)
+
+add_executable(test_artwork_resolver
+    test_artwork_resolver.cpp
+    ../src/scanner/ArtworkResolver.cpp
+)
+target_include_directories(test_artwork_resolver PRIVATE ../src)
+target_link_libraries(test_artwork_resolver PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_compile_features(test_artwork_resolver PRIVATE cxx_std_26)
+add_test(NAME test_artwork_resolver COMMAND test_artwork_resolver)
+set_tests_properties(test_artwork_resolver PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
