@@ -8,6 +8,9 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <limits>
+
 namespace {
 
 QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QString &tooltip)
@@ -18,6 +21,27 @@ QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QStr
     button->setAutoRaise(true);
     button->setFixedSize(34, 34);
     return button;
+}
+
+QString formatTime(qint64 milliseconds)
+{
+    if (milliseconds <= 0) {
+        return QStringLiteral("0:00");
+    }
+
+    const qint64 seconds = milliseconds / 1000;
+    const qint64 minutes = seconds / 60;
+    const qint64 hours = minutes / 60;
+    if (hours > 0) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes % 60, 2, 10, QLatin1Char('0'))
+            .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    }
+
+    return QStringLiteral("%1:%2")
+        .arg(minutes)
+        .arg(seconds % 60, 2, 10, QLatin1Char('0'));
 }
 
 } // namespace
@@ -34,7 +58,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     root->setSpacing(10);
 
     root->addWidget(iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous")));
-    root->addWidget(iconButton(this, QStyle::SP_MediaPlay, QStringLiteral("Play")));
+    m_playPause = iconButton(this, QStyle::SP_MediaPlay, QStringLiteral("Play"));
+    root->addWidget(m_playPause);
     root->addWidget(iconButton(this, QStyle::SP_MediaSkipForward, QStringLiteral("Next")));
 
     auto *progressLayout = new QVBoxLayout;
@@ -68,6 +93,39 @@ PlayerBar::PlayerBar(QWidget *parent)
     progressLayout->addLayout(timeline);
     root->addLayout(progressLayout, 1);
 
-    root->addWidget(iconButton(this, QStyle::SP_MediaStop, QStringLiteral("Stop")));
+    auto *stop = iconButton(this, QStyle::SP_MediaStop, QStringLiteral("Stop"));
+    root->addWidget(stop);
+
+    connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
+    connect(stop, &QToolButton::clicked, this, &PlayerBar::stopRequested);
+    connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
+        emit seekRequested(value);
+    });
 }
 
+void PlayerBar::setTrackText(const QString &text)
+{
+    m_hasTrack = !text.trimmed().isEmpty();
+    m_nowPlaying->setText(m_hasTrack ? text : QStringLiteral("No track playing"));
+    m_progress->setEnabled(m_hasTrack);
+}
+
+void PlayerBar::setPlaying(bool playing)
+{
+    m_playPause->setIcon(style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+    m_playPause->setToolTip(playing ? QStringLiteral("Pause") : QStringLiteral("Play"));
+}
+
+void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
+{
+    const qint64 safeDuration = std::max<qint64>(0, durationMs);
+    const qint64 safePosition = std::clamp<qint64>(positionMs, 0, safeDuration);
+
+    m_elapsed->setText(formatTime(safePosition));
+    m_duration->setText(formatTime(safeDuration));
+    m_progress->setEnabled(m_hasTrack && safeDuration > 0);
+    m_progress->setRange(0, static_cast<int>(std::min<qint64>(safeDuration, std::numeric_limits<int>::max())));
+    if (!m_progress->isSliderDown()) {
+        m_progress->setValue(static_cast<int>(std::min<qint64>(safePosition, std::numeric_limits<int>::max())));
+    }
+}

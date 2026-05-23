@@ -10,8 +10,8 @@
 TrackTable::TrackTable(QWidget *parent)
     : QTableView(parent)
 {
-    auto *model = new QStandardItemModel(0, 7, this);
-    model->setHorizontalHeaderLabels({
+    auto *itemModel = new QStandardItemModel(0, 7, this);
+    itemModel->setHorizontalHeaderLabels({
         QStringLiteral("Rating"),
         QStringLiteral("#"),
         QStringLiteral("Title"),
@@ -21,7 +21,7 @@ TrackTable::TrackTable(QWidget *parent)
         QStringLiteral("Year"),
     });
 
-    setModel(model);
+    setModel(itemModel);
     setItemDelegateForColumn(0, new StarRatingDelegate(this));
     setSortingEnabled(true);
     setAlternatingRowColors(true);
@@ -29,6 +29,14 @@ TrackTable::TrackTable(QWidget *parent)
     horizontalHeader()->setStretchLastSection(false);
     horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     verticalHeader()->setVisible(false);
+
+    connect(this, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
+        const QModelIndex ratingIndex = this->model()->index(index.row(), 0);
+        const Track track = ratingIndex.data(Qt::UserRole + 1).value<Track>();
+        if (!track.path.isEmpty()) {
+            emit trackActivated(track);
+        }
+    });
 }
 
 void TrackTable::setTracks(const QVector<Track> &tracks)
@@ -41,6 +49,7 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
 
         auto *rating = new QStandardItem(track.rating0To100 >= 0 ? QString::number(track.rating0To100) : QStringLiteral("-"));
         rating->setData(track.rating0To100, Qt::UserRole);
+        rating->setData(QVariant::fromValue(track), Qt::UserRole + 1);
         row << rating;
 
         auto *trackNumber = new QStandardItem(QString::number(track.trackNumber));

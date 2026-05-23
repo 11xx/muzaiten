@@ -2,18 +2,21 @@
 
 #include <QMainWindow>
 
+#include "core/Track.h"
+
 #include <memory>
 
 class Database;
 class AlbumGrid;
 class ArtistSidebar;
 class PlayerBar;
+class QAudioOutput;
+class QMediaPlayer;
 class QProgressBar;
 class QThread;
 class RightSidebar;
 class TrackTable;
 class ScanWorker;
-struct Track;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -27,6 +30,9 @@ private:
     void loadExistingLibrary();
     void refreshArtists();
     void selectArtist(const QString &artistName);
+    void playTrack(const Track &track);
+    void togglePlayback();
+    void updatePlaybackPosition();
     void startScan(const QString &rootPath);
     void ingestScanBatch(const QVector<Track> &tracks);
     void finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled);
@@ -41,8 +47,11 @@ private:
     TrackTable *m_trackTable = nullptr;
     RightSidebar *m_rightSidebar = nullptr;
     QProgressBar *m_scanProgress = nullptr;
+    QMediaPlayer *m_player = nullptr;
+    QAudioOutput *m_audioOutput = nullptr;
     std::unique_ptr<Database> m_database;
     QString m_currentArtist;
+    Track m_currentTrack;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_scanWorker = nullptr;
     qint64 m_lastUiRefreshIndexedTracks = 0;

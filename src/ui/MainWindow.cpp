@@ -17,11 +17,14 @@
 #include <QLoggingCategory>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QAudioOutput>
+#include <QMediaPlayer>
 #include <QProgressBar>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QThread>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QUuid>
 
@@ -69,6 +72,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_scanProgress->setVisible(false);
     statusBar()->addPermanentWidget(m_scanProgress);
 
+    m_audioOutput = new QAudioOutput(this);
+    m_audioOutput->setVolume(1.0);
+    m_player = new QMediaPlayer(this);
+    m_player->setAudioOutput(m_audioOutput);
+
     auto *libraryMenu = menuBar()->addMenu(QStringLiteral("&Library"));
     auto *openAction = libraryMenu->addAction(QStringLiteral("&Open Folder..."));
     connect(openAction, &QAction::triggered, this, &MainWindow::openLibraryFolder);
@@ -79,6 +87,21 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::playTrack);
+    connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
+    connect(m_playerBar, &PlayerBar::stopRequested, m_player, &QMediaPlayer::stop);
+    connect(m_playerBar, &PlayerBar::seekRequested, m_player, &QMediaPlayer::setPosition);
+    connect(m_player, &QMediaPlayer::positionChanged, this, &MainWindow::updatePlaybackPosition);
+    connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::updatePlaybackPosition);
+    connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
+        m_playerBar->setPlaying(state == QMediaPlayer::PlayingState);
+    });
+    connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &errorString) {
+        if (!errorString.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("Playback error: %1").arg(errorString), 10000);
+        }
+    });
+
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
     loadExistingLibrary();
 }
@@ -209,6 +232,39 @@ void MainWindow::selectArtist(const QString &artistName)
     m_currentArtist = artistName;
     m_albumGrid->setAlbums(m_database->albumsForArtist(artistName));
     m_trackTable->setTracks(m_database->tracksForArtist(artistName));
+}
+
+void MainWindow::playTrack(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+
+    m_currentTrack = track;
+    const QString label = QStringLiteral("%1 - %2").arg(track.artistName, track.title);
+    m_playerBar->setTrackText(label);
+    m_playerBar->setPosition(0, track.durationMs);
+    m_player->setSource(QUrl::fromLocalFile(track.path));
+    m_player->play();
+    statusBar()->showMessage(QStringLiteral("Playing %1").arg(label), 3000);
+}
+
+void MainWindow::togglePlayback()
+{
+    if (m_player->source().isEmpty()) {
+        return;
+    }
+
+    if (m_player->playbackState() == QMediaPlayer::PlayingState) {
+        m_player->pause();
+    } else {
+        m_player->play();
+    }
+}
+
+void MainWindow::updatePlaybackPosition()
+{
+    m_playerBar->setPosition(m_player->position(), m_player->duration());
 }
 
 QString MainWindow::databasePath() const
