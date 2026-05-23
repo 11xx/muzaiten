@@ -4,6 +4,7 @@
 #include "ui/StarRatingDelegate.h"
 
 #include <QHeaderView>
+#include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTime>
 
@@ -37,6 +38,29 @@ TrackTable::TrackTable(QWidget *parent)
             emit trackActivated(track);
         }
     });
+}
+
+int TrackTable::sortColumn() const
+{
+    return horizontalHeader()->sortIndicatorSection();
+}
+
+Qt::SortOrder TrackTable::sortOrder() const
+{
+    return horizontalHeader()->sortIndicatorOrder();
+}
+
+int TrackTable::verticalScrollValue() const
+{
+    return verticalScrollBar()->value();
+}
+
+void TrackTable::restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int verticalScrollValue)
+{
+    if (sortColumn >= 0 && sortColumn < model()->columnCount()) {
+        sortByColumn(sortColumn, sortOrder);
+    }
+    verticalScrollBar()->setValue(std::clamp(verticalScrollValue, verticalScrollBar()->minimum(), verticalScrollBar()->maximum()));
 }
 
 void TrackTable::setTracks(const QVector<Track> &tracks)
