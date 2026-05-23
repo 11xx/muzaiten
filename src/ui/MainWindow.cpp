@@ -5,6 +5,7 @@
 #include "scanner/ScanWorker.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/PlayerBar.h"
 #include "ui/RightSidebar.h"
 #include "ui/TrackTable.h"
 
@@ -21,6 +22,7 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QThread>
+#include <QVBoxLayout>
 #include <QUuid>
 
 Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
@@ -32,7 +34,15 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1440, 900);
     setMinimumSize(1100, 700);
 
-    auto *root = new QSplitter(Qt::Horizontal, this);
+    auto *central = new QWidget(this);
+    auto *centralLayout = new QVBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+
+    m_playerBar = new PlayerBar(central);
+    centralLayout->addWidget(m_playerBar, 0);
+
+    auto *root = new QSplitter(Qt::Horizontal, central);
     m_artistSidebar = new ArtistSidebar(root);
 
     auto *center = new QSplitter(Qt::Vertical, root);
@@ -51,7 +61,8 @@ MainWindow::MainWindow(QWidget *parent)
     root->setStretchFactor(2, 0);
     root->setSizes({260, 900, 300});
 
-    setCentralWidget(root);
+    centralLayout->addWidget(root, 1);
+    setCentralWidget(central);
 
     m_scanProgress = new QProgressBar(this);
     m_scanProgress->setRange(0, 0);
