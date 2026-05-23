@@ -109,6 +109,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
         m_audioOutput->setVolume(static_cast<float>(std::clamp(volume, 0, 100)) / 100.0f);
     });
+    connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
+        if (!m_currentTrack.path.isEmpty()) {
+            applyTrackRating(m_currentTrack, rating);
+        }
+    });
     connect(m_player, &QMediaPlayer::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {

@@ -4,14 +4,19 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QSlider>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 
 namespace {
@@ -30,15 +35,85 @@ public:
         update();
     }
 
+    int rating() const
+    {
+        return m_rating0To100;
+    }
+
+    std::function<void(int)> ratingChanged;
+
 protected:
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        m_hoverRating0To100 = StarRating::ratingFromPosition(StarRating::ratingRect(rect(), 18), event->pos());
+        update();
+    }
+
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() != Qt::LeftButton) {
+            return;
+        }
+
+        const int rating = StarRating::ratingFromPosition(StarRating::ratingRect(rect(), 18), event->pos());
+        if (rating >= 0 && ratingChanged) {
+            ratingChanged(rating);
+        }
+    }
+
+    void leaveEvent(QEvent *) override
+    {
+        m_hoverRating0To100 = StarRating::unset;
+        update();
+    }
+
     void paintEvent(QPaintEvent *) override
     {
         QPainter painter(this);
-        StarRating::paint(&painter, StarRating::ratingRect(rect(), 18), m_rating0To100, StarRating::unset, palette(), 18);
+        StarRating::paint(&painter, StarRating::ratingRect(rect(), 18), m_rating0To100, m_hoverRating0To100, palette(), 18);
     }
 
 private:
     int m_rating0To100 = StarRating::unset;
+    int m_hoverRating0To100 = StarRating::unset;
+};
+
+class VolumeButton final : public QToolButton {
+public:
+    explicit VolumeButton(QWidget *parent = nullptr)
+        : QToolButton(parent)
+    {
+        setIcon(parent->style()->standardIcon(QStyle::SP_MediaVolume));
+        setToolTip(QStringLiteral("Volume"));
+        setAutoRaise(true);
+        setFixedSize(34, 34);
+
+        auto *slider = new QSlider(Qt::Vertical);
+        slider->setRange(0, 100);
+        slider->setValue(100);
+        slider->setFixedHeight(120);
+        slider->setFixedWidth(36);
+        auto *action = new QWidgetAction(this);
+        action->setDefaultWidget(slider);
+        m_menu.addAction(action);
+        connect(slider, &QSlider::valueChanged, this, [this](int value) {
+            if (volumeChanged) {
+                volumeChanged(value);
+            }
+        });
+    }
+
+    std::function<void(int)> volumeChanged;
+
+protected:
+    void enterEvent(QEnterEvent *) override
+    {
+        const QPoint at = mapToGlobal(QPoint((width() - m_menu.sizeHint().width()) / 2, -m_menu.sizeHint().height()));
+        m_menu.popup(at);
+    }
+
+private:
+    QMenu m_menu;
 };
 
 QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QString &tooltip)
@@ -49,6 +124,34 @@ QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QStr
     button->setAutoRaise(true);
     button->setFixedSize(34, 34);
     return button;
+}
+
+QIcon shuffleIcon(const QPalette &palette)
+{
+    QPixmap pixmap(24, 24);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(palette.color(QPalette::ButtonText), 1.8);
+    painter.setPen(pen);
+
+    QPainterPath topPath;
+    topPath.moveTo(QPointF(4, 7));
+    topPath.lineTo(QPointF(9, 7));
+    topPath.cubicTo(QPointF(13, 7), QPointF(14, 17), QPointF(19, 17));
+    painter.drawPath(topPath);
+    painter.drawLine(QPointF(16, 14), QPointF(20, 17));
+    painter.drawLine(QPointF(16, 20), QPointF(20, 17));
+
+    QPainterPath bottomPath;
+    bottomPath.moveTo(QPointF(4, 17));
+    bottomPath.lineTo(QPointF(9, 17));
+    bottomPath.cubicTo(QPointF(13, 17), QPointF(14, 7), QPointF(19, 7));
+    painter.drawPath(bottomPath);
+    painter.drawLine(QPointF(16, 4), QPointF(20, 7));
+    painter.drawLine(QPointF(16, 10), QPointF(20, 7));
+
+    return QIcon(pixmap);
 }
 
 QString formatTime(qint64 milliseconds)
@@ -114,11 +217,13 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_subtitle = new QLabel(this);
     m_subtitle->setTextInteractionFlags(Qt::NoTextInteraction);
     m_subtitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    m_subtitle->setStyleSheet(QStringLiteral("color: palette(mid);"));
     textLayout->addWidget(m_subtitle);
     metaLayout->addLayout(textLayout, 1);
 
     auto *rating = new RatingStrip(this);
+    rating->ratingChanged = [this](int value) {
+        emit currentTrackRatingChanged(value);
+    };
     m_rating = rating;
     metaLayout->addWidget(m_rating, 0, Qt::AlignVCenter);
     progressLayout->addLayout(metaLayout);
@@ -145,24 +250,27 @@ PlayerBar::PlayerBar(QWidget *parent)
     progressLayout->addLayout(timeline);
     root->addLayout(progressLayout, 1);
 
-    auto *volume = new QSlider(Qt::Horizontal, this);
-    volume->setRange(0, 100);
-    volume->setValue(100);
-    volume->setFixedWidth(100);
+    auto *volume = new VolumeButton(this);
+    volume->volumeChanged = [this](int value) {
+        emit volumeChanged(value);
+    };
     root->addWidget(volume);
 
     auto *single = iconButton(this, QStyle::SP_BrowserReload, QStringLiteral("Single mode"));
     single->setCheckable(true);
     root->addWidget(single);
 
-    auto *shuffle = iconButton(this, QStyle::SP_FileDialogDetailedView, QStringLiteral("Shuffle"));
+    auto *shuffle = new QToolButton(this);
+    shuffle->setIcon(shuffleIcon(palette()));
+    shuffle->setToolTip(QStringLiteral("Shuffle"));
+    shuffle->setAutoRaise(true);
+    shuffle->setFixedSize(34, 34);
     shuffle->setCheckable(true);
     root->addWidget(shuffle);
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
-    connect(volume, &QSlider::valueChanged, this, &PlayerBar::volumeChanged);
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
         emit seekRequested(value);
     });

@@ -23,6 +23,7 @@ signals:
     void stopRequested();
     void seekRequested(qint64 positionMs);
     void volumeChanged(int volume0To100);
+    void currentTrackRatingChanged(int rating0To100);
 
 private:
     class QToolButton *m_playPause = nullptr;
