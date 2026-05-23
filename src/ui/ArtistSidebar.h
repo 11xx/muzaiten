@@ -17,6 +17,7 @@ public:
     explicit ArtistSidebar(QWidget *parent = nullptr);
 
     void setArtists(const QVector<Artist> &artists);
+    bool selectArtist(const QString &artistName);
 
 signals:
     void artistSelected(const QString &artistName);
