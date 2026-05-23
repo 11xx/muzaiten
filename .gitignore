@@ -1,4 +1,5 @@
 build/
+build-arch*/
 .cache/
 .qt/
 *.user
