@@ -86,6 +86,10 @@ bool Database::migrate()
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_album_artist ON tracks(album_artist_name)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_rating ON tracks(rating_0_100)"),
         QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, datetime('now'))"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS user_track_ratings (track_path TEXT PRIMARY KEY, rating_0_100 INTEGER, updated_at TEXT NOT NULL)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS user_album_ratings (album_artist_name TEXT NOT NULL, album_title TEXT NOT NULL, rating_0_100 INTEGER, updated_at TEXT NOT NULL, PRIMARY KEY(album_artist_name, album_title))"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, datetime('now'))"),
     };
 
     for (const QString &statement : statements) {
@@ -93,7 +97,7 @@ bool Database::migrate()
             return false;
         }
     }
-    return Schema::currentVersion == 1;
+    return Schema::currentVersion == 2;
 }
 
 QString Database::lastError() const
@@ -234,7 +238,17 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
 {
     QVector<Album> albums;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT album_title, MIN(date), COUNT(*), AVG(rating_0_100), COUNT(rating_0_100), MIN(parent_dir) FROM tracks WHERE album_artist_name = ? GROUP BY album_title ORDER BY lower(album_title)"));
+    query.prepare(QStringLiteral(
+        "SELECT t.album_title, MIN(t.date), COUNT(*), "
+        "AVG(COALESCE(utr.rating_0_100, t.rating_0_100)), "
+        "COUNT(COALESCE(utr.rating_0_100, t.rating_0_100)), "
+        "MIN(t.parent_dir), uar.rating_0_100 "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN user_album_ratings uar ON uar.album_artist_name = t.album_artist_name AND uar.album_title = t.album_title "
+        "WHERE t.album_artist_name = ? "
+        "GROUP BY t.album_title, uar.rating_0_100 "
+        "ORDER BY lower(t.album_title)"));
     query.addBindValue(albumArtist);
     query.exec();
     while (query.next()) {
@@ -246,17 +260,32 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         album.averageRating0To100 = query.value(3).isNull() ? -1 : query.value(3).toInt();
         album.knownRatingCount = query.value(4).toInt();
         album.representativeDir = query.value(5).toString();
+        album.hasUserRating = !query.value(6).isNull();
+        album.effectiveRating0To100 = album.hasUserRating ? query.value(6).toInt() : album.averageRating0To100;
         albums.push_back(album);
     }
     return albums;
 }
 
-QVector<Track> Database::tracksForArtist(const QString &albumArtist) const
+QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter) const
 {
     QVector<Track> tracks;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT path, parent_dir, filename, title, artist_name, album_artist_name, album_title, track_number, disc_number, duration_ms, rating_0_100, date FROM tracks WHERE album_artist_name = ? ORDER BY lower(album_title), disc_number, track_number, lower(title)"));
+    QString sql = QStringLiteral(
+        "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "WHERE t.album_artist_name = ?");
+    if (!albumTitleFilter.isEmpty()) {
+        sql += QStringLiteral(" AND t.album_title = ?");
+    }
+    sql += QStringLiteral(" ORDER BY lower(t.album_title), t.disc_number, t.track_number, lower(t.title)");
+    query.prepare(sql);
     query.addBindValue(albumArtist);
+    if (!albumTitleFilter.isEmpty()) {
+        query.addBindValue(albumTitleFilter);
+    }
     query.exec();
     while (query.next()) {
         Track track;
@@ -271,8 +300,104 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist) const
         track.discNumber = query.value(8).toInt();
         track.durationMs = query.value(9).toLongLong();
         track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
-        track.date = query.value(11).toString();
+        track.hasUserRating = !query.value(11).isNull();
+        track.effectiveRating0To100 = track.hasUserRating ? query.value(11).toInt() : track.rating0To100;
+        track.date = query.value(12).toString();
         tracks.push_back(track);
     }
     return tracks;
+}
+
+bool Database::setUserTrackRating(const QString &trackPath, int rating0To100)
+{
+    const int normalized = Rating::normalized0To100(rating0To100);
+    if (!Rating::isValidStoredValue(normalized) || normalized < 0) {
+        m_lastError = QStringLiteral("Invalid rating");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO user_track_ratings(track_path, rating_0_100, updated_at) VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(track_path) DO UPDATE SET rating_0_100=excluded.rating_0_100, updated_at=datetime('now')"));
+    query.addBindValue(trackPath);
+    query.addBindValue(normalized);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::clearUserTrackRating(const QString &trackPath)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM user_track_ratings WHERE track_path = ?"));
+    query.addBindValue(trackPath);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::setUserAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100)
+{
+    const int normalized = Rating::normalized0To100(rating0To100);
+    if (!Rating::isValidStoredValue(normalized) || normalized < 0) {
+        m_lastError = QStringLiteral("Invalid rating");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO user_album_ratings(album_artist_name, album_title, rating_0_100, updated_at) VALUES(?, ?, ?, datetime('now')) "
+        "ON CONFLICT(album_artist_name, album_title) DO UPDATE SET rating_0_100=excluded.rating_0_100, updated_at=datetime('now')"));
+    query.addBindValue(albumArtistName);
+    query.addBindValue(albumTitle);
+    query.addBindValue(normalized);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::clearUserAlbumRating(const QString &albumArtistName, const QString &albumTitle)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM user_album_ratings WHERE album_artist_name = ? AND album_title = ?"));
+    query.addBindValue(albumArtistName);
+    query.addBindValue(albumTitle);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QString Database::setting(const QString &key, const QString &fallback) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT value FROM app_settings WHERE key = ?"));
+    query.addBindValue(key);
+    if (!query.exec() || !query.next()) {
+        return fallback;
+    }
+    return query.value(0).toString();
+}
+
+bool Database::setSetting(const QString &key, const QString &value)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO app_settings(key, value, updated_at) VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')"));
+    query.addBindValue(key);
+    query.addBindValue(value);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
 }

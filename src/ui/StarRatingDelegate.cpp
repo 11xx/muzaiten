@@ -1,7 +1,9 @@
 #include "ui/StarRatingDelegate.h"
 
-#include "core/Rating.h"
+#include "ui/StarRating.h"
 
+#include <QEvent>
+#include <QMouseEvent>
 #include <QPainter>
 
 StarRatingDelegate::StarRatingDelegate(QObject *parent)
@@ -9,19 +11,38 @@ StarRatingDelegate::StarRatingDelegate(QObject *parent)
 {
 }
 
+bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index)
+{
+    if (!index.isValid() || model == nullptr) {
+        return false;
+    }
+
+    const QRect rect = StarRating::ratingRect(option.rect, 18);
+    if (event->type() == QEvent::MouseMove) {
+        const auto *mouse = static_cast<QMouseEvent *>(event);
+        const int hoverRating = StarRating::ratingFromPosition(rect, mouse->pos());
+        model->setData(index, hoverRating, Qt::UserRole + 2);
+        return true;
+    }
+
+    if (event->type() == QEvent::MouseButtonRelease) {
+        const auto *mouse = static_cast<QMouseEvent *>(event);
+        if (mouse->button() != Qt::LeftButton) {
+            return false;
+        }
+        const int rating = StarRating::ratingFromPosition(rect, mouse->pos());
+        if (rating >= 0) {
+            emit ratingEdited(index, rating);
+            return true;
+        }
+    }
+
+    return QStyledItemDelegate::editorEvent(event, model, option, index);
+}
+
 void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
     const int value = index.data(Qt::UserRole).toInt();
-    if (value < 0) {
-        painter->save();
-        painter->setPen(option.palette.color(QPalette::Disabled, QPalette::Text));
-        painter->drawText(option.rect.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft, QStringLiteral("-"));
-        painter->restore();
-        return;
-    }
-
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing);
-    painter->drawText(option.rect.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft, Rating::displayText(value));
-    painter->restore();
+    const int hoverValue = index.data(Qt::UserRole + 2).isValid() ? index.data(Qt::UserRole + 2).toInt() : StarRating::unset;
+    StarRating::paint(painter, StarRating::ratingRect(option.rect, 18), value, hoverValue, option.palette, 18);
 }

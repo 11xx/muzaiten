@@ -1,5 +1,7 @@
 #include "core/Rating.h"
+#include "ui/StarRating.h"
 
+#include <QRect>
 #include <QTest>
 
 class RatingTest final : public QObject {
@@ -8,7 +10,7 @@ class RatingTest final : public QObject {
 private slots:
     void normalizesToHalfStarBuckets();
     void validatesStoredValues();
-    void displaysUnsetAsBlank();
+    void mapsClickPositionToHalfStars();
 };
 
 void RatingTest::normalizesToHalfStarBuckets()
@@ -30,14 +32,17 @@ void RatingTest::validatesStoredValues()
     QVERIFY(!Rating::isValidStoredValue(110));
 }
 
-void RatingTest::displaysUnsetAsBlank()
+void RatingTest::mapsClickPositionToHalfStars()
 {
-    QCOMPARE(Rating::displayText(Rating::unset), QString());
-    QCOMPARE(Rating::displayText(0), QString());
-    QCOMPARE(Rating::displayText(10), QStringLiteral("1/2"));
-    QCOMPARE(Rating::displayText(20), QString(QChar(0x2605)));
+    QCOMPARE(Rating::normalized0To100(10), 10);
+    QCOMPARE(Rating::normalized0To100(90), 90);
+
+    const QRect rect(0, 0, 100, 20);
+    QCOMPARE(StarRating::ratingFromPosition(rect, QPoint(5, 10)), 10);
+    QCOMPARE(StarRating::ratingFromPosition(rect, QPoint(15, 10)), 20);
+    QCOMPARE(StarRating::ratingFromPosition(rect, QPoint(85, 10)), 90);
+    QCOMPARE(StarRating::ratingFromPosition(rect, QPoint(95, 10)), 100);
 }
 
 QTEST_MAIN(RatingTest)
 #include "test_rating.moc"
-

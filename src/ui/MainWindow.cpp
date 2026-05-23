@@ -89,6 +89,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_trackTable, &TrackTable::trackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
+    connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
+    connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
+    connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
+    connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::stopRequested, m_player, &QMediaPlayer::stop);
@@ -105,6 +111,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
+    loadViewSettings();
     loadExistingLibrary();
 }
 
@@ -232,10 +239,84 @@ void MainWindow::refreshArtists()
 void MainWindow::selectArtist(const QString &artistName)
 {
     rememberTrackTableViewState();
+    if (m_currentArtist != artistName) {
+        m_selectedAlbumTitle.clear();
+    }
     m_currentArtist = artistName;
-    m_albumGrid->setAlbums(m_database->albumsForArtist(artistName));
-    m_trackTable->setTracks(m_database->tracksForArtist(artistName));
+    refreshAlbumGrid();
+    refreshTrackTable();
     restoreTrackTableViewState();
+}
+
+void MainWindow::selectAlbumFilter(const QString &albumTitle)
+{
+    rememberTrackTableViewState();
+    m_selectedAlbumTitle = (m_selectedAlbumTitle == albumTitle) ? QString() : albumTitle;
+    refreshAlbumGrid();
+    refreshTrackTable();
+    restoreTrackTableViewState();
+}
+
+void MainWindow::refreshAlbumGrid()
+{
+    if (m_currentArtist.isEmpty()) {
+        return;
+    }
+    m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist));
+    m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
+}
+
+void MainWindow::refreshTrackTable()
+{
+    if (m_currentArtist.isEmpty()) {
+        return;
+    }
+    m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist, m_selectedAlbumTitle));
+}
+
+void MainWindow::applyTrackRating(const Track &track, int rating0To100)
+{
+    const bool ok = rating0To100 < 0 ? m_database->clearUserTrackRating(track.path) : m_database->setUserTrackRating(track.path, rating0To100);
+    if (!ok) {
+        QMessageBox::warning(this, QStringLiteral("Rating"), m_database->lastError());
+        return;
+    }
+    rememberTrackTableViewState();
+    refreshTrackTable();
+    refreshAlbumGrid();
+    restoreTrackTableViewState();
+}
+
+void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100)
+{
+    const bool ok = rating0To100 < 0 ? m_database->clearUserAlbumRating(albumArtistName, albumTitle) : m_database->setUserAlbumRating(albumArtistName, albumTitle, rating0To100);
+    if (!ok) {
+        QMessageBox::warning(this, QStringLiteral("Rating"), m_database->lastError());
+        return;
+    }
+    refreshAlbumGrid();
+}
+
+void MainWindow::loadViewSettings()
+{
+    m_trackTable->applyViewSettingsJson(m_database->setting(QStringLiteral("trackTable.view")));
+    m_albumGrid->applyViewSettingsJson(m_database->setting(QStringLiteral("albumGrid.view")));
+    m_artistSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("artistSidebar.view")));
+}
+
+void MainWindow::saveTrackTableViewSettings()
+{
+    m_database->setSetting(QStringLiteral("trackTable.view"), m_trackTable->viewSettingsJson());
+}
+
+void MainWindow::saveAlbumGridViewSettings()
+{
+    m_database->setSetting(QStringLiteral("albumGrid.view"), m_albumGrid->viewSettingsJson());
+}
+
+void MainWindow::saveArtistSidebarViewSettings()
+{
+    m_database->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
 }
 
 void MainWindow::playTrack(const Track &track)

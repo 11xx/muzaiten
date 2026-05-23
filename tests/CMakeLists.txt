@@ -1,17 +1,19 @@
 function(add_muzaiten_test name source)
     add_executable(${name} ${source}
         ../src/core/Rating.cpp
+        ../src/ui/StarRating.cpp
     )
     target_include_directories(${name} PRIVATE
         ../src
         ${CMAKE_CURRENT_BINARY_DIR}/../generated
     )
-    target_link_libraries(${name} PRIVATE Qt6::Core Qt6::Test)
+    target_link_libraries(${name} PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
     target_compile_features(${name} PRIVATE cxx_std_26)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
 add_muzaiten_test(test_rating test_rating.cpp)
+set_tests_properties(test_rating PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_schema
     test_schema.cpp
