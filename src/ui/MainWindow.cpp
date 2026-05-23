@@ -51,6 +51,7 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    m_albumGrid->setArtworkCacheRoot(cacheRoot());
     loadExistingLibrary();
 }
 

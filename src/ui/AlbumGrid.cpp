@@ -2,7 +2,9 @@
 
 #include "core/Album.h"
 #include "core/Rating.h"
+#include "scanner/ArtworkResolver.h"
 
+#include <QIcon>
 #include <QStandardItemModel>
 
 AlbumGrid::AlbumGrid(QWidget *parent)
@@ -20,12 +22,22 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     item->setEditable(false);
     model->appendRow(item);
     setModel(model);
+
+    connect(this, &QListView::clicked, this, [this](const QModelIndex &index) {
+        emit albumSelected(index.data(Qt::UserRole).toString());
+    });
+}
+
+void AlbumGrid::setArtworkCacheRoot(const QString &cacheRoot)
+{
+    m_artworkCacheRoot = cacheRoot;
 }
 
 void AlbumGrid::setAlbums(const QVector<Album> &albums)
 {
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
     itemModel->clear();
+    const ArtworkResolver resolver(m_artworkCacheRoot);
 
     for (const Album &album : albums) {
         QString label = album.title;
@@ -40,6 +52,14 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
         item->setEditable(false);
         item->setData(album.title, Qt::UserRole);
         item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
+
+        if (!album.representativeDir.isEmpty() && !m_artworkCacheRoot.isEmpty()) {
+            const ArtworkResult artwork = resolver.resolveForDirectory(album.representativeDir);
+            if (!artwork.cachePath.isEmpty()) {
+                item->setIcon(QIcon(artwork.cachePath));
+            }
+        }
+
         itemModel->appendRow(item);
     }
 }

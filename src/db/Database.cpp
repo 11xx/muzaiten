@@ -216,7 +216,7 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
 {
     QVector<Album> albums;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT album_title, MIN(date), COUNT(*), AVG(rating_0_100), COUNT(rating_0_100) FROM tracks WHERE album_artist_name = ? GROUP BY album_title ORDER BY lower(album_title)"));
+    query.prepare(QStringLiteral("SELECT album_title, MIN(date), COUNT(*), AVG(rating_0_100), COUNT(rating_0_100), MIN(parent_dir) FROM tracks WHERE album_artist_name = ? GROUP BY album_title ORDER BY lower(album_title)"));
     query.addBindValue(albumArtist);
     query.exec();
     while (query.next()) {
@@ -227,6 +227,7 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         album.trackCount = query.value(2).toInt();
         album.averageRating0To100 = query.value(3).isNull() ? -1 : query.value(3).toInt();
         album.knownRatingCount = query.value(4).toInt();
+        album.representativeDir = query.value(5).toString();
         albums.push_back(album);
     }
     return albums;
