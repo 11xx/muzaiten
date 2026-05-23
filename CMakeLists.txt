@@ -13,6 +13,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+include(CheckPIESupported)
+check_pie_supported()
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
