@@ -15,6 +15,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLoggingCategory>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -95,6 +97,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
+    connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::stopRequested, m_player, &QMediaPlayer::stop);
@@ -284,6 +287,19 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     rememberTrackTableViewState();
     refreshTrackTable();
     refreshAlbumGrid();
+    for (Track &queuedTrack : m_queue) {
+        if (queuedTrack.path != track.path) {
+            continue;
+        }
+        queuedTrack.hasUserRating = rating0To100 >= 0;
+        queuedTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : queuedTrack.rating0To100;
+    }
+    if (m_currentTrack.path == track.path) {
+        m_currentTrack.hasUserRating = rating0To100 >= 0;
+        m_currentTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : m_currentTrack.rating0To100;
+    }
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
     restoreTrackTableViewState();
 }
 
@@ -300,13 +316,16 @@ void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString 
 void MainWindow::loadViewSettings()
 {
     m_trackTable->applyViewSettingsJson(m_database->setting(QStringLiteral("trackTable.view")));
+    m_rightSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("rightSidebar.view")));
     m_albumGrid->applyViewSettingsJson(m_database->setting(QStringLiteral("albumGrid.view")));
     m_artistSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("artistSidebar.view")));
+    applySharedTableSettings();
 }
 
 void MainWindow::saveTrackTableViewSettings()
 {
     m_database->setSetting(QStringLiteral("trackTable.view"), m_trackTable->viewSettingsJson());
+    applySharedTableSettings();
 }
 
 void MainWindow::saveAlbumGridViewSettings()
@@ -317,6 +336,26 @@ void MainWindow::saveAlbumGridViewSettings()
 void MainWindow::saveArtistSidebarViewSettings()
 {
     m_database->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
+}
+
+void MainWindow::saveRightSidebarViewSettings()
+{
+    m_database->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
+    applySharedTableSettings();
+}
+
+void MainWindow::applySharedTableSettings()
+{
+    const QJsonObject sharedSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("tables.view")).toUtf8()).object();
+    const QJsonObject trackSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("trackTable.view")).toUtf8()).object();
+    const QJsonObject sidebarSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("rightSidebar.view")).toUtf8()).object();
+    const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(22)));
+    m_trackTable->setHeaderHeight(headerHeight);
+    m_rightSidebar->setHeaderHeight(headerHeight);
+
+    QJsonObject shared;
+    shared.insert(QStringLiteral("headerHeight"), headerHeight);
+    m_database->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::playTrack(const Track &track)

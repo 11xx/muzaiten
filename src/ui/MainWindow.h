@@ -39,6 +39,8 @@ private:
     void saveTrackTableViewSettings();
     void saveAlbumGridViewSettings();
     void saveArtistSidebarViewSettings();
+    void saveRightSidebarViewSettings();
+    void applySharedTableSettings();
     void playTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
     void playQueueIndex(int index);
