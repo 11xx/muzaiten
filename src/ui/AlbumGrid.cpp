@@ -2,6 +2,7 @@
 
 #include "core/Album.h"
 #include "scanner/ArtworkResolver.h"
+#include "ui/AlbumArtFallback.h"
 #include "ui/AlbumGridDelegate.h"
 #include "ui/StarRating.h"
 
@@ -99,7 +100,7 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
     itemModel->clear();
     const ArtworkResolver resolver(m_artworkCacheRoot);
-    const QIcon fallbackIcon(QStringLiteral(":/artwork/album-fallback-dark.svg"));
+    const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
 
     for (const Album &album : albums) {
         QString label = album.title;
@@ -158,7 +159,7 @@ void AlbumGrid::applyViewSettingsJson(const QString &json)
     if (!json.isEmpty()) {
         const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
         m_cellWidth = std::clamp(root.value(QStringLiteral("cellWidth")).toInt(204), 160, 320);
-    m_cellHeight = std::clamp(root.value(QStringLiteral("cellHeight")).toInt(292), 240, 400);
+        m_cellHeight = std::clamp(root.value(QStringLiteral("cellHeight")).toInt(292), 240, 400);
         m_artSize = std::clamp(root.value(QStringLiteral("artSize")).toInt(176), 96, 260);
         m_spacing = std::clamp(root.value(QStringLiteral("spacing")).toInt(6), 0, 24);
         m_starSize = std::clamp(root.value(QStringLiteral("starSize")).toInt(18), 18, 28);

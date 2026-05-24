@@ -1,5 +1,7 @@
 #include "ui/RightSidebar.h"
 
+#include "ui/AlbumArtFallback.h"
+
 #include <QAction>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -59,7 +61,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_queueTable->verticalHeader()->setVisible(false);
-    m_queueTable->verticalHeader()->setDefaultSectionSize(22);
+    m_queueTable->verticalHeader()->setDefaultSectionSize(20);
     m_queueTable->verticalHeader()->setMinimumSectionSize(20);
     m_queueTable->horizontalHeader()->setFixedHeight(20);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
@@ -125,9 +127,12 @@ void RightSidebar::setAlbumArt(const QString &imagePath)
 {
     QPixmap pixmap(imagePath);
     if (pixmap.isNull()) {
-        m_albumArt->setPixmap({});
-        m_albumArt->setText(QStringLiteral("Album art"));
-        return;
+        pixmap = QPixmap(AlbumArtFallback::resourcePath(palette()));
+        if (pixmap.isNull()) {
+            m_albumArt->setPixmap({});
+            m_albumArt->setText(QStringLiteral("Album art"));
+            return;
+        }
     }
 
     m_albumArt->setText({});
@@ -176,7 +181,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
     }
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
-    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(22), 20, 48));
+    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_queueTable->horizontalHeader()->restoreState(headerState);
