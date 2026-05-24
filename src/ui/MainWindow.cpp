@@ -6,6 +6,7 @@
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
 #include "mpd/MpdConfig.h"
+#include "mpd/MpdImportWorker.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scrobble/ListenBrainzScrobbler.h"
@@ -119,6 +120,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdFindFileRequested, this, &MainWindow::findMpdFile);
+    connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
@@ -173,6 +175,10 @@ MainWindow::~MainWindow()
     if (m_listenBrainzThread != nullptr) {
         m_listenBrainzThread->quit();
         m_listenBrainzThread->wait(3000);
+    }
+    if (m_mpdImportThread != nullptr) {
+        m_mpdImportThread->quit();
+        m_mpdImportThread->wait(3000);
     }
 }
 
@@ -567,6 +573,50 @@ void MainWindow::findMpdFile()
 
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
     statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
+}
+
+void MainWindow::importMpdLibraryMetadata()
+{
+    if (m_mpdImportThread != nullptr) {
+        statusBar()->showMessage(QStringLiteral("MPD import is already running"), 5000);
+        return;
+    }
+
+    const QString musicDirectory = mpdMusicDirectory();
+    if (musicDirectory.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("MPD import"), QStringLiteral("Configure an MPD source first."));
+        return;
+    }
+
+    const QString host = m_database->setting(QStringLiteral("mpd.host"), QStringLiteral("127.0.0.1"));
+    const quint16 port = static_cast<quint16>(m_database->setting(QStringLiteral("mpd.port"), QStringLiteral("6600")).toUShort());
+    const QString configPath = m_database->setting(QStringLiteral("mpd.configPath"));
+
+    m_mpdImportThread = new QThread(this);
+    m_mpdImportWorker = new MpdImportWorker(databasePath(), configPath, musicDirectory, host, port, 5000);
+    m_mpdImportWorker->moveToThread(m_mpdImportThread);
+
+    connect(m_mpdImportThread, &QThread::started, m_mpdImportWorker, &MpdImportWorker::run);
+    connect(m_mpdImportWorker, &MpdImportWorker::progress, this, [this](int imported, int total) {
+        statusBar()->showMessage(QStringLiteral("Importing MPD metadata: %1 / %2 tracks").arg(imported).arg(total));
+    });
+    connect(m_mpdImportWorker, &MpdImportWorker::finished, this, [this](int imported, const QString &error) {
+        if (!error.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("MPD import"), error);
+        } else {
+            statusBar()->showMessage(QStringLiteral("Imported %1 MPD tracks").arg(imported), 10000);
+        }
+        m_mpdImportThread->quit();
+    });
+    connect(m_mpdImportWorker, &MpdImportWorker::finished, m_mpdImportWorker, &QObject::deleteLater);
+    connect(m_mpdImportThread, &QThread::finished, m_mpdImportThread, &QObject::deleteLater);
+    connect(m_mpdImportThread, &QThread::finished, this, [this]() {
+        m_mpdImportThread = nullptr;
+        m_mpdImportWorker = nullptr;
+    });
+
+    statusBar()->showMessage(QStringLiteral("Starting MPD import from %1:%2").arg(host).arg(port));
+    m_mpdImportThread->start();
 }
 
 QString MainWindow::mpdMusicDirectory() const

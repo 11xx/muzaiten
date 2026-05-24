@@ -25,6 +25,7 @@ signals:
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdFindFileRequested();
+    void mpdImportRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void previousRequested();

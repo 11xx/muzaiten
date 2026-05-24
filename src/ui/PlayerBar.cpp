@@ -234,6 +234,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     menu->addSection(QStringLiteral("MPD"));
     QAction *mpdSource = menu->addAction(QStringLiteral("Configure MPD source..."));
     QAction *mpdFindFile = menu->addAction(QStringLiteral("Find MPD file..."));
+    QAction *mpdImport = menu->addAction(QStringLiteral("Import MPD library metadata"));
     menu->addSeparator();
     menu->addSection(QStringLiteral("Scrobblers"));
     m_listenBrainzEnabled = menu->addAction(QStringLiteral("ListenBrainz scrobbling"));
@@ -330,6 +331,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdFindFile, &QAction::triggered, this, &PlayerBar::mpdFindFileRequested);
+    connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
