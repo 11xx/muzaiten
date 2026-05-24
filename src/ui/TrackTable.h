@@ -26,6 +26,8 @@ public:
 
 signals:
     void trackActivated(const Track &track);
+    void playNextRequested(const QVector<Track> &tracks);
+    void addToQueueRequested(const QVector<Track> &tracks);
     void trackRatingChanged(const Track &track, int rating0To100);
     void viewSettingsChanged();
 
@@ -36,6 +38,7 @@ protected:
 private:
     void showHeaderMenu(const QPoint &pos);
     void showCellMenu(const QPoint &pos);
+    QVector<Track> tracksForContextRow(int row) const;
 
     QPersistentModelIndex m_hoverRatingIndex;
 };

@@ -104,6 +104,9 @@ TrackTable::TrackTable(QWidget *parent)
     connect(horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
         emit viewSettingsChanged();
     });
+    connect(horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
+        emit viewSettingsChanged();
+    });
 
     connect(this, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
         const QModelIndex ratingIndex = this->model()->index(index.row(), 0);
@@ -274,19 +277,61 @@ void TrackTable::showHeaderMenu(const QPoint &pos)
 void TrackTable::showCellMenu(const QPoint &pos)
 {
     const QModelIndex index = indexAt(pos);
-    if (!index.isValid() || index.column() != 0) {
+    if (!index.isValid()) {
         return;
     }
 
-    const Track track = index.data(Qt::UserRole + 1).value<Track>();
-    if (track.path.isEmpty() || !track.hasUserRating) {
+    const QVector<Track> tracks = tracksForContextRow(index.row());
+    if (tracks.isEmpty()) {
         return;
     }
 
     QMenu menu(this);
-    QAction *clear = menu.addAction(QStringLiteral("Clear rating override"));
-    connect(clear, &QAction::triggered, this, [this, track]() {
-        emit trackRatingChanged(track, StarRating::unset);
+    QAction *playNext = menu.addAction(QStringLiteral("Play next"));
+    connect(playNext, &QAction::triggered, this, [this, tracks]() {
+        emit playNextRequested(tracks);
     });
+    QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
+    connect(addToQueue, &QAction::triggered, this, [this, tracks]() {
+        emit addToQueueRequested(tracks);
+    });
+
+    const Track track = model()->index(index.row(), 0).data(Qt::UserRole + 1).value<Track>();
+    if (index.column() == 0 && track.hasUserRating) {
+        menu.addSeparator();
+        QAction *clear = menu.addAction(QStringLiteral("Clear rating override"));
+        connect(clear, &QAction::triggered, this, [this, track]() {
+            emit trackRatingChanged(track, StarRating::unset);
+        });
+    }
     menu.exec(viewport()->mapToGlobal(pos));
+}
+
+QVector<Track> TrackTable::tracksForContextRow(int row) const
+{
+    QVector<int> rows;
+    const QModelIndexList selected = selectionModel() != nullptr ? selectionModel()->selectedRows(0) : QModelIndexList();
+    const bool rowIsSelected = std::any_of(selected.begin(), selected.end(), [row](const QModelIndex &index) {
+        return index.row() == row;
+    });
+
+    if (rowIsSelected) {
+        rows.reserve(selected.size());
+        for (const QModelIndex &index : selected) {
+            rows.push_back(index.row());
+        }
+        std::sort(rows.begin(), rows.end());
+    } else {
+        rows.push_back(row);
+    }
+
+    QVector<Track> tracks;
+    tracks.reserve(rows.size());
+    for (int selectedRow : rows) {
+        const Track track = model()->index(selectedRow, 0).data(Qt::UserRole + 1).value<Track>();
+        if (!track.path.isEmpty()) {
+            tracks.push_back(track);
+        }
+    }
+    return tracks;
 }

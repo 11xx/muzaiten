@@ -21,6 +21,8 @@ public:
 
 signals:
     void albumSelectionToggled(const QString &albumTitle);
+    void albumPlayNextRequested(const QString &albumTitle);
+    void albumAddToQueueRequested(const QString &albumTitle);
     void albumRatingChanged(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     void viewSettingsChanged();
 
