@@ -5,6 +5,7 @@
 #include "core/Track.h"
 
 class QLabel;
+class QSplitter;
 class QTableWidget;
 
 class RightSidebar final : public QWidget {
@@ -32,5 +33,6 @@ private:
 private:
     QTableWidget *m_queueTable = nullptr;
     QLabel *m_albumArt = nullptr;
+    QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
 };

@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPixmap>
+#include <QSplitter>
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QByteArray>
@@ -42,10 +43,14 @@ RightSidebar::RightSidebar(QWidget *parent)
     : QWidget(parent)
 {
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(8);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(0);
 
-    m_queueTable = new QTableWidget(0, 3, this);
+    m_splitter = new QSplitter(Qt::Vertical, this);
+    m_splitter->setChildrenCollapsible(false);
+    layout->addWidget(m_splitter, 1);
+
+    m_queueTable = new QTableWidget(0, 3, m_splitter);
     m_queueTable->setHorizontalHeaderLabels({
         QStringLiteral("#"),
         QStringLiteral("Title"),
@@ -54,15 +59,15 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_queueTable->verticalHeader()->setVisible(false);
-    m_queueTable->verticalHeader()->setDefaultSectionSize(24);
-    m_queueTable->verticalHeader()->setMinimumSectionSize(22);
-    m_queueTable->horizontalHeader()->setFixedHeight(22);
+    m_queueTable->verticalHeader()->setDefaultSectionSize(22);
+    m_queueTable->verticalHeader()->setMinimumSectionSize(20);
+    m_queueTable->horizontalHeader()->setFixedHeight(20);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
-    layout->addWidget(m_queueTable, 1);
+    m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
         emit queueTrackActivated(row);
@@ -76,14 +81,21 @@ RightSidebar::RightSidebar(QWidget *parent)
     });
     connect(m_queueTable, &QTableWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
 
-    m_albumArt = new QLabel(this);
-    m_albumArt->setMinimumSize(220, 220);
+    m_albumArt = new QLabel(m_splitter);
+    m_albumArt->setMinimumSize(180, 180);
     m_albumArt->setMaximumHeight(360);
     m_albumArt->setAlignment(Qt::AlignCenter);
     m_albumArt->setFrameShape(QFrame::StyledPanel);
     m_albumArt->setText(QStringLiteral("Album art"));
     m_albumArt->setScaledContents(false);
-    layout->addWidget(m_albumArt, 0);
+    m_splitter->addWidget(m_albumArt);
+    m_splitter->setStretchFactor(0, 1);
+    m_splitter->setStretchFactor(1, 0);
+    m_splitter->setSizes({520, 260});
+
+    connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
+        emit viewSettingsChanged();
+    });
 }
 
 void RightSidebar::setQueue(const QVector<Track> &tracks)
@@ -119,7 +131,7 @@ void RightSidebar::setAlbumArt(const QString &imagePath)
     }
 
     m_albumArt->setText({});
-    const int side = std::min(m_albumArt->width(), std::max(220, m_albumArt->height()));
+    const int side = std::min(m_albumArt->width(), std::max(180, m_albumArt->height()));
     m_albumArt->setPixmap(pixmap.scaled(side, side, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
@@ -137,6 +149,11 @@ QString RightSidebar::viewSettingsJson() const
     root.insert(QStringLiteral("headerHeight"), m_queueTable->horizontalHeader()->height());
     root.insert(QStringLiteral("rowHeight"), m_queueTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_queueTable->horizontalHeader()->saveState().toBase64()));
+    QJsonArray splitterSizes;
+    for (int size : m_splitter->sizes()) {
+        splitterSizes.append(size);
+    }
+    root.insert(QStringLiteral("splitter"), splitterSizes);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -158,17 +175,25 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
         }
     }
 
-    setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(22));
-    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(24), 22, 48));
+    setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
+    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(22), 20, 48));
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_queueTable->horizontalHeader()->restoreState(headerState);
+    }
+    const QJsonArray splitter = root.value(QStringLiteral("splitter")).toArray();
+    QList<int> sizes;
+    for (const QJsonValue &value : splitter) {
+        sizes.push_back(value.toInt());
+    }
+    if (sizes.size() == 2) {
+        m_splitter->setSizes(sizes);
     }
 }
 
 void RightSidebar::setHeaderHeight(int height)
 {
-    m_queueTable->horizontalHeader()->setFixedHeight(std::clamp(height, 20, 40));
+    m_queueTable->horizontalHeader()->setFixedHeight(std::clamp(height, 18, 40));
 }
 
 void RightSidebar::showHeaderMenu(const QPoint &pos)

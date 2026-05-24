@@ -521,7 +521,7 @@ void MainWindow::applySharedTableSettings()
     const QJsonObject sharedSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("tables.view")).toUtf8()).object();
     const QJsonObject trackSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("trackTable.view")).toUtf8()).object();
     const QJsonObject sidebarSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("rightSidebar.view")).toUtf8()).object();
-    const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(22)));
+    const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(20)));
     m_trackTable->setHeaderHeight(headerHeight);
     m_rightSidebar->setHeaderHeight(headerHeight);
 

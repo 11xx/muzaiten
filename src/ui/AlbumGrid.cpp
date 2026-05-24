@@ -158,7 +158,7 @@ void AlbumGrid::applyViewSettingsJson(const QString &json)
     if (!json.isEmpty()) {
         const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
         m_cellWidth = std::clamp(root.value(QStringLiteral("cellWidth")).toInt(204), 160, 320);
-        m_cellHeight = std::clamp(root.value(QStringLiteral("cellHeight")).toInt(278), 220, 380);
+    m_cellHeight = std::clamp(root.value(QStringLiteral("cellHeight")).toInt(292), 240, 400);
         m_artSize = std::clamp(root.value(QStringLiteral("artSize")).toInt(176), 96, 260);
         m_spacing = std::clamp(root.value(QStringLiteral("spacing")).toInt(6), 0, 24);
         m_starSize = std::clamp(root.value(QStringLiteral("starSize")).toInt(18), 18, 28);
@@ -220,7 +220,7 @@ QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
 {
     const QRect cell = visualRect(index).adjusted(m_padding, m_padding, -m_padding, -m_padding);
     const QRect artRect(cell.left() + ((cell.width() - m_artSize) / 2), cell.top(), m_artSize, m_artSize);
-    const QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 44);
+    const QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 58);
     const QRect ratingCell = alignedRatingCell(artRect, textRect, m_starSize, m_textAlignment);
     return StarRating::ratingRect(ratingCell, m_starSize);
 }
