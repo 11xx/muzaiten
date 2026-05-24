@@ -19,11 +19,21 @@ add_executable(test_schema
     test_schema.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/fs/PathResolver.cpp
 )
 target_include_directories(test_schema PRIVATE ../src)
 target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
+
+add_executable(test_path_resolver
+    test_path_resolver.cpp
+    ../src/fs/PathResolver.cpp
+)
+target_include_directories(test_path_resolver PRIVATE ../src)
+target_link_libraries(test_path_resolver PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_path_resolver PRIVATE cxx_std_26)
+add_test(NAME test_path_resolver COMMAND test_path_resolver)
 
 add_executable(test_artwork_resolver
     test_artwork_resolver.cpp

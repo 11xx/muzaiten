@@ -7,6 +7,7 @@
 #include "core/Album.h"
 #include "core/Artist.h"
 #include "core/Track.h"
+#include "fs/LinkRoot.h"
 
 class Database final {
 public:
@@ -29,6 +30,9 @@ public:
     bool clearUserAlbumRating(const QString &albumArtistName, const QString &albumTitle);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
+    QVector<LinkRoot> linkRoots() const;
+    bool saveLinkRoot(const LinkRoot &linkRoot);
+    bool removeLinkRoot(int id);
     QVector<Artist> albumArtists() const;
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;

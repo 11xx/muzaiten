@@ -15,6 +15,7 @@ private slots:
     void userTrackRatingOverridesScannedRating();
     void userAlbumRatingOverridesAverageRating();
     void appSettingRoundTrips();
+    void linkRootRoundTrips();
 };
 
 namespace {
@@ -51,7 +52,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 2);
+    QCOMPARE(query.value(0).toInt(), 3);
 }
 
 void SchemaTest::upsertsTrackAndQueriesArtist()
@@ -132,6 +133,34 @@ void SchemaTest::appSettingRoundTrips()
     QCOMPARE(database.setting(QStringLiteral("missing"), QStringLiteral("fallback")), QStringLiteral("fallback"));
     QVERIFY2(database.setSetting(QStringLiteral("trackTable.view"), QStringLiteral("{\"rowHeight\":24}")), qPrintable(database.lastError()));
     QCOMPARE(database.setting(QStringLiteral("trackTable.view")), QStringLiteral("{\"rowHeight\":24}"));
+}
+
+void SchemaTest::linkRootRoundTrips()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-link-root-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    LinkRoot root;
+    root.name = QStringLiteral("Writable mirror");
+    root.sourcePrefix = QStringLiteral("/gak/music");
+    root.targetPrefix = QStringLiteral("/gak/turak/music");
+    root.priority = 100;
+    root.readable = true;
+    root.writable = true;
+    QVERIFY2(database.saveLinkRoot(root), qPrintable(database.lastError()));
+
+    const QVector<LinkRoot> roots = database.linkRoots();
+    QCOMPARE(roots.size(), 1);
+    QCOMPARE(roots.first().name, QStringLiteral("Writable mirror"));
+    QCOMPARE(roots.first().sourcePrefix, QStringLiteral("/gak/music"));
+    QCOMPARE(roots.first().targetPrefix, QStringLiteral("/gak/turak/music"));
+    QCOMPARE(roots.first().priority, 100);
+    QVERIFY(roots.first().readable);
+    QVERIFY(roots.first().writable);
+    QVERIFY(roots.first().enabled);
 }
 
 QTEST_MAIN(SchemaTest)
