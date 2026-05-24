@@ -18,11 +18,13 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QLoggingCategory>
 #include <QMessageBox>
 #include <QAudioOutput>
+#include <QCloseEvent>
 #include <QMediaPlayer>
 #include <QProgressBar>
 #include <QSplitter>
@@ -52,26 +54,26 @@ MainWindow::MainWindow(QWidget *parent)
     m_playerBar = new PlayerBar(central);
     centralLayout->addWidget(m_playerBar, 0);
 
-    auto *root = new QSplitter(Qt::Horizontal, central);
-    m_artistSidebar = new ArtistSidebar(root);
+    m_rootSplitter = new QSplitter(Qt::Horizontal, central);
+    m_artistSidebar = new ArtistSidebar(m_rootSplitter);
 
-    auto *center = new QSplitter(Qt::Vertical, root);
-    m_albumGrid = new AlbumGrid(center);
-    m_trackTable = new TrackTable(center);
-    center->setStretchFactor(0, 55);
-    center->setStretchFactor(1, 45);
+    m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
+    m_albumGrid = new AlbumGrid(m_centerSplitter);
+    m_trackTable = new TrackTable(m_centerSplitter);
+    m_centerSplitter->setStretchFactor(0, 55);
+    m_centerSplitter->setStretchFactor(1, 45);
 
-    m_rightSidebar = new RightSidebar(root);
+    m_rightSidebar = new RightSidebar(m_rootSplitter);
 
-    root->addWidget(m_artistSidebar);
-    root->addWidget(center);
-    root->addWidget(m_rightSidebar);
-    root->setStretchFactor(0, 0);
-    root->setStretchFactor(1, 1);
-    root->setStretchFactor(2, 0);
-    root->setSizes({260, 900, 300});
+    m_rootSplitter->addWidget(m_artistSidebar);
+    m_rootSplitter->addWidget(m_centerSplitter);
+    m_rootSplitter->addWidget(m_rightSidebar);
+    m_rootSplitter->setStretchFactor(0, 0);
+    m_rootSplitter->setStretchFactor(1, 1);
+    m_rootSplitter->setStretchFactor(2, 0);
+    m_rootSplitter->setSizes({260, 900, 300});
 
-    centralLayout->addWidget(root, 1);
+    centralLayout->addWidget(m_rootSplitter, 1);
     setCentralWidget(central);
 
     m_scanProgress = new QProgressBar(this);
@@ -97,13 +99,19 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_trackTable, &TrackTable::playNextRequested, this, &MainWindow::playNextTracks);
+    connect(m_trackTable, &TrackTable::addToQueueRequested, this, &MainWindow::addTracksToQueue);
     connect(m_trackTable, &TrackTable::trackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
+    connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
+    connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
+    connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
+    connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
@@ -127,6 +135,11 @@ MainWindow::MainWindow(QWidget *parent)
         const bool playing = state == QMediaPlayer::PlayingState;
         m_playerBar->setPlaying(playing);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+    });
+    connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::EndOfMedia && m_queueIndex + 1 < m_queue.size()) {
+            playQueueIndex(m_queueIndex + 1);
+        }
     });
     connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &errorString) {
         if (!errorString.isEmpty()) {
@@ -163,6 +176,12 @@ void MainWindow::openLibraryFolder()
     }
 
     startScan(root);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    saveMainWindowViewSettings();
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::startScan(const QString &rootPath)
@@ -351,6 +370,22 @@ void MainWindow::loadViewSettings()
     m_rightSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("rightSidebar.view")));
     m_albumGrid->applyViewSettingsJson(m_database->setting(QStringLiteral("albumGrid.view")));
     m_artistSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("artistSidebar.view")));
+    const QJsonObject mainWindow = QJsonDocument::fromJson(m_database->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
+    const QByteArray geometry = QByteArray::fromBase64(mainWindow.value(QStringLiteral("geometry")).toString().toLatin1());
+    if (!geometry.isEmpty()) {
+        restoreGeometry(geometry);
+    }
+    auto restoreSplitter = [](QSplitter *splitter, const QJsonArray &array) {
+        QList<int> sizes;
+        for (const QJsonValue &value : array) {
+            sizes.push_back(value.toInt());
+        }
+        if (sizes.size() == splitter->count()) {
+            splitter->setSizes(sizes);
+        }
+    };
+    restoreSplitter(m_rootSplitter, mainWindow.value(QStringLiteral("rootSplitter")).toArray());
+    restoreSplitter(m_centerSplitter, mainWindow.value(QStringLiteral("centerSplitter")).toArray());
     applySharedTableSettings();
 }
 
@@ -374,6 +409,23 @@ void MainWindow::saveRightSidebarViewSettings()
 {
     m_database->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
     applySharedTableSettings();
+}
+
+void MainWindow::saveMainWindowViewSettings()
+{
+    auto sizesToJson = [](const QList<int> &sizes) {
+        QJsonArray array;
+        for (int size : sizes) {
+            array.append(size);
+        }
+        return array;
+    };
+
+    QJsonObject root;
+    root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
+    root.insert(QStringLiteral("rootSplitter"), sizesToJson(m_rootSplitter->sizes()));
+    root.insert(QStringLiteral("centerSplitter"), sizesToJson(m_centerSplitter->sizes()));
+    m_database->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::applySharedTableSettings()
@@ -461,9 +513,80 @@ void MainWindow::appendAndPlayTrack(const Track &track)
         return;
     }
 
+    for (int index = 0; index < m_queue.size(); ++index) {
+        if (m_queue.at(index).path == track.path) {
+            playQueueIndex(index);
+            return;
+        }
+    }
+
     m_queue.push_back(track);
     m_rightSidebar->setQueue(m_queue);
     playQueueIndex(static_cast<int>(m_queue.size() - 1));
+}
+
+void MainWindow::playNextTracks(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty()) {
+        return;
+    }
+
+    if (m_queueIndex < 0 || m_queue.isEmpty()) {
+        const int start = static_cast<int>(m_queue.size());
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                m_queue.push_back(track);
+            }
+        }
+        m_rightSidebar->setQueue(m_queue);
+        if (m_queueIndex < 0 && start < m_queue.size()) {
+            playQueueIndex(start);
+        }
+        return;
+    }
+
+    int insertAt = m_playNextInsertIndex;
+    if (insertAt <= m_queueIndex || insertAt > m_queue.size()) {
+        insertAt = m_queueIndex + 1;
+    }
+
+    int inserted = 0;
+    for (const Track &track : tracks) {
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        m_queue.insert(insertAt + inserted, track);
+        ++inserted;
+    }
+
+    m_playNextInsertIndex = insertAt + inserted;
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+}
+
+void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
+{
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            m_queue.push_back(track);
+        }
+    }
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+}
+
+void MainWindow::playNextAlbum(const QString &albumTitle)
+{
+    if (!m_currentArtist.isEmpty() && !albumTitle.isEmpty()) {
+        playNextTracks(m_database->tracksForArtist(m_currentArtist, albumTitle));
+    }
+}
+
+void MainWindow::addAlbumToQueue(const QString &albumTitle)
+{
+    if (!m_currentArtist.isEmpty() && !albumTitle.isEmpty()) {
+        addTracksToQueue(m_database->tracksForArtist(m_currentArtist, albumTitle));
+    }
 }
 
 void MainWindow::playQueueIndex(int index)
@@ -473,6 +596,9 @@ void MainWindow::playQueueIndex(int index)
     }
 
     m_queueIndex = index;
+    if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
+        m_playNextInsertIndex = m_queueIndex + 1;
+    }
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     playTrack(m_queue.at(m_queueIndex));
 }
