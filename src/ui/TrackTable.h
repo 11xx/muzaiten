@@ -42,4 +42,5 @@ private:
     QVector<Track> tracksForContextRow(int row) const;
 
     QPersistentModelIndex m_hoverRatingIndex;
+    int m_rowHeight = 20;
 };

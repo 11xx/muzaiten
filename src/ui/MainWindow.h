@@ -89,6 +89,8 @@ private:
     void rememberTrackTableViewState();
     void restoreTrackTableViewState();
     void updateCurrentAlbumArt();
+    void applyTrackInfoPaneVisible(bool visible);
+    void applyCompactMenu(bool compact);
 
     ArtistSidebar *m_artistSidebar = nullptr;
     QSplitter *m_rootSplitter = nullptr;

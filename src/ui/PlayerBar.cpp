@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -227,26 +228,49 @@ PlayerBar::PlayerBar(QWidget *parent)
     root->setContentsMargins(44, 8, 10, 8);
     root->setSpacing(10);
 
-    auto *menu = new QMenu(this);
-    QAction *openLibrary = menu->addAction(QStringLiteral("Open library folder..."));
-    QAction *linkRoots = menu->addAction(QStringLiteral("Link roots..."));
-    menu->addSeparator();
-    menu->addSection(QStringLiteral("Playback"));
-    QAction *playbackOutput = menu->addAction(QStringLiteral("Output profile..."));
-    menu->addSeparator();
-    menu->addSection(QStringLiteral("MPD"));
-    QAction *mpdSource = menu->addAction(QStringLiteral("Configure MPD source..."));
-    QAction *mpdImport = menu->addAction(QStringLiteral("Import MPD library metadata"));
-    menu->addSeparator();
-    menu->addSection(QStringLiteral("Scrobblers"));
-    m_listenBrainzEnabled = menu->addAction(QStringLiteral("ListenBrainz scrobbling"));
+    auto *compactMenu = new QMenu(this);
+    auto *fileMenu = new QMenu(QStringLiteral("File"), this);
+    QAction *openLibrary = fileMenu->addAction(QStringLiteral("Open library folder..."));
+    QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
+
+    auto *playbackMenu = new QMenu(QStringLiteral("Playback"), this);
+    QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
+
+    auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
+    QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
+    QAction *mpdImport = mpdMenu->addAction(QStringLiteral("Import MPD library metadata"));
+
+    auto *scrobblersMenu = new QMenu(QStringLiteral("Scrobblers"), this);
+    m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
     m_listenBrainzEnabled->setCheckable(true);
-    QAction *listenBrainzToken = menu->addAction(QStringLiteral("Set ListenBrainz token..."));
+    QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token..."));
+
+    auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
+    m_trackInfoPaneVisible = settingsMenu->addAction(QStringLiteral("Show track information pane"));
+    m_trackInfoPaneVisible->setCheckable(true);
+    m_trackInfoPaneVisible->setChecked(true);
+    m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
+    m_compactMenu->setCheckable(true);
+
+    compactMenu->addMenu(fileMenu);
+    compactMenu->addMenu(playbackMenu);
+    compactMenu->addMenu(mpdMenu);
+    compactMenu->addMenu(scrobblersMenu);
+    compactMenu->addMenu(settingsMenu);
 
     m_menuButton = menuButton(this);
-    connect(m_menuButton, &QToolButton::clicked, this, [this, menu]() {
-        menu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height())));
+    connect(m_menuButton, &QToolButton::clicked, this, [this, compactMenu]() {
+        compactMenu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height())));
     });
+
+    m_menuBar = new QMenuBar(this);
+    m_menuBar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    m_menuBar->addMenu(fileMenu);
+    m_menuBar->addMenu(playbackMenu);
+    m_menuBar->addMenu(mpdMenu);
+    m_menuBar->addMenu(scrobblersMenu);
+    m_menuBar->addMenu(settingsMenu);
+    root->addWidget(m_menuBar);
 
     auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
     root->addWidget(previous);
@@ -334,6 +358,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
+    connect(m_compactMenu, &QAction::toggled, this, &PlayerBar::compactMenuChanged);
+    connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
@@ -364,6 +390,29 @@ void PlayerBar::setListenBrainzEnabled(bool enabled)
     }
     const QSignalBlocker blocker(m_listenBrainzEnabled);
     m_listenBrainzEnabled->setChecked(enabled);
+}
+
+void PlayerBar::setTrackInfoPaneVisible(bool visible)
+{
+    if (m_trackInfoPaneVisible == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_trackInfoPaneVisible);
+    m_trackInfoPaneVisible->setChecked(visible);
+}
+
+void PlayerBar::setCompactMenu(bool compact)
+{
+    if (m_compactMenu != nullptr) {
+        const QSignalBlocker blocker(m_compactMenu);
+        m_compactMenu->setChecked(compact);
+    }
+    if (m_menuButton != nullptr) {
+        m_menuButton->setVisible(compact);
+    }
+    if (m_menuBar != nullptr) {
+        m_menuBar->setVisible(!compact);
+    }
 }
 
 void PlayerBar::setPlaying(bool playing)

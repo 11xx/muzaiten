@@ -15,6 +15,9 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QByteArray>
+#include <QFormLayout>
+#include <QFrame>
+#include <QFileInfo>
 
 #include <algorithm>
 
@@ -38,6 +41,26 @@ QString ratingText(int rating0To100)
         return {};
     }
     return QStringLiteral("%1 %2").arg(rating0To100 / 20.0, 0, 'f', 1).arg(QChar(0x2605));
+}
+
+QLabel *valueLabel(QWidget *parent)
+{
+    auto *label = new QLabel(parent);
+    label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    label->setWordWrap(true);
+    return label;
+}
+
+QString formatDuration(qint64 durationMs)
+{
+    if (durationMs <= 0) {
+        return {};
+    }
+
+    const qint64 totalSeconds = durationMs / 1000;
+    const qint64 minutes = totalSeconds / 60;
+    const qint64 seconds = totalSeconds % 60;
+    return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
 } // namespace
@@ -67,6 +90,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->verticalHeader()->setVisible(false);
     m_queueTable->verticalHeader()->setDefaultSectionSize(20);
     m_queueTable->verticalHeader()->setMinimumSectionSize(20);
+    m_queueTable->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     m_queueTable->horizontalHeader()->setFixedHeight(20);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -88,6 +112,26 @@ RightSidebar::RightSidebar(QWidget *parent)
     });
     connect(m_queueTable, &QTableWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
 
+    m_trackInfoPane = new QFrame(m_splitter);
+    auto *infoLayout = new QFormLayout(m_trackInfoPane);
+    infoLayout->setContentsMargins(6, 6, 6, 6);
+    infoLayout->setHorizontalSpacing(8);
+    infoLayout->setVerticalSpacing(2);
+    m_trackInfoTitle = valueLabel(m_trackInfoPane);
+    m_trackInfoArtist = valueLabel(m_trackInfoPane);
+    m_trackInfoAlbum = valueLabel(m_trackInfoPane);
+    m_trackInfoYear = valueLabel(m_trackInfoPane);
+    m_trackInfoFile = valueLabel(m_trackInfoPane);
+    m_trackInfoProperties = valueLabel(m_trackInfoPane);
+    infoLayout->addRow(QStringLiteral("Title"), m_trackInfoTitle);
+    infoLayout->addRow(QStringLiteral("Artist"), m_trackInfoArtist);
+    infoLayout->addRow(QStringLiteral("Album"), m_trackInfoAlbum);
+    infoLayout->addRow(QStringLiteral("Year"), m_trackInfoYear);
+    infoLayout->addRow(QStringLiteral("File"), m_trackInfoFile);
+    infoLayout->addRow(QStringLiteral("Properties"), m_trackInfoProperties);
+    m_trackInfoPane->setMinimumHeight(96);
+    m_splitter->addWidget(m_trackInfoPane);
+
     m_albumArt = new QLabel(m_splitter);
     m_albumArt->setMinimumSize(180, 180);
     m_albumArt->setMaximumHeight(360);
@@ -98,7 +142,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_splitter->addWidget(m_albumArt);
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 0);
-    m_splitter->setSizes({520, 260});
+    m_splitter->setStretchFactor(2, 0);
+    m_splitter->setSizes({420, 150, 240});
+    setTrackInfo({});
 
     connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
         emit viewSettingsChanged();
@@ -115,6 +161,7 @@ void RightSidebar::setQueue(const QVector<Track> &tracks)
         m_queueTable->setItem(row, 0, new QTableWidgetItem(QString::number(row + 1)));
         m_queueTable->setItem(row, 1, new QTableWidgetItem(track.title));
         m_queueTable->setItem(row, 2, new QTableWidgetItem(ratingText(track.effectiveRating0To100)));
+        m_queueTable->setRowHeight(row, m_rowHeight);
     }
 }
 
@@ -145,6 +192,43 @@ void RightSidebar::setAlbumArt(const QString &imagePath)
     m_albumArt->setPixmap(pixmap.scaled(side, side, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
+void RightSidebar::setTrackInfo(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        m_trackInfoTitle->setText(QStringLiteral("No track playing."));
+        m_trackInfoArtist->clear();
+        m_trackInfoAlbum->clear();
+        m_trackInfoYear->clear();
+        m_trackInfoFile->clear();
+        m_trackInfoProperties->clear();
+        return;
+    }
+
+    m_trackInfoTitle->setText(track.title.isEmpty() ? track.filename : track.title);
+    m_trackInfoArtist->setText(track.artistName);
+    m_trackInfoAlbum->setText(track.albumTitle);
+    m_trackInfoYear->setText(track.date.left(4));
+    m_trackInfoFile->setText(track.path);
+
+    QStringList properties;
+    const QString duration = formatDuration(track.durationMs);
+    if (!duration.isEmpty()) {
+        properties.push_back(duration);
+    }
+    if (track.discNumber > 0) {
+        properties.push_back(QStringLiteral("Disc %1").arg(track.discNumber));
+    }
+    if (track.trackNumber > 0) {
+        properties.push_back(QStringLiteral("Track %1").arg(track.trackNumber));
+    }
+    m_trackInfoProperties->setText(properties.join(QStringLiteral(" / ")));
+}
+
+void RightSidebar::setTrackInfoVisible(bool visible)
+{
+    m_trackInfoPane->setVisible(visible);
+}
+
 QString RightSidebar::viewSettingsJson() const
 {
     QJsonArray visibleColumns;
@@ -159,6 +243,7 @@ QString RightSidebar::viewSettingsJson() const
     root.insert(QStringLiteral("headerHeight"), m_queueTable->horizontalHeader()->height());
     root.insert(QStringLiteral("rowHeight"), m_queueTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_queueTable->horizontalHeader()->saveState().toBase64()));
+    root.insert(QStringLiteral("showTrackInfo"), m_trackInfoPane->isVisible());
     QJsonArray splitterSizes;
     for (int size : m_splitter->sizes()) {
         splitterSizes.append(size);
@@ -186,7 +271,9 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
     }
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
-    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
+    const int rowHeight = root.value(QStringLiteral("rowHeight")).toInt(20);
+    m_rowHeight = rowHeight <= 24 ? 20 : std::clamp(rowHeight, 18, 48);
+    m_queueTable->verticalHeader()->setDefaultSectionSize(m_rowHeight);
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_queueTable->horizontalHeader()->restoreState(headerState);
@@ -197,8 +284,11 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
         sizes.push_back(value.toInt());
     }
     if (sizes.size() == 2) {
+        m_splitter->setSizes({sizes.value(0), 150, sizes.value(1)});
+    } else if (sizes.size() == 3) {
         m_splitter->setSizes(sizes);
     }
+    setTrackInfoVisible(root.value(QStringLiteral("showTrackInfo")).toBool(true));
 }
 
 void RightSidebar::setHeaderHeight(int height)

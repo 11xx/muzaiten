@@ -7,6 +7,7 @@
 class QLabel;
 class QSplitter;
 class QTableWidget;
+class QWidget;
 
 class RightSidebar final : public QWidget {
     Q_OBJECT
@@ -17,6 +18,8 @@ public:
     void setQueue(const QVector<Track> &tracks);
     void setCurrentIndex(int index);
     void setAlbumArt(const QString &imagePath);
+    void setTrackInfo(const Track &track);
+    void setTrackInfoVisible(bool visible);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void setHeaderHeight(int height);
@@ -33,6 +36,14 @@ private:
 private:
     QTableWidget *m_queueTable = nullptr;
     QLabel *m_albumArt = nullptr;
+    QWidget *m_trackInfoPane = nullptr;
+    QLabel *m_trackInfoTitle = nullptr;
+    QLabel *m_trackInfoArtist = nullptr;
+    QLabel *m_trackInfoAlbum = nullptr;
+    QLabel *m_trackInfoYear = nullptr;
+    QLabel *m_trackInfoFile = nullptr;
+    QLabel *m_trackInfoProperties = nullptr;
     QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
+    int m_rowHeight = 20;
 };
