@@ -35,6 +35,15 @@ target_link_libraries(test_path_resolver PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_path_resolver PRIVATE cxx_std_26)
 add_test(NAME test_path_resolver COMMAND test_path_resolver)
 
+add_executable(test_mpd_config
+    test_mpd_config.cpp
+    ../src/mpd/MpdConfig.cpp
+)
+target_include_directories(test_mpd_config PRIVATE ../src)
+target_link_libraries(test_mpd_config PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_mpd_config PRIVATE cxx_std_26)
+add_test(NAME test_mpd_config COMMAND test_mpd_config)
+
 add_executable(test_artwork_resolver
     test_artwork_resolver.cpp
     ../src/scanner/ArtworkResolver.cpp
