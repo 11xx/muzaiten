@@ -4,11 +4,8 @@ muzaiten is a native Linux music player focused on library browsing, queue-based
 
 The project is in early development. The implementation currently uses C++26, Qt 6 Widgets, SQLite, TagLib, Qt Multimedia, and Qt Network.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshot-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/screenshot-light.png">
-  <img alt="muzaiten main window" src="docs/assets/screenshot-light.png">
-</picture>
+![muzaiten main window - light](docs/assets/screenshot-light.png#gh-light-mode-only)
+![muzaiten main window - dark](docs/assets/screenshot-dark.png#gh-dark-mode-only)
 
 ## Features
 
