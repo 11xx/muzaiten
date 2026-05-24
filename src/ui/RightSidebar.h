@@ -22,7 +22,7 @@ public:
 
 signals:
     void queueTrackActivated(int index);
-    void findFileRequested(const Track &track, bool writable);
+    void findFileRequested(const Track &track);
     void viewSettingsChanged();
 
 private:

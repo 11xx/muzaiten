@@ -583,3 +583,108 @@ int Database::mpdTrackCount(qint64 sourceId) const
     }
     return query.value(0).toInt();
 }
+
+qint64 Database::mpdSourceId() const
+{
+    QSqlQuery query(m_db);
+    query.exec(QStringLiteral("SELECT id FROM media_sources WHERE kind = 'mpd' ORDER BY id ASC LIMIT 1"));
+    if (!query.next()) {
+        return 0;
+    }
+    return query.value(0).toLongLong();
+}
+
+QVector<Artist> Database::mpdAlbumArtists() const
+{
+    QVector<Artist> artists;
+    QSqlQuery query(m_db);
+    query.exec(QStringLiteral(
+        "SELECT album_artist_name, COUNT(DISTINCT album_title) "
+        "FROM mpd_tracks "
+        "WHERE album_artist_name IS NOT NULL AND album_artist_name != '' "
+        "GROUP BY album_artist_name "
+        "ORDER BY lower(album_artist_name)"));
+    while (query.next()) {
+        Artist artist;
+        artist.name = query.value(0).toString();
+        artist.albumCount = query.value(1).toInt();
+        artists.push_back(artist);
+    }
+    return artists;
+}
+
+QVector<Album> Database::mpdAlbumsForArtist(const QString &albumArtist, const QString &musicDirectory) const
+{
+    QVector<Album> albums;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT album_title, MIN(date), COUNT(*), MIN(uri) "
+        "FROM mpd_tracks "
+        "WHERE album_artist_name = ? "
+        "GROUP BY album_title "
+        "ORDER BY lower(album_title)"));
+    query.addBindValue(albumArtist);
+    query.exec();
+    while (query.next()) {
+        Album album;
+        album.title = query.value(0).toString();
+        album.albumArtistName = albumArtist;
+        album.date = query.value(1).toString();
+        album.trackCount = query.value(2).toInt();
+        album.averageRating0To100 = Rating::unset;
+        album.effectiveRating0To100 = Rating::unset;
+        const QString repUri = query.value(3).toString();
+        if (!repUri.isEmpty() && !musicDirectory.trimmed().isEmpty()) {
+            const QString resolvedPath = QDir::isAbsolutePath(repUri)
+                ? repUri
+                : QDir::cleanPath(QDir(musicDirectory).filePath(repUri));
+            album.representativeDir = QFileInfo(resolvedPath).absolutePath();
+        }
+        albums.push_back(album);
+    }
+    return albums;
+}
+
+QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QString &albumTitleFilter) const
+{
+    QVector<Track> tracks;
+    QSqlQuery query(m_db);
+    QString sql = QStringLiteral(
+        "SELECT uri, title, artist_name, album_artist_name, album_title, "
+        "track_number, disc_number, duration_ms, date "
+        "FROM mpd_tracks "
+        "WHERE album_artist_name = ?");
+    if (!albumTitleFilter.isEmpty()) {
+        sql += QStringLiteral(" AND album_title = ?");
+    }
+    sql += QStringLiteral(" ORDER BY lower(album_title), disc_number, track_number, lower(title)");
+    query.prepare(sql);
+    query.addBindValue(albumArtist);
+    if (!albumTitleFilter.isEmpty()) {
+        query.addBindValue(albumTitleFilter);
+    }
+    query.exec();
+    while (query.next()) {
+        Track track;
+        const QString uri = query.value(0).toString();
+        if (QDir::isAbsolutePath(uri)) {
+            track.path = uri;
+        } else {
+            track.path = QDir::cleanPath(QDir(musicDirectory).filePath(uri));
+        }
+        track.parentDir = QFileInfo(track.path).absolutePath();
+        track.filename = QFileInfo(track.path).fileName();
+        track.title = query.value(1).toString();
+        track.artistName = query.value(2).toString();
+        track.albumArtistName = query.value(3).toString();
+        track.albumTitle = query.value(4).toString();
+        track.trackNumber = query.value(5).toInt();
+        track.discNumber = query.value(6).toInt();
+        track.durationMs = query.value(7).toLongLong();
+        track.date = query.value(8).toString();
+        track.rating0To100 = Rating::unset;
+        track.effectiveRating0To100 = Rating::unset;
+        tracks.push_back(track);
+    }
+    return tracks;
+}

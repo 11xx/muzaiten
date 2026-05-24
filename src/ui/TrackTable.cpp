@@ -300,11 +300,7 @@ void TrackTable::showCellMenu(const QPoint &pos)
     menu.addSeparator();
     QAction *findFile = menu.addAction(QStringLiteral("Find file"));
     connect(findFile, &QAction::triggered, this, [this, track]() {
-        emit findFileRequested(track, false);
-    });
-    QAction *findWritableFile = menu.addAction(QStringLiteral("Find writable file"));
-    connect(findWritableFile, &QAction::triggered, this, [this, track]() {
-        emit findFileRequested(track, true);
+        emit findFileRequested(track);
     });
 
     if (index.column() == 0 && track.hasUserRating) {

@@ -9,6 +9,7 @@ class Artist;
 class QListView;
 class QLineEdit;
 class QStandardItemModel;
+class QTabBar;
 
 class ArtistSidebar final : public QWidget {
     Q_OBJECT
@@ -20,18 +21,22 @@ public:
     bool selectArtist(const QString &artistName);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
+    void setMpdAvailable(bool available);
 
 signals:
     void artistSelected(const QString &artistName);
     void viewSettingsChanged();
+    void librarySourceChanged(int index);
 
 private:
     void showContextMenu(const QPoint &pos);
 
 private:
+    QTabBar *m_tabBar = nullptr;
     QLineEdit *m_filter = nullptr;
     QListView *m_view = nullptr;
     QStandardItemModel *m_model = nullptr;
     bool m_showAlbumCount = true;
     int m_rowHeight = 22;
+    bool m_mpdAvailable = false;
 };

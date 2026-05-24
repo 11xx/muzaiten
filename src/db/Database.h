@@ -38,6 +38,10 @@ public:
     bool clearMpdTracksForSource(qint64 sourceId);
     bool upsertMpdTrack(qint64 sourceId, const MpdTrack &track);
     int mpdTrackCount(qint64 sourceId) const;
+    qint64 mpdSourceId() const;
+    QVector<Artist> mpdAlbumArtists() const;
+    QVector<Album> mpdAlbumsForArtist(const QString &albumArtist, const QString &musicDirectory) const;
+    QVector<Track> mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QString &albumTitleFilter = {}) const;
     QVector<Artist> albumArtists() const;
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;

@@ -22,6 +22,8 @@ class RightSidebar;
 class TrackTable;
 class ScanWorker;
 
+enum class LibrarySource { Local, Mpd };
+
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 
@@ -53,14 +55,14 @@ private:
     void savePlaybackProfile();
     void configurePlaybackProfile();
     void configureLinkRoots();
-    void findTrackFile(const Track &track, bool writable);
+    void findTrackFile(const Track &track);
     void configureMpdSource();
-    void findMpdFile();
     void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;
     void configureListenBrainz();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
+    void onLibrarySourceChanged(int index);
     void playTrack(const Track &track);
     void presentTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
@@ -80,8 +82,10 @@ private:
     void finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled);
     QString databasePath() const;
     QString cacheRoot() const;
+    QString mpdCacheRoot() const;
     QString stateRoot() const;
     bool useDevState() const;
+    QString resolvedReadPathForTrack(const Track &track) const;
     void rememberTrackTableViewState();
     void restoreTrackTableViewState();
     void updateCurrentAlbumArt();
@@ -106,6 +110,7 @@ private:
     int m_trackSortColumn = 0;
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;
+    LibrarySource m_librarySource = LibrarySource::Local;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_scanWorker = nullptr;
     QThread *m_listenBrainzThread = nullptr;

@@ -28,7 +28,7 @@ signals:
     void trackActivated(const Track &track);
     void playNextRequested(const QVector<Track> &tracks);
     void addToQueueRequested(const QVector<Track> &tracks);
-    void findFileRequested(const Track &track, bool writable);
+    void findFileRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);
     void viewSettingsChanged();
 
