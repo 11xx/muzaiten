@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QEvent>
 #include <QLoggingCategory>
 
 #include <taglib/tdebuglistener.h>
@@ -56,6 +57,15 @@ int MuzaitenApplication::run()
     return exec();
 }
 
+bool MuzaitenApplication::event(QEvent *event)
+{
+    const bool result = QApplication::event(event);
+    if (!m_applyingStyle && (event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange)) {
+        configureUiStyle();
+    }
+    return result;
+}
+
 void MuzaitenApplication::configureCommandLine()
 {
     QCommandLineParser parser;
@@ -100,11 +110,8 @@ void MuzaitenApplication::configureLogging(bool verbose)
 
 void MuzaitenApplication::configureUiStyle()
 {
+    m_applyingStyle = true;
     setStyleSheet(QStringLiteral(R"(
-        QAbstractScrollArea {
-            border: none;
-        }
-
         QScrollBar:vertical, QScrollBar:horizontal {
             background: transparent;
             border: none;
@@ -135,12 +142,12 @@ void MuzaitenApplication::configureUiStyle()
         }
 
         QScrollBar:hover::handle:vertical, QScrollBar:hover::handle:horizontal {
-            background: rgba(127, 127, 127, 104);
+            background: palette(mid);
         }
 
         QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover,
         QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
-            background: rgba(127, 127, 127, 176);
+            background: palette(dark);
         }
 
         QScrollBar::add-line, QScrollBar::sub-line,
@@ -151,4 +158,5 @@ void MuzaitenApplication::configureUiStyle()
             height: 0;
         }
     )"));
+    m_applyingStyle = false;
 }

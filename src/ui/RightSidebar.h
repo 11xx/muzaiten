@@ -45,5 +45,4 @@ private:
     QLabel *m_trackInfoProperties = nullptr;
     QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
-    int m_rowHeight = 20;
 };

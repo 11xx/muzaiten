@@ -90,7 +90,6 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->verticalHeader()->setVisible(false);
     m_queueTable->verticalHeader()->setDefaultSectionSize(20);
     m_queueTable->verticalHeader()->setMinimumSectionSize(20);
-    m_queueTable->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     m_queueTable->horizontalHeader()->setFixedHeight(20);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -161,7 +160,6 @@ void RightSidebar::setQueue(const QVector<Track> &tracks)
         m_queueTable->setItem(row, 0, new QTableWidgetItem(QString::number(row + 1)));
         m_queueTable->setItem(row, 1, new QTableWidgetItem(track.title));
         m_queueTable->setItem(row, 2, new QTableWidgetItem(ratingText(track.effectiveRating0To100)));
-        m_queueTable->setRowHeight(row, m_rowHeight);
     }
 }
 
@@ -271,9 +269,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
     }
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
-    const int rowHeight = root.value(QStringLiteral("rowHeight")).toInt(20);
-    m_rowHeight = rowHeight <= 24 ? 20 : std::clamp(rowHeight, 18, 48);
-    m_queueTable->verticalHeader()->setDefaultSectionSize(m_rowHeight);
+    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_queueTable->horizontalHeader()->restoreState(headerState);

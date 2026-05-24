@@ -221,12 +221,11 @@ PlayerBar::PlayerBar(QWidget *parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("PlayerBar"));
-    setMinimumHeight(72);
-    setMaximumHeight(82);
+    setMinimumHeight(92);
 
-    auto *root = new QHBoxLayout(this);
-    root->setContentsMargins(44, 8, 10, 8);
-    root->setSpacing(10);
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
 
     auto *compactMenu = new QMenu(this);
     auto *fileMenu = new QMenu(QStringLiteral("File"), this);
@@ -272,12 +271,18 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->addMenu(settingsMenu);
     root->addWidget(m_menuBar);
 
+    auto *controls = new QHBoxLayout;
+    controls->setContentsMargins(8, 6, 10, 8);
+    controls->setSpacing(10);
+
+    controls->addWidget(m_menuButton);
+
     auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
-    root->addWidget(previous);
+    controls->addWidget(previous);
     m_playPause = iconButton(this, QStyle::SP_MediaPlay, QStringLiteral("Play"));
-    root->addWidget(m_playPause);
+    controls->addWidget(m_playPause);
     auto *next = iconButton(this, QStyle::SP_MediaSkipForward, QStringLiteral("Next"));
-    root->addWidget(next);
+    controls->addWidget(next);
 
     auto *progressLayout = new QVBoxLayout;
     progressLayout->setContentsMargins(4, 0, 4, 0);
@@ -332,17 +337,17 @@ PlayerBar::PlayerBar(QWidget *parent)
     timeline->addWidget(m_duration);
 
     progressLayout->addLayout(timeline);
-    root->addLayout(progressLayout, 1);
+    controls->addLayout(progressLayout, 1);
 
     auto *volume = new VolumeButton(this);
     volume->volumeChanged = [this](int value) {
         emit volumeChanged(value);
     };
-    root->addWidget(volume);
+    controls->addWidget(volume);
 
     auto *single = iconButton(this, QStyle::SP_BrowserReload, QStringLiteral("Single mode"));
     single->setCheckable(true);
-    root->addWidget(single);
+    controls->addWidget(single);
 
     auto *shuffle = new QToolButton(this);
     shuffle->setIcon(shuffleIcon(palette()));
@@ -350,7 +355,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     shuffle->setAutoRaise(true);
     shuffle->setFixedSize(34, 34);
     shuffle->setCheckable(true);
-    root->addWidget(shuffle);
+    controls->addWidget(shuffle);
+    root->addLayout(controls);
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
@@ -438,7 +444,4 @@ void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
 void PlayerBar::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    if (m_menuButton != nullptr) {
-        m_menuButton->move(4, 4);
-    }
 }
