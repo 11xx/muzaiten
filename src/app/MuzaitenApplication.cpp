@@ -112,11 +112,19 @@ void MuzaitenApplication::configureUiStyle()
         }
 
         QScrollBar:vertical {
-            width: 8px;
+            width: 4px;
         }
 
         QScrollBar:horizontal {
-            height: 8px;
+            height: 4px;
+        }
+
+        QScrollBar:vertical:hover {
+            width: 10px;
+        }
+
+        QScrollBar:horizontal:hover {
+            height: 10px;
         }
 
         QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
@@ -126,9 +134,13 @@ void MuzaitenApplication::configureUiStyle()
             min-width: 28px;
         }
 
+        QScrollBar:hover::handle:vertical, QScrollBar:hover::handle:horizontal {
+            background: rgba(127, 127, 127, 104);
+        }
+
         QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover,
         QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
-            background: palette(mid);
+            background: rgba(127, 127, 127, 176);
         }
 
         QScrollBar::add-line, QScrollBar::sub-line,

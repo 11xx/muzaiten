@@ -5,6 +5,7 @@
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QWidget>
 
 StarRatingDelegate::StarRatingDelegate(QObject *parent)
     : QStyledItemDelegate(parent)
@@ -42,6 +43,9 @@ bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, c
 
 void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
+    if ((option.state & QStyle::State_MouseOver) && !(option.state & QStyle::State_Selected) && option.widget != nullptr) {
+        painter->fillRect(QRect(0, option.rect.top(), option.widget->width(), option.rect.height()), option.palette.color(QPalette::AlternateBase));
+    }
     const int value = index.data(Qt::UserRole).toInt();
     const int hoverValue = index.data(Qt::UserRole + 2).isValid() ? index.data(Qt::UserRole + 2).toInt() : StarRating::unset;
     StarRating::paint(painter, StarRating::ratingRect(option.rect, 18), value, hoverValue, option.palette, 18);
