@@ -12,11 +12,13 @@ public:
 
 protected:
     bool event(QEvent *event) override;
+    bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
     void configureCommandLine();
     void configureLogging(bool verbose);
     void configureUiStyle();
+    void setScrollAreaHover(QObject *object, bool hovered);
 
     bool m_applyingStyle = false;
 };

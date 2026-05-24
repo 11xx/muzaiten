@@ -5,11 +5,14 @@
 #include "ui/MainWindow.h"
 
 #include <QCommandLineParser>
+#include <QAbstractScrollArea>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QEvent>
 #include <QLoggingCategory>
+#include <QScrollBar>
+#include <QStyle>
 
 #include <taglib/tdebuglistener.h>
 
@@ -46,6 +49,7 @@ MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
 
     qRegisterMetaType<Track>("Track");
     qRegisterMetaType<QVector<Track>>("QVector<Track>");
+    installEventFilter(this);
     configureUiStyle();
     configureCommandLine();
 }
@@ -64,6 +68,21 @@ bool MuzaitenApplication::event(QEvent *event)
         configureUiStyle();
     }
     return result;
+}
+
+bool MuzaitenApplication::eventFilter(QObject *object, QEvent *event)
+{
+    switch (event->type()) {
+    case QEvent::Enter:
+        setScrollAreaHover(object, true);
+        break;
+    case QEvent::Leave:
+        setScrollAreaHover(object, false);
+        break;
+    default:
+        break;
+    }
+    return QApplication::eventFilter(object, event);
 }
 
 void MuzaitenApplication::configureCommandLine()
@@ -119,18 +138,10 @@ void MuzaitenApplication::configureUiStyle()
         }
 
         QScrollBar:vertical {
-            width: 4px;
-        }
-
-        QScrollBar:horizontal {
-            height: 4px;
-        }
-
-        QScrollBar:vertical:hover {
             width: 10px;
         }
 
-        QScrollBar:horizontal:hover {
+        QScrollBar:horizontal {
             height: 10px;
         }
 
@@ -141,13 +152,36 @@ void MuzaitenApplication::configureUiStyle()
             min-width: 28px;
         }
 
-        QScrollBar:hover::handle:vertical, QScrollBar:hover::handle:horizontal {
+        QScrollBar::handle:vertical {
+            margin-left: 3px;
+            margin-right: 3px;
+        }
+
+        QScrollBar::handle:horizontal {
+            margin-top: 3px;
+            margin-bottom: 3px;
+        }
+
+        QScrollBar[muzaitenPaneHover="true"]::handle:vertical,
+        QScrollBar[muzaitenPaneHover="true"]::handle:horizontal {
             background: palette(mid);
         }
 
         QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover,
         QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
             background: palette(dark);
+        }
+
+        QScrollBar::handle:vertical:hover,
+        QScrollBar::handle:vertical:pressed {
+            margin-left: 0;
+            margin-right: 0;
+        }
+
+        QScrollBar::handle:horizontal:hover,
+        QScrollBar::handle:horizontal:pressed {
+            margin-top: 0;
+            margin-bottom: 0;
         }
 
         QScrollBar::add-line, QScrollBar::sub-line,
@@ -159,4 +193,32 @@ void MuzaitenApplication::configureUiStyle()
         }
     )"));
     m_applyingStyle = false;
+}
+
+void MuzaitenApplication::setScrollAreaHover(QObject *object, bool hovered)
+{
+    auto *widget = qobject_cast<QWidget *>(object);
+    if (widget == nullptr) {
+        return;
+    }
+
+    auto *area = qobject_cast<QAbstractScrollArea *>(widget);
+    if (area == nullptr) {
+        area = qobject_cast<QAbstractScrollArea *>(widget->parentWidget());
+    }
+    if (area == nullptr) {
+        return;
+    }
+
+    auto apply = [hovered](QScrollBar *scrollBar) {
+        if (scrollBar == nullptr || scrollBar->property("muzaitenPaneHover").toBool() == hovered) {
+            return;
+        }
+        scrollBar->setProperty("muzaitenPaneHover", hovered);
+        scrollBar->style()->unpolish(scrollBar);
+        scrollBar->style()->polish(scrollBar);
+        scrollBar->update();
+    };
+    apply(area->verticalScrollBar());
+    apply(area->horizontalScrollBar());
 }
