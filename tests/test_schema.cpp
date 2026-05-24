@@ -16,6 +16,7 @@ private slots:
     void userAlbumRatingOverridesAverageRating();
     void appSettingRoundTrips();
     void linkRootRoundTrips();
+    void mpdTracksRoundTrip();
 };
 
 namespace {
@@ -161,6 +162,39 @@ void SchemaTest::linkRootRoundTrips()
     QVERIFY(roots.first().readable);
     QVERIFY(roots.first().writable);
     QVERIFY(roots.first().enabled);
+}
+
+void SchemaTest::mpdTracksRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-mpd-track-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const qint64 sourceId = database.upsertMediaSource(QStringLiteral("mpd"),
+                                                       QStringLiteral("local"),
+                                                       QStringLiteral("/gak/music"),
+                                                       QStringLiteral("/home/lobo/.config/mpd/mpd.conf"));
+    QVERIFY2(sourceId > 0, qPrintable(database.lastError()));
+
+    MpdTrack track;
+    track.uri = QStringLiteral("Artist/Album/01.flac");
+    track.title = QStringLiteral("Track");
+    track.artistName = QStringLiteral("Artist");
+    track.albumArtistName = QStringLiteral("Album Artist");
+    track.albumTitle = QStringLiteral("Album");
+    track.trackNumber = 1;
+    track.durationMs = 123000;
+    track.musicBrainz.recordingId = QStringLiteral("recording-id");
+    QVERIFY2(database.upsertMpdTrack(sourceId, track), qPrintable(database.lastError()));
+    QCOMPARE(database.mpdTrackCount(sourceId), 1);
+
+    track.title = QStringLiteral("Updated Track");
+    QVERIFY2(database.upsertMpdTrack(sourceId, track), qPrintable(database.lastError()));
+    QCOMPARE(database.mpdTrackCount(sourceId), 1);
+    QVERIFY2(database.clearMpdTracksForSource(sourceId), qPrintable(database.lastError()));
+    QCOMPARE(database.mpdTrackCount(sourceId), 0);
 }
 
 QTEST_MAIN(SchemaTest)

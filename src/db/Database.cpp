@@ -483,3 +483,103 @@ bool Database::removeLinkRoot(int id)
     }
     return true;
 }
+
+qint64 Database::upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath)
+{
+    QSqlQuery select(m_db);
+    select.prepare(QStringLiteral("SELECT id FROM media_sources WHERE kind = ? AND name = ?"));
+    select.addBindValue(kind);
+    select.addBindValue(name);
+    if (!select.exec()) {
+        m_lastError = select.lastError().text();
+        return 0;
+    }
+
+    if (select.next()) {
+        const qint64 id = select.value(0).toLongLong();
+        QSqlQuery update(m_db);
+        update.prepare(QStringLiteral(
+            "UPDATE media_sources "
+            "SET root_hint = ?, config_path = ?, enabled = 1, updated_at = datetime('now') "
+            "WHERE id = ?"));
+        update.addBindValue(rootHint);
+        update.addBindValue(configPath);
+        update.addBindValue(id);
+        if (!update.exec()) {
+            m_lastError = update.lastError().text();
+            return 0;
+        }
+        return id;
+    }
+
+    QSqlQuery insert(m_db);
+    insert.prepare(QStringLiteral(
+        "INSERT INTO media_sources(kind, name, root_hint, config_path, enabled, created_at, updated_at) "
+        "VALUES(?, ?, ?, ?, 1, datetime('now'), datetime('now'))"));
+    insert.addBindValue(kind);
+    insert.addBindValue(name);
+    insert.addBindValue(rootHint);
+    insert.addBindValue(configPath);
+    if (!insert.exec()) {
+        m_lastError = insert.lastError().text();
+        return 0;
+    }
+    return insert.lastInsertId().toLongLong();
+}
+
+bool Database::clearMpdTracksForSource(qint64 sourceId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM mpd_tracks WHERE source_id = ?"));
+    query.addBindValue(sourceId);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::upsertMpdTrack(qint64 sourceId, const MpdTrack &track)
+{
+    if (sourceId <= 0 || track.uri.isEmpty()) {
+        m_lastError = QStringLiteral("MPD source id and URI are required");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO mpd_tracks(source_id, uri, title, artist_name, album_artist_name, album_title, track_number, disc_number, duration_ms, date, musicbrainz_artist_id, musicbrainz_album_artist_id, musicbrainz_album_id, musicbrainz_recording_id, musicbrainz_release_track_id, last_seen_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+        "ON CONFLICT(source_id, uri) DO UPDATE SET title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, track_number=excluded.track_number, disc_number=excluded.disc_number, duration_ms=excluded.duration_ms, date=excluded.date, musicbrainz_artist_id=excluded.musicbrainz_artist_id, musicbrainz_album_artist_id=excluded.musicbrainz_album_artist_id, musicbrainz_album_id=excluded.musicbrainz_album_id, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_release_track_id=excluded.musicbrainz_release_track_id, last_seen_at=datetime('now')"));
+    query.addBindValue(sourceId);
+    query.addBindValue(track.uri);
+    query.addBindValue(track.title);
+    query.addBindValue(track.artistName);
+    query.addBindValue(track.albumArtistName);
+    query.addBindValue(track.albumTitle);
+    query.addBindValue(track.trackNumber);
+    query.addBindValue(track.discNumber);
+    query.addBindValue(track.durationMs);
+    query.addBindValue(track.date);
+    query.addBindValue(track.musicBrainz.artistId);
+    query.addBindValue(track.musicBrainz.albumArtistId);
+    query.addBindValue(track.musicBrainz.releaseId);
+    query.addBindValue(track.musicBrainz.recordingId);
+    query.addBindValue(track.musicBrainz.trackId);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+int Database::mpdTrackCount(qint64 sourceId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT COUNT(*) FROM mpd_tracks WHERE source_id = ?"));
+    query.addBindValue(sourceId);
+    if (!query.exec() || !query.next()) {
+        return 0;
+    }
+    return query.value(0).toInt();
+}

@@ -8,6 +8,7 @@
 #include "core/Artist.h"
 #include "core/Track.h"
 #include "fs/LinkRoot.h"
+#include "mpd/MpdTrack.h"
 
 class Database final {
 public:
@@ -33,6 +34,10 @@ public:
     QVector<LinkRoot> linkRoots() const;
     bool saveLinkRoot(const LinkRoot &linkRoot);
     bool removeLinkRoot(int id);
+    qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);
+    bool clearMpdTracksForSource(qint64 sourceId);
+    bool upsertMpdTrack(qint64 sourceId, const MpdTrack &track);
+    int mpdTrackCount(qint64 sourceId) const;
     QVector<Artist> albumArtists() const;
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;
