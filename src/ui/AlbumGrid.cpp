@@ -242,6 +242,18 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
     }
 
     const QModelIndex index = indexAt(pos);
+    if (index.isValid()) {
+        const QString albumTitle = index.data(AlbumTitleRole).toString();
+        QAction *playNext = menu.addAction(QStringLiteral("Play next"));
+        connect(playNext, &QAction::triggered, this, [this, albumTitle]() {
+            emit albumPlayNextRequested(albumTitle);
+        });
+        QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
+        connect(addToQueue, &QAction::triggered, this, [this, albumTitle]() {
+            emit albumAddToQueueRequested(albumTitle);
+        });
+    }
+
     if (index.isValid() && index.data(HasUserRatingRole).toBool()) {
         menu.addSeparator();
         QAction *clear = menu.addAction(QStringLiteral("Clear album rating override"));

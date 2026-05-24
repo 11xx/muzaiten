@@ -70,6 +70,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
         emit viewSettingsChanged();
     });
+    connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
+        emit viewSettingsChanged();
+    });
 
     m_albumArt = new QLabel(this);
     m_albumArt->setMinimumSize(220, 220);
