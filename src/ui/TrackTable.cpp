@@ -1,6 +1,7 @@
 #include "ui/TrackTable.h"
 
 #include "core/Track.h"
+#include "ui/DenseTableDelegate.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
@@ -72,11 +73,15 @@ TrackTable::TrackTable(QWidget *parent)
     });
 
     setModel(itemModel);
+    setItemDelegate(new DenseTableDelegate(this));
     auto *ratingDelegate = new StarRatingDelegate(this);
     setItemDelegateForColumn(0, ratingDelegate);
     setSortingEnabled(true);
     setAlternatingRowColors(true);
     setSelectionBehavior(QAbstractItemView::SelectRows);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
+    setShowGrid(false);
+    setWordWrap(false);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
     horizontalHeader()->setStretchLastSection(false);
@@ -87,6 +92,7 @@ TrackTable::TrackTable(QWidget *parent)
     verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);
     verticalHeader()->setVisible(false);
+    setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     setContextMenuPolicy(Qt::CustomContextMenu);
 
     connect(ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {

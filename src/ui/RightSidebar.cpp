@@ -1,6 +1,7 @@
 #include "ui/RightSidebar.h"
 
 #include "ui/AlbumArtFallback.h"
+#include "ui/DenseTableDelegate.h"
 
 #include <QAction>
 #include <QHeaderView>
@@ -60,6 +61,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     });
     m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_queueTable->setItemDelegate(new DenseTableDelegate(this));
+    m_queueTable->setShowGrid(false);
+    m_queueTable->setWordWrap(false);
     m_queueTable->verticalHeader()->setVisible(false);
     m_queueTable->verticalHeader()->setDefaultSectionSize(20);
     m_queueTable->verticalHeader()->setMinimumSectionSize(20);
@@ -69,6 +73,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_queueTable->setStyleSheet(QStringLiteral("QTableWidget::item { padding: 0 3px; }"));
     m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
