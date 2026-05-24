@@ -420,7 +420,7 @@ void PlayerBar::setCompactMenu(bool compact)
         m_menuButton->setVisible(compact);
         if (compact) {
             m_menuButton->raise();
-            m_menuButton->move(width() - m_menuButton->width() - 4, 4);
+            m_menuButton->move(4, 4);
         }
     }
     if (m_menuBar != nullptr) {
@@ -454,6 +454,6 @@ void PlayerBar::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     if (m_menuButton != nullptr && m_menuButton->isVisible()) {
-        m_menuButton->move(width() - m_menuButton->width() - 4, 4);
+        m_menuButton->move(4, 4);
     }
 }
