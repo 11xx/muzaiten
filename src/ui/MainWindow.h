@@ -9,11 +9,13 @@
 class Database;
 class AlbumGrid;
 class ArtistSidebar;
+class QCloseEvent;
 class ListenBrainzScrobbler;
 class PlayerBar;
 class QAudioOutput;
 class QMediaPlayer;
 class QProgressBar;
+class QSplitter;
 class QThread;
 class RightSidebar;
 class TrackTable;
@@ -25,6 +27,9 @@ class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
 
 private:
     void openLibraryFolder();
@@ -41,12 +46,17 @@ private:
     void saveAlbumGridViewSettings();
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
+    void saveMainWindowViewSettings();
     void applySharedTableSettings();
     void configureListenBrainz();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
     void playTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
+    void playNextTracks(const QVector<Track> &tracks);
+    void addTracksToQueue(const QVector<Track> &tracks);
+    void playNextAlbum(const QString &albumTitle);
+    void addAlbumToQueue(const QString &albumTitle);
     void playQueueIndex(int index);
     void playPreviousTrack();
     void playNextTrack();
@@ -64,6 +74,8 @@ private:
     void updateCurrentAlbumArt();
 
     ArtistSidebar *m_artistSidebar = nullptr;
+    QSplitter *m_rootSplitter = nullptr;
+    QSplitter *m_centerSplitter = nullptr;
     PlayerBar *m_playerBar = nullptr;
     AlbumGrid *m_albumGrid = nullptr;
     TrackTable *m_trackTable = nullptr;
@@ -77,6 +89,7 @@ private:
     Track m_currentTrack;
     QVector<Track> m_queue;
     int m_queueIndex = -1;
+    int m_playNextInsertIndex = -1;
     int m_trackSortColumn = 0;
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;
