@@ -35,6 +35,7 @@ set(MUZAITEN_SOURCES
     src/db/Database.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
+    src/playback/QtPlaybackBackend.cpp
     src/scanner/ScanWorker.cpp
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
@@ -63,6 +64,9 @@ set(MUZAITEN_HEADERS
     src/db/Schema.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
+    src/playback/PlaybackBackend.h
+    src/playback/PlaybackTypes.h
+    src/playback/QtPlaybackBackend.h
     src/scanner/ArtworkResolver.h
     src/scanner/LibraryScanner.h
     src/scanner/ScanWorker.h
