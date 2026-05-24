@@ -22,6 +22,7 @@ protected:
 
 signals:
     void openLibraryRequested();
+    void playbackProfileRequested();
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdFindFileRequested();

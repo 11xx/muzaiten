@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 #include "core/Track.h"
+#include "playback/PlaybackTypes.h"
 
 #include <memory>
 
@@ -48,6 +49,9 @@ private:
     void saveRightSidebarViewSettings();
     void saveMainWindowViewSettings();
     void applySharedTableSettings();
+    void loadPlaybackProfile();
+    void savePlaybackProfile();
+    void configurePlaybackProfile();
     void configureLinkRoots();
     void findTrackFile(const Track &track, bool writable);
     void configureMpdSource();
@@ -95,6 +99,7 @@ private:
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
     Track m_currentTrack;
+    PlaybackProfile m_playbackProfile;
     QVector<Track> m_queue;
     int m_queueIndex = -1;
     int m_playNextInsertIndex = -1;

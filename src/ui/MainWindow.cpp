@@ -14,6 +14,7 @@
 #include "ui/ArtistSidebar.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
+#include "ui/PlaybackProfileDialog.h"
 #include "ui/RightSidebar.h"
 #include "ui/TrackTable.h"
 
@@ -44,6 +45,45 @@
 #include <algorithm>
 
 Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
+
+namespace {
+
+PlaybackProfile playbackProfileFromJson(const QString &json)
+{
+    PlaybackProfile profile;
+    if (json.isEmpty()) {
+        return profile;
+    }
+
+    const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
+    profile.id = root.value(QStringLiteral("id")).toString(profile.id);
+    profile.name = root.value(QStringLiteral("name")).toString(profile.name);
+    profile.backend = root.value(QStringLiteral("backend")).toString(profile.backend);
+    profile.mode = root.value(QStringLiteral("mode")).toString(profile.mode);
+    profile.sink = root.value(QStringLiteral("sink")).toString(profile.sink);
+    profile.device = root.value(QStringLiteral("device")).toString(profile.device);
+    profile.softwareVolume = root.value(QStringLiteral("softwareVolume")).toBool(profile.softwareVolume);
+    profile.replayGain = root.value(QStringLiteral("replayGain")).toBool(profile.replayGain);
+    profile.allowResample = root.value(QStringLiteral("allowResample")).toBool(profile.allowResample);
+    return profile;
+}
+
+QString playbackProfileToJson(const PlaybackProfile &profile)
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("id"), profile.id);
+    root.insert(QStringLiteral("name"), profile.name);
+    root.insert(QStringLiteral("backend"), profile.backend);
+    root.insert(QStringLiteral("mode"), profile.mode);
+    root.insert(QStringLiteral("sink"), profile.sink);
+    root.insert(QStringLiteral("device"), profile.device);
+    root.insert(QStringLiteral("softwareVolume"), profile.softwareVolume);
+    root.insert(QStringLiteral("replayGain"), profile.replayGain);
+    root.insert(QStringLiteral("allowResample"), profile.allowResample);
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -117,6 +157,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
+    connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdFindFileRequested, this, &MainWindow::findMpdFile);
@@ -158,6 +199,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
+    loadPlaybackProfile();
     loadViewSettings();
     configureListenBrainz();
     loadExistingLibrary();
@@ -454,6 +496,31 @@ void MainWindow::applySharedTableSettings()
     QJsonObject shared;
     shared.insert(QStringLiteral("headerHeight"), headerHeight);
     m_database->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::loadPlaybackProfile()
+{
+    m_playbackProfile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+    m_playback->setProfile(m_playbackProfile);
+}
+
+void MainWindow::savePlaybackProfile()
+{
+    m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(m_playbackProfile));
+}
+
+void MainWindow::configurePlaybackProfile()
+{
+    PlaybackProfileDialog dialog(this);
+    dialog.setProfile(m_playbackProfile);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    m_playbackProfile = dialog.profile();
+    savePlaybackProfile();
+    m_playback->setProfile(m_playbackProfile);
+    statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
 }
 
 void MainWindow::configureLinkRoots()
