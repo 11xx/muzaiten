@@ -6,7 +6,7 @@ struct PlaybackProfile {
     QString id = QStringLiteral("shared-default");
     QString name = QStringLiteral("Shared output");
     QString mode = QStringLiteral("shared");
-    QString backend = QStringLiteral("qt");
+    QString backend = QStringLiteral("gstreamer");
     QString sink = QStringLiteral("auto");
     QString device;
     bool softwareVolume = true;

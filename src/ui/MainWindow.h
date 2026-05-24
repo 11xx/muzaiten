@@ -51,6 +51,7 @@ private:
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
     void playTrack(const Track &track);
+    void presentTrack(const Track &track);
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
@@ -61,6 +62,8 @@ private:
     void playNextTrack();
     void togglePlayback();
     void updatePlaybackPosition();
+    void prepareNextQueueTrack();
+    void advanceAfterPreparedTransition();
     void startScan(const QString &rootPath);
     void ingestScanBatch(const QVector<Track> &tracks);
     void finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled);

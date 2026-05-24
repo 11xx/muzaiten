@@ -21,6 +21,13 @@ check_pie_supported()
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
+pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+    gstreamer-1.0
+    gstreamer-audio-1.0
+    gstreamer-pbutils-1.0
+    glib-2.0
+    gobject-2.0
+)
 
 configure_file(
     src/core/Version.h.in
@@ -35,6 +42,7 @@ set(MUZAITEN_SOURCES
     src/db/Database.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
+    src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/ScanWorker.cpp
     src/scanner/ArtworkResolver.cpp
@@ -66,6 +74,7 @@ set(MUZAITEN_HEADERS
     src/mpd/MpdConfig.h
     src/playback/PlaybackBackend.h
     src/playback/PlaybackTypes.h
+    src/playback/GStreamerPlaybackBackend.h
     src/playback/QtPlaybackBackend.h
     src/scanner/ArtworkResolver.h
     src/scanner/LibraryScanner.h
@@ -97,6 +106,7 @@ target_link_libraries(muzaiten PRIVATE
     Qt6::Widgets
     Qt6::Sql
     PkgConfig::TAGLIB
+    PkgConfig::GSTREAMER
 )
 
 target_compile_options(muzaiten PRIVATE

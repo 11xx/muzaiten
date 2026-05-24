@@ -2,8 +2,8 @@
 
 #include "Version.h"
 #include "db/Database.h"
+#include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
-#include "playback/QtPlaybackBackend.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scrobble/ListenBrainzScrobbler.h"
@@ -81,7 +81,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_scanProgress->setVisible(false);
     statusBar()->addPermanentWidget(m_scanProgress);
 
-    m_playback = new QtPlaybackBackend(this);
+    m_playback = new GStreamerPlaybackBackend(this);
 
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
@@ -128,6 +128,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
+    connect(m_playback, &PlaybackBackend::preparedTrackStarted, this, &MainWindow::advanceAfterPreparedTransition);
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
         const bool playing = state == PlaybackBackend::State::Playing;
         m_playerBar->setPlaying(playing);
@@ -489,6 +490,13 @@ void MainWindow::playTrack(const Track &track)
         return;
     }
 
+    presentTrack(track);
+    m_playback->play(QUrl::fromLocalFile(track.path));
+    prepareNextQueueTrack();
+}
+
+void MainWindow::presentTrack(const Track &track)
+{
     m_currentTrack = track;
     updateCurrentAlbumArt();
     const QString title = track.title.isEmpty() ? track.filename : track.title;
@@ -498,7 +506,6 @@ void MainWindow::playTrack(const Track &track)
     }
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_playerBar->setPosition(0, track.durationMs);
-    m_playback->play(QUrl::fromLocalFile(track.path));
     QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
     statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
 }
@@ -631,6 +638,31 @@ void MainWindow::togglePlayback()
 void MainWindow::updatePlaybackPosition()
 {
     m_playerBar->setPosition(m_playback->position(), m_playback->duration());
+}
+
+void MainWindow::prepareNextQueueTrack()
+{
+    if (m_queueIndex < 0 || m_queueIndex + 1 >= m_queue.size()) {
+        m_playback->prepareNext({});
+        return;
+    }
+    const Track &nextTrack = m_queue.at(m_queueIndex + 1);
+    m_playback->prepareNext(QUrl::fromLocalFile(nextTrack.path));
+}
+
+void MainWindow::advanceAfterPreparedTransition()
+{
+    if (m_queueIndex + 1 >= m_queue.size()) {
+        return;
+    }
+
+    ++m_queueIndex;
+    if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
+        m_playNextInsertIndex = m_queueIndex + 1;
+    }
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    presentTrack(m_queue.at(m_queueIndex));
+    prepareNextQueueTrack();
 }
 
 void MainWindow::rememberTrackTableViewState()

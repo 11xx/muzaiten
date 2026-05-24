@@ -43,6 +43,7 @@ signals:
     void positionChanged(qint64 positionMs);
     void durationChanged(qint64 durationMs);
     void aboutToNeedNext();
+    void preparedTrackStarted();
     void finished();
     void errorOccurred(QString message);
     void technicalInfoChanged(QString text);
