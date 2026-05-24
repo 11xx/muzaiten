@@ -2,6 +2,8 @@
 
 #include "Version.h"
 #include "db/Database.h"
+#include "playback/PlaybackBackend.h"
+#include "playback/QtPlaybackBackend.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scrobble/ListenBrainzScrobbler.h"
@@ -23,9 +25,7 @@
 #include <QLineEdit>
 #include <QLoggingCategory>
 #include <QMessageBox>
-#include <QAudioOutput>
 #include <QCloseEvent>
-#include <QMediaPlayer>
 #include <QProgressBar>
 #include <QSplitter>
 #include <QStatusBar>
@@ -81,10 +81,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_scanProgress->setVisible(false);
     statusBar()->addPermanentWidget(m_scanProgress);
 
-    m_audioOutput = new QAudioOutput(this);
-    m_audioOutput->setVolume(1.0);
-    m_player = new QMediaPlayer(this);
-    m_player->setAudioOutput(m_audioOutput);
+    m_playback = new QtPlaybackBackend(this);
 
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
@@ -119,29 +116,29 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::nextRequested, this, &MainWindow::playNextTrack);
-    connect(m_playerBar, &PlayerBar::stopRequested, m_player, &QMediaPlayer::stop);
-    connect(m_playerBar, &PlayerBar::seekRequested, m_player, &QMediaPlayer::setPosition);
+    connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
+    connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
-        m_audioOutput->setVolume(static_cast<float>(std::clamp(volume, 0, 100)) / 100.0f);
+        m_playback->setVolume(static_cast<double>(std::clamp(volume, 0, 100)) / 100.0);
     });
     connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
         if (!m_currentTrack.path.isEmpty()) {
             applyTrackRating(m_currentTrack, rating);
         }
     });
-    connect(m_player, &QMediaPlayer::positionChanged, this, &MainWindow::updatePlaybackPosition);
-    connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::updatePlaybackPosition);
-    connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
-        const bool playing = state == QMediaPlayer::PlayingState;
+    connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
+    connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
+    connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
+        const bool playing = state == PlaybackBackend::State::Playing;
         m_playerBar->setPlaying(playing);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
     });
-    connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
-        if (status == QMediaPlayer::EndOfMedia && m_queueIndex + 1 < m_queue.size()) {
+    connect(m_playback, &PlaybackBackend::finished, this, [this]() {
+        if (m_queueIndex + 1 < m_queue.size()) {
             playQueueIndex(m_queueIndex + 1);
         }
     });
-    connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &errorString) {
+    connect(m_playback, &PlaybackBackend::errorOccurred, this, [this](const QString &errorString) {
         if (!errorString.isEmpty()) {
             statusBar()->showMessage(QStringLiteral("Playback error: %1").arg(errorString), 10000);
         }
@@ -501,8 +498,7 @@ void MainWindow::playTrack(const Track &track)
     }
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_playerBar->setPosition(0, track.durationMs);
-    m_player->setSource(QUrl::fromLocalFile(track.path));
-    m_player->play();
+    m_playback->play(QUrl::fromLocalFile(track.path));
     QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
     statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
 }
@@ -621,20 +617,20 @@ void MainWindow::playNextTrack()
 
 void MainWindow::togglePlayback()
 {
-    if (m_player->source().isEmpty()) {
+    if (!m_playback->hasSource()) {
         return;
     }
 
-    if (m_player->playbackState() == QMediaPlayer::PlayingState) {
-        m_player->pause();
+    if (m_playback->state() == PlaybackBackend::State::Playing) {
+        m_playback->pause();
     } else {
-        m_player->play();
+        m_playback->resume();
     }
 }
 
 void MainWindow::updatePlaybackPosition()
 {
-    m_playerBar->setPosition(m_player->position(), m_player->duration());
+    m_playerBar->setPosition(m_playback->position(), m_playback->duration());
 }
 
 void MainWindow::rememberTrackTableViewState()
