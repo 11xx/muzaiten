@@ -50,6 +50,10 @@ private:
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
     void saveMainWindowViewSettings();
+    void loadQueueState();
+    void saveQueueState();
+    void loadExplorerState();
+    void saveExplorerState();
     void applySharedTableSettings();
     void loadPlaybackProfile();
     void savePlaybackProfile();
@@ -67,7 +71,7 @@ private:
     void setListenBrainzToken();
     void onLibrarySourceChanged(int index);
     void playTrack(const Track &track);
-    void presentTrack(const Track &track);
+    void presentTrack(const Track &track, bool notifyScrobbler = true);
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);

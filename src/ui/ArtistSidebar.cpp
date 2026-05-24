@@ -122,6 +122,13 @@ void ArtistSidebar::setMpdAvailable(bool available)
     }
 }
 
+void ArtistSidebar::setLibrarySourceIndex(int index)
+{
+    const int safeIndex = (index == 1 && m_mpdAvailable) ? 1 : 0;
+    const QSignalBlocker blocker(m_tabBar);
+    m_tabBar->setCurrentIndex(safeIndex);
+}
+
 bool ArtistSidebar::selectArtist(const QString &artistName)
 {
     if (artistName.isEmpty()) {
