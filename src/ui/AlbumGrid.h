@@ -41,7 +41,7 @@ private:
     QString m_artworkCacheRoot;
     QString m_selectedAlbumTitle;
     int m_cellWidth = 204;
-    int m_cellHeight = 278;
+    int m_cellHeight = 292;
     int m_artSize = 176;
     int m_spacing = 6;
     int m_padding = 8;

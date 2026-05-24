@@ -19,7 +19,17 @@ enum Roles {
     StarSizeRole = Qt::UserRole + 8,
 };
 
-QRect alignedRatingCell(const QRect &anchorRect, const QRect &textRect, int starSize, Qt::Alignment alignment)
+QString titleFromDisplay(const QString &display)
+{
+    return display.section(QLatin1Char('\n'), 0, 0);
+}
+
+QString yearFromDisplay(const QString &display)
+{
+    return display.section(QLatin1Char('\n'), 1, 1);
+}
+
+QRect alignedRatingCell(const QRect &anchorRect, int top, int starSize, Qt::Alignment alignment)
 {
     const int starsWidth = starSize * 5;
     const int hitPadding = 6;
@@ -29,7 +39,36 @@ QRect alignedRatingCell(const QRect &anchorRect, const QRect &textRect, int star
     } else if (alignment & Qt::AlignHCenter) {
         left = anchorRect.left() + ((anchorRect.width() - starsWidth) / 2) - hitPadding;
     }
-    return {left, textRect.bottom() + 4, starsWidth + (hitPadding * 2), starSize};
+    return {left, top, starsWidth + (hitPadding * 2), starSize};
+}
+
+QString elidedToTwoLines(const QString &text, const QFont &font, const QFontMetrics &metrics, int width)
+{
+    QTextLayout layout(text);
+    layout.setFont(font);
+    QTextOption option;
+    option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    layout.setTextOption(option);
+    layout.beginLayout();
+
+    QStringList lines;
+    for (int lineNumber = 0; lineNumber < 2; ++lineNumber) {
+        QTextLine line = layout.createLine();
+        if (!line.isValid()) {
+            break;
+        }
+        line.setLineWidth(width);
+        const int start = line.textStart();
+        const int length = line.textLength();
+        QString lineText = text.mid(start, length).trimmed();
+        if (lineNumber == 1 && start + length < text.size()) {
+            lineText = metrics.elidedText(text.mid(start).trimmed(), Qt::ElideRight, width);
+        }
+        lines.push_back(lineText);
+    }
+
+    layout.endLayout();
+    return lines.join(QLatin1Char('\n'));
 }
 }
 
@@ -67,12 +106,20 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
     const QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
     icon.paint(painter, artRect, Qt::AlignCenter, QIcon::Normal, QIcon::Off);
 
-    QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 44);
+    const QRect titleRect(artRect.left(), artRect.bottom() + 5, artRect.width(), opt.fontMetrics.height() * 2 + 2);
+    const QRect yearRect(artRect.left(), titleRect.bottom() + 1, artRect.width(), opt.fontMetrics.height());
     painter->setPen(opt.palette.color(QPalette::Text));
     const auto alignment = static_cast<Qt::Alignment>(index.data(TextAlignmentRole).toInt());
-    painter->drawText(textRect, alignment | Qt::AlignTop | Qt::TextWordWrap, index.data(Qt::DisplayRole).toString());
+    const QString display = index.data(Qt::DisplayRole).toString();
+    painter->drawText(titleRect, alignment | Qt::AlignTop, elidedToTwoLines(titleFromDisplay(display), opt.font, opt.fontMetrics, titleRect.width()));
 
-    const QRect ratingCell = alignedRatingCell(artRect, textRect, starSize, alignment);
+    const QString year = yearFromDisplay(display);
+    if (!year.isEmpty()) {
+        painter->setPen(opt.palette.color(QPalette::Disabled, QPalette::Text));
+        painter->drawText(yearRect, alignment | Qt::AlignVCenter, year);
+    }
+
+    const QRect ratingCell = alignedRatingCell(artRect, yearRect.bottom() + 4, starSize, alignment);
     StarRating::paint(painter,
                       StarRating::ratingRect(ratingCell, starSize),
                       index.data(RatingRole).toInt(),

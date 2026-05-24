@@ -13,4 +13,5 @@ public:
 private:
     void configureCommandLine();
     void configureLogging(bool verbose);
+    void configureUiStyle();
 };

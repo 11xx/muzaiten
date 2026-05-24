@@ -45,6 +45,7 @@ MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
 
     qRegisterMetaType<Track>("Track");
     qRegisterMetaType<QVector<Track>>("QVector<Track>");
+    configureUiStyle();
     configureCommandLine();
 }
 
@@ -95,4 +96,47 @@ void MuzaitenApplication::configureLogging(bool verbose)
 
     static auto *tagLibListener = new TagLibQtDebugListener(verbose);
     TagLib::setDebugListener(tagLibListener);
+}
+
+void MuzaitenApplication::configureUiStyle()
+{
+    setStyleSheet(QStringLiteral(R"(
+        QAbstractScrollArea {
+            border: none;
+        }
+
+        QScrollBar:vertical, QScrollBar:horizontal {
+            background: transparent;
+            border: none;
+            margin: 0;
+        }
+
+        QScrollBar:vertical {
+            width: 8px;
+        }
+
+        QScrollBar:horizontal {
+            height: 8px;
+        }
+
+        QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+            background: transparent;
+            border-radius: 4px;
+            min-height: 28px;
+            min-width: 28px;
+        }
+
+        QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover,
+        QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
+            background: palette(mid);
+        }
+
+        QScrollBar::add-line, QScrollBar::sub-line,
+        QScrollBar::add-page, QScrollBar::sub-page {
+            background: transparent;
+            border: none;
+            width: 0;
+            height: 0;
+        }
+    )"));
 }

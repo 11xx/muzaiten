@@ -29,7 +29,7 @@ public:
 
     QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &index) const override
     {
-        return index.data(Qt::SizeHintRole).toSize().isValid() ? index.data(Qt::SizeHintRole).toSize() : QSize(120, 22);
+        return index.data(Qt::SizeHintRole).toSize().isValid() ? index.data(Qt::SizeHintRole).toSize() : QSize(120, 20);
     }
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
@@ -67,8 +67,8 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     : QWidget(parent)
 {
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(8);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(5);
 
     m_tabBar = new QTabBar(this);
     m_tabBar->addTab(QStringLiteral("Library"));
@@ -159,7 +159,7 @@ void ArtistSidebar::applyViewSettingsJson(const QString &json)
 
     const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
     m_showAlbumCount = root.value(QStringLiteral("showAlbumCount")).toBool(true);
-    m_rowHeight = std::clamp(root.value(QStringLiteral("rowHeight")).toInt(22), 20, 40);
+    m_rowHeight = std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 18, 40);
     for (int row = 0; row < m_model->rowCount(); ++row) {
         m_model->item(row)->setData(m_showAlbumCount, Qt::UserRole + 2);
         m_model->item(row)->setData(QSize(120, m_rowHeight), Qt::SizeHintRole);
