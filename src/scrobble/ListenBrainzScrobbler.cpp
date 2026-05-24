@@ -1,4 +1,4 @@
-#include "scrobble/ListenBrainzWorker.h"
+#include "scrobble/ListenBrainzScrobbler.h"
 
 #include "Version.h"
 
@@ -48,7 +48,7 @@ void addArrayIfPresent(QJsonObject &object, const QString &key, const QString &v
 
 } // namespace
 
-ListenBrainzWorker::ListenBrainzWorker(QObject *parent)
+ListenBrainzScrobbler::ListenBrainzScrobbler(QObject *parent)
     : QObject(parent)
 {
     m_network = new QNetworkAccessManager(this);
@@ -56,11 +56,11 @@ ListenBrainzWorker::ListenBrainzWorker(QObject *parent)
     m_retryTimer = new QTimer(this);
     m_progressTimer->setInterval(1000);
     m_retryTimer->setInterval(60000);
-    connect(m_progressTimer, &QTimer::timeout, this, &ListenBrainzWorker::checkListenProgress);
-    connect(m_retryTimer, &QTimer::timeout, this, &ListenBrainzWorker::retryPending);
+    connect(m_progressTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::checkListenProgress);
+    connect(m_retryTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::retryPending);
 }
 
-void ListenBrainzWorker::configure(bool enabled, const QString &token, const QString &cachePath)
+void ListenBrainzScrobbler::configure(bool enabled, const QString &token, const QString &cachePath)
 {
     m_enabled = enabled;
     m_token = token.trimmed();
@@ -78,7 +78,7 @@ void ListenBrainzWorker::configure(bool enabled, const QString &token, const QSt
     retryPending();
 }
 
-void ListenBrainzWorker::trackStarted(const Track &track)
+void ListenBrainzScrobbler::trackStarted(const Track &track)
 {
     m_currentTrack = track;
     m_hasCurrentTrack = true;
@@ -93,7 +93,7 @@ void ListenBrainzWorker::trackStarted(const Track &track)
     submitPlayingNow(track);
 }
 
-void ListenBrainzWorker::playbackStateChanged(bool playing)
+void ListenBrainzScrobbler::playbackStateChanged(bool playing)
 {
     if (!m_hasCurrentTrack || m_playing == playing) {
         return;
@@ -111,7 +111,7 @@ void ListenBrainzWorker::playbackStateChanged(bool playing)
     }
 }
 
-void ListenBrainzWorker::checkListenProgress()
+void ListenBrainzScrobbler::checkListenProgress()
 {
     if (!m_enabled || !m_playing || !m_hasCurrentTrack || m_listenSubmitted) {
         return;
@@ -122,7 +122,7 @@ void ListenBrainzWorker::checkListenProgress()
     }
 }
 
-void ListenBrainzWorker::retryPending()
+void ListenBrainzScrobbler::retryPending()
 {
     if (!m_enabled || m_token.isEmpty() || m_pendingListens.isEmpty() || m_listenSubmissionInFlight) {
         return;
@@ -140,7 +140,7 @@ void ListenBrainzWorker::retryPending()
     submitPayload(body, SubmissionKind::Listen);
 }
 
-void ListenBrainzWorker::submitPlayingNow(const Track &track)
+void ListenBrainzScrobbler::submitPlayingNow(const Track &track)
 {
     if (!m_enabled || m_token.isEmpty() || !hasMinimumMetadata(track)) {
         return;
@@ -157,7 +157,7 @@ void ListenBrainzWorker::submitPlayingNow(const Track &track)
     submitPayload(body, SubmissionKind::PlayingNow);
 }
 
-void ListenBrainzWorker::submitCompletedListen()
+void ListenBrainzScrobbler::submitCompletedListen()
 {
     if (!m_hasCurrentTrack || m_listenSubmitted) {
         return;
@@ -173,7 +173,7 @@ void ListenBrainzWorker::submitCompletedListen()
     retryPending();
 }
 
-void ListenBrainzWorker::submitPayload(const QJsonObject &payload, SubmissionKind kind)
+void ListenBrainzScrobbler::submitPayload(const QJsonObject &payload, SubmissionKind kind)
 {
     QNetworkRequest request(QUrl(QString::fromLatin1(apiUrl)));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -196,7 +196,7 @@ void ListenBrainzWorker::submitPayload(const QJsonObject &payload, SubmissionKin
     });
 }
 
-QJsonObject ListenBrainzWorker::listenObject(const Track &track, qint64 listenedAt) const
+QJsonObject ListenBrainzScrobbler::listenObject(const Track &track, qint64 listenedAt) const
 {
     QJsonObject listen;
     listen.insert(QStringLiteral("listened_at"), listenedAt);
@@ -204,7 +204,7 @@ QJsonObject ListenBrainzWorker::listenObject(const Track &track, qint64 listened
     return listen;
 }
 
-QJsonObject ListenBrainzWorker::metadataObject(const Track &track) const
+QJsonObject ListenBrainzScrobbler::metadataObject(const Track &track) const
 {
     QJsonObject metadata;
     metadata.insert(QStringLiteral("artist_name"), artistName(track));
@@ -214,7 +214,7 @@ QJsonObject ListenBrainzWorker::metadataObject(const Track &track) const
     return metadata;
 }
 
-QJsonObject ListenBrainzWorker::additionalInfoObject(const Track &track) const
+QJsonObject ListenBrainzScrobbler::additionalInfoObject(const Track &track) const
 {
     QJsonObject additionalInfo;
     if (!track.artistName.trimmed().isEmpty()) {
@@ -237,7 +237,7 @@ QJsonObject ListenBrainzWorker::additionalInfoObject(const Track &track) const
     return additionalInfo;
 }
 
-bool ListenBrainzWorker::hasMinimumMetadata(const Track &track) const
+bool ListenBrainzScrobbler::hasMinimumMetadata(const Track &track) const
 {
     const bool ok = !trackTitle(track).isEmpty() && !artistName(track).isEmpty();
     if (!ok) {
@@ -246,7 +246,7 @@ bool ListenBrainzWorker::hasMinimumMetadata(const Track &track) const
     return ok;
 }
 
-qint64 ListenBrainzWorker::requiredListenMs(const Track &track) const
+qint64 ListenBrainzScrobbler::requiredListenMs(const Track &track) const
 {
     if (track.durationMs <= 0) {
         return maxRequiredListenMs;
@@ -254,12 +254,12 @@ qint64 ListenBrainzWorker::requiredListenMs(const Track &track) const
     return std::min(track.durationMs / 2, maxRequiredListenMs);
 }
 
-qint64 ListenBrainzWorker::playedMs() const
+qint64 ListenBrainzScrobbler::playedMs() const
 {
     return m_accumulatedMs + (m_playing && m_segmentTimer.isValid() ? m_segmentTimer.elapsed() : 0);
 }
 
-void ListenBrainzWorker::loadPending()
+void ListenBrainzScrobbler::loadPending()
 {
     m_pendingListens.clear();
     QFile file(m_cachePath);
@@ -275,7 +275,7 @@ void ListenBrainzWorker::loadPending()
     }
 }
 
-void ListenBrainzWorker::savePending() const
+void ListenBrainzScrobbler::savePending() const
 {
     if (m_cachePath.isEmpty()) {
         return;
@@ -296,13 +296,13 @@ void ListenBrainzWorker::savePending() const
     file.write(QJsonDocument(listens).toJson(QJsonDocument::Compact));
 }
 
-void ListenBrainzWorker::cachePendingListen(const QJsonObject &listen)
+void ListenBrainzScrobbler::cachePendingListen(const QJsonObject &listen)
 {
     m_pendingListens.push_back(listen);
     savePending();
 }
 
-void ListenBrainzWorker::handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<QJsonObject> submittedListens)
+void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<QJsonObject> submittedListens)
 {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (kind == SubmissionKind::Listen) {

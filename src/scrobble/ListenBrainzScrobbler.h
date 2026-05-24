@@ -11,11 +11,11 @@
 
 class QNetworkReply;
 
-class ListenBrainzWorker final : public QObject {
+class ListenBrainzScrobbler final : public QObject {
     Q_OBJECT
 
 public:
-    explicit ListenBrainzWorker(QObject *parent = nullptr);
+    explicit ListenBrainzScrobbler(QObject *parent = nullptr);
 
 public slots:
     void configure(bool enabled, const QString &token, const QString &cachePath);
