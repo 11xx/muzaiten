@@ -61,6 +61,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_queueTable->setAlternatingRowColors(true);
+    m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(m_queueTable, 1);
 
     connect(m_queueTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
@@ -73,6 +74,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
         emit viewSettingsChanged();
     });
+    connect(m_queueTable, &QTableWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
 
     m_albumArt = new QLabel(this);
     m_albumArt->setMinimumSize(220, 220);
@@ -86,6 +88,7 @@ RightSidebar::RightSidebar(QWidget *parent)
 
 void RightSidebar::setQueue(const QVector<Track> &tracks)
 {
+    m_tracks = tracks;
     m_queueTable->setRowCount(0);
     for (int row = 0; row < tracks.size(); ++row) {
         const Track &track = tracks.at(row);
@@ -181,4 +184,24 @@ void RightSidebar::showHeaderMenu(const QPoint &pos)
         });
     }
     menu.exec(m_queueTable->horizontalHeader()->mapToGlobal(pos));
+}
+
+void RightSidebar::showQueueMenu(const QPoint &pos)
+{
+    const int row = m_queueTable->rowAt(pos.y());
+    if (row < 0 || row >= m_tracks.size()) {
+        return;
+    }
+
+    const Track track = m_tracks.at(row);
+    QMenu menu(this);
+    QAction *findFile = menu.addAction(QStringLiteral("Find file"));
+    connect(findFile, &QAction::triggered, this, [this, track]() {
+        emit findFileRequested(track, false);
+    });
+    QAction *findWritableFile = menu.addAction(QStringLiteral("Find writable file"));
+    connect(findWritableFile, &QAction::triggered, this, [this, track]() {
+        emit findFileRequested(track, true);
+    });
+    menu.exec(m_queueTable->viewport()->mapToGlobal(pos));
 }

@@ -229,6 +229,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     auto *menu = new QMenu(this);
     QAction *openLibrary = menu->addAction(QStringLiteral("Open library folder..."));
+    QAction *linkRoots = menu->addAction(QStringLiteral("Link roots..."));
     menu->addSeparator();
     menu->addSection(QStringLiteral("Scrobblers"));
     m_listenBrainzEnabled = menu->addAction(QStringLiteral("ListenBrainz scrobbling"));
@@ -322,6 +323,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
+    connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);

@@ -2,6 +2,7 @@
 
 #include "Version.h"
 #include "db/Database.h"
+#include "fs/LinkRoot.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
 #include "scanner/ScanWorker.h"
@@ -9,6 +10,7 @@
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
 #include "ui/RightSidebar.h"
 #include "ui/TrackTable.h"
@@ -16,7 +18,9 @@
 #include <QAction>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QJsonDocument>
@@ -111,6 +115,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
+    connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
@@ -126,6 +131,8 @@ MainWindow::MainWindow(QWidget *parent)
             applyTrackRating(m_currentTrack, rating);
         }
     });
+    connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::preparedTrackStarted, this, &MainWindow::advanceAfterPreparedTransition);
@@ -438,6 +445,54 @@ void MainWindow::applySharedTableSettings()
     QJsonObject shared;
     shared.insert(QStringLiteral("headerHeight"), headerHeight);
     m_database->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::configureLinkRoots()
+{
+    LinkRootsDialog dialog(this);
+    dialog.setLinkRoots(m_database->linkRoots());
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QVector<LinkRoot> existing = m_database->linkRoots();
+    for (const LinkRoot &root : existing) {
+        if (!m_database->removeLinkRoot(root.id)) {
+            QMessageBox::warning(this, QStringLiteral("Link roots"), m_database->lastError());
+            return;
+        }
+    }
+
+    for (const LinkRoot &root : dialog.linkRoots()) {
+        LinkRoot saved = root;
+        saved.id = 0;
+        if (!m_database->saveLinkRoot(saved)) {
+            QMessageBox::warning(this, QStringLiteral("Link roots"), m_database->lastError());
+            return;
+        }
+    }
+
+    statusBar()->showMessage(QStringLiteral("Link roots updated"), 3000);
+}
+
+void MainWindow::findTrackFile(const Track &track, bool writable)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+
+    const PathResolver resolver(m_database->linkRoots());
+    const PathResolution resolution = resolver.resolveLocalPath(track.path, writable ? PathUse::Write : PathUse::Read);
+    if (resolution.preferredPath.isEmpty()) {
+        QMessageBox::warning(this,
+                             writable ? QStringLiteral("Find writable file") : QStringLiteral("Find file"),
+                             QStringLiteral("%1\n\nCandidates:\n%2")
+                                 .arg(resolution.failureReason, resolution.candidates.join(QLatin1Char('\n'))));
+        return;
+    }
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
+    statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
 }
 
 void MainWindow::configureListenBrainz()

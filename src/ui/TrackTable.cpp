@@ -297,6 +297,16 @@ void TrackTable::showCellMenu(const QPoint &pos)
     });
 
     const Track track = model()->index(index.row(), 0).data(Qt::UserRole + 1).value<Track>();
+    menu.addSeparator();
+    QAction *findFile = menu.addAction(QStringLiteral("Find file"));
+    connect(findFile, &QAction::triggered, this, [this, track]() {
+        emit findFileRequested(track, false);
+    });
+    QAction *findWritableFile = menu.addAction(QStringLiteral("Find writable file"));
+    connect(findWritableFile, &QAction::triggered, this, [this, track]() {
+        emit findFileRequested(track, true);
+    });
+
     if (index.column() == 0 && track.hasUserRating) {
         menu.addSeparator();
         QAction *clear = menu.addAction(QStringLiteral("Clear rating override"));

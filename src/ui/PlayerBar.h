@@ -22,6 +22,7 @@ protected:
 
 signals:
     void openLibraryRequested();
+    void linkRootsRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void previousRequested();
