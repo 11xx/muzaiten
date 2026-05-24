@@ -22,12 +22,15 @@ public:
 
 signals:
     void queueTrackActivated(int index);
+    void findFileRequested(const Track &track, bool writable);
     void viewSettingsChanged();
 
 private:
     void showHeaderMenu(const QPoint &pos);
+    void showQueueMenu(const QPoint &pos);
 
 private:
     QTableWidget *m_queueTable = nullptr;
     QLabel *m_albumArt = nullptr;
+    QVector<Track> m_tracks;
 };

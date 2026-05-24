@@ -47,6 +47,8 @@ private:
     void saveRightSidebarViewSettings();
     void saveMainWindowViewSettings();
     void applySharedTableSettings();
+    void configureLinkRoots();
+    void findTrackFile(const Track &track, bool writable);
     void configureListenBrainz();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
