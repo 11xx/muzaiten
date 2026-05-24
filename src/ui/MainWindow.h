@@ -16,6 +16,7 @@ class PlaybackBackend;
 class QProgressBar;
 class QSplitter;
 class QThread;
+class MpdImportWorker;
 class RightSidebar;
 class TrackTable;
 class ScanWorker;
@@ -51,6 +52,7 @@ private:
     void findTrackFile(const Track &track, bool writable);
     void configureMpdSource();
     void findMpdFile();
+    void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;
     void configureListenBrainz();
     void setListenBrainzEnabled(bool enabled);
@@ -103,5 +105,7 @@ private:
     ScanWorker *m_scanWorker = nullptr;
     QThread *m_listenBrainzThread = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
+    QThread *m_mpdImportThread = nullptr;
+    MpdImportWorker *m_mpdImportWorker = nullptr;
     qint64 m_lastUiRefreshIndexedTracks = 0;
 };
