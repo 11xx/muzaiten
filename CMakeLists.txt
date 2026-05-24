@@ -56,6 +56,7 @@ set(MUZAITEN_SOURCES
     src/ui/ArtistSidebar.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
+    src/ui/PlaybackProfileDialog.cpp
     src/ui/PlayerBar.cpp
     src/ui/RightSidebar.cpp
     src/ui/StarRating.cpp
@@ -92,6 +93,7 @@ set(MUZAITEN_HEADERS
     src/ui/ArtistSidebar.h
     src/ui/LinkRootsDialog.h
     src/ui/MainWindow.h
+    src/ui/PlaybackProfileDialog.h
     src/ui/PlayerBar.h
     src/ui/RightSidebar.h
     src/ui/StarRating.h

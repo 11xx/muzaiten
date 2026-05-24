@@ -231,6 +231,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *openLibrary = menu->addAction(QStringLiteral("Open library folder..."));
     QAction *linkRoots = menu->addAction(QStringLiteral("Link roots..."));
     menu->addSeparator();
+    menu->addSection(QStringLiteral("Playback"));
+    QAction *playbackOutput = menu->addAction(QStringLiteral("Output profile..."));
+    menu->addSeparator();
     menu->addSection(QStringLiteral("MPD"));
     QAction *mpdSource = menu->addAction(QStringLiteral("Configure MPD source..."));
     QAction *mpdFindFile = menu->addAction(QStringLiteral("Find MPD file..."));
@@ -328,6 +331,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
+    connect(playbackOutput, &QAction::triggered, this, &PlayerBar::playbackProfileRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdFindFile, &QAction::triggered, this, &PlayerBar::mpdFindFileRequested);
