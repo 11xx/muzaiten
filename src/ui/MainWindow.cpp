@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "Version.h"
+#include "core/Rating.h"
 #include "db/Database.h"
 #include "fs/LinkRoot.h"
 #include "playback/GStreamerPlaybackBackend.h"
@@ -81,6 +82,50 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("replayGain"), profile.replayGain);
     root.insert(QStringLiteral("allowResample"), profile.allowResample);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+QJsonObject trackToJson(const Track &track)
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("path"), track.path);
+    root.insert(QStringLiteral("parentDir"), track.parentDir);
+    root.insert(QStringLiteral("filename"), track.filename);
+    root.insert(QStringLiteral("title"), track.title);
+    root.insert(QStringLiteral("artistName"), track.artistName);
+    root.insert(QStringLiteral("albumArtistName"), track.albumArtistName);
+    root.insert(QStringLiteral("albumTitle"), track.albumTitle);
+    root.insert(QStringLiteral("date"), track.date);
+    root.insert(QStringLiteral("originalDate"), track.originalDate);
+    root.insert(QStringLiteral("trackNumber"), track.trackNumber);
+    root.insert(QStringLiteral("discNumber"), track.discNumber);
+    root.insert(QStringLiteral("durationMs"), QString::number(track.durationMs));
+    root.insert(QStringLiteral("rating0To100"), track.rating0To100);
+    root.insert(QStringLiteral("effectiveRating0To100"), track.effectiveRating0To100);
+    root.insert(QStringLiteral("hasUserRating"), track.hasUserRating);
+    root.insert(QStringLiteral("fileSize"), QString::number(track.fileSize));
+    return root;
+}
+
+Track trackFromJson(const QJsonObject &root)
+{
+    Track track;
+    track.path = root.value(QStringLiteral("path")).toString();
+    track.parentDir = root.value(QStringLiteral("parentDir")).toString();
+    track.filename = root.value(QStringLiteral("filename")).toString(QFileInfo(track.path).fileName());
+    track.title = root.value(QStringLiteral("title")).toString();
+    track.artistName = root.value(QStringLiteral("artistName")).toString();
+    track.albumArtistName = root.value(QStringLiteral("albumArtistName")).toString();
+    track.albumTitle = root.value(QStringLiteral("albumTitle")).toString();
+    track.date = root.value(QStringLiteral("date")).toString();
+    track.originalDate = root.value(QStringLiteral("originalDate")).toString();
+    track.trackNumber = root.value(QStringLiteral("trackNumber")).toInt();
+    track.discNumber = root.value(QStringLiteral("discNumber")).toInt();
+    track.durationMs = root.value(QStringLiteral("durationMs")).toString().toLongLong();
+    track.rating0To100 = root.value(QStringLiteral("rating0To100")).toInt(Rating::unset);
+    track.effectiveRating0To100 = root.value(QStringLiteral("effectiveRating0To100")).toInt(track.rating0To100);
+    track.hasUserRating = root.value(QStringLiteral("hasUserRating")).toBool();
+    track.fileSize = root.value(QStringLiteral("fileSize")).toString().toLongLong();
+    return track;
 }
 
 } // namespace
@@ -206,6 +251,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
     loadPlaybackProfile();
     loadViewSettings();
+    loadQueueState();
+    loadExplorerState();
     configureListenBrainz();
     loadExistingLibrary();
 }
@@ -241,6 +288,8 @@ void MainWindow::openLibraryFolder()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    saveQueueState();
+    saveExplorerState();
     saveMainWindowViewSettings();
     QMainWindow::closeEvent(event);
 }
@@ -323,6 +372,11 @@ void MainWindow::loadExistingLibrary()
 {
     const qint64 mpdSourceId = m_database->mpdSourceId();
     m_artistSidebar->setMpdAvailable(mpdSourceId > 0);
+    m_artistSidebar->setLibrarySourceIndex(m_librarySource == LibrarySource::Mpd ? 1 : 0);
+    if (m_librarySource == LibrarySource::Mpd && mpdSourceId <= 0) {
+        m_librarySource = LibrarySource::Local;
+        m_artistSidebar->setLibrarySourceIndex(0);
+    }
     refreshArtists();
 }
 
@@ -377,6 +431,7 @@ void MainWindow::selectArtist(const QString &artistName)
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
+    saveExplorerState();
 }
 
 void MainWindow::selectAlbumFilter(const QString &albumTitle)
@@ -386,6 +441,7 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
+    saveExplorerState();
 }
 
 void MainWindow::refreshAlbumGrid()
@@ -524,6 +580,59 @@ void MainWindow::saveMainWindowViewSettings()
     root.insert(QStringLiteral("rootSplitter"), sizesToJson(m_rootSplitter->sizes()));
     root.insert(QStringLiteral("centerSplitter"), sizesToJson(m_centerSplitter->sizes()));
     m_database->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::loadQueueState()
+{
+    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("queue.state")).toUtf8()).object();
+    const QJsonArray tracks = root.value(QStringLiteral("tracks")).toArray();
+    m_queue.clear();
+    m_queue.reserve(tracks.size());
+    for (const QJsonValue &value : tracks) {
+        const Track track = trackFromJson(value.toObject());
+        if (!track.path.isEmpty()) {
+            m_queue.push_back(track);
+        }
+    }
+
+    m_queueIndex = std::clamp(root.value(QStringLiteral("index")).toInt(-1), -1, static_cast<int>(m_queue.size()) - 1);
+    m_playNextInsertIndex = std::clamp(root.value(QStringLiteral("playNextInsertIndex")).toInt(m_queueIndex + 1), 0, static_cast<int>(m_queue.size()));
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
+        presentTrack(m_queue.at(m_queueIndex), false);
+    }
+}
+
+void MainWindow::saveQueueState()
+{
+    QJsonArray tracks;
+    for (const Track &track : m_queue) {
+        tracks.append(trackToJson(track));
+    }
+
+    QJsonObject root;
+    root.insert(QStringLiteral("tracks"), tracks);
+    root.insert(QStringLiteral("index"), m_queueIndex);
+    root.insert(QStringLiteral("playNextInsertIndex"), m_playNextInsertIndex);
+    m_database->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::loadExplorerState()
+{
+    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("libraryExplorer.state")).toUtf8()).object();
+    m_librarySource = root.value(QStringLiteral("source")).toString() == QStringLiteral("mpd") ? LibrarySource::Mpd : LibrarySource::Local;
+    m_currentArtist = root.value(QStringLiteral("artist")).toString();
+    m_selectedAlbumTitle = root.value(QStringLiteral("album")).toString();
+}
+
+void MainWindow::saveExplorerState()
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("source"), m_librarySource == LibrarySource::Mpd ? QStringLiteral("mpd") : QStringLiteral("local"));
+    root.insert(QStringLiteral("artist"), m_currentArtist);
+    root.insert(QStringLiteral("album"), m_selectedAlbumTitle);
+    m_database->setSetting(QStringLiteral("libraryExplorer.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::applySharedTableSettings()
@@ -750,6 +859,7 @@ void MainWindow::onLibrarySourceChanged(int index)
         m_selectedAlbumTitle.clear();
         m_albumGrid->setAlbums({});
         m_trackTable->setTracks({});
+        saveExplorerState();
         statusBar()->showMessage(QStringLiteral("No MPD source configured. Use the menu to configure and import."), 5000);
         return;
     }
@@ -759,6 +869,7 @@ void MainWindow::onLibrarySourceChanged(int index)
 
     m_currentArtist.clear();
     m_selectedAlbumTitle.clear();
+    saveExplorerState();
     refreshArtists();
 }
 
@@ -855,7 +966,7 @@ void MainWindow::playTrack(const Track &track)
     prepareNextQueueTrack();
 }
 
-void MainWindow::presentTrack(const Track &track)
+void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
 {
     m_currentTrack = track;
     updateCurrentAlbumArt();
@@ -867,8 +978,10 @@ void MainWindow::presentTrack(const Track &track)
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
     m_playerBar->setPosition(0, track.durationMs);
-    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
-    statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
+    if (notifyScrobbler) {
+        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+        statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
+    }
 }
 
 void MainWindow::appendAndPlayTrack(const Track &track)
@@ -886,6 +999,7 @@ void MainWindow::appendAndPlayTrack(const Track &track)
 
     m_queue.push_back(track);
     m_rightSidebar->setQueue(m_queue);
+    saveQueueState();
     playQueueIndex(static_cast<int>(m_queue.size() - 1));
 }
 
@@ -903,6 +1017,7 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
             }
         }
         m_rightSidebar->setQueue(m_queue);
+        saveQueueState();
         if (m_queueIndex < 0 && start < m_queue.size()) {
             playQueueIndex(start);
         }
@@ -926,6 +1041,7 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
     m_playNextInsertIndex = insertAt + inserted;
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    saveQueueState();
 }
 
 void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
@@ -937,6 +1053,7 @@ void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    saveQueueState();
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)
@@ -972,6 +1089,7 @@ void MainWindow::playQueueIndex(int index)
         m_playNextInsertIndex = m_queueIndex + 1;
     }
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    saveQueueState();
     playTrack(m_queue.at(m_queueIndex));
 }
 
@@ -1032,6 +1150,7 @@ void MainWindow::advanceAfterPreparedTransition()
     }
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     presentTrack(m_queue.at(m_queueIndex));
+    saveQueueState();
     prepareNextQueueTrack();
 }
 

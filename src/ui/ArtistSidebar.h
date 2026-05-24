@@ -22,6 +22,7 @@ public:
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void setMpdAvailable(bool available);
+    void setLibrarySourceIndex(int index);
 
 signals:
     void artistSelected(const QString &artistName);
