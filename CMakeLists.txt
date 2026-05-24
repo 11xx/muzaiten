@@ -53,6 +53,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/ListenBrainzScrobbler.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumGridDelegate.cpp
+    src/ui/AlbumArtFallback.cpp
     src/ui/ArtistSidebar.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
@@ -90,6 +91,7 @@ set(MUZAITEN_HEADERS
     src/scrobble/ListenBrainzScrobbler.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
+    src/ui/AlbumArtFallback.h
     src/ui/ArtistSidebar.h
     src/ui/LinkRootsDialog.h
     src/ui/MainWindow.h

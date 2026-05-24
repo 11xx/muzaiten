@@ -84,7 +84,7 @@ TrackTable::TrackTable(QWidget *parent)
     horizontalHeader()->setSectionsMovable(true);
     horizontalHeader()->setFixedHeight(20);
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
-    verticalHeader()->setDefaultSectionSize(22);
+    verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);
     verticalHeader()->setVisible(false);
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -177,7 +177,7 @@ void TrackTable::applyViewSettingsJson(const QString &json)
         }
     }
 
-    const int rowHeight = root.value(QStringLiteral("rowHeight")).toInt(22);
+    const int rowHeight = root.value(QStringLiteral("rowHeight")).toInt(20);
     verticalHeader()->setDefaultSectionSize(std::clamp(rowHeight, 20, 48));
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
 
