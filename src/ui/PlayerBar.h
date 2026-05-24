@@ -30,6 +30,7 @@ signals:
     void mpdImportRequested();
     void compactMenuChanged(bool compact);
     void trackInfoPaneVisibleChanged(bool visible);
+    void trackInfoPaneSettingsRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void previousRequested();

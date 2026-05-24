@@ -248,6 +248,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_trackInfoPaneVisible = settingsMenu->addAction(QStringLiteral("Show track information pane"));
     m_trackInfoPaneVisible->setCheckable(true);
     m_trackInfoPaneVisible->setChecked(true);
+    QAction *trackInfoPaneSettings = settingsMenu->addAction(QStringLiteral("Track information panel..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
 
@@ -367,6 +368,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
     connect(m_compactMenu, &QAction::toggled, this, &PlayerBar::compactMenuChanged);
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
+    connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);

@@ -279,7 +279,7 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
     QSqlQuery query(m_db);
     QString sql = QStringLiteral(
         "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
-        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "WHERE t.album_artist_name = ?");
@@ -309,6 +309,8 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         track.hasUserRating = !query.value(11).isNull();
         track.effectiveRating0To100 = track.hasUserRating ? query.value(11).toInt() : track.rating0To100;
         track.date = query.value(12).toString();
+        track.originalDate = query.value(13).toString();
+        track.fileSize = query.value(14).toLongLong();
         tracks.push_back(track);
     }
     return tracks;
