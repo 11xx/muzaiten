@@ -44,6 +44,15 @@ target_link_libraries(test_mpd_config PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_mpd_config PRIVATE cxx_std_26)
 add_test(NAME test_mpd_config COMMAND test_mpd_config)
 
+add_executable(test_mpd_client
+    test_mpd_client.cpp
+    ../src/mpd/MpdClient.cpp
+)
+target_include_directories(test_mpd_client PRIVATE ../src)
+target_link_libraries(test_mpd_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_compile_features(test_mpd_client PRIVATE cxx_std_26)
+add_test(NAME test_mpd_client COMMAND test_mpd_client)
+
 add_executable(test_artwork_resolver
     test_artwork_resolver.cpp
     ../src/scanner/ArtworkResolver.cpp
