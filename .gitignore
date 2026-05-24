@@ -7,3 +7,4 @@ build-arch*/
 compile_commands.json
 musicbee-wine/
 resources/*.png
+dev-notes.md

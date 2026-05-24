@@ -42,7 +42,7 @@ Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("muzaiten %1").arg(QStringLiteral(MUZAITEN_VERSION)));
+    setWindowTitle(QStringLiteral("muzaiten"));
     resize(1440, 900);
     setMinimumSize(1100, 700);
 

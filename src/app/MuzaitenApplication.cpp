@@ -39,8 +39,9 @@ MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
 {
     QCoreApplication::setApplicationName(QStringLiteral(MUZAITEN_APP_NAME));
     QCoreApplication::setApplicationVersion(QStringLiteral(MUZAITEN_VERSION));
-    QCoreApplication::setOrganizationName(QStringLiteral("muzaiten"));
-    QCoreApplication::setOrganizationDomain(QStringLiteral(MUZAITEN_APP_ID));
+    QCoreApplication::setOrganizationName(QStringLiteral("11xx"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("11xx.org"));
+    setDesktopFileName(QStringLiteral(MUZAITEN_APP_ID));
 
     qRegisterMetaType<Track>("Track");
     qRegisterMetaType<QVector<Track>>("QVector<Track>");
