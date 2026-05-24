@@ -162,6 +162,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
+    connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
+    connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
@@ -436,6 +438,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
             subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
         }
         m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
+        m_rightSidebar->setTrackInfo(m_currentTrack);
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
@@ -455,7 +458,11 @@ void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString 
 void MainWindow::loadViewSettings()
 {
     m_trackTable->applyViewSettingsJson(m_database->setting(QStringLiteral("trackTable.view")));
-    m_rightSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("rightSidebar.view")));
+    const QString rightSidebarSettings = m_database->setting(QStringLiteral("rightSidebar.view"));
+    m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
+    m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
+    const QJsonObject playerBar = QJsonDocument::fromJson(m_database->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
+    m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
     m_albumGrid->applyViewSettingsJson(m_database->setting(QStringLiteral("albumGrid.view")));
     m_artistSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("artistSidebar.view")));
     const QJsonObject mainWindow = QJsonDocument::fromJson(m_database->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
@@ -528,6 +535,21 @@ void MainWindow::applySharedTableSettings()
     QJsonObject shared;
     shared.insert(QStringLiteral("headerHeight"), headerHeight);
     m_database->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::applyTrackInfoPaneVisible(bool visible)
+{
+    m_playerBar->setTrackInfoPaneVisible(visible);
+    m_rightSidebar->setTrackInfoVisible(visible);
+    saveRightSidebarViewSettings();
+}
+
+void MainWindow::applyCompactMenu(bool compact)
+{
+    m_playerBar->setCompactMenu(compact);
+    QJsonObject root;
+    root.insert(QStringLiteral("compactMenu"), compact);
+    m_database->setSetting(QStringLiteral("playerBar.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::loadPlaybackProfile()
@@ -814,6 +836,7 @@ void MainWindow::presentTrack(const Track &track)
         subtitle += QStringLiteral(" (%1)").arg(track.date.left(4));
     }
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
+    m_rightSidebar->setTrackInfo(track);
     m_playerBar->setPosition(0, track.durationMs);
     QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
     statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);

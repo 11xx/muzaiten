@@ -13,7 +13,9 @@ public:
 
     void setTrackText(const QString &text);
     void setTrackInfo(const QString &title, const QString &subtitle, int rating0To100);
+    void setTrackInfoPaneVisible(bool visible);
     void setListenBrainzEnabled(bool enabled);
+    void setCompactMenu(bool compact);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
 
@@ -26,6 +28,8 @@ signals:
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdImportRequested();
+    void compactMenuChanged(bool compact);
+    void trackInfoPaneVisibleChanged(bool visible);
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void previousRequested();
@@ -38,7 +42,10 @@ signals:
 
 private:
     class QToolButton *m_menuButton = nullptr;
+    class QMenuBar *m_menuBar = nullptr;
     class QToolButton *m_playPause = nullptr;
+    class QAction *m_compactMenu = nullptr;
+    class QAction *m_trackInfoPaneVisible = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_subtitle = nullptr;
