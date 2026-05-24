@@ -197,11 +197,7 @@ void RightSidebar::showQueueMenu(const QPoint &pos)
     QMenu menu(this);
     QAction *findFile = menu.addAction(QStringLiteral("Find file"));
     connect(findFile, &QAction::triggered, this, [this, track]() {
-        emit findFileRequested(track, false);
-    });
-    QAction *findWritableFile = menu.addAction(QStringLiteral("Find writable file"));
-    connect(findWritableFile, &QAction::triggered, this, [this, track]() {
-        emit findFileRequested(track, true);
+        emit findFileRequested(track);
     });
     menu.exec(m_queueTable->viewport()->mapToGlobal(pos));
 }

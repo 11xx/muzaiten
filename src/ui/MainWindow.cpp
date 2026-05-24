@@ -141,6 +141,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_listenBrainzThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    connect(m_artistSidebar, &ArtistSidebar::librarySourceChanged, this, &MainWindow::onLibrarySourceChanged);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
     connect(m_trackTable, &TrackTable::playNextRequested, this, &MainWindow::playNextTracks);
     connect(m_trackTable, &TrackTable::addToQueueRequested, this, &MainWindow::addTracksToQueue);
@@ -160,7 +161,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
-    connect(m_playerBar, &PlayerBar::mpdFindFileRequested, this, &MainWindow::findMpdFile);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
@@ -316,11 +316,33 @@ void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canc
 
 void MainWindow::loadExistingLibrary()
 {
+    const qint64 mpdSourceId = m_database->mpdSourceId();
+    m_artistSidebar->setMpdAvailable(mpdSourceId > 0);
     refreshArtists();
 }
 
 void MainWindow::refreshArtists()
 {
+    if (m_librarySource == LibrarySource::Mpd) {
+        const qint64 sourceId = m_database->mpdSourceId();
+        m_artistSidebar->setMpdAvailable(sourceId > 0);
+        const QVector<Artist> artists = m_database->mpdAlbumArtists();
+        m_artistSidebar->setArtists(artists);
+        if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
+            selectArtist(m_currentArtist);
+            return;
+        }
+        if (!artists.isEmpty() && m_currentArtist.isEmpty()) {
+            selectArtist(artists.first().name);
+            m_artistSidebar->selectArtist(artists.first().name);
+            return;
+        }
+        if (artists.isEmpty()) {
+            m_currentArtist.clear();
+        }
+        return;
+    }
+
     const QVector<Artist> artists = m_database->albumArtists();
     m_artistSidebar->setArtists(artists);
 
@@ -366,7 +388,13 @@ void MainWindow::refreshAlbumGrid()
     if (m_currentArtist.isEmpty()) {
         return;
     }
-    m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist));
+    if (m_librarySource == LibrarySource::Mpd) {
+        m_albumGrid->setArtworkCacheRoot(mpdCacheRoot());
+        m_albumGrid->setAlbums(m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory()));
+    } else {
+        m_albumGrid->setArtworkCacheRoot(cacheRoot());
+        m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist));
+    }
     m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
 }
 
@@ -375,7 +403,11 @@ void MainWindow::refreshTrackTable()
     if (m_currentArtist.isEmpty()) {
         return;
     }
-    m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist, m_selectedAlbumTitle));
+    if (m_librarySource == LibrarySource::Mpd) {
+        m_trackTable->setTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), m_selectedAlbumTitle));
+    } else {
+        m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist, m_selectedAlbumTitle));
+    }
 }
 
 void MainWindow::applyTrackRating(const Track &track, int rating0To100)
@@ -551,17 +583,17 @@ void MainWindow::configureLinkRoots()
     statusBar()->showMessage(QStringLiteral("Link roots updated"), 3000);
 }
 
-void MainWindow::findTrackFile(const Track &track, bool writable)
+void MainWindow::findTrackFile(const Track &track)
 {
     if (track.path.isEmpty()) {
         return;
     }
 
     const PathResolver resolver(m_database->linkRoots());
-    const PathResolution resolution = resolver.resolveLocalPath(track.path, writable ? PathUse::Write : PathUse::Read);
+    const PathResolution resolution = resolver.resolveLocalPath(track.path, PathUse::Read);
     if (resolution.preferredPath.isEmpty()) {
         QMessageBox::warning(this,
-                             writable ? QStringLiteral("Find writable file") : QStringLiteral("Find file"),
+                             QStringLiteral("Find file"),
                              QStringLiteral("%1\n\nCandidates:\n%2")
                                  .arg(resolution.failureReason, resolution.candidates.join(QLatin1Char('\n'))));
         return;
@@ -608,40 +640,6 @@ void MainWindow::configureMpdSource()
     statusBar()->showMessage(QStringLiteral("MPD music directory: %1").arg(config.musicDirectory), 5000);
 }
 
-void MainWindow::findMpdFile()
-{
-    const QString musicDirectory = mpdMusicDirectory();
-    if (musicDirectory.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Find MPD file"), QStringLiteral("Configure an MPD source first."));
-        return;
-    }
-
-    bool ok = false;
-    const QString uri = QInputDialog::getText(this,
-                                              QStringLiteral("Find MPD file"),
-                                              QStringLiteral("MPD relative URI"),
-                                              QLineEdit::Normal,
-                                              {},
-                                              &ok)
-                            .trimmed();
-    if (!ok || uri.isEmpty()) {
-        return;
-    }
-
-    const PathResolver resolver(m_database->linkRoots());
-    const PathResolution resolution = resolver.resolveMpdUri(uri, musicDirectory, PathUse::Read);
-    if (resolution.preferredPath.isEmpty()) {
-        QMessageBox::warning(this,
-                             QStringLiteral("Find MPD file"),
-                             QStringLiteral("%1\n\nCandidates:\n%2")
-                                 .arg(resolution.failureReason, resolution.candidates.join(QLatin1Char('\n'))));
-        return;
-    }
-
-    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
-    statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
-}
-
 void MainWindow::importMpdLibraryMetadata()
 {
     if (m_mpdImportThread != nullptr) {
@@ -672,6 +670,11 @@ void MainWindow::importMpdLibraryMetadata()
             QMessageBox::warning(this, QStringLiteral("MPD import"), error);
         } else {
             statusBar()->showMessage(QStringLiteral("Imported %1 MPD tracks").arg(imported), 10000);
+            const qint64 mpdSourceId = m_database->mpdSourceId();
+            m_artistSidebar->setMpdAvailable(mpdSourceId > 0);
+            if (m_librarySource == LibrarySource::Mpd) {
+                refreshArtists();
+            }
         }
         m_mpdImportThread->quit();
     });
@@ -684,6 +687,28 @@ void MainWindow::importMpdLibraryMetadata()
 
     statusBar()->showMessage(QStringLiteral("Starting MPD import from %1:%2").arg(host).arg(port));
     m_mpdImportThread->start();
+}
+
+void MainWindow::onLibrarySourceChanged(int index)
+{
+    m_librarySource = (index == 1) ? LibrarySource::Mpd : LibrarySource::Local;
+
+    if (m_librarySource == LibrarySource::Mpd && m_database->mpdSourceId() <= 0) {
+        m_artistSidebar->setMpdAvailable(false);
+        m_currentArtist.clear();
+        m_selectedAlbumTitle.clear();
+        m_albumGrid->setAlbums({});
+        m_trackTable->setTracks({});
+        statusBar()->showMessage(QStringLiteral("No MPD source configured. Use the menu to configure and import."), 5000);
+        return;
+    }
+
+    m_albumGrid->setArtworkCacheRoot(
+        m_librarySource == LibrarySource::Mpd ? mpdCacheRoot() : cacheRoot());
+
+    m_currentArtist.clear();
+    m_selectedAlbumTitle.clear();
+    refreshArtists();
 }
 
 QString MainWindow::mpdMusicDirectory() const
@@ -768,8 +793,14 @@ void MainWindow::playTrack(const Track &track)
         return;
     }
 
+    const QString playbackPath = resolvedReadPathForTrack(track);
+    if (playbackPath.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Playback"), QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
+        return;
+    }
+
     presentTrack(track);
-    m_playback->play(QUrl::fromLocalFile(track.path));
+    m_playback->play(QUrl::fromLocalFile(playbackPath));
     prepareNextQueueTrack();
 }
 
@@ -859,14 +890,22 @@ void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
 void MainWindow::playNextAlbum(const QString &albumTitle)
 {
     if (!m_currentArtist.isEmpty() && !albumTitle.isEmpty()) {
-        playNextTracks(m_database->tracksForArtist(m_currentArtist, albumTitle));
+        if (m_librarySource == LibrarySource::Mpd) {
+            playNextTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle));
+        } else {
+            playNextTracks(m_database->tracksForArtist(m_currentArtist, albumTitle));
+        }
     }
 }
 
 void MainWindow::addAlbumToQueue(const QString &albumTitle)
 {
     if (!m_currentArtist.isEmpty() && !albumTitle.isEmpty()) {
-        addTracksToQueue(m_database->tracksForArtist(m_currentArtist, albumTitle));
+        if (m_librarySource == LibrarySource::Mpd) {
+            addTracksToQueue(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle));
+        } else {
+            addTracksToQueue(m_database->tracksForArtist(m_currentArtist, albumTitle));
+        }
     }
 }
 
@@ -925,7 +964,8 @@ void MainWindow::prepareNextQueueTrack()
         return;
     }
     const Track &nextTrack = m_queue.at(m_queueIndex + 1);
-    m_playback->prepareNext(QUrl::fromLocalFile(nextTrack.path));
+    const QString nextPath = resolvedReadPathForTrack(nextTrack);
+    m_playback->prepareNext(nextPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(nextPath));
 }
 
 void MainWindow::advanceAfterPreparedTransition()
@@ -961,8 +1001,11 @@ void MainWindow::restoreTrackTableViewState()
 
 void MainWindow::updateCurrentAlbumArt()
 {
-    const ArtworkResolver resolver(cacheRoot());
-    const ArtworkResult artwork = resolver.resolveForDirectory(m_currentTrack.parentDir);
+    const QString cache = (m_librarySource == LibrarySource::Mpd) ? mpdCacheRoot() : cacheRoot();
+    const ArtworkResolver resolver(cache);
+    const QString resolvedPath = resolvedReadPathForTrack(m_currentTrack);
+    const QString directory = resolvedPath.isEmpty() ? m_currentTrack.parentDir : QFileInfo(resolvedPath).absolutePath();
+    const ArtworkResult artwork = resolver.resolveForDirectory(directory);
     m_rightSidebar->setAlbumArt(artwork.cachePath);
 }
 
@@ -978,6 +1021,13 @@ QString MainWindow::cacheRoot() const
     const QString root = stateRoot() + QStringLiteral("/cache");
     QDir().mkpath(root);
     return QDir(root).filePath(QStringLiteral("artwork"));
+}
+
+QString MainWindow::mpdCacheRoot() const
+{
+    const QString root = stateRoot() + QStringLiteral("/cache");
+    QDir().mkpath(root);
+    return QDir(root).filePath(QStringLiteral("mpd-artwork"));
 }
 
 QString MainWindow::stateRoot() const
@@ -1003,4 +1053,15 @@ bool MainWindow::useDevState() const
 {
     return qApp->property("muzaiten.devState").toBool()
         || QCoreApplication::applicationDirPath().endsWith(QStringLiteral("/build"));
+}
+
+QString MainWindow::resolvedReadPathForTrack(const Track &track) const
+{
+    if (track.path.isEmpty()) {
+        return {};
+    }
+
+    const PathResolver resolver(m_database->linkRoots());
+    const PathResolution resolution = resolver.resolveLocalPath(track.path, PathUse::Read);
+    return resolution.preferredPath;
 }

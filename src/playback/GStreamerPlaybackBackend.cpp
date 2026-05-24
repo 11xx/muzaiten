@@ -118,6 +118,8 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
         return;
     }
 
+    gst_element_set_state(m_playbin, GST_STATE_READY);
+
     const QString uri = uriForUrl(url);
     {
         QMutexLocker locker(&m_mutex);

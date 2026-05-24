@@ -189,6 +189,23 @@ void SchemaTest::mpdTracksRoundTrip()
     track.musicBrainz.recordingId = QStringLiteral("recording-id");
     QVERIFY2(database.upsertMpdTrack(sourceId, track), qPrintable(database.lastError()));
     QCOMPARE(database.mpdTrackCount(sourceId), 1);
+    QCOMPARE(database.mpdSourceId(), sourceId);
+
+    const QVector<Artist> artists = database.mpdAlbumArtists();
+    QCOMPARE(artists.size(), 1);
+    QCOMPARE(artists.first().name, QStringLiteral("Album Artist"));
+    QCOMPARE(artists.first().albumCount, 1);
+
+    const QVector<Album> albums = database.mpdAlbumsForArtist(QStringLiteral("Album Artist"), QStringLiteral("/gak/music"));
+    QCOMPARE(albums.size(), 1);
+    QCOMPARE(albums.first().title, QStringLiteral("Album"));
+    QCOMPARE(albums.first().representativeDir, QStringLiteral("/gak/music/Artist/Album"));
+
+    const QVector<Track> tracks = database.mpdTracksForArtist(QStringLiteral("Album Artist"), QStringLiteral("/gak/music"));
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().path, QStringLiteral("/gak/music/Artist/Album/01.flac"));
+    QCOMPARE(tracks.first().title, QStringLiteral("Track"));
+    QCOMPARE(tracks.first().durationMs, 123000);
 
     track.title = QStringLiteral("Updated Track");
     QVERIFY2(database.upsertMpdTrack(sourceId, track), qPrintable(database.lastError()));

@@ -37,6 +37,14 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     m_allowResample = new QCheckBox(QStringLiteral("Allow resampling"), this);
     form->addRow(QString(), m_allowResample);
 
+    connect(m_mode, &QComboBox::currentIndexChanged, this, [this](int index) {
+        const bool exclusive = m_mode->itemData(index).toString() == QStringLiteral("exclusive");
+        m_allowResample->setEnabled(!exclusive);
+        if (exclusive) {
+            m_allowResample->setChecked(false);
+        }
+    });
+
     layout->addLayout(form);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -53,7 +61,8 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     m_sink->setCurrentIndex(sinkIndex >= 0 ? sinkIndex : 0);
     m_device->setText(profile.device);
     m_softwareVolume->setChecked(profile.softwareVolume);
-    m_allowResample->setChecked(profile.allowResample);
+    m_allowResample->setChecked(profile.allowResample && profile.mode != QStringLiteral("exclusive"));
+    m_allowResample->setEnabled(profile.mode != QStringLiteral("exclusive"));
 }
 
 PlaybackProfile PlaybackProfileDialog::profile() const

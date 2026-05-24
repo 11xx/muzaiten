@@ -14,6 +14,7 @@
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
 #include <QStyle>
+#include <QTabBar>
 #include <QVBoxLayout>
 #include <algorithm>
 
@@ -69,6 +70,15 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     layout->setContentsMargins(8, 8, 8, 8);
     layout->setSpacing(8);
 
+    m_tabBar = new QTabBar(this);
+    m_tabBar->addTab(QStringLiteral("Library"));
+    m_tabBar->addTab(QStringLiteral("MPD"));
+    m_tabBar->setExpanding(false);
+    m_tabBar->setTabEnabled(1, false);
+    layout->addWidget(m_tabBar);
+
+    connect(m_tabBar, &QTabBar::currentChanged, this, &ArtistSidebar::librarySourceChanged);
+
     m_filter = new QLineEdit(this);
     m_filter->setPlaceholderText(QStringLiteral("Filter album artists"));
     layout->addWidget(m_filter);
@@ -100,6 +110,15 @@ void ArtistSidebar::setArtists(const QVector<Artist> &artists)
         item->setData(m_showAlbumCount, Qt::UserRole + 2);
         item->setData(QSize(120, m_rowHeight), Qt::SizeHintRole);
         m_model->appendRow(item);
+    }
+}
+
+void ArtistSidebar::setMpdAvailable(bool available)
+{
+    m_mpdAvailable = available;
+    m_tabBar->setTabEnabled(1, available);
+    if (!available && m_tabBar->currentIndex() == 1) {
+        m_tabBar->setCurrentIndex(0);
     }
 }
 
