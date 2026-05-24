@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 
 project(muzaiten
-    VERSION 2026.5.24
+    VERSION 2026.5.24.1
     DESCRIPTION "Native Linux music player inspired by MusicBee and ncmpcpp"
     LANGUAGES CXX
 )
