@@ -284,6 +284,7 @@ void GStreamerPlaybackBackend::pollPosition()
 
     gint64 position = GST_CLOCK_TIME_NONE;
     gint64 duration = GST_CLOCK_TIME_NONE;
+    const qint64 previousPositionMs = m_positionMs;
     if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position)) {
         const qint64 positionMs = clockTimeToMs(position);
         if (positionMs != m_positionMs) {
@@ -302,7 +303,8 @@ void GStreamerPlaybackBackend::pollPosition()
     bool emitPreparedStarted = false;
     {
         QMutexLocker locker(&m_mutex);
-        if (m_gaplessAdvancePending && m_positionMs <= 2000 && m_state == State::Playing) {
+        const bool positionReset = m_positionMs + 1000 < previousPositionMs;
+        if (m_gaplessAdvancePending && m_state == State::Playing && (m_positionMs <= 2000 || positionReset)) {
             m_gaplessAdvancePending = false;
             emitPreparedStarted = true;
         }
