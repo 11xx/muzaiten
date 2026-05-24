@@ -221,7 +221,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("PlayerBar"));
-    setMinimumHeight(92);
+    setMinimumHeight(82);
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -263,7 +263,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     });
 
     m_menuBar = new QMenuBar(this);
-    m_menuBar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    m_menuBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_menuBar->setFixedHeight(m_menuBar->fontMetrics().height() + 2);
+    m_menuBar->setContentsMargins(0, 0, 0, 0);
+    m_menuBar->setStyleSheet(QStringLiteral("QMenuBar { margin: 0; padding: 0; } QMenuBar::item { margin: 0; padding: 0 6px; }"));
     m_menuBar->addMenu(fileMenu);
     m_menuBar->addMenu(playbackMenu);
     m_menuBar->addMenu(mpdMenu);
@@ -274,8 +277,6 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *controls = new QHBoxLayout;
     controls->setContentsMargins(8, 6, 10, 8);
     controls->setSpacing(10);
-
-    controls->addWidget(m_menuButton);
 
     auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
     controls->addWidget(previous);
@@ -373,6 +374,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
         emit seekRequested(value);
     });
+
+    setCompactMenu(false);
 }
 
 void PlayerBar::setTrackText(const QString &text)
@@ -415,10 +418,16 @@ void PlayerBar::setCompactMenu(bool compact)
     }
     if (m_menuButton != nullptr) {
         m_menuButton->setVisible(compact);
+        if (compact) {
+            m_menuButton->raise();
+            m_menuButton->move(width() - m_menuButton->width() - 4, 4);
+        }
     }
     if (m_menuBar != nullptr) {
         m_menuBar->setVisible(!compact);
     }
+    setMinimumHeight(compact ? 72 : 82);
+    updateGeometry();
 }
 
 void PlayerBar::setPlaying(bool playing)
@@ -444,4 +453,7 @@ void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
 void PlayerBar::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
+    if (m_menuButton != nullptr && m_menuButton->isVisible()) {
+        m_menuButton->move(width() - m_menuButton->width() - 4, 4);
+    }
 }
