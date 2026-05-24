@@ -10,8 +10,13 @@ public:
 
     int run();
 
+protected:
+    bool event(QEvent *event) override;
+
 private:
     void configureCommandLine();
     void configureLogging(bool verbose);
     void configureUiStyle();
+
+    bool m_applyingStyle = false;
 };
