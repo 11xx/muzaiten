@@ -3,6 +3,8 @@
 #include "ui/StarRating.h"
 
 #include <QAction>
+#include <QApplication>
+#include <QCursor>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
@@ -13,6 +15,7 @@
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QStyle>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidgetAction>
@@ -98,6 +101,7 @@ public:
         auto *action = new QWidgetAction(this);
         action->setDefaultWidget(slider);
         m_menu.addAction(action);
+        m_menu.installEventFilter(this);
         connect(slider, &QSlider::valueChanged, this, [this](int value) {
             if (volumeChanged) {
                 volumeChanged(value);
@@ -110,11 +114,34 @@ public:
 protected:
     void enterEvent(QEnterEvent *) override
     {
-        const QPoint at = mapToGlobal(QPoint((width() - m_menu.sizeHint().width()) / 2, -m_menu.sizeHint().height()));
+        const QPoint at = mapToGlobal(QPoint(0, height()));
         m_menu.popup(at);
     }
 
+    void leaveEvent(QEvent *) override
+    {
+        closeIfPointerOutsideSoon();
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == &m_menu && event->type() == QEvent::Leave) {
+            closeIfPointerOutsideSoon();
+        }
+        return QToolButton::eventFilter(watched, event);
+    }
+
 private:
+    void closeIfPointerOutsideSoon()
+    {
+        QTimer::singleShot(150, this, [this]() {
+            const QPoint globalPos = QCursor::pos();
+            if (!rect().contains(mapFromGlobal(globalPos)) && !m_menu.geometry().contains(globalPos)) {
+                m_menu.close();
+            }
+        });
+    }
+
     QMenu m_menu;
 };
 
@@ -131,10 +158,9 @@ QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QStr
 QToolButton *menuButton(QWidget *parent)
 {
     auto *button = new QToolButton(parent);
-    button->setText(QStringLiteral("☰"));
+    button->setText(QStringLiteral("..."));
     button->setToolTip(QStringLiteral("Menu"));
     button->setAutoRaise(true);
-    button->setPopupMode(QToolButton::InstantPopup);
     button->setFixedSize(34, 34);
     return button;
 }
@@ -198,7 +224,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     setMaximumHeight(82);
 
     auto *root = new QHBoxLayout(this);
-    root->setContentsMargins(10, 8, 10, 8);
+    root->setContentsMargins(44, 8, 10, 8);
     root->setSpacing(10);
 
     auto *menu = new QMenu(this);
@@ -209,9 +235,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_listenBrainzEnabled->setCheckable(true);
     QAction *listenBrainzToken = menu->addAction(QStringLiteral("Set ListenBrainz token..."));
 
-    auto *hamburger = menuButton(this);
-    hamburger->setMenu(menu);
-    root->addWidget(hamburger);
+    m_menuButton = menuButton(this);
+    connect(m_menuButton, &QToolButton::clicked, this, [this, menu]() {
+        menu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height())));
+    });
 
     auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
     root->addWidget(previous);
@@ -344,5 +371,13 @@ void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
     m_progress->setRange(0, static_cast<int>(std::min<qint64>(safeDuration, std::numeric_limits<int>::max())));
     if (!m_progress->isSliderDown()) {
         m_progress->setValue(static_cast<int>(std::min<qint64>(safePosition, std::numeric_limits<int>::max())));
+    }
+}
+
+void PlayerBar::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (m_menuButton != nullptr) {
+        m_menuButton->move(4, 4);
     }
 }

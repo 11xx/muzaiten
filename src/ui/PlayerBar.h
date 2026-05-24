@@ -17,6 +17,9 @@ public:
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+
 signals:
     void openLibraryRequested();
     void listenBrainzEnabledChanged(bool enabled);
@@ -30,6 +33,7 @@ signals:
     void currentTrackRatingChanged(int rating0To100);
 
 private:
+    class QToolButton *m_menuButton = nullptr;
     class QToolButton *m_playPause = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;
     QLabel *m_title = nullptr;
