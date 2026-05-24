@@ -34,6 +34,7 @@ set(MUZAITEN_SOURCES
     src/core/Rating.cpp
     src/db/Database.cpp
     src/fs/PathResolver.cpp
+    src/mpd/MpdConfig.cpp
     src/scanner/ScanWorker.cpp
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
@@ -61,6 +62,7 @@ set(MUZAITEN_HEADERS
     src/db/Database.h
     src/db/Schema.h
     src/fs/LinkRoot.h
+    src/mpd/MpdConfig.h
     src/scanner/ArtworkResolver.h
     src/scanner/LibraryScanner.h
     src/scanner/ScanWorker.h
