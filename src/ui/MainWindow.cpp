@@ -164,6 +164,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
+    connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
@@ -181,6 +182,8 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
+    connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::preparedTrackStarted, this, &MainWindow::advanceAfterPreparedTransition);
@@ -623,6 +626,32 @@ void MainWindow::findTrackFile(const Track &track)
 
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
     statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
+}
+
+void MainWindow::configureTrackInfoPanel()
+{
+    m_rightSidebar->configureTrackInfoPanel(this);
+}
+
+void MainWindow::jumpToTrackInfoArtist(const QString &artistName)
+{
+    if (artistName.isEmpty()) {
+        return;
+    }
+    if (m_artistSidebar->selectArtist(artistName)) {
+        selectArtist(artistName);
+    }
+}
+
+void MainWindow::jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle)
+{
+    if (artistName.isEmpty()) {
+        return;
+    }
+    jumpToTrackInfoArtist(artistName);
+    if (!albumTitle.isEmpty() && m_selectedAlbumTitle != albumTitle) {
+        selectAlbumFilter(albumTitle);
+    }
 }
 
 void MainWindow::configureMpdSource()
