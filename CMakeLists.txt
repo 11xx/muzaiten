@@ -42,6 +42,7 @@ set(MUZAITEN_SOURCES
     src/db/Database.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
+    src/mpd/MpdClient.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/ScanWorker.cpp
@@ -73,6 +74,8 @@ set(MUZAITEN_HEADERS
     src/db/Schema.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
+    src/mpd/MpdClient.h
+    src/mpd/MpdTrack.h
     src/playback/PlaybackBackend.h
     src/playback/PlaybackTypes.h
     src/playback/GStreamerPlaybackBackend.h
