@@ -11,12 +11,24 @@
 #include <QDir>
 #include <QEvent>
 #include <QLoggingCategory>
+#include <QProxyStyle>
 #include <QScrollBar>
 #include <QStyle>
 
 #include <taglib/tdebuglistener.h>
 
 namespace {
+
+class OverlayScrollBarStyle final : public QProxyStyle {
+public:
+    int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr, const QWidget *widget = nullptr) const override
+    {
+        if (metric == PM_ScrollBarExtent) {
+            return 0;
+        }
+        return QProxyStyle::pixelMetric(metric, option, widget);
+    }
+};
 
 class TagLibQtDebugListener final : public TagLib::DebugListener {
 public:
@@ -129,6 +141,11 @@ void MuzaitenApplication::configureLogging(bool verbose)
 
 void MuzaitenApplication::configureUiStyle()
 {
+    if (!m_overlayScrollbarStyleInstalled) {
+        setStyle(new OverlayScrollBarStyle);
+        m_overlayScrollbarStyleInstalled = true;
+    }
+
     m_applyingStyle = true;
     setStyleSheet(QStringLiteral(R"(
         QScrollBar:vertical, QScrollBar:horizontal {
@@ -164,12 +181,12 @@ void MuzaitenApplication::configureUiStyle()
 
         QScrollBar[muzaitenPaneHover="true"]::handle:vertical,
         QScrollBar[muzaitenPaneHover="true"]::handle:horizontal {
-            background: palette(mid);
+            background: palette(midlight);
         }
 
         QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover,
         QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {
-            background: palette(dark);
+            background: palette(highlight);
         }
 
         QScrollBar::handle:vertical:hover,

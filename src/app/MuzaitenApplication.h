@@ -21,4 +21,5 @@ private:
     void setScrollAreaHover(QObject *object, bool hovered);
 
     bool m_applyingStyle = false;
+    bool m_overlayScrollbarStyleInstalled = false;
 };
