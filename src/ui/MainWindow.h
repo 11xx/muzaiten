@@ -9,7 +9,7 @@
 class Database;
 class AlbumGrid;
 class ArtistSidebar;
-class ListenBrainzWorker;
+class ListenBrainzScrobbler;
 class PlayerBar;
 class QAudioOutput;
 class QMediaPlayer;
@@ -83,6 +83,6 @@ private:
     QThread *m_scanThread = nullptr;
     ScanWorker *m_scanWorker = nullptr;
     QThread *m_listenBrainzThread = nullptr;
-    ListenBrainzWorker *m_listenBrainzWorker = nullptr;
+    ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
     qint64 m_lastUiRefreshIndexedTracks = 0;
 };

@@ -37,7 +37,7 @@ set(MUZAITEN_SOURCES
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
     src/scanner/TagReader.cpp
-    src/scrobble/ListenBrainzWorker.cpp
+    src/scrobble/ListenBrainzScrobbler.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumGridDelegate.cpp
     src/ui/ArtistSidebar.cpp
@@ -63,7 +63,7 @@ set(MUZAITEN_HEADERS
     src/scanner/LibraryScanner.h
     src/scanner/ScanWorker.h
     src/scanner/TagReader.h
-    src/scrobble/ListenBrainzWorker.h
+    src/scrobble/ListenBrainzScrobbler.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
     src/ui/ArtistSidebar.h

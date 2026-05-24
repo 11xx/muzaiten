@@ -4,7 +4,7 @@
 #include "db/Database.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
-#include "scrobble/ListenBrainzWorker.h"
+#include "scrobble/ListenBrainzScrobbler.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/PlayerBar.h"
@@ -90,9 +90,9 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     m_listenBrainzThread = new QThread(this);
-    m_listenBrainzWorker = new ListenBrainzWorker;
-    m_listenBrainzWorker->moveToThread(m_listenBrainzThread);
-    connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzWorker, &QObject::deleteLater);
+    m_listenBrainzScrobbler = new ListenBrainzScrobbler;
+    m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
+    connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzScrobbler, &QObject::deleteLater);
     m_listenBrainzThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
@@ -126,7 +126,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
         const bool playing = state == QMediaPlayer::PlayingState;
         m_playerBar->setPlaying(playing);
-        QMetaObject::invokeMethod(m_listenBrainzWorker, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
     });
     connect(m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &errorString) {
         if (!errorString.isEmpty()) {
@@ -399,7 +399,7 @@ void MainWindow::configureListenBrainz()
     }
 
     m_playerBar->setListenBrainzEnabled(enabled);
-    QMetaObject::invokeMethod(m_listenBrainzWorker,
+    QMetaObject::invokeMethod(m_listenBrainzScrobbler,
                               "configure",
                               Qt::QueuedConnection,
                               Q_ARG(bool, enabled),
@@ -451,7 +451,7 @@ void MainWindow::playTrack(const Track &track)
     m_playerBar->setPosition(0, track.durationMs);
     m_player->setSource(QUrl::fromLocalFile(track.path));
     m_player->play();
-    QMetaObject::invokeMethod(m_listenBrainzWorker, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
     statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
 }
 
