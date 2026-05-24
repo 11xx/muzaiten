@@ -5,6 +5,7 @@
 #include "fs/LinkRoot.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
+#include "mpd/MpdConfig.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scrobble/ListenBrainzScrobbler.h"
@@ -116,6 +117,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
+    connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
+    connect(m_playerBar, &PlayerBar::mpdFindFileRequested, this, &MainWindow::findMpdFile);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
@@ -493,6 +496,109 @@ void MainWindow::findTrackFile(const Track &track, bool writable)
 
     QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
     statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
+}
+
+void MainWindow::configureMpdSource()
+{
+    QString startPath = m_database->setting(QStringLiteral("mpd.configPath"));
+    if (startPath.isEmpty()) {
+        for (const QString &candidate : MpdConfigParser::defaultConfigCandidates()) {
+            if (QFileInfo::exists(candidate)) {
+                startPath = candidate;
+                break;
+            }
+        }
+    }
+
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      QStringLiteral("Choose MPD config"),
+                                                      startPath.isEmpty() ? QDir::homePath() : startPath,
+                                                      QStringLiteral("MPD config (*.conf);;All files (*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    const MpdConfig config = MpdConfigParser::parseFile(path, &error);
+    if (config.musicDirectory.isEmpty()) {
+        QMessageBox::warning(this,
+                             QStringLiteral("MPD source"),
+                             error.isEmpty()
+                                 ? QStringLiteral("Could not find music_directory in %1").arg(path)
+                                 : QStringLiteral("%1\n%2").arg(path, error));
+        return;
+    }
+
+    m_database->setSetting(QStringLiteral("mpd.configPath"), path);
+    m_database->setSetting(QStringLiteral("mpd.musicDirectory"), config.musicDirectory);
+    m_database->setSetting(QStringLiteral("mpd.playlistDirectory"), config.playlistDirectory);
+    statusBar()->showMessage(QStringLiteral("MPD music directory: %1").arg(config.musicDirectory), 5000);
+}
+
+void MainWindow::findMpdFile()
+{
+    const QString musicDirectory = mpdMusicDirectory();
+    if (musicDirectory.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Find MPD file"), QStringLiteral("Configure an MPD source first."));
+        return;
+    }
+
+    bool ok = false;
+    const QString uri = QInputDialog::getText(this,
+                                              QStringLiteral("Find MPD file"),
+                                              QStringLiteral("MPD relative URI"),
+                                              QLineEdit::Normal,
+                                              {},
+                                              &ok)
+                            .trimmed();
+    if (!ok || uri.isEmpty()) {
+        return;
+    }
+
+    const PathResolver resolver(m_database->linkRoots());
+    const PathResolution resolution = resolver.resolveMpdUri(uri, musicDirectory, PathUse::Read);
+    if (resolution.preferredPath.isEmpty()) {
+        QMessageBox::warning(this,
+                             QStringLiteral("Find MPD file"),
+                             QStringLiteral("%1\n\nCandidates:\n%2")
+                                 .arg(resolution.failureReason, resolution.candidates.join(QLatin1Char('\n'))));
+        return;
+    }
+
+    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
+    statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
+}
+
+QString MainWindow::mpdMusicDirectory() const
+{
+    QString musicDirectory = m_database->setting(QStringLiteral("mpd.musicDirectory"));
+    if (!musicDirectory.isEmpty()) {
+        return musicDirectory;
+    }
+
+    const QString configPath = m_database->setting(QStringLiteral("mpd.configPath"));
+    if (!configPath.isEmpty()) {
+        QString error;
+        const MpdConfig config = MpdConfigParser::parseFile(configPath, &error);
+        Q_UNUSED(error)
+        if (!config.musicDirectory.isEmpty()) {
+            return config.musicDirectory;
+        }
+    }
+
+    for (const QString &candidate : MpdConfigParser::defaultConfigCandidates()) {
+        if (!QFileInfo::exists(candidate)) {
+            continue;
+        }
+        QString error;
+        const MpdConfig config = MpdConfigParser::parseFile(candidate, &error);
+        Q_UNUSED(error)
+        if (!config.musicDirectory.isEmpty()) {
+            return config.musicDirectory;
+        }
+    }
+
+    return {};
 }
 
 void MainWindow::configureListenBrainz()

@@ -23,6 +23,8 @@ protected:
 signals:
     void openLibraryRequested();
     void linkRootsRequested();
+    void mpdSourceRequested();
+    void mpdFindFileRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void previousRequested();

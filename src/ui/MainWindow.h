@@ -49,6 +49,9 @@ private:
     void applySharedTableSettings();
     void configureLinkRoots();
     void findTrackFile(const Track &track, bool writable);
+    void configureMpdSource();
+    void findMpdFile();
+    QString mpdMusicDirectory() const;
     void configureListenBrainz();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
