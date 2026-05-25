@@ -12,6 +12,11 @@ StarRatingDelegate::StarRatingDelegate(QObject *parent)
 {
 }
 
+void StarRatingDelegate::setHoveredRow(int row)
+{
+    m_hoveredRow = row;
+}
+
 bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index)
 {
     if (!index.isValid() || model == nullptr) {
@@ -43,10 +48,16 @@ bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, c
 
 void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
-    if ((option.state & QStyle::State_MouseOver) && !(option.state & QStyle::State_Selected) && option.widget != nullptr) {
+    const bool selected = option.state & QStyle::State_Selected;
+    const bool hovered = (m_hoveredRow == index.row()) || (option.state & QStyle::State_MouseOver);
+    if (selected) {
+        painter->fillRect(option.rect, option.palette.color(QPalette::Highlight));
+    } else if (hovered) {
         QColor hover = option.palette.color(QPalette::Highlight);
         hover.setAlpha(34);
-        painter->fillRect(QRect(0, option.rect.top(), option.widget->width(), option.rect.height()), hover);
+        painter->fillRect(option.rect, hover);
+    } else if (index.row() % 2 == 1) {
+        painter->fillRect(option.rect, option.palette.color(QPalette::AlternateBase));
     }
     const int value = index.data(Qt::UserRole).toInt();
     const int hoverValue = index.data(Qt::UserRole + 2).isValid() ? index.data(Qt::UserRole + 2).toInt() : StarRating::unset;
