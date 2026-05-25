@@ -49,7 +49,10 @@ set(MUZAITEN_SOURCES
     src/scanner/ScanWorker.cpp
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
+    src/scanner/RatingTagSyncWorker.cpp
+    src/scanner/TagRating.cpp
     src/scanner/TagReader.cpp
+    src/scanner/TagRatingWriter.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumGridDelegate.cpp
@@ -87,8 +90,11 @@ set(MUZAITEN_HEADERS
     src/playback/QtPlaybackBackend.h
     src/scanner/ArtworkResolver.h
     src/scanner/LibraryScanner.h
+    src/scanner/RatingTagSyncWorker.h
     src/scanner/ScanWorker.h
+    src/scanner/TagRating.h
     src/scanner/TagReader.h
+    src/scanner/TagRatingWriter.h
     src/scrobble/ListenBrainzScrobbler.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h

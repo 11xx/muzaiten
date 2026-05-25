@@ -12,8 +12,12 @@ class SchemaTest final : public QObject {
 private slots:
     void migratesFreshDatabase();
     void upsertsTrackAndQueriesArtist();
-    void userTrackRatingOverridesScannedRating();
+    void scannedRatingOverridesUserRating();
+    void pendingUserRatingOverridesScannedRating();
+    void pendingRatingWritesRoundTrip();
+    void tracksWithUserRatingsRoundTrip();
     void userAlbumRatingOverridesAverageRating();
+    void pendingTrackRatingAffectsAlbumAverage();
     void appSettingRoundTrips();
     void linkRootRoundTrips();
     void mpdTracksRoundTrip();
@@ -53,7 +57,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 3);
+    QCOMPARE(query.value(0).toInt(), 4);
 }
 
 void SchemaTest::upsertsTrackAndQueriesArtist()
@@ -79,7 +83,7 @@ void SchemaTest::upsertsTrackAndQueriesArtist()
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
 }
 
-void SchemaTest::userTrackRatingOverridesScannedRating()
+void SchemaTest::scannedRatingOverridesUserRating()
 {
     QTemporaryDir temp;
     QVERIFY(temp.isValid());
@@ -94,13 +98,81 @@ void SchemaTest::userTrackRatingOverridesScannedRating()
     QVector<Track> tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
     QCOMPARE(tracks.size(), 1);
     QCOMPARE(tracks.first().rating0To100, 80);
-    QCOMPARE(tracks.first().effectiveRating0To100, 30);
+    QCOMPARE(tracks.first().effectiveRating0To100, 80);
     QVERIFY(tracks.first().hasUserRating);
 
     QVERIFY2(database.clearUserTrackRating(track.path), qPrintable(database.lastError()));
     tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
     QVERIFY(!tracks.first().hasUserRating);
+}
+
+void SchemaTest::pendingUserRatingOverridesScannedRating()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-pending-user-track-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    QVERIFY2(database.setUserTrackRating(track.path, 30), qPrintable(database.lastError()));
+    QVERIFY2(database.setPendingTrackRatingWrite(track.path, 30, QStringLiteral("pending")), qPrintable(database.lastError()));
+
+    QVector<Track> tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().rating0To100, 80);
+    QCOMPARE(tracks.first().effectiveRating0To100, 30);
+
+    QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
+    tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
+    QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::pendingRatingWritesRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-pending-rating-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const Track track = makeTrack(temp, QStringLiteral("01.flac"), Rating::unset);
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    QVERIFY2(database.setPendingTrackRatingWrite(track.path, 70, QStringLiteral("pending")), qPrintable(database.lastError()));
+
+    QVector<Track> tracks = database.tracksWithPendingRatingWrites();
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().path, track.path);
+    QCOMPARE(tracks.first().effectiveRating0To100, 70);
+
+    QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
+    tracks = database.tracksWithPendingRatingWrites();
+    QCOMPARE(tracks.size(), 0);
+}
+
+void SchemaTest::tracksWithUserRatingsRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-user-ratings-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), Rating::unset);
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    QVERIFY2(database.setUserTrackRating(track.path, 60), qPrintable(database.lastError()));
+
+    QVector<Track> tracks = database.tracksWithUserRatings();
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().path, track.path);
+    QCOMPARE(tracks.first().effectiveRating0To100, 60);
+
+    QVERIFY2(database.updateScannedTrackRating(track.path, 90, Rating::Source::MusicBeeCompatible, 100, 200), qPrintable(database.lastError()));
+    tracks = database.tracksWithUserRatings();
+    QCOMPARE(tracks.first().rating0To100, 90);
+    QCOMPARE(tracks.first().effectiveRating0To100, 90);
 }
 
 void SchemaTest::userAlbumRatingOverridesAverageRating()
@@ -122,6 +194,30 @@ void SchemaTest::userAlbumRatingOverridesAverageRating()
     albums = database.albumsForArtist(QStringLiteral("Album Artist"));
     QCOMPARE(albums.first().effectiveRating0To100, 90);
     QVERIFY(albums.first().hasUserRating);
+}
+
+void SchemaTest::pendingTrackRatingAffectsAlbumAverage()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-pending-album-average-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const Track first = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    const Track second = makeTrack(temp, QStringLiteral("02.flac"), 40);
+    QVERIFY2(database.upsertTrack(first), qPrintable(database.lastError()));
+    QVERIFY2(database.upsertTrack(second), qPrintable(database.lastError()));
+    QVERIFY2(database.setUserTrackRating(first.path, 20), qPrintable(database.lastError()));
+    QVERIFY2(database.setPendingTrackRatingWrite(first.path, 20, QStringLiteral("pending")), qPrintable(database.lastError()));
+
+    QVector<Album> albums = database.albumsForArtist(QStringLiteral("Album Artist"));
+    QCOMPARE(albums.size(), 1);
+    QCOMPARE(albums.first().effectiveRating0To100, 30);
+
+    QVERIFY2(database.clearPendingTrackRatingWrite(first.path), qPrintable(database.lastError()));
+    albums = database.albumsForArtist(QStringLiteral("Album Artist"));
+    QCOMPARE(albums.first().effectiveRating0To100, 60);
 }
 
 void SchemaTest::appSettingRoundTrips()

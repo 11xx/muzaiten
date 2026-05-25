@@ -44,6 +44,11 @@ private:
     void refreshTrackTable();
     void applyTrackRating(const Track &track, int rating0To100);
     void applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
+    void startRatingTagSync(const QVector<Track> &tracks, int scope);
+    void syncCurrentTrackRatingTags();
+    void syncCurrentArtistRatingTags();
+    void syncAllSavedRatingTags();
+    void retryPendingRatingTags();
     void loadViewSettings();
     void saveTrackTableViewSettings();
     void saveAlbumGridViewSettings();
