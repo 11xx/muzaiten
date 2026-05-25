@@ -219,6 +219,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
+    connect(m_rightSidebar, &RightSidebar::queueOrderChanged, this, &MainWindow::reorderQueue);
+    connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
+    connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
@@ -1211,6 +1214,102 @@ void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    saveQueueState();
+}
+
+void MainWindow::reorderQueue(const QVector<int> &oldRowsInNewOrder)
+{
+    if (oldRowsInNewOrder.size() != m_queue.size()) {
+        m_rightSidebar->setQueue(m_queue);
+        m_rightSidebar->setCurrentIndex(m_queueIndex);
+        return;
+    }
+
+    QVector<Track> reordered;
+    reordered.reserve(m_queue.size());
+    int newQueueIndex = -1;
+    for (int newRow = 0; newRow < oldRowsInNewOrder.size(); ++newRow) {
+        const int oldRow = oldRowsInNewOrder.at(newRow);
+        if (oldRow < 0 || oldRow >= m_queue.size()) {
+            m_rightSidebar->setQueue(m_queue);
+            m_rightSidebar->setCurrentIndex(m_queueIndex);
+            return;
+        }
+        reordered.push_back(m_queue.at(oldRow));
+        if (oldRow == m_queueIndex) {
+            newQueueIndex = newRow;
+        }
+    }
+
+    m_queue = reordered;
+    m_queueIndex = newQueueIndex;
+    m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    saveQueueState();
+}
+
+void MainWindow::removeQueueRows(const QVector<int> &rows)
+{
+    if (rows.isEmpty() || m_queue.isEmpty()) {
+        return;
+    }
+
+    QVector<int> sortedRows = rows;
+    std::sort(sortedRows.begin(), sortedRows.end());
+    sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
+
+    QVector<Track> remaining;
+    remaining.reserve(m_queue.size());
+    int newQueueIndex = -1;
+    int removedBeforeCurrent = 0;
+    bool removedCurrent = false;
+    int removeCursor = 0;
+    for (int row = 0; row < m_queue.size(); ++row) {
+        const bool remove = removeCursor < sortedRows.size() && sortedRows.at(removeCursor) == row;
+        if (remove) {
+            if (row < m_queueIndex) {
+                ++removedBeforeCurrent;
+            } else if (row == m_queueIndex) {
+                removedCurrent = true;
+            }
+            ++removeCursor;
+            continue;
+        }
+        remaining.push_back(m_queue.at(row));
+    }
+
+    if (!removedCurrent && m_queueIndex >= 0) {
+        newQueueIndex = m_queueIndex - removedBeforeCurrent;
+    } else if (!remaining.isEmpty()) {
+        newQueueIndex = std::min(m_queueIndex - removedBeforeCurrent, static_cast<int>(remaining.size()) - 1);
+    }
+
+    m_queue = remaining;
+    m_queueIndex = std::clamp(newQueueIndex, -1, static_cast<int>(m_queue.size()) - 1);
+    m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    saveQueueState();
+    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
+        presentTrack(m_queue.at(m_queueIndex), false);
+    } else {
+        m_currentTrack = {};
+        m_playerBar->setTrackText({});
+        m_rightSidebar->setTrackInfo({});
+    }
+}
+
+void MainWindow::clearQueue()
+{
+    m_queue.clear();
+    m_queueIndex = -1;
+    m_playNextInsertIndex = -1;
+    m_currentTrack = {};
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    m_playerBar->setTrackText({});
+    m_rightSidebar->setTrackInfo({});
     saveQueueState();
 }
 

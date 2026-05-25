@@ -29,6 +29,9 @@ public:
 
 signals:
     void queueTrackActivated(int index);
+    void queueOrderChanged(const QVector<int> &oldRowsInNewOrder);
+    void queueRowsRemoveRequested(const QVector<int> &rows);
+    void queueClearRequested();
     void artistRequested(const QString &artistName);
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);

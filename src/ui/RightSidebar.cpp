@@ -10,6 +10,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDropEvent>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
@@ -41,6 +42,33 @@ struct ColumnSpec {
     const char *key;
     const char *label;
     int index;
+};
+
+class QueueTableWidget final : public QTableWidget {
+    Q_OBJECT
+
+public:
+    using QTableWidget::QTableWidget;
+
+signals:
+    void rowOrderChanged(QVector<int> oldRowsInNewOrder);
+
+protected:
+    void dropEvent(QDropEvent *event) override
+    {
+        QTableWidget::dropEvent(event);
+
+        QVector<int> order;
+        order.reserve(rowCount());
+        for (int row = 0; row < rowCount(); ++row) {
+            const QTableWidgetItem *rowItem = item(row, 0);
+            if (rowItem == nullptr) {
+                return;
+            }
+            order.push_back(rowItem->data(Qt::UserRole).toInt());
+        }
+        emit rowOrderChanged(order);
+    }
 };
 
 constexpr ColumnSpec columns[] = {
@@ -221,14 +249,21 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_splitter->setChildrenCollapsible(false);
     layout->addWidget(m_splitter, 1);
 
-    m_queueTable = new QTableWidget(0, 3, m_splitter);
+    auto *queueTable = new QueueTableWidget(0, 3, m_splitter);
+    m_queueTable = queueTable;
     m_queueTable->setHorizontalHeaderLabels({
         QStringLiteral("#"),
         QStringLiteral("Title"),
         QStringLiteral("Rating"),
     });
     m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_queueTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_queueTable->setDragEnabled(true);
+    m_queueTable->setAcceptDrops(true);
+    m_queueTable->setDropIndicatorShown(true);
+    m_queueTable->setDragDropMode(QAbstractItemView::InternalMove);
+    m_queueTable->setDragDropOverwriteMode(false);
     m_queueTable->setItemDelegate(new DenseTableDelegate(this));
     m_queueTable->setShowGrid(false);
     m_queueTable->setWordWrap(false);
@@ -255,6 +290,7 @@ RightSidebar::RightSidebar(QWidget *parent)
         emit viewSettingsChanged();
     });
     connect(m_queueTable, &QTableWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
+    connect(queueTable, &QueueTableWidget::rowOrderChanged, this, &RightSidebar::queueOrderChanged);
 
     m_trackInfoPane = new QFrame(m_splitter);
     auto *infoLayout = new QVBoxLayout(m_trackInfoPane);
@@ -314,9 +350,15 @@ void RightSidebar::setQueue(const QVector<Track> &tracks)
     for (int row = 0; row < tracks.size(); ++row) {
         const Track &track = tracks.at(row);
         m_queueTable->insertRow(row);
-        m_queueTable->setItem(row, 0, new QTableWidgetItem(QString::number(row + 1)));
-        m_queueTable->setItem(row, 1, new QTableWidgetItem(track.title));
-        m_queueTable->setItem(row, 2, new QTableWidgetItem(ratingText(track.effectiveRating0To100)));
+        auto *position = new QTableWidgetItem(QString::number(row + 1));
+        position->setData(Qt::UserRole, row);
+        m_queueTable->setItem(row, 0, position);
+        auto *title = new QTableWidgetItem(track.title);
+        title->setData(Qt::UserRole, row);
+        m_queueTable->setItem(row, 1, title);
+        auto *rating = new QTableWidgetItem(ratingText(track.effectiveRating0To100));
+        rating->setData(Qt::UserRole, row);
+        m_queueTable->setItem(row, 2, rating);
     }
 }
 
@@ -711,12 +753,36 @@ void RightSidebar::showQueueMenu(const QPoint &pos)
     if (row < 0 || row >= m_tracks.size()) {
         return;
     }
+    if (!m_queueTable->selectionModel()->isRowSelected(row, QModelIndex())) {
+        m_queueTable->selectRow(row);
+    }
 
     const Track track = m_tracks.at(row);
     QMenu menu(this);
+    QAction *play = menu.addAction(QStringLiteral("Play"));
+    connect(play, &QAction::triggered, this, [this, row]() {
+        emit queueTrackActivated(row);
+    });
+    menu.addSeparator();
     QAction *findFile = menu.addAction(QStringLiteral("Find file"));
     connect(findFile, &QAction::triggered, this, [this, track]() {
         emit findFileRequested(track);
     });
+    QAction *removeSelected = menu.addAction(QStringLiteral("Remove selected"));
+    connect(removeSelected, &QAction::triggered, this, [this]() {
+        QVector<int> rows;
+        const QModelIndexList selected = m_queueTable->selectionModel()->selectedRows();
+        rows.reserve(selected.size());
+        for (const QModelIndex &index : selected) {
+            rows.push_back(index.row());
+        }
+        emit queueRowsRemoveRequested(rows);
+    });
+    QAction *clearQueue = menu.addAction(QStringLiteral("Clear queue"));
+    connect(clearQueue, &QAction::triggered, this, [this]() {
+        emit queueClearRequested();
+    });
     menu.exec(m_queueTable->viewport()->mapToGlobal(pos));
 }
+
+#include "RightSidebar.moc"
