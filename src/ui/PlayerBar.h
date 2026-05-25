@@ -31,6 +31,7 @@ signals:
     void syncAllSavedRatingTagsRequested();
     void retryPendingRatingTagsRequested();
     void playbackProfileRequested();
+    void playbackResumeRequested();
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdImportRequested();

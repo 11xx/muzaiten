@@ -64,6 +64,7 @@ set(MUZAITEN_SOURCES
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
     src/ui/PlaybackProfileDialog.cpp
+    src/ui/PlaybackResumeDialog.cpp
     src/ui/PlayerBar.cpp
     src/ui/RightSidebar.cpp
     src/ui/SourceDirectoriesDialog.cpp
@@ -110,6 +111,7 @@ set(MUZAITEN_HEADERS
     src/ui/LinkRootsDialog.h
     src/ui/MainWindow.h
     src/ui/PlaybackProfileDialog.h
+    src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
     src/ui/RightSidebar.h
     src/ui/SourceDirectoriesDialog.h

@@ -267,6 +267,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     auto *playbackMenu = new QMenu(QStringLiteral("Playback"), this);
     QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
+    QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
 
     auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
     QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
@@ -402,6 +403,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(syncAllSavedRatingTags, &QAction::triggered, this, &PlayerBar::syncAllSavedRatingTagsRequested);
     connect(retryPendingRatingTags, &QAction::triggered, this, &PlayerBar::retryPendingRatingTagsRequested);
     connect(playbackOutput, &QAction::triggered, this, &PlayerBar::playbackProfileRequested);
+    connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);

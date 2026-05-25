@@ -19,6 +19,7 @@
 #include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
 #include "ui/PlaybackProfileDialog.h"
+#include "ui/PlaybackResumeDialog.h"
 #include "ui/RightSidebar.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/TrackTable.h"
@@ -46,6 +47,7 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QThread>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QUuid>
@@ -113,6 +115,23 @@ MainView mainViewFromName(const QString &name)
         return MainView::FreeRoamFileExplorer;
     }
     return MainView::LibraryPanels;
+}
+
+QString playbackStateName(PlaybackBackend::State state)
+{
+    switch (state) {
+    case PlaybackBackend::State::Playing:
+        return QStringLiteral("playing");
+    case PlaybackBackend::State::Paused:
+        return QStringLiteral("paused");
+    case PlaybackBackend::State::Buffering:
+        return QStringLiteral("buffering");
+    case PlaybackBackend::State::Error:
+        return QStringLiteral("error");
+    case PlaybackBackend::State::Stopped:
+        break;
+    }
+    return QStringLiteral("stopped");
 }
 
 QJsonObject trackToJson(const Track &track)
@@ -263,6 +282,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_playback = new GStreamerPlaybackBackend(this);
     m_mpris = new MprisService(this);
+    m_playbackStateSaveTimer = new QTimer(this);
+    m_playbackStateSaveTimer->setSingleShot(true);
+    m_playbackStateSaveTimer->setInterval(2000);
+    connect(m_playbackStateSaveTimer, &QTimer::timeout, this, [this]() {
+        savePlaybackState();
+    });
 
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
@@ -327,6 +352,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
     connect(m_playerBar, &PlayerBar::retryPendingRatingTagsRequested, this, &MainWindow::retryPendingRatingTags);
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
+    connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
@@ -378,6 +404,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_playerBar->setPlaying(playing);
         m_mpris->setPlaybackState(state);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
     });
     connect(m_playback, &PlaybackBackend::finished, this, [this]() {
         if (m_queueIndex + 1 < m_queue.size()) {
@@ -407,11 +434,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
     loadPlaybackProfile();
+    loadPlaybackResumeSettings();
     loadViewSettings();
     loadQueueState();
     loadExplorerState();
     configureListenBrainz();
     loadExistingLibrary();
+    restoreSavedPlaybackState();
 }
 
 MainWindow::~MainWindow()
@@ -445,6 +474,7 @@ void MainWindow::openLibraryFolder()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    savePlaybackState(true);
     saveQueueState();
     saveExplorerState();
     saveMainWindowViewSettings();
@@ -1136,6 +1166,94 @@ void MainWindow::savePlaybackProfile()
     m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(m_playbackProfile));
 }
 
+void MainWindow::loadPlaybackResumeSettings()
+{
+    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("playback.resumeSettings")).toUtf8()).object();
+    m_savePlaybackPositionEnabled = root.value(QStringLiteral("savePosition")).toBool(true);
+    m_restorePlaybackStateEnabled = root.value(QStringLiteral("restorePlaybackState")).toBool(true);
+}
+
+void MainWindow::savePlaybackResumeSettings()
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("savePosition"), m_savePlaybackPositionEnabled);
+    root.insert(QStringLiteral("restorePlaybackState"), m_restorePlaybackStateEnabled);
+    m_database->setSetting(QStringLiteral("playback.resumeSettings"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::schedulePlaybackStateSave(bool immediate)
+{
+    if (!m_savePlaybackPositionEnabled && !m_restorePlaybackStateEnabled) {
+        return;
+    }
+    if (immediate) {
+        savePlaybackState();
+        return;
+    }
+    if (m_playbackStateSaveTimer != nullptr) {
+        m_playbackStateSaveTimer->start();
+    }
+}
+
+void MainWindow::savePlaybackState(bool force)
+{
+    if (!m_savePlaybackPositionEnabled && !m_restorePlaybackStateEnabled) {
+        return;
+    }
+
+    const qint64 positionMs = m_savePlaybackPositionEnabled ? std::max<qint64>(0, m_playback->position()) : 0;
+    const PlaybackBackend::State state = m_playback->state();
+    const QString stateName = playbackStateName(state);
+    const bool meaningfulPositionChange = std::llabs(positionMs - m_lastSavedPlaybackPositionMs) >= 5000;
+    const bool stateChanged = stateName != m_lastSavedPlaybackState;
+    const bool trackChanged = m_currentTrack.path != m_lastSavedPlaybackTrackPath;
+    if (!force && !meaningfulPositionChange && !stateChanged && !trackChanged) {
+        return;
+    }
+
+    QJsonObject root;
+    root.insert(QStringLiteral("queueIndex"), m_queueIndex);
+    root.insert(QStringLiteral("trackPath"), m_currentTrack.path);
+    root.insert(QStringLiteral("positionMs"), QString::number(positionMs));
+    root.insert(QStringLiteral("state"), stateName);
+    m_database->setSetting(QStringLiteral("playback.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    m_lastSavedPlaybackPositionMs = positionMs;
+    m_lastSavedPlaybackTrackPath = m_currentTrack.path;
+    m_lastSavedPlaybackState = stateName;
+}
+
+void MainWindow::restoreSavedPlaybackState()
+{
+    if (!m_restorePlaybackStateEnabled) {
+        return;
+    }
+
+    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("playback.state")).toUtf8()).object();
+    const int queueIndex = root.value(QStringLiteral("queueIndex")).toInt(-1);
+    const QString trackPath = root.value(QStringLiteral("trackPath")).toString();
+    const qint64 positionMs = root.value(QStringLiteral("positionMs")).toString().toLongLong();
+    const QString state = root.value(QStringLiteral("state")).toString(QStringLiteral("stopped"));
+    if (queueIndex < 0 || queueIndex >= m_queue.size() || trackPath.isEmpty() || m_queue.at(queueIndex).path != trackPath) {
+        return;
+    }
+    if (state != QStringLiteral("playing") && state != QStringLiteral("paused")) {
+        return;
+    }
+
+    playQueueIndex(queueIndex);
+    QTimer::singleShot(250, this, [this, positionMs, state]() {
+        if (positionMs > 0) {
+            m_playback->seek(positionMs);
+            m_playerBar->setPosition(positionMs, std::max<qint64>(m_playback->duration(), m_currentTrack.durationMs));
+            m_mpris->setPositionMs(positionMs);
+        }
+        if (state == QStringLiteral("paused")) {
+            m_playback->pause();
+        }
+        savePlaybackState(true);
+    });
+}
+
 void MainWindow::configurePlaybackProfile()
 {
     PlaybackProfileDialog dialog(this);
@@ -1148,6 +1266,22 @@ void MainWindow::configurePlaybackProfile()
     savePlaybackProfile();
     m_playback->setProfile(m_playbackProfile);
     statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
+}
+
+void MainWindow::configurePlaybackResume()
+{
+    PlaybackResumeDialog dialog(this);
+    dialog.setSavePositionEnabled(m_savePlaybackPositionEnabled);
+    dialog.setRestorePlaybackStateEnabled(m_restorePlaybackStateEnabled);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    m_savePlaybackPositionEnabled = dialog.savePositionEnabled();
+    m_restorePlaybackStateEnabled = dialog.restorePlaybackStateEnabled();
+    savePlaybackResumeSettings();
+    savePlaybackState(true);
+    statusBar()->showMessage(QStringLiteral("Playback resume settings updated"), 3000);
 }
 
 void MainWindow::configureLinkRoots()
@@ -1678,6 +1812,7 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
         m_playerBar->setTrackText({});
         m_rightSidebar->setTrackInfo({});
         m_mpris->setTrack({});
+        savePlaybackState(true);
     }
 }
 
@@ -1693,6 +1828,7 @@ void MainWindow::clearQueue()
     m_rightSidebar->setTrackInfo({});
     m_mpris->setTrack({});
     saveQueueState();
+    savePlaybackState(true);
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)
@@ -1801,6 +1937,9 @@ void MainWindow::updatePlaybackPosition()
     m_playerBar->setPosition(m_playback->position(), m_playback->duration());
     m_mpris->setPositionMs(m_playback->position());
     m_mpris->setDurationMs(m_playback->duration());
+    if (m_playback->state() == PlaybackBackend::State::Playing || m_playback->state() == PlaybackBackend::State::Paused) {
+        schedulePlaybackStateSave(false);
+    }
 }
 
 void MainWindow::prepareNextQueueTrack()
