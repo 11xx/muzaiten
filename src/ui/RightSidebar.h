@@ -41,6 +41,7 @@ signals:
 private:
     void showHeaderMenu(const QPoint &pos);
     void showQueueMenu(const QPoint &pos);
+    void setQueueHoveredRow(int row);
     void applyTrackInfoSettingsJson(const QJsonObject &root);
     QJsonArray trackInfoSettingsJson() const;
     void updateTrackInfoLabels();
@@ -65,4 +66,5 @@ private:
     QVector<Track> m_tracks;
     Track m_currentTrack;
     QString m_trackInfoMetadataPattern;
+    int m_queueHoveredRow = -1;
 };

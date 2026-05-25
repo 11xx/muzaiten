@@ -11,6 +11,11 @@ DenseTableDelegate::DenseTableDelegate(QObject *parent)
 {
 }
 
+void DenseTableDelegate::setHoveredRow(int row)
+{
+    m_hoveredRow = row;
+}
+
 void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
     QStyleOptionViewItem opt(option);
@@ -29,7 +34,7 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
         }
     }
     const bool selected = opt.state & QStyle::State_Selected;
-    const bool hovered = opt.state & QStyle::State_MouseOver;
+    const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
 
     if (opt.widget != nullptr && firstVisibleColumn) {
         const QRect rowRect(0, opt.rect.top(), opt.widget->width(), opt.rect.height());
