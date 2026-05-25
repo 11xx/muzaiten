@@ -9,11 +9,11 @@ PlaybackResumeDialog::PlaybackResumeDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(QStringLiteral("Playback resume"));
+    resize(460, 170);
 
     auto *layout = new QVBoxLayout(this);
     auto *description = new QLabel(QStringLiteral(
-        "Persist the current playback position and restore the last playback state on restart. "
-        "Position saving is throttled and only committed when it meaningfully changes."));
+        "Persist the current playback position and restore the last playback state on restart."));
     description->setWordWrap(true);
     layout->addWidget(description);
 
