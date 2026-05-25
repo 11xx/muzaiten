@@ -77,6 +77,7 @@ constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
 
 QString ratingText(int rating0To100);
 QString formatDuration(qint64 durationMs);
+QString trackNumberText(const Track &track);
 
 enum QueueRoles {
     TrackRole = Qt::UserRole + 1,
@@ -95,9 +96,56 @@ public:
         return m_dropIndicatorRow;
     }
 
+    void fitVisibleColumnsToViewport()
+    {
+        if (model() == nullptr || m_fittingColumns) {
+            return;
+        }
+
+        QVector<int> visibleColumns;
+        int totalWidth = 0;
+        for (int column = 0; column < model()->columnCount(); ++column) {
+            if (isColumnHidden(column)) {
+                continue;
+            }
+            visibleColumns.push_back(column);
+            totalWidth += columnWidth(column);
+        }
+        if (visibleColumns.isEmpty() || totalWidth <= 0) {
+            return;
+        }
+
+        const int targetWidth = viewport()->width();
+        if (targetWidth <= 0 || totalWidth == targetWidth) {
+            return;
+        }
+
+        const QSignalBlocker blocker(horizontalHeader());
+        m_fittingColumns = true;
+        int remainingWidth = targetWidth;
+        for (int index = 0; index < visibleColumns.size(); ++index) {
+            const int column = visibleColumns.at(index);
+            int width = 0;
+            if (index == visibleColumns.size() - 1) {
+                width = remainingWidth;
+            } else {
+                width = std::max(24, (columnWidth(column) * targetWidth) / totalWidth);
+                remainingWidth -= width;
+            }
+            setColumnWidth(column, std::max(24, width));
+        }
+        m_fittingColumns = false;
+    }
+
     std::function<void(const QVector<int> &rows, int destinationRow)> rowsMoveRequested;
 
 protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QTableView::resizeEvent(event);
+        fitVisibleColumnsToViewport();
+    }
+
     void dragMoveEvent(QDragMoveEvent *event) override
     {
         QTableView::dragMoveEvent(event);
@@ -176,6 +224,7 @@ private:
     }
 
     int m_dropIndicatorRow = -1;
+    bool m_fittingColumns = false;
 };
 
 QString displayYear(const Track &track)
@@ -258,7 +307,7 @@ public:
         case 7:
             return displayYear(track);
         case 8:
-            return track.trackNumber > 0 ? QString::number(track.trackNumber) : QString();
+            return trackNumberText(track);
         default:
             return {};
         }
@@ -673,6 +722,25 @@ QString formatDuration(qint64 durationMs)
     return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
+QString trackNumberText(const Track &track)
+{
+    if (track.trackNumber > 0) {
+        return track.discNumber > 1
+            ? QStringLiteral("%1.%2").arg(track.discNumber).arg(track.trackNumber, 2, 10, QLatin1Char('0'))
+            : QString::number(track.trackNumber);
+    }
+
+    const QString base = QFileInfo(track.filename.isEmpty() ? track.path : track.filename).completeBaseName();
+    int end = 0;
+    while (end < base.size() && base.at(end).isDigit()) {
+        ++end;
+    }
+    if (end > 0) {
+        return base.left(end);
+    }
+    return {};
+}
+
 QString displayDate(const Track &track)
 {
     if (!track.originalDate.isEmpty()) {
@@ -735,6 +803,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setItemDelegate(new DenseTableDelegate(this));
     auto *queueRatingDelegate = new StarRatingDelegate(this);
     m_queueTable->setItemDelegateForColumn(2, queueRatingDelegate);
+    m_queueTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_queueTable->setShowGrid(false);
     m_queueTable->setWordWrap(false);
     m_queueTable->setMouseTracking(true);
@@ -756,6 +825,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setColumnWidth(6, 70);
     m_queueTable->setColumnWidth(7, 58);
     m_queueTable->setColumnWidth(8, 54);
+    static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
@@ -775,6 +845,7 @@ RightSidebar::RightSidebar(QWidget *parent)
         emit viewSettingsChanged();
     });
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
+        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
         emit viewSettingsChanged();
     });
     connect(m_queueTable, &QWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
@@ -1083,6 +1154,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
         for (const ColumnSpec &spec : columns) {
             m_queueTable->setColumnHidden(spec.index, !visibleKeys.contains(QString::fromLatin1(spec.key)));
         }
+        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     }
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
@@ -1090,6 +1162,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_queueTable->horizontalHeader()->restoreState(headerState);
+        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     }
     const QJsonArray splitter = root.value(QStringLiteral("splitter")).toArray();
     QList<int> sizes;
