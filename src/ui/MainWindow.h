@@ -11,6 +11,7 @@
 class Database;
 class AlbumGrid;
 class ArtistSidebar;
+class FileExplorerView;
 class QCloseEvent;
 class ListenBrainzScrobbler;
 class MprisService;
@@ -18,6 +19,7 @@ class PlayerBar;
 class PlaybackBackend;
 class QProgressBar;
 class QPushButton;
+class QStackedWidget;
 class QSplitter;
 class QThread;
 class MpdImportWorker;
@@ -26,6 +28,7 @@ class TrackTable;
 class ScanWorker;
 
 enum class LibrarySource { Local, Mpd };
+enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer };
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -58,6 +61,11 @@ private:
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
     void saveMainWindowViewSettings();
+    void switchMainView(MainView view);
+    void toggleFileExplorerView();
+    void setLibraryExplorerDirectory(const QString &path);
+    void setFreeRoamDirectory(const QString &path);
+    void refreshLibraryFileExplorer();
     void loadQueueState();
     void saveQueueState();
     void loadExplorerState();
@@ -123,12 +131,15 @@ private:
     void restoreCurrentSourceSelection();
 
     ArtistSidebar *m_artistSidebar = nullptr;
+    QStackedWidget *m_mainStack = nullptr;
     QSplitter *m_rootSplitter = nullptr;
     QSplitter *m_centerSplitter = nullptr;
     PlayerBar *m_playerBar = nullptr;
     AlbumGrid *m_albumGrid = nullptr;
     TrackTable *m_trackTable = nullptr;
     RightSidebar *m_rightSidebar = nullptr;
+    FileExplorerView *m_libraryFileExplorer = nullptr;
+    FileExplorerView *m_freeRoamFileExplorer = nullptr;
     QProgressBar *m_scanProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
     PlaybackBackend *m_playback = nullptr;
@@ -148,6 +159,9 @@ private:
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;
     LibrarySource m_librarySource = LibrarySource::Local;
+    MainView m_mainView = MainView::LibraryPanels;
+    QString m_libraryExplorerDirectory;
+    QString m_freeRoamDirectory;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_scanWorker = nullptr;
     QThread *m_listenBrainzThread = nullptr;
