@@ -24,6 +24,10 @@ protected:
 
 signals:
     void openLibraryRequested();
+    void syncCurrentTrackRatingTagsRequested();
+    void syncCurrentArtistRatingTagsRequested();
+    void syncAllSavedRatingTagsRequested();
+    void retryPendingRatingTagsRequested();
     void playbackProfileRequested();
     void linkRootsRequested();
     void mpdSourceRequested();

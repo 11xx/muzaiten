@@ -231,6 +231,11 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *fileMenu = new QMenu(QStringLiteral("File"), this);
     QAction *openLibrary = fileMenu->addAction(QStringLiteral("Open library folder..."));
     QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
+    auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
+    QAction *syncCurrentTrackRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current track rating to file"));
+    QAction *syncCurrentArtistRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current artist rated tracks"));
+    QAction *syncAllSavedRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync all saved rated tracks"));
+    QAction *retryPendingRatingTags = ratingTagsMenu->addAction(QStringLiteral("Retry pending rating writes"));
 
     auto *playbackMenu = new QMenu(QStringLiteral("Playback"), this);
     QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
@@ -362,6 +367,10 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
+    connect(syncCurrentTrackRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentTrackRatingTagsRequested);
+    connect(syncCurrentArtistRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentArtistRatingTagsRequested);
+    connect(syncAllSavedRatingTags, &QAction::triggered, this, &PlayerBar::syncAllSavedRatingTagsRequested);
+    connect(retryPendingRatingTags, &QAction::triggered, this, &PlayerBar::retryPendingRatingTagsRequested);
     connect(playbackOutput, &QAction::triggered, this, &PlayerBar::playbackProfileRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
