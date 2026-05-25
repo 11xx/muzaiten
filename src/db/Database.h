@@ -46,6 +46,7 @@ public:
     bool saveScanRoot(const ScanRoot &root);
     bool removeScanRoot(int id);
     bool setScanRootLastScanned(int id, const QString &lastError = {});
+    Track trackForPath(const QString &path) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);
