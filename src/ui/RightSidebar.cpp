@@ -59,11 +59,28 @@ constexpr ColumnSpec columns[] = {
     {"position", "#", 0},
     {"title", "Title", 1},
     {"rating", "Rating", 2},
+    {"artist", "Artist", 3},
+    {"album", "Album", 4},
+    {"duration", "Duration", 5},
+    {"year", "Year", 6},
+    {"track", "Track", 7},
 };
 
 constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
 
 QString ratingText(int rating0To100);
+QString formatDuration(qint64 durationMs);
+
+QString displayYear(const Track &track)
+{
+    for (const QString &candidate : {track.originalDate, track.date}) {
+        const QString trimmed = candidate.trimmed();
+        if (!trimmed.isEmpty()) {
+            return trimmed.left(4);
+        }
+    }
+    return {};
+}
 
 class QueueTableModel final : public QAbstractTableModel {
     Q_OBJECT
@@ -81,7 +98,7 @@ public:
 
     int columnCount(const QModelIndex &parent = {}) const override
     {
-        return parent.isValid() ? 0 : 3;
+        return parent.isValid() ? 0 : 8;
     }
 
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
@@ -111,6 +128,16 @@ public:
             return track.title;
         case 2:
             return ratingText(track.effectiveRating0To100);
+        case 3:
+            return track.artistName;
+        case 4:
+            return track.albumTitle;
+        case 5:
+            return formatDuration(track.durationMs);
+        case 6:
+            return displayYear(track);
+        case 7:
+            return track.trackNumber > 0 ? QString::number(track.trackNumber) : QString();
         default:
             return {};
         }
@@ -381,7 +408,7 @@ private:
     void resetScrollState()
     {
         m_scrollOffset = 0;
-        m_pauseTicksRemaining = 24;
+        m_pauseTicksRemaining = 100;
         updateScrollTimer();
         update();
     }
@@ -416,7 +443,7 @@ private:
         ++m_scrollOffset;
         if (m_scrollOffset >= textWidth + gap) {
             m_scrollOffset = 0;
-            m_pauseTicksRemaining = 18;
+            m_pauseTicksRemaining = 100;
         }
         update();
     }
@@ -579,10 +606,18 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(7, QHeaderView::ResizeToContents);
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     m_queueTable->viewport()->installEventFilter(this);
+    for (const int column : {3, 4, 5, 6, 7}) {
+        m_queueTable->setColumnHidden(column, true);
+    }
     m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
