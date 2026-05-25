@@ -230,6 +230,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *compactMenu = new QMenu(this);
     auto *fileMenu = new QMenu(QStringLiteral("File"), this);
     QAction *openLibrary = fileMenu->addAction(QStringLiteral("Open library folder..."));
+    QAction *sourceDirectories = fileMenu->addAction(QStringLiteral("Source directories..."));
+    QAction *scanEnabledSources = fileMenu->addAction(QStringLiteral("Scan enabled source directories"));
     QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
     QAction *syncCurrentTrackRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current track rating to file"));
@@ -367,6 +369,8 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
+    connect(sourceDirectories, &QAction::triggered, this, &PlayerBar::sourceDirectoriesRequested);
+    connect(scanEnabledSources, &QAction::triggered, this, &PlayerBar::scanEnabledSourcesRequested);
     connect(syncCurrentTrackRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentTrackRatingTagsRequested);
     connect(syncCurrentArtistRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentArtistRatingTagsRequested);
     connect(syncAllSavedRatingTags, &QAction::triggered, this, &PlayerBar::syncAllSavedRatingTagsRequested);
