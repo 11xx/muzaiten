@@ -54,6 +54,7 @@ private:
     void updateShuffleIcon();
 
     class QToolButton *m_menuButton = nullptr;
+    QWidget *m_menuStrip = nullptr;
     class QMenuBar *m_menuBar = nullptr;
     class QToolButton *m_playPause = nullptr;
     class QToolButton *m_shuffle = nullptr;
