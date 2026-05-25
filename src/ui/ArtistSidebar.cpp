@@ -84,7 +84,15 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_tabBar->addTab(QStringLiteral("Library"));
     m_tabBar->addTab(QStringLiteral("MPD"));
     m_tabBar->setExpanding(false);
+    m_tabBar->setDocumentMode(true);
+    m_tabBar->setDrawBase(false);
+    m_tabBar->setFixedHeight(22);
     m_tabBar->setTabEnabled(1, false);
+    m_tabBar->setVisible(false);
+    m_tabBar->setStyleSheet(QStringLiteral(
+        "QTabBar::tab { border: 0; padding: 2px 8px; margin: 0; min-height: 16px; }"
+        "QTabBar::tab:selected { border: 0; }"
+        "QTabBar::tab:!selected { border: 0; }"));
     layout->addWidget(m_tabBar);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &ArtistSidebar::librarySourceChanged);
@@ -127,6 +135,7 @@ void ArtistSidebar::setArtists(const QVector<Artist> &artists)
 void ArtistSidebar::setMpdAvailable(bool available)
 {
     m_mpdAvailable = available;
+    m_tabBar->setVisible(available);
     m_tabBar->setTabEnabled(1, available);
     if (!available && m_tabBar->currentIndex() == 1) {
         m_tabBar->setCurrentIndex(0);
@@ -177,7 +186,7 @@ void ArtistSidebar::applyViewSettingsJson(const QString &json)
 
     const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
     m_showAlbumCount = root.value(QStringLiteral("showAlbumCount")).toBool(true);
-    m_rowHeight = std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 18, 40);
+    m_rowHeight = std::clamp(root.value(QStringLiteral("rowHeight")).toInt(18), 18, 40);
     applyRowHeight();
 }
 

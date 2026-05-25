@@ -433,6 +433,7 @@ void MainWindow::loadExistingLibrary()
     m_artistSidebar->setLibrarySourceIndex(m_librarySource == LibrarySource::Mpd ? 1 : 0);
     if (m_librarySource == LibrarySource::Mpd && mpdSourceId <= 0) {
         m_librarySource = LibrarySource::Local;
+        restoreCurrentSourceSelection();
         m_artistSidebar->setLibrarySourceIndex(0);
     }
     refreshArtists();
@@ -449,6 +450,10 @@ void MainWindow::refreshArtists()
             selectArtist(m_currentArtist);
             return;
         }
+        if (!m_currentArtist.isEmpty()) {
+            m_currentArtist.clear();
+            m_selectedAlbumTitle.clear();
+        }
         if (!artists.isEmpty() && m_currentArtist.isEmpty()) {
             selectArtist(artists.first().name);
             m_artistSidebar->selectArtist(artists.first().name);
@@ -456,6 +461,8 @@ void MainWindow::refreshArtists()
         }
         if (artists.isEmpty()) {
             m_currentArtist.clear();
+            m_selectedAlbumTitle.clear();
+            rememberCurrentSourceSelection();
         }
         return;
     }
@@ -468,6 +475,11 @@ void MainWindow::refreshArtists()
         return;
     }
 
+    if (!m_currentArtist.isEmpty()) {
+        m_currentArtist.clear();
+        m_selectedAlbumTitle.clear();
+    }
+
     if (!artists.isEmpty() && m_currentArtist.isEmpty()) {
         selectArtist(artists.first().name);
         m_artistSidebar->selectArtist(artists.first().name);
@@ -476,6 +488,8 @@ void MainWindow::refreshArtists()
 
     if (artists.isEmpty()) {
         m_currentArtist.clear();
+        m_selectedAlbumTitle.clear();
+        rememberCurrentSourceSelection();
     }
 }
 
@@ -486,6 +500,7 @@ void MainWindow::selectArtist(const QString &artistName)
         m_selectedAlbumTitle.clear();
     }
     m_currentArtist = artistName;
+    rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
@@ -496,6 +511,7 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
 {
     rememberTrackTableViewState();
     m_selectedAlbumTitle = (m_selectedAlbumTitle == albumTitle) ? QString() : albumTitle;
+    rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
@@ -805,16 +821,22 @@ void MainWindow::loadExplorerState()
 {
     const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("libraryExplorer.state")).toUtf8()).object();
     m_librarySource = root.value(QStringLiteral("source")).toString() == QStringLiteral("mpd") ? LibrarySource::Mpd : LibrarySource::Local;
-    m_currentArtist = root.value(QStringLiteral("artist")).toString();
-    m_selectedAlbumTitle = root.value(QStringLiteral("album")).toString();
+    m_localArtist = root.value(QStringLiteral("localArtist")).toString(root.value(QStringLiteral("artist")).toString());
+    m_localAlbumTitle = root.value(QStringLiteral("localAlbum")).toString(root.value(QStringLiteral("album")).toString());
+    m_mpdArtist = root.value(QStringLiteral("mpdArtist")).toString();
+    m_mpdAlbumTitle = root.value(QStringLiteral("mpdAlbum")).toString();
+    restoreCurrentSourceSelection();
 }
 
 void MainWindow::saveExplorerState()
 {
+    rememberCurrentSourceSelection();
     QJsonObject root;
     root.insert(QStringLiteral("source"), m_librarySource == LibrarySource::Mpd ? QStringLiteral("mpd") : QStringLiteral("local"));
-    root.insert(QStringLiteral("artist"), m_currentArtist);
-    root.insert(QStringLiteral("album"), m_selectedAlbumTitle);
+    root.insert(QStringLiteral("localArtist"), m_localArtist);
+    root.insert(QStringLiteral("localAlbum"), m_localAlbumTitle);
+    root.insert(QStringLiteral("mpdArtist"), m_mpdArtist);
+    root.insert(QStringLiteral("mpdAlbum"), m_mpdAlbumTitle);
     m_database->setSetting(QStringLiteral("libraryExplorer.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
@@ -845,6 +867,28 @@ void MainWindow::applyCompactMenu(bool compact)
     QJsonObject root;
     root.insert(QStringLiteral("compactMenu"), compact);
     m_database->setSetting(QStringLiteral("playerBar.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::rememberCurrentSourceSelection()
+{
+    if (m_librarySource == LibrarySource::Mpd) {
+        m_mpdArtist = m_currentArtist;
+        m_mpdAlbumTitle = m_selectedAlbumTitle;
+    } else {
+        m_localArtist = m_currentArtist;
+        m_localAlbumTitle = m_selectedAlbumTitle;
+    }
+}
+
+void MainWindow::restoreCurrentSourceSelection()
+{
+    if (m_librarySource == LibrarySource::Mpd) {
+        m_currentArtist = m_mpdArtist;
+        m_selectedAlbumTitle = m_mpdAlbumTitle;
+    } else {
+        m_currentArtist = m_localArtist;
+        m_selectedAlbumTitle = m_localAlbumTitle;
+    }
 }
 
 void MainWindow::loadPlaybackProfile()
@@ -1034,12 +1078,14 @@ void MainWindow::importMpdLibraryMetadata()
 
 void MainWindow::onLibrarySourceChanged(int index)
 {
+    rememberCurrentSourceSelection();
     m_librarySource = (index == 1) ? LibrarySource::Mpd : LibrarySource::Local;
 
     if (m_librarySource == LibrarySource::Mpd && m_database->mpdSourceId() <= 0) {
         m_artistSidebar->setMpdAvailable(false);
         m_currentArtist.clear();
         m_selectedAlbumTitle.clear();
+        rememberCurrentSourceSelection();
         m_albumGrid->setAlbums({});
         m_trackTable->setTracks({});
         saveExplorerState();
@@ -1050,8 +1096,7 @@ void MainWindow::onLibrarySourceChanged(int index)
     m_albumGrid->setArtworkCacheRoot(
         m_librarySource == LibrarySource::Mpd ? mpdCacheRoot() : cacheRoot());
 
-    m_currentArtist.clear();
-    m_selectedAlbumTitle.clear();
+    restoreCurrentSourceSelection();
     saveExplorerState();
     refreshArtists();
 }
