@@ -13,6 +13,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QStandardItemModel>
+#include <QTimer>
 #include <algorithm>
 
 namespace {
@@ -27,6 +28,8 @@ enum Roles {
     CellPaddingRole = Qt::UserRole + 7,
     StarSizeRole = Qt::UserRole + 8,
     HasUserRatingRole = Qt::UserRole + 9,
+    RepresentativeDirRole = Qt::UserRole + 10,
+    ArtworkGenerationRole = Qt::UserRole + 11,
 };
 
 QString alignmentToString(Qt::Alignment alignment)
@@ -80,6 +83,9 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setContextMenuPolicy(Qt::CustomContextMenu);
     applySettingsToView();
     setItemDelegate(new AlbumGridDelegate(this));
+    m_artworkTimer = new QTimer(this);
+    m_artworkTimer->setInterval(0);
+    connect(m_artworkTimer, &QTimer::timeout, this, &AlbumGrid::loadNextAlbumArtwork);
 
     auto *model = new QStandardItemModel(this);
     auto *item = new QStandardItem(QStringLiteral("No library loaded"));
@@ -97,9 +103,12 @@ void AlbumGrid::setArtworkCacheRoot(const QString &cacheRoot)
 
 void AlbumGrid::setAlbums(const QVector<Album> &albums)
 {
+    m_artworkTimer->stop();
+    ++m_artworkGeneration;
+    m_nextArtworkRow = 0;
+
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
     itemModel->clear();
-    const ArtworkResolver resolver(m_artworkCacheRoot);
     const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
 
     for (const Album &album : albums) {
@@ -120,19 +129,17 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
         item->setData(m_padding, CellPaddingRole);
         item->setData(m_starSize, StarSizeRole);
         item->setData(album.hasUserRating, HasUserRatingRole);
+        item->setData(album.representativeDir, RepresentativeDirRole);
+        item->setData(m_artworkGeneration, ArtworkGenerationRole);
         item->setData(QSize(m_cellWidth, m_cellHeight), Qt::SizeHintRole);
         item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
-
-        QIcon albumIcon = fallbackIcon;
-        if (!album.representativeDir.isEmpty() && !m_artworkCacheRoot.isEmpty()) {
-            const ArtworkResult artwork = resolver.resolveForDirectory(album.representativeDir);
-            if (!artwork.cachePath.isEmpty()) {
-                albumIcon = QIcon(artwork.cachePath);
-            }
-        }
-        item->setIcon(albumIcon);
+        item->setIcon(fallbackIcon);
 
         itemModel->appendRow(item);
+    }
+
+    if (!albums.isEmpty() && !m_artworkCacheRoot.isEmpty()) {
+        m_artworkTimer->start();
     }
 }
 
@@ -290,4 +297,35 @@ void AlbumGrid::applySettingsToItems()
         item->setData(QSize(m_cellWidth, m_cellHeight), Qt::SizeHintRole);
     }
     viewport()->update();
+}
+
+void AlbumGrid::loadNextAlbumArtwork()
+{
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        m_artworkTimer->stop();
+        return;
+    }
+
+    while (m_nextArtworkRow < itemModel->rowCount()) {
+        QStandardItem *item = itemModel->item(m_nextArtworkRow);
+        ++m_nextArtworkRow;
+        if (item == nullptr || item->data(ArtworkGenerationRole).toInt() != m_artworkGeneration) {
+            continue;
+        }
+
+        const QString representativeDir = item->data(RepresentativeDirRole).toString();
+        if (representativeDir.isEmpty()) {
+            return;
+        }
+
+        const ArtworkResolver resolver(m_artworkCacheRoot);
+        const ArtworkResult artwork = resolver.resolveForDirectory(representativeDir);
+        if (!artwork.cachePath.isEmpty()) {
+            item->setIcon(QIcon(artwork.cachePath));
+        }
+        return;
+    }
+
+    m_artworkTimer->stop();
 }

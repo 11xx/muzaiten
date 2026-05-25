@@ -6,6 +6,7 @@
 class Album;
 class QEvent;
 class QMouseEvent;
+class QTimer;
 
 class AlbumGrid final : public QListView {
     Q_OBJECT
@@ -36,10 +37,14 @@ private:
     void showContextMenu(const QPoint &pos);
     void applySettingsToView();
     void applySettingsToItems();
+    void loadNextAlbumArtwork();
 
 private:
     QString m_artworkCacheRoot;
     QString m_selectedAlbumTitle;
+    QTimer *m_artworkTimer = nullptr;
+    int m_nextArtworkRow = 0;
+    int m_artworkGeneration = 0;
     int m_cellWidth = 204;
     int m_cellHeight = 292;
     int m_artSize = 176;
