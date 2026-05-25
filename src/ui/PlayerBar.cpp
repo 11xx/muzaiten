@@ -146,6 +146,32 @@ private:
     QMenu m_menu;
 };
 
+class ClickSeekSlider final : public QSlider {
+public:
+    explicit ClickSeekSlider(Qt::Orientation orientation, QWidget *parent = nullptr)
+        : QSlider(orientation, parent)
+    {
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton && orientation() == Qt::Horizontal && minimum() < maximum()) {
+            const int clickX = std::clamp(static_cast<int>(event->position().x()), 0, std::max(1, width()));
+            const int newValue = QStyle::sliderValueFromPosition(minimum(),
+                                                                 maximum(),
+                                                                 clickX,
+                                                                 std::max(1, width()));
+            setValue(newValue);
+            emit sliderMoved(newValue);
+            emit actionTriggered(QAbstractSlider::SliderMove);
+            event->accept();
+            return;
+        }
+        QSlider::mousePressEvent(event);
+    }
+};
+
 QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QString &tooltip)
 {
     auto *button = new QToolButton(parent);
@@ -335,7 +361,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_elapsed->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     timeline->addWidget(m_elapsed);
 
-    m_progress = new QSlider(Qt::Horizontal, this);
+    m_progress = new ClickSeekSlider(Qt::Horizontal, this);
     m_progress->setRange(0, 0);
     m_progress->setEnabled(false);
     timeline->addWidget(m_progress, 1);
