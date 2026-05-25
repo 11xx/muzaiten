@@ -42,6 +42,6 @@ private:
     QListView *m_view = nullptr;
     QStandardItemModel *m_model = nullptr;
     bool m_showAlbumCount = true;
-    int m_rowHeight = 20;
+    int m_rowHeight = 18;
     bool m_mpdAvailable = false;
 };

@@ -113,6 +113,8 @@ private:
     void updateCurrentAlbumArt();
     void applyTrackInfoPaneVisible(bool visible);
     void applyCompactMenu(bool compact);
+    void rememberCurrentSourceSelection();
+    void restoreCurrentSourceSelection();
 
     ArtistSidebar *m_artistSidebar = nullptr;
     QSplitter *m_rootSplitter = nullptr;
@@ -127,6 +129,10 @@ private:
     std::unique_ptr<Database> m_database;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
+    QString m_localArtist;
+    QString m_localAlbumTitle;
+    QString m_mpdArtist;
+    QString m_mpdAlbumTitle;
     Track m_currentTrack;
     PlaybackProfile m_playbackProfile;
     QVector<Track> m_queue;
