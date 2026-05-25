@@ -830,7 +830,35 @@ bool RightSidebar::eventFilter(QObject *watched, QEvent *event)
             return true;
         }
     }
+    if (watched == m_queueTable->viewport() && event->type() == QEvent::MouseMove) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        const QModelIndex index = m_queueTable->indexAt(mouse->pos());
+        setQueueHoveredRow(index.isValid() ? index.row() : -1);
+    } else if (watched == m_queueTable->viewport() && event->type() == QEvent::Leave) {
+        setQueueHoveredRow(-1);
+    }
     return QWidget::eventFilter(watched, event);
+}
+
+void RightSidebar::setQueueHoveredRow(int row)
+{
+    if (m_queueHoveredRow == row) {
+        return;
+    }
+
+    const int previous = m_queueHoveredRow;
+    m_queueHoveredRow = row;
+    if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(m_queueTable->itemDelegate())) {
+        denseDelegate->setHoveredRow(row);
+    }
+    if (previous >= 0) {
+        const QRect rect = m_queueTable->visualRect(m_queueTable->model()->index(previous, 0));
+        m_queueTable->viewport()->update(QRect(0, rect.top(), m_queueTable->viewport()->width(), rect.height()));
+    }
+    if (row >= 0) {
+        const QRect rect = m_queueTable->visualRect(m_queueTable->model()->index(row, 0));
+        m_queueTable->viewport()->update(QRect(0, rect.top(), m_queueTable->viewport()->width(), rect.height()));
+    }
 }
 
 void RightSidebar::changeEvent(QEvent *event)

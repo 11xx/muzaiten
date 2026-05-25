@@ -42,6 +42,8 @@ private:
     void showHeaderMenu(const QPoint &pos);
     void showCellMenu(const QPoint &pos);
     QVector<Track> tracksForContextRow(int row) const;
+    void setHoveredRow(int row);
 
     QPersistentModelIndex m_hoverRatingIndex;
+    int m_hoveredRow = -1;
 };

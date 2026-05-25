@@ -226,7 +226,8 @@ TrackTable::TrackTable(QWidget *parent)
     : QTableView(parent)
 {
     setModel(new TrackTableModel(this));
-    setItemDelegate(new DenseTableDelegate(this));
+    auto *denseDelegate = new DenseTableDelegate(this);
+    setItemDelegate(denseDelegate);
     auto *ratingDelegate = new StarRatingDelegate(this);
     setItemDelegateForColumn(0, ratingDelegate);
     setSortingEnabled(true);
@@ -367,6 +368,7 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
 void TrackTable::mouseMoveEvent(QMouseEvent *event)
 {
     const QModelIndex index = indexAt(event->pos());
+    setHoveredRow(index.isValid() ? index.row() : -1);
     const QModelIndex ratingIndex = index.isValid() && index.column() == 0 ? index : QModelIndex();
     if (m_hoverRatingIndex.isValid() && m_hoverRatingIndex != ratingIndex) {
         model()->setData(m_hoverRatingIndex, StarRating::unset, HoverRatingRole);
@@ -377,11 +379,33 @@ void TrackTable::mouseMoveEvent(QMouseEvent *event)
 
 void TrackTable::leaveEvent(QEvent *event)
 {
+    setHoveredRow(-1);
     if (m_hoverRatingIndex.isValid()) {
         model()->setData(m_hoverRatingIndex, StarRating::unset, HoverRatingRole);
         m_hoverRatingIndex = QModelIndex();
     }
     QTableView::leaveEvent(event);
+}
+
+void TrackTable::setHoveredRow(int row)
+{
+    if (m_hoveredRow == row) {
+        return;
+    }
+
+    const int previous = m_hoveredRow;
+    m_hoveredRow = row;
+    if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(itemDelegate())) {
+        denseDelegate->setHoveredRow(row);
+    }
+    if (previous >= 0) {
+        const QRect rect = visualRect(model()->index(previous, 0));
+        viewport()->update(QRect(0, rect.top(), viewport()->width(), rect.height()));
+    }
+    if (row >= 0) {
+        const QRect rect = visualRect(model()->index(row, 0));
+        viewport()->update(QRect(0, rect.top(), viewport()->width(), rect.height()));
+    }
 }
 
 void TrackTable::showHeaderMenu(const QPoint &pos)

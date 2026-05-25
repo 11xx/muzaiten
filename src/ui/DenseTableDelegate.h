@@ -8,5 +8,9 @@ class DenseTableDelegate final : public QStyledItemDelegate {
 public:
     explicit DenseTableDelegate(QObject *parent = nullptr);
 
+    void setHoveredRow(int row);
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+
+private:
+    int m_hoveredRow = -1;
 };
