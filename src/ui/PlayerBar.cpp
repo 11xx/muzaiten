@@ -23,6 +23,7 @@
 #include <QEvent>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 
@@ -189,11 +190,33 @@ QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QStr
 QToolButton *menuButton(QWidget *parent)
 {
     auto *button = new QToolButton(parent);
-    button->setText(QStringLiteral("..."));
     button->setToolTip(QStringLiteral("Menu"));
     button->setAutoRaise(true);
-    button->setFixedSize(34, 34);
     return button;
+}
+
+QIcon menuGearIcon(const QPalette &palette)
+{
+    QPixmap pixmap(24, 24);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(palette.color(QPalette::ButtonText), 1.7);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+
+    painter.drawLine(QPointF(4, 7), QPointF(11, 7));
+    painter.drawLine(QPointF(4, 12), QPointF(10, 12));
+    painter.drawLine(QPointF(4, 17), QPointF(11, 17));
+    painter.drawEllipse(QPointF(16, 12), 4.4, 4.4);
+    painter.drawEllipse(QPointF(16, 12), 1.35, 1.35);
+    for (int index = 0; index < 8; ++index) {
+        const double angle = (index * 45.0) * 3.14159265358979323846 / 180.0;
+        const QPointF inner(16 + std::cos(angle) * 5.3, 12 + std::sin(angle) * 5.3);
+        const QPointF outer(16 + std::cos(angle) * 6.7, 12 + std::sin(angle) * 6.7);
+        painter.drawLine(inner, outer);
+    }
+    return QIcon(pixmap);
 }
 
 QIcon shuffleIcon(const QPalette &palette)
@@ -296,14 +319,24 @@ PlayerBar::PlayerBar(QWidget *parent)
     compactMenu->addMenu(scrobblersMenu);
     compactMenu->addMenu(settingsMenu);
 
-    m_menuButton = menuButton(this);
+    m_menuStrip = new QWidget(this);
+    m_menuStrip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto *menuStripLayout = new QHBoxLayout(m_menuStrip);
+    menuStripLayout->setContentsMargins(0, 0, 0, 0);
+    menuStripLayout->setSpacing(0);
+
+    m_menuButton = menuButton(m_menuStrip);
     connect(m_menuButton, &QToolButton::clicked, this, [this, compactMenu]() {
         compactMenu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height())));
     });
 
-    m_menuBar = new QMenuBar(this);
+    m_menuBar = new QMenuBar(m_menuStrip);
     m_menuBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_menuBar->setFixedHeight(m_menuBar->fontMetrics().height() + 2);
+    const int menuStripHeight = m_menuBar->fontMetrics().height() + 2;
+    m_menuStrip->setFixedHeight(menuStripHeight);
+    m_menuButton->setFixedSize(34, menuStripHeight);
+    m_menuButton->setIcon(menuGearIcon(palette()));
+    m_menuBar->setFixedHeight(menuStripHeight);
     m_menuBar->setContentsMargins(0, 0, 0, 0);
     restyleMenuBar();
     m_menuBar->addMenu(fileMenu);
@@ -311,7 +344,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->addMenu(mpdMenu);
     m_menuBar->addMenu(scrobblersMenu);
     m_menuBar->addMenu(settingsMenu);
-    root->addWidget(m_menuBar);
+    menuStripLayout->addWidget(m_menuButton);
+    menuStripLayout->addWidget(m_menuBar, 1);
+    root->addWidget(m_menuStrip);
 
     auto *controls = new QHBoxLayout;
     controls->setContentsMargins(8, 6, 10, 8);
@@ -465,15 +500,11 @@ void PlayerBar::setCompactMenu(bool compact)
     }
     if (m_menuButton != nullptr) {
         m_menuButton->setVisible(compact);
-        if (compact) {
-            m_menuButton->raise();
-            m_menuButton->move(4, 4);
-        }
     }
     if (m_menuBar != nullptr) {
         m_menuBar->setVisible(!compact);
     }
-    setMinimumHeight(compact ? 72 : 82);
+    setMinimumHeight(82);
     updateGeometry();
 }
 
@@ -502,6 +533,9 @@ void PlayerBar::changeEvent(QEvent *event)
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
         restyleMenuBar();
+        if (m_menuButton != nullptr) {
+            m_menuButton->setIcon(menuGearIcon(palette()));
+        }
         updateShuffleIcon();
     }
 }
@@ -509,9 +543,6 @@ void PlayerBar::changeEvent(QEvent *event)
 void PlayerBar::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    if (m_menuButton != nullptr && m_menuButton->isVisible()) {
-        m_menuButton->move(4, 4);
-    }
 }
 
 void PlayerBar::restyleMenuBar()
@@ -534,10 +565,26 @@ void PlayerBar::restyleMenuBar()
         "  background: transparent;"
         "}"
         "QMenuBar::item:selected {"
-        "  background: palette(button);"
+        "  background: palette(highlight);"
+        "  color: palette(highlighted-text);"
         "}"
         "QMenuBar::item:pressed {"
-        "  background: palette(midlight);"
+        "  background: palette(dark);"
+        "  color: palette(highlighted-text);"
+        "}"
+        "QToolButton {"
+        "  margin: 0;"
+        "  padding: 0;"
+        "  border: 0;"
+        "  border-right: 1px solid palette(mid);"
+        "  background: transparent;"
+        "}"
+        "QToolButton:hover {"
+        "  background: palette(highlight);"
+        "  color: palette(highlighted-text);"
+        "}"
+        "QToolButton:pressed {"
+        "  background: palette(dark);"
         "}"));
 }
 
