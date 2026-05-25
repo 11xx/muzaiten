@@ -17,6 +17,8 @@
 #include <algorithm>
 
 namespace {
+constexpr int albumBatchSize = 24;
+
 enum Roles {
     AlbumTitleRole = Qt::UserRole,
     AlbumArtistRole = Qt::UserRole + 1,
@@ -83,6 +85,9 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setContextMenuPolicy(Qt::CustomContextMenu);
     applySettingsToView();
     setItemDelegate(new AlbumGridDelegate(this));
+    m_populateTimer = new QTimer(this);
+    m_populateTimer->setInterval(0);
+    connect(m_populateTimer, &QTimer::timeout, this, &AlbumGrid::appendNextAlbumBatch);
     m_artworkTimer = new QTimer(this);
     m_artworkTimer->setInterval(0);
     connect(m_artworkTimer, &QTimer::timeout, this, &AlbumGrid::loadNextAlbumArtwork);
@@ -103,15 +108,34 @@ void AlbumGrid::setArtworkCacheRoot(const QString &cacheRoot)
 
 void AlbumGrid::setAlbums(const QVector<Album> &albums)
 {
+    m_populateTimer->stop();
     m_artworkTimer->stop();
     ++m_artworkGeneration;
+    m_pendingAlbums = albums;
+    m_nextAlbumRow = 0;
     m_nextArtworkRow = 0;
 
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
     itemModel->clear();
-    const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
 
-    for (const Album &album : albums) {
+    if (!m_pendingAlbums.isEmpty()) {
+        appendNextAlbumBatch();
+    }
+}
+
+void AlbumGrid::appendNextAlbumBatch()
+{
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        m_populateTimer->stop();
+        return;
+    }
+
+    const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
+    const qsizetype end = std::min(m_nextAlbumRow + albumBatchSize, m_pendingAlbums.size());
+
+    for (; m_nextAlbumRow < end; ++m_nextAlbumRow) {
+        const Album &album = m_pendingAlbums.at(m_nextAlbumRow);
         QString label = album.title;
         if (!album.date.isEmpty()) {
             label += QStringLiteral("\n%1").arg(album.date.left(4));
@@ -138,7 +162,14 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
         itemModel->appendRow(item);
     }
 
-    if (!albums.isEmpty() && !m_artworkCacheRoot.isEmpty()) {
+    if (m_nextAlbumRow < m_pendingAlbums.size()) {
+        m_populateTimer->start();
+    } else {
+        m_populateTimer->stop();
+        m_pendingAlbums.clear();
+    }
+
+    if (itemModel->rowCount() > 0 && !m_artworkCacheRoot.isEmpty() && !m_artworkTimer->isActive()) {
         m_artworkTimer->start();
     }
 }
@@ -327,5 +358,7 @@ void AlbumGrid::loadNextAlbumArtwork()
         return;
     }
 
-    m_artworkTimer->stop();
+    if (!m_populateTimer->isActive()) {
+        m_artworkTimer->stop();
+    }
 }
