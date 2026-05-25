@@ -36,6 +36,7 @@
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QProgressBar>
+#include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
@@ -173,6 +174,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_scanProgress->setRange(0, 0);
     m_scanProgress->setVisible(false);
     statusBar()->addPermanentWidget(m_scanProgress);
+    m_stopScanButton = new QPushButton(QStringLiteral("Stop scan"), this);
+    m_stopScanButton->setVisible(false);
+    m_stopScanButton->setToolTip(QStringLiteral("Cancel the current library scan"));
+    statusBar()->addPermanentWidget(m_stopScanButton);
 
     m_playback = new GStreamerPlaybackBackend(this);
 
@@ -197,6 +202,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_listenBrainzThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
     connect(m_artistSidebar, &ArtistSidebar::librarySourceChanged, this, &MainWindow::onLibrarySourceChanged);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
     connect(m_trackTable, &TrackTable::playNextRequested, this, &MainWindow::playNextTracks);
@@ -319,6 +325,8 @@ void MainWindow::startScan(const QString &rootPath)
     qCInfo(uiLog) << "starting scan" << rootPath;
     statusBar()->showMessage(QStringLiteral("Scanning %1").arg(rootPath));
     m_scanProgress->setVisible(true);
+    m_stopScanButton->setEnabled(true);
+    m_stopScanButton->setVisible(true);
     m_lastUiRefreshIndexedTracks = 0;
 
     m_scanThread = new QThread(this);
@@ -341,6 +349,17 @@ void MainWindow::startScan(const QString &rootPath)
     });
 
     m_scanThread->start();
+}
+
+void MainWindow::cancelScan()
+{
+    if (m_scanWorker == nullptr) {
+        return;
+    }
+
+    m_scanWorker->cancel();
+    m_stopScanButton->setEnabled(false);
+    statusBar()->showMessage(QStringLiteral("Canceling scan..."), 5000);
 }
 
 void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
@@ -375,6 +394,8 @@ void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canc
 {
     qCInfo(uiLog) << "scan finished" << visitedFiles << indexedTracks << "canceled" << canceled;
     m_scanProgress->setVisible(false);
+    m_stopScanButton->setVisible(false);
+    m_stopScanButton->setEnabled(false);
     statusBar()->showMessage(
         canceled
             ? QStringLiteral("Scan canceled: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks)
