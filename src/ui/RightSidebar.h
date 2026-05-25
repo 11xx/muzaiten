@@ -30,6 +30,7 @@ public:
 
 signals:
     void queueTrackActivated(int index);
+    void queueTrackRatingChanged(const Track &track, int rating0To100);
     void queueRowsMoveRequested(const QVector<int> &rows, int destinationRow);
     void queueRowsRemoveRequested(const QVector<int> &rows);
     void queueClearRequested();
@@ -69,4 +70,5 @@ private:
     Track m_currentTrack;
     QString m_trackInfoMetadataPattern;
     int m_queueHoveredRow = -1;
+    int m_queueDropIndicatorRow = -1;
 };
