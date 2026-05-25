@@ -22,6 +22,10 @@ public slots:
     void trackStarted(const Track &track);
     void playbackStateChanged(bool playing);
 
+signals:
+    void submissionFailed(QString message);
+    void disabledAfterFailures(QString message);
+
 private slots:
     void checkListenProgress();
     void retryPending();
@@ -45,6 +49,7 @@ private:
     void savePending() const;
     void cachePendingListen(const QJsonObject &listen);
     void handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<QJsonObject> submittedListens);
+    void disableScrobbling(const QString &message);
 
     QNetworkAccessManager *m_network = nullptr;
     QTimer *m_progressTimer = nullptr;
@@ -62,4 +67,5 @@ private:
     qint64 m_accumulatedMs = 0;
     QElapsedTimer m_segmentTimer;
     QList<QJsonObject> m_pendingListens;
+    int m_consecutiveFailures = 0;
 };

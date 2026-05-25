@@ -20,6 +20,7 @@ Q_LOGGING_CATEGORY(listenBrainzLog, "muzaiten.listenbrainz")
 namespace {
 constexpr qint64 maxRequiredListenMs = 4 * 60 * 1000;
 constexpr int maxListensPerImport = 99;
+constexpr int maxConsecutiveSubmissionFailures = 3;
 constexpr auto apiUrl = "https://api.listenbrainz.org/1/submit-listens";
 
 QString trackTitle(const Track &track)
@@ -64,6 +65,7 @@ void ListenBrainzScrobbler::configure(bool enabled, const QString &token, const 
 {
     m_enabled = enabled;
     m_token = token.trimmed();
+    m_consecutiveFailures = 0;
     if (m_cachePath != cachePath) {
         m_cachePath = cachePath;
         loadPending();
@@ -305,20 +307,41 @@ void ListenBrainzScrobbler::cachePendingListen(const QJsonObject &listen)
 void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<QJsonObject> submittedListens)
 {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QString errorString = reply->errorString();
     if (kind == SubmissionKind::Listen) {
         m_listenSubmissionInFlight = false;
     }
     const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
     if (!ok) {
-        qCWarning(listenBrainzLog) << "ListenBrainz submission failed" << status << reply->errorString();
+        const QString statusText = status > 0 ? QString::number(status) : QStringLiteral("network");
+        const QString message = QStringLiteral("ListenBrainz submission failed (%1): %2").arg(statusText, errorString);
+        qCWarning(listenBrainzLog) << message;
         reply->deleteLater();
+        if (status == 401 || status == 403) {
+            disableScrobbling(QStringLiteral("ListenBrainz token was rejected. Scrobbling has been disabled."));
+            return;
+        }
+        ++m_consecutiveFailures;
+        emit submissionFailed(message);
+        if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
+            disableScrobbling(QStringLiteral("ListenBrainz submissions failed %1 times. Scrobbling has been disabled.")
+                                  .arg(maxConsecutiveSubmissionFailures));
+        }
         return;
     }
 
+    m_consecutiveFailures = 0;
     if (kind == SubmissionKind::Listen && !submittedListens.isEmpty()) {
         m_pendingListens.erase(m_pendingListens.begin(), m_pendingListens.begin() + std::min(submittedListens.size(), m_pendingListens.size()));
         savePending();
     }
 
     reply->deleteLater();
+}
+
+void ListenBrainzScrobbler::disableScrobbling(const QString &message)
+{
+    m_enabled = false;
+    m_retryTimer->stop();
+    emit disabledAfterFailures(message);
 }

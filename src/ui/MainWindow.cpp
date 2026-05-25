@@ -185,6 +185,15 @@ MainWindow::MainWindow(QWidget *parent)
     m_listenBrainzScrobbler = new ListenBrainzScrobbler;
     m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
     connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzScrobbler, &QObject::deleteLater);
+    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::submissionFailed, this, [this](const QString &message) {
+        statusBar()->showMessage(message, 10000);
+    });
+    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::disabledAfterFailures, this, [this](const QString &message) {
+        m_database->setSetting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false"));
+        m_playerBar->setListenBrainzEnabled(false);
+        statusBar()->showMessage(message, 15000);
+        QMessageBox::warning(this, QStringLiteral("ListenBrainz"), message);
+    });
     m_listenBrainzThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
