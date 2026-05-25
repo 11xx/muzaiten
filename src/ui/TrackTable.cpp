@@ -50,6 +50,17 @@ QString formatDuration(qint64 durationMs)
     return duration.hour() > 0 ? duration.toString(QStringLiteral("h:mm:ss")) : duration.toString(QStringLiteral("m:ss"));
 }
 
+QString displayYear(const Track &track)
+{
+    for (const QString &candidate : {track.originalDate, track.date}) {
+        const QString trimmed = candidate.trimmed();
+        if (!trimmed.isEmpty()) {
+            return trimmed.left(4);
+        }
+    }
+    return {};
+}
+
 class TrackTableModel final : public QAbstractTableModel {
 public:
     explicit TrackTableModel(QObject *parent = nullptr)
@@ -117,7 +128,7 @@ public:
         case 5:
             return formatDuration(track.durationMs);
         case 6:
-            return track.date.left(4);
+            return displayYear(track);
         default:
             return {};
         }
@@ -190,7 +201,7 @@ private:
         case 5:
             return track.durationMs;
         case 6:
-            return track.date.left(4);
+            return displayYear(track);
         default:
             return {};
         }
