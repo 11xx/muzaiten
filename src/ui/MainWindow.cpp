@@ -15,6 +15,7 @@
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/FileExplorerView.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
 #include "ui/PlaybackProfileDialog.h"
@@ -39,7 +40,9 @@
 #include <QCloseEvent>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QThread>
@@ -86,6 +89,30 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("replayGain"), profile.replayGain);
     root.insert(QStringLiteral("allowResample"), profile.allowResample);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+QString mainViewName(MainView view)
+{
+    switch (view) {
+    case MainView::LibraryPanels:
+        return QStringLiteral("libraryPanels");
+    case MainView::LibraryFileExplorer:
+        return QStringLiteral("libraryFileExplorer");
+    case MainView::FreeRoamFileExplorer:
+        return QStringLiteral("freeRoamFileExplorer");
+    }
+    return QStringLiteral("libraryPanels");
+}
+
+MainView mainViewFromName(const QString &name)
+{
+    if (name == QStringLiteral("libraryFileExplorer")) {
+        return MainView::LibraryFileExplorer;
+    }
+    if (name == QStringLiteral("freeRoamFileExplorer")) {
+        return MainView::FreeRoamFileExplorer;
+    }
+    return MainView::LibraryPanels;
 }
 
 QJsonObject trackToJson(const Track &track)
@@ -191,7 +218,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_playerBar = new PlayerBar(central);
     centralLayout->addWidget(m_playerBar, 0);
 
-    m_rootSplitter = new QSplitter(Qt::Horizontal, central);
+    m_mainStack = new QStackedWidget(central);
+
+    m_rootSplitter = new QSplitter(Qt::Horizontal, m_mainStack);
     m_artistSidebar = new ArtistSidebar(m_rootSplitter);
 
     m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
@@ -210,7 +239,17 @@ MainWindow::MainWindow(QWidget *parent)
     m_rootSplitter->setStretchFactor(2, 0);
     m_rootSplitter->setSizes({260, 900, 300});
 
-    centralLayout->addWidget(m_rootSplitter, 1);
+    m_libraryFileExplorer = new FileExplorerView(m_mainStack);
+    m_libraryFileExplorer->setMode(FileExplorerMode::Library);
+    m_freeRoamFileExplorer = new FileExplorerView(m_mainStack);
+    m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
+    m_freeRoamFileExplorer->setRootPath(QDir::homePath());
+
+    m_mainStack->addWidget(m_rootSplitter);
+    m_mainStack->addWidget(m_libraryFileExplorer);
+    m_mainStack->addWidget(m_freeRoamFileExplorer);
+
+    centralLayout->addWidget(m_mainStack, 1);
     setCentralWidget(central);
 
     m_scanProgress = new QProgressBar(this);
@@ -315,6 +354,22 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
+    connect(m_libraryFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setLibraryExplorerDirectory);
+    connect(m_libraryFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_libraryFileExplorer, &FileExplorerView::playNextRequested, this, &MainWindow::playNextTracks);
+    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_libraryFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
+        startScan(path);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, &MainWindow::playNextTracks);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
+        startScan(path);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::preparedTrackStarted, this, &MainWindow::advanceAfterPreparedTransition);
@@ -333,6 +388,21 @@ MainWindow::MainWindow(QWidget *parent)
         if (!errorString.isEmpty()) {
             statusBar()->showMessage(QStringLiteral("Playback error: %1").arg(errorString), 10000);
         }
+    });
+
+    auto *libraryPanelsShortcut = new QShortcut(QKeySequence(QStringLiteral("1")), this);
+    connect(libraryPanelsShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        switchMainView(MainView::LibraryPanels);
+    });
+    auto *fileExplorerShortcut = new QShortcut(QKeySequence(QStringLiteral("2")), this);
+    connect(fileExplorerShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        toggleFileExplorerView();
     });
 
     m_albumGrid->setArtworkCacheRoot(cacheRoot());
@@ -494,6 +564,7 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
     if (m_lastUiRefreshIndexedTracks >= 512) {
         m_lastUiRefreshIndexedTracks = 0;
         refreshArtists();
+        refreshLibraryFileExplorer();
     }
 }
 
@@ -516,6 +587,7 @@ void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canc
             : QStringLiteral("Scan complete: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks),
         10000);
     refreshArtists();
+    refreshLibraryFileExplorer();
     if (!canceled && !m_pendingScanRoots.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
     } else if (sourceScan && !canceled) {
@@ -835,6 +907,12 @@ void MainWindow::loadViewSettings()
     };
     restoreSplitter(m_rootSplitter, mainWindow.value(QStringLiteral("rootSplitter")).toArray());
     restoreSplitter(m_centerSplitter, mainWindow.value(QStringLiteral("centerSplitter")).toArray());
+    m_mainView = mainViewFromName(mainWindow.value(QStringLiteral("mainView")).toString());
+    m_libraryExplorerDirectory = mainWindow.value(QStringLiteral("libraryExplorerDirectory")).toString();
+    m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
+    m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
+    refreshLibraryFileExplorer();
+    switchMainView(m_mainView);
     applySharedTableSettings();
 }
 
@@ -874,7 +952,66 @@ void MainWindow::saveMainWindowViewSettings()
     root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
     root.insert(QStringLiteral("rootSplitter"), sizesToJson(m_rootSplitter->sizes()));
     root.insert(QStringLiteral("centerSplitter"), sizesToJson(m_centerSplitter->sizes()));
+    root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
+    root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);
+    root.insert(QStringLiteral("freeRoamDirectory"), m_freeRoamDirectory);
     m_database->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::switchMainView(MainView view)
+{
+    m_mainView = view;
+    if (view == MainView::LibraryPanels) {
+        m_mainStack->setCurrentWidget(m_rootSplitter);
+    } else if (view == MainView::LibraryFileExplorer) {
+        refreshLibraryFileExplorer();
+        m_mainStack->setCurrentWidget(m_libraryFileExplorer);
+    } else {
+        m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
+        m_mainStack->setCurrentWidget(m_freeRoamFileExplorer);
+    }
+    saveMainWindowViewSettings();
+}
+
+void MainWindow::toggleFileExplorerView()
+{
+    if (m_mainView == MainView::LibraryFileExplorer) {
+        switchMainView(MainView::FreeRoamFileExplorer);
+    } else {
+        switchMainView(MainView::LibraryFileExplorer);
+    }
+}
+
+void MainWindow::setLibraryExplorerDirectory(const QString &path)
+{
+    m_libraryExplorerDirectory = cleanDirectoryPath(path);
+    refreshLibraryFileExplorer();
+    saveMainWindowViewSettings();
+}
+
+void MainWindow::setFreeRoamDirectory(const QString &path)
+{
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isDir()) {
+        return;
+    }
+    m_freeRoamDirectory = cleanDirectoryPath(path);
+    m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
+    saveMainWindowViewSettings();
+}
+
+void MainWindow::refreshLibraryFileExplorer()
+{
+    const QStringList directories = m_database->localLibraryDirectories(m_libraryExplorerDirectory);
+    const QVector<Track> tracks = m_libraryExplorerDirectory.isEmpty() ? QVector<Track>() : m_database->tracksForDirectory(m_libraryExplorerDirectory);
+    if (!m_libraryExplorerDirectory.isEmpty() && directories.isEmpty() && tracks.isEmpty()) {
+        m_libraryExplorerDirectory.clear();
+        m_libraryFileExplorer->setRootPath(QString());
+        m_libraryFileExplorer->setLibraryEntries(m_database->localLibraryDirectories(), {});
+        return;
+    }
+    m_libraryFileExplorer->setRootPath(m_libraryExplorerDirectory);
+    m_libraryFileExplorer->setLibraryEntries(directories, tracks);
 }
 
 void MainWindow::loadQueueState()
@@ -1076,6 +1213,7 @@ void MainWindow::configureSourceDirectories()
 
     rememberTrackTableViewState();
     refreshArtists();
+    refreshLibraryFileExplorer();
     restoreTrackTableViewState();
     statusBar()->showMessage(QStringLiteral("Source directories updated"), 3000);
 }
