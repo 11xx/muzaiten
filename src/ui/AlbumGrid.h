@@ -8,6 +8,7 @@
 class QEvent;
 class QMouseEvent;
 class QTimer;
+class QWheelEvent;
 
 class AlbumGrid final : public QListView {
     Q_OBJECT
@@ -32,6 +33,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
 
 private:
     QRect ratingRectForIndex(const QModelIndex &index) const;
