@@ -162,7 +162,10 @@ protected:
                                                                  maximum(),
                                                                  clickX,
                                                                  std::max(1, width()));
+            setSliderPosition(newValue);
             setValue(newValue);
+            setSliderDown(true);
+            emit sliderPressed();
             emit sliderMoved(newValue);
             emit actionTriggered(QAbstractSlider::SliderMove);
             event->accept();

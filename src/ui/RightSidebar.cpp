@@ -523,6 +523,7 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
 {
     QDialog dialog(parent);
     dialog.setWindowTitle(QStringLiteral("Track Information"));
+    dialog.resize(640, 420);
     auto *layout = new QVBoxLayout(&dialog);
 
     auto *table = new QTableWidget(0, 4, &dialog);
