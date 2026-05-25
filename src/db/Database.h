@@ -6,6 +6,7 @@
 
 #include "core/Album.h"
 #include "core/Artist.h"
+#include "core/ScanRoot.h"
 #include "core/Track.h"
 #include "fs/LinkRoot.h"
 #include "mpd/MpdTrack.h"
@@ -39,6 +40,14 @@ public:
     QVector<LinkRoot> linkRoots() const;
     bool saveLinkRoot(const LinkRoot &linkRoot);
     bool removeLinkRoot(int id);
+    QVector<ScanRoot> scanRoots() const;
+    QVector<ScanRoot> enabledScanRoots() const;
+    QVector<ScanRoot> enabledLibraryRoots() const;
+    bool saveScanRoot(const ScanRoot &root);
+    bool removeScanRoot(int id);
+    bool setScanRootLastScanned(int id, const QString &lastError = {});
+    QVector<Track> tracksForDirectory(const QString &directory) const;
+    QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);
     bool clearMpdTracksForSource(qint64 sourceId);
     bool upsertMpdTrack(qint64 sourceId, const MpdTrack &track);

@@ -6,8 +6,13 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE TABLE IF NOT EXISTS scan_roots (
   id INTEGER PRIMARY KEY,
   path TEXT NOT NULL UNIQUE,
+  name TEXT,
+  scan_enabled INTEGER NOT NULL DEFAULT 1,
+  library_enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  last_scanned_at TEXT
+  updated_at TEXT,
+  last_scanned_at TEXT,
+  last_error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS artists (
