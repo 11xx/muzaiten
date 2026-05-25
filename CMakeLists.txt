@@ -18,7 +18,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include(CheckPIESupported)
 check_pie_supported()
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets Sql Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core DBus Gui Multimedia Network Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
@@ -44,6 +44,7 @@ set(MUZAITEN_SOURCES
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
     src/mpd/MpdImportWorker.cpp
+    src/mpris/MprisService.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/ScanWorker.cpp
@@ -84,6 +85,7 @@ set(MUZAITEN_HEADERS
     src/mpd/MpdClient.h
     src/mpd/MpdTrack.h
     src/mpd/MpdImportWorker.h
+    src/mpris/MprisService.h
     src/playback/PlaybackBackend.h
     src/playback/PlaybackTypes.h
     src/playback/GStreamerPlaybackBackend.h
@@ -120,6 +122,7 @@ target_include_directories(muzaiten PRIVATE
 
 target_link_libraries(muzaiten PRIVATE
     Qt6::Core
+    Qt6::DBus
     Qt6::Network
     Qt6::Multimedia
     Qt6::Widgets

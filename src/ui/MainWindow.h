@@ -12,6 +12,7 @@ class AlbumGrid;
 class ArtistSidebar;
 class QCloseEvent;
 class ListenBrainzScrobbler;
+class MprisService;
 class PlayerBar;
 class PlaybackBackend;
 class QProgressBar;
@@ -90,6 +91,10 @@ private:
     void playPreviousTrack();
     void playNextTrack();
     void togglePlayback();
+    void playFromMpris();
+    void setVolumeFromMpris(double volume0To1);
+    void seekRelativeFromMpris(qint64 offsetMs);
+    void updateMprisCapabilities();
     void updatePlaybackPosition();
     void prepareNextQueueTrack();
     void advanceAfterPreparedTransition();
@@ -137,5 +142,7 @@ private:
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
+    MprisService *m_mpris = nullptr;
+    double m_volume = 1.0;
     qint64 m_lastUiRefreshIndexedTracks = 0;
 };
