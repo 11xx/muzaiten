@@ -1051,8 +1051,12 @@ void MainWindow::loadQueueState()
     m_queue.clear();
     m_queue.reserve(tracks.size());
     for (const QJsonValue &value : tracks) {
-        const Track track = trackFromJson(value.toObject());
+        Track track = trackFromJson(value.toObject());
         if (!track.path.isEmpty()) {
+            const Track refreshed = m_database->trackForPath(track.path);
+            if (!refreshed.path.isEmpty()) {
+                track = refreshed;
+            }
             m_queue.push_back(track);
         }
     }

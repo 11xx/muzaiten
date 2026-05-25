@@ -418,6 +418,48 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
     return tracks;
 }
 
+Track Database::trackForPath(const QString &path) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime, p.status "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.path = ?"));
+    query.addBindValue(path);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+
+    Track track;
+    track.path = query.value(0).toString();
+    track.parentDir = query.value(1).toString();
+    track.filename = query.value(2).toString();
+    track.title = query.value(3).toString();
+    track.artistName = query.value(4).toString();
+    track.albumArtistName = query.value(5).toString();
+    track.albumTitle = query.value(6).toString();
+    track.trackNumber = query.value(7).toInt();
+    track.discNumber = query.value(8).toInt();
+    track.durationMs = query.value(9).toLongLong();
+    track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
+    track.hasUserRating = !query.value(11).isNull();
+    const QString pendingStatus = query.value(16).toString();
+    const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
+        || pendingStatus == QStringLiteral("failed")
+        || pendingStatus == QStringLiteral("blocked_no_writable_path");
+    track.effectiveRating0To100 = pendingDbRating && track.hasUserRating
+        ? query.value(11).toInt()
+        : (track.rating0To100 >= 0 ? track.rating0To100 : (track.hasUserRating ? query.value(11).toInt() : Rating::unset));
+    track.date = query.value(12).toString();
+    track.originalDate = query.value(13).toString();
+    track.fileSize = query.value(14).toLongLong();
+    track.fileMtime = query.value(15).toLongLong();
+    return track;
+}
+
 bool Database::setUserTrackRating(const QString &trackPath, int rating0To100)
 {
     const int normalized = Rating::normalized0To100(rating0To100);
