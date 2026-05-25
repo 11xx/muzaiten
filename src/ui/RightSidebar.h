@@ -41,11 +41,13 @@ signals:
 private:
     void showHeaderMenu(const QPoint &pos);
     void showQueueMenu(const QPoint &pos);
+    void showTrackInfoLabelMenu(const QPoint &pos);
     void setQueueHoveredRow(int row);
     void applyTrackInfoSettingsJson(const QJsonObject &root);
     QJsonArray trackInfoSettingsJson() const;
     void updateTrackInfoLabels();
     void restyleTrackInfoLabels();
+    QLabel *trackInfoLabelFromSender() const;
 
 protected:
     void changeEvent(QEvent *event) override;
