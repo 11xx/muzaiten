@@ -59,4 +59,5 @@ private:
     int m_padding = 8;
     int m_starSize = 18;
     Qt::Alignment m_textAlignment = Qt::AlignHCenter;
+    QPoint m_wheelAngleRemainder;
 };

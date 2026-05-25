@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTimer>
 #include <QWheelEvent>
@@ -81,9 +82,13 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setUniformItemSizes(true);
     setWordWrap(true);
     setTextElideMode(Qt::ElideRight);
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
     setContextMenuPolicy(Qt::CustomContextMenu);
+    verticalScrollBar()->setSingleStep(36);
+    horizontalScrollBar()->setSingleStep(36);
     applySettingsToView();
     setItemDelegate(new AlbumGridDelegate(this));
     m_populateTimer = new QTimer(this);
@@ -269,7 +274,38 @@ void AlbumGrid::wheelEvent(QWheelEvent *event)
         event->accept();
         return;
     }
-    QListView::wheelEvent(event);
+
+    QScrollBar *scrollBar = verticalScrollBar();
+    QPoint pixelDelta = event->pixelDelta();
+    QPoint angleDelta = event->angleDelta();
+    int delta = 0;
+
+    if (std::abs(pixelDelta.x()) > std::abs(pixelDelta.y()) && horizontalScrollBar()->isVisible()) {
+        scrollBar = horizontalScrollBar();
+        delta = -pixelDelta.x();
+        if (delta == 0 && angleDelta.x() != 0) {
+            m_wheelAngleRemainder.rx() += angleDelta.x();
+            const int steps = m_wheelAngleRemainder.x() / 120;
+            m_wheelAngleRemainder.rx() -= steps * 120;
+            delta = -(steps * scrollBar->singleStep());
+        }
+    } else {
+        delta = -pixelDelta.y();
+        if (delta == 0 && angleDelta.y() != 0) {
+            m_wheelAngleRemainder.ry() += angleDelta.y();
+            const int steps = m_wheelAngleRemainder.y() / 120;
+            m_wheelAngleRemainder.ry() -= steps * 120;
+            delta = -(steps * scrollBar->singleStep());
+        }
+    }
+
+    if (delta == 0) {
+        event->ignore();
+        return;
+    }
+
+    scrollBar->setValue(scrollBar->value() + delta);
+    event->accept();
 }
 
 QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
