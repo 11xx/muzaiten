@@ -89,6 +89,7 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     QStyleOptionViewItem opt(option);
     initStyleOption(&opt, index);
+    opt.state &= ~QStyle::State_Selected;
 
     QApplication::style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, opt.widget);
     if (index.data(SelectedRole).toBool()) {

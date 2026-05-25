@@ -12,7 +12,9 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
 {
     QStyleOptionViewItem opt(option);
     if ((opt.state & QStyle::State_MouseOver) && !(opt.state & QStyle::State_Selected) && opt.widget != nullptr) {
-        painter->fillRect(QRect(0, opt.rect.top(), opt.widget->width(), opt.rect.height()), opt.palette.color(QPalette::AlternateBase));
+        QColor hover = opt.palette.color(QPalette::Highlight);
+        hover.setAlpha(34);
+        painter->fillRect(QRect(0, opt.rect.top(), opt.widget->width(), opt.rect.height()), hover);
         opt.state &= ~QStyle::State_MouseOver;
     }
     opt.displayAlignment = opt.displayAlignment | Qt::AlignVCenter;
