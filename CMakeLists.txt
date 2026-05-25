@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 4.0)
 
+string(TIMESTAMP MUZAITEN_BUILD_VERSION "%Y.%m.%d.%H%M%S" UTC)
+
 project(muzaiten
-    VERSION 2026.5.24.1
+    VERSION ${MUZAITEN_BUILD_VERSION}
     DESCRIPTION "Native Linux music player inspired by MusicBee and ncmpcpp"
     LANGUAGES CXX
 )
