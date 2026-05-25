@@ -5,12 +5,13 @@
 
 #include <QAction>
 #include <QAbstractItemView>
+#include <QAbstractTableModel>
 #include <QCheckBox>
 #include <QColor>
+#include <QDataStream>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QDropEvent>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
@@ -23,11 +24,13 @@
 #include <QLineEdit>
 #include <QMap>
 #include <QMenu>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
 #include <QSplitter>
 #include <QSpinBox>
+#include <QTableView>
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QByteArray>
@@ -44,37 +47,138 @@ struct ColumnSpec {
     int index;
 };
 
-class QueueTableWidget final : public QTableWidget {
-    Q_OBJECT
-
-public:
-    using QTableWidget::QTableWidget;
-
-signals:
-    void rowOrderChanged(QVector<int> oldRowsInNewOrder);
-
-protected:
-    void dropEvent(QDropEvent *event) override
-    {
-        QTableWidget::dropEvent(event);
-
-        QVector<int> order;
-        order.reserve(rowCount());
-        for (int row = 0; row < rowCount(); ++row) {
-            const QTableWidgetItem *rowItem = item(row, 0);
-            if (rowItem == nullptr) {
-                return;
-            }
-            order.push_back(rowItem->data(Qt::UserRole).toInt());
-        }
-        emit rowOrderChanged(order);
-    }
-};
-
 constexpr ColumnSpec columns[] = {
     {"position", "#", 0},
     {"title", "Title", 1},
     {"rating", "Rating", 2},
+};
+
+constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
+
+QString ratingText(int rating0To100);
+
+class QueueTableModel final : public QAbstractTableModel {
+    Q_OBJECT
+
+public:
+    explicit QueueTableModel(QObject *parent = nullptr)
+        : QAbstractTableModel(parent)
+    {
+    }
+
+    int rowCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : static_cast<int>(m_tracks.size());
+    }
+
+    int columnCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : 3;
+    }
+
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override
+    {
+        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+            return {};
+        }
+        for (const ColumnSpec &spec : columns) {
+            if (spec.index == section) {
+                return QString::fromLatin1(spec.label);
+            }
+        }
+        return {};
+    }
+
+    QVariant data(const QModelIndex &index, int role) const override
+    {
+        if (!index.isValid() || index.row() < 0 || index.row() >= m_tracks.size() || role != Qt::DisplayRole) {
+            return {};
+        }
+
+        const Track &track = m_tracks.at(index.row());
+        switch (index.column()) {
+        case 0:
+            return QString::number(index.row() + 1);
+        case 1:
+            return track.title;
+        case 2:
+            return ratingText(track.effectiveRating0To100);
+        default:
+            return {};
+        }
+    }
+
+    Qt::ItemFlags flags(const QModelIndex &index) const override
+    {
+        Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsDropEnabled;
+        if (index.isValid()) {
+            flags |= Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
+        }
+        return flags;
+    }
+
+    Qt::DropActions supportedDropActions() const override
+    {
+        return Qt::MoveAction;
+    }
+
+    QStringList mimeTypes() const override
+    {
+        return {QString::fromLatin1(queueRowsMimeType)};
+    }
+
+    QMimeData *mimeData(const QModelIndexList &indexes) const override
+    {
+        auto *mime = new QMimeData;
+        QVector<int> rows;
+        rows.reserve(indexes.size());
+        for (const QModelIndex &index : indexes) {
+            if (index.isValid() && !rows.contains(index.row())) {
+                rows.push_back(index.row());
+            }
+        }
+        std::sort(rows.begin(), rows.end());
+
+        QByteArray payload;
+        QDataStream stream(&payload, QIODevice::WriteOnly);
+        stream << rows;
+        mime->setData(QString::fromLatin1(queueRowsMimeType), payload);
+        return mime;
+    }
+
+    bool dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int, const QModelIndex &parent) override
+    {
+        if (action != Qt::MoveAction || data == nullptr || !data->hasFormat(QString::fromLatin1(queueRowsMimeType))) {
+            return false;
+        }
+
+        QVector<int> rows;
+        QByteArray payload = data->data(QString::fromLatin1(queueRowsMimeType));
+        QDataStream stream(&payload, QIODevice::ReadOnly);
+        stream >> rows;
+        int destinationRow = row;
+        if (destinationRow < 0 && parent.isValid()) {
+            destinationRow = parent.row();
+        }
+        if (destinationRow < 0) {
+            destinationRow = rowCount();
+        }
+        emit rowsMoveRequested(rows, destinationRow);
+        return true;
+    }
+
+    void setTracks(const QVector<Track> &tracks)
+    {
+        beginResetModel();
+        m_tracks = tracks;
+        endResetModel();
+    }
+
+signals:
+    void rowsMoveRequested(QVector<int> rows, int destinationRow) const;
+
+private:
+    QVector<Track> m_tracks;
 };
 
 struct TrackInfoField {
@@ -249,13 +353,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_splitter->setChildrenCollapsible(false);
     layout->addWidget(m_splitter, 1);
 
-    auto *queueTable = new QueueTableWidget(0, 3, m_splitter);
-    m_queueTable = queueTable;
-    m_queueTable->setHorizontalHeaderLabels({
-        QStringLiteral("#"),
-        QStringLiteral("Title"),
-        QStringLiteral("Rating"),
-    });
+    auto *queueModel = new QueueTableModel(this);
+    m_queueTable = new QTableView(m_splitter);
+    m_queueTable->setModel(queueModel);
     m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_queueTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -263,6 +363,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setAcceptDrops(true);
     m_queueTable->setDropIndicatorShown(true);
     m_queueTable->setDragDropMode(QAbstractItemView::InternalMove);
+    m_queueTable->setDefaultDropAction(Qt::MoveAction);
     m_queueTable->setDragDropOverwriteMode(false);
     m_queueTable->setItemDelegate(new DenseTableDelegate(this));
     m_queueTable->setShowGrid(false);
@@ -276,11 +377,13 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_queueTable->setStyleSheet(QStringLiteral("QTableWidget::item { padding: 0 3px; }"));
+    m_queueTable->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     m_splitter->addWidget(m_queueTable);
 
-    connect(m_queueTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
-        emit queueTrackActivated(row);
+    connect(m_queueTable, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
+        if (index.isValid()) {
+            emit queueTrackActivated(index.row());
+        }
     });
     connect(m_queueTable->horizontalHeader(), &QHeaderView::customContextMenuRequested, this, &RightSidebar::showHeaderMenu);
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
@@ -289,8 +392,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
         emit viewSettingsChanged();
     });
-    connect(m_queueTable, &QTableWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
-    connect(queueTable, &QueueTableWidget::rowOrderChanged, this, &RightSidebar::queueOrderChanged);
+    connect(m_queueTable, &QWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
+    connect(queueModel, &QueueTableModel::rowsMoveRequested, this, &RightSidebar::queueRowsMoveRequested);
 
     m_trackInfoPane = new QFrame(m_splitter);
     auto *infoLayout = new QVBoxLayout(m_trackInfoPane);
@@ -346,30 +449,19 @@ RightSidebar::RightSidebar(QWidget *parent)
 void RightSidebar::setQueue(const QVector<Track> &tracks)
 {
     m_tracks = tracks;
-    m_queueTable->setRowCount(0);
-    for (int row = 0; row < tracks.size(); ++row) {
-        const Track &track = tracks.at(row);
-        m_queueTable->insertRow(row);
-        auto *position = new QTableWidgetItem(QString::number(row + 1));
-        position->setData(Qt::UserRole, row);
-        m_queueTable->setItem(row, 0, position);
-        auto *title = new QTableWidgetItem(track.title);
-        title->setData(Qt::UserRole, row);
-        m_queueTable->setItem(row, 1, title);
-        auto *rating = new QTableWidgetItem(ratingText(track.effectiveRating0To100));
-        rating->setData(Qt::UserRole, row);
-        m_queueTable->setItem(row, 2, rating);
+    if (auto *queueModel = qobject_cast<QueueTableModel *>(m_queueTable->model())) {
+        queueModel->setTracks(tracks);
     }
 }
 
 void RightSidebar::setCurrentIndex(int index)
 {
-    if (index < 0 || index >= m_queueTable->rowCount()) {
+    if (index < 0 || index >= m_queueTable->model()->rowCount()) {
         m_queueTable->clearSelection();
         return;
     }
     m_queueTable->selectRow(index);
-    m_queueTable->scrollToItem(m_queueTable->item(index, 1), QAbstractItemView::PositionAtCenter);
+    m_queueTable->scrollTo(m_queueTable->model()->index(index, 1), QAbstractItemView::PositionAtCenter);
 }
 
 void RightSidebar::setAlbumArt(const QString &imagePath)

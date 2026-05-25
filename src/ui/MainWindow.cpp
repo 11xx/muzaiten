@@ -219,7 +219,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
-    connect(m_rightSidebar, &RightSidebar::queueOrderChanged, this, &MainWindow::reorderQueue);
+    connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
@@ -1217,31 +1217,66 @@ void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
     saveQueueState();
 }
 
-void MainWindow::reorderQueue(const QVector<int> &oldRowsInNewOrder)
+void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
 {
-    if (oldRowsInNewOrder.size() != m_queue.size()) {
-        m_rightSidebar->setQueue(m_queue);
-        m_rightSidebar->setCurrentIndex(m_queueIndex);
+    if (rows.isEmpty() || m_queue.isEmpty()) {
         return;
     }
 
-    QVector<Track> reordered;
-    reordered.reserve(m_queue.size());
-    int newQueueIndex = -1;
-    for (int newRow = 0; newRow < oldRowsInNewOrder.size(); ++newRow) {
-        const int oldRow = oldRowsInNewOrder.at(newRow);
-        if (oldRow < 0 || oldRow >= m_queue.size()) {
-            m_rightSidebar->setQueue(m_queue);
-            m_rightSidebar->setCurrentIndex(m_queueIndex);
-            return;
-        }
-        reordered.push_back(m_queue.at(oldRow));
-        if (oldRow == m_queueIndex) {
-            newQueueIndex = newRow;
-        }
+    QVector<int> sortedRows = rows;
+    std::sort(sortedRows.begin(), sortedRows.end());
+    sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
+    sortedRows.erase(std::remove_if(sortedRows.begin(), sortedRows.end(), [this](int row) {
+                         return row < 0 || row >= m_queue.size();
+                     }),
+                     sortedRows.end());
+    if (sortedRows.isEmpty()) {
+        return;
     }
 
-    m_queue = reordered;
+    destinationRow = std::clamp(destinationRow, 0, static_cast<int>(m_queue.size()));
+    QVector<Track> moving;
+    moving.reserve(sortedRows.size());
+    int removedBeforeDestination = 0;
+    for (int row : sortedRows) {
+        moving.push_back(m_queue.at(row));
+        if (row < destinationRow) {
+            ++removedBeforeDestination;
+        }
+    }
+    const int adjustedDestination = destinationRow - removedBeforeDestination;
+
+    QVector<Track> remaining;
+    remaining.reserve(m_queue.size() - moving.size());
+    int removeCursor = 0;
+    for (int row = 0; row < m_queue.size(); ++row) {
+        if (removeCursor < sortedRows.size() && sortedRows.at(removeCursor) == row) {
+            ++removeCursor;
+            continue;
+        }
+        remaining.push_back(m_queue.at(row));
+    }
+
+    m_queue = remaining;
+    for (int offset = 0; offset < moving.size(); ++offset) {
+        m_queue.insert(adjustedDestination + offset, moving.at(offset));
+    }
+
+    int newQueueIndex = -1;
+    if (m_queueIndex >= 0) {
+        const auto movedCurrent = std::find(sortedRows.cbegin(), sortedRows.cend(), m_queueIndex);
+        if (movedCurrent != sortedRows.cend()) {
+            newQueueIndex = adjustedDestination + static_cast<int>(std::distance(sortedRows.cbegin(), movedCurrent));
+        } else {
+            const int removedBeforeCurrent = static_cast<int>(std::count_if(sortedRows.cbegin(), sortedRows.cend(), [this](int row) {
+                return row < m_queueIndex;
+            }));
+            newQueueIndex = m_queueIndex - removedBeforeCurrent;
+            if (adjustedDestination <= newQueueIndex) {
+                newQueueIndex += static_cast<int>(moving.size());
+            }
+        }
+    }
     m_queueIndex = newQueueIndex;
     m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
     m_rightSidebar->setQueue(m_queue);
