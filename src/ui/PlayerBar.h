@@ -20,6 +20,7 @@ public:
     void setPosition(qint64 positionMs, qint64 durationMs);
 
 protected:
+    void changeEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 
 signals:
@@ -49,9 +50,13 @@ signals:
     void currentTrackRatingChanged(int rating0To100);
 
 private:
+    void restyleMenuBar();
+    void updateShuffleIcon();
+
     class QToolButton *m_menuButton = nullptr;
     class QMenuBar *m_menuBar = nullptr;
     class QToolButton *m_playPause = nullptr;
+    class QToolButton *m_shuffle = nullptr;
     class QAction *m_compactMenu = nullptr;
     class QAction *m_trackInfoPaneVisible = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;
