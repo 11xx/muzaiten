@@ -10,6 +10,7 @@
 #include "mpd/MpdImportWorker.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
+#include "scanner/RatingTagSyncWorker.h"
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
@@ -134,6 +135,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("muzaiten"));
+    qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
     setMinimumSize(1100, 700);
 
@@ -203,6 +205,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
+    connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
+    connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
+    connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
+    connect(m_playerBar, &PlayerBar::retryPendingRatingTagsRequested, this, &MainWindow::retryPendingRatingTags);
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
@@ -478,6 +484,11 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
         QMessageBox::warning(this, QStringLiteral("Rating"), m_database->lastError());
         return;
     }
+    if (rating0To100 >= 0) {
+        m_database->setPendingTrackRatingWrite(track.path, rating0To100, QStringLiteral("pending"));
+    } else {
+        m_database->clearPendingTrackRatingWrite(track.path);
+    }
     rememberTrackTableViewState();
     refreshTrackTable();
     refreshAlbumGrid();
@@ -486,11 +497,11 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
             continue;
         }
         queuedTrack.hasUserRating = rating0To100 >= 0;
-        queuedTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : queuedTrack.rating0To100;
+        queuedTrack.effectiveRating0To100 = queuedTrack.rating0To100 >= 0 ? queuedTrack.rating0To100 : (rating0To100 >= 0 ? rating0To100 : Rating::unset);
     }
     if (m_currentTrack.path == track.path) {
         m_currentTrack.hasUserRating = rating0To100 >= 0;
-        m_currentTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : m_currentTrack.rating0To100;
+        m_currentTrack.effectiveRating0To100 = m_currentTrack.rating0To100 >= 0 ? m_currentTrack.rating0To100 : (rating0To100 >= 0 ? rating0To100 : Rating::unset);
         const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
         QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
         if (!m_currentTrack.date.isEmpty()) {
@@ -502,6 +513,122 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     restoreTrackTableViewState();
+
+    if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
+        Track syncTrack = track;
+        syncTrack.hasUserRating = true;
+        syncTrack.effectiveRating0To100 = rating0To100;
+        startRatingTagSync({syncTrack}, static_cast<int>(RatingTagSyncRequest::Scope::Track));
+    }
+}
+
+void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
+{
+    if (tracks.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("No rating tags to sync"), 5000);
+        return;
+    }
+
+    RatingTagSyncRequest request;
+    request.scope = static_cast<RatingTagSyncRequest::Scope>(scope);
+    request.tracks = tracks;
+    request.linkRoots = m_database->linkRoots();
+
+    auto *thread = new QThread(this);
+    auto *worker = new RatingTagSyncWorker(databasePath(), request);
+    worker->moveToThread(thread);
+    connect(thread, &QThread::started, worker, &RatingTagSyncWorker::run);
+    connect(worker, &RatingTagSyncWorker::progress, this, [this](int checked, int total, const QString &) {
+        statusBar()->showMessage(QStringLiteral("Rating tag sync: %1 / %2 checked").arg(checked).arg(total));
+    });
+    connect(worker, &RatingTagSyncWorker::finished, this, [this, thread, worker](const RatingTagSyncSummary &summary, const QString &error) {
+        if (!error.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("Rating tag sync"), error);
+        } else {
+            statusBar()->showMessage(QStringLiteral("Rating tag sync complete: %1 written, %2 tag-won, %3 no writable path, %4 failed")
+                                         .arg(summary.written)
+                                         .arg(summary.tagWon)
+                                         .arg(summary.noWritablePath)
+                                         .arg(summary.failed),
+                                     10000);
+        }
+        rememberTrackTableViewState();
+        refreshTrackTable();
+        refreshAlbumGrid();
+        for (Track &queuedTrack : m_queue) {
+            const QVector<Track> refreshed = m_database->tracksForArtist(queuedTrack.albumArtistName, queuedTrack.albumTitle);
+            const auto it = std::find_if(refreshed.cbegin(), refreshed.cend(), [&queuedTrack](const Track &track) {
+                return track.path == queuedTrack.path;
+            });
+            if (it != refreshed.cend()) {
+                queuedTrack.rating0To100 = it->rating0To100;
+                queuedTrack.hasUserRating = it->hasUserRating;
+                queuedTrack.effectiveRating0To100 = it->effectiveRating0To100;
+            }
+        }
+        if (!m_currentTrack.path.isEmpty()) {
+            const QVector<Track> refreshed = m_database->tracksForArtist(m_currentTrack.albumArtistName, m_currentTrack.albumTitle);
+            const auto it = std::find_if(refreshed.cbegin(), refreshed.cend(), [this](const Track &track) {
+                return track.path == m_currentTrack.path;
+            });
+            if (it != refreshed.cend()) {
+                m_currentTrack = *it;
+                const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
+                QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
+                if (!m_currentTrack.date.isEmpty()) {
+                    subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
+                }
+                m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
+                m_rightSidebar->setTrackInfo(m_currentTrack);
+            }
+        }
+        m_rightSidebar->setQueue(m_queue);
+        m_rightSidebar->setCurrentIndex(m_queueIndex);
+        restoreTrackTableViewState();
+        worker->deleteLater();
+        thread->quit();
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void MainWindow::syncCurrentTrackRatingTags()
+{
+    if (m_librarySource != LibrarySource::Local || m_currentTrack.path.isEmpty() || m_currentTrack.effectiveRating0To100 < 0) {
+        statusBar()->showMessage(QStringLiteral("No current local rated track to sync"), 5000);
+        return;
+    }
+    startRatingTagSync({m_currentTrack}, static_cast<int>(RatingTagSyncRequest::Scope::Track));
+}
+
+void MainWindow::syncCurrentArtistRatingTags()
+{
+    if (m_librarySource != LibrarySource::Local || m_currentArtist.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("No current local artist to sync"), 5000);
+        return;
+    }
+    QVector<Track> tracks;
+    const QVector<Track> userRated = m_database->tracksWithUserRatings();
+    const QVector<Track> pending = m_database->tracksWithPendingRatingWrites();
+    for (const Track &track : userRated + pending) {
+        const bool alreadyQueued = std::any_of(tracks.cbegin(), tracks.cend(), [&track](const Track &queued) {
+            return queued.path == track.path;
+        });
+        if (track.albumArtistName == m_currentArtist && !alreadyQueued) {
+            tracks.push_back(track);
+        }
+    }
+    startRatingTagSync(tracks, static_cast<int>(RatingTagSyncRequest::Scope::CurrentArtist));
+}
+
+void MainWindow::syncAllSavedRatingTags()
+{
+    startRatingTagSync(m_database->tracksWithUserRatings(), static_cast<int>(RatingTagSyncRequest::Scope::SavedRatedTracks));
+}
+
+void MainWindow::retryPendingRatingTags()
+{
+    startRatingTagSync(m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));
 }
 
 void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100)
