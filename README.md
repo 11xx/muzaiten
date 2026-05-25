@@ -31,10 +31,24 @@ Dependencies:
 - Qt 6 with Core, Gui, Multimedia, Network, Widgets, Sql, and Test modules
 - TagLib
 
+Recommended frontend:
+
+```sh
+make build
+make test
+make smoke
+make run
+```
+
+This `Makefile` is a thin wrapper around CMake. It does not replace CMake as the build system; it provides stable convenience commands for common development flows.
+
+Direct CMake usage remains supported:
+
 ```sh
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
+timeout 2s env QT_QPA_PLATFORM=offscreen ./build/muzaiten
 ```
 
 ## Runtime State
