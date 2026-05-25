@@ -398,6 +398,9 @@ void TrackTable::setHoveredRow(int row)
     if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(itemDelegate())) {
         denseDelegate->setHoveredRow(row);
     }
+    if (auto *ratingDelegate = qobject_cast<StarRatingDelegate *>(itemDelegateForColumn(0))) {
+        ratingDelegate->setHoveredRow(row);
+    }
     if (previous >= 0) {
         const QRect rect = visualRect(model()->index(previous, 0));
         viewport()->update(QRect(0, rect.top(), viewport()->width(), rect.height()));
