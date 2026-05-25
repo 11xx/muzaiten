@@ -15,6 +15,7 @@ class ListenBrainzScrobbler;
 class PlayerBar;
 class PlaybackBackend;
 class QProgressBar;
+class QPushButton;
 class QSplitter;
 class QThread;
 class MpdImportWorker;
@@ -90,6 +91,7 @@ private:
     void prepareNextQueueTrack();
     void advanceAfterPreparedTransition();
     void startScan(const QString &rootPath);
+    void cancelScan();
     void ingestScanBatch(const QVector<Track> &tracks);
     void finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled);
     QString databasePath() const;
@@ -112,6 +114,7 @@ private:
     TrackTable *m_trackTable = nullptr;
     RightSidebar *m_rightSidebar = nullptr;
     QProgressBar *m_scanProgress = nullptr;
+    QPushButton *m_stopScanButton = nullptr;
     PlaybackBackend *m_playback = nullptr;
     std::unique_ptr<Database> m_database;
     QString m_currentArtist;
