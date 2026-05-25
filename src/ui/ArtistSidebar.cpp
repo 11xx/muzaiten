@@ -38,8 +38,17 @@ public:
         QStyleOptionViewItem opt(option);
         initStyleOption(&opt, index);
         opt.text.clear();
-        QStyle *style = opt.widget != nullptr ? opt.widget->style() : QApplication::style();
-        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+        const bool selected = opt.state & QStyle::State_Selected;
+        const bool hovered = opt.state & QStyle::State_MouseOver;
+        if (selected) {
+            painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
+        } else if (hovered) {
+            QColor hover = opt.palette.color(QPalette::Highlight);
+            hover.setAlpha(34);
+            painter->fillRect(opt.rect, hover);
+        } else if (index.row() % 2 == 1) {
+            painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
+        }
 
         const QRect textRect = option.rect.adjusted(6, 0, -6, 0);
         const QString name = index.data(Qt::UserRole).toString();
@@ -47,15 +56,15 @@ public:
         const bool showCount = index.data(Qt::UserRole + 2).toBool();
 
         painter->save();
-        painter->setPen(option.palette.color(QPalette::Text));
+        painter->setPen(selected ? option.palette.color(QPalette::HighlightedText) : option.palette.color(QPalette::Text));
         QRect nameRect = textRect;
         if (showCount && countValue.isValid()) {
             const QString count = QString::number(countValue.toInt());
             const int countWidth = option.fontMetrics.horizontalAdvance(count) + 8;
             nameRect.setRight(textRect.right() - countWidth);
-            painter->setPen(option.palette.color(QPalette::Disabled, QPalette::Text));
+            painter->setPen(selected ? option.palette.color(QPalette::HighlightedText) : option.palette.color(QPalette::Disabled, QPalette::Text));
             painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, count);
-            painter->setPen(option.palette.color(QPalette::Text));
+            painter->setPen(selected ? option.palette.color(QPalette::HighlightedText) : option.palette.color(QPalette::Text));
         }
         painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter, option.fontMetrics.elidedText(name, Qt::ElideRight, nameRect.width()));
         painter->restore();
