@@ -35,6 +35,7 @@
 #include <QVBoxLayout>
 #include <QByteArray>
 #include <QFrame>
+#include <QWheelEvent>
 
 #include <algorithm>
 #include <functional>
@@ -378,6 +379,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
+    m_queueTable->viewport()->installEventFilter(this);
     m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
@@ -813,6 +815,22 @@ void RightSidebar::restyleTrackInfoLabels()
 void RightSidebar::setHeaderHeight(int height)
 {
     m_queueTable->horizontalHeader()->setFixedHeight(std::clamp(height, 18, 40));
+}
+
+bool RightSidebar::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_queueTable->viewport() && event->type() == QEvent::Wheel) {
+        auto *wheel = static_cast<QWheelEvent *>(event);
+        if (wheel->modifiers() & Qt::ControlModifier) {
+            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
+            const int rowHeight = std::clamp(m_queueTable->verticalHeader()->defaultSectionSize() + step, 20, 48);
+            m_queueTable->verticalHeader()->setDefaultSectionSize(rowHeight);
+            emit viewSettingsChanged();
+            wheel->accept();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void RightSidebar::changeEvent(QEvent *event)

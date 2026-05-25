@@ -48,6 +48,7 @@ private:
 
 protected:
     void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     QTableView *m_queueTable = nullptr;
