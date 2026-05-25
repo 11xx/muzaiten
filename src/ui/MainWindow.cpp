@@ -497,11 +497,11 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
             continue;
         }
         queuedTrack.hasUserRating = rating0To100 >= 0;
-        queuedTrack.effectiveRating0To100 = queuedTrack.rating0To100 >= 0 ? queuedTrack.rating0To100 : (rating0To100 >= 0 ? rating0To100 : Rating::unset);
+        queuedTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : queuedTrack.rating0To100;
     }
     if (m_currentTrack.path == track.path) {
         m_currentTrack.hasUserRating = rating0To100 >= 0;
-        m_currentTrack.effectiveRating0To100 = m_currentTrack.rating0To100 >= 0 ? m_currentTrack.rating0To100 : (rating0To100 >= 0 ? rating0To100 : Rating::unset);
+        m_currentTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : m_currentTrack.rating0To100;
         const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
         QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
         if (!m_currentTrack.date.isEmpty()) {
@@ -584,6 +584,7 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
         }
         m_rightSidebar->setQueue(m_queue);
         m_rightSidebar->setCurrentIndex(m_queueIndex);
+        saveQueueState();
         restoreTrackTableViewState();
         worker->deleteLater();
         thread->quit();

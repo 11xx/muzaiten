@@ -26,6 +26,16 @@ target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
 
+add_executable(test_tag_rating
+    test_tag_rating.cpp
+    ../src/core/Rating.cpp
+    ../src/scanner/TagRating.cpp
+)
+target_include_directories(test_tag_rating PRIVATE ../src)
+target_link_libraries(test_tag_rating PRIVATE Qt6::Core Qt6::Test PkgConfig::TAGLIB)
+target_compile_features(test_tag_rating PRIVATE cxx_std_26)
+add_test(NAME test_tag_rating COMMAND test_tag_rating)
+
 add_executable(test_path_resolver
     test_path_resolver.cpp
     ../src/fs/PathResolver.cpp

@@ -27,6 +27,11 @@ public:
     bool upsertTrack(const Track &track);
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
+    bool setPendingTrackRatingWrite(const QString &trackPath, int rating0To100, const QString &status, const QString &lastError = {});
+    bool clearPendingTrackRatingWrite(const QString &trackPath);
+    QVector<Track> tracksWithUserRatings() const;
+    QVector<Track> tracksWithPendingRatingWrites() const;
+    bool updateScannedTrackRating(const QString &trackPath, int rating0To100, Rating::Source source, qint64 fileSize, qint64 fileMtime);
     bool setUserAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     bool clearUserAlbumRating(const QString &albumArtistName, const QString &albumTitle);
     QString setting(const QString &key, const QString &fallback = {}) const;
