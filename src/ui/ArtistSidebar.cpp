@@ -90,9 +90,26 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_tabBar->setTabEnabled(1, false);
     m_tabBar->setVisible(false);
     m_tabBar->setStyleSheet(QStringLiteral(
-        "QTabBar::tab { border: 0; padding: 2px 8px; margin: 0; min-height: 16px; }"
-        "QTabBar::tab:selected { border: 0; }"
-        "QTabBar::tab:!selected { border: 0; }"));
+        "QTabBar::tab {"
+        "  border: 1px solid palette(mid);"
+        "  border-bottom: 0;"
+        "  border-top-left-radius: 3px;"
+        "  border-top-right-radius: 3px;"
+        "  padding: 2px 9px;"
+        "  margin: 0 1px 0 0;"
+        "  min-height: 16px;"
+        "  background: palette(button);"
+        "}"
+        "QTabBar::tab:selected {"
+        "  background: palette(base);"
+        "  color: palette(text);"
+        "}"
+        "QTabBar::tab:!selected {"
+        "  color: palette(window-text);"
+        "}"
+        "QTabBar::tab:disabled {"
+        "  color: palette(disabled, window-text);"
+        "}"));
     layout->addWidget(m_tabBar);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &ArtistSidebar::librarySourceChanged);
