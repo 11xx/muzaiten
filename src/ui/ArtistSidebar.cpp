@@ -16,6 +16,7 @@
 #include <QStyle>
 #include <QTabBar>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <algorithm>
 
 namespace {
@@ -91,6 +92,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
     m_view->setUniformItemSizes(true);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_view->viewport()->installEventFilter(this);
     layout->addWidget(m_view, 1);
 
     connect(m_view, &QListView::clicked, this, [this](const QModelIndex &index) {
@@ -108,9 +110,9 @@ void ArtistSidebar::setArtists(const QVector<Artist> &artists)
         item->setData(artist.name, Qt::UserRole);
         item->setData(artist.albumCount, Qt::UserRole + 1);
         item->setData(m_showAlbumCount, Qt::UserRole + 2);
-        item->setData(QSize(120, m_rowHeight), Qt::SizeHintRole);
         m_model->appendRow(item);
     }
+    applyRowHeight();
 }
 
 void ArtistSidebar::setMpdAvailable(bool available)
@@ -167,10 +169,34 @@ void ArtistSidebar::applyViewSettingsJson(const QString &json)
     const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
     m_showAlbumCount = root.value(QStringLiteral("showAlbumCount")).toBool(true);
     m_rowHeight = std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 18, 40);
+    applyRowHeight();
+}
+
+void ArtistSidebar::applyRowHeight()
+{
     for (int row = 0; row < m_model->rowCount(); ++row) {
         m_model->item(row)->setData(m_showAlbumCount, Qt::UserRole + 2);
         m_model->item(row)->setData(QSize(120, m_rowHeight), Qt::SizeHintRole);
     }
+    if (m_view != nullptr) {
+        m_view->viewport()->update();
+    }
+}
+
+bool ArtistSidebar::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
+        auto *wheel = static_cast<QWheelEvent *>(event);
+        if (wheel->modifiers() & Qt::ControlModifier) {
+            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
+            m_rowHeight = std::clamp(m_rowHeight + step, 18, 40);
+            applyRowHeight();
+            emit viewSettingsChanged();
+            wheel->accept();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void ArtistSidebar::showContextMenu(const QPoint &pos)
@@ -181,9 +207,7 @@ void ArtistSidebar::showContextMenu(const QPoint &pos)
     showCount->setChecked(m_showAlbumCount);
     connect(showCount, &QAction::toggled, this, [this](bool checked) {
         m_showAlbumCount = checked;
-        for (int row = 0; row < m_model->rowCount(); ++row) {
-            m_model->item(row)->setData(m_showAlbumCount, Qt::UserRole + 2);
-        }
+        applyRowHeight();
         emit viewSettingsChanged();
     });
     menu.exec(m_view->viewport()->mapToGlobal(pos));

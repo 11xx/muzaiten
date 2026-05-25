@@ -31,6 +31,10 @@ signals:
 
 private:
     void showContextMenu(const QPoint &pos);
+    void applyRowHeight();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     QTabBar *m_tabBar = nullptr;
