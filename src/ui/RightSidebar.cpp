@@ -59,18 +59,19 @@ struct ColumnSpec {
     const char *key;
     const char *label;
     int index;
+    int preferredWidth;
 };
 
 constexpr ColumnSpec columns[] = {
-    {"position", "#", 0},
-    {"title", "Title", 1},
-    {"ratingEdit", "Rating", 2},
-    {"rating", "Rating (short)", 3},
-    {"artist", "Artist", 4},
-    {"album", "Album", 5},
-    {"duration", "Duration", 6},
-    {"year", "Year", 7},
-    {"track", "Track", 8},
+    {"position", "#", 0, 38},
+    {"title", "Title", 1, 180},
+    {"ratingEdit", "Rating", 2, 96},
+    {"rating", "Rating (short)", 3, 82},
+    {"artist", "Artist", 4, 120},
+    {"album", "Album", 5, 120},
+    {"duration", "Duration", 6, 70},
+    {"year", "Year", 7, 58},
+    {"track", "Track", 8, 54},
 };
 
 constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
@@ -104,14 +105,18 @@ public:
 
         QVector<int> visibleColumns;
         int totalWidth = 0;
+        int titleColumn = -1;
         for (int column = 0; column < model()->columnCount(); ++column) {
             if (isColumnHidden(column)) {
                 continue;
             }
             visibleColumns.push_back(column);
-            totalWidth += columnWidth(column);
+            if (column == 1) {
+                titleColumn = column;
+            }
+            totalWidth += std::max(24, columnWidth(column));
         }
-        if (visibleColumns.isEmpty() || totalWidth <= 0) {
+        if (visibleColumns.isEmpty()) {
             return;
         }
 
@@ -122,17 +127,18 @@ public:
 
         const QSignalBlocker blocker(horizontalHeader());
         m_fittingColumns = true;
-        int remainingWidth = targetWidth;
-        for (int index = 0; index < visibleColumns.size(); ++index) {
-            const int column = visibleColumns.at(index);
-            int width = 0;
-            if (index == visibleColumns.size() - 1) {
-                width = remainingWidth;
-            } else {
-                width = std::max(24, (columnWidth(column) * targetWidth) / totalWidth);
+        if (totalWidth < targetWidth && titleColumn >= 0) {
+            setColumnWidth(titleColumn, columnWidth(titleColumn) + (targetWidth - totalWidth));
+        } else if (totalWidth > targetWidth) {
+            int remainingWidth = targetWidth;
+            for (int index = 0; index < visibleColumns.size(); ++index) {
+                const int column = visibleColumns.at(index);
+                const int width = index == visibleColumns.size() - 1
+                    ? remainingWidth
+                    : std::max(24, (columnWidth(column) * targetWidth) / totalWidth);
+                setColumnWidth(column, std::max(24, width));
                 remainingWidth -= width;
             }
-            setColumnWidth(column, std::max(24, width));
         }
         m_fittingColumns = false;
     }
@@ -192,6 +198,16 @@ protected:
     }
 
 private:
+    static int preferredWidthForColumn(int column)
+    {
+        for (const ColumnSpec &spec : columns) {
+            if (spec.index == column) {
+                return spec.preferredWidth;
+            }
+        }
+        return 60;
+    }
+
     int rowForDropPosition(const QPoint &pos) const
     {
         const QModelIndex index = indexAt(pos);
@@ -469,6 +485,20 @@ public:
     std::function<void()> clicked;
 
 protected:
+    void enterEvent(QEnterEvent *event) override
+    {
+        m_hovered = true;
+        QLabel::enterEvent(event);
+        update();
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        m_hovered = false;
+        QLabel::leaveEvent(event);
+        update();
+    }
+
     QSize sizeHint() const override
     {
         return {QLabel::sizeHint().width(), fontMetrics().height() + 2};
@@ -507,8 +537,7 @@ protected:
         painter.setRenderHint(QPainter::TextAntialiasing, true);
         painter.setPen(palette().color(QPalette::WindowText));
 
-        QFont styled = font();
-        styled.setUnderline(m_clickable);
+        QFont styled = clickableFont();
         painter.setFont(styled);
 
         const QRect area = contentsRect();
@@ -551,7 +580,7 @@ private:
     QFont clickableFont() const
     {
         QFont styled = font();
-        styled.setUnderline(m_clickable);
+        styled.setUnderline(m_clickable && m_hovered);
         return styled;
     }
 
@@ -634,6 +663,7 @@ private:
 
     QString m_fullText;
     bool m_clickable = false;
+    bool m_hovered = false;
     TrackInfoOverflowMode m_overflowMode = TrackInfoOverflowMode::Scroll;
     QTimer m_scrollTimer;
     int m_scrollOffset = 0;
@@ -816,16 +846,6 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->horizontalHeader()->setStretchLastSection(false);
     m_queueTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    m_queueTable->setColumnWidth(0, 38);
-    m_queueTable->setColumnWidth(1, 180);
-    m_queueTable->setColumnWidth(2, 96);
-    m_queueTable->setColumnWidth(3, 82);
-    m_queueTable->setColumnWidth(4, 120);
-    m_queueTable->setColumnWidth(5, 120);
-    m_queueTable->setColumnWidth(6, 70);
-    m_queueTable->setColumnWidth(7, 58);
-    m_queueTable->setColumnWidth(8, 54);
-    static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
@@ -833,6 +853,10 @@ RightSidebar::RightSidebar(QWidget *parent)
     for (const int column : {2, 4, 5, 6, 7, 8}) {
         m_queueTable->setColumnHidden(column, true);
     }
+    for (const ColumnSpec &spec : columns) {
+        m_queueTable->setColumnWidth(spec.index, spec.preferredWidth);
+    }
+    static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
@@ -845,7 +869,6 @@ RightSidebar::RightSidebar(QWidget *parent)
         emit viewSettingsChanged();
     });
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
-        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
         emit viewSettingsChanged();
     });
     connect(m_queueTable, &QWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
@@ -1372,6 +1395,15 @@ void RightSidebar::showHeaderMenu(const QPoint &pos)
         action->setChecked(!m_queueTable->isColumnHidden(spec.index));
         connect(action, &QAction::toggled, this, [this, column = spec.index](bool checked) {
             m_queueTable->setColumnHidden(column, !checked);
+            if (checked && m_queueTable->columnWidth(column) <= 24) {
+                for (const ColumnSpec &candidate : columns) {
+                    if (candidate.index == column) {
+                        m_queueTable->setColumnWidth(column, candidate.preferredWidth);
+                        break;
+                    }
+                }
+            }
+            static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
             emit viewSettingsChanged();
         });
     }
