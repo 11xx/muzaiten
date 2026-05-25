@@ -47,7 +47,7 @@ private:
     QJsonArray trackInfoSettingsJson() const;
     void updateTrackInfoLabels();
     void restyleTrackInfoLabels();
-    QLabel *trackInfoLabelFromSender() const;
+    QWidget *trackInfoLabelFromSender() const;
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -57,12 +57,12 @@ private:
     QTableView *m_queueTable = nullptr;
     QLabel *m_albumArt = nullptr;
     QWidget *m_trackInfoPane = nullptr;
-    QLabel *m_trackInfoTitle = nullptr;
-    QLabel *m_trackInfoArtist = nullptr;
-    QLabel *m_trackInfoAlbum = nullptr;
-    QLabel *m_trackInfoYear = nullptr;
-    QLabel *m_trackInfoFile = nullptr;
-    QLabel *m_trackInfoProperties = nullptr;
+    QWidget *m_trackInfoTitle = nullptr;
+    QWidget *m_trackInfoArtist = nullptr;
+    QWidget *m_trackInfoAlbum = nullptr;
+    QWidget *m_trackInfoYear = nullptr;
+    QWidget *m_trackInfoFile = nullptr;
+    QWidget *m_trackInfoProperties = nullptr;
     QLabel *m_noTrackLabel = nullptr;
     QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
