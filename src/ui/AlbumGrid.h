@@ -1,9 +1,10 @@
 #pragma once
 
+#include "core/Album.h"
+
 #include <QListView>
 #include <QVector>
 
-class Album;
 class QEvent;
 class QMouseEvent;
 class QTimer;
@@ -37,12 +38,16 @@ private:
     void showContextMenu(const QPoint &pos);
     void applySettingsToView();
     void applySettingsToItems();
+    void appendNextAlbumBatch();
     void loadNextAlbumArtwork();
 
 private:
     QString m_artworkCacheRoot;
     QString m_selectedAlbumTitle;
+    QVector<Album> m_pendingAlbums;
+    QTimer *m_populateTimer = nullptr;
     QTimer *m_artworkTimer = nullptr;
+    qsizetype m_nextAlbumRow = 0;
     int m_nextArtworkRow = 0;
     int m_artworkGeneration = 0;
     int m_cellWidth = 204;
