@@ -2,6 +2,8 @@
 
 #include "ui/AlbumArtFallback.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/StarRating.h"
+#include "ui/StarRatingDelegate.h"
 
 #include <QAction>
 #include <QAbstractItemView>
@@ -13,12 +15,16 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QLine>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -58,18 +64,119 @@ struct ColumnSpec {
 constexpr ColumnSpec columns[] = {
     {"position", "#", 0},
     {"title", "Title", 1},
-    {"rating", "Rating", 2},
-    {"artist", "Artist", 3},
-    {"album", "Album", 4},
-    {"duration", "Duration", 5},
-    {"year", "Year", 6},
-    {"track", "Track", 7},
+    {"ratingEdit", "Rating", 2},
+    {"rating", "Rating (short)", 3},
+    {"artist", "Artist", 4},
+    {"album", "Album", 5},
+    {"duration", "Duration", 6},
+    {"year", "Year", 7},
+    {"track", "Track", 8},
 };
 
 constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
 
 QString ratingText(int rating0To100);
 QString formatDuration(qint64 durationMs);
+
+enum QueueRoles {
+    TrackRole = Qt::UserRole + 1,
+    HoverRatingRole = Qt::UserRole + 2,
+};
+
+class QueueTableView final : public QTableView {
+public:
+    explicit QueueTableView(QWidget *parent = nullptr)
+        : QTableView(parent)
+    {
+    }
+
+    int dropIndicatorRow() const
+    {
+        return m_dropIndicatorRow;
+    }
+
+    std::function<void(const QVector<int> &rows, int destinationRow)> rowsMoveRequested;
+
+protected:
+    void dragMoveEvent(QDragMoveEvent *event) override
+    {
+        QTableView::dragMoveEvent(event);
+        setDropIndicatorRow(rowForDropPosition(event->position().toPoint()));
+    }
+
+    void dragLeaveEvent(QDragLeaveEvent *event) override
+    {
+        QTableView::dragLeaveEvent(event);
+        setDropIndicatorRow(-1);
+    }
+
+    void dropEvent(QDropEvent *event) override
+    {
+        if (event->mimeData() != nullptr && event->mimeData()->hasFormat(QString::fromLatin1(queueRowsMimeType))) {
+            QVector<int> rows;
+            QByteArray payload = event->mimeData()->data(QString::fromLatin1(queueRowsMimeType));
+            QDataStream stream(&payload, QIODevice::ReadOnly);
+            stream >> rows;
+            if (rowsMoveRequested) {
+                rowsMoveRequested(rows, rowForDropPosition(event->position().toPoint()));
+            }
+            event->acceptProposedAction();
+        } else {
+            QTableView::dropEvent(event);
+        }
+        setDropIndicatorRow(-1);
+    }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        QTableView::paintEvent(event);
+        if (m_dropIndicatorRow < 0 || model() == nullptr) {
+            return;
+        }
+
+        const int y = yForDropRow(m_dropIndicatorRow);
+        QPainter painter(viewport());
+        QColor color = palette().color(QPalette::Highlight);
+        color.setAlpha(210);
+        QPen pen(color, 2);
+        painter.setPen(pen);
+        painter.drawLine(QLine(0, y, viewport()->width(), y));
+    }
+
+private:
+    int rowForDropPosition(const QPoint &pos) const
+    {
+        const QModelIndex index = indexAt(pos);
+        if (!index.isValid()) {
+            return model() == nullptr ? -1 : model()->rowCount();
+        }
+        const QRect rect = visualRect(index);
+        return pos.y() < rect.center().y() ? index.row() : index.row() + 1;
+    }
+
+    int yForDropRow(int row) const
+    {
+        if (model() == nullptr || model()->rowCount() == 0) {
+            return 0;
+        }
+        if (row >= model()->rowCount()) {
+            const QRect last = visualRect(model()->index(model()->rowCount() - 1, 0));
+            return last.bottom() + 1;
+        }
+        return visualRect(model()->index(row, 0)).top();
+    }
+
+    void setDropIndicatorRow(int row)
+    {
+        if (m_dropIndicatorRow == row) {
+            return;
+        }
+        m_dropIndicatorRow = row;
+        viewport()->update();
+    }
+
+    int m_dropIndicatorRow = -1;
+};
 
 QString displayYear(const Track &track)
 {
@@ -98,7 +205,7 @@ public:
 
     int columnCount(const QModelIndex &parent = {}) const override
     {
-        return parent.isValid() ? 0 : 8;
+        return parent.isValid() ? 0 : 9;
     }
 
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
@@ -117,6 +224,18 @@ public:
     QVariant data(const QModelIndex &index, int role) const override
     {
         if (!index.isValid() || index.row() < 0 || index.row() >= m_tracks.size() || role != Qt::DisplayRole) {
+            if (index.isValid() && index.row() >= 0 && index.row() < m_tracks.size()) {
+                const Track &track = m_tracks.at(index.row());
+                if (role == TrackRole) {
+                    return QVariant::fromValue(track);
+                }
+                if (index.column() == 2 && role == Qt::UserRole) {
+                    return track.effectiveRating0To100;
+                }
+                if (index.column() == 2 && role == HoverRatingRole) {
+                    return m_hoverRatings.value(index.row(), StarRating::unset);
+                }
+            }
             return {};
         }
 
@@ -127,20 +246,32 @@ public:
         case 1:
             return track.title;
         case 2:
-            return ratingText(track.effectiveRating0To100);
+            return {};
         case 3:
-            return track.artistName;
+            return ratingText(track.effectiveRating0To100);
         case 4:
-            return track.albumTitle;
+            return track.artistName;
         case 5:
-            return formatDuration(track.durationMs);
+            return track.albumTitle;
         case 6:
-            return displayYear(track);
+            return formatDuration(track.durationMs);
         case 7:
+            return displayYear(track);
+        case 8:
             return track.trackNumber > 0 ? QString::number(track.trackNumber) : QString();
         default:
             return {};
         }
+    }
+
+    bool setData(const QModelIndex &index, const QVariant &value, int role) override
+    {
+        if (!index.isValid() || index.column() != 2 || role != HoverRatingRole || index.row() >= m_hoverRatings.size()) {
+            return false;
+        }
+        m_hoverRatings[index.row()] = value.toInt();
+        emit dataChanged(index, index, {HoverRatingRole});
+        return true;
     }
 
     Qt::ItemFlags flags(const QModelIndex &index) const override
@@ -206,6 +337,7 @@ public:
     {
         beginResetModel();
         m_tracks = tracks;
+        m_hoverRatings.fill(StarRating::unset, m_tracks.size());
         endResetModel();
     }
 
@@ -214,6 +346,7 @@ signals:
 
 private:
     QVector<Track> m_tracks;
+    QVector<int> m_hoverRatings;
 };
 
 struct TrackInfoField {
@@ -587,7 +720,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     layout->addWidget(m_splitter, 1);
 
     auto *queueModel = new QueueTableModel(this);
-    m_queueTable = new QTableView(m_splitter);
+    auto *queueView = new QueueTableView(m_splitter);
+    m_queueTable = queueView;
     m_queueTable->setModel(queueModel);
     m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_queueTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -599,25 +733,34 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setDefaultDropAction(Qt::MoveAction);
     m_queueTable->setDragDropOverwriteMode(false);
     m_queueTable->setItemDelegate(new DenseTableDelegate(this));
+    auto *queueRatingDelegate = new StarRatingDelegate(this);
+    m_queueTable->setItemDelegateForColumn(2, queueRatingDelegate);
     m_queueTable->setShowGrid(false);
     m_queueTable->setWordWrap(false);
+    m_queueTable->setMouseTracking(true);
+    m_queueTable->viewport()->setMouseTracking(true);
     m_queueTable->verticalHeader()->setVisible(false);
     m_queueTable->verticalHeader()->setDefaultSectionSize(20);
     m_queueTable->verticalHeader()->setMinimumSectionSize(20);
     m_queueTable->horizontalHeader()->setFixedHeight(20);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_queueTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_queueTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    m_queueTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    m_queueTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
-    m_queueTable->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
-    m_queueTable->horizontalHeader()->setSectionResizeMode(7, QHeaderView::ResizeToContents);
+    m_queueTable->horizontalHeader()->setStretchLastSection(false);
+    m_queueTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_queueTable->setColumnWidth(0, 38);
+    m_queueTable->setColumnWidth(1, 180);
+    m_queueTable->setColumnWidth(2, 96);
+    m_queueTable->setColumnWidth(3, 82);
+    m_queueTable->setColumnWidth(4, 120);
+    m_queueTable->setColumnWidth(5, 120);
+    m_queueTable->setColumnWidth(6, 70);
+    m_queueTable->setColumnWidth(7, 58);
+    m_queueTable->setColumnWidth(8, 54);
     m_queueTable->setAlternatingRowColors(true);
     m_queueTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     m_queueTable->viewport()->installEventFilter(this);
-    for (const int column : {3, 4, 5, 6, 7}) {
+    for (const int column : {2, 4, 5, 6, 7, 8}) {
         m_queueTable->setColumnHidden(column, true);
     }
     m_splitter->addWidget(m_queueTable);
@@ -635,7 +778,15 @@ RightSidebar::RightSidebar(QWidget *parent)
         emit viewSettingsChanged();
     });
     connect(m_queueTable, &QWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
-    connect(queueModel, &QueueTableModel::rowsMoveRequested, this, &RightSidebar::queueRowsMoveRequested);
+    queueView->rowsMoveRequested = [this](const QVector<int> &rows, int destinationRow) {
+        emit queueRowsMoveRequested(rows, destinationRow);
+    };
+    connect(queueRatingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
+        const Track track = index.data(TrackRole).value<Track>();
+        if (!track.path.isEmpty()) {
+            emit queueTrackRatingChanged(track, rating);
+        }
+    });
 
     m_trackInfoPane = new QFrame(m_splitter);
     auto *infoLayout = new QVBoxLayout(m_trackInfoPane);
@@ -1115,7 +1266,11 @@ void RightSidebar::setQueueHoveredRow(int row)
     if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(m_queueTable->itemDelegate())) {
         denseDelegate->setHoveredRow(row);
     }
+    if (auto *ratingDelegate = qobject_cast<StarRatingDelegate *>(m_queueTable->itemDelegateForColumn(2))) {
+        ratingDelegate->setHoveredRow(row);
+    }
     if (previous >= 0) {
+        m_queueTable->model()->setData(m_queueTable->model()->index(previous, 2), StarRating::unset, HoverRatingRole);
         const QRect rect = m_queueTable->visualRect(m_queueTable->model()->index(previous, 0));
         m_queueTable->viewport()->update(QRect(0, rect.top(), m_queueTable->viewport()->width(), rect.height()));
     }
