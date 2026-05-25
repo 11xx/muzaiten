@@ -9,6 +9,8 @@
 #include <QStringList>
 #include <QVariant>
 
+#include <algorithm>
+
 namespace {
 
 QString sourceName(Rating::Source source)
@@ -39,6 +41,54 @@ bool execSql(QSqlQuery &query, const QString &sql, QString *error)
         return false;
     }
     return true;
+}
+
+bool tableHasColumn(QSqlDatabase database, const QString &table, const QString &column)
+{
+    QSqlQuery query(database);
+    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) {
+        return false;
+    }
+    while (query.next()) {
+        if (query.value(1).toString() == column) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ensureColumn(QSqlDatabase database, const QString &table, const QString &column, const QString &definition, QString *error)
+{
+    if (tableHasColumn(database, table, column)) {
+        return true;
+    }
+    QSqlQuery query(database);
+    return execSql(query, QStringLiteral("ALTER TABLE %1 ADD COLUMN %2").arg(table, definition), error);
+}
+
+QString cleanRootPath(const QString &path)
+{
+    const QString cleaned = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    if (cleaned.size() > 1 && cleaned.endsWith(QLatin1Char('/'))) {
+        return cleaned.left(cleaned.size() - 1);
+    }
+    return cleaned;
+}
+
+bool hasScanRoots(QSqlDatabase database)
+{
+    QSqlQuery query(database);
+    return query.exec(QStringLiteral("SELECT 1 FROM scan_roots LIMIT 1")) && query.next();
+}
+
+QString enabledLibraryRootPredicate(const QString &trackAlias)
+{
+    return QStringLiteral(
+        "EXISTS ("
+        "SELECT 1 FROM scan_roots sr "
+        "WHERE sr.library_enabled = 1 "
+        "AND (%1.path = sr.path OR %1.path LIKE sr.path || '/%'))")
+        .arg(trackAlias);
 }
 
 } // namespace
@@ -76,7 +126,7 @@ bool Database::migrate()
     QSqlQuery query(m_db);
     const QStringList statements = {
         QStringLiteral("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS scan_roots (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_scanned_at TEXT)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS scan_roots (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT, scan_enabled INTEGER NOT NULL DEFAULT 1, library_enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT, last_scanned_at TEXT, last_error TEXT)"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS artists (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort_name TEXT, musicbrainz_artist_id TEXT, UNIQUE(name, musicbrainz_artist_id))"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL, album_artist_id INTEGER, sort_title TEXT, date TEXT, original_date TEXT, musicbrainz_release_id TEXT, musicbrainz_release_group_id TEXT, artwork_cache_key TEXT, FOREIGN KEY(album_artist_id) REFERENCES artists(id))"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, parent_dir TEXT NOT NULL, filename TEXT NOT NULL, title TEXT, artist_name TEXT, album_artist_name TEXT, album_title TEXT, album_id INTEGER, track_number INTEGER, track_total INTEGER, disc_number INTEGER, disc_total INTEGER, duration_ms INTEGER, rating_0_100 INTEGER, rating_source TEXT NOT NULL DEFAULT 'none', play_count INTEGER, date TEXT, original_date TEXT, musicbrainz_recording_id TEXT, musicbrainz_track_id TEXT, musicbrainz_release_id TEXT, file_size INTEGER NOT NULL, file_mtime INTEGER NOT NULL, scanned_at TEXT NOT NULL, scan_error TEXT, FOREIGN KEY(album_id) REFERENCES albums(id))"),
@@ -106,7 +156,34 @@ bool Database::migrate()
             return false;
         }
     }
-    return Schema::currentVersion == 4;
+
+    const QVector<QPair<QString, QString>> scanRootColumns = {
+        {QStringLiteral("name"), QStringLiteral("name TEXT")},
+        {QStringLiteral("scan_enabled"), QStringLiteral("scan_enabled INTEGER NOT NULL DEFAULT 1")},
+        {QStringLiteral("library_enabled"), QStringLiteral("library_enabled INTEGER NOT NULL DEFAULT 1")},
+        {QStringLiteral("updated_at"), QStringLiteral("updated_at TEXT")},
+        {QStringLiteral("last_error"), QStringLiteral("last_error TEXT")},
+    };
+    for (const auto &column : scanRootColumns) {
+        if (!ensureColumn(m_db, QStringLiteral("scan_roots"), column.first, column.second, &m_lastError)) {
+            return false;
+        }
+    }
+
+    const QStringList sourceDirectoryStatements = {
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_scan_roots_scan_enabled ON scan_roots(scan_enabled)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_scan_roots_library_enabled ON scan_roots(library_enabled)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_path ON tracks(path)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_parent_dir ON tracks(parent_dir)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(5, datetime('now'))"),
+    };
+    for (const QString &statement : sourceDirectoryStatements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 5;
 }
 
 QString Database::lastError() const
@@ -233,7 +310,12 @@ QVector<Artist> Database::albumArtists() const
 {
     QVector<Artist> artists;
     QSqlQuery query(m_db);
-    query.exec(QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks GROUP BY album_artist_name ORDER BY lower(album_artist_name)"));
+    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" WHERE %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+    }
+    sql += QStringLiteral(" GROUP BY album_artist_name ORDER BY lower(album_artist_name)");
+    query.exec(sql);
     while (query.next()) {
         Artist artist;
         artist.name = query.value(0).toString();
@@ -260,10 +342,11 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "LEFT JOIN user_album_ratings uar ON uar.album_artist_name = t.album_artist_name AND uar.album_title = t.album_title "
-        "WHERE t.album_artist_name = ? "
+        "WHERE t.album_artist_name = ? %2 "
         "GROUP BY t.album_title, uar.rating_0_100 "
         "ORDER BY lower(t.album_title)")
-                      .arg(effectiveTrackRating));
+                      .arg(effectiveTrackRating,
+                           hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"))) : QString()));
     query.addBindValue(albumArtist);
     query.exec();
     while (query.next()) {
@@ -293,6 +376,9 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.album_artist_name = ?");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+    }
     if (!albumTitleFilter.isEmpty()) {
         sql += QStringLiteral(" AND t.album_title = ?");
     }
@@ -637,6 +723,216 @@ bool Database::removeLinkRoot(int id)
         return false;
     }
     return true;
+}
+
+QVector<ScanRoot> Database::scanRoots() const
+{
+    QVector<ScanRoot> roots;
+    QSqlQuery query(m_db);
+    query.exec(QStringLiteral(
+        "SELECT id, name, path, scan_enabled, library_enabled, created_at, updated_at, last_scanned_at, last_error "
+        "FROM scan_roots "
+        "ORDER BY lower(path)"));
+    while (query.next()) {
+        ScanRoot root;
+        root.id = query.value(0).toInt();
+        root.name = query.value(1).toString();
+        root.path = query.value(2).toString();
+        root.scanEnabled = query.value(3).toBool();
+        root.libraryEnabled = query.value(4).toBool();
+        root.createdAt = query.value(5).toString();
+        root.updatedAt = query.value(6).toString();
+        root.lastScannedAt = query.value(7).toString();
+        root.lastError = query.value(8).toString();
+        roots.push_back(root);
+    }
+    return roots;
+}
+
+QVector<ScanRoot> Database::enabledScanRoots() const
+{
+    QVector<ScanRoot> roots;
+    for (const ScanRoot &root : scanRoots()) {
+        if (root.scanEnabled) {
+            roots.push_back(root);
+        }
+    }
+    return roots;
+}
+
+QVector<ScanRoot> Database::enabledLibraryRoots() const
+{
+    QVector<ScanRoot> roots;
+    for (const ScanRoot &root : scanRoots()) {
+        if (root.libraryEnabled) {
+            roots.push_back(root);
+        }
+    }
+    return roots;
+}
+
+bool Database::saveScanRoot(const ScanRoot &root)
+{
+    const QString path = cleanRootPath(root.path);
+    if (path.trimmed().isEmpty()) {
+        m_lastError = QStringLiteral("Source directory path is required");
+        return false;
+    }
+
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isDir() || info.isSymLink()) {
+        m_lastError = QStringLiteral("Source directory must be an existing non-symlink directory");
+        return false;
+    }
+
+    const QString fallbackName = info.fileName().isEmpty() ? path : info.fileName();
+    const QString name = root.name.trimmed().isEmpty() ? fallbackName : root.name.trimmed();
+    QSqlQuery query(m_db);
+    if (root.id > 0) {
+        query.prepare(QStringLiteral(
+            "UPDATE scan_roots "
+            "SET name = ?, path = ?, scan_enabled = ?, library_enabled = ?, updated_at = datetime('now') "
+            "WHERE id = ?"));
+        query.addBindValue(name);
+        query.addBindValue(path);
+        query.addBindValue(root.scanEnabled ? 1 : 0);
+        query.addBindValue(root.libraryEnabled ? 1 : 0);
+        query.addBindValue(root.id);
+    } else {
+        query.prepare(QStringLiteral(
+            "INSERT INTO scan_roots(path, name, scan_enabled, library_enabled, created_at, updated_at) "
+            "VALUES(?, ?, ?, ?, datetime('now'), datetime('now'))"));
+        query.addBindValue(path);
+        query.addBindValue(name);
+        query.addBindValue(root.scanEnabled ? 1 : 0);
+        query.addBindValue(root.libraryEnabled ? 1 : 0);
+    }
+
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::removeScanRoot(int id)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM scan_roots WHERE id = ?"));
+    query.addBindValue(id);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::setScanRootLastScanned(int id, const QString &lastError)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "UPDATE scan_roots "
+        "SET last_scanned_at = datetime('now'), last_error = ?, updated_at = datetime('now') "
+        "WHERE id = ?"));
+    query.addBindValue(lastError);
+    query.addBindValue(id);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QVector<Track> Database::tracksForDirectory(const QString &directory) const
+{
+    QVector<Track> tracks;
+    const QString cleanDirectory = cleanRootPath(directory);
+    QSqlQuery query(m_db);
+    QString sql = QStringLiteral(
+        "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, p.status "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.parent_dir = ?");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+    }
+    sql += QStringLiteral(" ORDER BY t.disc_number, t.track_number, lower(t.filename)");
+    query.prepare(sql);
+    query.addBindValue(cleanDirectory);
+    query.exec();
+    while (query.next()) {
+        Track track;
+        track.path = query.value(0).toString();
+        track.parentDir = query.value(1).toString();
+        track.filename = query.value(2).toString();
+        track.title = query.value(3).toString();
+        track.artistName = query.value(4).toString();
+        track.albumArtistName = query.value(5).toString();
+        track.albumTitle = query.value(6).toString();
+        track.trackNumber = query.value(7).toInt();
+        track.discNumber = query.value(8).toInt();
+        track.durationMs = query.value(9).toLongLong();
+        track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
+        track.hasUserRating = !query.value(11).isNull();
+        const QString pendingStatus = query.value(15).toString();
+        const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
+            || pendingStatus == QStringLiteral("failed")
+            || pendingStatus == QStringLiteral("blocked_no_writable_path");
+        track.effectiveRating0To100 = pendingDbRating && track.hasUserRating
+            ? query.value(11).toInt()
+            : (track.rating0To100 >= 0 ? track.rating0To100 : (track.hasUserRating ? query.value(11).toInt() : Rating::unset));
+        track.date = query.value(12).toString();
+        track.originalDate = query.value(13).toString();
+        track.fileSize = query.value(14).toLongLong();
+        tracks.push_back(track);
+    }
+    return tracks;
+}
+
+QStringList Database::localLibraryDirectories(const QString &parentDirectory) const
+{
+    QStringList directories;
+    const QString parent = parentDirectory.trimmed().isEmpty() ? QString() : cleanRootPath(parentDirectory);
+    QSqlQuery query(m_db);
+    QString sql = QStringLiteral("SELECT DISTINCT t.parent_dir FROM tracks t");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" WHERE %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+    }
+    sql += QStringLiteral(" ORDER BY lower(t.parent_dir)");
+    query.exec(sql);
+
+    const QVector<ScanRoot> libraryRoots = enabledLibraryRoots();
+    while (query.next()) {
+        const QString dir = cleanRootPath(query.value(0).toString());
+        if (parent.isEmpty()) {
+            if (libraryRoots.isEmpty()) {
+                directories.push_back(dir);
+                continue;
+            }
+            for (const ScanRoot &root : libraryRoots) {
+                if (dir == root.path || dir.startsWith(root.path + QLatin1Char('/'))) {
+                    directories.push_back(root.path);
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if (!dir.startsWith(parent + QLatin1Char('/'))) {
+            continue;
+        }
+        const QString remainder = dir.mid(parent.size() + 1);
+        const qsizetype slash = remainder.indexOf(QLatin1Char('/'));
+        directories.push_back(slash < 0 ? dir : parent + QLatin1Char('/') + remainder.left(slash));
+    }
+
+    directories.removeDuplicates();
+    std::sort(directories.begin(), directories.end(), [](const QString &left, const QString &right) {
+        return QString::localeAwareCompare(left, right) < 0;
+    });
+    return directories;
 }
 
 qint64 Database::upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath)

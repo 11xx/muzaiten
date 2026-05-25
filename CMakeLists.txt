@@ -77,6 +77,7 @@ set(MUZAITEN_HEADERS
     src/core/Artist.h
     src/core/MusicBrainzIds.h
     src/core/Rating.h
+    src/core/ScanRoot.h
     src/core/Track.h
     src/db/Database.h
     src/db/Schema.h
