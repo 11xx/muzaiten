@@ -14,6 +14,7 @@
 #include <QMouseEvent>
 #include <QStandardItemModel>
 #include <QTimer>
+#include <QWheelEvent>
 #include <algorithm>
 
 namespace {
@@ -253,6 +254,22 @@ void AlbumGrid::leaveEvent(QEvent *event)
         }
     }
     QListView::leaveEvent(event);
+}
+
+void AlbumGrid::wheelEvent(QWheelEvent *event)
+{
+    if (event->modifiers() & Qt::ControlModifier) {
+        const int step = event->angleDelta().y() > 0 ? 12 : -12;
+        m_artSize = std::clamp(m_artSize + step, 96, 260);
+        m_cellWidth = std::clamp(m_artSize + 28, 160, 320);
+        m_cellHeight = std::clamp(m_artSize + 116, 240, 400);
+        applySettingsToView();
+        applySettingsToItems();
+        emit viewSettingsChanged();
+        event->accept();
+        return;
+    }
+    QListView::wheelEvent(event);
 }
 
 QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
