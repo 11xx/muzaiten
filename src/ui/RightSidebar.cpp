@@ -15,6 +15,7 @@
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -34,6 +35,7 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QByteArray>
+#include <QClipboard>
 #include <QFrame>
 #include <QWheelEvent>
 
@@ -411,6 +413,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_trackInfoProperties = valueLabel(m_trackInfoPane);
     m_trackInfoFile = valueLabel(m_trackInfoPane);
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
+        label->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(label, &QWidget::customContextMenuRequested, this, &RightSidebar::showTrackInfoLabelMenu);
         infoLayout->addWidget(label);
     }
     static_cast<TrackInfoLabel *>(m_trackInfoArtist)->setClickable(true);
@@ -800,16 +804,24 @@ void RightSidebar::restyleTrackInfoLabels()
         styled.setPointSize(std::max(6, baseFont.pointSize() + label->property("muzaitenSizeDelta").toInt()));
         label->setFont(styled);
         QPalette labelPalette = palette();
-        QColor color = labelPalette.color(QPalette::WindowText);
+        QColor color = labelPalette.color(QPalette::Text);
         color.setAlphaF(static_cast<float>(std::clamp(label->property("muzaitenOpacity").toInt() / 100.0, 0.1, 1.0)));
         labelPalette.setColor(QPalette::WindowText, color);
+        labelPalette.setColor(QPalette::Text, color);
+        labelPalette.setColor(QPalette::ButtonText, color);
         label->setPalette(labelPalette);
     }
     QPalette emptyPalette = palette();
-    QColor emptyColor = emptyPalette.color(QPalette::WindowText);
+    QColor emptyColor = emptyPalette.color(QPalette::Text);
     emptyColor.setAlphaF(0.75);
     emptyPalette.setColor(QPalette::WindowText, emptyColor);
+    emptyPalette.setColor(QPalette::Text, emptyColor);
     m_noTrackLabel->setPalette(emptyPalette);
+}
+
+QLabel *RightSidebar::trackInfoLabelFromSender() const
+{
+    return qobject_cast<QLabel *>(sender());
 }
 
 void RightSidebar::setHeaderHeight(int height)
@@ -921,6 +933,27 @@ void RightSidebar::showQueueMenu(const QPoint &pos)
         emit queueClearRequested();
     });
     menu.exec(m_queueTable->viewport()->mapToGlobal(pos));
+}
+
+void RightSidebar::showTrackInfoLabelMenu(const QPoint &pos)
+{
+    QLabel *label = trackInfoLabelFromSender();
+    if (label == nullptr) {
+        return;
+    }
+
+    const QString text = static_cast<TrackInfoLabel *>(label)->fullText().trimmed();
+
+    QMenu menu(this);
+    QAction *copy = menu.addAction(QStringLiteral("Copy"));
+    copy->setEnabled(!text.isEmpty());
+    QAction *configure = menu.addAction(QStringLiteral("Configure track information..."));
+    const QAction *selected = menu.exec(label->mapToGlobal(pos));
+    if (selected == copy) {
+        QGuiApplication::clipboard()->setText(text);
+    } else if (selected == configure) {
+        configureTrackInfoPanel(this);
+    }
 }
 
 #include "RightSidebar.moc"
