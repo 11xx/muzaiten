@@ -8,6 +8,7 @@
 
 class QEvent;
 class QMouseEvent;
+class QWheelEvent;
 
 class TrackTable final : public QTableView {
     Q_OBJECT
@@ -35,6 +36,7 @@ signals:
 protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
 
 private:
     void showHeaderMenu(const QPoint &pos);

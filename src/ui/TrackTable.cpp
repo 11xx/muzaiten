@@ -6,6 +6,7 @@
 #include "ui/StarRatingDelegate.h"
 
 #include <QAction>
+#include <QAbstractTableModel>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -13,9 +14,11 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QScrollBar>
-#include <QStandardItemModel>
 #include <QTime>
 #include <QByteArray>
+#include <QWheelEvent>
+
+#include <limits>
 
 namespace {
 
@@ -33,6 +36,168 @@ constexpr ColumnSpec columns[] = {
     {"artist", "Artist", 4},
     {"duration", "Duration", 5},
     {"year", "Year", 6},
+};
+
+enum TrackRoles {
+    SortRole = Qt::UserRole,
+    TrackRole = Qt::UserRole + 1,
+    HoverRatingRole = Qt::UserRole + 2,
+};
+
+QString formatDuration(qint64 durationMs)
+{
+    const QTime duration = QTime(0, 0).addMSecs(static_cast<int>(durationMs));
+    return duration.hour() > 0 ? duration.toString(QStringLiteral("h:mm:ss")) : duration.toString(QStringLiteral("m:ss"));
+}
+
+class TrackTableModel final : public QAbstractTableModel {
+public:
+    explicit TrackTableModel(QObject *parent = nullptr)
+        : QAbstractTableModel(parent)
+    {
+    }
+
+    int rowCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : static_cast<int>(std::min<qsizetype>(m_tracks.size(), std::numeric_limits<int>::max()));
+    }
+
+    int columnCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : 7;
+    }
+
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override
+    {
+        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+            return {};
+        }
+        for (const ColumnSpec &spec : columns) {
+            if (spec.index == section) {
+                return QString::fromLatin1(spec.label);
+            }
+        }
+        return {};
+    }
+
+    QVariant data(const QModelIndex &index, int role) const override
+    {
+        if (!index.isValid() || index.row() < 0 || index.row() >= m_tracks.size()) {
+            return {};
+        }
+
+        const Track &track = m_tracks.at(index.row());
+        if (role == TrackRole) {
+            return QVariant::fromValue(track);
+        }
+        if (role == HoverRatingRole && index.column() == 0) {
+            return m_hoverRatings.value(index.row(), StarRating::unset);
+        }
+        if (role == Qt::EditRole && index.column() == 0) {
+            return track.effectiveRating0To100;
+        }
+        if (role == SortRole) {
+            return sortValue(track, index.column());
+        }
+        if (role != Qt::DisplayRole && role != Qt::UserRole) {
+            return {};
+        }
+
+        switch (index.column()) {
+        case 0:
+            return track.effectiveRating0To100;
+        case 1:
+            return track.trackNumber > 0 ? QString::number(track.trackNumber) : QString();
+        case 2:
+            return track.title;
+        case 3:
+            return track.albumTitle;
+        case 4:
+            return track.artistName;
+        case 5:
+            return formatDuration(track.durationMs);
+        case 6:
+            return track.date.left(4);
+        default:
+            return {};
+        }
+    }
+
+    bool setData(const QModelIndex &index, const QVariant &value, int role) override
+    {
+        if (!index.isValid() || role != HoverRatingRole || index.column() != 0 || index.row() >= m_hoverRatings.size()) {
+            return false;
+        }
+        m_hoverRatings[index.row()] = value.toInt();
+        emit dataChanged(index, index, {HoverRatingRole});
+        return true;
+    }
+
+    Qt::ItemFlags flags(const QModelIndex &index) const override
+    {
+        return index.isValid() ? Qt::ItemIsEnabled | Qt::ItemIsSelectable : Qt::NoItemFlags;
+    }
+
+    void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override
+    {
+        if (column < 0 || column >= columnCount()) {
+            return;
+        }
+
+        beginResetModel();
+        std::sort(m_tracks.begin(), m_tracks.end(), [column, order](const Track &left, const Track &right) {
+            const QVariant leftValue = sortValue(left, column);
+            const QVariant rightValue = sortValue(right, column);
+            int comparison = 0;
+            if (leftValue.metaType().id() == QMetaType::LongLong || leftValue.metaType().id() == QMetaType::Int) {
+                comparison = leftValue.toLongLong() < rightValue.toLongLong() ? -1 : (leftValue.toLongLong() > rightValue.toLongLong() ? 1 : 0);
+            } else {
+                comparison = QString::localeAwareCompare(leftValue.toString(), rightValue.toString());
+            }
+            return order == Qt::AscendingOrder ? comparison < 0 : comparison > 0;
+        });
+        m_hoverRatings.fill(StarRating::unset, m_tracks.size());
+        endResetModel();
+    }
+
+    void setTracks(const QVector<Track> &tracks)
+    {
+        beginResetModel();
+        m_tracks = tracks;
+        m_hoverRatings.fill(StarRating::unset, m_tracks.size());
+        endResetModel();
+    }
+
+    Track trackAt(int row) const
+    {
+        return row >= 0 && row < m_tracks.size() ? m_tracks.at(row) : Track{};
+    }
+
+private:
+    static QVariant sortValue(const Track &track, int column)
+    {
+        switch (column) {
+        case 0:
+            return track.effectiveRating0To100;
+        case 1:
+            return track.trackNumber;
+        case 2:
+            return track.title;
+        case 3:
+            return track.albumTitle;
+        case 4:
+            return track.artistName;
+        case 5:
+            return track.durationMs;
+        case 6:
+            return track.date.left(4);
+        default:
+            return {};
+        }
+    }
+
+    QVector<Track> m_tracks;
+    QVector<int> m_hoverRatings;
 };
 
 QString columnKey(int column)
@@ -60,19 +225,7 @@ int columnFromKey(const QString &key)
 TrackTable::TrackTable(QWidget *parent)
     : QTableView(parent)
 {
-    auto *itemModel = new QStandardItemModel(0, 7, this);
-    itemModel->setSortRole(Qt::UserRole);
-    itemModel->setHorizontalHeaderLabels({
-        QStringLiteral("Rating"),
-        QStringLiteral("#"),
-        QStringLiteral("Title"),
-        QStringLiteral("Album"),
-        QStringLiteral("Artist"),
-        QStringLiteral("Duration"),
-        QStringLiteral("Year"),
-    });
-
-    setModel(itemModel);
+    setModel(new TrackTableModel(this));
     setItemDelegate(new DenseTableDelegate(this));
     auto *ratingDelegate = new StarRatingDelegate(this);
     setItemDelegateForColumn(0, ratingDelegate);
@@ -96,7 +249,7 @@ TrackTable::TrackTable(QWidget *parent)
     setContextMenuPolicy(Qt::CustomContextMenu);
 
     connect(ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
-        const Track track = index.data(Qt::UserRole + 1).value<Track>();
+        const Track track = index.data(TrackRole).value<Track>();
         if (!track.path.isEmpty()) {
             emit trackRatingChanged(track, rating);
         }
@@ -116,7 +269,7 @@ TrackTable::TrackTable(QWidget *parent)
 
     connect(this, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
         const QModelIndex ratingIndex = this->model()->index(index.row(), 0);
-        const Track track = ratingIndex.data(Qt::UserRole + 1).value<Track>();
+        const Track track = ratingIndex.data(TrackRole).value<Track>();
         if (!track.path.isEmpty()) {
             emit trackActivated(track);
         }
@@ -203,46 +356,12 @@ void TrackTable::setHeaderHeight(int height)
 
 void TrackTable::setTracks(const QVector<Track> &tracks)
 {
-    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
-    itemModel->setRowCount(0);
-
-    for (const Track &track : tracks) {
-        QList<QStandardItem *> row;
-
-        auto *rating = new QStandardItem;
-        rating->setData(track.effectiveRating0To100, Qt::EditRole);
-        rating->setData(track.effectiveRating0To100, Qt::UserRole);
-        rating->setData(QVariant::fromValue(track), Qt::UserRole + 1);
-        rating->setData(-1, Qt::UserRole + 2);
-        row << rating;
-
-        auto *trackNumber = new QStandardItem(QString::number(track.trackNumber));
-        trackNumber->setData(track.trackNumber, Qt::UserRole);
-        row << trackNumber;
-
-        auto *title = new QStandardItem(track.title);
-        title->setData(track.title, Qt::UserRole);
-        row << title;
-        auto *album = new QStandardItem(track.albumTitle);
-        album->setData(track.albumTitle, Qt::UserRole);
-        row << album;
-        auto *artist = new QStandardItem(track.artistName);
-        artist->setData(track.artistName, Qt::UserRole);
-        row << artist;
-
-        const QTime duration = QTime(0, 0).addMSecs(static_cast<int>(track.durationMs));
-        auto *durationItem = new QStandardItem(duration.hour() > 0 ? duration.toString(QStringLiteral("h:mm:ss")) : duration.toString(QStringLiteral("m:ss")));
-        durationItem->setData(track.durationMs, Qt::UserRole);
-        row << durationItem;
-        auto *year = new QStandardItem(track.date.left(4));
-        year->setData(track.date.left(4), Qt::UserRole);
-        row << year;
-
-        for (QStandardItem *item : row) {
-            item->setEditable(false);
-        }
-        itemModel->appendRow(row);
+    auto *trackModel = static_cast<TrackTableModel *>(model());
+    if (trackModel == nullptr) {
+        return;
     }
+    trackModel->setTracks(tracks);
+    sortByColumn(sortColumn(), sortOrder());
 }
 
 void TrackTable::mouseMoveEvent(QMouseEvent *event)
@@ -250,7 +369,7 @@ void TrackTable::mouseMoveEvent(QMouseEvent *event)
     const QModelIndex index = indexAt(event->pos());
     const QModelIndex ratingIndex = index.isValid() && index.column() == 0 ? index : QModelIndex();
     if (m_hoverRatingIndex.isValid() && m_hoverRatingIndex != ratingIndex) {
-        model()->setData(m_hoverRatingIndex, -1, Qt::UserRole + 2);
+        model()->setData(m_hoverRatingIndex, StarRating::unset, HoverRatingRole);
     }
     m_hoverRatingIndex = ratingIndex;
     QTableView::mouseMoveEvent(event);
@@ -259,7 +378,7 @@ void TrackTable::mouseMoveEvent(QMouseEvent *event)
 void TrackTable::leaveEvent(QEvent *event)
 {
     if (m_hoverRatingIndex.isValid()) {
-        model()->setData(m_hoverRatingIndex, -1, Qt::UserRole + 2);
+        model()->setData(m_hoverRatingIndex, StarRating::unset, HoverRatingRole);
         m_hoverRatingIndex = QModelIndex();
     }
     QTableView::leaveEvent(event);
@@ -302,7 +421,7 @@ void TrackTable::showCellMenu(const QPoint &pos)
         emit addToQueueRequested(tracks);
     });
 
-    const Track track = model()->index(index.row(), 0).data(Qt::UserRole + 1).value<Track>();
+    const Track track = model()->index(index.row(), 0).data(TrackRole).value<Track>();
     menu.addSeparator();
     QAction *findFile = menu.addAction(QStringLiteral("Find file"));
     connect(findFile, &QAction::triggered, this, [this, track]() {
@@ -340,10 +459,23 @@ QVector<Track> TrackTable::tracksForContextRow(int row) const
     QVector<Track> tracks;
     tracks.reserve(rows.size());
     for (int selectedRow : rows) {
-        const Track track = model()->index(selectedRow, 0).data(Qt::UserRole + 1).value<Track>();
+        const Track track = model()->index(selectedRow, 0).data(TrackRole).value<Track>();
         if (!track.path.isEmpty()) {
             tracks.push_back(track);
         }
     }
     return tracks;
+}
+
+void TrackTable::wheelEvent(QWheelEvent *event)
+{
+    if (event->modifiers() & Qt::ControlModifier) {
+        const int step = event->angleDelta().y() > 0 ? 2 : -2;
+        const int rowHeight = std::clamp(verticalHeader()->defaultSectionSize() + step, 20, 48);
+        verticalHeader()->setDefaultSectionSize(rowHeight);
+        emit viewSettingsChanged();
+        event->accept();
+        return;
+    }
+    QTableView::wheelEvent(event);
 }
