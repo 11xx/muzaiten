@@ -44,7 +44,9 @@ bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, c
 void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
     if ((option.state & QStyle::State_MouseOver) && !(option.state & QStyle::State_Selected) && option.widget != nullptr) {
-        painter->fillRect(QRect(0, option.rect.top(), option.widget->width(), option.rect.height()), option.palette.color(QPalette::AlternateBase));
+        QColor hover = option.palette.color(QPalette::Highlight);
+        hover.setAlpha(34);
+        painter->fillRect(QRect(0, option.rect.top(), option.widget->width(), option.rect.height()), hover);
     }
     const int value = index.data(Qt::UserRole).toInt();
     const int hoverValue = index.data(Qt::UserRole + 2).isValid() ? index.data(Qt::UserRole + 2).toInt() : StarRating::unset;
