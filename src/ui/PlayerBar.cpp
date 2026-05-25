@@ -20,6 +20,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidgetAction>
+#include <QEvent>
 
 #include <algorithm>
 #include <functional>
@@ -304,7 +305,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_menuBar->setFixedHeight(m_menuBar->fontMetrics().height() + 2);
     m_menuBar->setContentsMargins(0, 0, 0, 0);
-    m_menuBar->setStyleSheet(QStringLiteral("QMenuBar { margin: 0; padding: 0; } QMenuBar::item { margin: 0; padding: 0 6px; }"));
+    restyleMenuBar();
     m_menuBar->addMenu(fileMenu);
     m_menuBar->addMenu(playbackMenu);
     m_menuBar->addMenu(mpdMenu);
@@ -388,13 +389,13 @@ PlayerBar::PlayerBar(QWidget *parent)
     single->setCheckable(true);
     controls->addWidget(single);
 
-    auto *shuffle = new QToolButton(this);
-    shuffle->setIcon(shuffleIcon(palette()));
-    shuffle->setToolTip(QStringLiteral("Shuffle"));
-    shuffle->setAutoRaise(true);
-    shuffle->setFixedSize(34, 34);
-    shuffle->setCheckable(true);
-    controls->addWidget(shuffle);
+    m_shuffle = new QToolButton(this);
+    m_shuffle->setToolTip(QStringLiteral("Shuffle"));
+    m_shuffle->setAutoRaise(true);
+    m_shuffle->setFixedSize(34, 34);
+    m_shuffle->setCheckable(true);
+    updateShuffleIcon();
+    controls->addWidget(m_shuffle);
     root->addLayout(controls);
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
@@ -496,10 +497,53 @@ void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
     }
 }
 
+void PlayerBar::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
+        restyleMenuBar();
+        updateShuffleIcon();
+    }
+}
+
 void PlayerBar::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     if (m_menuButton != nullptr && m_menuButton->isVisible()) {
         m_menuButton->move(4, 4);
+    }
+}
+
+void PlayerBar::restyleMenuBar()
+{
+    if (m_menuBar == nullptr) {
+        return;
+    }
+    m_menuBar->setStyleSheet(QStringLiteral(
+        "QMenuBar {"
+        "  margin: 0;"
+        "  padding: 0;"
+        "  background: palette(window);"
+        "  border-top: 1px solid palette(mid);"
+        "  border-bottom: 1px solid palette(mid);"
+        "}"
+        "QMenuBar::item {"
+        "  margin: 0;"
+        "  padding: 0 10px;"
+        "  border-right: 1px solid palette(mid);"
+        "  background: transparent;"
+        "}"
+        "QMenuBar::item:selected {"
+        "  background: palette(button);"
+        "}"
+        "QMenuBar::item:pressed {"
+        "  background: palette(midlight);"
+        "}"));
+}
+
+void PlayerBar::updateShuffleIcon()
+{
+    if (m_shuffle != nullptr) {
+        m_shuffle->setIcon(shuffleIcon(palette()));
     }
 }

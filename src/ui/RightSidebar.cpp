@@ -303,6 +303,8 @@ protected:
         QLabel::changeEvent(event);
         if (event->type() == QEvent::FontChange) {
             resetScrollState();
+        } else if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
+            update();
         }
     }
 
@@ -1126,9 +1128,10 @@ void RightSidebar::setQueueHoveredRow(int row)
 void RightSidebar::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
-    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::FontChange) {
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) {
         restyleTrackInfoLabels();
         updateTrackInfoLabels();
+        m_trackInfoPane->update();
     }
 }
 
