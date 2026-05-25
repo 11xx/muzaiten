@@ -81,7 +81,7 @@ private:
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
-    void reorderQueue(const QVector<int> &oldRowsInNewOrder);
+    void moveQueueRows(const QVector<int> &rows, int destinationRow);
     void removeQueueRows(const QVector<int> &rows);
     void clearQueue();
     void playNextAlbum(const QString &albumTitle);

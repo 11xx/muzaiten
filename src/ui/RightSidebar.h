@@ -8,6 +8,7 @@
 
 class QLabel;
 class QSplitter;
+class QTableView;
 class QTableWidget;
 class QWidget;
 
@@ -29,7 +30,7 @@ public:
 
 signals:
     void queueTrackActivated(int index);
-    void queueOrderChanged(const QVector<int> &oldRowsInNewOrder);
+    void queueRowsMoveRequested(const QVector<int> &rows, int destinationRow);
     void queueRowsRemoveRequested(const QVector<int> &rows);
     void queueClearRequested();
     void artistRequested(const QString &artistName);
@@ -49,7 +50,7 @@ protected:
     void changeEvent(QEvent *event) override;
 
 private:
-    QTableWidget *m_queueTable = nullptr;
+    QTableView *m_queueTable = nullptr;
     QLabel *m_albumArt = nullptr;
     QWidget *m_trackInfoPane = nullptr;
     QLabel *m_trackInfoTitle = nullptr;
