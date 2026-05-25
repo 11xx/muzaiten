@@ -8,6 +8,7 @@
 #include "playback/PlaybackBackend.h"
 #include "mpd/MpdConfig.h"
 #include "mpd/MpdImportWorker.h"
+#include "mpris/MprisService.h"
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scanner/RatingTagSyncWorker.h"
@@ -180,6 +181,7 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(m_stopScanButton);
 
     m_playback = new GStreamerPlaybackBackend(this);
+    m_mpris = new MprisService(this);
 
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
@@ -222,6 +224,20 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
+    connect(m_mpris, &MprisService::raiseRequested, this, [this]() {
+        show();
+        raise();
+        activateWindow();
+    });
+    connect(m_mpris, &MprisService::previousRequested, this, &MainWindow::playPreviousTrack);
+    connect(m_mpris, &MprisService::nextRequested, this, &MainWindow::playNextTrack);
+    connect(m_mpris, &MprisService::pauseRequested, m_playback, &PlaybackBackend::pause);
+    connect(m_mpris, &MprisService::playPauseRequested, this, &MainWindow::togglePlayback);
+    connect(m_mpris, &MprisService::stopRequested, m_playback, &PlaybackBackend::stop);
+    connect(m_mpris, &MprisService::playRequested, this, &MainWindow::playFromMpris);
+    connect(m_mpris, &MprisService::seekRequested, m_playback, &PlaybackBackend::seek);
+    connect(m_mpris, &MprisService::relativeSeekRequested, this, &MainWindow::seekRelativeFromMpris);
+    connect(m_mpris, &MprisService::volumeRequested, this, &MainWindow::setVolumeFromMpris);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
@@ -242,7 +258,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
-        m_playback->setVolume(static_cast<double>(std::clamp(volume, 0, 100)) / 100.0);
+        m_volume = static_cast<double>(std::clamp(volume, 0, 100)) / 100.0;
+        m_playback->setVolume(m_volume);
+        m_mpris->setVolume(m_volume);
     });
     connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
         if (!m_currentTrack.path.isEmpty()) {
@@ -259,6 +277,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
         const bool playing = state == PlaybackBackend::State::Playing;
         m_playerBar->setPlaying(playing);
+        m_mpris->setPlaybackState(state);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
     });
     connect(m_playback, &PlaybackBackend::finished, this, [this]() {
@@ -542,6 +561,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
         }
         m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
         m_rightSidebar->setTrackInfo(m_currentTrack);
+        m_mpris->setTrack(m_currentTrack);
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
@@ -613,6 +633,7 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
                 }
                 m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
                 m_rightSidebar->setTrackInfo(m_currentTrack);
+                m_mpris->setTrack(m_currentTrack);
             }
         }
         m_rightSidebar->setQueue(m_queue);
@@ -777,6 +798,7 @@ void MainWindow::saveQueueState()
     root.insert(QStringLiteral("index"), m_queueIndex);
     root.insert(QStringLiteral("playNextInsertIndex"), m_playNextInsertIndex);
     m_database->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    updateMprisCapabilities();
 }
 
 void MainWindow::loadExplorerState()
@@ -1139,6 +1161,10 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
     m_playerBar->setPosition(0, track.durationMs);
+    m_mpris->setTrack(track);
+    m_mpris->setDurationMs(track.durationMs);
+    m_mpris->setPositionMs(0);
+    updateMprisCapabilities();
     if (notifyScrobbler) {
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
@@ -1332,6 +1358,7 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
         m_currentTrack = {};
         m_playerBar->setTrackText({});
         m_rightSidebar->setTrackInfo({});
+        m_mpris->setTrack({});
     }
 }
 
@@ -1345,6 +1372,7 @@ void MainWindow::clearQueue()
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     m_playerBar->setTrackText({});
     m_rightSidebar->setTrackInfo({});
+    m_mpris->setTrack({});
     saveQueueState();
 }
 
@@ -1404,6 +1432,9 @@ void MainWindow::playNextTrack()
 void MainWindow::togglePlayback()
 {
     if (!m_playback->hasSource()) {
+        if (!m_queue.isEmpty()) {
+            playQueueIndex(m_queueIndex >= 0 ? m_queueIndex : 0);
+        }
         return;
     }
 
@@ -1414,9 +1445,43 @@ void MainWindow::togglePlayback()
     }
 }
 
+void MainWindow::playFromMpris()
+{
+    if (m_playback->hasSource()) {
+        m_playback->resume();
+        return;
+    }
+    if (!m_queue.isEmpty()) {
+        playQueueIndex(m_queueIndex >= 0 ? m_queueIndex : 0);
+    }
+}
+
+void MainWindow::setVolumeFromMpris(double volume0To1)
+{
+    m_volume = std::clamp(volume0To1, 0.0, 1.0);
+    m_playback->setVolume(m_volume);
+    m_mpris->setVolume(m_volume);
+}
+
+void MainWindow::seekRelativeFromMpris(qint64 offsetMs)
+{
+    const qint64 duration = std::max<qint64>(0, m_playback->duration());
+    const qint64 requested = m_playback->position() + offsetMs;
+    m_playback->seek(duration > 0 ? std::clamp<qint64>(requested, 0, duration) : std::max<qint64>(0, requested));
+}
+
+void MainWindow::updateMprisCapabilities()
+{
+    m_mpris->setQueueCapabilities(m_queueIndex > 0,
+                                  m_queueIndex >= 0 && m_queueIndex + 1 < m_queue.size(),
+                                  m_playback->hasSource() || !m_queue.isEmpty());
+}
+
 void MainWindow::updatePlaybackPosition()
 {
     m_playerBar->setPosition(m_playback->position(), m_playback->duration());
+    m_mpris->setPositionMs(m_playback->position());
+    m_mpris->setDurationMs(m_playback->duration());
 }
 
 void MainWindow::prepareNextQueueTrack()
