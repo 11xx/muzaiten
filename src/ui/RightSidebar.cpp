@@ -942,7 +942,10 @@ void RightSidebar::showTrackInfoLabelMenu(const QPoint &pos)
         return;
     }
 
-    const QString text = static_cast<TrackInfoLabel *>(label)->fullText().trimmed();
+    QString text = label->toolTip().trimmed();
+    if (text.isEmpty()) {
+        text = static_cast<TrackInfoLabel *>(label)->fullText().trimmed();
+    }
 
     QMenu menu(this);
     QAction *copy = menu.addAction(QStringLiteral("Copy"));
