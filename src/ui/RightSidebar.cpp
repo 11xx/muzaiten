@@ -8,6 +8,7 @@
 #include <QAbstractTableModel>
 #include <QCheckBox>
 #include <QColor>
+#include <QComboBox>
 #include <QDataStream>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -27,12 +28,16 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPixmap>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QTableView>
 #include <QTableWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QByteArray>
 #include <QClipboard>
@@ -192,6 +197,11 @@ struct TrackInfoField {
     int sizeDelta = 0;
 };
 
+enum class TrackInfoOverflowMode {
+    Scroll,
+    Truncate,
+};
+
 QVector<TrackInfoField> defaultTrackInfoFields()
 {
     return {
@@ -211,13 +221,18 @@ public:
     {
         setTextInteractionFlags(Qt::NoTextInteraction);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_scrollTimer.setInterval(30);
+        connect(&m_scrollTimer, &QTimer::timeout, this, [this]() {
+            advanceScroll();
+        });
     }
 
     void setFullText(const QString &text)
     {
         m_fullText = text;
         setToolTip(text);
-        updateElidedText();
+        resetScrollState();
+        update();
     }
 
     QString fullText() const
@@ -229,34 +244,230 @@ public:
     {
         m_clickable = clickable;
         setCursor(clickable ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        update();
+    }
+
+    void setOverflowMode(TrackInfoOverflowMode mode)
+    {
+        if (m_overflowMode == mode) {
+            return;
+        }
+        m_overflowMode = mode;
+        resetScrollState();
+        update();
     }
 
     std::function<void()> clicked;
 
 protected:
+    QSize sizeHint() const override
+    {
+        return {QLabel::sizeHint().width(), fontMetrics().height() + 2};
+    }
+
     void resizeEvent(QResizeEvent *event) override
     {
         QLabel::resizeEvent(event);
-        updateElidedText();
+        resetScrollState();
+    }
+
+    void changeEvent(QEvent *event) override
+    {
+        QLabel::changeEvent(event);
+        if (event->type() == QEvent::FontChange) {
+            resetScrollState();
+        }
     }
 
     void mousePressEvent(QMouseEvent *event) override
     {
-        if (m_clickable && event->button() == Qt::LeftButton && clicked) {
+        if (m_clickable && event->button() == Qt::LeftButton && textBounds().contains(event->pos()) && clicked) {
             clicked();
             return;
         }
         QLabel::mousePressEvent(event);
     }
 
-private:
-    void updateElidedText()
+    void paintEvent(QPaintEvent *event) override
     {
-        QLabel::setText(fontMetrics().elidedText(m_fullText, Qt::ElideRight, width()));
+        Q_UNUSED(event);
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::TextAntialiasing, true);
+        painter.setPen(palette().color(QPalette::WindowText));
+
+        QFont styled = font();
+        styled.setUnderline(m_clickable);
+        painter.setFont(styled);
+
+        const QRect area = contentsRect();
+        if (area.width() <= 0 || area.height() <= 0 || m_fullText.isEmpty()) {
+            return;
+        }
+
+        const QFontMetrics fm(styled);
+        const int textWidth = fm.horizontalAdvance(m_fullText);
+        const int baseline = area.top() + ((area.height() - fm.height()) / 2) + fm.ascent();
+        const bool overflowing = textWidth > area.width();
+        if (!overflowing || m_overflowMode == TrackInfoOverflowMode::Truncate) {
+            const QString text = overflowing ? compactDisplayText(fm, area.width()) : m_fullText;
+            painter.drawText(area.left(), baseline, text);
+            return;
+        }
+
+        const int gap = std::max(24, fm.horizontalAdvance(QStringLiteral("   ")));
+        painter.setClipRect(area);
+        painter.drawText(area.left() - m_scrollOffset, baseline, m_fullText);
+        painter.drawText(area.left() - m_scrollOffset + textWidth + gap, baseline, m_fullText);
+    }
+
+private:
+    QRect textBounds() const
+    {
+        const QRect area = contentsRect();
+        const QFont styled = clickableFont();
+        const QFontMetrics fm(styled);
+        const int visibleWidth = (m_overflowMode == TrackInfoOverflowMode::Scroll)
+            ? std::min(fm.horizontalAdvance(m_fullText), area.width())
+            : fm.horizontalAdvance(compactDisplayText(fm, area.width()));
+        const int textHeight = fm.height();
+        return QRect(area.left(),
+                     area.top() + ((area.height() - textHeight) / 2),
+                     std::max(0, visibleWidth),
+                     textHeight);
+    }
+
+    QFont clickableFont() const
+    {
+        QFont styled = font();
+        styled.setUnderline(m_clickable);
+        return styled;
+    }
+
+    QString compactDisplayText(const QFontMetrics &fm, int width) const
+    {
+        if (width <= 0) {
+            return {};
+        }
+        if (!m_fullText.contains(QLatin1Char('/')) && !m_fullText.contains(QLatin1Char('\\'))) {
+            return fm.elidedText(m_fullText, Qt::ElideMiddle, width);
+        }
+
+        const QString cleaned = QDir::cleanPath(m_fullText);
+        const QFileInfo info(cleaned);
+        const QString fileName = info.fileName();
+        const QStringList parts = cleaned.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        QStringList candidates;
+        if (!parts.isEmpty() && !fileName.isEmpty()) {
+            const QString root = cleaned.startsWith(QLatin1Char('/')) ? QStringLiteral("/") : QString();
+            if (parts.size() >= 2) {
+                candidates.push_back(root + parts.at(0) + QStringLiteral("/.../") + fileName);
+            }
+            if (parts.size() >= 3) {
+                candidates.push_back(root + parts.at(0) + QLatin1Char('/') + parts.at(1) + QStringLiteral("/.../") + fileName);
+            }
+            candidates.push_back(QStringLiteral(".../") + fileName);
+        }
+        candidates.push_back(cleaned);
+
+        for (const QString &candidate : candidates) {
+            if (fm.horizontalAdvance(candidate) <= width) {
+                return candidate;
+            }
+        }
+        return fm.elidedText(candidates.isEmpty() ? cleaned : candidates.constFirst(), Qt::ElideMiddle, width);
+    }
+
+    void resetScrollState()
+    {
+        m_scrollOffset = 0;
+        m_pauseTicksRemaining = 24;
+        updateScrollTimer();
+        update();
+    }
+
+    void updateScrollTimer()
+    {
+        const bool needsScroll = m_overflowMode == TrackInfoOverflowMode::Scroll
+            && fontMetrics().horizontalAdvance(m_fullText) > contentsRect().width()
+            && !m_fullText.isEmpty();
+        if (needsScroll) {
+            if (!m_scrollTimer.isActive()) {
+                m_scrollTimer.start();
+            }
+        } else {
+            m_scrollTimer.stop();
+        }
+    }
+
+    void advanceScroll()
+    {
+        const QFontMetrics fm(clickableFont());
+        const int textWidth = fm.horizontalAdvance(m_fullText);
+        const int gap = std::max(24, fm.horizontalAdvance(QStringLiteral("   ")));
+        if (textWidth <= contentsRect().width()) {
+            m_scrollTimer.stop();
+            return;
+        }
+        if (m_pauseTicksRemaining > 0) {
+            --m_pauseTicksRemaining;
+            return;
+        }
+        ++m_scrollOffset;
+        if (m_scrollOffset >= textWidth + gap) {
+            m_scrollOffset = 0;
+            m_pauseTicksRemaining = 18;
+        }
+        update();
     }
 
     QString m_fullText;
     bool m_clickable = false;
+    TrackInfoOverflowMode m_overflowMode = TrackInfoOverflowMode::Scroll;
+    QTimer m_scrollTimer;
+    int m_scrollOffset = 0;
+    int m_pauseTicksRemaining = 0;
+};
+
+class AlbumArtLabel final : public QLabel {
+public:
+    explicit AlbumArtLabel(QWidget *parent = nullptr)
+        : QLabel(parent)
+    {
+        setAlignment(Qt::AlignCenter);
+        setFrameShape(QFrame::StyledPanel);
+        setScaledContents(false);
+    }
+
+    void setSourcePixmap(const QPixmap &pixmap)
+    {
+        m_sourcePixmap = pixmap;
+        updateScaledPixmap();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QLabel::resizeEvent(event);
+        updateScaledPixmap();
+    }
+
+private:
+    void updateScaledPixmap()
+    {
+        if (m_sourcePixmap.isNull()) {
+            setPixmap({});
+            return;
+        }
+        const QSize target = contentsRect().size();
+        if (target.width() <= 0 || target.height() <= 0) {
+            setPixmap({});
+            return;
+        }
+        setPixmap(m_sourcePixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+
+    QPixmap m_sourcePixmap;
 };
 
 QString formatSize(qint64 bytes)
@@ -331,16 +542,6 @@ QString metadataText(const Track &track, const QString &pattern)
     text.replace(QStringLiteral("{duration}"), duration);
     text.replace(QStringLiteral("{size}"), size);
     return text.simplified();
-}
-
-QString compactPath(const QString &path)
-{
-    if (path.isEmpty()) {
-        return {};
-    }
-    const QFileInfo info(path);
-    const QString root = QDir::isAbsolutePath(path) ? QDir::rootPath() : QString();
-    return root + QStringLiteral(".../") + info.fileName();
 }
 
 } // namespace
@@ -433,13 +634,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_trackInfoPane->setMinimumHeight(96);
     m_splitter->addWidget(m_trackInfoPane);
 
-    m_albumArt = new QLabel(m_splitter);
+    m_albumArt = new AlbumArtLabel(m_splitter);
     m_albumArt->setMinimumSize(180, 180);
-    m_albumArt->setMaximumHeight(360);
-    m_albumArt->setAlignment(Qt::AlignCenter);
-    m_albumArt->setFrameShape(QFrame::StyledPanel);
     m_albumArt->setText(QStringLiteral("Album art"));
-    m_albumArt->setScaledContents(false);
     m_splitter->addWidget(m_albumArt);
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 0);
@@ -483,8 +680,7 @@ void RightSidebar::setAlbumArt(const QString &imagePath)
     }
 
     m_albumArt->setText({});
-    const int side = std::min(m_albumArt->width(), std::max(180, m_albumArt->height()));
-    m_albumArt->setPixmap(pixmap.scaled(side, side, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    static_cast<AlbumArtLabel *>(m_albumArt)->setSourcePixmap(pixmap);
 }
 
 void RightSidebar::setTrackInfo(const Track &track)
@@ -499,7 +695,6 @@ void RightSidebar::updateTrackInfoLabels()
     m_noTrackLabel->setVisible(!hasTrack);
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
         label->setVisible(hasTrack && !label->property("muzaitenHidden").toBool());
-        label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     }
     if (!hasTrack) {
         return;
@@ -510,7 +705,7 @@ void RightSidebar::updateTrackInfoLabels()
     static_cast<TrackInfoLabel *>(m_trackInfoAlbum)->setFullText(m_currentTrack.albumTitle);
     static_cast<TrackInfoLabel *>(m_trackInfoYear)->setFullText(displayDate(m_currentTrack));
     static_cast<TrackInfoLabel *>(m_trackInfoProperties)->setFullText(metadataText(m_currentTrack, m_trackInfoMetadataPattern));
-    static_cast<TrackInfoLabel *>(m_trackInfoFile)->setFullText(compactPath(m_currentTrack.path));
+    static_cast<TrackInfoLabel *>(m_trackInfoFile)->setFullText(m_currentTrack.path);
     m_trackInfoFile->setToolTip(m_currentTrack.path);
 }
 
@@ -589,6 +784,15 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     metadataRow->addWidget(metadataPattern, 1);
     layout->addLayout(metadataRow);
 
+    auto *overflowRow = new QHBoxLayout;
+    overflowRow->addWidget(new QLabel(QStringLiteral("Overflow"), &dialog));
+    auto *overflowMode = new QComboBox(&dialog);
+    overflowMode->addItem(QStringLiteral("Scroll"));
+    overflowMode->addItem(QStringLiteral("Truncate"));
+    overflowMode->setCurrentIndex(m_trackInfoTitle->property("muzaitenOverflowMode").toString() == QStringLiteral("truncate") ? 1 : 0);
+    overflowRow->addWidget(overflowMode, 1);
+    layout->addLayout(overflowRow);
+
     auto moveSelected = [table](int direction) {
         const int row = table->currentRow();
         const int target = row + direction;
@@ -643,6 +847,7 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     }
     root.insert(QStringLiteral("trackInfoFields"), fields);
     root.insert(QStringLiteral("trackInfoMetadata"), metadataPattern->text());
+    root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode->currentIndex() == 1 ? QStringLiteral("truncate") : QStringLiteral("scroll"));
     applyTrackInfoSettingsJson(root);
     emit viewSettingsChanged();
 }
@@ -664,6 +869,8 @@ QString RightSidebar::viewSettingsJson() const
     root.insert(QStringLiteral("showTrackInfo"), m_trackInfoPane->isVisible());
     root.insert(QStringLiteral("trackInfoFields"), trackInfoSettingsJson());
     root.insert(QStringLiteral("trackInfoMetadata"), m_trackInfoMetadataPattern);
+    const QString overflowMode = m_trackInfoTitle->property("muzaitenOverflowMode").toString();
+    root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode.isEmpty() ? QStringLiteral("scroll") : overflowMode);
     QJsonArray splitterSizes;
     for (int size : m_splitter->sizes()) {
         splitterSizes.append(size);
@@ -719,7 +926,7 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
         return;
     }
 
-    const QMap<QString, QLabel *> labels = {
+    const QMap<QString, QWidget *> labels = {
         {QStringLiteral("title"), m_trackInfoTitle},
         {QStringLiteral("artist"), m_trackInfoArtist},
         {QStringLiteral("album"), m_trackInfoAlbum},
@@ -730,7 +937,7 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
     auto *layout = qobject_cast<QVBoxLayout *>(m_trackInfoPane->layout());
     for (const QJsonValue &value : fields) {
         const QJsonObject field = value.toObject();
-        QLabel *label = labels.value(field.value(QStringLiteral("key")).toString());
+        QWidget *label = labels.value(field.value(QStringLiteral("key")).toString());
         if (label == nullptr) {
             continue;
         }
@@ -743,13 +950,20 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
         }
     }
     m_trackInfoMetadataPattern = root.value(QStringLiteral("trackInfoMetadata")).toString();
+    const QString overflow = root.value(QStringLiteral("trackInfoOverflowMode")).toString(QStringLiteral("scroll"));
+    for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
+        label->setProperty("muzaitenOverflowMode", overflow);
+        static_cast<TrackInfoLabel *>(label)->setOverflowMode(overflow == QStringLiteral("truncate")
+                                                                  ? TrackInfoOverflowMode::Truncate
+                                                                  : TrackInfoOverflowMode::Scroll);
+    }
     restyleTrackInfoLabels();
     updateTrackInfoLabels();
 }
 
 QJsonArray RightSidebar::trackInfoSettingsJson() const
 {
-    const QMap<QLabel *, QString> keys = {
+    const QMap<QWidget *, QString> keys = {
         {m_trackInfoTitle, QStringLiteral("title")},
         {m_trackInfoArtist, QStringLiteral("artist")},
         {m_trackInfoAlbum, QStringLiteral("album")},
@@ -760,7 +974,7 @@ QJsonArray RightSidebar::trackInfoSettingsJson() const
     QJsonArray fields;
     auto *layout = qobject_cast<QVBoxLayout *>(m_trackInfoPane->layout());
     for (int index = 0; layout != nullptr && index < layout->count(); ++index) {
-        auto *label = qobject_cast<QLabel *>(layout->itemAt(index)->widget());
+        QWidget *label = layout->itemAt(index)->widget();
         const QString key = keys.value(label);
         if (key.isEmpty()) {
             continue;
@@ -778,7 +992,7 @@ QJsonArray RightSidebar::trackInfoSettingsJson() const
 void RightSidebar::restyleTrackInfoLabels()
 {
     const auto defaults = defaultTrackInfoFields();
-    const QMap<QString, QLabel *> labels = {
+    const QMap<QString, QWidget *> labels = {
         {QStringLiteral("title"), m_trackInfoTitle},
         {QStringLiteral("artist"), m_trackInfoArtist},
         {QStringLiteral("album"), m_trackInfoAlbum},
@@ -788,7 +1002,7 @@ void RightSidebar::restyleTrackInfoLabels()
     };
     QFont baseFont = font();
     for (const TrackInfoField &field : defaults) {
-        QLabel *label = labels.value(field.key);
+        QWidget *label = labels.value(field.key);
         if (label == nullptr) {
             continue;
         }
@@ -820,9 +1034,9 @@ void RightSidebar::restyleTrackInfoLabels()
     m_noTrackLabel->setPalette(emptyPalette);
 }
 
-QLabel *RightSidebar::trackInfoLabelFromSender() const
+QWidget *RightSidebar::trackInfoLabelFromSender() const
 {
-    return qobject_cast<QLabel *>(sender());
+    return qobject_cast<QWidget *>(sender());
 }
 
 void RightSidebar::setHeaderHeight(int height)
@@ -938,7 +1152,7 @@ void RightSidebar::showQueueMenu(const QPoint &pos)
 
 void RightSidebar::showTrackInfoLabelMenu(const QPoint &pos)
 {
-    QLabel *label = trackInfoLabelFromSender();
+    QWidget *label = trackInfoLabelFromSender();
     if (label == nullptr) {
         return;
     }
