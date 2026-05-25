@@ -65,6 +65,7 @@ set(MUZAITEN_SOURCES
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlayerBar.cpp
     src/ui/RightSidebar.cpp
+    src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
     src/ui/TrackTable.cpp
@@ -109,6 +110,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlayerBar.h
     src/ui/RightSidebar.h
+    src/ui/SourceDirectoriesDialog.h
     src/ui/StarRating.h
     src/ui/StarRatingDelegate.h
     src/ui/TrackTable.h

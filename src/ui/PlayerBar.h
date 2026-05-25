@@ -24,6 +24,8 @@ protected:
 
 signals:
     void openLibraryRequested();
+    void sourceDirectoriesRequested();
+    void scanEnabledSourcesRequested();
     void syncCurrentTrackRatingTagsRequested();
     void syncCurrentArtistRatingTagsRequested();
     void syncAllSavedRatingTagsRequested();

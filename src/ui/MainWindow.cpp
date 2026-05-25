@@ -19,6 +19,7 @@
 #include "ui/PlayerBar.h"
 #include "ui/PlaybackProfileDialog.h"
 #include "ui/RightSidebar.h"
+#include "ui/SourceDirectoriesDialog.h"
 #include "ui/TrackTable.h"
 
 #include <QAction>
@@ -131,6 +132,47 @@ Track trackFromJson(const QJsonObject &root)
     return track;
 }
 
+QString cleanDirectoryPath(const QString &path)
+{
+    const QString cleaned = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    if (cleaned.size() > 1 && cleaned.endsWith(QLatin1Char('/'))) {
+        return cleaned.left(cleaned.size() - 1);
+    }
+    return cleaned;
+}
+
+bool isDirectoryCoveredBy(const QString &child, const QString &parent)
+{
+    return child != parent && child.startsWith(parent + QLatin1Char('/'));
+}
+
+QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
+{
+    for (ScanRoot &root : roots) {
+        root.path = cleanDirectoryPath(root.path);
+    }
+    std::sort(roots.begin(), roots.end(), [](const ScanRoot &left, const ScanRoot &right) {
+        if (left.path.size() == right.path.size()) {
+            return left.path < right.path;
+        }
+        return left.path.size() < right.path.size();
+    });
+
+    QVector<ScanRoot> deduped;
+    for (const ScanRoot &root : roots) {
+        if (!root.scanEnabled || root.path.isEmpty()) {
+            continue;
+        }
+        const bool covered = std::any_of(deduped.cbegin(), deduped.cend(), [&root](const ScanRoot &existing) {
+            return root.path == existing.path || isDirectoryCoveredBy(root.path, existing.path);
+        });
+        if (!covered) {
+            deduped.push_back(root);
+        }
+    }
+    return deduped;
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -239,6 +281,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_mpris, &MprisService::relativeSeekRequested, this, &MainWindow::seekRelativeFromMpris);
     connect(m_mpris, &MprisService::volumeRequested, this, &MainWindow::setVolumeFromMpris);
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
+    connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
+    connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
@@ -339,13 +383,20 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::startScan(const QString &rootPath)
 {
+    startScan(rootPath, 0);
+}
+
+void MainWindow::startScan(const QString &rootPath, int scanRootId)
+{
     if (m_scanThread != nullptr) {
         statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
         return;
     }
 
     qCInfo(uiLog) << "starting scan" << rootPath;
-    statusBar()->showMessage(QStringLiteral("Scanning %1").arg(rootPath));
+    m_activeScanRootId = scanRootId;
+    m_activeScanRootPath = cleanDirectoryPath(rootPath);
+    statusBar()->showMessage(QStringLiteral("Scanning %1").arg(m_activeScanRootPath));
     m_scanProgress->setVisible(true);
     m_stopScanButton->setEnabled(true);
     m_stopScanButton->setVisible(true);
@@ -368,9 +419,42 @@ void MainWindow::startScan(const QString &rootPath)
     connect(m_scanThread, &QThread::finished, this, [this]() {
         m_scanThread = nullptr;
         m_scanWorker = nullptr;
+        if (!m_pendingScanRoots.isEmpty()) {
+            startNextQueuedSourceScan();
+        }
     });
 
     m_scanThread->start();
+}
+
+void MainWindow::scanEnabledSourceDirectories()
+{
+    scanSourceRoots(m_database->enabledScanRoots());
+}
+
+void MainWindow::scanSourceRoots(const QVector<ScanRoot> &roots)
+{
+    if (m_scanThread != nullptr) {
+        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
+        return;
+    }
+
+    m_pendingScanRoots = deduplicatedScanRoots(roots);
+    if (m_pendingScanRoots.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("No scan-enabled source directories"), 5000);
+        return;
+    }
+    startNextQueuedSourceScan();
+}
+
+void MainWindow::startNextQueuedSourceScan()
+{
+    if (m_scanThread != nullptr || m_pendingScanRoots.isEmpty()) {
+        return;
+    }
+
+    const ScanRoot root = m_pendingScanRoots.takeFirst();
+    startScan(root.path, root.id);
 }
 
 void MainWindow::cancelScan()
@@ -380,6 +464,7 @@ void MainWindow::cancelScan()
     }
 
     m_scanWorker->cancel();
+    m_pendingScanRoots.clear();
     m_stopScanButton->setEnabled(false);
     statusBar()->showMessage(QStringLiteral("Canceling scan..."), 5000);
 }
@@ -415,6 +500,13 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
 void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled)
 {
     qCInfo(uiLog) << "scan finished" << visitedFiles << indexedTracks << "canceled" << canceled;
+    const bool sourceScan = m_activeScanRootId > 0;
+    const QString finishedRootPath = m_activeScanRootPath;
+    if (sourceScan) {
+        m_database->setScanRootLastScanned(m_activeScanRootId, canceled ? QStringLiteral("Canceled") : QString());
+    }
+    m_activeScanRootId = 0;
+    m_activeScanRootPath.clear();
     m_scanProgress->setVisible(false);
     m_stopScanButton->setVisible(false);
     m_stopScanButton->setEnabled(false);
@@ -424,6 +516,11 @@ void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canc
             : QStringLiteral("Scan complete: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks),
         10000);
     refreshArtists();
+    if (!canceled && !m_pendingScanRoots.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
+    } else if (sourceScan && !canceled) {
+        statusBar()->showMessage(QStringLiteral("Source scans complete"), 10000);
+    }
 }
 
 void MainWindow::loadExistingLibrary()
@@ -942,6 +1039,45 @@ void MainWindow::configureLinkRoots()
     }
 
     statusBar()->showMessage(QStringLiteral("Link roots updated"), 3000);
+}
+
+void MainWindow::configureSourceDirectories()
+{
+    SourceDirectoriesDialog dialog(this);
+    dialog.setScanRoots(m_database->scanRoots());
+    connect(&dialog, &SourceDirectoriesDialog::scanRootsRequested, this, [this](const QVector<ScanRoot> &roots) {
+        scanSourceRoots(roots);
+    });
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QVector<ScanRoot> updated = dialog.scanRoots();
+    const QVector<ScanRoot> existing = m_database->scanRoots();
+    for (const ScanRoot &root : existing) {
+        const bool stillPresent = std::any_of(updated.cbegin(), updated.cend(), [&root](const ScanRoot &candidate) {
+            return candidate.id == root.id;
+        });
+        if (stillPresent) {
+            continue;
+        }
+        if (!m_database->removeScanRoot(root.id)) {
+            QMessageBox::warning(this, QStringLiteral("Source directories"), m_database->lastError());
+            return;
+        }
+    }
+
+    for (const ScanRoot &root : updated) {
+        if (!m_database->saveScanRoot(root)) {
+            QMessageBox::warning(this, QStringLiteral("Source directories"), m_database->lastError());
+            return;
+        }
+    }
+
+    rememberTrackTableViewState();
+    refreshArtists();
+    restoreTrackTableViewState();
+    statusBar()->showMessage(QStringLiteral("Source directories updated"), 3000);
 }
 
 void MainWindow::findTrackFile(const Track &track)

@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 #include "core/Track.h"
+#include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
 
 #include <memory>
@@ -66,6 +67,7 @@ private:
     void savePlaybackProfile();
     void configurePlaybackProfile();
     void configureLinkRoots();
+    void configureSourceDirectories();
     void findTrackFile(const Track &track);
     void configureTrackInfoPanel();
     void jumpToTrackInfoArtist(const QString &artistName);
@@ -99,6 +101,10 @@ private:
     void prepareNextQueueTrack();
     void advanceAfterPreparedTransition();
     void startScan(const QString &rootPath);
+    void startScan(const QString &rootPath, int scanRootId);
+    void scanEnabledSourceDirectories();
+    void scanSourceRoots(const QVector<ScanRoot> &roots);
+    void startNextQueuedSourceScan();
     void cancelScan();
     void ingestScanBatch(const QVector<Track> &tracks);
     void finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled);
@@ -151,4 +157,7 @@ private:
     MprisService *m_mpris = nullptr;
     double m_volume = 1.0;
     qint64 m_lastUiRefreshIndexedTracks = 0;
+    QVector<ScanRoot> m_pendingScanRoots;
+    int m_activeScanRootId = 0;
+    QString m_activeScanRootPath;
 };
