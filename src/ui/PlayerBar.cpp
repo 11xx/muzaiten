@@ -23,7 +23,6 @@
 #include <QEvent>
 
 #include <algorithm>
-#include <cmath>
 #include <functional>
 #include <limits>
 
@@ -195,27 +194,19 @@ QToolButton *menuButton(QWidget *parent)
     return button;
 }
 
-QIcon menuGearIcon(const QPalette &palette)
+QIcon menuHamburgerIcon(const QPalette &palette)
 {
     QPixmap pixmap(24, 24);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    QPen pen(palette.color(QPalette::ButtonText), 1.7);
+    QPen pen(palette.color(QPalette::ButtonText), 2.0);
+    pen.setCapStyle(Qt::RoundCap);
     painter.setPen(pen);
-    painter.setBrush(Qt::NoBrush);
 
-    painter.drawLine(QPointF(4, 7), QPointF(11, 7));
-    painter.drawLine(QPointF(4, 12), QPointF(10, 12));
-    painter.drawLine(QPointF(4, 17), QPointF(11, 17));
-    painter.drawEllipse(QPointF(16, 12), 4.4, 4.4);
-    painter.drawEllipse(QPointF(16, 12), 1.35, 1.35);
-    for (int index = 0; index < 8; ++index) {
-        const double angle = (index * 45.0) * 3.14159265358979323846 / 180.0;
-        const QPointF inner(16 + std::cos(angle) * 5.3, 12 + std::sin(angle) * 5.3);
-        const QPointF outer(16 + std::cos(angle) * 6.7, 12 + std::sin(angle) * 6.7);
-        painter.drawLine(inner, outer);
-    }
+    painter.drawLine(QPointF(5, 7), QPointF(19, 7));
+    painter.drawLine(QPointF(5, 12), QPointF(19, 12));
+    painter.drawLine(QPointF(5, 17), QPointF(19, 17));
     return QIcon(pixmap);
 }
 
@@ -324,6 +315,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *menuStripLayout = new QHBoxLayout(m_menuStrip);
     menuStripLayout->setContentsMargins(0, 0, 0, 0);
     menuStripLayout->setSpacing(0);
+    menuStripLayout->setAlignment(Qt::AlignLeft);
 
     m_menuButton = menuButton(m_menuStrip);
     connect(m_menuButton, &QToolButton::clicked, this, [this, compactMenu]() {
@@ -334,8 +326,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     const int menuStripHeight = m_menuBar->fontMetrics().height() + 2;
     m_menuStrip->setFixedHeight(menuStripHeight);
-    m_menuButton->setFixedSize(34, menuStripHeight);
-    m_menuButton->setIcon(menuGearIcon(palette()));
+    m_menuButton->setFixedSize(30, menuStripHeight);
+    m_menuButton->setIconSize(QSize(18, 18));
+    m_menuButton->setIcon(menuHamburgerIcon(palette()));
     m_menuBar->setFixedHeight(menuStripHeight);
     m_menuBar->setContentsMargins(0, 0, 0, 0);
     restyleMenuBar();
@@ -534,7 +527,7 @@ void PlayerBar::changeEvent(QEvent *event)
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
         restyleMenuBar();
         if (m_menuButton != nullptr) {
-            m_menuButton->setIcon(menuGearIcon(palette()));
+            m_menuButton->setIcon(menuHamburgerIcon(palette()));
         }
         updateShuffleIcon();
     }
