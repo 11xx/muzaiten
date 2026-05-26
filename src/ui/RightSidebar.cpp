@@ -548,7 +548,13 @@ protected:
 
         QPainter painter(this);
         painter.setRenderHint(QPainter::TextAntialiasing, true);
-        painter.setPen(palette().color(QPalette::WindowText));
+
+        QColor color = palette().color(QPalette::WindowText);
+        const int opacity = property("muzaitenOpacity").toInt();
+        if (opacity > 0) {
+            color.setAlphaF(static_cast<float>(std::clamp(opacity / 100.0, 0.1, 1.0)));
+        }
+        painter.setPen(color);
 
         QFont styled = clickableFont();
         painter.setFont(styled);
@@ -1316,13 +1322,6 @@ void RightSidebar::restyleTrackInfoLabels()
         QFont styled = baseFont;
         styled.setPointSize(std::max(6, baseFont.pointSize() + label->property("muzaitenSizeDelta").toInt()));
         label->setFont(styled);
-        QPalette labelPalette = palette();
-        QColor color = labelPalette.color(QPalette::Text);
-        color.setAlphaF(static_cast<float>(std::clamp(label->property("muzaitenOpacity").toInt() / 100.0, 0.1, 1.0)));
-        labelPalette.setColor(QPalette::WindowText, color);
-        labelPalette.setColor(QPalette::Text, color);
-        labelPalette.setColor(QPalette::ButtonText, color);
-        label->setPalette(labelPalette);
     }
     QPalette emptyPalette = palette();
     QColor emptyColor = emptyPalette.color(QPalette::Text);
