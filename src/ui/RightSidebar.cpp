@@ -97,7 +97,7 @@ public:
         return m_dropIndicatorRow;
     }
 
-    void fitVisibleColumnsToViewport()
+    void fitVisibleColumnsToViewport(int fixedColumn = -1)
     {
         if (model() == nullptr || m_fittingColumns) {
             return;
@@ -105,15 +105,11 @@ public:
 
         QVector<int> visibleColumns;
         int totalWidth = 0;
-        int titleColumn = -1;
         for (int column = 0; column < model()->columnCount(); ++column) {
             if (isColumnHidden(column)) {
                 continue;
             }
             visibleColumns.push_back(column);
-            if (column == 1) {
-                titleColumn = column;
-            }
             totalWidth += std::max(24, columnWidth(column));
         }
         if (visibleColumns.isEmpty()) {
@@ -127,19 +123,36 @@ public:
 
         const QSignalBlocker blocker(horizontalHeader());
         m_fittingColumns = true;
-        if (totalWidth < targetWidth && titleColumn >= 0) {
-            setColumnWidth(titleColumn, columnWidth(titleColumn) + (targetWidth - totalWidth));
-        } else if (totalWidth > targetWidth) {
-            int remainingWidth = targetWidth;
-            for (int index = 0; index < visibleColumns.size(); ++index) {
-                const int column = visibleColumns.at(index);
-                const int width = index == visibleColumns.size() - 1
-                    ? remainingWidth
-                    : std::max(24, (columnWidth(column) * targetWidth) / totalWidth);
-                setColumnWidth(column, std::max(24, width));
-                remainingWidth -= width;
+
+        QVector<int> adjustableColumns;
+        int fixedWidth = 0;
+        int adjustableWidth = 0;
+        for (int column : visibleColumns) {
+            const int width = std::max(24, columnWidth(column));
+            if (column == fixedColumn) {
+                fixedWidth += width;
+                continue;
             }
+            adjustableColumns.push_back(column);
+            adjustableWidth += width;
         }
+
+        if (adjustableColumns.isEmpty()) {
+            m_fittingColumns = false;
+            return;
+        }
+
+        const int availableWidth = std::max(24 * static_cast<int>(adjustableColumns.size()), targetWidth - fixedWidth);
+        int remainingWidth = availableWidth;
+        for (int index = 0; index < adjustableColumns.size(); ++index) {
+            const int column = adjustableColumns.at(index);
+            const int width = index == adjustableColumns.size() - 1
+                ? remainingWidth
+                : std::max(24, (columnWidth(column) * availableWidth) / std::max(1, adjustableWidth));
+            setColumnWidth(column, std::max(24, width));
+            remainingWidth -= width;
+        }
+
         m_fittingColumns = false;
     }
 
@@ -868,7 +881,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
         emit viewSettingsChanged();
     });
-    connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
+    connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this](int logicalIndex, int, int) {
+        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport(logicalIndex);
         emit viewSettingsChanged();
     });
     connect(m_queueTable, &QWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
