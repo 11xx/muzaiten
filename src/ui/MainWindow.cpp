@@ -1718,7 +1718,9 @@ void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
         return;
     }
 
-    destinationRow = std::clamp(destinationRow, 0, static_cast<int>(m_queue.size()));
+    destinationRow = std::clamp(destinationRow,
+                                m_queueIndex >= 0 ? m_queueIndex + 1 : 0,
+                                static_cast<int>(m_queue.size()));
     QVector<Track> moving;
     moving.reserve(sortedRows.size());
     int removedBeforeDestination = 0;
