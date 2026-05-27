@@ -122,11 +122,43 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
     m_nextArtworkRow = 0;
 
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
-    itemModel->clear();
+    const int target = static_cast<int>(m_pendingAlbums.size());
 
-    if (!m_pendingAlbums.isEmpty()) {
-        appendNextAlbumBatch();
+    while (itemModel->rowCount() > target) {
+        itemModel->removeRow(itemModel->rowCount() - 1);
     }
+
+    for (int i = 0; i < itemModel->rowCount(); ++i) {
+        populateItemFromAlbum(itemModel->item(i), m_pendingAlbums[i]);
+    }
+    m_nextAlbumRow = itemModel->rowCount();
+
+    if (m_nextAlbumRow < target) {
+        appendNextAlbumBatch();
+    } else {
+        m_pendingAlbums.clear();
+        if (itemModel->rowCount() > 0 && !m_artworkCacheRoot.isEmpty() && !m_artworkTimer->isActive()) {
+            m_artworkTimer->start();
+        }
+    }
+}
+
+void AlbumGrid::populateItemFromAlbum(QStandardItem *item, const Album &album)
+{
+    QString label = album.title;
+    if (!album.date.isEmpty()) {
+        label += QStringLiteral("\n%1").arg(album.date.left(4));
+    }
+    item->setText(label);
+    item->setData(album.title, AlbumTitleRole);
+    item->setData(album.albumArtistName, AlbumArtistRole);
+    item->setData(album.effectiveRating0To100, RatingRole);
+    item->setData(StarRating::unset, HoverRatingRole);
+    item->setData(!album.title.isEmpty() && album.title == m_selectedAlbumTitle, SelectedRole);
+    item->setData(album.hasUserRating, HasUserRatingRole);
+    item->setData(album.representativeDir, RepresentativeDirRole);
+    item->setData(m_artworkGeneration, ArtworkGenerationRole);
+    item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
 }
 
 void AlbumGrid::appendNextAlbumBatch()
@@ -142,27 +174,15 @@ void AlbumGrid::appendNextAlbumBatch()
 
     for (; m_nextAlbumRow < end; ++m_nextAlbumRow) {
         const Album &album = m_pendingAlbums.at(m_nextAlbumRow);
-        QString label = album.title;
-        if (!album.date.isEmpty()) {
-            label += QStringLiteral("\n%1").arg(album.date.left(4));
-        }
 
-        auto *item = new QStandardItem(label);
+        auto *item = new QStandardItem();
         item->setEditable(false);
-        item->setData(album.title, AlbumTitleRole);
-        item->setData(album.albumArtistName, AlbumArtistRole);
-        item->setData(album.effectiveRating0To100, RatingRole);
-        item->setData(StarRating::unset, HoverRatingRole);
-        item->setData(!album.title.isEmpty() && album.title == m_selectedAlbumTitle, SelectedRole);
+        populateItemFromAlbum(item, album);
         item->setData(static_cast<int>(m_textAlignment), TextAlignmentRole);
         item->setData(m_artSize, ArtSizeRole);
         item->setData(m_padding, CellPaddingRole);
         item->setData(m_starSize, StarSizeRole);
-        item->setData(album.hasUserRating, HasUserRatingRole);
-        item->setData(album.representativeDir, RepresentativeDirRole);
-        item->setData(m_artworkGeneration, ArtworkGenerationRole);
         item->setData(QSize(m_cellWidth, m_cellHeight), Qt::SizeHintRole);
-        item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
         item->setIcon(fallbackIcon);
 
         itemModel->appendRow(item);

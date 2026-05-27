@@ -7,6 +7,7 @@
 
 class QEvent;
 class QMouseEvent;
+class QStandardItem;
 class QTimer;
 class QWheelEvent;
 
@@ -40,6 +41,7 @@ private:
     void showContextMenu(const QPoint &pos);
     void applySettingsToView();
     void applySettingsToItems();
+    void populateItemFromAlbum(class QStandardItem *item, const Album &album);
     void appendNextAlbumBatch();
     void loadNextAlbumArtwork();
 
