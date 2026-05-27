@@ -699,9 +699,9 @@ public:
         setScaledContents(false);
     }
 
-    void setSourcePixmap(const QPixmap &pixmap)
+    void setSourcePath(const QString &path)
     {
-        m_sourcePixmap = pixmap;
+        m_sourcePath = path;
         updateScaledPixmap();
     }
 
@@ -715,7 +715,7 @@ protected:
 private:
     void updateScaledPixmap()
     {
-        if (m_sourcePixmap.isNull()) {
+        if (m_sourcePath.isEmpty()) {
             setPixmap({});
             return;
         }
@@ -724,10 +724,27 @@ private:
             setPixmap({});
             return;
         }
-        setPixmap(m_sourcePixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+        const bool isSvg = m_sourcePath.endsWith(QStringLiteral(".svg"), Qt::CaseInsensitive);
+        if (isSvg) {
+            QIcon icon(m_sourcePath);
+            if (icon.isNull()) {
+                return;
+            }
+            const qreal dpr = devicePixelRatioF();
+            const QSize pxTarget(static_cast<int>(target.width() * dpr),
+                                  static_cast<int>(target.height() * dpr));
+            setPixmap(icon.pixmap(pxTarget));
+        } else {
+            QPixmap source(m_sourcePath);
+            if (source.isNull()) {
+                return;
+            }
+            setPixmap(source.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
     }
 
-    QPixmap m_sourcePixmap;
+    QString m_sourcePath;
 };
 
 QString formatSize(qint64 bytes)
@@ -971,18 +988,17 @@ void RightSidebar::setCurrentIndex(int index)
 
 void RightSidebar::setAlbumArt(const QString &imagePath)
 {
-    QPixmap pixmap(imagePath);
-    if (pixmap.isNull()) {
-        pixmap = QPixmap(AlbumArtFallback::resourcePath(palette()));
-        if (pixmap.isNull()) {
-            m_albumArt->setPixmap({});
-            m_albumArt->setText(QStringLiteral("Album art"));
-            return;
-        }
+    const bool valid = !imagePath.isEmpty() && QFileInfo::exists(imagePath);
+    const QString effectivePath = valid ? imagePath : AlbumArtFallback::resourcePath(palette());
+
+    if (effectivePath.isEmpty()) {
+        m_albumArt->setPixmap({});
+        m_albumArt->setText(QStringLiteral("Album art"));
+        return;
     }
 
     m_albumArt->setText({});
-    static_cast<AlbumArtLabel *>(m_albumArt)->setSourcePixmap(pixmap);
+    static_cast<AlbumArtLabel *>(m_albumArt)->setSourcePath(effectivePath);
 }
 
 void RightSidebar::setTrackInfo(const Track &track)
