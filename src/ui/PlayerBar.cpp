@@ -169,8 +169,6 @@ protected:
             emit sliderPressed();
             emit sliderMoved(newValue);
             emit actionTriggered(QAbstractSlider::SliderMove);
-            event->accept();
-            return;
         }
         QSlider::mousePressEvent(event);
     }
