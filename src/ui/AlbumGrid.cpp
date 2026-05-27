@@ -427,6 +427,8 @@ void AlbumGrid::loadNextAlbumArtwork()
         const ArtworkResult artwork = resolver.resolveForDirectory(representativeDir);
         if (!artwork.cachePath.isEmpty()) {
             item->setIcon(QIcon(artwork.cachePath));
+        } else {
+            item->setIcon(QIcon(AlbumArtFallback::resourcePath(palette())));
         }
         return;
     }
