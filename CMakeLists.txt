@@ -63,6 +63,7 @@ set(MUZAITEN_SOURCES
     src/ui/ArtistSidebar.cpp
     src/ui/DenseTableDelegate.cpp
     src/ui/FileExplorerView.cpp
+    src/ui/FileExplorerKeybindings.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
     src/ui/PlaybackProfileDialog.cpp
@@ -110,6 +111,7 @@ set(MUZAITEN_HEADERS
     src/ui/ArtistSidebar.h
     src/ui/DenseTableDelegate.h
     src/ui/FileExplorerView.h
+    src/ui/FileExplorerKeybindings.h
     src/ui/LinkRootsDialog.h
     src/ui/MainWindow.h
     src/ui/PlaybackProfileDialog.h
