@@ -1,11 +1,13 @@
 #pragma once
 
 #include "core/Track.h"
+#include "ui/FileExplorerKeybindings.h"
 
 #include <QWidget>
 #include <QVector>
 
 class QLabel;
+class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -22,9 +24,16 @@ public:
 
     void setMode(FileExplorerMode mode);
     FileExplorerMode mode() const;
+    void setModeTitle(const QString &title);
     void setRootPath(const QString &path);
     QString currentDirectory() const;
     void setLibraryEntries(const QStringList &directories, const QVector<Track> &tracks);
+
+    void setKeyBindingProfileName(const QString &name);
+    QString keyBindingProfileName() const;
+    void setKeyHintBarVisible(bool visible);
+    bool isKeyHintBarVisible() const;
+    QStringList availableKeyBindingProfiles() const;
 
 signals:
     void directoryRequested(const QString &path);
@@ -33,6 +42,11 @@ signals:
     void addToQueueRequested(const QVector<Track> &tracks);
     void importDirectoryRequested(const QString &path);
     void findFileRequested(const Track &track);
+    void keyBindingProfileChanged(const QString &name);
+    void keyHintVisibilityChanged(bool visible);
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void refreshFreeRoam();
@@ -45,8 +59,20 @@ private:
     QVector<Track> tracksForDirectory(const QString &path) const;
     QVector<Track> selectedTracks() const;
 
+    void applyKeyAction(const QString &action);
+    void updateHintBar();
+
     QLabel *m_pathLabel = nullptr;
+    QLabel *m_modeTitle = nullptr;
+    QWidget *m_hintBar = nullptr;
+    QLabel *m_hintLabel = nullptr;
     QTreeWidget *m_tree = nullptr;
+    QTimer *m_ggTimer = nullptr;
     FileExplorerMode m_mode = FileExplorerMode::Library;
     QString m_currentDirectory;
+    KeyBindingMap m_keyBindings;
+    QString m_keyBindingProfileName;
+    bool m_pendingG = false;
 };
+
+

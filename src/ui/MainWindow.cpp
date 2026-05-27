@@ -260,9 +260,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_libraryFileExplorer = new FileExplorerView(m_mainStack);
     m_libraryFileExplorer->setMode(FileExplorerMode::Library);
+    m_libraryFileExplorer->setModeTitle(QStringLiteral("Library Explorer"));
     m_freeRoamFileExplorer = new FileExplorerView(m_mainStack);
     m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
     m_freeRoamFileExplorer->setRootPath(QDir::homePath());
+    m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
 
     m_mainStack->addWidget(m_rootSplitter);
     m_mainStack->addWidget(m_libraryFileExplorer);
@@ -397,6 +399,22 @@ MainWindow::MainWindow(QWidget *parent)
         startScan(path);
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
+        m_freeRoamFileExplorer->setKeyBindingProfileName(name);
+        m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
+        m_libraryFileExplorer->setKeyBindingProfileName(name);
+        m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
+        m_freeRoamFileExplorer->setKeyHintBarVisible(visible);
+        m_database->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
+        m_libraryFileExplorer->setKeyHintBarVisible(visible);
+        m_database->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+    });
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::preparedTrackStarted, this, &MainWindow::advanceAfterPreparedTransition);
@@ -943,6 +961,17 @@ void MainWindow::loadViewSettings()
     m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
     m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
     refreshLibraryFileExplorer();
+
+    const QString keyProfile = m_database->setting(QStringLiteral("fileExplorer.keyBindingProfile"));
+    if (!keyProfile.isEmpty()) {
+        m_libraryFileExplorer->setKeyBindingProfileName(keyProfile);
+        m_freeRoamFileExplorer->setKeyBindingProfileName(keyProfile);
+    }
+    const QString showHints = m_database->setting(QStringLiteral("fileExplorer.showKeyHints"));
+    const bool hintsVisible = showHints == QStringLiteral("true");
+    m_libraryFileExplorer->setKeyHintBarVisible(hintsVisible);
+    m_freeRoamFileExplorer->setKeyHintBarVisible(hintsVisible);
+
     switchMainView(m_mainView);
     applySharedTableSettings();
 }
