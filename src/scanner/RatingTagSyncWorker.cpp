@@ -53,19 +53,6 @@ void RatingTagSyncWorker::run()
             continue;
         }
 
-        const Track fileTrack = reader.read(writePath.preferredPath);
-        if (fileTrack.rating0To100 >= 0) {
-            database.updateScannedTrackRating(track.path,
-                                             fileTrack.rating0To100,
-                                             fileTrack.ratingSource,
-                                             fileTrack.fileSize,
-                                             fileTrack.fileMtime);
-            database.setUserTrackRating(track.path, fileTrack.rating0To100);
-            database.clearPendingTrackRatingWrite(track.path);
-            ++summary.tagWon;
-            continue;
-        }
-
         const TagRatingWriteResult write = writer.writeRating(writePath.preferredPath, desired);
         if (write.ok) {
             const Track reread = reader.read(writePath.preferredPath);

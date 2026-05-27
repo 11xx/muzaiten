@@ -21,13 +21,6 @@ TagRatingWriteResult TagRatingWriter::writeRating(const QString &path, int ratin
     }
 
     TagLib::PropertyMap properties = file.file()->properties();
-    const TagRatingReadResult existing = readRating(properties);
-    if (existing.rating0To100 >= 0) {
-        result.existingTagWon = true;
-        result.fileRating0To100 = existing.rating0To100;
-        return result;
-    }
-
     setMusicBeeRating(properties, normalized);
     file.file()->setProperties(properties);
     if (!file.file()->save()) {
