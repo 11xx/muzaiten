@@ -16,6 +16,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QStyle>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -87,16 +88,21 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     });
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_tree->setRootIsDecorated(false);
+    m_tree->setIndentation(0);
+    m_tree->setIconSize(QSize(22, 22));
     m_tree->setAlternatingRowColors(true);
     m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(m_tree, 1);
 
     m_hintBar = new QWidget(this);
+    m_hintBar->setAutoFillBackground(true);
+    QPalette hintPalette = m_hintBar->palette();
+    hintPalette.setColor(QPalette::Window, hintPalette.color(QPalette::Window).darker(108));
+    m_hintBar->setPalette(hintPalette);
     auto *hintLayout = new QHBoxLayout(m_hintBar);
-    hintLayout->setContentsMargins(8, 2, 8, 2);
+    hintLayout->setContentsMargins(8, 1, 8, 1);
     m_hintLabel = new QLabel(m_hintBar);
-    m_hintLabel->setStyleSheet(QStringLiteral("color: palette(window-text); opacity: 0.6; font-size: 90%;"));
     hintLayout->addWidget(m_hintLabel, 1);
     auto *hintDismiss = new QPushButton(QStringLiteral("\u2715"), m_hintBar);
     hintDismiss->setFixedSize(20, 20);
@@ -116,7 +122,7 @@ FileExplorerView::FileExplorerView(QWidget *parent)
         m_pendingG = false;
     });
 
-    m_tree->viewport()->installEventFilter(this);
+    m_tree->installEventFilter(this);
 
     setKeyBindingProfileName(QStringLiteral("vim"));
 
@@ -322,6 +328,7 @@ void FileExplorerView::addDirectoryItem(const QString &path)
 {
     auto *item = new QTreeWidgetItem(m_tree);
     item->setText(0, QFileInfo(path).fileName().isEmpty() ? path : QFileInfo(path).fileName());
+    item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder"), style()->standardIcon(QStyle::SP_DirIcon)));
     item->setData(0, TypeRole, DirectoryItem);
     item->setData(0, PathRole, cleanPath(path));
 }
@@ -333,6 +340,7 @@ void FileExplorerView::addTrackItem(const Track &track)
     item->setText(1, track.artistName);
     item->setText(2, track.albumTitle);
     item->setText(3, formatDuration(track.durationMs));
+    item->setIcon(0, QIcon::fromTheme(QStringLiteral("audio-x-generic"), style()->standardIcon(QStyle::SP_MediaPlay)));
     item->setData(0, TypeRole, TrackItem);
     item->setData(0, PathRole, track.path);
     item->setData(0, TrackRole, QVariant::fromValue(track));
@@ -444,13 +452,25 @@ void FileExplorerView::updateHintBar()
 
 bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched != m_tree->viewport() || event->type() != QEvent::KeyPress) {
+    if (watched != m_tree || event->type() != QEvent::KeyPress) {
         return QWidget::eventFilter(watched, event);
     }
 
     auto *keyEvent = static_cast<QKeyEvent *>(event);
     const int key = keyEvent->key();
     const auto modifiers = keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
+
+    if (!modifiers && key == Qt::Key_Backspace) {
+        navigateUp();
+        return true;
+    }
+
+    if (key == Qt::Key_Up || key == Qt::Key_Down || key == Qt::Key_Left || key == Qt::Key_Right ||
+        key == Qt::Key_PageUp || key == Qt::Key_PageDown ||
+        key == Qt::Key_Home || key == Qt::Key_End ||
+        key == Qt::Key_Return || key == Qt::Key_Enter) {
+        return false;
+    }
 
     if (!modifiers && key == Qt::Key_G && m_keyBindings.contains(Qt::Key_G)) {
         if (m_pendingG) {
@@ -472,7 +492,7 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
         return true;
     }
 
-    if (!modifiers) {
+    if (!modifiers && key >= Qt::Key_Space && key <= Qt::Key_AsciiTilde) {
         for (auto it = m_keyBindings.constBegin(); it != m_keyBindings.constEnd(); ++it) {
             if (it.key().count() == 1 && (it.key()[0].key() == static_cast<Qt::Key>(key))) {
                 applyKeyAction(it.value());
@@ -481,7 +501,7 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
-    return QWidget::eventFilter(watched, event);
+    return false;
 }
 
 void FileExplorerView::applyKeyAction(const QString &action)
