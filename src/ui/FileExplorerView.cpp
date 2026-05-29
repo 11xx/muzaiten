@@ -190,6 +190,14 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     connect(up, &QPushButton::clicked, this, &FileExplorerView::navigateUp);
     connect(m_tree, &QTreeWidget::itemActivated, this, &FileExplorerView::activateItem);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &FileExplorerView::showContextMenu);
+    // Remember the cursor position per directory so returning to a directory
+    // restores its previous selection instead of resetting to the top.
+    connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *current, QTreeWidgetItem *) {
+        if (m_restoringSelection || current == nullptr) {
+            return;
+        }
+        m_lastSelectedByDir.insert(m_currentDirectory, current->data(0, PathRole).toString());
+    });
 }
 
 void FileExplorerView::setMode(FileExplorerMode mode)
@@ -222,6 +230,31 @@ QString FileExplorerView::currentDirectory() const
     return m_currentDirectory;
 }
 
+void FileExplorerView::restoreSelectionForCurrentDirectory()
+{
+    if (m_tree->topLevelItemCount() == 0) {
+        return;
+    }
+    m_restoringSelection = true;
+    const QString wanted = m_lastSelectedByDir.value(m_currentDirectory);
+    QTreeWidgetItem *target = nullptr;
+    if (!wanted.isEmpty()) {
+        for (int row = 0; row < m_tree->topLevelItemCount(); ++row) {
+            QTreeWidgetItem *item = m_tree->topLevelItem(row);
+            if (item != nullptr && item->data(0, PathRole).toString() == wanted) {
+                target = item;
+                break;
+            }
+        }
+    }
+    if (target == nullptr) {
+        target = m_tree->topLevelItem(0);
+    }
+    m_tree->setCurrentItem(target);
+    m_tree->scrollToItem(target, QAbstractItemView::PositionAtCenter);
+    m_restoringSelection = false;
+}
+
 void FileExplorerView::setLibraryEntries(const QStringList &directories, const QVector<Track> &tracks)
 {
     m_metadataTimer->stop();
@@ -234,6 +267,7 @@ void FileExplorerView::setLibraryEntries(const QStringList &directories, const Q
     for (const Track &track : tracks) {
         addTrackItem(track);
     }
+    restoreSelectionForCurrentDirectory();
     // Force a full repaint; without this the view can keep showing the prior
     // listing until each row is hovered.
     m_tree->viewport()->update();
@@ -275,6 +309,7 @@ void FileExplorerView::refreshFreeRoam()
     if (!m_pendingMetadata.isEmpty()) {
         m_metadataTimer->start();
     }
+    restoreSelectionForCurrentDirectory();
     // Force a full repaint; without this the view can keep showing the prior
     // listing until each row is hovered.
     m_tree->viewport()->update();
