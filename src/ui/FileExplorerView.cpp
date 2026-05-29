@@ -234,6 +234,9 @@ void FileExplorerView::setLibraryEntries(const QStringList &directories, const Q
     for (const Track &track : tracks) {
         addTrackItem(track);
     }
+    // Force a full repaint; without this the view can keep showing the prior
+    // listing until each row is hovered.
+    m_tree->viewport()->update();
 }
 
 void FileExplorerView::refreshFreeRoam()
@@ -272,6 +275,9 @@ void FileExplorerView::refreshFreeRoam()
     if (!m_pendingMetadata.isEmpty()) {
         m_metadataTimer->start();
     }
+    // Force a full repaint; without this the view can keep showing the prior
+    // listing until each row is hovered.
+    m_tree->viewport()->update();
 }
 
 void FileExplorerView::activateItem(QTreeWidgetItem *item)
