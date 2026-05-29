@@ -28,6 +28,25 @@
 
 namespace {
 
+// A menu that stays open when a checkable action is clicked, so related
+// toggles can be flipped without reopening it each time. Non-checkable
+// actions close the menu as usual.
+class StayOpenMenu final : public QMenu {
+public:
+    using QMenu::QMenu;
+
+protected:
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        QAction *action = activeAction();
+        if (action != nullptr && action->isEnabled() && action->isCheckable()) {
+            action->trigger();
+            return;
+        }
+        QMenu::mouseReleaseEvent(event);
+    }
+};
+
 class RatingStrip final : public QWidget {
 public:
     explicit RatingStrip(QWidget *parent = nullptr)
@@ -289,7 +308,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
     QAction *mpdImport = mpdMenu->addAction(QStringLiteral("Import MPD library metadata"));
 
-    auto *scrobblersMenu = new QMenu(QStringLiteral("Scrobblers"), this);
+    auto *scrobblersMenu = new StayOpenMenu(QStringLiteral("Scrobblers"), this);
     m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
     m_listenBrainzEnabled->setCheckable(true);
     QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token..."));
