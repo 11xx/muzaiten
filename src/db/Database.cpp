@@ -118,6 +118,13 @@ bool Database::open(const QString &path)
         m_lastError = m_db.lastError().text();
         return false;
     }
+
+    QSqlQuery pragma(m_db);
+    pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+    pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+    pragma.exec(QStringLiteral("PRAGMA foreign_keys=ON"));
+    pragma.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
+
     return migrate();
 }
 
@@ -183,7 +190,28 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 5;
+    const QVector<QPair<QString, QString>> trackColumns = {
+        {QStringLiteral("missing"), QStringLiteral("missing INTEGER NOT NULL DEFAULT 0")},
+        {QStringLiteral("missing_since"), QStringLiteral("missing_since TEXT")},
+    };
+    for (const auto &column : trackColumns) {
+        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+            return false;
+        }
+    }
+
+    const QStringList fullMetadataStatements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS track_metadata (track_id INTEGER PRIMARY KEY, format INTEGER NOT NULL DEFAULT 1, raw_size INTEGER NOT NULL, data BLOB NOT NULL, FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_missing ON tracks(missing)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(6, datetime('now'))"),
+    };
+    for (const QString &statement : fullMetadataStatements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 6;
 }
 
 QString Database::lastError() const
@@ -273,7 +301,7 @@ bool Database::upsertTrack(const Track &track)
     query.prepare(QStringLiteral(
         "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error) "
         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?) "
-        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error"));
+        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL"));
     query.addBindValue(track.path);
     query.addBindValue(track.parentDir);
     query.addBindValue(track.filename);
@@ -303,16 +331,125 @@ bool Database::upsertTrack(const Track &track)
         m_lastError = query.lastError().text();
         return false;
     }
+
+    if (!track.fullMetadataBlob.isEmpty()) {
+        QSqlQuery idQuery(m_db);
+        idQuery.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
+        idQuery.addBindValue(track.path);
+        if (idQuery.exec() && idQuery.next()) {
+            const qint64 trackId = idQuery.value(0).toLongLong();
+            QSqlQuery metaQuery(m_db);
+            metaQuery.prepare(QStringLiteral(
+                "INSERT INTO track_metadata(track_id, format, raw_size, data) VALUES(?, 1, ?, ?) "
+                "ON CONFLICT(track_id) DO UPDATE SET format=1, raw_size=excluded.raw_size, data=excluded.data"));
+            metaQuery.addBindValue(trackId);
+            metaQuery.addBindValue(track.fullMetadataRawSize);
+            metaQuery.addBindValue(track.fullMetadataBlob);
+            if (!metaQuery.exec()) {
+                m_lastError = metaQuery.lastError().text();
+                return false;
+            }
+        }
+    }
     return true;
+}
+
+QHash<QString, QPair<qint64, qint64>> Database::trackFingerprints(const QString &rootPrefix) const
+{
+    QHash<QString, QPair<qint64, qint64>> fingerprints;
+    QSqlQuery query(m_db);
+    if (rootPrefix.isEmpty()) {
+        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size FROM tracks"));
+    } else {
+        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"));
+        query.addBindValue(rootPrefix);
+        QString likePrefix = rootPrefix;
+        likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+        likePrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+        likePrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+        query.addBindValue(likePrefix + QStringLiteral("/%"));
+    }
+    if (!query.exec()) {
+        return fingerprints;
+    }
+    while (query.next()) {
+        fingerprints.insert(query.value(0).toString(),
+                            qMakePair(query.value(1).toLongLong(), query.value(2).toLongLong()));
+    }
+    return fingerprints;
+}
+
+int Database::markTracksMissing(const QStringList &paths)
+{
+    int marked = 0;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("UPDATE tracks SET missing=1, missing_since=datetime('now') WHERE path = ? AND missing = 0"));
+    for (const QString &path : paths) {
+        query.addBindValue(path);
+        if (query.exec()) {
+            marked += query.numRowsAffected();
+        }
+    }
+    return marked;
+}
+
+int Database::removeMissingTracks()
+{
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("DELETE FROM tracks WHERE missing = 1"))) {
+        m_lastError = query.lastError().text();
+        return 0;
+    }
+    return query.numRowsAffected();
+}
+
+int Database::missingTrackCount() const
+{
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT COUNT(*) FROM tracks WHERE missing = 1")) && query.next()) {
+        return query.value(0).toInt();
+    }
+    return 0;
+}
+
+QStringList Database::tracksWithoutFullMetadata(int limit) const
+{
+    QStringList paths;
+    QSqlQuery query(m_db);
+    QString sql = QStringLiteral("SELECT path FROM tracks WHERE missing = 0 AND id NOT IN (SELECT track_id FROM track_metadata)");
+    if (limit > 0) {
+        sql += QStringLiteral(" LIMIT %1").arg(limit);
+    }
+    if (!query.exec(sql)) {
+        return paths;
+    }
+    while (query.next()) {
+        paths.append(query.value(0).toString());
+    }
+    return paths;
+}
+
+MetadataBlob::FullMetadata Database::fullMetadata(const QString &path) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT m.raw_size, m.data FROM track_metadata m JOIN tracks t ON t.id = m.track_id WHERE t.path = ?"));
+    query.addBindValue(path);
+    if (query.exec() && query.next()) {
+        const qint64 rawSize = query.value(0).toLongLong();
+        const QByteArray blob = query.value(1).toByteArray();
+        return MetadataBlob::decode(blob, rawSize);
+    }
+    return {};
 }
 
 QVector<Artist> Database::albumArtists() const
 {
     QVector<Artist> artists;
     QSqlQuery query(m_db);
-    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t");
+    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t WHERE t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" WHERE %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
     }
     sql += QStringLiteral(" GROUP BY album_artist_name ORDER BY lower(album_artist_name)");
     query.exec(sql);
@@ -342,7 +479,7 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "LEFT JOIN user_album_ratings uar ON uar.album_artist_name = t.album_artist_name AND uar.album_title = t.album_title "
-        "WHERE t.album_artist_name = ? %2 "
+        "WHERE t.album_artist_name = ? AND t.missing = 0 %2 "
         "GROUP BY t.album_title, uar.rating_0_100 "
         "ORDER BY lower(t.album_title)")
                       .arg(effectiveTrackRating,
@@ -375,7 +512,7 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "WHERE t.album_artist_name = ?");
+        "WHERE t.album_artist_name = ? AND t.missing = 0");
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
     }
@@ -896,7 +1033,7 @@ QVector<Track> Database::tracksForDirectory(const QString &directory) const
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "WHERE t.parent_dir = ?");
+        "WHERE t.parent_dir = ? AND t.missing = 0");
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
     }
@@ -938,9 +1075,9 @@ QStringList Database::localLibraryDirectories(const QString &parentDirectory) co
     QStringList directories;
     const QString parent = parentDirectory.trimmed().isEmpty() ? QString() : cleanRootPath(parentDirectory);
     QSqlQuery query(m_db);
-    QString sql = QStringLiteral("SELECT DISTINCT t.parent_dir FROM tracks t");
+    QString sql = QStringLiteral("SELECT DISTINCT t.parent_dir FROM tracks t WHERE t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" WHERE %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
     }
     sql += QStringLiteral(" ORDER BY lower(t.parent_dir)");
     query.exec(sql);
