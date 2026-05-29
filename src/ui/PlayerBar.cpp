@@ -326,6 +326,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *trackInfoPaneSettings = settingsMenu->addAction(QStringLiteral("Track information panel..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
+    settingsMenu->addSeparator();
+    m_listUnsupportedFiles = settingsMenu->addAction(QStringLiteral("List unsupported files in explorer"));
+    m_listUnsupportedFiles->setCheckable(true);
+    m_listUnsupportedFiles->setVisible(false); // only relevant in file-explorer view
 
     compactMenu->addMenu(fileMenu);
     compactMenu->addMenu(playbackMenu);
@@ -465,6 +469,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
     connect(m_compactMenu, &QAction::toggled, this, &PlayerBar::compactMenuChanged);
+    connect(m_listUnsupportedFiles, &QAction::toggled, this, &PlayerBar::listUnsupportedFilesChanged);
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
@@ -519,6 +524,22 @@ void PlayerBar::setTrackInfoPaneVisible(bool visible)
     }
     const QSignalBlocker blocker(m_trackInfoPaneVisible);
     m_trackInfoPaneVisible->setChecked(visible);
+}
+
+void PlayerBar::setListUnsupportedFiles(bool show)
+{
+    if (m_listUnsupportedFiles == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_listUnsupportedFiles);
+    m_listUnsupportedFiles->setChecked(show);
+}
+
+void PlayerBar::setExplorerOptionsVisible(bool visible)
+{
+    if (m_listUnsupportedFiles != nullptr) {
+        m_listUnsupportedFiles->setVisible(visible);
+    }
 }
 
 void PlayerBar::setCompactMenu(bool compact)

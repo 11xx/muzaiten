@@ -16,6 +16,8 @@ public:
     void setTrackInfoPaneVisible(bool visible);
     void setListenBrainzEnabled(bool enabled);
     void setLastFmEnabled(bool enabled);
+    void setListUnsupportedFiles(bool show);
+    void setExplorerOptionsVisible(bool visible);
     void setCompactMenu(bool compact);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
@@ -40,6 +42,7 @@ signals:
     void mpdSourceRequested();
     void mpdImportRequested();
     void compactMenuChanged(bool compact);
+    void listUnsupportedFilesChanged(bool show);
     void trackInfoPaneVisibleChanged(bool visible);
     void trackInfoPaneSettingsRequested();
     void listenBrainzEnabledChanged(bool enabled);
@@ -64,6 +67,7 @@ private:
     class QToolButton *m_playPause = nullptr;
     class QToolButton *m_shuffle = nullptr;
     class QAction *m_compactMenu = nullptr;
+    class QAction *m_listUnsupportedFiles = nullptr;
     class QAction *m_trackInfoPaneVisible = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;
     class QAction *m_lastFmEnabled = nullptr;
