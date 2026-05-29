@@ -368,7 +368,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
     connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
-    connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, &MainWindow::playQueueIndex);
+    connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, [this](int index) { playQueueIndex(index); });
     connect(m_rightSidebar, &RightSidebar::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
@@ -1322,7 +1322,11 @@ void MainWindow::restoreSavedPlaybackState()
         return;
     }
 
-    playQueueIndex(queueIndex);
+    // Restore without notifying scrobblers: the backend briefly reports a
+    // playing state while starting up, and submitting "now playing" off that
+    // transient is premature. Notify only once playback has settled below,
+    // and only when the restored session is genuinely playing.
+    playQueueIndex(queueIndex, false);
     QTimer::singleShot(250, this, [this, positionMs, state]() {
         if (positionMs > 0) {
             m_playback->seek(positionMs);
@@ -1331,6 +1335,8 @@ void MainWindow::restoreSavedPlaybackState()
         }
         if (state == QStringLiteral("paused")) {
             m_playback->pause();
+        } else if (m_playback->state() == PlaybackBackend::State::Playing) {
+            notifyScrobblersTrackStarted(m_currentTrack);
         }
         savePlaybackState(true);
     });
@@ -1812,7 +1818,7 @@ void MainWindow::showLastFmSettings()
     QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
 }
 
-void MainWindow::playTrack(const Track &track)
+void MainWindow::playTrack(const Track &track, bool notifyScrobbler)
 {
     if (track.path.isEmpty()) {
         return;
@@ -1824,7 +1830,7 @@ void MainWindow::playTrack(const Track &track)
         return;
     }
 
-    presentTrack(track);
+    presentTrack(track, notifyScrobbler);
     m_playback->play(QUrl::fromLocalFile(playbackPath));
     prepareNextQueueTrack();
 }
@@ -1846,10 +1852,15 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
     m_mpris->setPositionMs(0);
     updateMprisCapabilities();
     if (notifyScrobbler) {
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
-        QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+        notifyScrobblersTrackStarted(track);
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
     }
+}
+
+void MainWindow::notifyScrobblersTrackStarted(const Track &track)
+{
+    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+    QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
 }
 
 void MainWindow::appendAndPlayTrack(const Track &track)
@@ -2083,7 +2094,7 @@ void MainWindow::addAlbumToQueue(const QString &albumTitle)
     }
 }
 
-void MainWindow::playQueueIndex(int index)
+void MainWindow::playQueueIndex(int index, bool notifyScrobbler)
 {
     if (index < 0 || index >= m_queue.size()) {
         return;
@@ -2095,7 +2106,7 @@ void MainWindow::playQueueIndex(int index)
     }
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     saveQueueState();
-    playTrack(m_queue.at(m_queueIndex));
+    playTrack(m_queue.at(m_queueIndex), notifyScrobbler);
 }
 
 void MainWindow::playPreviousTrack()

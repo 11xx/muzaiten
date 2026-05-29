@@ -100,8 +100,9 @@ private:
     QString lastFmApiKey() const;
     QString lastFmSharedSecret() const;
     void onLibrarySourceChanged(int index);
-    void playTrack(const Track &track);
+    void playTrack(const Track &track, bool notifyScrobbler = true);
     void presentTrack(const Track &track, bool notifyScrobbler = true);
+    void notifyScrobblersTrackStarted(const Track &track);
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
@@ -110,7 +111,7 @@ private:
     void clearQueue();
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
-    void playQueueIndex(int index);
+    void playQueueIndex(int index, bool notifyScrobbler = true);
     void playPreviousTrack();
     void playNextTrack();
     void togglePlayback();
