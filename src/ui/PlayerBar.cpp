@@ -293,6 +293,12 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
     m_listenBrainzEnabled->setCheckable(true);
     QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token..."));
+    scrobblersMenu->addSeparator();
+    m_lastFmEnabled = scrobblersMenu->addAction(QStringLiteral("Last.fm scrobbling"));
+    m_lastFmEnabled->setCheckable(true);
+    QAction *lastFmAccount = scrobblersMenu->addAction(QStringLiteral("Configure Last.fm account..."));
+    QAction *lastFmAuthStart = scrobblersMenu->addAction(QStringLiteral("Start Last.fm authentication"));
+    QAction *lastFmAuthFinish = scrobblersMenu->addAction(QStringLiteral("Finish Last.fm authentication"));
 
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
     m_trackInfoPaneVisible = settingsMenu->addAction(QStringLiteral("Show track information pane"));
@@ -442,6 +448,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
+    connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
+    connect(lastFmAccount, &QAction::triggered, this, &PlayerBar::lastFmAccountRequested);
+    connect(lastFmAuthStart, &QAction::triggered, this, &PlayerBar::lastFmAuthenticationStartRequested);
+    connect(lastFmAuthFinish, &QAction::triggered, this, &PlayerBar::lastFmAuthenticationFinishRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
@@ -472,6 +482,15 @@ void PlayerBar::setListenBrainzEnabled(bool enabled)
     }
     const QSignalBlocker blocker(m_listenBrainzEnabled);
     m_listenBrainzEnabled->setChecked(enabled);
+}
+
+void PlayerBar::setLastFmEnabled(bool enabled)
+{
+    if (m_lastFmEnabled == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_lastFmEnabled);
+    m_lastFmEnabled->setChecked(enabled);
 }
 
 void PlayerBar::setTrackInfoPaneVisible(bool visible)

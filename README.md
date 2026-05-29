@@ -14,7 +14,7 @@ The project is in early development. The implementation currently uses C++26, Qt
 - Artist track table with sortable ratings.
 - DB-only user ratings in half-star increments.
 - Queue sidebar with album art for the current track.
-- ListenBrainz scrobbling with playing-now and completed-listen submissions.
+- ListenBrainz and Last.fm scrobbling with playing-now and completed-listen submissions.
 - Persistent UI state for core panes, table columns, and splitters.
 
 ## Library Safety

@@ -14,6 +14,7 @@ class ArtistSidebar;
 class FileExplorerView;
 class QCloseEvent;
 class ListenBrainzScrobbler;
+class LastFmScrobbler;
 class MprisService;
 class PlayerBar;
 class PlaybackBackend;
@@ -93,6 +94,11 @@ private:
     void configureListenBrainz();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
+    void configureLastFm();
+    void setLastFmEnabled(bool enabled);
+    void configureLastFmAccount();
+    void startLastFmAuthentication();
+    void finishLastFmAuthentication();
     void onLibrarySourceChanged(int index);
     void playTrack(const Track &track);
     void presentTrack(const Track &track, bool notifyScrobbler = true);
@@ -173,6 +179,8 @@ private:
     ScanWorker *m_scanWorker = nullptr;
     QThread *m_listenBrainzThread = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
+    QThread *m_lastFmThread = nullptr;
+    LastFmScrobbler *m_lastFmScrobbler = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     MprisService *m_mpris = nullptr;

@@ -12,6 +12,7 @@
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scanner/RatingTagSyncWorker.h"
+#include "scrobble/LastFmScrobbler.h"
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
@@ -28,9 +29,12 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -311,6 +315,37 @@ MainWindow::MainWindow(QWidget *parent)
     });
     m_listenBrainzThread->start();
 
+    m_lastFmThread = new QThread(this);
+    m_lastFmScrobbler = new LastFmScrobbler;
+    m_lastFmScrobbler->moveToThread(m_lastFmThread);
+    connect(m_lastFmThread, &QThread::finished, m_lastFmScrobbler, &QObject::deleteLater);
+    connect(m_lastFmScrobbler, &LastFmScrobbler::submissionFailed, this, [this](const QString &message) {
+        statusBar()->showMessage(message, 10000);
+    });
+    connect(m_lastFmScrobbler, &LastFmScrobbler::disabledAfterFailures, this, [this](const QString &message) {
+        m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
+        m_playerBar->setLastFmEnabled(false);
+        statusBar()->showMessage(message, 15000);
+        QMessageBox::warning(this, QStringLiteral("Last.fm"), message);
+    });
+    connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationUrlReady, this, [this](const QUrl &url) {
+        QDesktopServices::openUrl(url);
+        statusBar()->showMessage(QStringLiteral("Authorize muzaiten in your browser, then choose Finish Last.fm authentication."), 15000);
+    });
+    connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationSucceeded, this, [this](const QString &username, const QString &sessionKey) {
+        m_database->setSetting(QStringLiteral("lastfm.username"), username);
+        m_database->setSetting(QStringLiteral("lastfm.sessionKey"), sessionKey);
+        configureLastFm();
+        statusBar()->showMessage(username.isEmpty() ? QStringLiteral("Last.fm authentication complete")
+                                                    : QStringLiteral("Last.fm authenticated as %1").arg(username),
+                                 8000);
+    });
+    connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationFailed, this, [this](const QString &message) {
+        statusBar()->showMessage(message, 10000);
+        QMessageBox::warning(this, QStringLiteral("Last.fm"), message);
+    });
+    m_lastFmThread->start();
+
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
     connect(m_artistSidebar, &ArtistSidebar::librarySourceChanged, this, &MainWindow::onLibrarySourceChanged);
@@ -364,6 +399,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
+    connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
+    connect(m_playerBar, &PlayerBar::lastFmAccountRequested, this, &MainWindow::configureLastFmAccount);
+    connect(m_playerBar, &PlayerBar::lastFmAuthenticationStartRequested, this, &MainWindow::startLastFmAuthentication);
+    connect(m_playerBar, &PlayerBar::lastFmAuthenticationFinishRequested, this, &MainWindow::finishLastFmAuthentication);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::nextRequested, this, &MainWindow::playNextTrack);
@@ -423,6 +462,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_playerBar->setPlaying(playing);
         m_mpris->setPlaybackState(state);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
     });
     connect(m_playback, &PlaybackBackend::finished, this, [this]() {
@@ -458,6 +498,7 @@ MainWindow::MainWindow(QWidget *parent)
     loadQueueState();
     loadExplorerState();
     configureListenBrainz();
+    configureLastFm();
     loadExistingLibrary();
     restoreSavedPlaybackState();
 }
@@ -474,6 +515,10 @@ MainWindow::~MainWindow()
     if (m_listenBrainzThread != nullptr) {
         m_listenBrainzThread->quit();
         m_listenBrainzThread->wait(3000);
+    }
+    if (m_lastFmThread != nullptr) {
+        m_lastFmThread->quit();
+        m_lastFmThread->wait(3000);
     }
     if (m_mpdImportThread != nullptr) {
         m_mpdImportThread->quit();
@@ -1619,6 +1664,102 @@ void MainWindow::setListenBrainzToken()
     statusBar()->showMessage(QStringLiteral("ListenBrainz token updated"), 3000);
 }
 
+void MainWindow::configureLastFm()
+{
+    const bool enabled = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
+    QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey"));
+    QString sharedSecret = m_database->setting(QStringLiteral("lastfm.sharedSecret"));
+    QString sessionKey = m_database->setting(QStringLiteral("lastfm.sessionKey"));
+    if (apiKey.isEmpty()) {
+        apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
+    }
+    if (sharedSecret.isEmpty()) {
+        sharedSecret = QString::fromLocal8Bit(qgetenv("LASTFM_SHARED_SECRET")).trimmed();
+    }
+    if (sessionKey.isEmpty()) {
+        sessionKey = QString::fromLocal8Bit(qgetenv("LASTFM_SESSION_KEY")).trimmed();
+    }
+
+    m_playerBar->setLastFmEnabled(enabled);
+    QMetaObject::invokeMethod(m_lastFmScrobbler,
+                              "configure",
+                              Qt::QueuedConnection,
+                              Q_ARG(bool, enabled),
+                              Q_ARG(QString, apiKey),
+                              Q_ARG(QString, sharedSecret),
+                              Q_ARG(QString, sessionKey),
+                              Q_ARG(QString, stateRoot() + QStringLiteral("/lastfm-pending.json")));
+}
+
+void MainWindow::setLastFmEnabled(bool enabled)
+{
+    m_database->setSetting(QStringLiteral("lastfm.enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
+    configureLastFm();
+    statusBar()->showMessage(enabled ? QStringLiteral("Last.fm scrobbling enabled") : QStringLiteral("Last.fm scrobbling disabled"), 3000);
+}
+
+void MainWindow::configureLastFmAccount()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Last.fm account"));
+
+    auto *layout = new QFormLayout(&dialog);
+    auto *apiKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.apiKey")), &dialog);
+    auto *sharedSecret = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sharedSecret")), &dialog);
+    auto *sessionKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sessionKey")), &dialog);
+    auto *username = new QLineEdit(m_database->setting(QStringLiteral("lastfm.username")), &dialog);
+    sharedSecret->setEchoMode(QLineEdit::Password);
+    sessionKey->setEchoMode(QLineEdit::Password);
+    username->setReadOnly(true);
+
+    layout->addRow(QStringLiteral("API key"), apiKey);
+    layout->addRow(QStringLiteral("Shared secret"), sharedSecret);
+    layout->addRow(QStringLiteral("Session key"), sessionKey);
+    layout->addRow(QStringLiteral("Username"), username);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    m_database->setSetting(QStringLiteral("lastfm.apiKey"), apiKey->text().trimmed());
+    m_database->setSetting(QStringLiteral("lastfm.sharedSecret"), sharedSecret->text().trimmed());
+    m_database->setSetting(QStringLiteral("lastfm.sessionKey"), sessionKey->text().trimmed());
+    configureLastFm();
+    statusBar()->showMessage(QStringLiteral("Last.fm account updated"), 3000);
+}
+
+void MainWindow::startLastFmAuthentication()
+{
+    QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey"));
+    QString sharedSecret = m_database->setting(QStringLiteral("lastfm.sharedSecret"));
+    if (apiKey.isEmpty()) {
+        apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
+    }
+    if (sharedSecret.isEmpty()) {
+        sharedSecret = QString::fromLocal8Bit(qgetenv("LASTFM_SHARED_SECRET")).trimmed();
+    }
+    if (apiKey.isEmpty() || sharedSecret.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Last.fm"), QStringLiteral("Configure a Last.fm API key and shared secret first."));
+        return;
+    }
+
+    QMetaObject::invokeMethod(m_lastFmScrobbler,
+                              "startAuthentication",
+                              Qt::QueuedConnection,
+                              Q_ARG(QString, apiKey),
+                              Q_ARG(QString, sharedSecret));
+}
+
+void MainWindow::finishLastFmAuthentication()
+{
+    QMetaObject::invokeMethod(m_lastFmScrobbler, "finishAuthentication", Qt::QueuedConnection);
+}
+
 void MainWindow::playTrack(const Track &track)
 {
     if (track.path.isEmpty()) {
@@ -1654,6 +1795,7 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
     updateMprisCapabilities();
     if (notifyScrobbler) {
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
     }
 }
