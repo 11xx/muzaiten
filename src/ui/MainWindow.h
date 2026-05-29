@@ -96,9 +96,9 @@ private:
     void setListenBrainzToken();
     void configureLastFm();
     void setLastFmEnabled(bool enabled);
-    void configureLastFmAccount();
-    void startLastFmAuthentication();
-    void finishLastFmAuthentication();
+    void showLastFmSettings();
+    QString lastFmApiKey() const;
+    QString lastFmSharedSecret() const;
     void onLibrarySourceChanged(int index);
     void playTrack(const Track &track);
     void presentTrack(const Track &track, bool notifyScrobbler = true);

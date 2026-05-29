@@ -23,7 +23,7 @@ public slots:
     void trackStarted(const Track &track);
     void playbackStateChanged(bool playing);
     void startAuthentication(const QString &apiKey, const QString &sharedSecret);
-    void finishAuthentication();
+    void cancelAuthentication();
 
 signals:
     void submissionFailed(QString message);
@@ -35,6 +35,7 @@ signals:
 private slots:
     void checkListenProgress();
     void retryPending();
+    void pollAuthSession();
 
 private:
     enum class RequestKind {
@@ -65,6 +66,7 @@ private:
     QNetworkAccessManager *m_network = nullptr;
     QTimer *m_progressTimer = nullptr;
     QTimer *m_retryTimer = nullptr;
+    QTimer *m_authPollTimer = nullptr;
     bool m_enabled = false;
     QString m_apiKey;
     QString m_sharedSecret;
@@ -84,4 +86,6 @@ private:
     QString m_pendingAuthToken;
     QString m_pendingAuthApiKey;
     QString m_pendingAuthSecret;
+    int m_authPollAttempts = 0;
+    bool m_authRequestInFlight = false;
 };
