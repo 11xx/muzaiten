@@ -16,6 +16,7 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QStyle>
 #include <QTimer>
 #include <QTreeWidget>
@@ -123,6 +124,9 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     });
 
     m_tree->installEventFilter(this);
+    // Route focus to the tree so its key-binding eventFilter receives key
+    // presses as soon as the explorer is shown, without a prior click.
+    setFocusProxy(m_tree);
 
     setKeyBindingProfileName(QStringLiteral("vim"));
 
@@ -310,6 +314,15 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     } else if (selected == findFile) {
         emit findFileRequested(tracks.first());
     }
+}
+
+void FileExplorerView::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    // Give the tree keyboard focus whenever this explorer becomes visible, so
+    // the configured key bindings work immediately (previously they only
+    // activated after a click moved focus into the tree).
+    m_tree->setFocus(Qt::OtherFocusReason);
 }
 
 void FileExplorerView::navigateUp()
