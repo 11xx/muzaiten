@@ -459,6 +459,9 @@ MainWindow::MainWindow(QWidget *parent)
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::startDirectoryChanged, this, [this](const QString &path) {
+        m_database->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
+    });
     connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
         m_freeRoamFileExplorer->setKeyBindingProfileName(name);
         m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
@@ -1152,6 +1155,8 @@ void MainWindow::loadViewSettings()
     m_playerBar->setListUnsupportedFiles(showUnsupported);
     m_libraryFileExplorer->setShowUnsupportedFiles(showUnsupported);
     m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
+
+    m_freeRoamFileExplorer->setStartDirectory(m_database->setting(QStringLiteral("fileExplorer.startDirectory")));
 
     switchMainView(m_mainView);
     applySharedTableSettings();

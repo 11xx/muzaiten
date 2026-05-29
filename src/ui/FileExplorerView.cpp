@@ -294,6 +294,11 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     QTreeWidgetItem *item = m_tree->itemAt(pos);
     if (item == nullptr) {
         QMenu menu(this);
+        QAction *setStart = nullptr;
+        if (m_mode == FileExplorerMode::FreeRoam && !m_currentDirectory.isEmpty()) {
+            setStart = menu.addAction(QStringLiteral("Set current folder as start directory (Backspace)"));
+            menu.addSeparator();
+        }
         QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
         for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
             QAction *action = keyMenu->addAction(profile.label);
@@ -308,7 +313,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         hintToggle->setCheckable(true);
         hintToggle->setChecked(m_hintBar->isVisible());
         connect(hintToggle, &QAction::toggled, this, &FileExplorerView::setKeyHintBarVisible);
-        menu.exec(m_tree->viewport()->mapToGlobal(pos));
+        const QAction *selected = menu.exec(m_tree->viewport()->mapToGlobal(pos));
+        if (setStart != nullptr && selected == setStart) {
+            setStartDirectory(m_currentDirectory);
+        }
         return;
     }
 
@@ -320,6 +328,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         QAction *playNext = menu.addAction(QStringLiteral("Play next"));
         QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
         QAction *scan = menu.addAction(QStringLiteral("Scan/Add this directory to library"));
+        QAction *setStart = nullptr;
+        if (m_mode == FileExplorerMode::FreeRoam) {
+            setStart = menu.addAction(QStringLiteral("Set as start directory (Backspace)"));
+        }
         menu.addSeparator();
         QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
         for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
@@ -355,6 +367,8 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
             emit addToQueueRequested(tracks);
         } else if (selected == scan) {
             emit importDirectoryRequested(path);
+        } else if (setStart != nullptr && selected == setStart) {
+            setStartDirectory(path);
         }
         return;
     }
@@ -519,6 +533,21 @@ void FileExplorerView::setTrackResolver(std::function<Track(const QString &)> re
     m_trackResolver = std::move(resolver);
 }
 
+void FileExplorerView::setStartDirectory(const QString &path)
+{
+    const QString cleaned = path.isEmpty() ? QString() : cleanPath(path);
+    if (m_startDirectory == cleaned) {
+        return;
+    }
+    m_startDirectory = cleaned;
+    emit startDirectoryChanged(m_startDirectory);
+}
+
+QString FileExplorerView::startDirectory() const
+{
+    return m_startDirectory;
+}
+
 void FileExplorerView::setShowUnsupportedFiles(bool show)
 {
     if (m_showUnsupported == show) {
@@ -650,7 +679,13 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
     const auto modifiers = keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
 
     if (!modifiers && key == Qt::Key_Backspace) {
-        navigateUp();
+        // Jump to the bookmarked start directory when one is set (free-roam),
+        // otherwise keep the universal navigate-up behavior.
+        if (m_mode == FileExplorerMode::FreeRoam && !m_startDirectory.isEmpty()) {
+            emit directoryRequested(m_startDirectory);
+        } else {
+            navigateUp();
+        }
         return true;
     }
 
