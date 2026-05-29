@@ -56,6 +56,8 @@ set(MUZAITEN_SOURCES
     src/scanner/TagRating.cpp
     src/scanner/TagReader.cpp
     src/scanner/TagRatingWriter.cpp
+    src/scrobble/LastFmApi.cpp
+    src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumGridDelegate.cpp
@@ -104,6 +106,8 @@ set(MUZAITEN_HEADERS
     src/scanner/TagRating.h
     src/scanner/TagReader.h
     src/scanner/TagRatingWriter.h
+    src/scrobble/LastFmApi.h
+    src/scrobble/LastFmScrobbler.h
     src/scrobble/ListenBrainzScrobbler.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
