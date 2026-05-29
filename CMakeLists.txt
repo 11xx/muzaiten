@@ -60,6 +60,7 @@ set(MUZAITEN_SOURCES
     src/playback/QtPlaybackBackend.cpp
     src/scanner/ScanWorker.cpp
     src/scanner/DirectoryWalker.cpp
+    src/scanner/ScanPipeline.cpp
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
     src/scanner/RatingTagSyncWorker.cpp
@@ -114,6 +115,7 @@ set(MUZAITEN_HEADERS
     src/scanner/DirectoryWalker.h
     src/scanner/LibraryScanner.h
     src/scanner/RatingTagSyncWorker.h
+    src/scanner/ScanPipeline.h
     src/scanner/ScanWorker.h
     src/scanner/TagRating.h
     src/scanner/TagReader.h

@@ -1,0 +1,67 @@
+#pragma once
+
+#include "core/Track.h"
+
+#include <QHash>
+#include <QObject>
+#include <QPair>
+#include <QString>
+#include <QStringList>
+#include <QVector>
+
+#include <atomic>
+#include <string>
+#include <vector>
+
+// Coordinates a fast, multi-threaded, cancellable library scan:
+//   enumerate (DirectoryWalker) -> diff against DB fingerprints (skip unchanged)
+//   -> parallel tag read + metadata-archive encode -> batched DB writes.
+// Lives on its own control thread; all DB writes happen on the receiver's
+// thread via the batchReady signal (single connection to library.sqlite).
+// Also supports a backfill mode that re-reads an explicit list of files.
+class ScanPipeline final : public QObject {
+    Q_OBJECT
+
+public:
+    struct Options {
+        int walkerThreads = 0;   // 0 => auto from disk type
+        int tagThreads = 0;      // 0 => auto from disk type
+        int batchSize = 256;
+        bool lowPriority = true;
+        bool forceFullRescan = false;  // ignore fingerprint skip, re-read everything
+    };
+
+    // Scan mode. fingerprints is path -> (mtime,size) of known tracks under root.
+    ScanPipeline(QString rootPath, int scanRootId,
+                 QHash<QString, QPair<qint64, qint64>> fingerprints,
+                 Options options, QObject *parent = nullptr);
+    // Backfill mode: re-read the given paths (no enumerate/diff/missing).
+    ScanPipeline(QStringList backfillPaths, Options options, QObject *parent = nullptr);
+
+    int scanRootId() const { return m_scanRootId; }
+
+public slots:
+    void run();
+    void cancel();
+
+signals:
+    void batchReady(QVector<Track> tracks);
+    void progress(qint64 enumerated, qint64 toProcess, qint64 processed, QString phase);
+    void missingReady(QStringList paths);
+    void finished(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
+
+private:
+    enum class Mode { Scan, Backfill };
+
+    void runScan();
+    void runBackfill();
+    qint64 processPaths(const std::vector<std::string> &paths, qint64 enumerated, const QString &phase);
+
+    Mode m_mode;
+    QString m_rootPath;
+    int m_scanRootId = 0;
+    QHash<QString, QPair<qint64, qint64>> m_fingerprints;
+    QStringList m_backfillPaths;
+    Options m_options;
+    std::atomic_bool m_cancel = false;
+};
