@@ -1,17 +1,19 @@
 #include "ui/AlbumGrid.h"
 
 #include "core/Album.h"
-#include "scanner/ArtworkResolver.h"
+#include "scanner/ArtworkCache.h"
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumGridDelegate.h"
 #include "ui/StarRating.h"
 
 #include <QAction>
 #include <QIcon>
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPixmap>
 #include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTimer>
@@ -107,9 +109,18 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     connect(this, &QListView::customContextMenuRequested, this, &AlbumGrid::showContextMenu);
 }
 
-void AlbumGrid::setArtworkCacheRoot(const QString &cacheRoot)
+void AlbumGrid::setArtworkCache(ArtworkCache *cache)
 {
-    m_artworkCacheRoot = cacheRoot;
+    if (m_artworkCache == cache) {
+        return;
+    }
+    if (m_artworkCache != nullptr) {
+        disconnect(m_artworkCache, nullptr, this, nullptr);
+    }
+    m_artworkCache = cache;
+    if (m_artworkCache != nullptr) {
+        connect(m_artworkCache, &ArtworkCache::artworkReady, this, &AlbumGrid::onArtworkReady);
+    }
 }
 
 void AlbumGrid::setAlbums(const QVector<Album> &albums)
@@ -137,7 +148,7 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
         appendNextAlbumBatch();
     } else {
         m_pendingAlbums.clear();
-        if (itemModel->rowCount() > 0 && !m_artworkCacheRoot.isEmpty() && !m_artworkTimer->isActive()) {
+        if (itemModel->rowCount() > 0 && m_artworkCache != nullptr && !m_artworkTimer->isActive()) {
             m_artworkTimer->start();
         }
     }
@@ -195,7 +206,7 @@ void AlbumGrid::appendNextAlbumBatch()
         m_pendingAlbums.clear();
     }
 
-    if (itemModel->rowCount() > 0 && !m_artworkCacheRoot.isEmpty() && !m_artworkTimer->isActive()) {
+    if (itemModel->rowCount() > 0 && m_artworkCache != nullptr && !m_artworkTimer->isActive()) {
         m_artworkTimer->start();
     }
 }
@@ -413,6 +424,7 @@ void AlbumGrid::loadNextAlbumArtwork()
 
     while (m_nextArtworkRow < itemModel->rowCount()) {
         QStandardItem *item = itemModel->item(m_nextArtworkRow);
+        const int row = m_nextArtworkRow;
         ++m_nextArtworkRow;
         if (item == nullptr || item->data(ArtworkGenerationRole).toInt() != m_artworkGeneration) {
             continue;
@@ -423,17 +435,37 @@ void AlbumGrid::loadNextAlbumArtwork()
             return;
         }
 
-        const ArtworkResolver resolver(m_artworkCacheRoot);
-        const ArtworkResult artwork = resolver.resolveForDirectory(representativeDir);
-        if (!artwork.cachePath.isEmpty()) {
-            item->setIcon(QIcon(artwork.cachePath));
-        } else {
-            item->setIcon(QIcon(AlbumArtFallback::resourcePath(palette())));
+        // Request art asynchronously (folder art only for the grid). The SVG
+        // fallback is already set at item creation; onArtworkReady fills in the
+        // real cover when it arrives, guarded by the artwork generation.
+        if (m_artworkCache != nullptr) {
+            m_artworkCache->requestArtwork(QString::number(row), representativeDir, QString(),
+                                           static_cast<quint64>(m_artworkGeneration));
         }
         return;
     }
 
     if (!m_populateTimer->isActive()) {
         m_artworkTimer->stop();
+    }
+}
+
+void AlbumGrid::onArtworkReady(const QString &token, const QImage &image, quint64 generation)
+{
+    if (image.isNull() || generation != static_cast<quint64>(m_artworkGeneration)) {
+        return;
+    }
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        return;
+    }
+    bool ok = false;
+    const int row = token.toInt(&ok);
+    if (!ok) {
+        return; // not a grid token (e.g. the sidebar's "current")
+    }
+    QStandardItem *item = itemModel->item(row);
+    if (item != nullptr && item->data(ArtworkGenerationRole).toInt() == m_artworkGeneration) {
+        item->setIcon(QIcon(QPixmap::fromImage(image)));
     }
 }

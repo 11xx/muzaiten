@@ -28,6 +28,8 @@ signals:
     void openLibraryRequested();
     void sourceDirectoriesRequested();
     void scanEnabledSourcesRequested();
+    void forceRescanRequested();
+    void removeMissingTracksRequested();
     void syncCurrentTrackRatingTagsRequested();
     void syncCurrentArtistRatingTagsRequested();
     void syncAllSavedRatingTagsRequested();

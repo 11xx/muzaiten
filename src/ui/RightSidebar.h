@@ -6,6 +6,7 @@
 
 #include "core/Track.h"
 
+class QImage;
 class QLabel;
 class QSplitter;
 class QTableView;
@@ -21,6 +22,7 @@ public:
     void setQueue(const QVector<Track> &tracks);
     void setCurrentIndex(int index);
     void setAlbumArt(const QString &imagePath);
+    void setAlbumArt(const QImage &image);
     void setTrackInfo(const Track &track);
     void setTrackInfoVisible(bool visible);
     void configureTrackInfoPanel(QWidget *parent);
