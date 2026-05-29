@@ -50,7 +50,7 @@ private:
     void refreshArtists();
     void selectArtist(const QString &artistName);
     void selectAlbumFilter(const QString &albumTitle);
-    void refreshAlbumGrid();
+    void refreshAlbumGrid(bool freshLoad = false);
     void refreshTrackTable();
     void applyTrackRating(const Track &track, int rating0To100);
     void applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);

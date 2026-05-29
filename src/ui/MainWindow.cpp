@@ -887,7 +887,7 @@ void MainWindow::selectArtist(const QString &artistName)
     }
     m_currentArtist = artistName;
     rememberCurrentSourceSelection();
-    refreshAlbumGrid();
+    refreshAlbumGrid(true);
     refreshTrackTable();
     restoreTrackTableViewState();
     saveExplorerState();
@@ -904,15 +904,15 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
     saveExplorerState();
 }
 
-void MainWindow::refreshAlbumGrid()
+void MainWindow::refreshAlbumGrid(bool freshLoad)
 {
     if (m_currentArtist.isEmpty()) {
         return;
     }
     if (m_librarySource == LibrarySource::Mpd) {
-        m_albumGrid->setAlbums(m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory()));
+        m_albumGrid->setAlbums(m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory()), freshLoad);
     } else {
-        m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist));
+        m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist), freshLoad);
     }
     m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
 }
