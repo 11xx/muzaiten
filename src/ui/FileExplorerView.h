@@ -43,6 +43,8 @@ public:
     // Resolver used to reuse already-scanned track metadata/ratings (by path)
     // instead of re-reading tags; returns a track with empty path when unknown.
     void setTrackResolver(std::function<Track(const QString &)> resolver);
+    void setStartDirectory(const QString &path);
+    QString startDirectory() const;
 
 signals:
     void directoryRequested(const QString &path);
@@ -52,6 +54,7 @@ signals:
     void importDirectoryRequested(const QString &path);
     void findFileRequested(const Track &track);
     void trackRatingChangeRequested(const Track &track, int rating0To100);
+    void startDirectoryChanged(const QString &path);
     void keyBindingProfileChanged(const QString &name);
     void keyHintVisibilityChanged(bool visible);
 
@@ -92,6 +95,7 @@ private:
     QString m_keyBindingProfileName;
     bool m_pendingG = false;
     bool m_showUnsupported = false;
+    QString m_startDirectory;
 };
 
 
