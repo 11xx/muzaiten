@@ -462,6 +462,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_freeRoamFileExplorer, &FileExplorerView::startDirectoryChanged, this, [this](const QString &path) {
         m_database->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
     });
+    connect(m_libraryFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
+        m_freeRoamFileExplorer->setRowHeight(height);
+        m_database->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
+        m_libraryFileExplorer->setRowHeight(height);
+        m_database->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
+    });
     connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
         m_freeRoamFileExplorer->setKeyBindingProfileName(name);
         m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
@@ -1157,6 +1165,12 @@ void MainWindow::loadViewSettings()
     m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
 
     m_freeRoamFileExplorer->setStartDirectory(m_database->setting(QStringLiteral("fileExplorer.startDirectory")));
+
+    const int explorerRowHeight = m_database->setting(QStringLiteral("fileExplorer.rowHeight")).toInt();
+    if (explorerRowHeight > 0) {
+        m_libraryFileExplorer->setRowHeight(explorerRowHeight);
+        m_freeRoamFileExplorer->setRowHeight(explorerRowHeight);
+    }
 
     switchMainView(m_mainView);
     applySharedTableSettings();

@@ -892,8 +892,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setMouseTracking(true);
     m_queueTable->viewport()->setMouseTracking(true);
     m_queueTable->verticalHeader()->setVisible(false);
-    m_queueTable->verticalHeader()->setDefaultSectionSize(20);
-    m_queueTable->verticalHeader()->setMinimumSectionSize(20);
+    m_queueTable->verticalHeader()->setDefaultSectionSize(18);
+    m_queueTable->verticalHeader()->setMinimumSectionSize(18);
     m_queueTable->horizontalHeader()->setFixedHeight(20);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -1244,7 +1244,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
     }
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
-    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
+    m_queueTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(18), 18, 48));
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_queueTable->horizontalHeader()->restoreState(headerState);
@@ -1390,7 +1390,7 @@ bool RightSidebar::eventFilter(QObject *watched, QEvent *event)
         auto *wheel = static_cast<QWheelEvent *>(event);
         if (wheel->modifiers() & Qt::ControlModifier) {
             const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
-            const int rowHeight = std::clamp(m_queueTable->verticalHeader()->defaultSectionSize() + step, 20, 48);
+            const int rowHeight = std::clamp(m_queueTable->verticalHeader()->defaultSectionSize() + step, 18, 48);
             m_queueTable->verticalHeader()->setDefaultSectionSize(rowHeight);
             emit viewSettingsChanged();
             wheel->accept();
