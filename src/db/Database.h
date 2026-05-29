@@ -4,8 +4,14 @@
 #include <QString>
 #include <QVector>
 
+#include <QHash>
+#include <QPair>
+#include <QSet>
+#include <QStringList>
+
 #include "core/Album.h"
 #include "core/Artist.h"
+#include "core/MetadataBlob.h"
 #include "core/ScanRoot.h"
 #include "core/Track.h"
 #include "fs/LinkRoot.h"
@@ -26,6 +32,15 @@ public:
     bool beginTransaction();
     bool commitTransaction();
     bool upsertTrack(const Track &track);
+    // path -> (file_mtime, file_size) for tracks under rootPrefix, for the
+    // incremental-rescan diff. Empty rootPrefix returns all tracks.
+    QHash<QString, QPair<qint64, qint64>> trackFingerprints(const QString &rootPrefix = {}) const;
+    // Flags the given track paths as missing (file no longer present).
+    int markTracksMissing(const QStringList &paths);
+    int removeMissingTracks();
+    int missingTrackCount() const;
+    QStringList tracksWithoutFullMetadata(int limit = 0) const;
+    MetadataBlob::FullMetadata fullMetadata(const QString &path) const;
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
     bool setPendingTrackRatingWrite(const QString &trackPath, int rating0To100, const QString &status, const QString &lastError = {});
