@@ -296,7 +296,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         QMenu menu(this);
         QAction *setStart = nullptr;
         if (m_mode == FileExplorerMode::FreeRoam && !m_currentDirectory.isEmpty()) {
-            setStart = menu.addAction(QStringLiteral("Set current folder as start directory (Backspace)"));
+            setStart = menu.addAction(QStringLiteral("Set current folder as start directory (b to jump)"));
             menu.addSeparator();
         }
         QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
@@ -330,7 +330,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         QAction *scan = menu.addAction(QStringLiteral("Scan/Add this directory to library"));
         QAction *setStart = nullptr;
         if (m_mode == FileExplorerMode::FreeRoam) {
-            setStart = menu.addAction(QStringLiteral("Set as start directory (Backspace)"));
+            setStart = menu.addAction(QStringLiteral("Set as start directory (b to jump)"));
         }
         menu.addSeparator();
         QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
@@ -679,13 +679,7 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
     const auto modifiers = keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
 
     if (!modifiers && key == Qt::Key_Backspace) {
-        // Jump to the bookmarked start directory when one is set (free-roam),
-        // otherwise keep the universal navigate-up behavior.
-        if (m_mode == FileExplorerMode::FreeRoam && !m_startDirectory.isEmpty()) {
-            emit directoryRequested(m_startDirectory);
-        } else {
-            navigateUp();
-        }
+        navigateUp();
         return true;
     }
 
@@ -829,6 +823,11 @@ void FileExplorerView::applyKeyAction(const QString &action)
 
     } else if (action == GoHome) {
         emit directoryRequested(QDir::homePath());
+
+    } else if (action == GoToStart) {
+        if (m_mode == FileExplorerMode::FreeRoam && !m_startDirectory.isEmpty()) {
+            emit directoryRequested(m_startDirectory);
+        }
 
     } else if (action == Escape) {
         if (!m_currentDirectory.isEmpty()) {
