@@ -9,7 +9,8 @@
 #include "mpd/MpdConfig.h"
 #include "mpd/MpdImportWorker.h"
 #include "mpris/MprisService.h"
-#include "scanner/ScanWorker.h"
+#include "scanner/ArtworkCache.h"
+#include "scanner/ScanPipeline.h"
 #include "scanner/ArtworkResolver.h"
 #include "scanner/RatingTagSyncWorker.h"
 #include "scrobble/LastFmCredentials.h"
@@ -38,6 +39,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QInputDialog>
 #include <QLabel>
 #include <QJsonDocument>
@@ -304,6 +306,10 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
     }
 
+    m_artworkCache = std::make_unique<ArtworkCache>(stateRoot() + QStringLiteral("/cache/artwork.sqlite"));
+    connect(m_artworkCache.get(), &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
+    connect(m_artworkCache.get(), &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
+
     m_listenBrainzThread = new QThread(this);
     m_listenBrainzScrobbler = new ListenBrainzScrobbler;
     m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
@@ -390,6 +396,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
+    connect(m_playerBar, &PlayerBar::forceRescanRequested, this, &MainWindow::forceRescanEnabledSourceDirectories);
+    connect(m_playerBar, &PlayerBar::removeMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
@@ -494,7 +502,7 @@ MainWindow::MainWindow(QWidget *parent)
         toggleFileExplorerView();
     });
 
-    m_albumGrid->setArtworkCacheRoot(cacheRoot());
+    m_albumGrid->setArtworkCache(m_artworkCache.get());
     loadPlaybackProfile();
     loadPlaybackResumeSettings();
     loadViewSettings();
@@ -504,16 +512,24 @@ MainWindow::MainWindow(QWidget *parent)
     configureLastFm();
     loadExistingLibrary();
     restoreSavedPlaybackState();
+    maybeStartMetadataBackfill();
 }
 
 MainWindow::~MainWindow()
 {
-    if (m_scanWorker != nullptr) {
-        m_scanWorker->cancel();
+    if (m_scanPipeline != nullptr) {
+        m_scanPipeline->cancel();
     }
     if (m_scanThread != nullptr) {
         m_scanThread->quit();
         m_scanThread->wait(3000);
+    }
+    if (m_backfillPipeline != nullptr) {
+        m_backfillPipeline->cancel();
+    }
+    if (m_backfillThread != nullptr) {
+        m_backfillThread->quit();
+        m_backfillThread->wait(3000);
     }
     if (m_listenBrainzThread != nullptr) {
         m_listenBrainzThread->quit();
@@ -569,25 +585,37 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     m_stopScanButton->setVisible(true);
     m_lastUiRefreshIndexedTracks = 0;
 
-    m_scanThread = new QThread(this);
-    m_scanWorker = new ScanWorker(rootPath, 128);
-    m_scanWorker->moveToThread(m_scanThread);
+    ScanPipeline::Options options;
+    options.forceFullRescan = m_forceFullRescan;
 
-    connect(m_scanThread, &QThread::started, m_scanWorker, &ScanWorker::run);
-    connect(m_scanWorker, &ScanWorker::batchReady, this, &MainWindow::ingestScanBatch);
-    connect(m_scanWorker, &ScanWorker::progress, this, [this](qint64 visitedFiles, qint64 indexedTracks, const QString &currentPath) {
-        statusBar()->showMessage(QStringLiteral("Scanning: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks));
-        qCDebug(uiLog) << "scan progress" << visitedFiles << indexedTracks << currentPath;
-    });
-    connect(m_scanWorker, &ScanWorker::finished, this, &MainWindow::finishScan);
-    connect(m_scanWorker, &ScanWorker::finished, m_scanThread, &QThread::quit);
-    connect(m_scanThread, &QThread::finished, m_scanWorker, &QObject::deleteLater);
+    m_scanThread = new QThread(this);
+    m_scanPipeline = new ScanPipeline(m_activeScanRootPath, scanRootId,
+                                      m_database->trackFingerprints(m_activeScanRootPath), options);
+    m_scanPipeline->moveToThread(m_scanThread);
+
+    connect(m_scanThread, &QThread::started, m_scanPipeline, &ScanPipeline::run);
+    connect(m_scanPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
+    connect(m_scanPipeline, &ScanPipeline::progress, this,
+            [this](qint64 enumerated, qint64 toProcess, qint64 processed, const QString &phase) {
+                if (phase == QStringLiteral("enumerating")) {
+                    statusBar()->showMessage(QStringLiteral("Scanning: enumerating files..."));
+                } else {
+                    statusBar()->showMessage(QStringLiteral("Scanning: %1 of %2 read (%3 found)")
+                                                 .arg(processed).arg(toProcess).arg(enumerated));
+                }
+            });
+    connect(m_scanPipeline, &ScanPipeline::missingReady, this, &MainWindow::markScannedTracksMissing);
+    connect(m_scanPipeline, &ScanPipeline::finished, this, &MainWindow::finishScan);
+    connect(m_scanPipeline, &ScanPipeline::finished, m_scanThread, &QThread::quit);
+    connect(m_scanThread, &QThread::finished, m_scanPipeline, &QObject::deleteLater);
     connect(m_scanThread, &QThread::finished, m_scanThread, &QObject::deleteLater);
     connect(m_scanThread, &QThread::finished, this, [this]() {
         m_scanThread = nullptr;
-        m_scanWorker = nullptr;
+        m_scanPipeline = nullptr;
         if (!m_pendingScanRoots.isEmpty()) {
             startNextQueuedSourceScan();
+        } else {
+            m_forceFullRescan = false;
         }
     });
 
@@ -596,6 +624,16 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
 
 void MainWindow::scanEnabledSourceDirectories()
 {
+    scanSourceRoots(m_database->enabledScanRoots());
+}
+
+void MainWindow::forceRescanEnabledSourceDirectories()
+{
+    if (m_scanThread != nullptr) {
+        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
+        return;
+    }
+    m_forceFullRescan = true;
     scanSourceRoots(m_database->enabledScanRoots());
 }
 
@@ -626,12 +664,13 @@ void MainWindow::startNextQueuedSourceScan()
 
 void MainWindow::cancelScan()
 {
-    if (m_scanWorker == nullptr) {
+    if (m_scanPipeline == nullptr) {
         return;
     }
 
-    m_scanWorker->cancel();
+    m_scanPipeline->cancel();
     m_pendingScanRoots.clear();
+    m_forceFullRescan = false;
     m_stopScanButton->setEnabled(false);
     statusBar()->showMessage(QStringLiteral("Canceling scan..."), 5000);
 }
@@ -665,9 +704,9 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
     }
 }
 
-void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canceled)
+void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
 {
-    qCInfo(uiLog) << "scan finished" << visitedFiles << indexedTracks << "canceled" << canceled;
+    qCInfo(uiLog) << "scan finished" << enumerated << indexed << "skipped" << skipped << "canceled" << canceled;
     const bool sourceScan = m_activeScanRootId > 0;
     const QString finishedRootPath = m_activeScanRootPath;
     if (sourceScan) {
@@ -680,8 +719,8 @@ void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canc
     m_stopScanButton->setEnabled(false);
     statusBar()->showMessage(
         canceled
-            ? QStringLiteral("Scan canceled: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks)
-            : QStringLiteral("Scan complete: %1 files visited, %2 tracks indexed").arg(visitedFiles).arg(indexedTracks),
+            ? QStringLiteral("Scan canceled: %1 read, %2 unchanged").arg(indexed).arg(skipped)
+            : QStringLiteral("Scan complete: %1 found, %2 read, %3 unchanged").arg(enumerated).arg(indexed).arg(skipped),
         10000);
     refreshArtists();
     refreshLibraryFileExplorer();
@@ -689,6 +728,87 @@ void MainWindow::finishScan(qint64 visitedFiles, qint64 indexedTracks, bool canc
         statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
     } else if (sourceScan && !canceled) {
         statusBar()->showMessage(QStringLiteral("Source scans complete"), 10000);
+        maybeStartMetadataBackfill();
+    }
+}
+
+void MainWindow::markScannedTracksMissing(const QStringList &paths)
+{
+    if (paths.isEmpty()) {
+        return;
+    }
+    if (!m_database->beginTransaction()) {
+        return;
+    }
+    const int marked = m_database->markTracksMissing(paths);
+    m_database->commitTransaction();
+    if (marked > 0) {
+        qCInfo(uiLog) << "marked" << marked << "tracks missing";
+    }
+}
+
+void MainWindow::removeMissingTracks()
+{
+    const int count = m_database->missingTrackCount();
+    if (count == 0) {
+        statusBar()->showMessage(QStringLiteral("No missing tracks to remove"), 5000);
+        return;
+    }
+    const auto choice = QMessageBox::question(
+        this, QStringLiteral("Remove missing tracks"),
+        QStringLiteral("Permanently remove %1 track(s) whose files are gone from the library?").arg(count));
+    if (choice != QMessageBox::Yes) {
+        return;
+    }
+    const int removed = m_database->removeMissingTracks();
+    refreshArtists();
+    refreshLibraryFileExplorer();
+    statusBar()->showMessage(QStringLiteral("Removed %1 missing track(s)").arg(removed), 5000);
+}
+
+void MainWindow::maybeStartMetadataBackfill()
+{
+    if (m_backfillThread != nullptr || m_scanThread != nullptr) {
+        return;
+    }
+    const QStringList paths = m_database->tracksWithoutFullMetadata();
+    if (paths.isEmpty()) {
+        return;
+    }
+
+    m_backfillThread = new QThread(this);
+    m_backfillPipeline = new ScanPipeline(paths, ScanPipeline::Options{});
+    m_backfillPipeline->moveToThread(m_backfillThread);
+    connect(m_backfillThread, &QThread::started, m_backfillPipeline, &ScanPipeline::run);
+    connect(m_backfillPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
+    connect(m_backfillPipeline, &ScanPipeline::finished, this, &MainWindow::finishMetadataBackfill);
+    connect(m_backfillPipeline, &ScanPipeline::finished, m_backfillThread, &QThread::quit);
+    connect(m_backfillThread, &QThread::finished, m_backfillPipeline, &QObject::deleteLater);
+    connect(m_backfillThread, &QThread::finished, m_backfillThread, &QObject::deleteLater);
+    connect(m_backfillThread, &QThread::finished, this, [this]() {
+        m_backfillThread = nullptr;
+        m_backfillPipeline = nullptr;
+    });
+    statusBar()->showMessage(QStringLiteral("Backfilling metadata archive for %1 track(s)...").arg(paths.size()), 5000);
+    m_backfillThread->start();
+}
+
+void MainWindow::finishMetadataBackfill()
+{
+    statusBar()->showMessage(QStringLiteral("Metadata archive backfill complete"), 5000);
+}
+
+void MainWindow::onArtworkReady(const QString &token, const QImage &image, quint64 generation)
+{
+    if (token == QStringLiteral("current") && generation == m_currentArtGeneration && !image.isNull()) {
+        m_rightSidebar->setAlbumArt(image);
+    }
+}
+
+void MainWindow::onArtworkMissing(const QString &token, quint64 generation)
+{
+    if (token == QStringLiteral("current") && generation == m_currentArtGeneration) {
+        m_rightSidebar->setAlbumArt(QString());
     }
 }
 
@@ -790,10 +910,8 @@ void MainWindow::refreshAlbumGrid()
         return;
     }
     if (m_librarySource == LibrarySource::Mpd) {
-        m_albumGrid->setArtworkCacheRoot(mpdCacheRoot());
         m_albumGrid->setAlbums(m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory()));
     } else {
-        m_albumGrid->setArtworkCacheRoot(cacheRoot());
         m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist));
     }
     m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
@@ -1589,9 +1707,6 @@ void MainWindow::onLibrarySourceChanged(int index)
         return;
     }
 
-    m_albumGrid->setArtworkCacheRoot(
-        m_librarySource == LibrarySource::Mpd ? mpdCacheRoot() : cacheRoot());
-
     restoreCurrentSourceSelection();
     saveExplorerState();
     refreshArtists();
@@ -2228,12 +2343,16 @@ void MainWindow::restoreTrackTableViewState()
 
 void MainWindow::updateCurrentAlbumArt()
 {
-    const QString cache = (m_librarySource == LibrarySource::Mpd) ? mpdCacheRoot() : cacheRoot();
-    const ArtworkResolver resolver(cache);
+    ++m_currentArtGeneration;
+    // Show the fallback immediately; the cache replies asynchronously and the
+    // generation guard drops stale results from fast track changes.
+    m_rightSidebar->setAlbumArt(QString());
+
     const QString resolvedPath = resolvedReadPathForTrack(m_currentTrack);
     const QString directory = resolvedPath.isEmpty() ? m_currentTrack.parentDir : QFileInfo(resolvedPath).absolutePath();
-    const ArtworkResult artwork = resolver.resolveForDirectory(directory);
-    m_rightSidebar->setAlbumArt(artwork.cachePath);
+    if (m_artworkCache != nullptr) {
+        m_artworkCache->requestArtwork(QStringLiteral("current"), directory, resolvedPath, m_currentArtGeneration);
+    }
 }
 
 QString MainWindow::databasePath() const

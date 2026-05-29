@@ -5,7 +5,9 @@
 #include <QListView>
 #include <QVector>
 
+class ArtworkCache;
 class QEvent;
+class QImage;
 class QMouseEvent;
 class QStandardItem;
 class QTimer;
@@ -17,7 +19,7 @@ class AlbumGrid final : public QListView {
 public:
     explicit AlbumGrid(QWidget *parent = nullptr);
 
-    void setArtworkCacheRoot(const QString &cacheRoot);
+    void setArtworkCache(ArtworkCache *cache);
     void setAlbums(const QVector<Album> &albums);
     void setSelectedAlbumTitle(const QString &albumTitle);
     QString viewSettingsJson() const;
@@ -44,9 +46,10 @@ private:
     void populateItemFromAlbum(class QStandardItem *item, const Album &album);
     void appendNextAlbumBatch();
     void loadNextAlbumArtwork();
+    void onArtworkReady(const QString &token, const QImage &image, quint64 generation);
 
 private:
-    QString m_artworkCacheRoot;
+    ArtworkCache *m_artworkCache = nullptr;
     QString m_selectedAlbumTitle;
     QVector<Album> m_pendingAlbums;
     QTimer *m_populateTimer = nullptr;

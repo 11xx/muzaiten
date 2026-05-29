@@ -58,7 +58,6 @@ set(MUZAITEN_SOURCES
     src/mpris/MprisService.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
-    src/scanner/ScanWorker.cpp
     src/scanner/DirectoryWalker.cpp
     src/scanner/ScanPipeline.cpp
     src/scanner/ArtworkCache.cpp
@@ -118,7 +117,6 @@ set(MUZAITEN_HEADERS
     src/scanner/LibraryScanner.h
     src/scanner/RatingTagSyncWorker.h
     src/scanner/ScanPipeline.h
-    src/scanner/ScanWorker.h
     src/scanner/TagRating.h
     src/scanner/TagReader.h
     src/scanner/TagRatingWriter.h

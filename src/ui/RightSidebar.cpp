@@ -36,6 +36,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QImage>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -702,6 +703,14 @@ public:
     void setSourcePath(const QString &path)
     {
         m_sourcePath = path;
+        m_sourceImage = QImage();
+        updateScaledPixmap();
+    }
+
+    void setSourceImage(const QImage &image)
+    {
+        m_sourceImage = image;
+        m_sourcePath.clear();
         updateScaledPixmap();
     }
 
@@ -715,12 +724,19 @@ protected:
 private:
     void updateScaledPixmap()
     {
-        if (m_sourcePath.isEmpty()) {
+        const QSize target = contentsRect().size();
+        if (target.width() <= 0 || target.height() <= 0) {
             setPixmap({});
             return;
         }
-        const QSize target = contentsRect().size();
-        if (target.width() <= 0 || target.height() <= 0) {
+
+        if (!m_sourceImage.isNull()) {
+            const QPixmap source = QPixmap::fromImage(m_sourceImage);
+            setPixmap(source.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            return;
+        }
+
+        if (m_sourcePath.isEmpty()) {
             setPixmap({});
             return;
         }
@@ -745,6 +761,7 @@ private:
     }
 
     QString m_sourcePath;
+    QImage m_sourceImage;
 };
 
 QString formatSize(qint64 bytes)
@@ -999,6 +1016,16 @@ void RightSidebar::setAlbumArt(const QString &imagePath)
 
     m_albumArt->setText({});
     static_cast<AlbumArtLabel *>(m_albumArt)->setSourcePath(effectivePath);
+}
+
+void RightSidebar::setAlbumArt(const QImage &image)
+{
+    if (image.isNull()) {
+        setAlbumArt(QString());
+        return;
+    }
+    m_albumArt->setText({});
+    static_cast<AlbumArtLabel *>(m_albumArt)->setSourceImage(image);
 }
 
 void RightSidebar::setTrackInfo(const Track &track)
