@@ -107,6 +107,7 @@ set(MUZAITEN_HEADERS
     src/scanner/TagReader.h
     src/scanner/TagRatingWriter.h
     src/scrobble/LastFmApi.h
+    src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
     src/scrobble/ListenBrainzScrobbler.h
     src/ui/AlbumGrid.h

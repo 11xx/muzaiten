@@ -21,6 +21,10 @@ namespace {
 constexpr qint64 maxRequiredListenMs = 4 * 60 * 1000;
 constexpr int maxScrobblesPerBatch = 50;
 constexpr int maxConsecutiveSubmissionFailures = 3;
+constexpr int authPollIntervalMs = 3000;
+constexpr int maxAuthPollAttempts = 60;
+constexpr int errorTokenNotAuthorized = 14;
+constexpr int errorTokenExpired = 15;
 constexpr auto apiRootUrl = "https://ws.audioscrobbler.com/2.0/";
 constexpr auto authRootUrl = "https://www.last.fm/api/auth/";
 
@@ -100,10 +104,13 @@ LastFmScrobbler::LastFmScrobbler(QObject *parent)
     m_network = new QNetworkAccessManager(this);
     m_progressTimer = new QTimer(this);
     m_retryTimer = new QTimer(this);
+    m_authPollTimer = new QTimer(this);
     m_progressTimer->setInterval(1000);
     m_retryTimer->setInterval(60000);
+    m_authPollTimer->setInterval(authPollIntervalMs);
     connect(m_progressTimer, &QTimer::timeout, this, &LastFmScrobbler::checkListenProgress);
     connect(m_retryTimer, &QTimer::timeout, this, &LastFmScrobbler::retryPending);
+    connect(m_authPollTimer, &QTimer::timeout, this, &LastFmScrobbler::pollAuthSession);
 }
 
 void LastFmScrobbler::configure(bool enabled, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &cachePath)
@@ -169,6 +176,9 @@ void LastFmScrobbler::startAuthentication(const QString &apiKey, const QString &
         return;
     }
 
+    m_authPollTimer->stop();
+    m_authPollAttempts = 0;
+    m_authRequestInFlight = false;
     m_pendingAuthToken.clear();
     m_pendingAuthApiKey = trimmedApiKey;
     m_pendingAuthSecret = trimmedSecret;
@@ -179,13 +189,27 @@ void LastFmScrobbler::startAuthentication(const QString &apiKey, const QString &
     postParams(params, RequestKind::AuthToken);
 }
 
-void LastFmScrobbler::finishAuthentication()
+void LastFmScrobbler::cancelAuthentication()
 {
-    if (m_pendingAuthToken.isEmpty() || m_pendingAuthApiKey.isEmpty() || m_pendingAuthSecret.isEmpty()) {
-        emit authenticationFailed(QStringLiteral("Start Last.fm authentication before finishing it."));
+    m_authPollTimer->stop();
+    m_authPollAttempts = 0;
+    m_authRequestInFlight = false;
+    m_pendingAuthToken.clear();
+}
+
+void LastFmScrobbler::pollAuthSession()
+{
+    if (m_authRequestInFlight || m_pendingAuthToken.isEmpty()) {
+        return;
+    }
+    if (m_authPollAttempts >= maxAuthPollAttempts) {
+        cancelAuthentication();
+        emit authenticationFailed(QStringLiteral("Timed out waiting for Last.fm authorization. Try logging in again."));
         return;
     }
 
+    ++m_authPollAttempts;
+    m_authRequestInFlight = true;
     LastFmApi::Params params;
     LastFmApi::addParam(params, QStringLiteral("method"), QStringLiteral("auth.getSession"));
     LastFmApi::addParam(params, QStringLiteral("api_key"), m_pendingAuthApiKey);
@@ -335,17 +359,44 @@ void LastFmScrobbler::handleAuthTokenResponse(const LastFmApi::Response &respons
     query.addQueryItem(QStringLiteral("token"), m_pendingAuthToken);
     url.setQuery(query);
     emit authenticationUrlReady(url);
+
+    // Poll auth.getSession until the user authorizes in the browser, so the
+    // session is picked up automatically with no further interaction.
+    m_authPollAttempts = 0;
+    m_authPollTimer->start();
 }
 
 void LastFmScrobbler::handleAuthSessionResponse(const LastFmApi::Response &response)
 {
-    if (!response.parsed || !response.ok || response.sessionKey.isEmpty()) {
+    m_authRequestInFlight = false;
+
+    if (response.parsed && response.ok && !response.sessionKey.isEmpty()) {
+        const QString sessionName = response.sessionName;
+        const QString sessionKey = response.sessionKey;
+        cancelAuthentication();
+        emit authenticationSucceeded(sessionName, sessionKey);
+        return;
+    }
+
+    // The token is not authorized yet; keep polling until the user finishes
+    // in the browser or the attempt budget runs out.
+    if (response.parsed && !response.ok && response.errorCode == errorTokenNotAuthorized) {
+        return;
+    }
+
+    // An expired token or any other hard failure ends the attempt.
+    if (response.parsed && !response.ok && response.errorCode == errorTokenExpired) {
+        cancelAuthentication();
+        emit authenticationFailed(QStringLiteral("Last.fm authorization expired before it completed. Try logging in again."));
+        return;
+    }
+    if (response.parsed && !response.ok) {
+        cancelAuthentication();
         emit authenticationFailed(responseErrorText(response, QStringLiteral("Last.fm authentication did not complete.")));
         return;
     }
 
-    m_pendingAuthToken.clear();
-    emit authenticationSucceeded(response.sessionName, response.sessionKey);
+    // Unparsed/network errors are transient; let the poll timer try again.
 }
 
 void LastFmScrobbler::handleNowPlayingResponse(const LastFmApi::Response &response, const QString &transportMessage)

@@ -12,6 +12,7 @@
 #include "scanner/ScanWorker.h"
 #include "scanner/ArtworkResolver.h"
 #include "scanner/RatingTagSyncWorker.h"
+#include "scrobble/LastFmCredentials.h"
 #include "scrobble/LastFmScrobbler.h"
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "ui/AlbumGrid.h"
@@ -35,7 +36,10 @@
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
 #include <QInputDialog>
+#include <QLabel>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -330,11 +334,12 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationUrlReady, this, [this](const QUrl &url) {
         QDesktopServices::openUrl(url);
-        statusBar()->showMessage(QStringLiteral("Authorize muzaiten in your browser, then choose Finish Last.fm authentication."), 15000);
+        statusBar()->showMessage(QStringLiteral("Authorize muzaiten in your browser; it will connect automatically."), 15000);
     });
     connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationSucceeded, this, [this](const QString &username, const QString &sessionKey) {
         m_database->setSetting(QStringLiteral("lastfm.username"), username);
         m_database->setSetting(QStringLiteral("lastfm.sessionKey"), sessionKey);
+        m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("true"));
         configureLastFm();
         statusBar()->showMessage(username.isEmpty() ? QStringLiteral("Last.fm authentication complete")
                                                     : QStringLiteral("Last.fm authenticated as %1").arg(username),
@@ -400,9 +405,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
-    connect(m_playerBar, &PlayerBar::lastFmAccountRequested, this, &MainWindow::configureLastFmAccount);
-    connect(m_playerBar, &PlayerBar::lastFmAuthenticationStartRequested, this, &MainWindow::startLastFmAuthentication);
-    connect(m_playerBar, &PlayerBar::lastFmAuthenticationFinishRequested, this, &MainWindow::finishLastFmAuthentication);
+    connect(m_playerBar, &PlayerBar::lastFmSettingsRequested, this, &MainWindow::showLastFmSettings);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::nextRequested, this, &MainWindow::playNextTrack);
@@ -1664,29 +1667,42 @@ void MainWindow::setListenBrainzToken()
     statusBar()->showMessage(QStringLiteral("ListenBrainz token updated"), 3000);
 }
 
-void MainWindow::configureLastFm()
+QString MainWindow::lastFmApiKey() const
 {
-    const bool enabled = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-    QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey"));
-    QString sharedSecret = m_database->setting(QStringLiteral("lastfm.sharedSecret"));
-    QString sessionKey = m_database->setting(QStringLiteral("lastfm.sessionKey"));
+    QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey")).trimmed();
     if (apiKey.isEmpty()) {
         apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
     }
-    if (sharedSecret.isEmpty()) {
-        sharedSecret = QString::fromLocal8Bit(qgetenv("LASTFM_SHARED_SECRET")).trimmed();
+    if (apiKey.isEmpty()) {
+        apiKey = QString::fromLatin1(LastFmCredentials::defaultApiKey).trimmed();
     }
-    if (sessionKey.isEmpty()) {
-        sessionKey = QString::fromLocal8Bit(qgetenv("LASTFM_SESSION_KEY")).trimmed();
+    return apiKey;
+}
+
+QString MainWindow::lastFmSharedSecret() const
+{
+    QString secret = m_database->setting(QStringLiteral("lastfm.sharedSecret")).trimmed();
+    if (secret.isEmpty()) {
+        secret = QString::fromLocal8Bit(qgetenv("LASTFM_SHARED_SECRET")).trimmed();
     }
+    if (secret.isEmpty()) {
+        secret = QString::fromLatin1(LastFmCredentials::defaultSharedSecret).trimmed();
+    }
+    return secret;
+}
+
+void MainWindow::configureLastFm()
+{
+    const bool enabled = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
+    const QString sessionKey = m_database->setting(QStringLiteral("lastfm.sessionKey"));
 
     m_playerBar->setLastFmEnabled(enabled);
     QMetaObject::invokeMethod(m_lastFmScrobbler,
                               "configure",
                               Qt::QueuedConnection,
                               Q_ARG(bool, enabled),
-                              Q_ARG(QString, apiKey),
-                              Q_ARG(QString, sharedSecret),
+                              Q_ARG(QString, lastFmApiKey()),
+                              Q_ARG(QString, lastFmSharedSecret()),
                               Q_ARG(QString, sessionKey),
                               Q_ARG(QString, stateRoot() + QStringLiteral("/lastfm-pending.json")));
 }
@@ -1698,66 +1714,102 @@ void MainWindow::setLastFmEnabled(bool enabled)
     statusBar()->showMessage(enabled ? QStringLiteral("Last.fm scrobbling enabled") : QStringLiteral("Last.fm scrobbling disabled"), 3000);
 }
 
-void MainWindow::configureLastFmAccount()
+void MainWindow::showLastFmSettings()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("Last.fm account"));
+    dialog.setWindowTitle(QStringLiteral("Last.fm API settings"));
 
-    auto *layout = new QFormLayout(&dialog);
-    auto *apiKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.apiKey")), &dialog);
-    auto *sharedSecret = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sharedSecret")), &dialog);
-    auto *sessionKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sessionKey")), &dialog);
-    auto *username = new QLineEdit(m_database->setting(QStringLiteral("lastfm.username")), &dialog);
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *status = new QLabel(&dialog);
+    layout->addWidget(status);
+
+    auto *loginButton = new QPushButton(QStringLiteral("Log in to Last.fm"), &dialog);
+    auto *logoutButton = new QPushButton(QStringLiteral("Log out"), &dialog);
+    auto *buttonRow = new QHBoxLayout;
+    buttonRow->addWidget(loginButton);
+    buttonRow->addWidget(logoutButton);
+    buttonRow->addStretch();
+    layout->addLayout(buttonRow);
+
+    auto *advanced = new QGroupBox(QStringLiteral("API credentials (optional)"), &dialog);
+    auto *form = new QFormLayout(advanced);
+    auto *apiKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.apiKey")), advanced);
+    auto *sharedSecret = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sharedSecret")), advanced);
+    apiKey->setPlaceholderText(QStringLiteral("Built-in default"));
+    sharedSecret->setPlaceholderText(QStringLiteral("Built-in default"));
     sharedSecret->setEchoMode(QLineEdit::Password);
-    sessionKey->setEchoMode(QLineEdit::Password);
-    username->setReadOnly(true);
+    form->addRow(QStringLiteral("API key"), apiKey);
+    form->addRow(QStringLiteral("Shared secret"), sharedSecret);
+    layout->addWidget(advanced);
 
-    layout->addRow(QStringLiteral("API key"), apiKey);
-    layout->addRow(QStringLiteral("Shared secret"), sharedSecret);
-    layout->addRow(QStringLiteral("Session key"), sessionKey);
-    layout->addRow(QStringLiteral("Username"), username);
-
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    layout->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
+    const auto refreshStatus = [this, status, logoutButton]() {
+        const QString username = m_database->setting(QStringLiteral("lastfm.username"));
+        const bool connected = !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
+        if (connected) {
+            status->setText(username.isEmpty() ? QStringLiteral("Connected to Last.fm")
+                                               : QStringLiteral("Connected as %1").arg(username));
+        } else {
+            status->setText(QStringLiteral("Not connected"));
+        }
+        logoutButton->setEnabled(connected);
+    };
+    refreshStatus();
 
-    m_database->setSetting(QStringLiteral("lastfm.apiKey"), apiKey->text().trimmed());
-    m_database->setSetting(QStringLiteral("lastfm.sharedSecret"), sharedSecret->text().trimmed());
-    m_database->setSetting(QStringLiteral("lastfm.sessionKey"), sessionKey->text().trimmed());
-    configureLastFm();
-    statusBar()->showMessage(QStringLiteral("Last.fm account updated"), 3000);
-}
+    const auto persistCredentials = [this, apiKey, sharedSecret]() {
+        m_database->setSetting(QStringLiteral("lastfm.apiKey"), apiKey->text().trimmed());
+        m_database->setSetting(QStringLiteral("lastfm.sharedSecret"), sharedSecret->text().trimmed());
+        configureLastFm();
+    };
 
-void MainWindow::startLastFmAuthentication()
-{
-    QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey"));
-    QString sharedSecret = m_database->setting(QStringLiteral("lastfm.sharedSecret"));
-    if (apiKey.isEmpty()) {
-        apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
-    }
-    if (sharedSecret.isEmpty()) {
-        sharedSecret = QString::fromLocal8Bit(qgetenv("LASTFM_SHARED_SECRET")).trimmed();
-    }
-    if (apiKey.isEmpty() || sharedSecret.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Last.fm"), QStringLiteral("Configure a Last.fm API key and shared secret first."));
-        return;
-    }
+    connect(loginButton, &QPushButton::clicked, &dialog, [this, &dialog, persistCredentials, loginButton, status]() {
+        persistCredentials();
+        const QString key = lastFmApiKey();
+        const QString secret = lastFmSharedSecret();
+        if (key.isEmpty() || secret.isEmpty()) {
+            QMessageBox::warning(&dialog, QStringLiteral("Last.fm"),
+                                 QStringLiteral("Enter a Last.fm API key and shared secret first."));
+            return;
+        }
+        loginButton->setEnabled(false);
+        status->setText(QStringLiteral("Waiting for browser authorization…"));
+        QMetaObject::invokeMethod(m_lastFmScrobbler,
+                                  "startAuthentication",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(QString, key),
+                                  Q_ARG(QString, secret));
+    });
 
-    QMetaObject::invokeMethod(m_lastFmScrobbler,
-                              "startAuthentication",
-                              Qt::QueuedConnection,
-                              Q_ARG(QString, apiKey),
-                              Q_ARG(QString, sharedSecret));
-}
+    connect(logoutButton, &QPushButton::clicked, &dialog, [this, refreshStatus]() {
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
+        m_database->setSetting(QStringLiteral("lastfm.sessionKey"), QString());
+        m_database->setSetting(QStringLiteral("lastfm.username"), QString());
+        m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
+        configureLastFm();
+        refreshStatus();
+    });
 
-void MainWindow::finishLastFmAuthentication()
-{
-    QMetaObject::invokeMethod(m_lastFmScrobbler, "finishAuthentication", Qt::QueuedConnection);
+    // Auth runs on a worker thread; exec() keeps the event loop running, so
+    // these queued signals update the open dialog live. Scoped to the dialog
+    // so the connections drop when it closes.
+    connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationSucceeded, &dialog,
+            [refreshStatus, loginButton](const QString &, const QString &) {
+                loginButton->setEnabled(true);
+                refreshStatus();
+            });
+    connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationFailed, &dialog,
+            [status, loginButton](const QString &message) {
+                loginButton->setEnabled(true);
+                status->setText(QStringLiteral("Not connected — %1").arg(message));
+            });
+
+    dialog.exec();
+    persistCredentials();
+    QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
 }
 
 void MainWindow::playTrack(const Track &track)

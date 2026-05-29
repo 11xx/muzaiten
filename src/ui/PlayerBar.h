@@ -43,9 +43,7 @@ signals:
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void lastFmEnabledChanged(bool enabled);
-    void lastFmAccountRequested();
-    void lastFmAuthenticationStartRequested();
-    void lastFmAuthenticationFinishRequested();
+    void lastFmSettingsRequested();
     void previousRequested();
     void playPauseRequested();
     void nextRequested();
