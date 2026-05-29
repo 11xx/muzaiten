@@ -3,8 +3,11 @@
 #include "core/Track.h"
 #include "ui/FileExplorerKeybindings.h"
 
+#include <QList>
 #include <QWidget>
 #include <QVector>
+
+#include <functional>
 
 class QFileInfo;
 class QLabel;
@@ -37,6 +40,9 @@ public:
     QStringList availableKeyBindingProfiles() const;
     void setShowUnsupportedFiles(bool show);
     bool showUnsupportedFiles() const;
+    // Resolver used to reuse already-scanned track metadata/ratings (by path)
+    // instead of re-reading tags; returns a track with empty path when unknown.
+    void setTrackResolver(std::function<Track(const QString &)> resolver);
 
 signals:
     void directoryRequested(const QString &path);
@@ -45,6 +51,7 @@ signals:
     void addToQueueRequested(const QVector<Track> &tracks);
     void importDirectoryRequested(const QString &path);
     void findFileRequested(const Track &track);
+    void trackRatingChangeRequested(const Track &track, int rating0To100);
     void keyBindingProfileChanged(const QString &name);
     void keyHintVisibilityChanged(bool visible);
 
@@ -59,7 +66,10 @@ private:
     void navigateUp();
     void addDirectoryItem(const QString &path);
     void addTrackItem(const Track &track);
+    void addPendingTrackItem(const QFileInfo &info);
     void addUnsupportedItem(const QFileInfo &info);
+    void applyTrackToItem(QTreeWidgetItem *item, const Track &track);
+    void processNextMetadata();
     Track trackForFile(const QString &path) const;
     QVector<Track> tracksForDirectory(const QString &path) const;
     QVector<Track> selectedTracks() const;
@@ -73,6 +83,9 @@ private:
     QLabel *m_hintLabel = nullptr;
     QTreeWidget *m_tree = nullptr;
     QTimer *m_ggTimer = nullptr;
+    QTimer *m_metadataTimer = nullptr;
+    QList<QTreeWidgetItem *> m_pendingMetadata;
+    std::function<Track(const QString &)> m_trackResolver;
     FileExplorerMode m_mode = FileExplorerMode::Library;
     QString m_currentDirectory;
     KeyBindingMap m_keyBindings;
