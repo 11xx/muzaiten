@@ -17,6 +17,13 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Embedded default Last.fm credentials, injected at build time so secrets
+# never live in the source tree. Distributed builds pass real values with
+# -DMUZAITEN_LASTFM_API_KEY=... -DMUZAITEN_LASTFM_SHARED_SECRET=...; an empty
+# default leaves Last.fm inactive until the user configures their own.
+set(MUZAITEN_LASTFM_API_KEY "" CACHE STRING "Embedded default Last.fm API key")
+set(MUZAITEN_LASTFM_SHARED_SECRET "" CACHE STRING "Embedded default Last.fm shared secret")
+
 include(CheckPIESupported)
 check_pie_supported()
 
@@ -134,6 +141,11 @@ add_executable(muzaiten ${MUZAITEN_SOURCES} ${MUZAITEN_HEADERS})
 target_include_directories(muzaiten PRIVATE
     src
     ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+
+target_compile_definitions(muzaiten PRIVATE
+    MUZAITEN_LASTFM_API_KEY="${MUZAITEN_LASTFM_API_KEY}"
+    MUZAITEN_LASTFM_SHARED_SECRET="${MUZAITEN_LASTFM_SHARED_SECRET}"
 )
 
 target_link_libraries(muzaiten PRIVATE
