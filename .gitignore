@@ -9,3 +9,5 @@ musicbee-wine/
 resources/*.png
 dev-notes.md
 handoff-*.md
+.env
+build-new1/
