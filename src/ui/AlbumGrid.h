@@ -20,8 +20,12 @@ public:
     explicit AlbumGrid(QWidget *parent = nullptr);
 
     void setArtworkCache(ArtworkCache *cache);
-    void setAlbums(const QVector<Album> &albums);
+    // freshLoad = true when loading a different artist's albums; it shows a
+    // per-album loading spinner while art is fetched. Within-artist selection
+    // changes and narrow rating refreshes pass false (no spinner).
+    void setAlbums(const QVector<Album> &albums, bool freshLoad = false);
     void setSelectedAlbumTitle(const QString &albumTitle);
+    int loadingAngle() const { return m_loadingAngle; }
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
 
@@ -47,6 +51,8 @@ private:
     void appendNextAlbumBatch();
     void loadNextAlbumArtwork();
     void onArtworkReady(const QString &token, const QImage &image, quint64 generation);
+    void onArtworkMissing(const QString &token, quint64 generation);
+    void clearItemLoading(int row);
 
 private:
     ArtworkCache *m_artworkCache = nullptr;
@@ -54,6 +60,10 @@ private:
     QVector<Album> m_pendingAlbums;
     QTimer *m_populateTimer = nullptr;
     QTimer *m_artworkTimer = nullptr;
+    QTimer *m_spinnerTimer = nullptr;
+    bool m_showLoading = false;
+    int m_loadingCount = 0;
+    int m_loadingAngle = 0;
     qsizetype m_nextAlbumRow = 0;
     int m_nextArtworkRow = 0;
     int m_artworkGeneration = 0;

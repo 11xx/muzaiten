@@ -1,5 +1,6 @@
 #include "ui/AlbumGridDelegate.h"
 
+#include "ui/AlbumGrid.h"
 #include "ui/StarRating.h"
 
 #include <QApplication>
@@ -17,6 +18,7 @@ enum Roles {
     ArtSizeRole = Qt::UserRole + 6,
     CellPaddingRole = Qt::UserRole + 7,
     StarSizeRole = Qt::UserRole + 8,
+    LoadingRole = Qt::UserRole + 12,
 };
 
 QString titleFromDisplay(const QString &display)
@@ -106,6 +108,26 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     const QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
     icon.paint(painter, artRect, Qt::AlignCenter, QIcon::Normal, QIcon::Off);
+
+    if (index.data(LoadingRole).toBool()) {
+        const int diameter = std::max(18, artSize / 5);
+        const QRect spinnerRect(artRect.center().x() - diameter / 2,
+                                artRect.center().y() - diameter / 2, diameter, diameter);
+        int angle = 0;
+        if (const auto *grid = qobject_cast<const AlbumGrid *>(parent())) {
+            angle = grid->loadingAngle();
+        }
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(opt.palette.color(QPalette::Highlight), std::max(2, diameter / 10));
+        pen.setCapStyle(Qt::RoundCap);
+        painter->setPen(pen);
+        painter->setBrush(Qt::NoBrush);
+        // 270-degree arc rotating with the shared loading angle (Qt uses
+        // 1/16-degree units, counter-clockwise).
+        painter->drawArc(spinnerRect, -angle * 16, 270 * 16);
+        painter->restore();
+    }
 
     const QRect titleRect(artRect.left(), artRect.bottom() + 5, artRect.width(), opt.fontMetrics.height() * 2 + 2);
     const QRect yearRect(artRect.left(), titleRect.bottom() + 1, artRect.width(), opt.fontMetrics.height());

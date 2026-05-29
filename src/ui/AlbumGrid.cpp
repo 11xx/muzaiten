@@ -36,6 +36,7 @@ enum Roles {
     HasUserRatingRole = Qt::UserRole + 9,
     RepresentativeDirRole = Qt::UserRole + 10,
     ArtworkGenerationRole = Qt::UserRole + 11,
+    LoadingRole = Qt::UserRole + 12,
 };
 
 QString alignmentToString(Qt::Alignment alignment)
@@ -99,6 +100,12 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     m_artworkTimer = new QTimer(this);
     m_artworkTimer->setInterval(0);
     connect(m_artworkTimer, &QTimer::timeout, this, &AlbumGrid::loadNextAlbumArtwork);
+    m_spinnerTimer = new QTimer(this);
+    m_spinnerTimer->setInterval(90);
+    connect(m_spinnerTimer, &QTimer::timeout, this, [this]() {
+        m_loadingAngle = (m_loadingAngle + 30) % 360;
+        viewport()->update();
+    });
 
     auto *model = new QStandardItemModel(this);
     auto *item = new QStandardItem(QStringLiteral("No library loaded"));
@@ -120,17 +127,21 @@ void AlbumGrid::setArtworkCache(ArtworkCache *cache)
     m_artworkCache = cache;
     if (m_artworkCache != nullptr) {
         connect(m_artworkCache, &ArtworkCache::artworkReady, this, &AlbumGrid::onArtworkReady);
+        connect(m_artworkCache, &ArtworkCache::artworkMissing, this, &AlbumGrid::onArtworkMissing);
     }
 }
 
-void AlbumGrid::setAlbums(const QVector<Album> &albums)
+void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
 {
     m_populateTimer->stop();
     m_artworkTimer->stop();
+    m_spinnerTimer->stop();
     ++m_artworkGeneration;
     m_pendingAlbums = albums;
     m_nextAlbumRow = 0;
     m_nextArtworkRow = 0;
+    m_showLoading = freshLoad && m_artworkCache != nullptr;
+    m_loadingCount = m_showLoading ? static_cast<int>(albums.size()) : 0;
 
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
     const int target = static_cast<int>(m_pendingAlbums.size());
@@ -139,8 +150,17 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
         itemModel->removeRow(itemModel->rowCount() - 1);
     }
 
+    const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
     for (int i = 0; i < itemModel->rowCount(); ++i) {
-        populateItemFromAlbum(itemModel->item(i), m_pendingAlbums[i]);
+        QStandardItem *item = itemModel->item(i);
+        // Reset stale art when a reused row now shows a different album, so a
+        // previous artist's cover never lingers as another album's art.
+        const bool albumChanged = item->data(AlbumTitleRole) != m_pendingAlbums[i].title
+            || item->data(AlbumArtistRole) != m_pendingAlbums[i].albumArtistName;
+        populateItemFromAlbum(item, m_pendingAlbums[i]);
+        if (albumChanged) {
+            item->setIcon(fallbackIcon);
+        }
     }
     m_nextAlbumRow = itemModel->rowCount();
 
@@ -151,6 +171,10 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums)
         if (itemModel->rowCount() > 0 && m_artworkCache != nullptr && !m_artworkTimer->isActive()) {
             m_artworkTimer->start();
         }
+    }
+
+    if (m_showLoading && m_loadingCount > 0) {
+        m_spinnerTimer->start();
     }
 }
 
@@ -169,6 +193,7 @@ void AlbumGrid::populateItemFromAlbum(QStandardItem *item, const Album &album)
     item->setData(album.hasUserRating, HasUserRatingRole);
     item->setData(album.representativeDir, RepresentativeDirRole);
     item->setData(m_artworkGeneration, ArtworkGenerationRole);
+    item->setData(m_showLoading, LoadingRole);
     item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
 }
 
@@ -467,5 +492,46 @@ void AlbumGrid::onArtworkReady(const QString &token, const QImage &image, quint6
     QStandardItem *item = itemModel->item(row);
     if (item != nullptr && item->data(ArtworkGenerationRole).toInt() == m_artworkGeneration) {
         item->setIcon(QIcon(QPixmap::fromImage(image)));
+    }
+    clearItemLoading(row);
+}
+
+void AlbumGrid::onArtworkMissing(const QString &token, quint64 generation)
+{
+    if (generation != static_cast<quint64>(m_artworkGeneration)) {
+        return;
+    }
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        return;
+    }
+    bool ok = false;
+    const int row = token.toInt(&ok);
+    if (!ok) {
+        return; // not a grid token (e.g. the sidebar's "current")
+    }
+    QStandardItem *item = itemModel->item(row);
+    if (item != nullptr && item->data(ArtworkGenerationRole).toInt() == m_artworkGeneration) {
+        // No art for this album: ensure the fallback shows (clears any stale
+        // cover carried over from a reused row).
+        item->setIcon(QIcon(AlbumArtFallback::resourcePath(palette())));
+    }
+    clearItemLoading(row);
+}
+
+void AlbumGrid::clearItemLoading(int row)
+{
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        return;
+    }
+    QStandardItem *item = itemModel->item(row);
+    if (item == nullptr || !item->data(LoadingRole).toBool()) {
+        return;
+    }
+    item->setData(false, LoadingRole);
+    if (m_loadingCount > 0 && --m_loadingCount == 0) {
+        m_spinnerTimer->stop();
+        viewport()->update();
     }
 }
