@@ -32,7 +32,7 @@ QVector<Track> LibraryScanner::scan(const QString &rootPath) const
     return tracks;
 }
 
-bool LibraryScanner::isSupportedAudioFile(const QString &path)
+const QSet<QString> &LibraryScanner::supportedAudioExtensions()
 {
     static const QSet<QString> extensions = {
         QStringLiteral("flac"),
@@ -44,6 +44,11 @@ bool LibraryScanner::isSupportedAudioFile(const QString &path)
         QStringLiteral("wv"),
         QStringLiteral("ape"),
     };
-    return extensions.contains(QFileInfo(path).suffix().toLower());
+    return extensions;
+}
+
+bool LibraryScanner::isSupportedAudioFile(const QString &path)
+{
+    return supportedAudioExtensions().contains(QFileInfo(path).suffix().toLower());
 }
 

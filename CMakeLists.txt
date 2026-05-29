@@ -59,6 +59,7 @@ set(MUZAITEN_SOURCES
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/ScanWorker.cpp
+    src/scanner/DirectoryWalker.cpp
     src/scanner/ArtworkResolver.cpp
     src/scanner/LibraryScanner.cpp
     src/scanner/RatingTagSyncWorker.cpp
@@ -110,6 +111,7 @@ set(MUZAITEN_HEADERS
     src/playback/GStreamerPlaybackBackend.h
     src/playback/QtPlaybackBackend.h
     src/scanner/ArtworkResolver.h
+    src/scanner/DirectoryWalker.h
     src/scanner/LibraryScanner.h
     src/scanner/RatingTagSyncWorker.h
     src/scanner/ScanWorker.h
