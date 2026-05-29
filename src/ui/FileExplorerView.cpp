@@ -9,6 +9,7 @@
 #include <QDirIterator>
 #include <QEvent>
 #include <QFileInfo>
+#include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -26,16 +27,60 @@
 namespace {
 
 enum ItemType {
-    DirectoryItem = 1,
-    TrackItem = 2,
-    UnsupportedItem = 3,
+    DirectoryItem = 1, // start at 1 so an unset TypeRole (toInt() == 0) is never a valid type
+    TrackItem,
+    UnsupportedItem,
 };
 
 enum ItemRoles {
     TypeRole = Qt::UserRole,
-    PathRole = Qt::UserRole + 1,
-    TrackRole = Qt::UserRole + 2,
+    PathRole,
+    TrackRole,
 };
+
+enum Column {
+    NameColumn = 0,
+    ArtistColumn,
+    AlbumColumn,
+    DurationColumn,
+    RatingColumn,
+    SizeColumn,
+};
+
+QString formatSize(qint64 bytes)
+{
+    if (bytes <= 0) {
+        return QString();
+    }
+    static const char *units[] = {"B", "KB", "MB", "GB", "TB"};
+    double value = static_cast<double>(bytes);
+    int unit = 0;
+    while (value >= 1024.0 && unit < 4) {
+        value /= 1024.0;
+        ++unit;
+    }
+    return unit == 0 ? QStringLiteral("%1 B").arg(bytes)
+                     : QStringLiteral("%1 %2").arg(value, 0, 'f', 1).arg(QLatin1String(units[unit]));
+}
+
+QString ratingStars(int rating0To100)
+{
+    if (rating0To100 <= 0) {
+        return QString();
+    }
+    const int full = rating0To100 / 20;
+    const bool half = (rating0To100 % 20) >= 10;
+    QString stars(full, QChar(0x2605)); // ★
+    if (half) {
+        stars += QChar(0x00BD); // ½
+    }
+    return stars;
+}
+
+int displayRating(const Track &track)
+{
+    return track.effectiveRating0To100 >= 0 ? track.effectiveRating0To100 : track.rating0To100;
+}
 
 QString cleanPath(const QString &path)
 {
@@ -81,14 +126,19 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     layout->addWidget(bar);
 
     m_tree = new QTreeWidget(this);
-    m_tree->setColumnCount(4);
+    m_tree->setColumnCount(6);
     m_tree->setHeaderLabels({
         QStringLiteral("Name"),
         QStringLiteral("Artist"),
         QStringLiteral("Album"),
         QStringLiteral("Duration"),
+        QStringLiteral("Rating"),
+        QStringLiteral("Size"),
     });
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
     m_tree->setRootIsDecorated(false);
     m_tree->setIndentation(0);
     m_tree->setIconSize(QSize(22, 22));
@@ -124,6 +174,12 @@ FileExplorerView::FileExplorerView(QWidget *parent)
         m_pendingG = false;
     });
 
+    // Drives lazy, non-blocking metadata reads for free-roam files not already
+    // known to the library (one file per event-loop tick).
+    m_metadataTimer = new QTimer(this);
+    m_metadataTimer->setInterval(0);
+    connect(m_metadataTimer, &QTimer::timeout, this, &FileExplorerView::processNextMetadata);
+
     m_tree->installEventFilter(this);
     // Route focus to the tree so its key-binding eventFilter receives key
     // presses as soon as the explorer is shown, without a prior click.
@@ -142,6 +198,8 @@ void FileExplorerView::setMode(FileExplorerMode mode)
         return;
     }
     m_mode = mode;
+    m_metadataTimer->stop();
+    m_pendingMetadata.clear();
     m_tree->clear();
 }
 
@@ -166,6 +224,8 @@ QString FileExplorerView::currentDirectory() const
 
 void FileExplorerView::setLibraryEntries(const QStringList &directories, const QVector<Track> &tracks)
 {
+    m_metadataTimer->stop();
+    m_pendingMetadata.clear();
     m_tree->clear();
     m_pathLabel->setText(m_currentDirectory.isEmpty() ? QStringLiteral("Library") : m_currentDirectory);
     for (const QString &directory : directories) {
@@ -178,6 +238,8 @@ void FileExplorerView::setLibraryEntries(const QStringList &directories, const Q
 
 void FileExplorerView::refreshFreeRoam()
 {
+    m_metadataTimer->stop();
+    m_pendingMetadata.clear();
     m_tree->clear();
     const QDir dir(m_currentDirectory);
     if (!dir.exists()) {
@@ -192,12 +254,23 @@ void FileExplorerView::refreshFreeRoam()
         if (entry.isDir()) {
             addDirectoryItem(entry.absoluteFilePath());
         } else if (LibraryScanner::isSupportedAudioFile(entry.absoluteFilePath())) {
-            addTrackItem(trackForFile(entry.absoluteFilePath()));
+            // Reuse already-scanned metadata/ratings when known; otherwise show
+            // the row immediately and read its tags lazily off the UI hot path.
+            const Track known = m_trackResolver ? m_trackResolver(cleanPath(entry.absoluteFilePath())) : Track();
+            if (!known.path.isEmpty()) {
+                addTrackItem(known);
+            } else {
+                addPendingTrackItem(entry);
+            }
         } else if (m_showUnsupported) {
             // Listing only: unsupported (incl. extension-less) files are shown
             // but never read or played.
             addUnsupportedItem(entry);
         }
+    }
+
+    if (!m_pendingMetadata.isEmpty()) {
+        m_metadataTimer->start();
     }
 }
 
@@ -294,6 +367,16 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
     QAction *findFile = menu.addAction(QStringLiteral("Find file"));
+
+    QMenu *ratingMenu = menu.addMenu(QStringLiteral("Rating"));
+    QHash<QAction *, int> ratingActions;
+    QAction *clearRating = ratingMenu->addAction(QStringLiteral("Clear rating"));
+    ratingActions.insert(clearRating, -1);
+    for (int rating = 10; rating <= 100; rating += 10) {
+        QAction *action = ratingMenu->addAction(ratingStars(rating));
+        ratingActions.insert(action, rating);
+    }
+
     menu.addSeparator();
     QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
     for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
@@ -309,7 +392,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     hintToggle->setCheckable(true);
     hintToggle->setChecked(m_hintBar->isVisible());
     connect(hintToggle, &QAction::toggled, this, &FileExplorerView::setKeyHintBarVisible);
-    const QAction *selected = menu.exec(m_tree->viewport()->mapToGlobal(pos));
+    QAction *selected = menu.exec(m_tree->viewport()->mapToGlobal(pos));
     if (selected == play) {
         emit trackActivated(tracks.first());
     } else if (selected == playNext) {
@@ -318,6 +401,22 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         emit addToQueueRequested(tracks);
     } else if (selected == findFile) {
         emit findFileRequested(tracks.first());
+    } else if (selected != nullptr && ratingActions.contains(selected)) {
+        const int rating = ratingActions.value(selected);
+        for (const Track &track : tracks) {
+            emit trackRatingChangeRequested(track, rating);
+        }
+        // Reflect the new rating immediately on the selected rows.
+        for (QTreeWidgetItem *item : m_tree->selectedItems()) {
+            if (item != nullptr && item->data(0, TypeRole).toInt() == TrackItem) {
+                Track updated = item->data(0, TrackRole).value<Track>();
+                updated.effectiveRating0To100 = rating;
+                updated.rating0To100 = rating;
+                updated.hasUserRating = rating >= 0;
+                item->setData(0, TrackRole, QVariant::fromValue(updated));
+                item->setText(RatingColumn, ratingStars(rating < 0 ? 0 : rating));
+            }
+        }
     }
 }
 
@@ -351,27 +450,73 @@ void FileExplorerView::addDirectoryItem(const QString &path)
     item->setData(0, PathRole, cleanPath(path));
 }
 
+void FileExplorerView::applyTrackToItem(QTreeWidgetItem *item, const Track &track)
+{
+    item->setText(NameColumn, track.title.trimmed().isEmpty() ? track.filename : track.title);
+    item->setText(ArtistColumn, track.artistName);
+    item->setText(AlbumColumn, track.albumTitle);
+    item->setText(DurationColumn, formatDuration(track.durationMs));
+    item->setText(RatingColumn, ratingStars(displayRating(track)));
+    item->setText(SizeColumn, formatSize(track.fileSize));
+    item->setData(0, TrackRole, QVariant::fromValue(track));
+}
+
 void FileExplorerView::addTrackItem(const Track &track)
 {
     auto *item = new QTreeWidgetItem(m_tree);
-    item->setText(0, track.title.trimmed().isEmpty() ? track.filename : track.title);
-    item->setText(1, track.artistName);
-    item->setText(2, track.albumTitle);
-    item->setText(3, formatDuration(track.durationMs));
     item->setIcon(0, QIcon::fromTheme(QStringLiteral("audio-x-generic"), style()->standardIcon(QStyle::SP_MediaPlay)));
     item->setData(0, TypeRole, TrackItem);
     item->setData(0, PathRole, track.path);
-    item->setData(0, TrackRole, QVariant::fromValue(track));
+    applyTrackToItem(item, track);
+}
+
+void FileExplorerView::addPendingTrackItem(const QFileInfo &info)
+{
+    auto *item = new QTreeWidgetItem(m_tree);
+    item->setText(NameColumn, info.completeBaseName());
+    item->setText(SizeColumn, formatSize(info.size()));
+    item->setIcon(0, QIcon::fromTheme(QStringLiteral("audio-x-generic"), style()->standardIcon(QStyle::SP_MediaPlay)));
+    item->setData(0, TypeRole, TrackItem);
+    item->setData(0, PathRole, cleanPath(info.absoluteFilePath()));
+    Track placeholder;
+    placeholder.path = cleanPath(info.absoluteFilePath());
+    placeholder.filename = info.fileName();
+    placeholder.fileSize = info.size();
+    item->setData(0, TrackRole, QVariant::fromValue(placeholder));
+    m_pendingMetadata.push_back(item);
+}
+
+void FileExplorerView::processNextMetadata()
+{
+    if (m_pendingMetadata.isEmpty()) {
+        m_metadataTimer->stop();
+        return;
+    }
+    QTreeWidgetItem *item = m_pendingMetadata.takeFirst();
+    if (item == nullptr) {
+        return;
+    }
+    const QString path = item->data(0, PathRole).toString();
+    applyTrackToItem(item, trackForFile(path));
+    if (m_pendingMetadata.isEmpty()) {
+        m_metadataTimer->stop();
+    }
 }
 
 void FileExplorerView::addUnsupportedItem(const QFileInfo &info)
 {
     auto *item = new QTreeWidgetItem(m_tree);
-    item->setText(0, info.fileName());
+    item->setText(NameColumn, info.fileName());
+    item->setText(SizeColumn, formatSize(info.size()));
     item->setIcon(0, QIcon::fromTheme(QStringLiteral("text-x-generic"), style()->standardIcon(QStyle::SP_FileIcon)));
     item->setData(0, TypeRole, UnsupportedItem);
     item->setData(0, PathRole, cleanPath(info.absoluteFilePath()));
-    item->setForeground(0, palette().brush(QPalette::Disabled, QPalette::Text));
+    item->setForeground(NameColumn, palette().brush(QPalette::Disabled, QPalette::Text));
+}
+
+void FileExplorerView::setTrackResolver(std::function<Track(const QString &)> resolver)
+{
+    m_trackResolver = std::move(resolver);
 }
 
 void FileExplorerView::setShowUnsupportedFiles(bool show)

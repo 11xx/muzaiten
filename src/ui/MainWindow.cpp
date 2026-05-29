@@ -454,6 +454,11 @@ MainWindow::MainWindow(QWidget *parent)
         startScan(path);
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
+    const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
+    m_libraryFileExplorer->setTrackResolver(trackResolver);
+    m_freeRoamFileExplorer->setTrackResolver(trackResolver);
     connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
         m_freeRoamFileExplorer->setKeyBindingProfileName(name);
         m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
