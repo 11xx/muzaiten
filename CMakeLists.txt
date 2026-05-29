@@ -30,6 +30,7 @@ check_pie_supported()
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core DBus Gui Multimedia Network Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
+pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-audio-1.0
@@ -47,6 +48,7 @@ configure_file(
 set(MUZAITEN_SOURCES
     src/app/main.cpp
     src/app/MuzaitenApplication.cpp
+    src/core/MetadataBlob.cpp
     src/core/Rating.cpp
     src/db/Database.cpp
     src/fs/PathResolver.cpp
@@ -90,6 +92,7 @@ set(MUZAITEN_HEADERS
     src/app/MuzaitenApplication.h
     src/core/Album.h
     src/core/Artist.h
+    src/core/MetadataBlob.h
     src/core/MusicBrainzIds.h
     src/core/Rating.h
     src/core/ScanRoot.h
@@ -157,6 +160,7 @@ target_link_libraries(muzaiten PRIVATE
     Qt6::Sql
     PkgConfig::TAGLIB
     PkgConfig::GSTREAMER
+    PkgConfig::ZSTD
 )
 
 target_compile_options(muzaiten PRIVATE

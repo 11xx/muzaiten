@@ -3,6 +3,7 @@
 #include "core/MusicBrainzIds.h"
 #include "core/Rating.h"
 
+#include <QByteArray>
 #include <QString>
 #include <QtTypes>
 #include <QMetaType>
@@ -32,6 +33,8 @@ struct Track {
     qint64 fileSize = 0;
     qint64 fileMtime = 0;
     QString scanError;
+    QByteArray fullMetadataBlob;     // zstd(JSON) of the complete tag set; empty if not captured
+    qint64 fullMetadataRawSize = 0;  // uncompressed length of the archive JSON
 };
 
 Q_DECLARE_METATYPE(Track)

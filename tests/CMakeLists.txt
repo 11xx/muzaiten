@@ -15,14 +15,24 @@ endfunction()
 add_muzaiten_test(test_rating test_rating.cpp)
 set_tests_properties(test_rating PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_metadata_blob
+    test_metadata_blob.cpp
+    ../src/core/MetadataBlob.cpp
+)
+target_include_directories(test_metadata_blob PRIVATE ../src)
+target_link_libraries(test_metadata_blob PRIVATE Qt6::Core Qt6::Test PkgConfig::ZSTD)
+target_compile_features(test_metadata_blob PRIVATE cxx_std_26)
+add_test(NAME test_metadata_blob COMMAND test_metadata_blob)
+
 add_executable(test_schema
     test_schema.cpp
+    ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
 )
 target_include_directories(test_schema PRIVATE ../src)
-target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
 
