@@ -28,6 +28,7 @@ namespace {
 enum ItemType {
     DirectoryItem = 1,
     TrackItem = 2,
+    UnsupportedItem = 3,
 };
 
 enum ItemRoles {
@@ -192,6 +193,10 @@ void FileExplorerView::refreshFreeRoam()
             addDirectoryItem(entry.absoluteFilePath());
         } else if (LibraryScanner::isSupportedAudioFile(entry.absoluteFilePath())) {
             addTrackItem(trackForFile(entry.absoluteFilePath()));
+        } else if (m_showUnsupported) {
+            // Listing only: unsupported (incl. extension-less) files are shown
+            // but never read or played.
+            addUnsupportedItem(entry);
         }
     }
 }
@@ -357,6 +362,32 @@ void FileExplorerView::addTrackItem(const Track &track)
     item->setData(0, TypeRole, TrackItem);
     item->setData(0, PathRole, track.path);
     item->setData(0, TrackRole, QVariant::fromValue(track));
+}
+
+void FileExplorerView::addUnsupportedItem(const QFileInfo &info)
+{
+    auto *item = new QTreeWidgetItem(m_tree);
+    item->setText(0, info.fileName());
+    item->setIcon(0, QIcon::fromTheme(QStringLiteral("text-x-generic"), style()->standardIcon(QStyle::SP_FileIcon)));
+    item->setData(0, TypeRole, UnsupportedItem);
+    item->setData(0, PathRole, cleanPath(info.absoluteFilePath()));
+    item->setForeground(0, palette().brush(QPalette::Disabled, QPalette::Text));
+}
+
+void FileExplorerView::setShowUnsupportedFiles(bool show)
+{
+    if (m_showUnsupported == show) {
+        return;
+    }
+    m_showUnsupported = show;
+    if (m_mode == FileExplorerMode::FreeRoam) {
+        refreshFreeRoam();
+    }
+}
+
+bool FileExplorerView::showUnsupportedFiles() const
+{
+    return m_showUnsupported;
 }
 
 Track FileExplorerView::trackForFile(const QString &path) const

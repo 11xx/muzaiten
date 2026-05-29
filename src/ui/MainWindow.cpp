@@ -398,6 +398,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
     connect(m_playerBar, &PlayerBar::forceRescanRequested, this, &MainWindow::forceRescanEnabledSourceDirectories);
     connect(m_playerBar, &PlayerBar::removeMissingTracksRequested, this, &MainWindow::removeMissingTracks);
+    connect(m_playerBar, &PlayerBar::listUnsupportedFilesChanged, this, [this](bool show) {
+        m_freeRoamFileExplorer->setShowUnsupportedFiles(show);
+        m_libraryFileExplorer->setShowUnsupportedFiles(show);
+        m_database->setSetting(QStringLiteral("fileExplorer.showUnsupported"), show ? QStringLiteral("true") : QStringLiteral("false"));
+    });
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
@@ -1138,6 +1143,11 @@ void MainWindow::loadViewSettings()
     m_libraryFileExplorer->setKeyHintBarVisible(hintsVisible);
     m_freeRoamFileExplorer->setKeyHintBarVisible(hintsVisible);
 
+    const bool showUnsupported = m_database->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
+    m_playerBar->setListUnsupportedFiles(showUnsupported);
+    m_libraryFileExplorer->setShowUnsupportedFiles(showUnsupported);
+    m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
+
     switchMainView(m_mainView);
     applySharedTableSettings();
 }
@@ -1187,6 +1197,7 @@ void MainWindow::saveMainWindowViewSettings()
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
+    m_playerBar->setExplorerOptionsVisible(view != MainView::LibraryPanels);
     if (view == MainView::LibraryPanels) {
         m_mainStack->setCurrentWidget(m_rootSplitter);
     } else if (view == MainView::LibraryFileExplorer) {

@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QVector>
 
+class QFileInfo;
 class QLabel;
 class QTimer;
 class QTreeWidget;
@@ -34,6 +35,8 @@ public:
     void setKeyHintBarVisible(bool visible);
     bool isKeyHintBarVisible() const;
     QStringList availableKeyBindingProfiles() const;
+    void setShowUnsupportedFiles(bool show);
+    bool showUnsupportedFiles() const;
 
 signals:
     void directoryRequested(const QString &path);
@@ -56,6 +59,7 @@ private:
     void navigateUp();
     void addDirectoryItem(const QString &path);
     void addTrackItem(const Track &track);
+    void addUnsupportedItem(const QFileInfo &info);
     Track trackForFile(const QString &path) const;
     QVector<Track> tracksForDirectory(const QString &path) const;
     QVector<Track> selectedTracks() const;
@@ -74,6 +78,7 @@ private:
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
     bool m_pendingG = false;
+    bool m_showUnsupported = false;
 };
 
 
