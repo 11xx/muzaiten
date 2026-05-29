@@ -23,6 +23,9 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QVariant>
+#include <QWheelEvent>
+
+#include <algorithm>
 
 namespace {
 
@@ -141,10 +144,11 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     m_tree->header()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
     m_tree->setRootIsDecorated(false);
     m_tree->setIndentation(0);
-    m_tree->setIconSize(QSize(22, 22));
+    m_tree->setUniformRowHeights(true);
     m_tree->setAlternatingRowColors(true);
     m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    applyRowHeight();
     layout->addWidget(m_tree, 1);
 
     m_hintBar = new QWidget(this);
@@ -181,6 +185,7 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     connect(m_metadataTimer, &QTimer::timeout, this, &FileExplorerView::processNextMetadata);
 
     m_tree->installEventFilter(this);
+    m_tree->viewport()->installEventFilter(this); // Ctrl+wheel row-height resize
     // Route focus to the tree so its key-binding eventFilter receives key
     // presses as soon as the explorer is shown, without a prior click.
     setFocusProxy(m_tree);
@@ -228,6 +233,38 @@ void FileExplorerView::setRootPath(const QString &path)
 QString FileExplorerView::currentDirectory() const
 {
     return m_currentDirectory;
+}
+
+void FileExplorerView::setRowHeight(int height)
+{
+    const int clamped = std::clamp(height, 16, 40);
+    if (m_rowHeight == clamped) {
+        return;
+    }
+    m_rowHeight = clamped;
+    applyRowHeight();
+    emit rowHeightChanged(m_rowHeight);
+}
+
+int FileExplorerView::rowHeight() const
+{
+    return m_rowHeight;
+}
+
+void FileExplorerView::applyRowHeightToItem(QTreeWidgetItem *item) const
+{
+    if (item != nullptr) {
+        item->setSizeHint(0, QSize(0, m_rowHeight));
+    }
+}
+
+void FileExplorerView::applyRowHeight()
+{
+    const int icon = std::clamp(m_rowHeight - 4, 12, 24);
+    m_tree->setIconSize(QSize(icon, icon));
+    for (int row = 0; row < m_tree->topLevelItemCount(); ++row) {
+        applyRowHeightToItem(m_tree->topLevelItem(row));
+    }
 }
 
 void FileExplorerView::restoreSelectionForCurrentDirectory()
@@ -503,6 +540,7 @@ void FileExplorerView::addDirectoryItem(const QString &path)
     item->setIcon(0, QIcon::fromTheme(QStringLiteral("folder"), style()->standardIcon(QStyle::SP_DirIcon)));
     item->setData(0, TypeRole, DirectoryItem);
     item->setData(0, PathRole, cleanPath(path));
+    applyRowHeightToItem(item);
 }
 
 void FileExplorerView::applyTrackToItem(QTreeWidgetItem *item, const Track &track)
@@ -523,6 +561,7 @@ void FileExplorerView::addTrackItem(const Track &track)
     item->setData(0, TypeRole, TrackItem);
     item->setData(0, PathRole, track.path);
     applyTrackToItem(item, track);
+    applyRowHeightToItem(item);
 }
 
 void FileExplorerView::addPendingTrackItem(const QFileInfo &info)
@@ -538,6 +577,7 @@ void FileExplorerView::addPendingTrackItem(const QFileInfo &info)
     placeholder.filename = info.fileName();
     placeholder.fileSize = info.size();
     item->setData(0, TrackRole, QVariant::fromValue(placeholder));
+    applyRowHeightToItem(item);
     m_pendingMetadata.push_back(item);
 }
 
@@ -567,6 +607,7 @@ void FileExplorerView::addUnsupportedItem(const QFileInfo &info)
     item->setData(0, TypeRole, UnsupportedItem);
     item->setData(0, PathRole, cleanPath(info.absoluteFilePath()));
     item->setForeground(NameColumn, palette().brush(QPalette::Disabled, QPalette::Text));
+    applyRowHeightToItem(item);
 }
 
 void FileExplorerView::setTrackResolver(std::function<Track(const QString &)> resolver)
@@ -711,6 +752,16 @@ void FileExplorerView::updateHintBar()
 
 bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_tree->viewport() && event->type() == QEvent::Wheel) {
+        auto *wheel = static_cast<QWheelEvent *>(event);
+        if (wheel->modifiers() & Qt::ControlModifier) {
+            setRowHeight(m_rowHeight + (wheel->angleDelta().y() > 0 ? 2 : -2));
+            wheel->accept();
+            return true;
+        }
+        return QWidget::eventFilter(watched, event);
+    }
+
     if (watched != m_tree || event->type() != QEvent::KeyPress) {
         return QWidget::eventFilter(watched, event);
     }

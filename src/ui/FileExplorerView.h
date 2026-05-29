@@ -46,6 +46,8 @@ public:
     void setTrackResolver(std::function<Track(const QString &)> resolver);
     void setStartDirectory(const QString &path);
     QString startDirectory() const;
+    void setRowHeight(int height);
+    int rowHeight() const;
 
 signals:
     void directoryRequested(const QString &path);
@@ -56,6 +58,7 @@ signals:
     void findFileRequested(const Track &track);
     void trackRatingChangeRequested(const Track &track, int rating0To100);
     void startDirectoryChanged(const QString &path);
+    void rowHeightChanged(int height);
     void keyBindingProfileChanged(const QString &name);
     void keyHintVisibilityChanged(bool visible);
 
@@ -75,6 +78,8 @@ private:
     void applyTrackToItem(QTreeWidgetItem *item, const Track &track);
     void processNextMetadata();
     void restoreSelectionForCurrentDirectory();
+    void applyRowHeight();
+    void applyRowHeightToItem(QTreeWidgetItem *item) const;
     Track trackForFile(const QString &path) const;
     QVector<Track> tracksForDirectory(const QString &path) const;
     QVector<Track> selectedTracks() const;
@@ -100,6 +105,7 @@ private:
     QString m_startDirectory;
     QHash<QString, QString> m_lastSelectedByDir;
     bool m_restoringSelection = false;
+    int m_rowHeight = 18;
 };
 
 
