@@ -3,6 +3,7 @@
 #include "core/Track.h"
 #include "ui/FileExplorerKeybindings.h"
 
+#include <QHash>
 #include <QList>
 #include <QWidget>
 #include <QVector>
@@ -73,6 +74,7 @@ private:
     void addUnsupportedItem(const QFileInfo &info);
     void applyTrackToItem(QTreeWidgetItem *item, const Track &track);
     void processNextMetadata();
+    void restoreSelectionForCurrentDirectory();
     Track trackForFile(const QString &path) const;
     QVector<Track> tracksForDirectory(const QString &path) const;
     QVector<Track> selectedTracks() const;
@@ -96,6 +98,8 @@ private:
     bool m_pendingG = false;
     bool m_showUnsupported = false;
     QString m_startDirectory;
+    QHash<QString, QString> m_lastSelectedByDir;
+    bool m_restoringSelection = false;
 };
 
 
