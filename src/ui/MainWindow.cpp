@@ -307,7 +307,8 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
     }
 
-    m_artworkCache = std::make_unique<ArtworkCache>(stateRoot() + QStringLiteral("/cache/artwork.sqlite"));
+    const int artworkSize = std::clamp(m_database->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
+    m_artworkCache = std::make_unique<ArtworkCache>(stateRoot() + QStringLiteral("/cache/artwork.sqlite"), artworkSize);
     connect(m_artworkCache.get(), &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
     connect(m_artworkCache.get(), &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
 
@@ -417,6 +418,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
+    connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
@@ -1641,6 +1643,29 @@ void MainWindow::findTrackFile(const Track &track)
 void MainWindow::configureTrackInfoPanel()
 {
     m_rightSidebar->configureTrackInfoPanel(this);
+}
+
+void MainWindow::configureAlbumArtResolution()
+{
+    const int current = std::clamp(m_database->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
+    bool ok = false;
+    const int size = QInputDialog::getInt(this,
+                                          QStringLiteral("Album art resolution"),
+                                          QStringLiteral("Cached cover size (pixels, square).\nHigher is sharper but uses more cache space."),
+                                          current, 128, 4096, 64, &ok);
+    if (!ok || size == current) {
+        return;
+    }
+
+    m_database->setSetting(QStringLiteral("artwork.size"), QString::number(size));
+    if (m_artworkCache != nullptr) {
+        m_artworkCache->setArtSize(size);
+    }
+    // Re-render visible art at the new resolution (new size -> new cache keys).
+    updateCurrentAlbumArt();
+    if (!m_currentArtist.isEmpty()) {
+        refreshAlbumGrid(true);
+    }
 }
 
 void MainWindow::jumpToTrackInfoArtist(const QString &artistName)

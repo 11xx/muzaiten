@@ -45,6 +45,7 @@ signals:
     void listUnsupportedFilesChanged(bool show);
     void trackInfoPaneVisibleChanged(bool visible);
     void trackInfoPaneSettingsRequested();
+    void albumArtResolutionRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void lastFmEnabledChanged(bool enabled);
