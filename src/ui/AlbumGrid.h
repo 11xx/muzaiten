@@ -42,10 +42,15 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     QRect ratingRectForIndex(const QModelIndex &index) const;
     void showContextMenu(const QPoint &pos);
+    // Recomputes the effective cell/art sizes so a whole number of columns at the
+    // configured base width fills the viewport, distributing the slack instead of
+    // leaving it as right-edge whitespace (MusicBee-style).
+    void recomputeEffectiveSizes();
     void applySettingsToView();
     void applySettingsToItems();
     void applySort();
@@ -70,9 +75,12 @@ private:
     qsizetype m_nextAlbumRow = 0;
     int m_nextArtworkRow = 0;
     int m_artworkGeneration = 0;
-    int m_cellWidth = 204;
+    int m_cellWidth = 204;   // configured base (C-scroll target / persisted)
     int m_cellHeight = 292;
     int m_artSize = 176;
+    int m_effectiveCellWidth = 204;  // base stretched to fill the viewport width
+    int m_effectiveCellHeight = 292;
+    int m_effectiveArtSize = 176;
     int m_spacing = 6;
     int m_padding = 8;
     int m_starSize = 18;
