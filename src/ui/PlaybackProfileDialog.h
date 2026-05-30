@@ -27,4 +27,5 @@ private:
     QComboBox *m_deviceCombo = nullptr;
     QCheckBox *m_softwareVolume = nullptr;
     QCheckBox *m_allowResample = nullptr;
+    QCheckBox *m_releaseSinkOnPause = nullptr;
 };

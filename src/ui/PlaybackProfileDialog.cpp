@@ -81,6 +81,14 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
         QStringLiteral("Allow GStreamer to convert sample rates. Normally off — PipeWire handles rate negotiation."));
     m_form->addRow(QString(), m_allowResample);
 
+    // Release on pause (always on in bit-perfect; configurable in shared)
+    m_releaseSinkOnPause = new QCheckBox(QStringLiteral("Release output device on pause"), this);
+    m_releaseSinkOnPause->setToolTip(
+        QStringLiteral("Free the audio device immediately on pause so other apps can use it. "
+                       "Resume seeks back to the paused position. "
+                       "Always enabled in bit-perfect mode."));
+    m_form->addRow(QString(), m_releaseSinkOnPause);
+
     connect(m_mode, &QComboBox::currentIndexChanged, this, [this]() {
         updateModeVisibility();
     });
@@ -107,6 +115,12 @@ void PlaybackProfileDialog::updateModeVisibility()
     m_form->setRowVisible(m_deviceCombo,    bitPerfect);
     m_form->setRowVisible(m_softwareVolume, !bitPerfect);
     m_form->setRowVisible(m_allowResample,  !bitPerfect);
+    // In bit-perfect mode the device is always released on pause (exclusive ALSA
+    // access blocks other apps otherwise); lock the checkbox to reflect that.
+    m_releaseSinkOnPause->setEnabled(!bitPerfect);
+    if (bitPerfect) {
+        m_releaseSinkOnPause->setChecked(true);
+    }
 }
 
 void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
@@ -134,6 +148,7 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
 
     m_softwareVolume->setChecked(profile.softwareVolume);
     m_allowResample->setChecked(profile.allowResample);
+    m_releaseSinkOnPause->setChecked(profile.releaseSinkOnPause);
 
     updateModeVisibility();
 }
@@ -152,11 +167,13 @@ PlaybackProfile PlaybackProfileDialog::profile() const
         p.device = devData.isEmpty() ? m_deviceCombo->currentText().trimmed() : devData;
         p.softwareVolume = false;
         p.allowResample  = false;
+        p.releaseSinkOnPause = true; // mandatory in bit-perfect
     } else {
         p.sink           = m_sink->currentData().toString();
         p.device.clear();
-        p.softwareVolume = m_softwareVolume->isChecked();
-        p.allowResample  = m_allowResample->isChecked();
+        p.softwareVolume     = m_softwareVolume->isChecked();
+        p.allowResample      = m_allowResample->isChecked();
+        p.releaseSinkOnPause = m_releaseSinkOnPause->isChecked();
     }
 
     return p;
