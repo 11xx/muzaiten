@@ -2,6 +2,7 @@
 
 #include "ui/AlbumArtFallback.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/OverlayScrollBar.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
@@ -1090,6 +1091,7 @@ RightSidebar::RightSidebar(QWidget *parent)
             emit queueTrackRatingChanged(track, rating);
         }
     });
+    OverlayScrollBar::install(m_queueTable);
 
     m_trackInfoPane = new QFrame(m_splitter);
     auto *infoLayout = new QVBoxLayout(m_trackInfoPane);

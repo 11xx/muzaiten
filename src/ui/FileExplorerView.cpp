@@ -2,6 +2,7 @@
 
 #include "scanner/LibraryScanner.h"
 #include "scanner/TagReader.h"
+#include "ui/OverlayScrollBar.h"
 
 #include <QAction>
 #include <QApplication>
@@ -186,6 +187,7 @@ FileExplorerView::FileExplorerView(QWidget *parent)
 
     m_tree->installEventFilter(this);
     m_tree->viewport()->installEventFilter(this); // Ctrl+wheel row-height resize
+    OverlayScrollBar::install(m_tree);
     // Route focus to the tree so its key-binding eventFilter receives key
     // presses as soon as the explorer is shown, without a prior click.
     setFocusProxy(m_tree);

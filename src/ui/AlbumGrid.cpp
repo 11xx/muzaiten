@@ -4,6 +4,7 @@
 #include "scanner/ArtworkCache.h"
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumGridDelegate.h"
+#include "ui/OverlayScrollBar.h"
 #include "ui/StarRating.h"
 
 #include <QAction>
@@ -114,6 +115,7 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setModel(model);
 
     connect(this, &QListView::customContextMenuRequested, this, &AlbumGrid::showContextMenu);
+    OverlayScrollBar::install(this);
 }
 
 void AlbumGrid::setArtworkCache(ArtworkCache *cache)
