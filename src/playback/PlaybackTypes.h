@@ -17,4 +17,9 @@ struct PlaybackProfile {
     // access would block every other app while merely paused); configurable
     // in shared mode (default on).
     bool releaseSinkOnPause = true;
+    // Copy this percentage of each source file into an anonymous in-RAM
+    // buffer (memfd) before playback begins.  0 = off (plain file:// URI);
+    // 100 = load the whole file into RAM.  Eliminates disk/mount re-reads
+    // on soft-pause resume and decouples playback from slow/network mounts.
+    int preloadPercent = 0;
 };

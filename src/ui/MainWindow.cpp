@@ -90,6 +90,8 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
     profile.replayGain = root.value(QStringLiteral("replayGain")).toBool(profile.replayGain);
     profile.allowResample = root.value(QStringLiteral("allowResample")).toBool(profile.allowResample);
     profile.releaseSinkOnPause = root.value(QStringLiteral("releaseSinkOnPause")).toBool(profile.releaseSinkOnPause);
+    profile.preloadPercent = std::clamp(
+        root.value(QStringLiteral("preloadPercent")).toInt(profile.preloadPercent), 0, 100);
     return profile;
 }
 
@@ -106,6 +108,7 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("replayGain"), profile.replayGain);
     root.insert(QStringLiteral("allowResample"), profile.allowResample);
     root.insert(QStringLiteral("releaseSinkOnPause"), profile.releaseSinkOnPause);
+    root.insert(QStringLiteral("preloadPercent"), profile.preloadPercent);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -2503,6 +2506,7 @@ void MainWindow::advanceAfterPreparedTransition()
         return;
     }
 
+    m_playback->onGaplessTrackAdvanced();
     ++m_queueIndex;
     if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
         m_playNextInsertIndex = m_queueIndex + 1;

@@ -37,6 +37,9 @@ public:
     virtual bool hasSource() const = 0;
     virtual qint64 position() const = 0;
     virtual qint64 duration() const = 0;
+    // Called after a gapless track advance so the backend can promote the
+    // prepared-track preload buffer to current and discard the old one.
+    virtual void onGaplessTrackAdvanced() {}
 
 signals:
     void stateChanged(PlaybackBackend::State state);

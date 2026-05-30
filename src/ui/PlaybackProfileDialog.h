@@ -8,6 +8,7 @@ class QCheckBox;
 class QComboBox;
 class QFormLayout;
 class QLineEdit;
+class QSpinBox;
 
 class PlaybackProfileDialog final : public QDialog {
     Q_OBJECT
@@ -28,4 +29,5 @@ private:
     QCheckBox *m_softwareVolume = nullptr;
     QCheckBox *m_allowResample = nullptr;
     QCheckBox *m_releaseSinkOnPause = nullptr;
+    QSpinBox *m_preloadPercent = nullptr;
 };
