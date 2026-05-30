@@ -3,6 +3,8 @@
 #include "core/Album.h"
 #include "core/Track.h"
 
+#include <QCollator>
+
 namespace MusicSort {
 
 namespace {
@@ -31,7 +33,15 @@ int cmpInt(qint64 a, qint64 b)
 
 int cmpStr(const QString &a, const QString &b)
 {
-    return QString::localeAwareCompare(a, b);
+    // Natural ordering: embedded numbers compare by value, so "2" sorts before
+    // "11" instead of character-by-character ("11" before "2"). Case-insensitive.
+    static const QCollator collator = [] {
+        QCollator c;
+        c.setNumericMode(true);
+        c.setCaseSensitivity(Qt::CaseInsensitive);
+        return c;
+    }();
+    return collator.compare(a, b);
 }
 
 } // namespace
