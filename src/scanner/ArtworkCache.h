@@ -7,6 +7,8 @@
 
 #include <QtTypes>
 
+#include <atomic>
+
 class QThread;
 
 // Monolithic artwork cache backed by a single SQLite file (WAL), replacing the
@@ -19,12 +21,17 @@ class ArtworkCache final : public QObject {
     Q_OBJECT
 
 public:
-    explicit ArtworkCache(QString dbPath, QObject *parent = nullptr);
+    // artSize is the square pixel size cached covers are rendered to.
+    explicit ArtworkCache(QString dbPath, int artSize, QObject *parent = nullptr);
     ~ArtworkCache() override;
 
     // Thread-safe. Resolves art for the given directory (folder art) and/or
     // filePath (embedded art) asynchronously; replies carry back token+generation.
     void requestArtwork(const QString &token, const QString &directory, const QString &filePath, quint64 generation);
+
+    // Thread-safe. Changes the cached cover resolution. The size is part of each
+    // cache key, so existing blobs at other sizes are simply re-rendered lazily.
+    void setArtSize(int artSize);
 
 signals:
     void artworkReady(QString token, QImage image, quint64 generation);
@@ -42,4 +49,5 @@ private:
     QString m_connectionName;
     QThread *m_thread = nullptr;
     QSqlDatabase m_db;
+    std::atomic<int> m_artSize;
 };

@@ -14,11 +14,14 @@
 #include <taglib/tlist.h>
 #include <taglib/tvariant.h>
 
+#include <algorithm>
+
 namespace {
 
-constexpr int kArtSize = 320;
 constexpr int kSourceFolder = 0;
 constexpr int kSourceEmbedded = 1;
+constexpr int kMinArtSize = 128;
+constexpr int kMaxArtSize = 4096;
 
 QStringList folderArtCandidates()
 {
@@ -46,7 +49,7 @@ QString folderArtPath(const QString &directory)
     return {};
 }
 
-QString cacheKeyFor(const QString &path, char kind)
+QString cacheKeyFor(const QString &path, char kind, int artSize)
 {
     const QFileInfo info(path);
     QCryptographicHash hash(QCryptographicHash::Sha256);
@@ -54,19 +57,20 @@ QString cacheKeyFor(const QString &path, char kind)
     hash.addData(QByteArray::number(info.lastModified().toSecsSinceEpoch()));
     hash.addData(QByteArray::number(info.size()));
     hash.addData(QByteArray(1, kind));
+    hash.addData(QByteArray::number(artSize)); // size is part of the identity
     return QString::fromLatin1(hash.result().toHex());
 }
 
-QImage squareArt(const QImage &source)
+QImage squareArt(const QImage &source, int artSize)
 {
     if (source.isNull()) {
         return {};
     }
-    QImage square(kArtSize, kArtSize, QImage::Format_ARGB32);
+    QImage square(artSize, artSize, QImage::Format_ARGB32);
     square.fill(Qt::transparent);
-    const QImage scaled = source.scaled(kArtSize, kArtSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const QImage scaled = source.scaled(artSize, artSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     QPainter painter(&square);
-    painter.drawImage((kArtSize - scaled.width()) / 2, (kArtSize - scaled.height()) / 2, scaled);
+    painter.drawImage((artSize - scaled.width()) / 2, (artSize - scaled.height()) / 2, scaled);
     painter.end();
     return square;
 }
@@ -103,10 +107,11 @@ QImage embeddedArt(const QString &filePath)
 
 } // namespace
 
-ArtworkCache::ArtworkCache(QString dbPath, QObject *parent)
+ArtworkCache::ArtworkCache(QString dbPath, int artSize, QObject *parent)
     : QObject(parent)
     , m_dbPath(std::move(dbPath))
     , m_connectionName(QStringLiteral("artwork-cache-%1").arg(reinterpret_cast<quintptr>(this)))
+    , m_artSize(std::clamp(artSize, kMinArtSize, kMaxArtSize))
 {
     m_thread = new QThread(this);
     moveToThread(m_thread);
@@ -152,15 +157,22 @@ void ArtworkCache::requestArtwork(const QString &token, const QString &directory
                               Q_ARG(QString, filePath), Q_ARG(quint64, generation));
 }
 
+void ArtworkCache::setArtSize(int artSize)
+{
+    m_artSize.store(std::clamp(artSize, kMinArtSize, kMaxArtSize));
+}
+
 void ArtworkCache::handleRequest(const QString &token, const QString &directory, const QString &filePath, quint64 generation)
 {
+    const int artSize = m_artSize.load();
+
     // Folder art first (preferred, shared across an album's tracks).
     const QString folder = folderArtPath(directory);
     if (!folder.isEmpty()) {
-        const QString key = cacheKeyFor(folder, 'f');
+        const QString key = cacheKeyFor(folder, 'f', artSize);
         QImage cached = lookupBlob(key);
         if (cached.isNull()) {
-            cached = squareArt(QImage(folder));
+            cached = squareArt(QImage(folder), artSize);
             if (!cached.isNull()) {
                 storeBlob(key, kSourceFolder, cached, toPng(cached));
             }
@@ -173,10 +185,10 @@ void ArtworkCache::handleRequest(const QString &token, const QString &directory,
 
     // Embedded art fallback (lazy; only on navigation, never during scans).
     if (!filePath.isEmpty()) {
-        const QString key = cacheKeyFor(filePath, 'e');
+        const QString key = cacheKeyFor(filePath, 'e', artSize);
         QImage cached = lookupBlob(key);
         if (cached.isNull()) {
-            cached = squareArt(embeddedArt(filePath));
+            cached = squareArt(embeddedArt(filePath), artSize);
             if (!cached.isNull()) {
                 storeBlob(key, kSourceEmbedded, cached, toPng(cached));
             }

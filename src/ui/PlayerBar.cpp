@@ -324,6 +324,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_trackInfoPaneVisible->setCheckable(true);
     m_trackInfoPaneVisible->setChecked(true);
     QAction *trackInfoPaneSettings = settingsMenu->addAction(QStringLiteral("Track information panel..."));
+    QAction *albumArtResolution = settingsMenu->addAction(QStringLiteral("Album art resolution..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
     settingsMenu->addSeparator();
@@ -472,6 +473,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_listUnsupportedFiles, &QAction::toggled, this, &PlayerBar::listUnsupportedFilesChanged);
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
+    connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
