@@ -42,11 +42,21 @@ protected:
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
+public:
+    enum class SortKey {
+        Year,
+        Title,
+        Rating,
+        TrackCount,
+        RecentlyAdded,
+    };
+
 private:
     QRect ratingRectForIndex(const QModelIndex &index) const;
     void showContextMenu(const QPoint &pos);
     void applySettingsToView();
     void applySettingsToItems();
+    void applySort();
     void populateItemFromAlbum(class QStandardItem *item, const Album &album);
     void appendNextAlbumBatch();
     void loadNextAlbumArtwork();
@@ -57,6 +67,7 @@ private:
 private:
     ArtworkCache *m_artworkCache = nullptr;
     QString m_selectedAlbumTitle;
+    QVector<Album> m_sourceAlbums;  // unsorted source list from last setAlbums call
     QVector<Album> m_pendingAlbums;
     QTimer *m_populateTimer = nullptr;
     QTimer *m_artworkTimer = nullptr;
@@ -74,5 +85,7 @@ private:
     int m_padding = 8;
     int m_starSize = 18;
     Qt::Alignment m_textAlignment = Qt::AlignHCenter;
+    SortKey m_sortKey = SortKey::Year;
+    bool m_sortDescending = true; // newest first for Year
     QPoint m_wheelAngleRemainder;
 };
