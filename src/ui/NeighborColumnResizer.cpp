@@ -20,7 +20,12 @@ NeighborColumnResizer::NeighborColumnResizer(QHeaderView *header, std::function<
     , m_header(header)
     , m_minWidthFor(std::move(minWidthFor))
 {
+    // Interactive resize mouse events are delivered to the header's viewport, so
+    // filter both to reliably detect when a drag begins on a handle.
     m_header->installEventFilter(this);
+    if (m_header->viewport() != nullptr) {
+        m_header->viewport()->installEventFilter(this);
+    }
     connect(m_header, &QHeaderView::sectionResized, this, &NeighborColumnResizer::onSectionResized);
 }
 
@@ -59,7 +64,7 @@ bool NeighborColumnResizer::isOnHandle(int x) const
 
 bool NeighborColumnResizer::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_header) {
+    if (watched == m_header || watched == m_header->viewport()) {
         if (event->type() == QEvent::MouseButtonPress) {
             auto *mouse = static_cast<QMouseEvent *>(event);
             if (mouse->button() == Qt::LeftButton) {
