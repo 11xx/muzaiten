@@ -150,6 +150,17 @@ public:
         for (int col : adjustableColumns) {
             sumAdjustableMin += minWidthForColumn(col);
         }
+
+        // If a fixed (dragged) column would push the adjustable columns below their
+        // minimums, clamp it so the table never overflows the viewport width.
+        if (fixedColumn >= 0) {
+            const int maxFixed = targetWidth - sumAdjustableMin;
+            if (fixedWidth > maxFixed) {
+                fixedWidth = std::max(minWidthForColumn(fixedColumn), maxFixed);
+                setColumnWidth(fixedColumn, fixedWidth);
+            }
+        }
+
         const int availableWidth = std::max(sumAdjustableMin, targetWidth - fixedWidth);
         int remainingWidth = availableWidth;
         for (int index = 0; index < adjustableColumns.size(); ++index) {
