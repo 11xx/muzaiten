@@ -33,6 +33,8 @@ private:
     void reposition();
     QRect handleRect() const;
     void setHovered(bool hovered);
+    int viewportHeight() const;
+    bool isScrollable() const;
 
     QAbstractScrollArea *m_area = nullptr;
     QScrollBar *m_scrollBar = nullptr;

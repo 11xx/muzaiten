@@ -47,10 +47,20 @@ void OverlayScrollBar::reposition()
     raise();
 }
 
+int OverlayScrollBar::viewportHeight() const
+{
+    return m_area->viewport()->height();
+}
+
+bool OverlayScrollBar::isScrollable() const
+{
+    return m_scrollBar->minimum() < m_scrollBar->maximum();
+}
+
 // Returns the handle rect in widget coordinates.
 QRect OverlayScrollBar::handleRect() const
 {
-    const int vh = height();
+    const int vh = viewportHeight();
     const int minimum = m_scrollBar->minimum();
     const int maximum = m_scrollBar->maximum();
     const int total = maximum - minimum;
@@ -73,8 +83,12 @@ QRect OverlayScrollBar::handleRect() const
 
 void OverlayScrollBar::paintEvent(QPaintEvent *)
 {
-    const bool scrollable = m_scrollBar->minimum() < m_scrollBar->maximum();
-    if (!scrollable && !m_hovered && !m_dragging) {
+    // Keep geometry synced to the live viewport before drawing, so painted
+    // bounds never lag behind a resize that arrived out of order.
+    reposition();
+
+    // Nothing to show when the content fits the viewport, even while hovered.
+    if (!isScrollable()) {
         return;
     }
 
@@ -90,7 +104,7 @@ void OverlayScrollBar::paintEvent(QPaintEvent *)
         painter.setBrush(color);
         painter.setPen(Qt::NoPen);
         painter.drawRoundedRect(hr, 4, 4);
-    } else if (scrollable) {
+    } else {
         // Faint hairline at the handle position (idle indicator)
         QColor color = palette().color(QPalette::Mid);
         color.setAlpha(70);
@@ -136,13 +150,13 @@ bool OverlayScrollBar::eventFilter(QObject *watched, QEvent *event)
 
     case QEvent::MouseButtonPress: {
         auto *mouse = static_cast<QMouseEvent *>(event);
-        if (!m_dragging && m_hovered && mouse->button() == Qt::LeftButton) {
+        if (!m_dragging && m_hovered && isScrollable() && mouse->button() == Qt::LeftButton) {
             // mapFromParent: viewport coords → widget coords
             if (handleRect().contains(mapFromParent(mouse->pos()))) {
                 m_dragging = true;
                 m_dragStartPos = mouse->pos().y();
                 m_dragStartValue = m_scrollBar->value();
-                m_dragTrack = height() - handleRect().height();
+                m_dragTrack = viewportHeight() - handleRect().height();
                 update();
                 return true; // eat: don't pass click to content beneath the handle
             }
@@ -173,7 +187,8 @@ bool OverlayScrollBar::eventFilter(QObject *watched, QEvent *event)
             update();
             return true; // eat during drag so content doesn't get spurious hovers
         }
-        const bool inGhostZone = mouse->pos().x() >= m_area->viewport()->width() - ghostZone;
+        const bool inGhostZone = isScrollable()
+            && mouse->pos().x() >= m_area->viewport()->width() - ghostZone;
         if (inGhostZone != m_hovered) {
             setHovered(inGhostZone);
         }
