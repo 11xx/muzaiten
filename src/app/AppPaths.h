@@ -21,6 +21,14 @@ namespace AppPaths {
 QString dataDir();   // XDG_DATA_HOME  - library.sqlite
 QString stateDir();  // XDG_STATE_HOME - state.sqlite, pending-scrobble queues
 QString cacheDir();  // XDG_CACHE_HOME - artwork.sqlite, mpd-artwork/
-QString configDir(); // XDG_CONFIG_HOME - reserved for a future config file
+QString configDir(); // XDG_CONFIG_HOME - holds the config file
+
+// Path to the INI config file (configDir()/muzaiten.conf).
+QString configFilePath();
+
+// Writes a fully-commented template config file if none exists yet (no-op
+// otherwise). Reading uses the [paths] section as a precedence layer below
+// CLI flags / env / --state-root and above the XDG default.
+void writeDefaultConfigIfMissing();
 
 } // namespace AppPaths

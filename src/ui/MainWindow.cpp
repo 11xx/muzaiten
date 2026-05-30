@@ -313,8 +313,9 @@ MainWindow::MainWindow(QWidget *parent)
     // so they persist independently of the per-build library database.
     m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
 
-    // Materialize the config dir as a hook for a future config file (unused now).
-    AppPaths::configDir();
+    // Create a commented config-file template on first run; its [paths] section
+    // feeds AppPaths (below CLI/env/--state-root, above the XDG default).
+    AppPaths::writeDefaultConfigIfMissing();
 
     const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
     m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
