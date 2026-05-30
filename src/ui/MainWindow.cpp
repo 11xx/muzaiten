@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "Version.h"
+#include "core/MusicSort.h"
 #include "core/Rating.h"
 #include "db/Database.h"
 #include "fs/LinkRoot.h"
@@ -486,6 +487,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_freeRoamFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
         m_libraryFileExplorer->setKeyHintBarVisible(visible);
         m_database->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+    });
+    auto persistExplorerSort = [this](const QString &field, bool descending, bool reverseGroups) {
+        m_database->setSetting(QStringLiteral("fileExplorer.sortField"), field);
+        m_database->setSetting(QStringLiteral("fileExplorer.sortDescending"), descending ? QStringLiteral("true") : QStringLiteral("false"));
+        m_database->setSetting(QStringLiteral("fileExplorer.sortReverseGroups"), reverseGroups ? QStringLiteral("true") : QStringLiteral("false"));
+    };
+    connect(m_libraryFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
+        m_freeRoamFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
+        persistExplorerSort(field, descending, reverseGroups);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
+        m_libraryFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
+        persistExplorerSort(field, descending, reverseGroups);
     });
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
@@ -1174,6 +1188,13 @@ void MainWindow::loadViewSettings()
         m_libraryFileExplorer->setRowHeight(explorerRowHeight);
         m_freeRoamFileExplorer->setRowHeight(explorerRowHeight);
     }
+
+    const MusicSort::SortField explorerSortField = MusicSort::sortFieldFromString(
+        m_database->setting(QStringLiteral("fileExplorer.sortField")), MusicSort::SortField::FileName);
+    const bool explorerSortDesc = m_database->setting(QStringLiteral("fileExplorer.sortDescending")) == QStringLiteral("true");
+    const bool explorerSortReverseGroups = m_database->setting(QStringLiteral("fileExplorer.sortReverseGroups")) == QStringLiteral("true");
+    m_libraryFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
+    m_freeRoamFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
 
     switchMainView(m_mainView);
     applySharedTableSettings();
