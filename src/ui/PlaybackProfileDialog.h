@@ -6,6 +6,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QFormLayout;
 class QLineEdit;
 
 class PlaybackProfileDialog final : public QDialog {
@@ -18,9 +19,12 @@ public:
     PlaybackProfile profile() const;
 
 private:
+    void updateModeVisibility();
+
+    QFormLayout *m_form = nullptr;
     QComboBox *m_mode = nullptr;
     QComboBox *m_sink = nullptr;
-    QLineEdit *m_device = nullptr;
+    QComboBox *m_deviceCombo = nullptr;
     QCheckBox *m_softwareVolume = nullptr;
     QCheckBox *m_allowResample = nullptr;
 };

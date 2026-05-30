@@ -82,7 +82,8 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
     profile.id = root.value(QStringLiteral("id")).toString(profile.id);
     profile.name = root.value(QStringLiteral("name")).toString(profile.name);
     profile.backend = root.value(QStringLiteral("backend")).toString(profile.backend);
-    profile.mode = root.value(QStringLiteral("mode")).toString(profile.mode);
+    const QString mode = root.value(QStringLiteral("mode")).toString(profile.mode);
+    profile.mode = mode == QStringLiteral("exclusive") ? QStringLiteral("bit-perfect") : mode;
     profile.sink = root.value(QStringLiteral("sink")).toString(profile.sink);
     profile.device = root.value(QStringLiteral("device")).toString(profile.device);
     profile.softwareVolume = root.value(QStringLiteral("softwareVolume")).toBool(profile.softwareVolume);

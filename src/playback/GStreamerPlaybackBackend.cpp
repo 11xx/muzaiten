@@ -33,6 +33,15 @@ GstElement *makeSink(const PlaybackProfile &profile)
         return factoryExists(name) ? gst_element_factory_make(name, nullptr) : nullptr;
     };
 
+    // Bit-perfect always goes direct to ALSA hw: regardless of the sink field.
+    if (profile.mode == QStringLiteral("bit-perfect")) {
+        GstElement *sink = make("alsasink");
+        if (sink != nullptr && !profile.device.isEmpty()) {
+            g_object_set(G_OBJECT(sink), "device", profile.device.toUtf8().constData(), nullptr);
+        }
+        return sink;
+    }
+
     GstElement *sink = nullptr;
     if (profile.sink == QStringLiteral("alsa")) {
         sink = make("alsasink");
