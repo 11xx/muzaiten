@@ -51,6 +51,9 @@ public:
     void setRowHeight(int height);
     int rowHeight() const;
     void setSort(MusicSort::SortField field, bool descending, bool reverseGroups);
+    // Navigates to the file's directory and selects it (no-op if the directory
+    // can't be reached). Works for both library and free-roam modes.
+    void revealFile(const QString &filePath);
 
 signals:
     void directoryRequested(const QString &path);
