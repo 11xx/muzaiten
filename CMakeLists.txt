@@ -72,6 +72,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
     src/ui/AlbumGrid.cpp
+    src/ui/NeighborColumnResizer.cpp
     src/ui/OverlayScrollBar.cpp
     src/ui/AlbumGridDelegate.cpp
     src/ui/AlbumArtFallback.cpp
@@ -129,6 +130,7 @@ set(MUZAITEN_HEADERS
     src/scrobble/ListenBrainzScrobbler.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
+    src/ui/NeighborColumnResizer.h
     src/ui/OverlayScrollBar.h
     src/ui/AlbumArtFallback.h
     src/ui/ArtistSidebar.h

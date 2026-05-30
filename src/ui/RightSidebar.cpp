@@ -2,6 +2,7 @@
 
 #include "ui/AlbumArtFallback.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -1099,8 +1100,18 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
         emit viewSettingsChanged();
     });
-    connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this](int logicalIndex, int, int) {
-        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport(logicalIndex);
+    // User column resizing trades width with the adjacent column only (no global
+    // redistribute); the viewport-fill fit still runs on pane resize/show-hide.
+    auto *queueColumnResizer = NeighborColumnResizer::install(
+        m_queueTable->horizontalHeader(), [](int column) {
+            for (const ColumnSpec &spec : columns) {
+                if (spec.index == column) {
+                    return spec.minWidth;
+                }
+            }
+            return 24;
+        });
+    connect(queueColumnResizer, &NeighborColumnResizer::columnResized, this, [this]() {
         emit viewSettingsChanged();
     });
     connect(m_queueTable->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this](int, int) {
