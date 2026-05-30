@@ -39,7 +39,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
-#include <QPolygonF>
 #include <QImage>
 #include <QPixmap>
 #include <QPushButton>
@@ -258,28 +257,14 @@ protected:
 
         QPainter painter(viewport());
 
-        // Currently-playing indicator: a left accent bar plus a play glyph,
-        // drawn at the row level so it is independent of which columns are shown.
+        // Currently-playing indicator: a left accent bar, drawn at the row level
+        // so it is independent of which columns are shown (paired with the row
+        // tint from the item delegate).
         if (m_currentPlayingRow >= 0 && m_currentPlayingRow < model()->rowCount()) {
             const int y = rowViewportPosition(m_currentPlayingRow);
             const int h = rowHeight(m_currentPlayingRow);
             if (h > 0 && y + h > 0 && y < viewport()->height()) {
-                const QColor accent = palette().color(QPalette::Highlight);
-                painter.fillRect(QRect(0, y, 3, h), accent);
-
-                // Small play triangle just right of the bar, vertically centred.
-                const int glyph = std::min(h - 6, 8);
-                if (glyph >= 5) {
-                    const int top = y + (h - glyph) / 2;
-                    const qreal left = 4.5;
-                    QPolygonF triangle({QPointF(left, top), QPointF(left, top + glyph),
-                                        QPointF(left + glyph * 0.85, top + glyph / 2.0)});
-                    painter.setRenderHint(QPainter::Antialiasing, true);
-                    painter.setPen(Qt::NoPen);
-                    painter.setBrush(accent);
-                    painter.drawPolygon(triangle);
-                    painter.setRenderHint(QPainter::Antialiasing, false);
-                }
+                painter.fillRect(QRect(0, y, 3, h), palette().color(QPalette::Highlight));
             }
         }
 
