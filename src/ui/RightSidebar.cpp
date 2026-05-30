@@ -959,9 +959,24 @@ private:
             return;
         }
 
+        // Render at the device pixel ratio so covers stay crisp on HiDPI screens:
+        // scale to the physical pixel size and tag the pixmap's DPR, otherwise the
+        // image is produced at logical size and upscaled by the compositor (blurry).
+        const qreal dpr = devicePixelRatioF();
+        const QSize pxTarget(qRound(target.width() * dpr), qRound(target.height() * dpr));
+
+        auto applyRaster = [&](const QPixmap &source) {
+            if (source.isNull()) {
+                return false;
+            }
+            QPixmap scaled = source.scaled(pxTarget, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            scaled.setDevicePixelRatio(dpr);
+            setPixmap(scaled);
+            return true;
+        };
+
         if (!m_sourceImage.isNull()) {
-            const QPixmap source = QPixmap::fromImage(m_sourceImage);
-            setPixmap(source.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            applyRaster(QPixmap::fromImage(m_sourceImage));
             return;
         }
 
@@ -970,22 +985,15 @@ private:
             return;
         }
 
-        const bool isSvg = m_sourcePath.endsWith(QStringLiteral(".svg"), Qt::CaseInsensitive);
-        if (isSvg) {
+        if (m_sourcePath.endsWith(QStringLiteral(".svg"), Qt::CaseInsensitive)) {
             QIcon icon(m_sourcePath);
             if (icon.isNull()) {
                 return;
             }
-            const qreal dpr = devicePixelRatioF();
-            const QSize pxTarget(static_cast<int>(target.width() * dpr),
-                                  static_cast<int>(target.height() * dpr));
-            setPixmap(icon.pixmap(pxTarget));
+            // The (size, dpr) overload bakes the device pixel ratio into the pixmap.
+            setPixmap(icon.pixmap(target, dpr));
         } else {
-            QPixmap source(m_sourcePath);
-            if (source.isNull()) {
-                return;
-            }
-            setPixmap(source.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            applyRaster(QPixmap(m_sourcePath));
         }
     }
 
