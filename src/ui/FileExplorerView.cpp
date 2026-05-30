@@ -238,6 +238,30 @@ QString FileExplorerView::currentDirectory() const
     return m_currentDirectory;
 }
 
+void FileExplorerView::revealFile(const QString &filePath)
+{
+    const QString cleaned = cleanPath(filePath);
+    if (cleaned.isEmpty()) {
+        return;
+    }
+    const QString dir = cleanPath(QFileInfo(cleaned).absolutePath());
+    if (dir.isEmpty()) {
+        return;
+    }
+
+    // Remember the wanted selection so it is applied once the directory's listing
+    // is (re)populated; restoreSelectionForCurrentDirectory() consumes it.
+    m_lastSelectedByDir.insert(dir, cleaned);
+
+    if (cleanPath(m_currentDirectory) == dir) {
+        restoreSelectionForCurrentDirectory();
+    } else {
+        // MainWindow owns navigation (library entries come from the DB, free-roam
+        // from the filesystem); the listing's repopulation restores the selection.
+        emit directoryRequested(dir);
+    }
+}
+
 void FileExplorerView::setRowHeight(int height)
 {
     const int clamped = std::clamp(height, 16, 40);

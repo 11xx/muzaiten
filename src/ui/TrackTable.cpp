@@ -305,6 +305,22 @@ TrackTable::TrackTable(QWidget *parent)
     OverlayScrollBar::install(this);
 }
 
+void TrackTable::selectTrackByPath(const QString &path)
+{
+    if (path.isEmpty() || model() == nullptr) {
+        return;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
+        if (track.path == path) {
+            selectRow(row);
+            setCurrentIndex(model()->index(row, 0));
+            scrollTo(model()->index(row, 0), QAbstractItemView::PositionAtCenter);
+            return;
+        }
+    }
+}
+
 int TrackTable::sortColumn() const
 {
     return horizontalHeader()->sortIndicatorSection();

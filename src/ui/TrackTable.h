@@ -24,6 +24,8 @@ public:
     Qt::SortOrder sortOrder() const;
     int verticalScrollValue() const;
     void restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int verticalScrollValue);
+    // Selects and scrolls to the row whose track has this path (no-op if absent).
+    void selectTrackByPath(const QString &path);
 
 signals:
     void trackActivated(const Track &track);

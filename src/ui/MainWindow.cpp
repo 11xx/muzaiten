@@ -539,6 +539,13 @@ MainWindow::MainWindow(QWidget *parent)
         }
         toggleFileExplorerView();
     });
+    auto *jumpToPlayingShortcut = new QShortcut(QKeySequence(QStringLiteral("o")), this);
+    connect(jumpToPlayingShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        jumpToPlayingSong();
+    });
 
     m_albumGrid->setArtworkCache(m_artworkCache.get());
     loadPlaybackProfile();
@@ -1266,6 +1273,39 @@ void MainWindow::toggleFileExplorerView()
         switchMainView(MainView::FreeRoamFileExplorer);
     } else {
         switchMainView(MainView::LibraryFileExplorer);
+    }
+}
+
+void MainWindow::jumpToPlayingSong()
+{
+    if (m_currentTrack.path.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Nothing is playing"), 3000);
+        return;
+    }
+
+    switch (m_mainView) {
+    case MainView::LibraryPanels: {
+        const QString artist = !m_currentTrack.albumArtistName.trimmed().isEmpty()
+            ? m_currentTrack.albumArtistName
+            : m_currentTrack.artistName;
+        if (!artist.isEmpty()) {
+            // Show all of the artist's tracks (drop any album filter) so the
+            // playing track is guaranteed visible, then select it.
+            m_selectedAlbumTitle.clear();
+            m_artistSidebar->selectArtist(artist);
+            selectArtist(artist);
+        }
+        m_trackTable->selectTrackByPath(m_currentTrack.path);
+        break;
+    }
+    case MainView::LibraryFileExplorer:
+        m_libraryFileExplorer->revealFile(m_currentTrack.path);
+        break;
+    case MainView::FreeRoamFileExplorer: {
+        const QString resolved = resolvedReadPathForTrack(m_currentTrack);
+        m_freeRoamFileExplorer->revealFile(resolved.isEmpty() ? m_currentTrack.path : resolved);
+        break;
+    }
     }
 }
 

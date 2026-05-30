@@ -67,6 +67,7 @@ private:
     void saveMainWindowViewSettings();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
+    void jumpToPlayingSong();
     void setLibraryExplorerDirectory(const QString &path);
     void setFreeRoamDirectory(const QString &path);
     void refreshLibraryFileExplorer();
