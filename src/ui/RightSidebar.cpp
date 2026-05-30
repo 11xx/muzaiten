@@ -86,6 +86,7 @@ QString trackNumberText(const Track &track);
 enum QueueRoles {
     TrackRole = Qt::UserRole + 1,
     HoverRatingRole = Qt::UserRole + 2,
+    PlayNextOrdinalRole = Qt::UserRole + 3,
 };
 
 class QueueTableView final : public QTableView {
@@ -274,6 +275,80 @@ private:
     bool m_fittingColumns = false;
 };
 
+// Delegate for the queue table: replicates DenseTableDelegate painting and
+// overlays a small dimmed play-next ordinal at the right edge of the title cell
+// when the title-accent display mode is enabled.
+class QueueItemDelegate final : public QStyledItemDelegate {
+    Q_OBJECT
+
+public:
+    explicit QueueItemDelegate(QObject *parent = nullptr)
+        : QStyledItemDelegate(parent)
+    {
+    }
+
+    void setHoveredRow(int row)
+    {
+        m_hoveredRow = row;
+    }
+
+    void setShowTitleAccent(bool show)
+    {
+        m_showTitleAccent = show;
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+
+        const bool selected = opt.state & QStyle::State_Selected;
+        const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
+
+        if (selected) {
+            painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
+        } else if (hovered) {
+            QColor hover = opt.palette.color(QPalette::Highlight);
+            hover.setAlpha(34);
+            painter->fillRect(opt.rect, hover);
+        } else if (index.row() % 2 == 1) {
+            painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
+        }
+
+        if (selected) {
+            opt.palette.setColor(QPalette::Text, opt.palette.color(QPalette::HighlightedText));
+        } else {
+            opt.state &= ~QStyle::State_MouseOver;
+            opt.state &= ~QStyle::State_Selected;
+        }
+        opt.features &= ~QStyleOptionViewItem::Alternate;
+        opt.backgroundBrush = Qt::NoBrush;
+        opt.displayAlignment = opt.displayAlignment | Qt::AlignVCenter;
+        QStyledItemDelegate::paint(painter, opt, index);
+
+        if (m_showTitleAccent && index.column() == 1) {
+            const int ordinal = index.data(PlayNextOrdinalRole).toInt();
+            if (ordinal > 0) {
+                painter->save();
+                QColor color = option.palette.color(selected ? QPalette::HighlightedText : QPalette::Highlight);
+                color.setAlpha(selected ? 160 : 130);
+                painter->setPen(color);
+                QFont f = painter->font();
+                f.setPointSizeF(f.pointSizeF() * 0.8);
+                painter->setFont(f);
+                painter->drawText(option.rect.adjusted(0, 0, -4, 0),
+                                  Qt::AlignRight | Qt::AlignVCenter,
+                                  QString::number(ordinal));
+                painter->restore();
+            }
+        }
+    }
+
+private:
+    int m_hoveredRow = -1;
+    bool m_showTitleAccent = false;
+};
+
 QString displayYear(const Track &track)
 {
     for (const QString &candidate : {track.originalDate, track.date}) {
@@ -325,6 +400,9 @@ public:
                 if (role == TrackRole) {
                     return QVariant::fromValue(track);
                 }
+                if (role == PlayNextOrdinalRole) {
+                    return playNextOrdinalForRow(index.row());
+                }
                 if (index.column() == 2 && role == Qt::UserRole) {
                     return track.effectiveRating0To100;
                 }
@@ -337,8 +415,15 @@ public:
 
         const Track &track = m_tracks.at(index.row());
         switch (index.column()) {
-        case 0:
+        case 0: {
+            if (m_showPlayNextBadge) {
+                const int ordinal = playNextOrdinalForRow(index.row());
+                if (ordinal > 0) {
+                    return QStringLiteral("▸%1").arg(ordinal);
+                }
+            }
             return QString::number(index.row() + 1);
+        }
         case 1:
             return track.title;
         case 2:
@@ -437,12 +522,49 @@ public:
         endResetModel();
     }
 
+    // Sets the half-open range [begin, end) of rows that are "play next" priority
+    // tracks. Rows outside the range (or when begin >= end) have ordinal 0.
+    void setPlayNextRange(int begin, int end)
+    {
+        if (m_playNextBegin == begin && m_playNextEnd == end) {
+            return;
+        }
+        m_playNextBegin = begin;
+        m_playNextEnd = end;
+        if (rowCount() > 0) {
+            emit dataChanged(index(0, 0), index(rowCount() - 1, 1));
+        }
+    }
+
+    void setShowPlayNextBadge(bool show)
+    {
+        if (m_showPlayNextBadge == show) {
+            return;
+        }
+        m_showPlayNextBadge = show;
+        if (rowCount() > 0) {
+            emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {Qt::DisplayRole});
+        }
+    }
+
 signals:
     void rowsMoveRequested(QVector<int> rows, int destinationRow) const;
 
 private:
+    int playNextOrdinalForRow(int row) const
+    {
+        if (m_playNextBegin < 0 || m_playNextEnd <= m_playNextBegin
+            || row < m_playNextBegin || row >= m_playNextEnd) {
+            return 0;
+        }
+        return row - m_playNextBegin + 1;
+    }
+
     QVector<Track> m_tracks;
     QVector<int> m_hoverRatings;
+    int m_playNextBegin = -1;
+    int m_playNextEnd = -1;
+    bool m_showPlayNextBadge = true;
 };
 
 struct TrackInfoField {
@@ -900,7 +1022,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setDragDropMode(QAbstractItemView::InternalMove);
     m_queueTable->setDefaultDropAction(Qt::MoveAction);
     m_queueTable->setDragDropOverwriteMode(false);
-    m_queueTable->setItemDelegate(new DenseTableDelegate(this));
+    auto *queueItemDelegate = new QueueItemDelegate(this);
+    m_queueTable->setItemDelegate(queueItemDelegate);
     auto *queueRatingDelegate = new StarRatingDelegate(this);
     m_queueTable->setItemDelegateForColumn(2, queueRatingDelegate);
     m_queueTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -1016,6 +1139,15 @@ void RightSidebar::setQueue(const QVector<Track> &tracks)
     QTimer::singleShot(0, this, [this]() {
         static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     });
+}
+
+void RightSidebar::setPlayNextRange(int begin, int end)
+{
+    m_playNextBegin = begin;
+    m_playNextEnd = end;
+    if (auto *queueModel = qobject_cast<QueueTableModel *>(m_queueTable->model())) {
+        queueModel->setPlayNextRange(begin, end);
+    }
 }
 
 void RightSidebar::setCurrentIndex(int index)
@@ -1246,6 +1378,8 @@ QString RightSidebar::viewSettingsJson() const
         splitterSizes.append(size);
     }
     root.insert(QStringLiteral("splitter"), splitterSizes);
+    root.insert(QStringLiteral("showPlayNextBadge"), m_showPlayNextBadge);
+    root.insert(QStringLiteral("showPlayNextTitleAccent"), m_showPlayNextTitleAccent);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -1287,6 +1421,17 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
     }
     setTrackInfoVisible(root.value(QStringLiteral("showTrackInfo")).toBool(true));
     applyTrackInfoSettingsJson(root);
+
+    const bool badge = root.value(QStringLiteral("showPlayNextBadge")).toBool(true);
+    m_showPlayNextBadge = badge;
+    if (auto *queueModel = qobject_cast<QueueTableModel *>(m_queueTable->model())) {
+        queueModel->setShowPlayNextBadge(badge);
+    }
+    const bool accent = root.value(QStringLiteral("showPlayNextTitleAccent")).toBool(false);
+    m_showPlayNextTitleAccent = accent;
+    if (auto *d = qobject_cast<QueueItemDelegate *>(m_queueTable->itemDelegate())) {
+        d->setShowTitleAccent(accent);
+    }
 }
 
 void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
@@ -1440,8 +1585,8 @@ void RightSidebar::setQueueHoveredRow(int row)
 
     const int previous = m_queueHoveredRow;
     m_queueHoveredRow = row;
-    if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(m_queueTable->itemDelegate())) {
-        denseDelegate->setHoveredRow(row);
+    if (auto *d = qobject_cast<QueueItemDelegate *>(m_queueTable->itemDelegate())) {
+        d->setHoveredRow(row);
     }
     if (auto *ratingDelegate = qobject_cast<StarRatingDelegate *>(m_queueTable->itemDelegateForColumn(2))) {
         ratingDelegate->setHoveredRow(row);
@@ -1488,6 +1633,31 @@ void RightSidebar::showHeaderMenu(const QPoint &pos)
             emit viewSettingsChanged();
         });
     }
+    menu.addSeparator();
+
+    QAction *badgeAction = menu.addAction(QStringLiteral("Show play-next badge in # column"));
+    badgeAction->setCheckable(true);
+    badgeAction->setChecked(m_showPlayNextBadge);
+    connect(badgeAction, &QAction::toggled, this, [this](bool checked) {
+        m_showPlayNextBadge = checked;
+        if (auto *queueModel = qobject_cast<QueueTableModel *>(m_queueTable->model())) {
+            queueModel->setShowPlayNextBadge(checked);
+        }
+        emit viewSettingsChanged();
+    });
+
+    QAction *accentAction = menu.addAction(QStringLiteral("Show play-next ordinal in title"));
+    accentAction->setCheckable(true);
+    accentAction->setChecked(m_showPlayNextTitleAccent);
+    connect(accentAction, &QAction::toggled, this, [this](bool checked) {
+        m_showPlayNextTitleAccent = checked;
+        if (auto *d = qobject_cast<QueueItemDelegate *>(m_queueTable->itemDelegate())) {
+            d->setShowTitleAccent(checked);
+        }
+        m_queueTable->viewport()->update();
+        emit viewSettingsChanged();
+    });
+
     menu.exec(m_queueTable->horizontalHeader()->mapToGlobal(pos));
 }
 
@@ -1521,6 +1691,11 @@ void RightSidebar::showQueueMenu(const QPoint &pos)
             rows.push_back(index.row());
         }
         emit queueRowsRemoveRequested(rows);
+    });
+    QAction *clearPlayNext = menu.addAction(QStringLiteral("Clear play next priority"));
+    clearPlayNext->setEnabled(m_playNextEnd > m_playNextBegin && m_playNextBegin >= 0);
+    connect(clearPlayNext, &QAction::triggered, this, [this]() {
+        emit clearPlayNextPriorityRequested();
     });
     QAction *clearQueue = menu.addAction(QStringLiteral("Clear queue"));
     connect(clearQueue, &QAction::triggered, this, [this]() {

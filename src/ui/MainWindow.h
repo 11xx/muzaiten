@@ -111,6 +111,8 @@ private:
     void moveQueueRows(const QVector<int> &rows, int destinationRow);
     void removeQueueRows(const QVector<int> &rows);
     void clearQueue();
+    void clearPlayNextPriority();
+    void refreshPlayNextRange();
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
     void playQueueIndex(int index, bool notifyScrobbler = true);

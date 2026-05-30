@@ -20,6 +20,7 @@ public:
     explicit RightSidebar(QWidget *parent = nullptr);
 
     void setQueue(const QVector<Track> &tracks);
+    void setPlayNextRange(int begin, int end);
     void setCurrentIndex(int index);
     void setAlbumArt(const QString &imagePath);
     void setAlbumArt(const QImage &image);
@@ -36,6 +37,7 @@ signals:
     void queueRowsMoveRequested(const QVector<int> &rows, int destinationRow);
     void queueRowsRemoveRequested(const QVector<int> &rows);
     void queueClearRequested();
+    void clearPlayNextPriorityRequested();
     void artistRequested(const QString &artistName);
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);
@@ -73,4 +75,8 @@ private:
     QString m_trackInfoMetadataPattern;
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
+    int m_playNextBegin = -1;
+    int m_playNextEnd = -1;
+    bool m_showPlayNextBadge = true;
+    bool m_showPlayNextTitleAccent = false;
 };

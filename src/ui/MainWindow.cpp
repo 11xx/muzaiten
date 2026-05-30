@@ -379,6 +379,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
+    connect(m_rightSidebar, &RightSidebar::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_mpris, &MprisService::raiseRequested, this, [this]() {
         show();
         raise();
@@ -986,6 +987,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     restoreTrackTableViewState();
 
     if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
@@ -1059,6 +1061,7 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
         }
         m_rightSidebar->setQueue(m_queue);
         m_rightSidebar->setCurrentIndex(m_queueIndex);
+        refreshPlayNextRange();
         saveQueueState();
         restoreTrackTableViewState();
         worker->deleteLater();
@@ -1296,6 +1299,7 @@ void MainWindow::loadQueueState()
     m_playNextInsertIndex = std::clamp(root.value(QStringLiteral("playNextInsertIndex")).toInt(m_queueIndex + 1), 0, static_cast<int>(m_queue.size()));
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
         presentTrack(m_queue.at(m_queueIndex), false);
     }
@@ -2046,6 +2050,7 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
             }
         }
         m_rightSidebar->setQueue(m_queue);
+        refreshPlayNextRange();
         saveQueueState();
         if (m_queueIndex < 0 && start < m_queue.size()) {
             playQueueIndex(start);
@@ -2070,6 +2075,7 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
     m_playNextInsertIndex = insertAt + inserted;
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     saveQueueState();
 }
 
@@ -2082,6 +2088,7 @@ void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
     }
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     saveQueueState();
 }
 
@@ -2151,6 +2158,7 @@ void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
     m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     saveQueueState();
 }
 
@@ -2195,6 +2203,7 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
     m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     saveQueueState();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
         presentTrack(m_queue.at(m_queueIndex), false);
@@ -2215,11 +2224,28 @@ void MainWindow::clearQueue()
     m_currentTrack = {};
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     m_playerBar->setTrackText({});
     m_rightSidebar->setTrackInfo({});
     m_mpris->setTrack({});
     saveQueueState();
     savePlaybackState(true);
+}
+
+void MainWindow::clearPlayNextPriority()
+{
+    if (m_queueIndex >= 0) {
+        m_playNextInsertIndex = m_queueIndex + 1;
+    } else {
+        m_playNextInsertIndex = -1;
+    }
+    refreshPlayNextRange();
+    saveQueueState();
+}
+
+void MainWindow::refreshPlayNextRange()
+{
+    m_rightSidebar->setPlayNextRange(m_queueIndex + 1, m_playNextInsertIndex);
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)
