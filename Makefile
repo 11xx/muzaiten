@@ -8,6 +8,8 @@ BUILD_DIR                  ?= build
 CMAKE                      ?= cmake
 CTEST                      ?= ctest
 CMAKE_GENERATOR            ?= Ninja
+# Ninja is "ninja" on Arch/Debian and "ninja-build" on Fedora; detect either.
+NINJA                      ?= $(shell command -v ninja 2>/dev/null || command -v ninja-build 2>/dev/null)
 QT_QPA_PLATFORM            ?= offscreen
 MUZAITEN_LASTFM_API_KEY    ?=
 MUZAITEN_LASTFM_SHARED_SECRET ?=
@@ -32,7 +34,15 @@ help:
 		'  MUZAITEN_LASTFM_SHARED_SECRET=...'
 
 configure:
+	@if [ -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
+		prog=$$(sed -n 's/^CMAKE_MAKE_PROGRAM:[^=]*=//p' "$(BUILD_DIR)/CMakeCache.txt"); \
+		if [ -n "$$prog" ] && [ ! -x "$$prog" ]; then \
+			echo "Stale CMake cache (build program '$$prog' not found here); reconfiguring from scratch."; \
+			rm -rf "$(BUILD_DIR)/CMakeCache.txt" "$(BUILD_DIR)/CMakeFiles"; \
+		fi; \
+	fi
 	$(CMAKE) -S . -B $(BUILD_DIR) -G $(CMAKE_GENERATOR) \
+		$(if $(NINJA),-DCMAKE_MAKE_PROGRAM="$(NINJA)") \
 		-DMUZAITEN_LASTFM_API_KEY="$(MUZAITEN_LASTFM_API_KEY)" \
 		-DMUZAITEN_LASTFM_SHARED_SECRET="$(MUZAITEN_LASTFM_SHARED_SECRET)"
 
