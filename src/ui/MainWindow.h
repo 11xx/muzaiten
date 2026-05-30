@@ -9,6 +9,7 @@
 #include <memory>
 
 class Database;
+class SettingsStore;
 class AlbumGrid;
 class ArtistSidebar;
 class FileExplorerView;
@@ -151,10 +152,6 @@ private:
     void onArtworkReady(const QString &token, const QImage &image, quint64 generation);
     void onArtworkMissing(const QString &token, quint64 generation);
     QString databasePath() const;
-    QString cacheRoot() const;
-    QString mpdCacheRoot() const;
-    QString stateRoot() const;
-    bool useDevState() const;
     QString resolvedReadPathForTrack(const Track &track) const;
     void rememberTrackTableViewState();
     void restoreTrackTableViewState();
@@ -178,6 +175,7 @@ private:
     QPushButton *m_stopScanButton = nullptr;
     PlaybackBackend *m_playback = nullptr;
     std::unique_ptr<Database> m_database;
+    std::unique_ptr<SettingsStore> m_state;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
     QString m_localArtist;

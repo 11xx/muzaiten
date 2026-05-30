@@ -65,24 +65,43 @@ void MuzaitenApplication::configureCommandLine()
     QStringList verboseNames;
     verboseNames << QStringLiteral("verbose");
     const QCommandLineOption verboseOption(verboseNames, QStringLiteral("Enable verbose debug logging."));
-    const QCommandLineOption stateRootOption(QStringLiteral("state-root"), QStringLiteral("Store database, cache, and config under <path>."), QStringLiteral("path"));
-    const QCommandLineOption xdgStateOption(QStringLiteral("xdg-state"), QStringLiteral("Use normal XDG state paths even when running from build/."));
+    // Path overrides. Default is XDG; these provide explicit, full customization.
+    const QCommandLineOption stateRootOption(QStringLiteral("state-root"), QStringLiteral("Store all data/state/cache/config under <path>/{data,state,cache,config}."), QStringLiteral("path"));
+    const QCommandLineOption devStateOption(QStringLiteral("dev-state"), QStringLiteral("Shortcut for --state-root ./dev-state (relative to the current directory)."));
+    const QCommandLineOption dataDirOption(QStringLiteral("data-dir"), QStringLiteral("Override the data directory (library database)."), QStringLiteral("path"));
+    const QCommandLineOption stateDirOption(QStringLiteral("state-dir"), QStringLiteral("Override the state directory (UI prefs, session, pending scrobbles)."), QStringLiteral("path"));
+    const QCommandLineOption cacheDirOption(QStringLiteral("cache-dir"), QStringLiteral("Override the cache directory (artwork)."), QStringLiteral("path"));
+    const QCommandLineOption configDirOption(QStringLiteral("config-dir"), QStringLiteral("Override the config directory (reserved for a future config file)."), QStringLiteral("path"));
     parser.addOption(verboseOption);
     parser.addOption(stateRootOption);
-    parser.addOption(xdgStateOption);
+    parser.addOption(devStateOption);
+    parser.addOption(dataDirOption);
+    parser.addOption(stateDirOption);
+    parser.addOption(cacheDirOption);
+    parser.addOption(configDirOption);
     parser.process(*this);
 
     const bool verbose = parser.isSet(verboseOption) || qEnvironmentVariableIsSet("MUZAITEN_VERBOSE");
     configureLogging(verbose);
     setProperty("muzaiten.verbose", verbose);
 
-    const QString envRoot = QString::fromLocal8Bit(qgetenv("MUZAITEN_STATE_ROOT")).trimmed();
+    // Store CLI-flag-derived overrides as properties; AppPaths applies the full
+    // precedence (flag > env > combined root > XDG default) and reads env vars.
     const QString cliRoot = parser.value(stateRootOption).trimmed();
-    const QString stateRoot = !cliRoot.isEmpty() ? cliRoot : envRoot;
-    if (!stateRoot.isEmpty()) {
-        setProperty("muzaiten.stateRoot", QDir(stateRoot).absolutePath());
+    if (!cliRoot.isEmpty()) {
+        setProperty("muzaiten.stateRoot", QDir(cliRoot).absolutePath());
     }
-    setProperty("muzaiten.devState", !parser.isSet(xdgStateOption));
+    setProperty("muzaiten.devState", parser.isSet(devStateOption));
+    const auto setDirProperty = [this, &parser](const QCommandLineOption &option, const char *property) {
+        const QString value = parser.value(option).trimmed();
+        if (!value.isEmpty()) {
+            setProperty(property, QDir(value).absolutePath());
+        }
+    };
+    setDirProperty(dataDirOption, "muzaiten.dataDir");
+    setDirProperty(stateDirOption, "muzaiten.stateDir");
+    setDirProperty(cacheDirOption, "muzaiten.cacheDir");
+    setDirProperty(configDirOption, "muzaiten.configDir");
 }
 
 void MuzaitenApplication::configureLogging(bool verbose)

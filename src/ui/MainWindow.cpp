@@ -1,9 +1,11 @@
 #include "ui/MainWindow.h"
 
 #include "Version.h"
+#include "app/AppPaths.h"
 #include "core/MusicSort.h"
 #include "core/Rating.h"
 #include "db/Database.h"
+#include "db/SettingsStore.h"
 #include "fs/LinkRoot.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
@@ -307,8 +309,15 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
     }
 
-    const int artworkSize = std::clamp(m_database->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
-    m_artworkCache = std::make_unique<ArtworkCache>(stateRoot() + QStringLiteral("/cache/artwork.sqlite"), artworkSize);
+    // UI/view prefs and session state live in a separate store under XDG_STATE_HOME
+    // so they persist independently of the per-build library database.
+    m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
+
+    // Materialize the config dir as a hook for a future config file (unused now).
+    AppPaths::configDir();
+
+    const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
+    m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
     connect(m_artworkCache.get(), &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
     connect(m_artworkCache.get(), &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
 
@@ -404,7 +413,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::listUnsupportedFilesChanged, this, [this](bool show) {
         m_freeRoamFileExplorer->setShowUnsupportedFiles(show);
         m_libraryFileExplorer->setShowUnsupportedFiles(show);
-        m_database->setSetting(QStringLiteral("fileExplorer.showUnsupported"), show ? QStringLiteral("true") : QStringLiteral("false"));
+        m_state->setSetting(QStringLiteral("fileExplorer.showUnsupported"), show ? QStringLiteral("true") : QStringLiteral("false"));
     });
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
@@ -429,9 +438,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
-        m_volume = static_cast<double>(std::clamp(volume, 0, 100)) / 100.0;
+        const int clamped = std::clamp(volume, 0, 100);
+        m_volume = static_cast<double>(clamped) / 100.0;
         m_playback->setVolume(m_volume);
         m_mpris->setVolume(m_volume);
+        m_state->setSetting(QStringLiteral("volume"), QString::number(clamped));
     });
     connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
         if (!m_currentTrack.path.isEmpty()) {
@@ -464,36 +475,36 @@ MainWindow::MainWindow(QWidget *parent)
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
     connect(m_freeRoamFileExplorer, &FileExplorerView::startDirectoryChanged, this, [this](const QString &path) {
-        m_database->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
+        m_state->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
     });
     connect(m_libraryFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
         m_freeRoamFileExplorer->setRowHeight(height);
-        m_database->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
+        m_state->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
         m_libraryFileExplorer->setRowHeight(height);
-        m_database->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
+        m_state->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
     });
     connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
         m_freeRoamFileExplorer->setKeyBindingProfileName(name);
-        m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
+        m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
         m_libraryFileExplorer->setKeyBindingProfileName(name);
-        m_database->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
+        m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
     });
     connect(m_libraryFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
         m_freeRoamFileExplorer->setKeyHintBarVisible(visible);
-        m_database->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+        m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
         m_libraryFileExplorer->setKeyHintBarVisible(visible);
-        m_database->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+        m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
     });
     auto persistExplorerSort = [this](const QString &field, bool descending, bool reverseGroups) {
-        m_database->setSetting(QStringLiteral("fileExplorer.sortField"), field);
-        m_database->setSetting(QStringLiteral("fileExplorer.sortDescending"), descending ? QStringLiteral("true") : QStringLiteral("false"));
-        m_database->setSetting(QStringLiteral("fileExplorer.sortReverseGroups"), reverseGroups ? QStringLiteral("true") : QStringLiteral("false"));
+        m_state->setSetting(QStringLiteral("fileExplorer.sortField"), field);
+        m_state->setSetting(QStringLiteral("fileExplorer.sortDescending"), descending ? QStringLiteral("true") : QStringLiteral("false"));
+        m_state->setSetting(QStringLiteral("fileExplorer.sortReverseGroups"), reverseGroups ? QStringLiteral("true") : QStringLiteral("false"));
     };
     connect(m_libraryFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
         m_freeRoamFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
@@ -1145,15 +1156,21 @@ void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString 
 
 void MainWindow::loadViewSettings()
 {
-    m_trackTable->applyViewSettingsJson(m_database->setting(QStringLiteral("trackTable.view")));
-    const QString rightSidebarSettings = m_database->setting(QStringLiteral("rightSidebar.view"));
+    m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
+    const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
     m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
-    const QJsonObject playerBar = QJsonDocument::fromJson(m_database->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
+    const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
     m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
-    m_albumGrid->applyViewSettingsJson(m_database->setting(QStringLiteral("albumGrid.view")));
-    m_artistSidebar->applyViewSettingsJson(m_database->setting(QStringLiteral("artistSidebar.view")));
-    const QJsonObject mainWindow = QJsonDocument::fromJson(m_database->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
+
+    const int volume = std::clamp(m_state->setting(QStringLiteral("volume"), QStringLiteral("100")).toInt(), 0, 100);
+    m_volume = static_cast<double>(volume) / 100.0;
+    m_playback->setVolume(m_volume);
+    m_mpris->setVolume(m_volume);
+    m_playerBar->setVolume(volume);
+    m_albumGrid->applyViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
+    m_artistSidebar->applyViewSettingsJson(m_state->setting(QStringLiteral("artistSidebar.view")));
+    const QJsonObject mainWindow = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
     const QByteArray geometry = QByteArray::fromBase64(mainWindow.value(QStringLiteral("geometry")).toString().toLatin1());
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
@@ -1175,33 +1192,33 @@ void MainWindow::loadViewSettings()
     m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
     refreshLibraryFileExplorer();
 
-    const QString keyProfile = m_database->setting(QStringLiteral("fileExplorer.keyBindingProfile"));
+    const QString keyProfile = m_state->setting(QStringLiteral("fileExplorer.keyBindingProfile"));
     if (!keyProfile.isEmpty()) {
         m_libraryFileExplorer->setKeyBindingProfileName(keyProfile);
         m_freeRoamFileExplorer->setKeyBindingProfileName(keyProfile);
     }
-    const QString showHints = m_database->setting(QStringLiteral("fileExplorer.showKeyHints"));
+    const QString showHints = m_state->setting(QStringLiteral("fileExplorer.showKeyHints"));
     const bool hintsVisible = showHints == QStringLiteral("true");
     m_libraryFileExplorer->setKeyHintBarVisible(hintsVisible);
     m_freeRoamFileExplorer->setKeyHintBarVisible(hintsVisible);
 
-    const bool showUnsupported = m_database->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
+    const bool showUnsupported = m_state->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
     m_playerBar->setListUnsupportedFiles(showUnsupported);
     m_libraryFileExplorer->setShowUnsupportedFiles(showUnsupported);
     m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
 
-    m_freeRoamFileExplorer->setStartDirectory(m_database->setting(QStringLiteral("fileExplorer.startDirectory")));
+    m_freeRoamFileExplorer->setStartDirectory(m_state->setting(QStringLiteral("fileExplorer.startDirectory")));
 
-    const int explorerRowHeight = m_database->setting(QStringLiteral("fileExplorer.rowHeight")).toInt();
+    const int explorerRowHeight = m_state->setting(QStringLiteral("fileExplorer.rowHeight")).toInt();
     if (explorerRowHeight > 0) {
         m_libraryFileExplorer->setRowHeight(explorerRowHeight);
         m_freeRoamFileExplorer->setRowHeight(explorerRowHeight);
     }
 
     const MusicSort::SortField explorerSortField = MusicSort::sortFieldFromString(
-        m_database->setting(QStringLiteral("fileExplorer.sortField")), MusicSort::SortField::FileName);
-    const bool explorerSortDesc = m_database->setting(QStringLiteral("fileExplorer.sortDescending")) == QStringLiteral("true");
-    const bool explorerSortReverseGroups = m_database->setting(QStringLiteral("fileExplorer.sortReverseGroups")) == QStringLiteral("true");
+        m_state->setting(QStringLiteral("fileExplorer.sortField")), MusicSort::SortField::FileName);
+    const bool explorerSortDesc = m_state->setting(QStringLiteral("fileExplorer.sortDescending")) == QStringLiteral("true");
+    const bool explorerSortReverseGroups = m_state->setting(QStringLiteral("fileExplorer.sortReverseGroups")) == QStringLiteral("true");
     m_libraryFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
     m_freeRoamFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
 
@@ -1211,23 +1228,23 @@ void MainWindow::loadViewSettings()
 
 void MainWindow::saveTrackTableViewSettings()
 {
-    m_database->setSetting(QStringLiteral("trackTable.view"), m_trackTable->viewSettingsJson());
+    m_state->setSetting(QStringLiteral("trackTable.view"), m_trackTable->viewSettingsJson());
     applySharedTableSettings();
 }
 
 void MainWindow::saveAlbumGridViewSettings()
 {
-    m_database->setSetting(QStringLiteral("albumGrid.view"), m_albumGrid->viewSettingsJson());
+    m_state->setSetting(QStringLiteral("albumGrid.view"), m_albumGrid->viewSettingsJson());
 }
 
 void MainWindow::saveArtistSidebarViewSettings()
 {
-    m_database->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
+    m_state->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
 }
 
 void MainWindow::saveRightSidebarViewSettings()
 {
-    m_database->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
+    m_state->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
     applySharedTableSettings();
 }
 
@@ -1248,7 +1265,7 @@ void MainWindow::saveMainWindowViewSettings()
     root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
     root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);
     root.insert(QStringLiteral("freeRoamDirectory"), m_freeRoamDirectory);
-    m_database->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    m_state->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::switchMainView(MainView view)
@@ -1343,7 +1360,7 @@ void MainWindow::refreshLibraryFileExplorer()
 
 void MainWindow::loadQueueState()
 {
-    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("queue.state")).toUtf8()).object();
+    const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
     const QJsonArray tracks = root.value(QStringLiteral("tracks")).toArray();
     m_queue.clear();
     m_queue.reserve(tracks.size());
@@ -1379,13 +1396,13 @@ void MainWindow::saveQueueState()
     root.insert(QStringLiteral("tracks"), tracks);
     root.insert(QStringLiteral("index"), m_queueIndex);
     root.insert(QStringLiteral("playNextInsertIndex"), m_playNextInsertIndex);
-    m_database->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    m_state->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
     updateMprisCapabilities();
 }
 
 void MainWindow::loadExplorerState()
 {
-    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("libraryExplorer.state")).toUtf8()).object();
+    const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("libraryExplorer.state")).toUtf8()).object();
     m_librarySource = root.value(QStringLiteral("source")).toString() == QStringLiteral("mpd") ? LibrarySource::Mpd : LibrarySource::Local;
     m_localArtist = root.value(QStringLiteral("localArtist")).toString(root.value(QStringLiteral("artist")).toString());
     m_localAlbumTitle = root.value(QStringLiteral("localAlbum")).toString(root.value(QStringLiteral("album")).toString());
@@ -1403,21 +1420,21 @@ void MainWindow::saveExplorerState()
     root.insert(QStringLiteral("localAlbum"), m_localAlbumTitle);
     root.insert(QStringLiteral("mpdArtist"), m_mpdArtist);
     root.insert(QStringLiteral("mpdAlbum"), m_mpdAlbumTitle);
-    m_database->setSetting(QStringLiteral("libraryExplorer.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    m_state->setSetting(QStringLiteral("libraryExplorer.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::applySharedTableSettings()
 {
-    const QJsonObject sharedSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("tables.view")).toUtf8()).object();
-    const QJsonObject trackSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("trackTable.view")).toUtf8()).object();
-    const QJsonObject sidebarSettings = QJsonDocument::fromJson(m_database->setting(QStringLiteral("rightSidebar.view")).toUtf8()).object();
+    const QJsonObject sharedSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("tables.view")).toUtf8()).object();
+    const QJsonObject trackSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("trackTable.view")).toUtf8()).object();
+    const QJsonObject sidebarSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("rightSidebar.view")).toUtf8()).object();
     const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(20)));
     m_trackTable->setHeaderHeight(headerHeight);
     m_rightSidebar->setHeaderHeight(headerHeight);
 
     QJsonObject shared;
     shared.insert(QStringLiteral("headerHeight"), headerHeight);
-    m_database->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
+    m_state->setSetting(QStringLiteral("tables.view"), QString::fromUtf8(QJsonDocument(shared).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::applyTrackInfoPaneVisible(bool visible)
@@ -1432,7 +1449,7 @@ void MainWindow::applyCompactMenu(bool compact)
     m_playerBar->setCompactMenu(compact);
     QJsonObject root;
     root.insert(QStringLiteral("compactMenu"), compact);
-    m_database->setSetting(QStringLiteral("playerBar.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    m_state->setSetting(QStringLiteral("playerBar.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::rememberCurrentSourceSelection()
@@ -1518,7 +1535,7 @@ void MainWindow::savePlaybackState(bool force)
     root.insert(QStringLiteral("trackPath"), m_currentTrack.path);
     root.insert(QStringLiteral("positionMs"), QString::number(positionMs));
     root.insert(QStringLiteral("state"), stateName);
-    m_database->setSetting(QStringLiteral("playback.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    m_state->setSetting(QStringLiteral("playback.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
     m_lastSavedPlaybackPositionMs = positionMs;
     m_lastSavedPlaybackTrackPath = m_currentTrack.path;
     m_lastSavedPlaybackState = stateName;
@@ -1530,7 +1547,7 @@ void MainWindow::restoreSavedPlaybackState()
         return;
     }
 
-    const QJsonObject root = QJsonDocument::fromJson(m_database->setting(QStringLiteral("playback.state")).toUtf8()).object();
+    const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playback.state")).toUtf8()).object();
     const int queueIndex = root.value(QStringLiteral("queueIndex")).toInt(-1);
     const QString trackPath = root.value(QStringLiteral("trackPath")).toString();
     const qint64 positionMs = root.value(QStringLiteral("positionMs")).toString().toLongLong();
@@ -1687,7 +1704,7 @@ void MainWindow::configureTrackInfoPanel()
 
 void MainWindow::configureAlbumArtResolution()
 {
-    const int current = std::clamp(m_database->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
+    const int current = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
     bool ok = false;
     const int size = QInputDialog::getInt(this,
                                           QStringLiteral("Album art resolution"),
@@ -1697,7 +1714,7 @@ void MainWindow::configureAlbumArtResolution()
         return;
     }
 
-    m_database->setSetting(QStringLiteral("artwork.size"), QString::number(size));
+    m_state->setSetting(QStringLiteral("artwork.size"), QString::number(size));
     if (m_artworkCache != nullptr) {
         m_artworkCache->setArtSize(size);
     }
@@ -1883,7 +1900,7 @@ void MainWindow::configureListenBrainz()
                               Qt::QueuedConnection,
                               Q_ARG(bool, enabled),
                               Q_ARG(QString, token),
-                              Q_ARG(QString, stateRoot() + QStringLiteral("/listenbrainz-pending.json")));
+                              Q_ARG(QString, QDir(AppPaths::stateDir()).filePath(QStringLiteral("listenbrainz-pending.json"))));
 }
 
 void MainWindow::setListenBrainzEnabled(bool enabled)
@@ -1950,7 +1967,7 @@ void MainWindow::configureLastFm()
                               Q_ARG(QString, lastFmApiKey()),
                               Q_ARG(QString, lastFmSharedSecret()),
                               Q_ARG(QString, sessionKey),
-                              Q_ARG(QString, stateRoot() + QStringLiteral("/lastfm-pending.json")));
+                              Q_ARG(QString, QDir(AppPaths::stateDir()).filePath(QStringLiteral("lastfm-pending.json"))));
 }
 
 void MainWindow::setLastFmEnabled(bool enabled)
@@ -2520,48 +2537,7 @@ void MainWindow::updateCurrentAlbumArt()
 
 QString MainWindow::databasePath() const
 {
-    const QString root = stateRoot() + QStringLiteral("/data");
-    QDir().mkpath(root);
-    return QDir(root).filePath(QStringLiteral("library.sqlite"));
-}
-
-QString MainWindow::cacheRoot() const
-{
-    const QString root = stateRoot() + QStringLiteral("/cache");
-    QDir().mkpath(root);
-    return QDir(root).filePath(QStringLiteral("artwork"));
-}
-
-QString MainWindow::mpdCacheRoot() const
-{
-    const QString root = stateRoot() + QStringLiteral("/cache");
-    QDir().mkpath(root);
-    return QDir(root).filePath(QStringLiteral("mpd-artwork"));
-}
-
-QString MainWindow::stateRoot() const
-{
-    const QString overrideRoot = qApp->property("muzaiten.stateRoot").toString();
-    if (!overrideRoot.isEmpty()) {
-        QDir().mkpath(overrideRoot);
-        return overrideRoot;
-    }
-
-    if (useDevState()) {
-        const QString root = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("dev-state"));
-        QDir().mkpath(root);
-        return root;
-    }
-
-    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(root);
-    return root;
-}
-
-bool MainWindow::useDevState() const
-{
-    return qApp->property("muzaiten.devState").toBool()
-        || QCoreApplication::applicationDirPath().endsWith(QStringLiteral("/build"));
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("library.sqlite"));
 }
 
 QString MainWindow::resolvedReadPathForTrack(const Track &track) const

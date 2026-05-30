@@ -114,20 +114,27 @@ public:
         setAutoRaise(true);
         setFixedSize(34, 34);
 
-        auto *slider = new QSlider(Qt::Vertical);
-        slider->setRange(0, 100);
-        slider->setValue(100);
-        slider->setFixedHeight(120);
-        slider->setFixedWidth(36);
+        m_slider = new QSlider(Qt::Vertical);
+        m_slider->setRange(0, 100);
+        m_slider->setValue(100);
+        m_slider->setFixedHeight(120);
+        m_slider->setFixedWidth(36);
         auto *action = new QWidgetAction(this);
-        action->setDefaultWidget(slider);
+        action->setDefaultWidget(m_slider);
         m_menu.addAction(action);
         m_menu.installEventFilter(this);
-        connect(slider, &QSlider::valueChanged, this, [this](int value) {
+        connect(m_slider, &QSlider::valueChanged, this, [this](int value) {
             if (volumeChanged) {
                 volumeChanged(value);
             }
         });
+    }
+
+    // Reflects an externally-restored volume without re-emitting volumeChanged.
+    void setValue(int volume0To100)
+    {
+        const QSignalBlocker blocker(m_slider);
+        m_slider->setValue(std::clamp(volume0To100, 0, 100));
     }
 
     std::function<void(int)> volumeChanged;
@@ -164,6 +171,7 @@ private:
     }
 
     QMenu m_menu;
+    QSlider *m_slider = nullptr;
 };
 
 class ClickSeekSlider final : public QSlider {
@@ -440,6 +448,7 @@ PlayerBar::PlayerBar(QWidget *parent)
         emit volumeChanged(value);
     };
     controls->addWidget(volume);
+    m_volumeButton = volume;
 
     auto *single = iconButton(this, QStyle::SP_BrowserReload, QStringLiteral("Single mode"));
     single->setCheckable(true);
@@ -564,6 +573,13 @@ void PlayerBar::setPlaying(bool playing)
 {
     m_playPause->setIcon(style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
     m_playPause->setToolTip(playing ? QStringLiteral("Pause") : QStringLiteral("Play"));
+}
+
+void PlayerBar::setVolume(int volume0To100)
+{
+    if (m_volumeButton != nullptr) {
+        static_cast<VolumeButton *>(m_volumeButton)->setValue(volume0To100);
+    }
 }
 
 void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
