@@ -20,8 +20,8 @@ help:
 		'  make build      Configure and build the project' \
 		'  make test       Build and run the test suite' \
 		'  make smoke      Build and run the offscreen startup smoke test' \
-		'  make run        Build and launch the app with --verbose' \
-		'  make dev        Build, test, and run the app with --verbose' \
+		'  make run        Build and launch the app with --verbose (XDG dirs)' \
+		'  make dev        Build and launch with isolated ./dev-state (MUZAITEN_DEV_STATE)' \
 		'  make clean      Remove build outputs from $(BUILD_DIR)' \
 		'  make distclean  Alias for clean' \
 		'' \
@@ -54,7 +54,10 @@ smoke: build
 run: build
 	./$(APP) --verbose
 
-dev: test run
+# Dev launcher: MUZAITEN_DEV_STATE points all dirs at ./dev-state (CWD-relative),
+# so data/state/cache are isolated in the repo and shared across every build dir.
+dev: build
+	MUZAITEN_DEV_STATE=1 ./$(APP) --verbose
 
 clean:
 	rm -rf $(BUILD_DIR)

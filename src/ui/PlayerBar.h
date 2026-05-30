@@ -21,6 +21,7 @@ public:
     void setCompactMenu(bool compact);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
+    void setVolume(int volume0To100);
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -63,6 +64,7 @@ private:
     void updateShuffleIcon();
 
     class QToolButton *m_menuButton = nullptr;
+    class QToolButton *m_volumeButton = nullptr;
     QWidget *m_menuStrip = nullptr;
     class QMenuBar *m_menuBar = nullptr;
     class QToolButton *m_playPause = nullptr;

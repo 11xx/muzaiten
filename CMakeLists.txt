@@ -47,11 +47,13 @@ configure_file(
 
 set(MUZAITEN_SOURCES
     src/app/main.cpp
+    src/app/AppPaths.cpp
     src/app/MuzaitenApplication.cpp
     src/core/MetadataBlob.cpp
     src/core/MusicSort.cpp
     src/core/Rating.cpp
     src/db/Database.cpp
+    src/db/SettingsStore.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
@@ -94,6 +96,7 @@ set(MUZAITEN_SOURCES
 )
 
 set(MUZAITEN_HEADERS
+    src/app/AppPaths.h
     src/app/MuzaitenApplication.h
     src/core/Album.h
     src/core/Artist.h
@@ -104,6 +107,7 @@ set(MUZAITEN_HEADERS
     src/core/ScanRoot.h
     src/core/Track.h
     src/db/Database.h
+    src/db/SettingsStore.h
     src/db/Schema.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
