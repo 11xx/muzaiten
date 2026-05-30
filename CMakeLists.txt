@@ -49,6 +49,7 @@ set(MUZAITEN_SOURCES
     src/app/main.cpp
     src/app/MuzaitenApplication.cpp
     src/core/MetadataBlob.cpp
+    src/core/MusicSort.cpp
     src/core/Rating.cpp
     src/db/Database.cpp
     src/fs/PathResolver.cpp
@@ -97,6 +98,7 @@ set(MUZAITEN_HEADERS
     src/core/Artist.h
     src/core/MetadataBlob.h
     src/core/MusicBrainzIds.h
+    src/core/MusicSort.h
     src/core/Rating.h
     src/core/ScanRoot.h
     src/core/Track.h
