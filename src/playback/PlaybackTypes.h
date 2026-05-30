@@ -11,5 +11,5 @@ struct PlaybackProfile {
     QString device;
     bool softwareVolume = true;
     bool replayGain = false;
-    bool allowResample = true;
+    bool allowResample = false;
 };
