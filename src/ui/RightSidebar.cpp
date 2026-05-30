@@ -16,6 +16,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDragEnterEvent>
 #include <QDragLeaveEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -186,9 +187,31 @@ protected:
         fitVisibleColumnsToViewport();
     }
 
+    bool isQueueDrag(const QMimeData *mime) const
+    {
+        return mime != nullptr && mime->hasFormat(QString::fromLatin1(queueRowsMimeType));
+    }
+
+    void dragEnterEvent(QDragEnterEvent *event) override
+    {
+        if (isQueueDrag(event->mimeData())) {
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+        } else {
+            QTableView::dragEnterEvent(event);
+        }
+    }
+
     void dragMoveEvent(QDragMoveEvent *event) override
     {
-        QTableView::dragMoveEvent(event);
+        if (isQueueDrag(event->mimeData())) {
+            // Accept the move across the whole viewport (including above the first
+            // row) so items can be dropped upward, not only downward.
+            event->setDropAction(Qt::MoveAction);
+            event->accept();
+        } else {
+            QTableView::dragMoveEvent(event);
+        }
         setDropIndicatorRow(rowForDropPosition(event->position().toPoint()));
     }
 
@@ -200,7 +223,7 @@ protected:
 
     void dropEvent(QDropEvent *event) override
     {
-        if (event->mimeData() != nullptr && event->mimeData()->hasFormat(QString::fromLatin1(queueRowsMimeType))) {
+        if (isQueueDrag(event->mimeData())) {
             QVector<int> rows;
             QByteArray payload = event->mimeData()->data(QString::fromLatin1(queueRowsMimeType));
             QDataStream stream(&payload, QIODevice::ReadOnly);
@@ -469,11 +492,13 @@ public:
 
     Qt::ItemFlags flags(const QModelIndex &index) const override
     {
-        Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsDropEnabled;
         if (index.isValid()) {
-            flags |= Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
+            // Rows are draggable but NOT drop targets: drops only land *between*
+            // rows (above/below), never "onto" a row, so there is no third
+            // ambiguous "over" snap state.
+            return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
         }
-        return flags;
+        return Qt::ItemIsEnabled | Qt::ItemIsDropEnabled;
     }
 
     Qt::DropActions supportedDropActions() const override
@@ -1030,7 +1055,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_queueTable->setDragEnabled(true);
     m_queueTable->setAcceptDrops(true);
-    m_queueTable->setDropIndicatorShown(true);
+    m_queueTable->setDropIndicatorShown(false); // we draw our own above/below line
     m_queueTable->setDragDropMode(QAbstractItemView::InternalMove);
     m_queueTable->setDefaultDropAction(Qt::MoveAction);
     m_queueTable->setDragDropOverwriteMode(false);
