@@ -166,6 +166,23 @@ void GStreamerPlaybackBackend::stop()
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
+    // Clear all source state so hasSource() is honest after stop/end-of-queue.
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri.clear();
+        m_preparedUri.clear();
+        m_gaplessAdvancePending = false;
+    }
+    const qint64 prevPos = m_positionMs;
+    const qint64 prevDur = m_durationMs;
+    m_positionMs = 0;
+    m_durationMs = 0;
+    if (prevPos != 0) {
+        emit positionChanged(0);
+    }
+    if (prevDur != 0) {
+        emit durationChanged(0);
+    }
     updateState(State::Stopped);
 }
 

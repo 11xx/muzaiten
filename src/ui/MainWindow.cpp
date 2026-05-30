@@ -530,6 +530,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playback, &PlaybackBackend::finished, this, [this]() {
         if (m_queueIndex + 1 < m_queue.size()) {
             playQueueIndex(m_queueIndex + 1);
+        } else {
+            // End of queue: tear the pipeline down so hasSource() is false and
+            // the output device is freed. A later Play will restart cleanly.
+            m_playback->stop();
+            updateMprisCapabilities();
         }
     });
     connect(m_playback, &PlaybackBackend::errorOccurred, this, [this](const QString &errorString) {
