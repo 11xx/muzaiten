@@ -19,6 +19,7 @@
 #include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTimer>
+#include <QResizeEvent>
 #include <QWheelEvent>
 #include <algorithm>
 
@@ -227,6 +228,8 @@ void AlbumGrid::populateItemFromAlbum(QStandardItem *item, const Album &album)
     item->setData(album.representativeDir, RepresentativeDirRole);
     item->setData(m_artworkGeneration, ArtworkGenerationRole);
     item->setData(m_showLoading, LoadingRole);
+    item->setData(m_effectiveArtSize, ArtSizeRole);
+    item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
     item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
 }
 
@@ -248,10 +251,10 @@ void AlbumGrid::appendNextAlbumBatch()
         item->setEditable(false);
         populateItemFromAlbum(item, album);
         item->setData(static_cast<int>(m_textAlignment), TextAlignmentRole);
-        item->setData(m_artSize, ArtSizeRole);
+        item->setData(m_effectiveArtSize, ArtSizeRole);
         item->setData(m_padding, CellPaddingRole);
         item->setData(m_starSize, StarSizeRole);
-        item->setData(QSize(m_cellWidth, m_cellHeight), Qt::SizeHintRole);
+        item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
         item->setIcon(fallbackIcon);
 
         itemModel->appendRow(item);
@@ -406,7 +409,7 @@ void AlbumGrid::wheelEvent(QWheelEvent *event)
 QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
 {
     const QRect cell = visualRect(index).adjusted(m_padding, m_padding, -m_padding, -m_padding);
-    const QRect artRect(cell.left() + ((cell.width() - m_artSize) / 2), cell.top(), m_artSize, m_artSize);
+    const QRect artRect(cell.left() + ((cell.width() - m_effectiveArtSize) / 2), cell.top(), m_effectiveArtSize, m_effectiveArtSize);
     const QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 58);
     const QRect ratingCell = alignedRatingCell(artRect, textRect, m_starSize, m_textAlignment);
     return StarRating::ratingRect(ratingCell, m_starSize);
@@ -493,11 +496,46 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
     menu.exec(viewport()->mapToGlobal(pos));
 }
 
+void AlbumGrid::recomputeEffectiveSizes()
+{
+    const int vpW = viewport()->width();
+    if (vpW <= 0) {
+        m_effectiveCellWidth = m_cellWidth;
+        m_effectiveCellHeight = m_cellHeight;
+        m_effectiveArtSize = m_artSize;
+        return;
+    }
+
+    // Number of columns that fit at the configured base width, then stretch each
+    // cell so that many columns exactly fill the width (no right-edge slack).
+    const int cols = std::max(1, (vpW + m_spacing) / (m_cellWidth + m_spacing));
+    const int effCellW = std::max(m_cellWidth, (vpW - m_spacing * (cols + 1)) / cols);
+
+    const int artHPad = m_cellWidth - m_artSize;   // horizontal padding around art
+    const int artVExtra = m_cellHeight - m_artSize; // text/rating area below art
+    m_effectiveCellWidth = effCellW;
+    m_effectiveArtSize = std::max(m_artSize, effCellW - artHPad);
+    m_effectiveCellHeight = m_effectiveArtSize + artVExtra;
+}
+
+void AlbumGrid::resizeEvent(QResizeEvent *event)
+{
+    QListView::resizeEvent(event);
+    const int previousArt = m_effectiveArtSize;
+    const int previousW = m_effectiveCellWidth;
+    recomputeEffectiveSizes();
+    if (m_effectiveArtSize != previousArt || m_effectiveCellWidth != previousW) {
+        applySettingsToView();
+        applySettingsToItems();
+    }
+}
+
 void AlbumGrid::applySettingsToView()
 {
+    recomputeEffectiveSizes();
     setSpacing(m_spacing);
-    setIconSize(QSize(m_artSize, m_artSize));
-    setGridSize(QSize(m_cellWidth, m_cellHeight));
+    setIconSize(QSize(m_effectiveArtSize, m_effectiveArtSize));
+    setGridSize(QSize(m_effectiveCellWidth, m_effectiveCellHeight));
 }
 
 void AlbumGrid::applySettingsToItems()
@@ -511,10 +549,10 @@ void AlbumGrid::applySettingsToItems()
         const QString title = item->data(AlbumTitleRole).toString();
         item->setData(!title.isEmpty() && title == m_selectedAlbumTitle, SelectedRole);
         item->setData(static_cast<int>(m_textAlignment), TextAlignmentRole);
-        item->setData(m_artSize, ArtSizeRole);
+        item->setData(m_effectiveArtSize, ArtSizeRole);
         item->setData(m_padding, CellPaddingRole);
         item->setData(m_starSize, StarSizeRole);
-        item->setData(QSize(m_cellWidth, m_cellHeight), Qt::SizeHintRole);
+        item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
     }
     viewport()->update();
 }
