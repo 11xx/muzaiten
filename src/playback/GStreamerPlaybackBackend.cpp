@@ -127,6 +127,8 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
         return;
     }
 
+    m_softPaused = false;
+    m_pendingSeekMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
 
     const QString uri = uriForUrl(url);
@@ -149,20 +151,59 @@ void GStreamerPlaybackBackend::prepareNext(const QUrl &url)
 
 void GStreamerPlaybackBackend::pause()
 {
-    if (m_playbin != nullptr) {
+    if (m_playbin == nullptr) {
+        return;
+    }
+
+    const bool release = (m_profile.mode == QStringLiteral("bit-perfect"))
+                         || m_profile.releaseSinkOnPause;
+
+    if (release) {
+        // Capture position before tearing down the pipeline.
+        gint64 pos = GST_CLOCK_TIME_NONE;
+        gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos);
+        m_resumePositionMs = clockTimeToMs(pos);
+        m_softPaused = true;
+        // READY releases the audio device but keeps the element graph intact
+        // so re-preroll on resume is fast.  State messages from the
+        // PLAYING→PAUSED→READY transitions are suppressed in handleMessage
+        // while m_softPaused is true.
+        gst_element_set_state(m_playbin, GST_STATE_READY);
+        updateState(State::Paused);
+    } else {
         gst_element_set_state(m_playbin, GST_STATE_PAUSED);
     }
 }
 
 void GStreamerPlaybackBackend::resume()
 {
-    if (m_playbin != nullptr) {
-        gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+    if (m_playbin == nullptr) {
+        return;
     }
+
+    if (m_softPaused) {
+        const qint64 seekTo = m_resumePositionMs;
+        m_softPaused = false;
+        // Re-preroll: READY→PAUSED.  Block until the pipeline has prerolled
+        // (typically <50 ms for local files) so we can seek reliably before
+        // letting it play.
+        gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+        gst_element_get_state(m_playbin, nullptr, nullptr, 5 * GST_SECOND);
+        if (seekTo > 0) {
+            gst_element_seek_simple(m_playbin,
+                                    GST_FORMAT_TIME,
+                                    static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH
+                                                              | GST_SEEK_FLAG_KEY_UNIT),
+                                    static_cast<gint64>(seekTo) * GST_MSECOND);
+        }
+    }
+    gst_element_set_state(m_playbin, GST_STATE_PLAYING);
 }
 
 void GStreamerPlaybackBackend::stop()
 {
+    m_softPaused = false;
+    m_pendingSeekMs = -1;
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
@@ -306,7 +347,7 @@ void GStreamerPlaybackBackend::pollBus()
 
 void GStreamerPlaybackBackend::pollPosition()
 {
-    if (m_playbin == nullptr) {
+    if (m_playbin == nullptr || m_softPaused) {
         return;
     }
 
@@ -372,7 +413,12 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             gst_message_parse_state_changed(message, &oldState, &newState, &pending);
             Q_UNUSED(oldState)
             Q_UNUSED(pending)
-            updateState(stateFromGst(newState));
+            // While soft-paused the pipeline is transitioning to READY to release
+            // the audio device; suppress those intermediate state messages so the
+            // UI stays in Paused and we don't notify scrobblers/MPRIS of a stop.
+            if (!m_softPaused) {
+                updateState(stateFromGst(newState));
+            }
         }
         break;
     default:

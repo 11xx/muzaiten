@@ -89,6 +89,7 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
     profile.softwareVolume = root.value(QStringLiteral("softwareVolume")).toBool(profile.softwareVolume);
     profile.replayGain = root.value(QStringLiteral("replayGain")).toBool(profile.replayGain);
     profile.allowResample = root.value(QStringLiteral("allowResample")).toBool(profile.allowResample);
+    profile.releaseSinkOnPause = root.value(QStringLiteral("releaseSinkOnPause")).toBool(profile.releaseSinkOnPause);
     return profile;
 }
 
@@ -104,6 +105,7 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("softwareVolume"), profile.softwareVolume);
     root.insert(QStringLiteral("replayGain"), profile.replayGain);
     root.insert(QStringLiteral("allowResample"), profile.allowResample);
+    root.insert(QStringLiteral("releaseSinkOnPause"), profile.releaseSinkOnPause);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 

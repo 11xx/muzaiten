@@ -51,4 +51,11 @@ private:
     qint64 m_durationMs = 0;
     bool m_gaplessAdvancePending = false;
     double m_volume = 1.0;
+
+    // Soft-pause: the pipeline is driven to READY (releasing the audio device)
+    // while we remember the position for a seamless seek on resume.
+    bool m_softPaused = false;
+    qint64 m_resumePositionMs = 0;
+    // Pending seek to apply once the pipeline prerolls after a soft-pause resume.
+    qint64 m_pendingSeekMs = -1;
 };
