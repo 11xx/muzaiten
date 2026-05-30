@@ -54,7 +54,7 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
 
     // Sink (shared mode only)
     m_sink = new QComboBox(this);
-    m_sink->addItem(QStringLiteral("Auto (PipeWire → PulseAudio)"), QStringLiteral("auto"));
+    m_sink->addItem(QStringLiteral("Auto"), QStringLiteral("auto"));
     m_sink->addItem(QStringLiteral("PipeWire"),   QStringLiteral("pipewire"));
     m_sink->addItem(QStringLiteral("PulseAudio"), QStringLiteral("pulse"));
     m_sink->addItem(QStringLiteral("ALSA"),       QStringLiteral("alsa"));
@@ -91,6 +91,11 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
+
+    // Pin the minimum size to the fully-expanded (shared) state so switching
+    // modes never shrinks the dialog.
+    layout->activate();
+    setMinimumSize(sizeHint());
 
     updateModeVisibility();
 }
