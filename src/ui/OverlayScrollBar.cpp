@@ -8,7 +8,7 @@
 #include <QScrollBar>
 
 OverlayScrollBar::OverlayScrollBar(QAbstractScrollArea *area, QWidget *parent)
-    : QWidget(parent != nullptr ? parent : area->viewport())
+    : QWidget(parent != nullptr ? parent : area)
     , m_area(area)
     , m_scrollBar(area->verticalScrollBar())
 {
@@ -33,7 +33,9 @@ OverlayScrollBar::OverlayScrollBar(QAbstractScrollArea *area, QWidget *parent)
 
 void OverlayScrollBar::install(QAbstractScrollArea *area)
 {
-    new OverlayScrollBar(area); // parented to viewport; lifetime managed by viewport
+    // Parented to the scroll area (not its viewport): a viewport child would be
+    // blitted along with the content on every scroll, making the handle flicker.
+    new OverlayScrollBar(area);
 }
 
 // ---------------------------------------------------------------------------
@@ -42,8 +44,9 @@ void OverlayScrollBar::install(QAbstractScrollArea *area)
 
 void OverlayScrollBar::reposition()
 {
-    const QSize vp = m_area->viewport()->size();
-    setGeometry(vp.width() - ghostZone, 0, ghostZone, vp.height());
+    // Position over the viewport's right edge, in the scroll area's coordinates.
+    const QRect vr = m_area->viewport()->geometry();
+    setGeometry(vr.x() + vr.width() - ghostZone, vr.y(), ghostZone, vr.height());
     raise();
 }
 
@@ -151,8 +154,12 @@ bool OverlayScrollBar::eventFilter(QObject *watched, QEvent *event)
     case QEvent::MouseButtonPress: {
         auto *mouse = static_cast<QMouseEvent *>(event);
         if (!m_dragging && m_hovered && isScrollable() && mouse->button() == Qt::LeftButton) {
-            // mapFromParent: viewport coords → widget coords
-            if (handleRect().contains(mapFromParent(mouse->pos()))) {
+            // Convert viewport-local cursor pos to overlay-local coords. The
+            // overlay's left edge sits at (viewportWidth - ghostZone) and its
+            // top aligns with the viewport top.
+            const QPoint local(mouse->pos().x() - (m_area->viewport()->width() - ghostZone),
+                               mouse->pos().y());
+            if (handleRect().contains(local)) {
                 m_dragging = true;
                 m_dragStartPos = mouse->pos().y();
                 m_dragStartValue = m_scrollBar->value();
