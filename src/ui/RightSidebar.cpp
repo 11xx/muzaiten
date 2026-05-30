@@ -44,6 +44,7 @@
 #include <QSpinBox>
 #include <QTableView>
 #include <QTableWidget>
+#include <QScrollBar>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QByteArray>
@@ -61,18 +62,19 @@ struct ColumnSpec {
     const char *label;
     int index;
     int preferredWidth;
+    int minWidth = 24;
 };
 
 constexpr ColumnSpec columns[] = {
     {"position", "#", 0, 38},
     {"title", "Title", 1, 180},
     {"ratingEdit", "Rating", 2, 96},
-    {"rating", "Rating (short)", 3, 82},
+    {"rating", "Rating (short)", 3, 56, 12},
     {"artist", "Artist", 4, 120},
     {"album", "Album", 5, 120},
     {"duration", "Duration", 6, 70},
     {"year", "Year", 7, 58},
-    {"track", "Track", 8, 54},
+    {"track", "Track", 8, 36, 12},
 };
 
 constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
@@ -111,7 +113,7 @@ public:
                 continue;
             }
             visibleColumns.push_back(column);
-            totalWidth += std::max(24, columnWidth(column));
+            totalWidth += std::max(minWidthForColumn(column), columnWidth(column));
         }
         if (visibleColumns.isEmpty()) {
             return;
@@ -129,7 +131,7 @@ public:
         int fixedWidth = 0;
         int adjustableWidth = 0;
         for (int column : visibleColumns) {
-            const int width = std::max(24, columnWidth(column));
+            const int width = std::max(minWidthForColumn(column), columnWidth(column));
             if (column == fixedColumn) {
                 fixedWidth += width;
                 continue;
@@ -143,14 +145,19 @@ public:
             return;
         }
 
-        const int availableWidth = std::max(24 * static_cast<int>(adjustableColumns.size()), targetWidth - fixedWidth);
+        int sumAdjustableMin = 0;
+        for (int col : adjustableColumns) {
+            sumAdjustableMin += minWidthForColumn(col);
+        }
+        const int availableWidth = std::max(sumAdjustableMin, targetWidth - fixedWidth);
         int remainingWidth = availableWidth;
         for (int index = 0; index < adjustableColumns.size(); ++index) {
             const int column = adjustableColumns.at(index);
+            const int minW = minWidthForColumn(column);
             const int width = index == adjustableColumns.size() - 1
-                ? remainingWidth
-                : std::max(24, (columnWidth(column) * availableWidth) / std::max(1, adjustableWidth));
-            setColumnWidth(column, std::max(24, width));
+                ? std::max(minW, remainingWidth)
+                : std::max(minW, (columnWidth(column) * availableWidth) / std::max(1, adjustableWidth));
+            setColumnWidth(column, width);
             remainingWidth -= width;
         }
 
@@ -220,6 +227,16 @@ private:
             }
         }
         return 60;
+    }
+
+    static int minWidthForColumn(int column)
+    {
+        for (const ColumnSpec &spec : columns) {
+            if (spec.index == column) {
+                return spec.minWidth;
+            }
+        }
+        return 24;
     }
 
     int rowForDropPosition(const QPoint &pos) const
@@ -895,6 +912,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_queueTable->verticalHeader()->setDefaultSectionSize(18);
     m_queueTable->verticalHeader()->setMinimumSectionSize(18);
     m_queueTable->horizontalHeader()->setFixedHeight(20);
+    m_queueTable->horizontalHeader()->setMinimumSectionSize(8);
     m_queueTable->horizontalHeader()->setSectionsMovable(true);
     m_queueTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_queueTable->horizontalHeader()->setStretchLastSection(false);
@@ -924,6 +942,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable->horizontalHeader(), &QHeaderView::sectionResized, this, [this](int logicalIndex, int, int) {
         static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport(logicalIndex);
         emit viewSettingsChanged();
+    });
+    connect(m_queueTable->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this](int, int) {
+        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
     });
     connect(m_queueTable, &QWidget::customContextMenuRequested, this, &RightSidebar::showQueueMenu);
     queueView->rowsMoveRequested = [this](const QVector<int> &rows, int destinationRow) {
@@ -991,6 +1012,10 @@ void RightSidebar::setQueue(const QVector<Track> &tracks)
     if (auto *queueModel = qobject_cast<QueueTableModel *>(m_queueTable->model())) {
         queueModel->setTracks(tracks);
     }
+    // Defer until Qt finalizes the post-reset layout (scrollbar visibility may change).
+    QTimer::singleShot(0, this, [this]() {
+        static_cast<QueueTableView *>(m_queueTable)->fitVisibleColumnsToViewport();
+    });
 }
 
 void RightSidebar::setCurrentIndex(int index)
