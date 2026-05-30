@@ -113,6 +113,13 @@ private:
     void clearQueue();
     void clearPlayNextPriority();
     void refreshPlayNextRange();
+    // Single funnel for structural queue changes: re-derives and pushes every
+    // piece of queue-dependent state (sidebar contents, current row, play-next
+    // range, the gapless prepared-next buffer, persisted state) from the
+    // canonical (m_queue, m_queueIndex, m_playNextInsertIndex). Any mutator that
+    // changes queue contents or order MUST end by calling this so the prepared
+    // "next" track can never drift from the visible order.
+    void syncQueueState();
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
     void playQueueIndex(int index, bool notifyScrobbler = true);
