@@ -2281,6 +2281,7 @@ void MainWindow::playQueueIndex(int index, bool notifyScrobbler)
         m_playNextInsertIndex = m_queueIndex + 1;
     }
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     saveQueueState();
     playTrack(m_queue.at(m_queueIndex), notifyScrobbler);
 }
@@ -2381,6 +2382,7 @@ void MainWindow::advanceAfterPreparedTransition()
         m_playNextInsertIndex = m_queueIndex + 1;
     }
     m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
     presentTrack(m_queue.at(m_queueIndex));
     saveQueueState();
     prepareNextQueueTrack();
