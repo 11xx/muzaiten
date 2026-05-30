@@ -2,6 +2,7 @@
 
 #include "core/Track.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/OverlayScrollBar.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
@@ -286,6 +287,8 @@ TrackTable::TrackTable(QWidget *parent)
             emit trackActivated(track);
         }
     });
+
+    OverlayScrollBar::install(this);
 }
 
 int TrackTable::sortColumn() const

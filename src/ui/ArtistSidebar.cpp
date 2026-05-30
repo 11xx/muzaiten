@@ -1,6 +1,7 @@
 #include "ui/ArtistSidebar.h"
 
 #include "core/Artist.h"
+#include "ui/OverlayScrollBar.h"
 
 #include <QAction>
 #include <QApplication>
@@ -127,6 +128,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view->setUniformItemSizes(true);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->viewport()->installEventFilter(this);
+    OverlayScrollBar::install(m_view);
     layout->addWidget(m_view, 1);
 
     connect(m_view, &QListView::clicked, this, [this](const QModelIndex &index) {
