@@ -6,7 +6,10 @@
 #include <QFile>
 #include <QFormLayout>
 #include <QRegularExpression>
+#include <QSpinBox>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace {
 
@@ -89,6 +92,18 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
                        "Always enabled in bit-perfect mode."));
     m_form->addRow(QString(), m_releaseSinkOnPause);
 
+    // RAM preload
+    m_preloadPercent = new QSpinBox(this);
+    m_preloadPercent->setRange(0, 100);
+    m_preloadPercent->setSuffix(QStringLiteral("%"));
+    m_preloadPercent->setSpecialValueText(QStringLiteral("Off"));
+    m_preloadPercent->setToolTip(
+        QStringLiteral("Copy this percentage of each track into RAM before playback begins. "
+                       "0 = off (reads from disk normally). "
+                       "Any non-zero value loads the whole file into RAM, eliminating disk "
+                       "re-reads on resume and decoupling playback from slow or network mounts."));
+    m_form->addRow(QStringLiteral("Preload into RAM"), m_preloadPercent);
+
     connect(m_mode, &QComboBox::currentIndexChanged, this, [this]() {
         updateModeVisibility();
     });
@@ -149,6 +164,7 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     m_softwareVolume->setChecked(profile.softwareVolume);
     m_allowResample->setChecked(profile.allowResample);
     m_releaseSinkOnPause->setChecked(profile.releaseSinkOnPause);
+    m_preloadPercent->setValue(std::clamp(profile.preloadPercent, 0, 100));
 
     updateModeVisibility();
 }
@@ -175,6 +191,7 @@ PlaybackProfile PlaybackProfileDialog::profile() const
         p.allowResample      = m_allowResample->isChecked();
         p.releaseSinkOnPause = m_releaseSinkOnPause->isChecked();
     }
+    p.preloadPercent = m_preloadPercent->value();
 
     return p;
 }

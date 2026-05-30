@@ -7,6 +7,15 @@
 #include <algorithm>
 #include <mutex>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC 0x0001U
+#endif
+
 namespace {
 
 void initializeGStreamer()
@@ -131,7 +140,8 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     m_pendingSeekMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
 
-    const QString uri = uriForUrl(url);
+    const QString uri = sourceUriForPlayback(url, m_currentPreload);
+    m_preparedPreload.clear();
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri = uri;
@@ -144,7 +154,12 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
 
 void GStreamerPlaybackBackend::prepareNext(const QUrl &url)
 {
-    const QString uri = uriForUrl(url);
+    QString uri;
+    if (url.isEmpty()) {
+        m_preparedPreload.clear();
+    } else {
+        uri = sourceUriForPlayback(url, m_preparedPreload);
+    }
     QMutexLocker locker(&m_mutex);
     m_preparedUri = uri;
 }
@@ -207,6 +222,9 @@ void GStreamerPlaybackBackend::stop()
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
+    // Release preload buffers after GStreamer has closed its fds (NULL above).
+    m_currentPreload.clear();
+    m_preparedPreload.clear();
     // Clear all source state so hasSource() is honest after stop/end-of-queue.
     {
         QMutexLocker locker(&m_mutex);
@@ -297,6 +315,8 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    m_currentPreload.clear();
+    m_preparedPreload.clear();
 
     m_playbin = gst_element_factory_make("playbin3", "muzaiten-playbin");
     const QString playbinName = m_playbin != nullptr ? QStringLiteral("playbin3") : QStringLiteral("playbin");
@@ -438,4 +458,74 @@ void GStreamerPlaybackBackend::updateState(State state)
 QString GStreamerPlaybackBackend::uriForUrl(const QUrl &url) const
 {
     return QString::fromUtf8(url.toEncoded());
+}
+
+void GStreamerPlaybackBackend::onGaplessTrackAdvanced()
+{
+    // The prepared track has become the current one; promote the buffer so
+    // the old current-preload memfd is closed and the prepared slot is free.
+    m_currentPreload = std::move(m_preparedPreload);
+}
+
+QString GStreamerPlaybackBackend::sourceUriForPlayback(const QUrl &url, MemFdBuffer &buf)
+{
+    buf.clear();
+
+    if (m_profile.preloadPercent <= 0 || !url.isLocalFile()) {
+        return uriForUrl(url);
+    }
+
+    const std::string path = url.toLocalFile().toStdString();
+    const int srcFd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (srcFd < 0) {
+        return uriForUrl(url);
+    }
+
+    struct stat st{};
+    if (::fstat(srcFd, &st) != 0 || st.st_size <= 0) {
+        ::close(srcFd);
+        return uriForUrl(url);
+    }
+    const off_t fileSize = st.st_size;
+
+    // Create an anonymous in-RAM file.
+    const int mfd = static_cast<int>(
+        ::syscall(SYS_memfd_create, "muzaiten-preload", MFD_CLOEXEC));
+    if (mfd < 0) {
+        ::close(srcFd);
+        return uriForUrl(url);
+    }
+
+    if (::ftruncate(mfd, fileSize) != 0) {
+        ::close(mfd);
+        ::close(srcFd);
+        return uriForUrl(url);
+    }
+
+    // Copy the entire file synchronously into the memfd.  Any preloadPercent > 0
+    // is treated as "full file in RAM" in v1 — the percentage controls the
+    // opt-in threshold, not a partial-copy amount.
+    {
+        std::array<char, 256 * 1024> chunk{};
+        off_t remaining = fileSize;
+        while (remaining > 0) {
+            const ssize_t nr = ::read(srcFd, chunk.data(),
+                                      std::min<off_t>(remaining,
+                                                      static_cast<off_t>(chunk.size())));
+            if (nr <= 0) {
+                break;
+            }
+            if (::write(mfd, chunk.data(), static_cast<size_t>(nr)) != nr) {
+                break;
+            }
+            remaining -= nr;
+        }
+    }
+    ::close(srcFd);
+
+    // Rewind so GStreamer reads from the start.
+    ::lseek(mfd, 0, SEEK_SET);
+
+    buf.fd = mfd;
+    return QStringLiteral("file:///proc/self/fd/%1").arg(mfd);
 }
