@@ -1,5 +1,6 @@
 #include "ui/TrackTable.h"
 
+#include "core/MusicSort.h"
 #include "core/Track.h"
 #include "ui/DenseTableDelegate.h"
 #include "ui/OverlayScrollBar.h"
@@ -156,18 +157,17 @@ public:
             return;
         }
 
+        // Route the clicked column through the shared sort/grouping chains so
+        // ties (e.g. equal ratings) fall into a logical order rather than an
+        // arbitrary one. Header clicks have no "reverse groups" control.
+        const MusicSort::SortField field = sortFieldForColumn(column);
+        const auto dir = order == Qt::AscendingOrder
+            ? MusicSort::SortDirection::Ascending
+            : MusicSort::SortDirection::Descending;
+
         beginResetModel();
-        std::sort(m_tracks.begin(), m_tracks.end(), [column, order](const Track &left, const Track &right) {
-            const QVariant leftValue = sortValue(left, column);
-            const QVariant rightValue = sortValue(right, column);
-            int comparison = 0;
-            if (leftValue.metaType().id() == QMetaType::LongLong || leftValue.metaType().id() == QMetaType::Int) {
-                comparison = leftValue.toLongLong() < rightValue.toLongLong() ? -1 : (leftValue.toLongLong() > rightValue.toLongLong() ? 1 : 0);
-            } else {
-                comparison = QString::localeAwareCompare(leftValue.toString(), rightValue.toString());
-            }
-            return order == Qt::AscendingOrder ? comparison < 0 : comparison > 0;
-        });
+        std::stable_sort(m_tracks.begin(), m_tracks.end(),
+                         MusicSort::makeComparator<Track>(field, dir, /*reverseGroups=*/false));
         m_hoverRatings.fill(StarRating::unset, m_tracks.size());
         endResetModel();
     }
@@ -186,6 +186,20 @@ public:
     }
 
 private:
+    static MusicSort::SortField sortFieldForColumn(int column)
+    {
+        switch (column) {
+        case 0:  return MusicSort::SortField::Rating;
+        case 1:  return MusicSort::SortField::TrackNumber;
+        case 2:  return MusicSort::SortField::Title;
+        case 3:  return MusicSort::SortField::AlbumTitle;
+        case 4:  return MusicSort::SortField::Artist;
+        case 5:  return MusicSort::SortField::Duration;
+        case 6:  return MusicSort::SortField::Year;
+        default: return MusicSort::SortField::Title;
+        }
+    }
+
     static QVariant sortValue(const Track &track, int column)
     {
         switch (column) {
