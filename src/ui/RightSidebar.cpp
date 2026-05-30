@@ -39,6 +39,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QPolygonF>
 #include <QImage>
 #include <QPixmap>
 #include <QPushButton>
@@ -102,6 +103,15 @@ public:
     int dropIndicatorRow() const
     {
         return m_dropIndicatorRow;
+    }
+
+    void setCurrentPlayingRow(int row)
+    {
+        if (m_currentPlayingRow == row) {
+            return;
+        }
+        m_currentPlayingRow = row;
+        viewport()->update();
     }
 
     void fitVisibleColumnsToViewport(int fixedColumn = -1)
@@ -242,17 +252,45 @@ protected:
     void paintEvent(QPaintEvent *event) override
     {
         QTableView::paintEvent(event);
-        if (m_dropIndicatorRow < 0 || model() == nullptr) {
+        if (model() == nullptr) {
             return;
         }
 
-        const int y = yForDropRow(m_dropIndicatorRow);
         QPainter painter(viewport());
-        QColor color = palette().color(QPalette::Highlight);
-        color.setAlpha(210);
-        QPen pen(color, 2);
-        painter.setPen(pen);
-        painter.drawLine(QLine(0, y, viewport()->width(), y));
+
+        // Currently-playing indicator: a left accent bar plus a play glyph,
+        // drawn at the row level so it is independent of which columns are shown.
+        if (m_currentPlayingRow >= 0 && m_currentPlayingRow < model()->rowCount()) {
+            const int y = rowViewportPosition(m_currentPlayingRow);
+            const int h = rowHeight(m_currentPlayingRow);
+            if (h > 0 && y + h > 0 && y < viewport()->height()) {
+                const QColor accent = palette().color(QPalette::Highlight);
+                painter.fillRect(QRect(0, y, 3, h), accent);
+
+                // Small play triangle just right of the bar, vertically centred.
+                const int glyph = std::min(h - 6, 8);
+                if (glyph >= 5) {
+                    const int top = y + (h - glyph) / 2;
+                    const qreal left = 4.5;
+                    QPolygonF triangle({QPointF(left, top), QPointF(left, top + glyph),
+                                        QPointF(left + glyph * 0.85, top + glyph / 2.0)});
+                    painter.setRenderHint(QPainter::Antialiasing, true);
+                    painter.setPen(Qt::NoPen);
+                    painter.setBrush(accent);
+                    painter.drawPolygon(triangle);
+                    painter.setRenderHint(QPainter::Antialiasing, false);
+                }
+            }
+        }
+
+        if (m_dropIndicatorRow >= 0) {
+            const int y = yForDropRow(m_dropIndicatorRow);
+            QColor color = palette().color(QPalette::Highlight);
+            color.setAlpha(210);
+            QPen pen(color, 2);
+            painter.setPen(pen);
+            painter.drawLine(QLine(0, y, viewport()->width(), y));
+        }
     }
 
 private:
@@ -308,6 +346,7 @@ private:
     }
 
     int m_dropIndicatorRow = -1;
+    int m_currentPlayingRow = -1;
     bool m_fittingColumns = false;
 };
 
@@ -333,6 +372,11 @@ public:
         m_showTitleAccent = show;
     }
 
+    void setCurrentRow(int row)
+    {
+        m_currentRow = row;
+    }
+
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
         QStyleOptionViewItem opt(option);
@@ -340,6 +384,7 @@ public:
 
         const bool selected = opt.state & QStyle::State_Selected;
         const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
+        const bool playing = index.row() == m_currentRow;
 
         if (selected) {
             painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
@@ -347,6 +392,12 @@ public:
             QColor hover = opt.palette.color(QPalette::Highlight);
             hover.setAlpha(34);
             painter->fillRect(opt.rect, hover);
+        } else if (playing) {
+            // Distinct, column-independent tint for the currently playing row
+            // (every visible cell, regardless of which columns are shown).
+            QColor tint = opt.palette.color(QPalette::Highlight);
+            tint.setAlpha(48);
+            painter->fillRect(opt.rect, tint);
         } else if (index.row() % 2 == 1) {
             painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
         }
@@ -382,6 +433,7 @@ public:
 
 private:
     int m_hoveredRow = -1;
+    int m_currentRow = -1;
     bool m_showTitleAccent = false;
 };
 
@@ -1199,14 +1251,24 @@ void RightSidebar::setPlayNextRange(int begin, int end)
     }
 }
 
-void RightSidebar::setCurrentIndex(int index)
+void RightSidebar::setCurrentIndex(int index, bool reveal)
 {
-    if (index < 0 || index >= m_queueTable->model()->rowCount()) {
-        m_queueTable->clearSelection();
-        return;
+    // The "currently playing" row is shown with its own indicator and is kept
+    // independent of the user's selection, so reordering/adding/removing never
+    // hijacks the selection or scrolls the view. Only explicit playback changes
+    // (reveal == true) scroll the playing row into view.
+    const int rowCount = m_queueTable->model()->rowCount();
+    const int current = (index >= 0 && index < rowCount) ? index : -1;
+
+    static_cast<QueueTableView *>(m_queueTable)->setCurrentPlayingRow(current);
+    if (auto *delegate = qobject_cast<QueueItemDelegate *>(m_queueTable->itemDelegate())) {
+        delegate->setCurrentRow(current);
     }
-    m_queueTable->selectRow(index);
-    m_queueTable->scrollTo(m_queueTable->model()->index(index, 1), QAbstractItemView::PositionAtCenter);
+    m_queueTable->viewport()->update();
+
+    if (reveal && current >= 0) {
+        m_queueTable->scrollTo(m_queueTable->model()->index(current, 0), QAbstractItemView::PositionAtCenter);
+    }
 }
 
 void RightSidebar::setAlbumArt(const QString &imagePath)

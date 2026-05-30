@@ -1319,7 +1319,7 @@ void MainWindow::loadQueueState()
     m_queueIndex = std::clamp(root.value(QStringLiteral("index")).toInt(-1), -1, static_cast<int>(m_queue.size()) - 1);
     m_playNextInsertIndex = std::clamp(root.value(QStringLiteral("playNextInsertIndex")).toInt(m_queueIndex + 1), 0, static_cast<int>(m_queue.size()));
     m_rightSidebar->setQueue(m_queue);
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    m_rightSidebar->setCurrentIndex(m_queueIndex, /*reveal=*/true);
     refreshPlayNextRange();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
         presentTrack(m_queue.at(m_queueIndex), false);
@@ -2315,7 +2315,7 @@ void MainWindow::playQueueIndex(int index, bool notifyScrobbler)
     if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
         m_playNextInsertIndex = m_queueIndex + 1;
     }
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    m_rightSidebar->setCurrentIndex(m_queueIndex, /*reveal=*/true);
     refreshPlayNextRange();
     saveQueueState();
     playTrack(m_queue.at(m_queueIndex), notifyScrobbler);
