@@ -1,5 +1,6 @@
 #include "ui/FileExplorerView.h"
 
+#include "core/MusicSort.h"
 #include "scanner/LibraryScanner.h"
 #include "scanner/TagReader.h"
 #include "ui/OverlayScrollBar.h"
@@ -306,6 +307,7 @@ void FileExplorerView::setLibraryEntries(const QStringList &directories, const Q
     for (const Track &track : tracks) {
         addTrackItem(track);
     }
+    sortTopLevelItems();
     restoreSelectionForCurrentDirectory();
     // Force a full repaint; without this the view can keep showing the prior
     // listing until each row is hovered.
@@ -348,6 +350,7 @@ void FileExplorerView::refreshFreeRoam()
     if (!m_pendingMetadata.isEmpty()) {
         m_metadataTimer->start();
     }
+    sortTopLevelItems();
     restoreSelectionForCurrentDirectory();
     // Force a full repaint; without this the view can keep showing the prior
     // listing until each row is hovered.
@@ -379,6 +382,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
             setStart = menu.addAction(QStringLiteral("Set current folder as start directory (b to jump)"));
             menu.addSeparator();
         }
+        buildSortMenu(&menu);
         QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
         for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
             QAction *action = keyMenu->addAction(profile.label);
@@ -413,6 +417,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
             setStart = menu.addAction(QStringLiteral("Set as start directory (b to jump)"));
         }
         menu.addSeparator();
+        buildSortMenu(&menu);
         QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
         for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
             QAction *action = keyMenu->addAction(profile.label);
@@ -472,6 +477,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     }
 
     menu.addSeparator();
+    buildSortMenu(&menu);
     QMenu *keyMenu = menu.addMenu(QStringLiteral("Key bindings"));
     for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
         QAction *action = keyMenu->addAction(profile.label);
@@ -533,6 +539,97 @@ void FileExplorerView::navigateUp()
         return;
     }
     emit directoryRequested(parent);
+}
+
+void FileExplorerView::sortTopLevelItems()
+{
+    const int count = m_tree->topLevelItemCount();
+    if (count <= 1) {
+        return;
+    }
+
+    QTreeWidgetItem *current = m_tree->currentItem();
+    const QString currentPath = current != nullptr ? current->data(0, PathRole).toString() : QString();
+
+    QList<QTreeWidgetItem *> items;
+    items.reserve(count);
+    while (m_tree->topLevelItemCount() > 0) {
+        items.push_back(m_tree->takeTopLevelItem(0));
+    }
+
+    const auto dir = m_sortDescending ? MusicSort::SortDirection::Descending : MusicSort::SortDirection::Ascending;
+    const auto cmp = MusicSort::makeComparator<Track>(m_sortField, dir, m_sortReverseGroups);
+    std::stable_sort(items.begin(), items.end(), [&](QTreeWidgetItem *a, QTreeWidgetItem *b) {
+        const bool aDir = a->data(0, TypeRole).toInt() == DirectoryItem;
+        const bool bDir = b->data(0, TypeRole).toInt() == DirectoryItem;
+        if (aDir != bDir) {
+            return aDir; // directories always grouped first
+        }
+        if (aDir) {
+            return QString::localeAwareCompare(a->text(NameColumn), b->text(NameColumn)) < 0;
+        }
+        return cmp(a->data(0, TrackRole).value<Track>(), b->data(0, TrackRole).value<Track>());
+    });
+
+    m_tree->addTopLevelItems(items);
+
+    if (!currentPath.isEmpty()) {
+        for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *it = m_tree->topLevelItem(i);
+            if (it->data(0, PathRole).toString() == currentPath) {
+                m_tree->setCurrentItem(it);
+                break;
+            }
+        }
+    }
+}
+
+void FileExplorerView::setSort(MusicSort::SortField field, bool descending, bool reverseGroups)
+{
+    if (m_sortField == field && m_sortDescending == descending && m_sortReverseGroups == reverseGroups) {
+        return;
+    }
+    m_sortField = field;
+    m_sortDescending = descending;
+    m_sortReverseGroups = reverseGroups;
+    sortTopLevelItems();
+    emit sortChanged(MusicSort::sortFieldToString(m_sortField), m_sortDescending, m_sortReverseGroups);
+}
+
+void FileExplorerView::buildSortMenu(QMenu *parent)
+{
+    QMenu *sortMenu = parent->addMenu(QStringLiteral("Sort by"));
+    const struct { const char *label; MusicSort::SortField field; } options[] = {
+        {"Name", MusicSort::SortField::FileName},
+        {"Year", MusicSort::SortField::Year},
+        {"Album", MusicSort::SortField::AlbumTitle},
+        {"Artist", MusicSort::SortField::Artist},
+        {"Rating", MusicSort::SortField::Rating},
+        {"Duration", MusicSort::SortField::Duration},
+        {"Track number", MusicSort::SortField::TrackNumber},
+    };
+    for (const auto &opt : options) {
+        QAction *action = sortMenu->addAction(QString::fromUtf8(opt.label));
+        action->setCheckable(true);
+        action->setChecked(m_sortField == opt.field);
+        connect(action, &QAction::triggered, this, [this, field = opt.field]() {
+            setSort(field, m_sortDescending, m_sortReverseGroups);
+        });
+    }
+    sortMenu->addSeparator();
+    QAction *desc = sortMenu->addAction(QStringLiteral("Descending"));
+    desc->setCheckable(true);
+    desc->setChecked(m_sortDescending);
+    connect(desc, &QAction::triggered, this, [this](bool checked) {
+        setSort(m_sortField, checked, checked ? m_sortReverseGroups : false);
+    });
+    QAction *reverseGroups = sortMenu->addAction(QStringLiteral("Reverse groups too"));
+    reverseGroups->setCheckable(true);
+    reverseGroups->setChecked(m_sortReverseGroups);
+    reverseGroups->setEnabled(m_sortDescending);
+    connect(reverseGroups, &QAction::triggered, this, [this](bool checked) {
+        setSort(m_sortField, m_sortDescending, checked);
+    });
 }
 
 void FileExplorerView::addDirectoryItem(const QString &path)
@@ -597,6 +694,8 @@ void FileExplorerView::processNextMetadata()
     applyTrackToItem(item, trackForFile(path));
     if (m_pendingMetadata.isEmpty()) {
         m_metadataTimer->stop();
+        // Tags are now loaded; settle the listing under the active sort.
+        sortTopLevelItems();
     }
 }
 
@@ -608,6 +707,11 @@ void FileExplorerView::addUnsupportedItem(const QFileInfo &info)
     item->setIcon(0, QIcon::fromTheme(QStringLiteral("text-x-generic"), style()->standardIcon(QStyle::SP_FileIcon)));
     item->setData(0, TypeRole, UnsupportedItem);
     item->setData(0, PathRole, cleanPath(info.absoluteFilePath()));
+    Track placeholder;
+    placeholder.path = cleanPath(info.absoluteFilePath());
+    placeholder.filename = info.fileName();
+    placeholder.fileSize = info.size();
+    item->setData(0, TrackRole, QVariant::fromValue(placeholder));
     item->setForeground(NameColumn, palette().brush(QPalette::Disabled, QPalette::Text));
     applyRowHeightToItem(item);
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/MusicSort.h"
 #include "core/Track.h"
 #include "ui/FileExplorerKeybindings.h"
 
@@ -12,6 +13,7 @@
 
 class QFileInfo;
 class QLabel;
+class QMenu;
 class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -48,6 +50,7 @@ public:
     QString startDirectory() const;
     void setRowHeight(int height);
     int rowHeight() const;
+    void setSort(MusicSort::SortField field, bool descending, bool reverseGroups);
 
 signals:
     void directoryRequested(const QString &path);
@@ -61,6 +64,7 @@ signals:
     void rowHeightChanged(int height);
     void keyBindingProfileChanged(const QString &name);
     void keyHintVisibilityChanged(bool visible);
+    void sortChanged(const QString &field, bool descending, bool reverseGroups);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -77,6 +81,8 @@ private:
     void addUnsupportedItem(const QFileInfo &info);
     void applyTrackToItem(QTreeWidgetItem *item, const Track &track);
     void processNextMetadata();
+    void sortTopLevelItems();
+    void buildSortMenu(QMenu *parent);
     void restoreSelectionForCurrentDirectory();
     void applyRowHeight();
     void applyRowHeightToItem(QTreeWidgetItem *item) const;
@@ -106,6 +112,9 @@ private:
     QHash<QString, QString> m_lastSelectedByDir;
     bool m_restoringSelection = false;
     int m_rowHeight = 18;
+    MusicSort::SortField m_sortField = MusicSort::SortField::FileName;
+    bool m_sortDescending = false;
+    bool m_sortReverseGroups = false;
 };
 
 
