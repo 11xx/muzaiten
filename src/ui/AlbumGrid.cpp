@@ -1,6 +1,7 @@
 #include "ui/AlbumGrid.h"
 
 #include "core/Album.h"
+#include "core/MusicSort.h"
 #include "scanner/ArtworkCache.h"
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumGridDelegate.h"
@@ -39,44 +40,6 @@ enum Roles {
     ArtworkGenerationRole = Qt::UserRole + 11,
     LoadingRole = Qt::UserRole + 12,
 };
-
-// Extract the best available year as an int for sort comparisons.
-// Mirrors the displayYear logic in TrackTable: prefer originalDate, fall back to date.
-int albumSortYear(const Album &album)
-{
-    for (const QString &candidate : {album.originalDate, album.date}) {
-        const QString y = candidate.trimmed().left(4);
-        if (!y.isEmpty()) {
-            bool ok = false;
-            const int year = y.toInt(&ok);
-            if (ok && year > 0) {
-                return year;
-            }
-        }
-    }
-    return 0; // unknown year sorts first/last depending on direction
-}
-
-QString sortKeyToString(AlbumGrid::SortKey key)
-{
-    switch (key) {
-    case AlbumGrid::SortKey::Year:          return QStringLiteral("year");
-    case AlbumGrid::SortKey::Title:         return QStringLiteral("title");
-    case AlbumGrid::SortKey::Rating:        return QStringLiteral("rating");
-    case AlbumGrid::SortKey::TrackCount:    return QStringLiteral("trackCount");
-    case AlbumGrid::SortKey::RecentlyAdded: return QStringLiteral("recentlyAdded");
-    }
-    return QStringLiteral("year");
-}
-
-AlbumGrid::SortKey sortKeyFromString(const QString &s)
-{
-    if (s == QStringLiteral("title"))         return AlbumGrid::SortKey::Title;
-    if (s == QStringLiteral("rating"))        return AlbumGrid::SortKey::Rating;
-    if (s == QStringLiteral("trackCount"))    return AlbumGrid::SortKey::TrackCount;
-    if (s == QStringLiteral("recentlyAdded")) return AlbumGrid::SortKey::RecentlyAdded;
-    return AlbumGrid::SortKey::Year; // default
-}
 
 QString alignmentToString(Qt::Alignment alignment)
 {
@@ -185,36 +148,11 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
         m_sourceAlbums = albums;
     }
 
-    // Build the display order
+    // Build the display order using the shared sort/grouping chains.
     QVector<Album> sorted = m_sourceAlbums;
-    std::stable_sort(sorted.begin(), sorted.end(), [this](const Album &a, const Album &b) {
-        auto cmpTitle = [](const Album &x, const Album &y) {
-            return x.title.toLower() < y.title.toLower();
-        };
-        bool less = false;
-        switch (m_sortKey) {
-        case SortKey::Year: {
-            const int ya = albumSortYear(a);
-            const int yb = albumSortYear(b);
-            if (ya != yb) { less = ya < yb; break; }
-            less = cmpTitle(a, b); break;
-        }
-        case SortKey::Title:
-            less = cmpTitle(a, b); break;
-        case SortKey::Rating:
-            if (a.effectiveRating0To100 != b.effectiveRating0To100) {
-                less = a.effectiveRating0To100 < b.effectiveRating0To100; break;
-            }
-            less = cmpTitle(a, b); break;
-        case SortKey::TrackCount:
-            if (a.trackCount != b.trackCount) { less = a.trackCount < b.trackCount; break; }
-            less = cmpTitle(a, b); break;
-        case SortKey::RecentlyAdded:
-            if (a.addedMtime != b.addedMtime) { less = a.addedMtime < b.addedMtime; break; }
-            less = cmpTitle(a, b); break;
-        }
-        return m_sortDescending ? !less : less;
-    });
+    const auto dir = m_sortDescending ? MusicSort::SortDirection::Descending : MusicSort::SortDirection::Ascending;
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     MusicSort::makeComparator<Album>(m_sortField, dir, m_sortReverseGroups));
 
     m_pendingAlbums = sorted;
     m_nextAlbumRow = 0;
@@ -346,8 +284,9 @@ QString AlbumGrid::viewSettingsJson() const
     root.insert(QStringLiteral("spacing"), m_spacing);
     root.insert(QStringLiteral("textAlignment"), alignmentToString(m_textAlignment));
     root.insert(QStringLiteral("starSize"), m_starSize);
-    root.insert(QStringLiteral("sortKey"), sortKeyToString(m_sortKey));
+    root.insert(QStringLiteral("sortField"), MusicSort::sortFieldToString(m_sortField));
     root.insert(QStringLiteral("sortDescending"), m_sortDescending);
+    root.insert(QStringLiteral("sortReverseGroups"), m_sortReverseGroups);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -361,8 +300,9 @@ void AlbumGrid::applyViewSettingsJson(const QString &json)
         m_spacing = std::clamp(root.value(QStringLiteral("spacing")).toInt(6), 0, 24);
         m_starSize = std::clamp(root.value(QStringLiteral("starSize")).toInt(18), 18, 28);
         m_textAlignment = alignmentFromString(root.value(QStringLiteral("textAlignment")).toString(QStringLiteral("center")));
-        m_sortKey = sortKeyFromString(root.value(QStringLiteral("sortKey")).toString());
+        m_sortField = MusicSort::sortFieldFromString(root.value(QStringLiteral("sortField")).toString(), MusicSort::SortField::Year);
         m_sortDescending = root.value(QStringLiteral("sortDescending")).toBool(true);
+        m_sortReverseGroups = root.value(QStringLiteral("sortReverseGroups")).toBool(false);
     }
     applySettingsToView();
     applySettingsToItems();
@@ -478,19 +418,19 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
     menu.setMinimumWidth(180);
 
     QMenu *sortMenu = menu.addMenu(QStringLiteral("Sort by"));
-    const struct { const char *label; SortKey key; } sortOptions[] = {
-        {"Original year", SortKey::Year},
-        {"Title (A–Z)",   SortKey::Title},
-        {"Rating",        SortKey::Rating},
-        {"Track count",   SortKey::TrackCount},
-        {"Recently added", SortKey::RecentlyAdded},
+    const struct { const char *label; MusicSort::SortField field; } sortOptions[] = {
+        {"Original year", MusicSort::SortField::Year},
+        {"Title (A–Z)",   MusicSort::SortField::Title},
+        {"Rating",        MusicSort::SortField::Rating},
+        {"Track count",   MusicSort::SortField::TrackCount},
+        {"Recently added", MusicSort::SortField::DateAdded},
     };
     for (const auto &opt : sortOptions) {
         QAction *action = sortMenu->addAction(QString::fromUtf8(opt.label));
         action->setCheckable(true);
-        action->setChecked(m_sortKey == opt.key);
-        connect(action, &QAction::triggered, this, [this, key = opt.key]() {
-            m_sortKey = key;
+        action->setChecked(m_sortField == opt.field);
+        connect(action, &QAction::triggered, this, [this, field = opt.field]() {
+            m_sortField = field;
             applySort();
             emit viewSettingsChanged();
         });
@@ -501,6 +441,18 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
     descAction->setChecked(m_sortDescending);
     connect(descAction, &QAction::triggered, this, [this](bool checked) {
         m_sortDescending = checked;
+        if (!checked) {
+            m_sortReverseGroups = false;
+        }
+        applySort();
+        emit viewSettingsChanged();
+    });
+    QAction *reverseGroupsAction = sortMenu->addAction(QStringLiteral("Reverse groups too"));
+    reverseGroupsAction->setCheckable(true);
+    reverseGroupsAction->setChecked(m_sortReverseGroups);
+    reverseGroupsAction->setEnabled(m_sortDescending);
+    connect(reverseGroupsAction, &QAction::triggered, this, [this](bool checked) {
+        m_sortReverseGroups = checked;
         applySort();
         emit viewSettingsChanged();
     });

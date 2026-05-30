@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Album.h"
+#include "core/MusicSort.h"
 
 #include <QListView>
 #include <QVector>
@@ -42,15 +43,6 @@ protected:
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
-public:
-    enum class SortKey {
-        Year,
-        Title,
-        Rating,
-        TrackCount,
-        RecentlyAdded,
-    };
-
 private:
     QRect ratingRectForIndex(const QModelIndex &index) const;
     void showContextMenu(const QPoint &pos);
@@ -85,7 +77,8 @@ private:
     int m_padding = 8;
     int m_starSize = 18;
     Qt::Alignment m_textAlignment = Qt::AlignHCenter;
-    SortKey m_sortKey = SortKey::Year;
+    MusicSort::SortField m_sortField = MusicSort::SortField::Year;
     bool m_sortDescending = true; // newest first for Year
+    bool m_sortReverseGroups = false;
     QPoint m_wheelAngleRemainder;
 };
