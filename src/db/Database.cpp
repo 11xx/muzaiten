@@ -474,14 +474,14 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         "SELECT t.album_title, MIN(t.date), COUNT(*), "
         "AVG(%1), "
         "COUNT(%1), "
-        "MIN(t.parent_dir), uar.rating_0_100 "
+        "MIN(t.parent_dir), uar.rating_0_100, "
+        "MIN(t.original_date), MAX(t.file_mtime) "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "LEFT JOIN user_album_ratings uar ON uar.album_artist_name = t.album_artist_name AND uar.album_title = t.album_title "
         "WHERE t.album_artist_name = ? AND t.missing = 0 %2 "
-        "GROUP BY t.album_title, uar.rating_0_100 "
-        "ORDER BY lower(t.album_title)")
+        "GROUP BY t.album_title, uar.rating_0_100")
                       .arg(effectiveTrackRating,
                            hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"))) : QString()));
     query.addBindValue(albumArtist);
@@ -497,6 +497,8 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         album.representativeDir = query.value(5).toString();
         album.hasUserRating = !query.value(6).isNull();
         album.effectiveRating0To100 = album.hasUserRating ? query.value(6).toInt() : album.averageRating0To100;
+        album.originalDate = query.value(7).toString();
+        album.addedMtime = query.value(8).toLongLong();
         albums.push_back(album);
     }
     return albums;
