@@ -2070,11 +2070,12 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
                 m_queue.push_back(track);
             }
         }
-        m_rightSidebar->setQueue(m_queue);
-        refreshPlayNextRange();
-        saveQueueState();
         if (m_queueIndex < 0 && start < m_queue.size()) {
+            // Show the new rows, then start playback (playQueueIndex prepares next).
+            m_rightSidebar->setQueue(m_queue);
             playQueueIndex(start);
+        } else {
+            syncQueueState();
         }
         return;
     }
@@ -2094,10 +2095,7 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
     }
 
     m_playNextInsertIndex = insertAt + inserted;
-    m_rightSidebar->setQueue(m_queue);
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
-    refreshPlayNextRange();
-    saveQueueState();
+    syncQueueState();
 }
 
 void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
@@ -2107,10 +2105,7 @@ void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
             m_queue.push_back(track);
         }
     }
-    m_rightSidebar->setQueue(m_queue);
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
-    refreshPlayNextRange();
-    saveQueueState();
+    syncQueueState();
 }
 
 void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
@@ -2130,9 +2125,9 @@ void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
         return;
     }
 
-    destinationRow = std::clamp(destinationRow,
-                                m_queueIndex >= 0 ? m_queueIndex + 1 : 0,
-                                static_cast<int>(m_queue.size()));
+    // Allow dropping anywhere, including above the current track: newQueueIndex
+    // below tracks where the playing track lands, so playback stays correct.
+    destinationRow = std::clamp(destinationRow, 0, static_cast<int>(m_queue.size()));
     QVector<Track> moving;
     moving.reserve(sortedRows.size());
     int removedBeforeDestination = 0;
@@ -2176,11 +2171,10 @@ void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
         }
     }
     m_queueIndex = newQueueIndex;
+    // Manually reordering the upcoming tracks collapses the play-next priority
+    // block (its ordinals no longer reflect a single "play next" batch).
     m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
-    m_rightSidebar->setQueue(m_queue);
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
-    refreshPlayNextRange();
-    saveQueueState();
+    syncQueueState();
 }
 
 void MainWindow::removeQueueRows(const QVector<int> &rows)
@@ -2222,10 +2216,7 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
     m_queue = remaining;
     m_queueIndex = std::clamp(newQueueIndex, -1, static_cast<int>(m_queue.size()) - 1);
     m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
-    m_rightSidebar->setQueue(m_queue);
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
-    refreshPlayNextRange();
-    saveQueueState();
+    syncQueueState();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
         presentTrack(m_queue.at(m_queueIndex), false);
     } else {
@@ -2243,13 +2234,10 @@ void MainWindow::clearQueue()
     m_queueIndex = -1;
     m_playNextInsertIndex = -1;
     m_currentTrack = {};
-    m_rightSidebar->setQueue(m_queue);
-    m_rightSidebar->setCurrentIndex(m_queueIndex);
-    refreshPlayNextRange();
+    syncQueueState();
     m_playerBar->setTrackText({});
     m_rightSidebar->setTrackInfo({});
     m_mpris->setTrack({});
-    saveQueueState();
     savePlaybackState(true);
 }
 
@@ -2267,6 +2255,32 @@ void MainWindow::clearPlayNextPriority()
 void MainWindow::refreshPlayNextRange()
 {
     m_rightSidebar->setPlayNextRange(m_queueIndex + 1, m_playNextInsertIndex);
+}
+
+void MainWindow::syncQueueState()
+{
+    // Defensively clamp the canonical indices so callers can mutate the queue
+    // freely and rely on this one place to keep everything in range.
+    if (m_queue.isEmpty()) {
+        m_queueIndex = -1;
+    } else {
+        m_queueIndex = std::clamp(m_queueIndex, -1, static_cast<int>(m_queue.size()) - 1);
+    }
+    if (m_queueIndex < 0) {
+        m_playNextInsertIndex = -1;
+    } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
+        m_playNextInsertIndex = m_queueIndex + 1;
+    }
+
+    // Push every derived view of the queue in lock-step. Crucially this includes
+    // re-preparing the gapless "next" track: the playback backend pre-buffers
+    // m_queue[m_queueIndex + 1], so reordering/inserting/removing without this
+    // would let a stale track play next while the UI shows a different order.
+    m_rightSidebar->setQueue(m_queue);
+    m_rightSidebar->setCurrentIndex(m_queueIndex);
+    refreshPlayNextRange();
+    prepareNextQueueTrack();
+    saveQueueState();
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)
