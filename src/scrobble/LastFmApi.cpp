@@ -80,7 +80,7 @@ QByteArray formBody(const Params &params)
             body += '&';
         }
         first = false;
-        body += QUrl::toPercentEncoding(param.first);
+        body += QUrl::toPercentEncoding(param.first, QByteArrayLiteral("[]"));
         body += '=';
         body += QUrl::toPercentEncoding(param.second);
     }
