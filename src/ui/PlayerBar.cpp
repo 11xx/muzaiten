@@ -72,8 +72,8 @@ protected:
 
 class MenuPaddingStyle final : public QProxyStyle {
 public:
-    explicit MenuPaddingStyle(QStyle *baseStyle)
-        : QProxyStyle(baseStyle)
+    MenuPaddingStyle()
+        : QProxyStyle()
     {
     }
 
@@ -346,7 +346,7 @@ void styleMenu(QMenu *menu)
     if (menu == nullptr) {
         return;
     }
-    auto *style = new MenuPaddingStyle(menu->style());
+    auto *style = new MenuPaddingStyle;
     style->setParent(menu);
     menu->setStyle(style);
 }
