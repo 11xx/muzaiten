@@ -314,11 +314,13 @@ private:
         if (model() == nullptr || model()->rowCount() == 0) {
             return 0;
         }
-        if (row >= model()->rowCount()) {
-            const QRect last = visualRect(model()->index(model()->rowCount() - 1, 0));
-            return last.bottom() + 1;
+        // Use row geometry rather than visualRect(column 0) so the indicator
+        // position is independent of whether the "#" column is hidden.
+        const int lastRow = model()->rowCount() - 1;
+        if (row > lastRow) {
+            return rowViewportPosition(lastRow) + rowHeight(lastRow);
         }
-        return visualRect(model()->index(row, 0)).top();
+        return rowViewportPosition(row);
     }
 
     void setDropIndicatorRow(int row)
