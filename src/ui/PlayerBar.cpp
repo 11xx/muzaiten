@@ -312,10 +312,11 @@ void styleMenu(QMenu *menu)
     }
     menu->setStyleSheet(QStringLiteral(
         "QMenu::item {"
-        "  padding: 4px 30px 4px 12px;"
+        "  padding: 4px 34px 4px 24px;"
         "}"
-        "QMenu::indicator {"
-        "  left: 5px;"
+        "QMenu::item:selected {"
+        "  background: palette(highlight);"
+        "  color: palette(highlighted-text);"
         "}"));
 }
 
