@@ -24,7 +24,6 @@ struct RatingTagSyncRequest {
 struct RatingTagSyncSummary {
     int checked = 0;
     int written = 0;
-    int tagWon = 0;
     int noWritablePath = 0;
     int failed = 0;
 };
