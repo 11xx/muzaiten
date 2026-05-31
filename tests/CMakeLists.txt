@@ -91,3 +91,33 @@ target_link_libraries(test_artwork_resolver PRIVATE Qt6::Core Qt6::Gui Qt6::Test
 target_compile_features(test_artwork_resolver PRIVATE cxx_std_26)
 add_test(NAME test_artwork_resolver COMMAND test_artwork_resolver)
 set_tests_properties(test_artwork_resolver PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Search engine tests (no Qt Widgets dependency)
+add_executable(test_search_query
+    test_search_query.cpp
+    ../src/search/SearchQuery.cpp
+)
+target_include_directories(test_search_query PRIVATE ../src)
+target_link_libraries(test_search_query PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_search_query PRIVATE cxx_std_26)
+add_test(NAME test_search_query COMMAND test_search_query)
+
+add_executable(test_fuzzy_match
+    test_fuzzy_match.cpp
+    ../src/search/FuzzyMatch.cpp
+)
+target_include_directories(test_fuzzy_match PRIVATE ../src)
+target_link_libraries(test_fuzzy_match PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_fuzzy_match PRIVATE cxx_std_26)
+add_test(NAME test_fuzzy_match COMMAND test_fuzzy_match)
+
+add_executable(test_search_index
+    test_search_index.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/SearchIndex.cpp
+    ../src/search/SearchQuery.cpp
+)
+target_include_directories(test_search_index PRIVATE ../src)
+target_link_libraries(test_search_index PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_search_index PRIVATE cxx_std_26)
+add_test(NAME test_search_index COMMAND test_search_index)

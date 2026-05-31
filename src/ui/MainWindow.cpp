@@ -27,6 +27,7 @@
 #include "ui/PlaybackProfileDialog.h"
 #include "ui/PlaybackResumeDialog.h"
 #include "ui/RightSidebar.h"
+#include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/TrackTable.h"
 
@@ -125,6 +126,8 @@ QString mainViewName(MainView view)
         return QStringLiteral("libraryFileExplorer");
     case MainView::FreeRoamFileExplorer:
         return QStringLiteral("freeRoamFileExplorer");
+    case MainView::Search:
+        return QStringLiteral("search");
     }
     return QStringLiteral("libraryPanels");
 }
@@ -136,6 +139,9 @@ MainView mainViewFromName(const QString &name)
     }
     if (name == QStringLiteral("freeRoamFileExplorer")) {
         return MainView::FreeRoamFileExplorer;
+    }
+    if (name == QStringLiteral("search")) {
+        return MainView::Search;
     }
     return MainView::LibraryPanels;
 }
@@ -288,10 +294,12 @@ MainWindow::MainWindow(QWidget *parent)
     m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
     m_freeRoamFileExplorer->setRootPath(QDir::homePath());
     m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
+    m_searchView = new SearchView(m_mainStack);
 
     m_mainStack->addWidget(m_rootSplitter);
     m_mainStack->addWidget(m_libraryFileExplorer);
     m_mainStack->addWidget(m_freeRoamFileExplorer);
+    m_mainStack->addWidget(m_searchView);
 
     centralLayout->addWidget(m_mainStack, 1);
     setCentralWidget(central);
@@ -484,6 +492,17 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
+
+    // Search view
+    connect(m_searchView, &SearchView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_searchView, &SearchView::playNowRequested, this, [this](const QVector<Track> &tracks) {
+        if (tracks.isEmpty()) return;
+        addTracksToQueue(tracks);
+        playQueueIndex(static_cast<int>(m_queue.size()) - static_cast<int>(tracks.size()));
+    });
+    connect(m_searchView, &SearchView::leaveRequested, this, [this]() {
+        switchMainView(MainView::LibraryPanels);
+    });
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
@@ -567,6 +586,15 @@ MainWindow::MainWindow(QWidget *parent)
             return;
         }
         toggleFileExplorerView();
+    });
+    auto *searchShortcut = new QShortcut(QKeySequence(QStringLiteral("3")), this);
+    connect(searchShortcut, &QShortcut::activated, this, [this]() {
+        // Don't steal '3' from text inputs other than the search box itself.
+        QWidget *fw = QApplication::focusWidget();
+        if (qobject_cast<QLineEdit *>(fw) != nullptr && fw != m_searchView->findChild<QLineEdit *>()) {
+            return;
+        }
+        switchMainView(MainView::Search);
     });
     auto *jumpToPlayingShortcut = new QShortcut(QKeySequence(QStringLiteral("o")), this);
     connect(jumpToPlayingShortcut, &QShortcut::activated, this, [this]() {
@@ -790,6 +818,10 @@ void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, b
         10000);
     refreshArtists();
     refreshLibraryFileExplorer();
+    // Rebuild the search index with fresh library data
+    if (!canceled) {
+        m_searchView->invalidateIndex(databasePath());
+    }
     if (!canceled && !m_pendingScanRoots.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
     } else if (sourceScan && !canceled) {
@@ -1272,12 +1304,16 @@ void MainWindow::saveMainWindowViewSettings()
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
-    m_playerBar->setExplorerOptionsVisible(view != MainView::LibraryPanels);
+    m_playerBar->setExplorerOptionsVisible(view != MainView::LibraryPanels && view != MainView::Search);
     if (view == MainView::LibraryPanels) {
         m_mainStack->setCurrentWidget(m_rootSplitter);
     } else if (view == MainView::LibraryFileExplorer) {
         refreshLibraryFileExplorer();
         m_mainStack->setCurrentWidget(m_libraryFileExplorer);
+    } else if (view == MainView::Search) {
+        m_mainStack->setCurrentWidget(m_searchView);
+        m_searchView->ensureIndexLoaded(databasePath());
+        m_searchView->focusSearchBox();
     } else {
         m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
         m_mainStack->setCurrentWidget(m_freeRoamFileExplorer);
@@ -1332,6 +1368,11 @@ void MainWindow::revealTrackInLibrary(const Track &track)
         m_freeRoamFileExplorer->revealFile(resolved.isEmpty() ? track.path : resolved);
         break;
     }
+    case MainView::Search:
+        // Search view has no reveal concept; switch to library panels and reveal there
+        switchMainView(MainView::LibraryPanels);
+        revealTrackInLibrary(track);
+        break;
     }
 }
 
@@ -1852,6 +1893,8 @@ void MainWindow::importMpdLibraryMetadata()
             if (m_librarySource == LibrarySource::Mpd) {
                 refreshArtists();
             }
+            // Rebuild the search index to include the newly imported MPD tracks
+            m_searchView->invalidateIndex(databasePath());
         }
         m_mpdImportThread->quit();
     });

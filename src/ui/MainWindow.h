@@ -31,9 +31,10 @@ class RightSidebar;
 class TrackTable;
 class ScanPipeline;
 class ArtworkCache;
+class SearchView;
 
 enum class LibrarySource { Local, Mpd };
-enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer };
+enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search };
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -173,6 +174,7 @@ private:
     RightSidebar *m_rightSidebar = nullptr;
     FileExplorerView *m_libraryFileExplorer = nullptr;
     FileExplorerView *m_freeRoamFileExplorer = nullptr;
+    SearchView       *m_searchView = nullptr;
     QProgressBar *m_scanProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
     PlaybackBackend *m_playback = nullptr;
