@@ -463,7 +463,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
-    connect(m_rightSidebar, &RightSidebar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
+    connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
     connect(m_libraryFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setLibraryExplorerDirectory);
@@ -1300,28 +1300,36 @@ void MainWindow::jumpToPlayingSong()
         statusBar()->showMessage(QStringLiteral("Nothing is playing"), 3000);
         return;
     }
+    revealTrackInLibrary(m_currentTrack);
+}
+
+void MainWindow::revealTrackInLibrary(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
 
     switch (m_mainView) {
     case MainView::LibraryPanels: {
-        const QString artist = !m_currentTrack.albumArtistName.trimmed().isEmpty()
-            ? m_currentTrack.albumArtistName
-            : m_currentTrack.artistName;
+        const QString artist = !track.albumArtistName.trimmed().isEmpty()
+            ? track.albumArtistName
+            : track.artistName;
         if (!artist.isEmpty()) {
             // Show all of the artist's tracks (drop any album filter) so the
-            // playing track is guaranteed visible, then select it.
+            // target track is guaranteed visible, then select it.
             m_selectedAlbumTitle.clear();
             m_artistSidebar->selectArtist(artist);
             selectArtist(artist);
         }
-        m_trackTable->selectTrackByPath(m_currentTrack.path);
+        m_trackTable->selectTrackByPath(track.path);
         break;
     }
     case MainView::LibraryFileExplorer:
-        m_libraryFileExplorer->revealFile(m_currentTrack.path);
+        m_libraryFileExplorer->revealFile(track.path);
         break;
     case MainView::FreeRoamFileExplorer: {
-        const QString resolved = resolvedReadPathForTrack(m_currentTrack);
-        m_freeRoamFileExplorer->revealFile(resolved.isEmpty() ? m_currentTrack.path : resolved);
+        const QString resolved = resolvedReadPathForTrack(track);
+        m_freeRoamFileExplorer->revealFile(resolved.isEmpty() ? track.path : resolved);
         break;
     }
     }
