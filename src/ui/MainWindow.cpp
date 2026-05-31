@@ -26,9 +26,11 @@
 #include "ui/PlayerBar.h"
 #include "ui/PlaybackProfileDialog.h"
 #include "ui/PlaybackResumeDialog.h"
+#include "ui/RankingDialog.h"
 #include "ui/RightSidebar.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
+#include "search/RankConfig.h"
 #include "ui/TrackTable.h"
 
 #include <QAction>
@@ -448,6 +450,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
+    connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
@@ -611,6 +614,7 @@ MainWindow::MainWindow(QWidget *parent)
     loadPlaybackProfile();
     loadPlaybackResumeSettings();
     loadViewSettings();
+    loadSearchRankingConfig();
     loadQueueState();
     loadExplorerState();
     configureListenBrainz();
@@ -1669,6 +1673,29 @@ void MainWindow::configurePlaybackResume()
     savePlaybackResumeSettings();
     savePlaybackState(true);
     statusBar()->showMessage(QStringLiteral("Playback resume settings updated"), 3000);
+}
+
+void MainWindow::loadSearchRankingConfig()
+{
+    const QString json = m_database->setting(QStringLiteral("search.ranking"));
+    m_searchView->setRankConfig(Search::RankConfig::fromJsonString(json));
+}
+
+void MainWindow::configureSearchRanking()
+{
+    const QString json = m_database->setting(QStringLiteral("search.ranking"));
+    const Search::RankConfig current = Search::RankConfig::fromJsonString(json);
+
+    RankingDialog dialog(this);
+    dialog.setConfig(current);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const Search::RankConfig updated = dialog.config();
+    m_database->setSetting(QStringLiteral("search.ranking"), updated.toJsonString());
+    m_searchView->setRankConfig(updated);
+    statusBar()->showMessage(QStringLiteral("Search ranking updated"), 3000);
 }
 
 void MainWindow::configureLinkRoots()

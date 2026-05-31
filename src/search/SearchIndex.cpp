@@ -241,6 +241,7 @@ void SearchIndex::clear()
 }
 
 QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMode,
+                                          const ExclusionSet &excludes,
                                           int *totalMatches) const
 {
     if (totalMatches) *totalMatches = 0;
@@ -255,6 +256,15 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     const int n = static_cast<int>(m_records.size());
     for (int i = 0; i < n; ++i) {
         const SearchRecord &rec = m_records[i];
+
+        // Exclusions are an early reject, before any relevance scoring, so they
+        // only reduce work and never consume the result cap.
+        bool excluded = false;
+        for (const ExcludeMatcher &ex : excludes) {
+            if (ex.matches(rec)) { excluded = true; break; }
+        }
+        if (excluded) continue;
+
         int total = 0;
         bool ok = true;
         for (const Term &term : query.terms) {

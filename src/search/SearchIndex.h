@@ -11,6 +11,7 @@
 // match() is const and thread-safe from a single thread (do NOT call from
 // multiple threads simultaneously without external locking).
 
+#include "search/Exclusion.h"
 #include "search/FuzzyMatch.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
@@ -54,8 +55,10 @@ public:
 
     // Run a query and return the top-scoring results (capped at kMaxResults).
     // Empty query → empty result. When totalMatches is non-null it receives the
-    // full (uncapped) number of matching records.
+    // full (uncapped) number of matching records. `excludes`, when non-empty,
+    // drop matching records during the filter phase (before scoring).
     QVector<ScoredResult> match(const SearchQuery &query, bool fuzzyMode,
+                                 const ExclusionSet &excludes = {},
                                  int *totalMatches = nullptr) const;
 
     int size() const { return static_cast<int>(m_records.size()); }

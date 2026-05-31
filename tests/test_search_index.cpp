@@ -231,7 +231,7 @@ private slots:
             makeRecord(QStringLiteral("Green Three"),QStringLiteral("A"), QStringLiteral("X")),
         });
         int total = -1;
-        const auto results = idx.match(SearchQuery::parse(QStringLiteral("blue")), false, &total);
+        const auto results = idx.match(SearchQuery::parse(QStringLiteral("blue")), false, {}, &total);
         QCOMPARE(results.size(), 2);
         QCOMPARE(total, 2);
     }

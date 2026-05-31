@@ -94,6 +94,8 @@ private:
     void findTrackFile(const Track &track);
     void configureTrackInfoPanel();
     void configureAlbumArtResolution();
+    void configureSearchRanking();
+    void loadSearchRankingConfig();
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
     void configureMpdSource();

@@ -51,6 +51,11 @@ void SearchWorker::clearIndex()
     m_index.clear();
 }
 
+void SearchWorker::setExclusions(QVector<Search::ExcludeRule> rules)
+{
+    m_excludes = compileExcludes(rules);
+}
+
 void SearchWorker::runQuery(quint64 queryId, const QString &queryString, bool fuzzyMode)
 {
     // Record the latest query id; if a newer one arrives while we're computing,
@@ -64,7 +69,7 @@ void SearchWorker::runQuery(quint64 queryId, const QString &queryString, bool fu
 
     const SearchQuery q = SearchQuery::parse(queryString);
     int totalMatches = 0;
-    QVector<ScoredResult> results = m_index.match(q, fuzzyMode, &totalMatches);
+    QVector<ScoredResult> results = m_index.match(q, fuzzyMode, m_excludes, &totalMatches);
 
     // Only emit if this is still the most recent query
     if (m_latestQueryId.load() == queryId) {

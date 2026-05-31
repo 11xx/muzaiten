@@ -1329,7 +1329,8 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
     QString sql = QStringLiteral(
         "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
         "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
-        "COALESCE(utr.rating_0_100, t.rating_0_100) "
+        "COALESCE(utr.rating_0_100, t.rating_0_100), "
+        "t.track_number, t.disc_number, t.file_mtime, t.file_size "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "WHERE t.missing = 0");
@@ -1354,6 +1355,10 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         rec.channels          = query.value(10).toInt();
         rec.codec             = query.value(11).toString();
         rec.rating0To100      = query.value(12).isNull() ? -1 : query.value(12).toInt();
+        rec.trackNumber       = query.value(13).toInt();
+        rec.discNumber        = query.value(14).toInt();
+        rec.fileMtime         = query.value(15).toLongLong();
+        rec.fileSize          = query.value(16).toLongLong();
         rec.source            = Search::TrackSource::Local;
         // Pre-compute lowercased versions for case-insensitive matching
         rec.normTitle        = rec.title.toLower();
@@ -1372,7 +1377,8 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
     const QString sql = QStringLiteral(
-        "SELECT uri, title, artist_name, album_artist_name, album_title, date, duration_ms "
+        "SELECT uri, title, artist_name, album_artist_name, album_title, date, duration_ms, "
+        "track_number, disc_number "
         "FROM mpd_tracks");
     if (!query.exec(sql)) {
         return records;
@@ -1387,6 +1393,8 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
         rec.albumTitle      = query.value(4).toString();
         rec.date            = query.value(5).toString();
         rec.durationMs      = query.value(6).toLongLong();
+        rec.trackNumber     = query.value(7).toInt();
+        rec.discNumber      = query.value(8).toInt();
         rec.rating0To100    = -1;
         rec.source          = Search::TrackSource::Mpd;
         rec.normTitle        = rec.title.toLower();

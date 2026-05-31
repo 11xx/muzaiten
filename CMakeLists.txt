@@ -73,7 +73,10 @@ set(MUZAITEN_SOURCES
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
+    src/search/Exclusion.cpp
     src/search/FuzzyMatch.cpp
+    src/search/RankConfig.cpp
+    src/search/ResultRanker.cpp
     src/search/SearchIndex.cpp
     src/search/SearchQuery.cpp
     src/search/SearchWorker.cpp
@@ -91,6 +94,7 @@ set(MUZAITEN_SOURCES
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlaybackResumeDialog.cpp
     src/ui/PlayerBar.cpp
+    src/ui/RankingDialog.cpp
     src/ui/RightSidebar.cpp
     src/ui/SearchResultDelegate.cpp
     src/ui/SearchResultsModel.cpp
@@ -139,7 +143,10 @@ set(MUZAITEN_HEADERS
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
     src/scrobble/ListenBrainzScrobbler.h
+    src/search/Exclusion.h
     src/search/FuzzyMatch.h
+    src/search/RankConfig.h
+    src/search/ResultRanker.h
     src/search/SearchIndex.h
     src/search/SearchQuery.h
     src/search/SearchRecord.h
@@ -158,6 +165,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
+    src/ui/RankingDialog.h
     src/ui/RightSidebar.h
     src/ui/SearchResultDelegate.h
     src/ui/SearchResultsModel.h

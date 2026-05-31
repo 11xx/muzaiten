@@ -48,6 +48,7 @@ signals:
     void trackInfoPaneVisibleChanged(bool visible);
     void trackInfoPaneSettingsRequested();
     void albumArtResolutionRequested();
+    void searchRankingRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void lastFmEnabledChanged(bool enabled);

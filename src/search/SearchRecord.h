@@ -37,7 +37,14 @@ struct SearchRecord {
     int sampleRateHz = 0;
     int bitrateKbps = 0;
     int channels = 0;
+    int bitDepth = 0;        // not scanned yet (placeholder for a future scan); 0 = unknown
     QString codec;           // lower-cased extension / codec, e.g. "flac"
+
+    // ---- ordering helpers (used by the ranking layer / MusicSort) ---------
+    int trackNumber = 0;
+    int discNumber = 0;
+    qint64 fileMtime = 0;
+    qint64 fileSize = 0;
 
     TrackSource source = TrackSource::Local;
 };
