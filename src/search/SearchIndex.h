@@ -42,6 +42,9 @@ public:
     // Replace the index contents. Takes ownership of the supplied records.
     void build(QVector<SearchRecord> records);
 
+    // Release all indexed records, freeing memory.
+    void clear();
+
     // Run a query and return scored, ranked results.
     // results.isEmpty() if the query is empty (show nothing, not everything).
     QVector<ScoredResult> match(const SearchQuery &query, bool fuzzyMode) const;

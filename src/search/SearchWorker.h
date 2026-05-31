@@ -33,6 +33,10 @@ public slots:
     // superseded queries are silently dropped).
     void runQuery(quint64 queryId, const QString &queryString, bool fuzzyMode);
 
+    // Release the in-memory index, freeing memory. The next buildIndex()
+    // reloads it from the database.
+    void clearIndex();
+
 signals:
     void indexReady(int trackCount);
     void indexError(const QString &error);

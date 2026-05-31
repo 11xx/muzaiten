@@ -91,6 +91,12 @@ void SearchIndex::build(QVector<SearchRecord> records)
     m_records = std::move(records);
 }
 
+void SearchIndex::clear()
+{
+    m_records.clear();
+    m_records.squeeze();
+}
+
 QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMode) const
 {
     if (query.isEmpty() || m_records.isEmpty()) return {};
@@ -160,13 +166,15 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             {
                 const bool withPos = true; // always collect positions for highlighting
 
+                // Append (union) match positions so EVERY matching term contributes
+                // its highlight ranges to the field — not just the last one.
                 auto tryField = [&](const QString &norm, const QString &orig,
                                     QVector<int> *outPositions,
                                     int weight) -> bool {
                     MatchResult mr = matchTextField(norm, orig, term, fuzzyMode, withPos);
                     if (mr.matched()) {
                         totalScore += mr.score + weight;
-                        if (outPositions) *outPositions = mr.positions;
+                        if (outPositions) *outPositions += mr.positions;
                         return true;
                     }
                     return false;
@@ -177,12 +185,14 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
                     termMatched = tryField(rec.normTitle, rec.title,
                                            &sr.ranges.titlePositions, fieldWeight(TermKind::TitleText));
                     break;
-                case TermKind::ArtistText:
-                    termMatched = tryField(rec.normArtist, rec.artistName,
-                                           &sr.ranges.artistPositions, fieldWeight(TermKind::ArtistText))
-                               || tryField(rec.normAlbumArtist, rec.albumArtistName,
-                                           &sr.ranges.albumArtistPositions, fieldWeight(TermKind::ArtistText));
+                case TermKind::ArtistText: {
+                    const bool a = tryField(rec.normArtist, rec.artistName,
+                                            &sr.ranges.artistPositions, fieldWeight(TermKind::ArtistText));
+                    const bool b = tryField(rec.normAlbumArtist, rec.albumArtistName,
+                                            &sr.ranges.albumArtistPositions, fieldWeight(TermKind::ArtistText));
+                    termMatched = a || b;
                     break;
+                }
                 case TermKind::AlbumArtistText:
                     termMatched = tryField(rec.normAlbumArtist, rec.albumArtistName,
                                            &sr.ranges.albumArtistPositions, fieldWeight(TermKind::AlbumArtistText));
@@ -201,34 +211,19 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
                     break;
                 case TermKind::FreeText:
                 default: {
-                    // Try title first (highest weight), then others; accumulate to best positions
+                    // A free term matches if it matches ANY field; highlight every
+                    // field it matches (each tryField appends its own positions).
                     bool matched = false;
-                    if (tryField(rec.normTitle, rec.title,
-                                 &sr.ranges.titlePositions, fieldWeight(TermKind::TitleText))) {
-                        matched = true;
-                    }
-                    if (tryField(rec.normArtist, rec.artistName,
-                                 &sr.ranges.artistPositions, fieldWeight(TermKind::ArtistText))) {
-                        matched = true;
-                    }
-                    if (!matched || sr.ranges.albumArtistPositions.isEmpty()) {
-                        tryField(rec.normAlbumArtist, rec.albumArtistName,
-                                 &sr.ranges.albumArtistPositions, fieldWeight(TermKind::AlbumArtistText));
-                    }
-                    if (tryField(rec.normAlbum, rec.albumTitle,
-                                 &sr.ranges.albumPositions, fieldWeight(TermKind::AlbumText))) {
-                        matched = true;
-                    }
-                    if (!matched) {
-                        if (tryField(rec.normFilename, rec.filename,
-                                     &sr.ranges.filenamePositions, fieldWeight(TermKind::FilenameText))) {
-                            matched = true;
-                        }
-                        if (tryField(rec.normPath, rec.path,
-                                     &sr.ranges.pathPositions, fieldWeight(TermKind::PathText))) {
-                            matched = true;
-                        }
-                    }
+                    matched |= tryField(rec.normTitle, rec.title,
+                                        &sr.ranges.titlePositions, fieldWeight(TermKind::TitleText));
+                    matched |= tryField(rec.normArtist, rec.artistName,
+                                        &sr.ranges.artistPositions, fieldWeight(TermKind::ArtistText));
+                    matched |= tryField(rec.normAlbumArtist, rec.albumArtistName,
+                                        &sr.ranges.albumArtistPositions, fieldWeight(TermKind::AlbumArtistText));
+                    matched |= tryField(rec.normAlbum, rec.albumTitle,
+                                        &sr.ranges.albumPositions, fieldWeight(TermKind::AlbumText));
+                    matched |= tryField(rec.normPath, rec.path,
+                                        &sr.ranges.pathPositions, fieldWeight(TermKind::PathText));
                     termMatched = matched;
                     break;
                 }

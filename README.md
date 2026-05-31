@@ -130,14 +130,26 @@ Press `3` to open the search view. Type to filter interactively; all terms AND t
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Add selected results to queue |
+| `Enter` | Add selected (or cursor) results to queue |
 | `Alt+Enter` | Add to queue and play immediately |
-| `Tab` / `Ctrl+Space` | Toggle selection on current row, advance |
-| `Ctrl+A` | Select all visible results |
-| `↑` / `↓` / `Ctrl+P` / `Ctrl+N` | Navigate |
+| `↑` / `↓` / `Ctrl+P` / `Ctrl+N` | Move the result cursor |
+| `PgUp` / `PgDn` / `Home` / `End` | Jump the cursor |
+| `Tab` | Mark current row, advance cursor |
+| `Ctrl+Space` | Toggle mark on current row |
+| `Ctrl+A` | Mark all results |
 | `Ctrl+F` | Toggle fuzzy mode (default: exact orderless substring) |
-| `Esc` | Return to library panels view |
+| `Esc` / `Ctrl+G` | Clear the query; press again to leave text-input mode |
+| `/` | Return focus to the search box (from browse mode) |
+| `F5` (or re-press `3`) | Rebuild the search index |
 | `Ctrl+scroll` | Adjust result row height |
+| Double-click | Play now |
+| Right-click | Context menu: play / queue / play next / find in library / open directory |
+
+The result list always keeps a highlighted cursor you move with the arrow or
+`Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style. `Esc`/`Ctrl+G`
+first clears the query, then (when already empty) releases the text box so `1`
+and `2` switch views; `/` jumps back into the box. The library index is loaded
+into memory on first use and kept resident, so re-opening search is instant.
 
 **Query syntax:**
 
