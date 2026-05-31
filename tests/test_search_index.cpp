@@ -197,33 +197,43 @@ private slots:
         QCOMPARE(results.size(), 1);
     }
 
-    void matchRangesArePopulated()
+    void highlightPositionsPopulated()
     {
-        SearchIndex idx;
-        idx.build({makeRecord(QStringLiteral("So What"), QStringLiteral("Miles Davis"),
-                               QStringLiteral("Kind of Blue"))});
-        const auto results = idx.match(SearchQuery::parse(QStringLiteral("what")), false);
-        QCOMPARE(results.size(), 1);
         // "what" matches title "So What" at positions 3-6
-        QVERIFY(!results[0].ranges.titlePositions.isEmpty());
+        const QVector<int> pos = Search::highlightPositions(
+            QStringLiteral("So What"),
+            SearchQuery::parse(QStringLiteral("what")),
+            Search::HighlightField::Title, false);
+        QVERIFY(!pos.isEmpty());
+        QVERIFY(pos.contains(3));
+        QVERIFY(pos.contains(6));
     }
 
     void multipleTermsHighlightAllMatchesPerField()
     {
         // Regression: every matching term must contribute its highlight ranges
         // to a field, not just the last one.
-        SearchIndex idx;
-        idx.build({makeRecord(QStringLiteral("The Nation Of One"),
-                              QStringLiteral("VEiiLA"),
-                              QStringLiteral("Trust"))});
-        const auto results = idx.match(SearchQuery::parse(QStringLiteral("the nation of one")), false);
-        QCOMPARE(results.size(), 1);
-        // "the", "nation", "of", "one" all match within the title — the union of
-        // their positions should cover most of the 17-char title.
-        const auto &pos = results[0].ranges.titlePositions;
+        const QVector<int> pos = Search::highlightPositions(
+            QStringLiteral("The Nation Of One"),
+            SearchQuery::parse(QStringLiteral("the nation of one")),
+            Search::HighlightField::Title, false);
         // "The Nation Of One" has 14 non-space characters; all should be highlighted.
         QSet<int> unique(pos.begin(), pos.end());
         QVERIFY(unique.size() >= 14);
+    }
+
+    void totalMatchesReported()
+    {
+        SearchIndex idx;
+        idx.build({
+            makeRecord(QStringLiteral("Blue One"),   QStringLiteral("A"), QStringLiteral("X")),
+            makeRecord(QStringLiteral("Blue Two"),   QStringLiteral("A"), QStringLiteral("X")),
+            makeRecord(QStringLiteral("Green Three"),QStringLiteral("A"), QStringLiteral("X")),
+        });
+        int total = -1;
+        const auto results = idx.match(SearchQuery::parse(QStringLiteral("blue")), false, &total);
+        QCOMPARE(results.size(), 2);
+        QCOMPARE(total, 2);
     }
 };
 

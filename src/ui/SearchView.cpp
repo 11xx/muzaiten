@@ -394,10 +394,14 @@ void SearchView::submitQuery()
     if (!m_worker || !m_indexLoaded) return;
     const QString text = m_searchBox->text().trimmed();
     if (text.isEmpty()) {
+        m_matchCount = 0;
+        m_delegate->setQuery(Search::SearchQuery{}, m_fuzzyMode);
         m_model->clear();
         updateStatusLabel();
         return;
     }
+    // Give the delegate the parsed query so it can highlight on-screen rows.
+    m_delegate->setQuery(Search::SearchQuery::parse(text), m_fuzzyMode);
     ++m_queryId;
     QMetaObject::invokeMethod(m_worker, "runQuery", Qt::QueuedConnection,
                               Q_ARG(quint64, m_queryId),
@@ -420,10 +424,11 @@ void SearchView::onIndexError(const QString &error)
     m_statusLabel->setText(QStringLiteral("Index error: %1").arg(error));
 }
 
-void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results)
+void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches)
 {
     if (queryId != m_queryId) return; // stale result from a superseded query
 
+    m_matchCount = totalMatches;
     // Each ScoredResult embeds a copy of its SearchRecord, so the model/delegate
     // work entirely with data already copied across the thread boundary.
     m_model->setResults(std::move(results));
@@ -445,13 +450,16 @@ void SearchView::updateStatusLabel()
         m_statusLabel->setText(QStringLiteral("Loading index…"));
         return;
     }
-    const int matchCount = m_model->rowCount();
     const QString modeStr = m_fuzzyMode ? QStringLiteral("fuzzy") : QStringLiteral("exact");
     if (m_searchBox->text().isEmpty()) {
         m_statusLabel->setText(QStringLiteral("%1 tracks  ·  %2").arg(m_totalIndexed).arg(modeStr));
     } else {
+        const int shown = m_model->rowCount();
+        const QString countStr = (m_matchCount > shown)
+            ? QStringLiteral("%1 of %2").arg(shown).arg(m_matchCount)  // capped display
+            : QString::number(m_matchCount);
         m_statusLabel->setText(QStringLiteral("%1 / %2  ·  %3")
-                                    .arg(matchCount).arg(m_totalIndexed).arg(modeStr));
+                                    .arg(countStr).arg(m_totalIndexed).arg(modeStr));
     }
 }
 

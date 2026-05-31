@@ -40,7 +40,7 @@ public slots:
 signals:
     void indexReady(int trackCount);
     void indexError(const QString &error);
-    void resultsReady(quint64 queryId, QVector<Search::ScoredResult> results);
+    void resultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
 
 private:
     QString   m_dbPath;

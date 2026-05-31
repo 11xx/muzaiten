@@ -19,21 +19,28 @@
 
 namespace Search {
 
-// Per-field match ranges for one result row.
-struct FieldRanges {
-    QVector<int> titlePositions;
-    QVector<int> artistPositions;
-    QVector<int> albumArtistPositions;
-    QVector<int> albumPositions;
-    QVector<int> filenamePositions;
-    QVector<int> pathPositions;
+struct ScoredResult {
+    SearchRecord rec;          // copy of the matching record (embedded for thread safety)
+    int          score = 0;
 };
 
-struct ScoredResult {
-    SearchRecord rec;               // copy of the matching record (embedded for thread safety)
-    int          score       = 0;
-    FieldRanges  ranges;
-};
+// Cap on the number of results materialized/returned per query. A broad query
+// (e.g. one character) can match nearly the whole library; we only ever display
+// and ship the top-scoring slice, which keeps per-keystroke cost bounded.
+inline constexpr int kMaxResults = 2000;
+
+// Which displayed line a highlight request targets (used by the delegate to
+// pick the query terms that apply to a given field).
+enum class HighlightField { Title, Artist, Album, Path };
+
+// Compute the character positions in `text` highlighted by the query's text
+// terms that apply to `field`. Runs only for on-screen rows (the delegate),
+// so it can afford to find every occurrence. `text` is the original-case
+// display string; matching is case-insensitive.
+QVector<int> highlightPositions(const QString &text,
+                                 const SearchQuery &query,
+                                 HighlightField field,
+                                 bool fuzzyMode);
 
 class SearchIndex {
 public:
@@ -45,9 +52,11 @@ public:
     // Release all indexed records, freeing memory.
     void clear();
 
-    // Run a query and return scored, ranked results.
-    // results.isEmpty() if the query is empty (show nothing, not everything).
-    QVector<ScoredResult> match(const SearchQuery &query, bool fuzzyMode) const;
+    // Run a query and return the top-scoring results (capped at kMaxResults).
+    // Empty query → empty result. When totalMatches is non-null it receives the
+    // full (uncapped) number of matching records.
+    QVector<ScoredResult> match(const SearchQuery &query, bool fuzzyMode,
+                                 int *totalMatches = nullptr) const;
 
     int size() const { return static_cast<int>(m_records.size()); }
     bool isEmpty() const { return m_records.isEmpty(); }

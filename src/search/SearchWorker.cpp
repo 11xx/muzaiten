@@ -58,16 +58,17 @@ void SearchWorker::runQuery(quint64 queryId, const QString &queryString, bool fu
     m_latestQueryId.store(queryId);
 
     if (m_index.isEmpty()) {
-        emit resultsReady(queryId, {});
+        emit resultsReady(queryId, {}, 0);
         return;
     }
 
     const SearchQuery q = SearchQuery::parse(queryString);
-    QVector<ScoredResult> results = m_index.match(q, fuzzyMode);
+    int totalMatches = 0;
+    QVector<ScoredResult> results = m_index.match(q, fuzzyMode, &totalMatches);
 
     // Only emit if this is still the most recent query
     if (m_latestQueryId.load() == queryId) {
-        emit resultsReady(queryId, std::move(results));
+        emit resultsReady(queryId, std::move(results), totalMatches);
     }
 }
 

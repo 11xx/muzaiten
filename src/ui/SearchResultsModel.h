@@ -13,8 +13,6 @@ public:
     enum Roles {
         // Returns the SearchRecord for the result row.
         SearchRecordRole = Qt::UserRole,
-        // Returns the ScoredResult (score + match ranges) for the row.
-        ScoredResultRole = Qt::UserRole + 1,
     };
 
     explicit SearchResultsModel(QObject *parent = nullptr);

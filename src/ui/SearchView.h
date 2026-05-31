@@ -55,7 +55,7 @@ private slots:
     void onDebounceTimeout();
     void onIndexReady(int count);
     void onIndexError(const QString &error);
-    void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results);
+    void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
     void onCleanupTimeout();
     void showContextMenu(const QPoint &pos);
     void onDoubleClicked(const QModelIndex &index);
@@ -99,5 +99,6 @@ private:
     bool      m_fuzzyMode    = false;
     quint64   m_queryId      = 0;
     int       m_totalIndexed = 0;
+    int       m_matchCount   = 0;  // total matches for the current query (uncapped)
     int       m_rowHeight    = 0;  // 0 = delegate auto
 };
