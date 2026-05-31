@@ -531,14 +531,14 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
             emit trackRatingChangeRequested(track, rating);
         }
         // Reflect the new rating immediately on the selected rows.
-        for (QTreeWidgetItem *item : m_tree->selectedItems()) {
-            if (item != nullptr && item->data(0, TypeRole).toInt() == TrackItem) {
-                Track updated = item->data(0, TrackRole).value<Track>();
+        for (QTreeWidgetItem *selectedItem : m_tree->selectedItems()) {
+            if (selectedItem != nullptr && selectedItem->data(0, TypeRole).toInt() == TrackItem) {
+                Track updated = selectedItem->data(0, TrackRole).value<Track>();
                 updated.effectiveRating0To100 = rating;
                 updated.rating0To100 = rating;
                 updated.hasUserRating = rating >= 0;
-                item->setData(0, TrackRole, QVariant::fromValue(updated));
-                item->setText(RatingColumn, ratingStars(rating < 0 ? 0 : rating));
+                selectedItem->setData(0, TrackRole, QVariant::fromValue(updated));
+                selectedItem->setText(RatingColumn, ratingStars(rating < 0 ? 0 : rating));
             }
         }
     }

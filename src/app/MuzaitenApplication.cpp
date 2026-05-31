@@ -9,6 +9,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QLoggingCategory>
+#include <QStandardPaths>
 
 #include <taglib/tdebuglistener.h>
 
@@ -41,7 +42,10 @@ MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
     QCoreApplication::setApplicationVersion(QStringLiteral(MUZAITEN_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("11xx"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("11xx.org"));
-    setDesktopFileName(QStringLiteral(MUZAITEN_APP_ID));
+    const QString desktopFile = QStringLiteral(MUZAITEN_APP_ID ".desktop");
+    if (!QStandardPaths::locate(QStandardPaths::ApplicationsLocation, desktopFile).isEmpty()) {
+        setDesktopFileName(QStringLiteral(MUZAITEN_APP_ID));
+    }
 
     qRegisterMetaType<Track>("Track");
     qRegisterMetaType<QVector<Track>>("QVector<Track>");

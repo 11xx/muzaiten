@@ -349,7 +349,7 @@ void LastFmScrobbler::postParams(LastFmApi::Params params, RequestKind kind, int
 void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind kind, int submittedScrobbleCount)
 {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const QByteArray body = reply->readAll();
+    const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
     const LastFmApi::Response response = LastFmApi::parseXml(body);
     const QString errorString = reply->errorString();
     const QString statusText = status > 0 ? QString::number(status) : QStringLiteral("network");
