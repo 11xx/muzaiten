@@ -152,6 +152,30 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
 }
 
+void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
+{
+    if (m_playbin == nullptr || url.isEmpty()) {
+        return;
+    }
+
+    m_softPaused = false;
+    m_pendingSeekMs = -1;
+    gst_element_set_state(m_playbin, GST_STATE_READY);
+
+    const QString uri = sourceUriForPlayback(url, m_currentPreload);
+    m_preparedPreload.clear();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri = uri;
+        m_preparedUri.clear();
+        m_gaplessAdvancePending = false;
+    }
+    g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
+    // Transition only to PAUSED: pipeline prerolls (buffering the first frame)
+    // but the audio sink never produces output. No blip.
+    gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+}
+
 void GStreamerPlaybackBackend::prepareNext(const QUrl &url)
 {
     QString uri;
