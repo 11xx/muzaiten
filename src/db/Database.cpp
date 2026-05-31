@@ -830,6 +830,18 @@ bool Database::setSetting(const QString &key, const QString &value)
     return true;
 }
 
+bool Database::removeSetting(const QString &key)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM app_settings WHERE key = ?"));
+    query.addBindValue(key);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 QVector<LinkRoot> Database::linkRoots() const
 {
     QVector<LinkRoot> roots;

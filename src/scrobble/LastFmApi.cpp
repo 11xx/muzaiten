@@ -1,7 +1,7 @@
 #include "scrobble/LastFmApi.h"
 
 #include <QCryptographicHash>
-#include <QUrlQuery>
+#include <QUrl>
 #include <QXmlStreamReader>
 
 #include <algorithm>
@@ -68,11 +68,23 @@ QString signature(const Params &params, const QString &secret)
 
 QByteArray formBody(const Params &params)
 {
-    QUrlQuery query;
+    // Build application/x-www-form-urlencoded using QUrl::toPercentEncoding so
+    // that '+' is encoded as '%2B'. QUrlQuery::query(FullyEncoded) leaves '+' as
+    // a literal '+', which servers decode as a space — diverging from the raw
+    // UTF-8 bytes that signature() signed, causing error 13 on tracks/artists
+    // whose names contain '+' (e.g. "C++", "Justice + Simian").
+    QByteArray body;
+    bool first = true;
     for (const auto &param : params) {
-        query.addQueryItem(param.first, param.second);
+        if (!first) {
+            body += '&';
+        }
+        first = false;
+        body += QUrl::toPercentEncoding(param.first);
+        body += '=';
+        body += QUrl::toPercentEncoding(param.second);
     }
-    return query.query(QUrl::FullyEncoded).toUtf8();
+    return body;
 }
 
 Response parseXml(const QByteArray &body)

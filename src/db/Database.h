@@ -52,6 +52,7 @@ public:
     bool clearUserAlbumRating(const QString &albumArtistName, const QString &albumTitle);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
+    bool removeSetting(const QString &key);
     QVector<LinkRoot> linkRoots() const;
     bool saveLinkRoot(const LinkRoot &linkRoot);
     bool removeLinkRoot(int id);
