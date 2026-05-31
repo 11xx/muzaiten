@@ -27,6 +27,10 @@ public:
 
     virtual void setProfile(const PlaybackProfile &profile) = 0;
     virtual void play(const QUrl &url) = 0;
+    // Load the source into a prerolled-but-paused state without ever producing
+    // audio output. Default falls back to play()+pause() for backends that
+    // cannot distinguish the two; backends that can should override.
+    virtual void loadPaused(const QUrl &url) { play(url); pause(); }
     virtual void prepareNext(const QUrl &url) = 0;
     virtual void pause() = 0;
     virtual void resume() = 0;

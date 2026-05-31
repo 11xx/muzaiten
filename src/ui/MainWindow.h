@@ -105,7 +105,7 @@ private:
     QString lastFmApiKey() const;
     QString lastFmSharedSecret() const;
     void onLibrarySourceChanged(int index);
-    void playTrack(const Track &track, bool notifyScrobbler = true);
+    void playTrack(const Track &track, bool notifyScrobbler = true, bool startPaused = false);
     void presentTrack(const Track &track, bool notifyScrobbler = true);
     void notifyScrobblersTrackStarted(const Track &track);
     void appendAndPlayTrack(const Track &track);
@@ -125,7 +125,7 @@ private:
     void syncQueueState();
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
-    void playQueueIndex(int index, bool notifyScrobbler = true);
+    void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false);
     void playPreviousTrack();
     void playNextTrack();
     void togglePlayback();

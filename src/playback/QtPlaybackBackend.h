@@ -13,6 +13,7 @@ public:
 
     void setProfile(const PlaybackProfile &profile) override;
     void play(const QUrl &url) override;
+    void loadPaused(const QUrl &url) override;
     void prepareNext(const QUrl &url) override;
     void pause() override;
     void resume() override;
