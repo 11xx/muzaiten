@@ -19,6 +19,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QVector>
 #include <QWidgetAction>
 #include <QEvent>
 
@@ -44,6 +45,26 @@ protected:
             return;
         }
         QMenu::mouseReleaseEvent(event);
+    }
+};
+
+class EagerMenuBar final : public QMenuBar {
+public:
+    using QMenuBar::QMenuBar;
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        QAction *action = actionAt(event->pos());
+        if (event->button() == Qt::LeftButton && action != nullptr && action == activeAction()) {
+            if (QMenu *menu = action->menu(); menu != nullptr && menu->isVisible()) {
+                menu->hide();
+                setActiveAction(nullptr);
+                event->accept();
+                return;
+            }
+        }
+        QMenuBar::mousePressEvent(event);
     }
 };
 
@@ -284,6 +305,20 @@ QString formatTime(qint64 milliseconds)
         .arg(seconds % 60, 2, 10, QLatin1Char('0'));
 }
 
+void styleMenu(QMenu *menu)
+{
+    if (menu == nullptr) {
+        return;
+    }
+    menu->setStyleSheet(QStringLiteral(
+        "QMenu::item {"
+        "  padding: 4px 30px 4px 12px;"
+        "}"
+        "QMenu::indicator {"
+        "  left: 5px;"
+        "}"));
+}
+
 } // namespace
 
 PlayerBar::PlayerBar(QWidget *parent)
@@ -341,6 +376,11 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_listUnsupportedFiles->setCheckable(true);
     m_listUnsupportedFiles->setVisible(false); // only relevant in file-explorer view
 
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
+    for (QMenu *menu : styledMenus) {
+        styleMenu(menu);
+    }
+
     compactMenu->addMenu(fileMenu);
     compactMenu->addMenu(playbackMenu);
     compactMenu->addMenu(mpdMenu);
@@ -359,7 +399,7 @@ PlayerBar::PlayerBar(QWidget *parent)
         compactMenu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height())));
     });
 
-    m_menuBar = new QMenuBar(m_menuStrip);
+    m_menuBar = new EagerMenuBar(m_menuStrip);
     m_menuBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     const int menuStripHeight = m_menuBar->fontMetrics().height() + 2;
     m_menuStrip->setFixedHeight(menuStripHeight);
@@ -631,7 +671,7 @@ void PlayerBar::restyleMenuBar()
         "QMenuBar::item {"
         "  margin: 0;"
         "  padding: 0 10px;"
-        "  border-right: 1px solid palette(mid);"
+        "  border: 0;"
         "  background: transparent;"
         "}"
         "QMenuBar::item:selected {"
@@ -639,14 +679,13 @@ void PlayerBar::restyleMenuBar()
         "  color: palette(highlighted-text);"
         "}"
         "QMenuBar::item:pressed {"
-        "  background: palette(dark);"
+        "  background: palette(highlight);"
         "  color: palette(highlighted-text);"
         "}"
         "QToolButton {"
         "  margin: 0;"
         "  padding: 0;"
         "  border: 0;"
-        "  border-right: 1px solid palette(mid);"
         "  background: transparent;"
         "}"
         "QToolButton:hover {"
@@ -654,7 +693,7 @@ void PlayerBar::restyleMenuBar()
         "  color: palette(highlighted-text);"
         "}"
         "QToolButton:pressed {"
-        "  background: palette(dark);"
+        "  background: palette(highlight);"
         "}"));
 }
 
