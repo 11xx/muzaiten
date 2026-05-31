@@ -113,6 +113,7 @@ add_test(NAME test_fuzzy_match COMMAND test_fuzzy_match)
 
 add_executable(test_search_index
     test_search_index.cpp
+    ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchIndex.cpp
     ../src/search/SearchQuery.cpp
@@ -121,3 +122,42 @@ target_include_directories(test_search_index PRIVATE ../src)
 target_link_libraries(test_search_index PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_search_index PRIVATE cxx_std_26)
 add_test(NAME test_search_index COMMAND test_search_index)
+
+add_executable(test_rank_config
+    test_rank_config.cpp
+    ../src/search/Exclusion.cpp
+    ../src/search/RankConfig.cpp
+    ../src/core/MusicSort.cpp
+)
+target_include_directories(test_rank_config PRIVATE ../src)
+target_link_libraries(test_rank_config PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_rank_config PRIVATE cxx_std_26)
+add_test(NAME test_rank_config COMMAND test_rank_config)
+
+add_executable(test_exclusion
+    test_exclusion.cpp
+    ../src/search/Exclusion.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/SearchIndex.cpp
+    ../src/search/SearchQuery.cpp
+)
+target_include_directories(test_exclusion PRIVATE ../src)
+target_link_libraries(test_exclusion PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_exclusion PRIVATE cxx_std_26)
+add_test(NAME test_exclusion COMMAND test_exclusion)
+
+add_executable(test_result_ranker
+    test_result_ranker.cpp
+    ../src/search/Exclusion.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/RankConfig.cpp
+    ../src/search/ResultRanker.cpp
+    ../src/search/SearchIndex.cpp
+    ../src/search/SearchQuery.cpp
+    ../src/core/MusicSort.cpp
+    ../src/core/Rating.cpp
+)
+target_include_directories(test_result_ranker PRIVATE ../src)
+target_link_libraries(test_result_ranker PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_result_ranker PRIVATE cxx_std_26)
+add_test(NAME test_result_ranker COMMAND test_result_ranker)

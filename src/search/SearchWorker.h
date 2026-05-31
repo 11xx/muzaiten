@@ -6,6 +6,7 @@
 // Thread affinity: all slots execute on the worker thread (via queued
 // connections).  All signals are queued back to the GUI thread.
 
+#include "search/Exclusion.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 
@@ -37,6 +38,9 @@ public slots:
     // reloads it from the database.
     void clearIndex();
 
+    // Update the exclusion rules; compiled once and applied to every query.
+    void setExclusions(QVector<Search::ExcludeRule> rules);
+
 signals:
     void indexReady(int trackCount);
     void indexError(const QString &error);
@@ -45,6 +49,7 @@ signals:
 private:
     QString   m_dbPath;
     SearchIndex m_index;
+    ExclusionSet m_excludes;
     std::atomic<quint64> m_latestQueryId{0};
     Database *m_db = nullptr;  // opened on the worker thread in buildIndex()
 };

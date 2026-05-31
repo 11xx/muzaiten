@@ -1,6 +1,8 @@
 #include "ui/SearchView.h"
 
 #include "core/Track.h"
+#include "search/Exclusion.h"
+#include "search/RankConfig.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
@@ -338,13 +340,30 @@ void SearchView::forceRefresh()
     invalidateIndex(m_dbPath);
 }
 
+void SearchView::setRankConfig(const Search::RankConfig &config)
+{
+    m_rankConfig = config;
+    m_ranker.setConfig(config);
+    if (m_worker) {
+        QMetaObject::invokeMethod(m_worker, "setExclusions", Qt::QueuedConnection,
+                                  Q_ARG(QVector<Search::ExcludeRule>, m_rankConfig.excludes));
+    }
+    submitQuery(); // re-run with the new ranking + exclusions
+}
+
 void SearchView::setupWorker(const QString &dbPath)
 {
     if (m_worker) return;
     m_dbPath = dbPath;
+    qRegisterMetaType<QVector<Search::ExcludeRule>>();
     m_workerThread = new QThread(this);
     m_worker = new Search::SearchWorker(dbPath);
     m_worker->moveToThread(m_workerThread);
+    // Push any exclusions already configured before the worker existed.
+    if (!m_rankConfig.excludes.isEmpty()) {
+        QMetaObject::invokeMethod(m_worker, "setExclusions", Qt::QueuedConnection,
+                                  Q_ARG(QVector<Search::ExcludeRule>, m_rankConfig.excludes));
+    }
 
     connect(m_worker, &Search::SearchWorker::indexReady,
             this, &SearchView::onIndexReady, Qt::QueuedConnection);
@@ -429,6 +448,9 @@ void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> r
     if (queryId != m_queryId) return; // stale result from a superseded query
 
     m_matchCount = totalMatches;
+    // Front-end ranking: re-order the matched set by the user's criteria before
+    // handing it to the model. The engine's relevance order is the input.
+    m_ranker.sort(results);
     // Each ScoredResult embeds a copy of its SearchRecord, so the model/delegate
     // work entirely with data already copied across the thread boundary.
     m_model->setResults(std::move(results));

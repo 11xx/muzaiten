@@ -138,6 +138,7 @@ Press `3` to open the search view. Type to filter interactively; all terms AND t
 | `Ctrl+Space` | Toggle mark on current row |
 | `Ctrl+A` | Mark all results |
 | `Ctrl+F` | Toggle fuzzy mode (default: exact orderless substring) |
+| Result order | Configurable via `Settings > Search ranking…` (see below) |
 | `Esc` / `Ctrl+G` | Clear the query; press again to leave text-input mode |
 | `/` | Return focus to the search box (from browse mode) |
 | `F5` (or re-press `3`) | Rebuild the search index |
@@ -174,6 +175,27 @@ into memory on first use and kept resident, so re-opening search is instant.
 | `dur:>3:30` | Duration > 3 min 30 sec |
 
 Combine freely: `miles ext:flac rating:>=80 !live`
+
+### Ranking and exclusions
+
+`Settings > Search ranking…` opens a panel that controls how results are
+ordered and what is filtered out:
+
+- **Ranking criteria** — an ordered list (top = highest priority). Each row is a
+  criterion with a direction: Relevance, Audio quality, Preferred directory
+  (with a path), Library order (the same grouping as the rest of the app), or a
+  single sort field. The default is **Relevance → Audio quality → Library
+  order**, so the most relevant matches come first and, among equally relevant
+  ones, higher-quality audio (lossless / higher sample rate) floats up. Move a
+  criterion above Relevance to make it dominate the matched results.
+- **Audio quality** scores lossless codecs first, then sample rate, then
+  bitrate/channels. (Bit depth is not scanned yet; it will factor in once it is.)
+- **Exclude patterns** — glob patterns (`*`, `?`) that drop results entirely,
+  each scoped to the file path or to any field. Excluded tracks are skipped
+  before ranking, so excluding large folders can make search faster. Examples:
+  `*/Podcasts/*` (Path), `*.m4b` (Path), `*live*` (Any field).
+
+Ranking and exclusion changes apply live and persist across restarts.
 
 ## File Explorer Notes
 

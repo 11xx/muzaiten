@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/Track.h"
+#include "search/RankConfig.h"
+#include "search/ResultRanker.h"
 #include "search/SearchIndex.h"
 #include "search/SearchRecord.h"
 
@@ -36,6 +38,10 @@ public:
 
     // Give keyboard focus to the search box ("input mode").
     void focusSearchBox();
+
+    // Apply a new ranking/exclusion config: rebuilds the front-end ranker,
+    // forwards exclusions to the worker, and re-runs the current query.
+    void setRankConfig(const Search::RankConfig &config);
 
 signals:
     void addToQueueRequested(QVector<Track> tracks);
@@ -92,6 +98,9 @@ private:
 
     QThread              *m_workerThread = nullptr;
     Search::SearchWorker *m_worker       = nullptr;
+
+    Search::RankConfig   m_rankConfig;
+    Search::ResultRanker m_ranker;
 
     QString   m_dbPath;
     bool      m_indexLoaded  = false;
