@@ -70,6 +70,7 @@ private:
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();
+    void revealTrackInLibrary(const Track &track);
     void setLibraryExplorerDirectory(const QString &path);
     void setFreeRoamDirectory(const QString &path);
     void refreshLibraryFileExplorer();
