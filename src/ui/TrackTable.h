@@ -36,6 +36,7 @@ signals:
     void viewSettingsChanged();
 
 protected:
+    void changeEvent(QEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;

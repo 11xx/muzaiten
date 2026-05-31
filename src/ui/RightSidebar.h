@@ -79,4 +79,5 @@ private:
     int m_playNextEnd = -1;
     bool m_showPlayNextBadge = true;
     bool m_showPlayNextTitleAccent = false;
+    bool m_usingArtFallback = true;
 };
