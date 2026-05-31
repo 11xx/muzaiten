@@ -581,7 +581,6 @@ MainWindow::MainWindow(QWidget *parent)
     configureLastFm();
     loadExistingLibrary();
     restoreSavedPlaybackState();
-    maybeStartMetadataBackfill();
 }
 
 MainWindow::~MainWindow()
@@ -592,13 +591,6 @@ MainWindow::~MainWindow()
     if (m_scanThread != nullptr) {
         m_scanThread->quit();
         m_scanThread->wait(3000);
-    }
-    if (m_backfillPipeline != nullptr) {
-        m_backfillPipeline->cancel();
-    }
-    if (m_backfillThread != nullptr) {
-        m_backfillThread->quit();
-        m_backfillThread->wait(3000);
     }
     if (m_listenBrainzThread != nullptr) {
         m_listenBrainzThread->quit();
@@ -797,7 +789,6 @@ void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, b
         statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
     } else if (sourceScan && !canceled) {
         statusBar()->showMessage(QStringLiteral("Source scans complete"), 10000);
-        maybeStartMetadataBackfill();
     }
 }
 
@@ -835,37 +826,6 @@ void MainWindow::removeMissingTracks()
     statusBar()->showMessage(QStringLiteral("Removed %1 missing track(s)").arg(removed), 5000);
 }
 
-void MainWindow::maybeStartMetadataBackfill()
-{
-    if (m_backfillThread != nullptr || m_scanThread != nullptr) {
-        return;
-    }
-    const QStringList paths = m_database->tracksWithoutFullMetadata();
-    if (paths.isEmpty()) {
-        return;
-    }
-
-    m_backfillThread = new QThread(this);
-    m_backfillPipeline = new ScanPipeline(paths, ScanPipeline::Options{});
-    m_backfillPipeline->moveToThread(m_backfillThread);
-    connect(m_backfillThread, &QThread::started, m_backfillPipeline, &ScanPipeline::run);
-    connect(m_backfillPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
-    connect(m_backfillPipeline, &ScanPipeline::finished, this, &MainWindow::finishMetadataBackfill);
-    connect(m_backfillPipeline, &ScanPipeline::finished, m_backfillThread, &QThread::quit);
-    connect(m_backfillThread, &QThread::finished, m_backfillPipeline, &QObject::deleteLater);
-    connect(m_backfillThread, &QThread::finished, m_backfillThread, &QObject::deleteLater);
-    connect(m_backfillThread, &QThread::finished, this, [this]() {
-        m_backfillThread = nullptr;
-        m_backfillPipeline = nullptr;
-    });
-    statusBar()->showMessage(QStringLiteral("Backfilling metadata archive for %1 track(s)...").arg(paths.size()), 5000);
-    m_backfillThread->start();
-}
-
-void MainWindow::finishMetadataBackfill()
-{
-    statusBar()->showMessage(QStringLiteral("Metadata archive backfill complete"), 5000);
-}
 
 void MainWindow::onArtworkReady(const QString &token, const QImage &image, quint64 generation)
 {

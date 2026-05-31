@@ -39,7 +39,6 @@ public:
     int markTracksMissing(const QStringList &paths);
     int removeMissingTracks();
     int missingTrackCount() const;
-    QStringList tracksWithoutFullMetadata(int limit = 0) const;
     MetadataBlob::FullMetadata fullMetadata(const QString &path) const;
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
