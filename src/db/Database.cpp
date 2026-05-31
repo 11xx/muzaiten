@@ -1,6 +1,7 @@
 #include "db/Database.h"
 
 #include "db/Schema.h"
+#include "search/SearchRecord.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -211,7 +212,52 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 6;
+    // v7: promote audio technical properties to tracks table for fast search indexing
+    const QVector<QPair<QString, QString>> techColumns = {
+        {QStringLiteral("sample_rate_hz"), QStringLiteral("sample_rate_hz INTEGER")},
+        {QStringLiteral("bitrate_kbps"),   QStringLiteral("bitrate_kbps INTEGER")},
+        {QStringLiteral("channels"),       QStringLiteral("channels INTEGER")},
+        {QStringLiteral("codec"),          QStringLiteral("codec TEXT")},
+    };
+    for (const auto &column : techColumns) {
+        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+            return false;
+        }
+    }
+
+    // Backfill from stored metadata blobs for rows that have a blob but NULL tech columns
+    {
+        QSqlQuery bfQuery(m_db);
+        bfQuery.prepare(QStringLiteral(
+            "SELECT t.path, t.id, m.raw_size, m.data "
+            "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
+            "WHERE t.sample_rate_hz IS NULL AND t.bitrate_kbps IS NULL"));
+        if (bfQuery.exec()) {
+            QSqlQuery upd(m_db);
+            upd.prepare(QStringLiteral(
+                "UPDATE tracks SET sample_rate_hz=?, bitrate_kbps=?, channels=?, codec=? WHERE id=?"));
+            while (bfQuery.next()) {
+                const qint64 trackId = bfQuery.value(1).toLongLong();
+                const qint64 rawSize = bfQuery.value(2).toLongLong();
+                const QByteArray blob = bfQuery.value(3).toByteArray();
+                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
+                if (meta.sampleRateHz > 0 || meta.bitrateKbps > 0 || !meta.codec.isEmpty()) {
+                    upd.addBindValue(meta.sampleRateHz > 0 ? QVariant(meta.sampleRateHz) : QVariant());
+                    upd.addBindValue(meta.bitrateKbps > 0 ? QVariant(meta.bitrateKbps) : QVariant());
+                    upd.addBindValue(meta.channels > 0 ? QVariant(meta.channels) : QVariant());
+                    upd.addBindValue(meta.codec.isEmpty() ? QVariant() : QVariant(meta.codec));
+                    upd.addBindValue(trackId);
+                    upd.exec();
+                }
+            }
+        }
+    }
+
+    if (!execSql(query, QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(7, datetime('now'))"), &m_lastError)) {
+        return false;
+    }
+
+    return Schema::currentVersion == 7;
 }
 
 QString Database::lastError() const
@@ -299,9 +345,9 @@ bool Database::upsertTrack(const Track &track)
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?) "
-        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL"));
+        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec"));
     query.addBindValue(track.path);
     query.addBindValue(track.parentDir);
     query.addBindValue(track.filename);
@@ -326,6 +372,10 @@ bool Database::upsertTrack(const Track &track)
     query.addBindValue(track.fileSize);
     query.addBindValue(track.fileMtime);
     query.addBindValue(track.scanError);
+    query.addBindValue(track.sampleRateHz > 0 ? QVariant(track.sampleRateHz) : QVariant());
+    query.addBindValue(track.bitrateKbps > 0 ? QVariant(track.bitrateKbps) : QVariant());
+    query.addBindValue(track.channels > 0 ? QVariant(track.channels) : QVariant());
+    query.addBindValue(track.codec.isEmpty() ? QVariant() : QVariant(track.codec));
 
     if (!query.exec()) {
         m_lastError = query.lastError().text();
@@ -1270,6 +1320,84 @@ QVector<Album> Database::mpdAlbumsForArtist(const QString &albumArtist, const QS
         albums.push_back(album);
     }
     return albums;
+}
+
+QVector<Search::SearchRecord> Database::allTracksForSearch() const
+{
+    QVector<Search::SearchRecord> records;
+    QSqlQuery query(m_db);
+    QString sql = QStringLiteral(
+        "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
+        "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
+        "COALESCE(utr.rating_0_100, t.rating_0_100) "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "WHERE t.missing = 0");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+    }
+    if (!query.exec(sql)) {
+        return records;
+    }
+    while (query.next()) {
+        Search::SearchRecord rec;
+        rec.path              = query.value(0).toString();
+        rec.filename          = query.value(1).toString();
+        rec.title             = query.value(2).toString();
+        rec.artistName        = query.value(3).toString();
+        rec.albumArtistName   = query.value(4).toString();
+        rec.albumTitle        = query.value(5).toString();
+        rec.date              = query.value(6).toString();
+        rec.durationMs        = query.value(7).toLongLong();
+        rec.sampleRateHz      = query.value(8).toInt();
+        rec.bitrateKbps       = query.value(9).toInt();
+        rec.channels          = query.value(10).toInt();
+        rec.codec             = query.value(11).toString();
+        rec.rating0To100      = query.value(12).isNull() ? -1 : query.value(12).toInt();
+        rec.source            = Search::TrackSource::Local;
+        // Pre-compute lowercased versions for case-insensitive matching
+        rec.normTitle        = rec.title.toLower();
+        rec.normArtist       = rec.artistName.toLower();
+        rec.normAlbumArtist  = rec.albumArtistName.toLower();
+        rec.normAlbum        = rec.albumTitle.toLower();
+        rec.normFilename     = rec.filename.toLower();
+        rec.normPath         = rec.path.toLower();
+        records.push_back(std::move(rec));
+    }
+    return records;
+}
+
+QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
+{
+    QVector<Search::SearchRecord> records;
+    QSqlQuery query(m_db);
+    const QString sql = QStringLiteral(
+        "SELECT uri, title, artist_name, album_artist_name, album_title, date, duration_ms "
+        "FROM mpd_tracks");
+    if (!query.exec(sql)) {
+        return records;
+    }
+    while (query.next()) {
+        Search::SearchRecord rec;
+        rec.path            = query.value(0).toString();
+        rec.filename        = rec.path.section(QLatin1Char('/'), -1);
+        rec.title           = query.value(1).toString();
+        rec.artistName      = query.value(2).toString();
+        rec.albumArtistName = query.value(3).toString();
+        rec.albumTitle      = query.value(4).toString();
+        rec.date            = query.value(5).toString();
+        rec.durationMs      = query.value(6).toLongLong();
+        rec.rating0To100    = -1;
+        rec.source          = Search::TrackSource::Mpd;
+        rec.normTitle        = rec.title.toLower();
+        rec.normArtist       = rec.artistName.toLower();
+        rec.normAlbumArtist  = rec.albumArtistName.toLower();
+        rec.normAlbum        = rec.albumTitle.toLower();
+        rec.normFilename     = rec.filename.toLower();
+        rec.normPath         = rec.path.toLower();
+        records.push_back(std::move(rec));
+    }
+    return records;
 }
 
 QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QString &albumTitleFilter) const

@@ -35,6 +35,11 @@ struct Track {
     QString scanError;
     QByteArray fullMetadataBlob;     // zstd(JSON) of the complete tag set; empty if not captured
     qint64 fullMetadataRawSize = 0;  // uncompressed length of the archive JSON
+    // Technical audio properties (promoted from the metadata blob for fast access / search indexing)
+    int sampleRateHz = 0;
+    int bitrateKbps = 0;
+    int channels = 0;
+    QString codec;  // file extension lower-cased, e.g. "flac", "mp3", "opus"
 };
 
 Q_DECLARE_METATYPE(Track)

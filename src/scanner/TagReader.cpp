@@ -80,6 +80,9 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
 
     if (const TagLib::AudioProperties *audio = file.audioProperties()) {
         track.durationMs = static_cast<qint64>(audio->lengthInMilliseconds());
+        track.bitrateKbps = audio->bitrate();
+        track.sampleRateHz = audio->sampleRate();
+        track.channels = audio->channels();
         if (fullMetadata != nullptr) {
             fullMetadata->bitrateKbps = audio->bitrate();
             fullMetadata->sampleRateHz = audio->sampleRate();
@@ -88,6 +91,7 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
     }
 
     const TagLib::PropertyMap properties = file.file()->properties();
+    track.codec = info.suffix().toLower();
     if (fullMetadata != nullptr) {
         for (auto it = properties.begin(); it != properties.end(); ++it) {
             QStringList values;
@@ -97,7 +101,7 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
             }
             fullMetadata->tags.insert(toQString(it->first), values);
         }
-        fullMetadata->codec = info.suffix().toLower();
+        fullMetadata->codec = track.codec;
     }
     track.albumArtistName = firstProperty(properties, {
         QStringLiteral("ALBUMARTIST"),

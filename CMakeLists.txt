@@ -73,6 +73,10 @@ set(MUZAITEN_SOURCES
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
+    src/search/FuzzyMatch.cpp
+    src/search/SearchIndex.cpp
+    src/search/SearchQuery.cpp
+    src/search/SearchWorker.cpp
     src/ui/AlbumGrid.cpp
     src/ui/NeighborColumnResizer.cpp
     src/ui/OverlayScrollBar.cpp
@@ -88,6 +92,9 @@ set(MUZAITEN_SOURCES
     src/ui/PlaybackResumeDialog.cpp
     src/ui/PlayerBar.cpp
     src/ui/RightSidebar.cpp
+    src/ui/SearchResultDelegate.cpp
+    src/ui/SearchResultsModel.cpp
+    src/ui/SearchView.cpp
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
@@ -132,6 +139,11 @@ set(MUZAITEN_HEADERS
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
     src/scrobble/ListenBrainzScrobbler.h
+    src/search/FuzzyMatch.h
+    src/search/SearchIndex.h
+    src/search/SearchQuery.h
+    src/search/SearchRecord.h
+    src/search/SearchWorker.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
     src/ui/NeighborColumnResizer.h
@@ -147,6 +159,9 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
     src/ui/RightSidebar.h
+    src/ui/SearchResultDelegate.h
+    src/ui/SearchResultsModel.h
+    src/ui/SearchView.h
     src/ui/SourceDirectoriesDialog.h
     src/ui/StarRating.h
     src/ui/StarRatingDelegate.h

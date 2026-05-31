@@ -116,10 +116,52 @@ MUZAITEN_VERBOSE=1 ./build/muzaiten
 
 - `1`: library panels view.
 - `2`: toggle between library explorer and free-roam explorer.
+- `3`: library search view (fzf-style, searches entire library including MPD tracks).
 - `o`: find the current track in the active library view.
 - Queue context menu: play a row, find that row in the library, open its containing directory, remove rows, clear play-next priority, or clear the queue.
 - `Ctrl+scroll` over the queue or file explorers: adjust row height.
 - Context menus on tables, album grid, queue header, and explorer rows expose sorting, visibility, rating, and queue actions.
+
+## Library Search
+
+Press `3` to open the search view. Type to filter interactively; all terms AND together in any order.
+
+**Search keybindings:**
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Add selected results to queue |
+| `Alt+Enter` | Add to queue and play immediately |
+| `Tab` / `Ctrl+Space` | Toggle selection on current row, advance |
+| `Ctrl+A` | Select all visible results |
+| `↑` / `↓` / `Ctrl+P` / `Ctrl+N` | Navigate |
+| `Ctrl+F` | Toggle fuzzy mode (default: exact orderless substring) |
+| `Esc` | Return to library panels view |
+| `Ctrl+scroll` | Adjust result row height |
+
+**Query syntax:**
+
+| Pattern | Meaning |
+|---------|---------|
+| `miles blue` | Both "miles" AND "blue" anywhere in the record (orderless) |
+| `!classical` | Negate: exclude matches |
+| `^miles` | Prefix anchor: field must start with "miles" |
+| `blue$` | Suffix anchor: field must end with "blue" |
+| `'exact` | Force exact match in fuzzy mode |
+| `artist:davis` | Match only in artist/album-artist field |
+| `album:blue` | Match only in album title |
+| `title:what` | Match only in track title |
+| `path:/gak` | Match only in file path |
+| `ext:flac` | Exact extension/codec filter |
+| `khz:>=96` | Sample rate ≥ 96 kHz |
+| `hz:44100` | Sample rate = 44100 Hz |
+| `kbps:>320` | Bitrate > 320 kbps |
+| `ch:2` | Stereo (2 channels) |
+| `rating:>=80` | User rating ≥ 80/100 |
+| `year:>=2000` | Release year ≥ 2000 |
+| `dur:>3:30` | Duration > 3 min 30 sec |
+
+Combine freely: `miles ext:flac rating:>=80 !live`
 
 ## File Explorer Notes
 

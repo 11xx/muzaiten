@@ -1,5 +1,5 @@
 #pragma once
 
 namespace Schema {
-inline constexpr int currentVersion = 6;
+inline constexpr int currentVersion = 7;
 }

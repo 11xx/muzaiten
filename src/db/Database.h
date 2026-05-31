@@ -16,6 +16,7 @@
 #include "core/Track.h"
 #include "fs/LinkRoot.h"
 #include "mpd/MpdTrack.h"
+#include "search/SearchRecord.h"
 
 class Database final {
 public:
@@ -75,6 +76,10 @@ public:
     QVector<Artist> albumArtists() const;
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;
+    // Lightweight row set for building the search index — all non-missing local tracks.
+    QVector<Search::SearchRecord> allTracksForSearch() const;
+    // Lightweight row set for MPD-imported tracks.
+    QVector<Search::SearchRecord> allMpdTracksForSearch() const;
 
 private:
     qint64 upsertArtist(const QString &name, const QString &sortName = {});
