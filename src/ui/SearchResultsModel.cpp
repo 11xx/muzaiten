@@ -43,9 +43,6 @@ QVariant SearchResultsModel::data(const QModelIndex &index, int role) const
     case SearchRecordRole:
         return QVariant::fromValue(sr.rec);
 
-    case ScoredResultRole:
-        return QVariant::fromValue(sr);
-
     default:
         return {};
     }

@@ -13,7 +13,6 @@
 #include <QTextLayout>
 
 Q_DECLARE_METATYPE(Search::SearchRecord)
-Q_DECLARE_METATYPE(Search::ScoredResult)
 
 namespace {
 
@@ -63,6 +62,12 @@ void SearchResultDelegate::setCurrentRow(int row)
 void SearchResultDelegate::setRowHeight(int height)
 {
     m_rowHeight = height;
+}
+
+void SearchResultDelegate::setQuery(const Search::SearchQuery &query, bool fuzzyMode)
+{
+    m_query = query;
+    m_fuzzyMode = fuzzyMode;
 }
 
 QSize SearchResultDelegate::sizeHint(const QStyleOptionViewItem &option,
@@ -175,15 +180,20 @@ void SearchResultDelegate::paint(QPainter *painter,
         painter->fillRect(QRect(opt.rect.left(), opt.rect.top(), 3, opt.rect.height()), barColor);
     }
 
-    // Resolve record and match ranges
+    // Resolve record
     const auto recVar = index.data(SearchResultsModel::SearchRecordRole);
-    const auto srVar  = index.data(SearchResultsModel::ScoredResultRole);
     if (!recVar.isValid()) {
         painter->restore();
         return;
     }
     const Search::SearchRecord &rec = qvariant_cast<Search::SearchRecord>(recVar);
-    const Search::ScoredResult &sr  = qvariant_cast<Search::ScoredResult>(srVar);
+
+    // Highlight positions are computed lazily here — only for the handful of
+    // on-screen rows — instead of for every record during matching.
+    using Search::HighlightField;
+    const QVector<int> titlePos  = Search::highlightPositions(rec.title, m_query, HighlightField::Title, m_fuzzyMode);
+    const QString displayArtistName = rec.albumArtistName.isEmpty() ? rec.artistName : rec.albumArtistName;
+    const QVector<int> artistPos = Search::highlightPositions(displayArtistName, m_query, HighlightField::Artist, m_fuzzyMode);
 
     // Color palette
     const QColor primaryColor = selected
@@ -245,24 +255,20 @@ void SearchResultDelegate::paint(QPainter *painter,
             const QRect titleOnly(textLeft, lineRect(0).top(), std::max(0, textW - durW), lineH);
             const QRect durOnly(textLeft + std::max(0, textW - durW), lineRect(0).top(), durW, lineH);
             drawHighlightedText(painter, titleOnly, Qt::AlignLeft, rec.title,
-                                sr.ranges.titlePositions, primaryColor, matchColor, fm);
+                                titlePos, primaryColor, matchColor, fm);
             painter->setPen(secondaryColor);
             painter->drawText(durOnly, Qt::AlignRight | Qt::AlignVCenter, dur);
         } else {
             drawHighlightedText(painter, lineRect(0), Qt::AlignLeft, rec.title,
-                                sr.ranges.titlePositions, primaryColor, matchColor, fm);
+                                titlePos, primaryColor, matchColor, fm);
         }
     }
 
     // Line 1: artist (or album artist if different from artist)
     {
-        const QString &displayArtist = rec.albumArtistName.isEmpty()
-            ? rec.artistName : rec.albumArtistName;
-        const QVector<int> &artistPos = !sr.ranges.albumArtistPositions.isEmpty()
-            ? sr.ranges.albumArtistPositions : sr.ranges.artistPositions;
         if (!iconArtist.isNull()) iconArtist.paint(painter, iconRect(1), Qt::AlignCenter,
                                                     QIcon::Normal, QIcon::Off);
-        drawHighlightedText(painter, lineRect(1), Qt::AlignLeft, displayArtist,
+        drawHighlightedText(painter, lineRect(1), Qt::AlignLeft, displayArtistName,
                             artistPos, secondaryColor, matchColor, fm);
     }
 
@@ -270,18 +276,22 @@ void SearchResultDelegate::paint(QPainter *painter,
     {
         const QString albumLine = rec.date.isEmpty() ? rec.albumTitle
             : QStringLiteral("%1  (%2)").arg(rec.albumTitle, rec.date);
+        const QVector<int> albumPos = Search::highlightPositions(rec.albumTitle, m_query,
+                                                                 HighlightField::Album, m_fuzzyMode);
         if (!iconAlbum.isNull()) iconAlbum.paint(painter, iconRect(2), Qt::AlignCenter,
                                                   QIcon::Normal, QIcon::Off);
         drawHighlightedText(painter, lineRect(2), Qt::AlignLeft, albumLine,
-                            sr.ranges.albumPositions, secondaryColor, matchColor, fm);
+                            albumPos, secondaryColor, matchColor, fm);
     }
 
     // Line 3: path
     {
+        const QVector<int> pathPos = Search::highlightPositions(rec.path, m_query,
+                                                               HighlightField::Path, m_fuzzyMode);
         if (!iconPath.isNull()) iconPath.paint(painter, iconRect(3), Qt::AlignCenter,
                                                QIcon::Normal, QIcon::Off);
         drawHighlightedText(painter, lineRect(3), Qt::AlignLeft, rec.path,
-                            sr.ranges.pathPositions, secondaryColor, matchColor, fm);
+                            pathPos, secondaryColor, matchColor, fm);
     }
 
     painter->restore();
