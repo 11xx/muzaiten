@@ -104,6 +104,7 @@ private:
     void showLastFmSettings();
     QString lastFmApiKey() const;
     QString lastFmSharedSecret() const;
+    bool hasDefaultLastFmCredentials() const;
     void onLibrarySourceChanged(int index);
     void playTrack(const Track &track, bool notifyScrobbler = true, bool startPaused = false);
     void presentTrack(const Track &track, bool notifyScrobbler = true);

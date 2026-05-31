@@ -11,6 +11,7 @@ private slots:
     void signatureExcludesFormatAndCallback();
     void signatureSortsIndexedNamesLiterally();
     void formBodyEncodesUtf8AndArrayNames();
+    void formBodyEncodesPlusAsPercent2B();
     void parsesAuthTokenSuccess();
     void parsesAuthSessionSuccess();
     void parsesScrobbleSuccess();
@@ -66,6 +67,23 @@ void LastFmApiTest::formBodyEncodesUtf8AndArrayNames()
     const QByteArray body = LastFmApi::formBody(params);
     QVERIFY(body.contains("artist[0]=Bj%C3%B6rk"));
     QVERIFY(body.contains("track[0]=A%20Song"));
+}
+
+void LastFmApiTest::formBodyEncodesPlusAsPercent2B()
+{
+    // '+' in a parameter value must be percent-encoded as %2B in the POST body,
+    // not left as a literal '+' (which servers decode as a space under
+    // application/x-www-form-urlencoded, diverging from the bytes that were
+    // MD5-signed and causing error 13 "Invalid method signature").
+    LastFmApi::Params params;
+    LastFmApi::addParam(params, QStringLiteral("artist"), QStringLiteral("C++"));
+    LastFmApi::addParam(params, QStringLiteral("track"), QStringLiteral("a+b"));
+    const QByteArray body = LastFmApi::formBody(params);
+    // '+' must be %2B — never a literal '+' or a space
+    QVERIFY(body.contains("artist=C%2B%2B"));
+    QVERIFY(body.contains("track=a%2Bb"));
+    QVERIFY(!body.contains("artist=C++"));
+    QVERIFY(!body.contains("track=a+b"));
 }
 
 void LastFmApiTest::parsesAuthTokenSuccess()

@@ -61,6 +61,7 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QUuid>
@@ -1968,6 +1969,21 @@ QString MainWindow::lastFmSharedSecret() const
     return secret;
 }
 
+bool MainWindow::hasDefaultLastFmCredentials() const
+{
+    // Returns true when env vars or build-time defaults supply both key and secret
+    // (without consulting the DB — those are user overrides, not "defaults").
+    const auto fromEnvOrDefault = [](const char *envVar, const char *buildDefault) {
+        QString v = QString::fromLocal8Bit(qgetenv(envVar)).trimmed();
+        if (v.isEmpty()) {
+            v = QString::fromLatin1(buildDefault).trimmed();
+        }
+        return v;
+    };
+    return !fromEnvOrDefault("LASTFM_API_KEY", LastFmCredentials::defaultApiKey).isEmpty()
+        && !fromEnvOrDefault("LASTFM_SHARED_SECRET", LastFmCredentials::defaultSharedSecret).isEmpty();
+}
+
 void MainWindow::configureLastFm()
 {
     const bool enabled = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
@@ -1994,94 +2010,171 @@ void MainWindow::setLastFmEnabled(bool enabled)
 void MainWindow::showLastFmSettings()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("Last.fm API settings"));
+    dialog.setWindowTitle(QStringLiteral("Last.fm settings"));
 
     auto *layout = new QVBoxLayout(&dialog);
 
+    // --- Status label ---
     auto *status = new QLabel(&dialog);
     layout->addWidget(status);
 
-    auto *loginButton = new QPushButton(QStringLiteral("Log in to Last.fm"), &dialog);
-    auto *logoutButton = new QPushButton(QStringLiteral("Log out"), &dialog);
+    // --- Single login/logout button ---
+    // State machine: Disconnected → Login flow, Connected → Confirm logout.
+    // A small shared struct keeps the confirm-timer and flag alive across lambdas.
+    struct ButtonState {
+        QTimer *confirmTimer = nullptr;
+        bool confirming = false;
+    };
+    auto state = std::make_shared<ButtonState>();
+
+    auto *actionButton = new QPushButton(&dialog);
     auto *buttonRow = new QHBoxLayout;
-    buttonRow->addWidget(loginButton);
-    buttonRow->addWidget(logoutButton);
+    buttonRow->addWidget(actionButton);
     buttonRow->addStretch();
     layout->addLayout(buttonRow);
 
-    auto *advanced = new QGroupBox(QStringLiteral("API credentials (optional)"), &dialog);
-    auto *form = new QFormLayout(advanced);
-    auto *apiKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.apiKey")), advanced);
-    auto *sharedSecret = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sharedSecret")), advanced);
-    apiKey->setPlaceholderText(QStringLiteral("Built-in default"));
-    sharedSecret->setPlaceholderText(QStringLiteral("Built-in default"));
+    state->confirmTimer = new QTimer(&dialog);
+    state->confirmTimer->setSingleShot(true);
+    state->confirmTimer->setInterval(3000);
+
+    // --- Credentials drawer ---
+    // Collapsed by default when build/env defaults supply both key and secret;
+    // expanded otherwise so users who must supply their own see the fields.
+    const bool hasDefaults = hasDefaultLastFmCredentials();
+    const QString keyPlaceholder = hasDefaults
+        ? QStringLiteral("Using built-in default (leave blank)")
+        : QStringLiteral("Required — your Last.fm API key");
+    const QString secretPlaceholder = hasDefaults
+        ? QStringLiteral("Using built-in default (leave blank)")
+        : QStringLiteral("Required — your Last.fm shared secret");
+
+    auto *drawerToggle = new QToolButton(&dialog);
+    drawerToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    drawerToggle->setText(QStringLiteral("API credentials"));
+    drawerToggle->setCheckable(true);
+    drawerToggle->setChecked(!hasDefaults);
+    drawerToggle->setArrowType(drawerToggle->isChecked() ? Qt::DownArrow : Qt::RightArrow);
+    layout->addWidget(drawerToggle);
+
+    auto *credWidget = new QWidget(&dialog);
+    auto *form = new QFormLayout(credWidget);
+    form->setContentsMargins(16, 0, 0, 0);
+    auto *apiKey = new QLineEdit(m_database->setting(QStringLiteral("lastfm.apiKey")), credWidget);
+    auto *sharedSecret = new QLineEdit(m_database->setting(QStringLiteral("lastfm.sharedSecret")), credWidget);
+    apiKey->setPlaceholderText(keyPlaceholder);
+    sharedSecret->setPlaceholderText(secretPlaceholder);
     sharedSecret->setEchoMode(QLineEdit::Password);
     form->addRow(QStringLiteral("API key"), apiKey);
     form->addRow(QStringLiteral("Shared secret"), sharedSecret);
-    layout->addWidget(advanced);
+    credWidget->setVisible(!hasDefaults);
+    layout->addWidget(credWidget);
+
+    connect(drawerToggle, &QToolButton::toggled, credWidget, [drawerToggle, credWidget](bool open) {
+        credWidget->setVisible(open);
+        drawerToggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+        if (auto *w = drawerToggle->window()) {
+            w->adjustSize();
+        }
+    });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
-    const auto refreshStatus = [this, status, logoutButton]() {
+    // --- refreshStatus: updates label and button label based on current DB state ---
+    const auto refreshStatus = [this, status, actionButton, state]() {
         const QString username = m_database->setting(QStringLiteral("lastfm.username"));
         const bool connected = !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
+        state->confirming = false;
+        state->confirmTimer->stop();
         if (connected) {
-            status->setText(username.isEmpty() ? QStringLiteral("Connected to Last.fm")
-                                               : QStringLiteral("Connected as %1").arg(username));
+            const QString text = username.isEmpty()
+                ? QStringLiteral("Connected to Last.fm")
+                : QStringLiteral("Connected as %1").arg(username);
+            status->setText(text);
+            status->setStyleSheet(QStringLiteral("font-weight: 600; color: #2e9e3f;"));
+            actionButton->setText(QStringLiteral("Log out"));
+            actionButton->setEnabled(true);
         } else {
             status->setText(QStringLiteral("Not connected"));
+            status->setStyleSheet(QString());
+            actionButton->setText(QStringLiteral("Log in to Last.fm"));
+            actionButton->setEnabled(true);
         }
-        logoutButton->setEnabled(connected);
     };
     refreshStatus();
 
+    // --- Persist credentials from the drawer fields ---
     const auto persistCredentials = [this, apiKey, sharedSecret]() {
         m_database->setSetting(QStringLiteral("lastfm.apiKey"), apiKey->text().trimmed());
         m_database->setSetting(QStringLiteral("lastfm.sharedSecret"), sharedSecret->text().trimmed());
         configureLastFm();
     };
 
-    connect(loginButton, &QPushButton::clicked, &dialog, [this, &dialog, persistCredentials, loginButton, status]() {
-        persistCredentials();
-        const QString key = lastFmApiKey();
-        const QString secret = lastFmSharedSecret();
-        if (key.isEmpty() || secret.isEmpty()) {
-            QMessageBox::warning(&dialog, QStringLiteral("Last.fm"),
-                                 QStringLiteral("Enter a Last.fm API key and shared secret first."));
-            return;
-        }
-        loginButton->setEnabled(false);
-        status->setText(QStringLiteral("Waiting for browser authorization…"));
-        QMetaObject::invokeMethod(m_lastFmScrobbler,
-                                  "startAuthentication",
-                                  Qt::QueuedConnection,
-                                  Q_ARG(QString, key),
-                                  Q_ARG(QString, secret));
-    });
-
-    connect(logoutButton, &QPushButton::clicked, &dialog, [this, refreshStatus]() {
+    // --- Logout helper (shared by button click and confirm-timer path) ---
+    const auto doLogout = [this, refreshStatus]() {
         QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
-        m_database->setSetting(QStringLiteral("lastfm.sessionKey"), QString());
-        m_database->setSetting(QStringLiteral("lastfm.username"), QString());
+        m_database->removeSetting(QStringLiteral("lastfm.sessionKey"));
+        m_database->removeSetting(QStringLiteral("lastfm.username"));
         m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
         configureLastFm();
         refreshStatus();
+    };
+
+    // Confirm-timeout: revert "Click again to log out" back to "Log out"
+    connect(state->confirmTimer, &QTimer::timeout, &dialog, [actionButton, state]() {
+        state->confirming = false;
+        actionButton->setText(QStringLiteral("Log out"));
+    });
+
+    // --- Single button handler ---
+    connect(actionButton, &QPushButton::clicked, &dialog,
+            [this, &dialog, persistCredentials, doLogout, actionButton, status, state]() {
+        const bool connected = !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
+
+        if (!connected) {
+            // Login path
+            persistCredentials();
+            const QString key = lastFmApiKey();
+            const QString secret = lastFmSharedSecret();
+            if (key.isEmpty() || secret.isEmpty()) {
+                QMessageBox::warning(&dialog, QStringLiteral("Last.fm"),
+                                     QStringLiteral("Enter a Last.fm API key and shared secret first."));
+                return;
+            }
+            actionButton->setEnabled(false);
+            status->setText(QStringLiteral("Waiting for browser authorization…"));
+            status->setStyleSheet(QString());
+            QMetaObject::invokeMethod(m_lastFmScrobbler,
+                                      "startAuthentication",
+                                      Qt::QueuedConnection,
+                                      Q_ARG(QString, key),
+                                      Q_ARG(QString, secret));
+        } else if (!state->confirming) {
+            // First logout click → enter confirm state
+            state->confirming = true;
+            actionButton->setText(QStringLiteral("Click again to log out"));
+            state->confirmTimer->start();
+        } else {
+            // Second click within window → commit logout
+            state->confirmTimer->stop();
+            doLogout();
+        }
     });
 
     // Auth runs on a worker thread; exec() keeps the event loop running, so
     // these queued signals update the open dialog live. Scoped to the dialog
     // so the connections drop when it closes.
     connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationSucceeded, &dialog,
-            [refreshStatus, loginButton](const QString &, const QString &) {
-                loginButton->setEnabled(true);
+            [refreshStatus](const QString &, const QString &) {
                 refreshStatus();
             });
     connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationFailed, &dialog,
-            [status, loginButton](const QString &message) {
-                loginButton->setEnabled(true);
+            [status, actionButton](const QString &message) {
                 status->setText(QStringLiteral("Not connected — %1").arg(message));
+                status->setStyleSheet(QString());
+                actionButton->setEnabled(true);
+                actionButton->setText(QStringLiteral("Log in to Last.fm"));
             });
 
     dialog.exec();
