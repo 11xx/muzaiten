@@ -62,6 +62,9 @@
 #include <QThread>
 #include <QTimer>
 #include <QToolButton>
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#include <QDBusMessage>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QUuid>
@@ -427,6 +430,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::syncCurrentArtistRatingTagsRequested, this, &MainWindow::syncCurrentArtistRatingTags);
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
     connect(m_playerBar, &PlayerBar::retryPendingRatingTagsRequested, this, &MainWindow::retryPendingRatingTags);
+    connect(m_playerBar, &PlayerBar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
@@ -459,6 +463,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_rightSidebar, &RightSidebar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
     connect(m_libraryFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setLibraryExplorerDirectory);
@@ -1669,13 +1674,29 @@ void MainWindow::findTrackFile(const Track &track)
     const PathResolution resolution = resolver.resolveLocalPath(track.path, PathUse::Read);
     if (resolution.preferredPath.isEmpty()) {
         QMessageBox::warning(this,
-                             QStringLiteral("Find file"),
+                             QStringLiteral("Open containing directory"),
                              QStringLiteral("%1\n\nCandidates:\n%2")
                                  .arg(resolution.failureReason, resolution.candidates.join(QLatin1Char('\n'))));
         return;
     }
 
-    QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
+    // Try the FreeDesktop ShowItems D-Bus API first; it pre-selects the file
+    // in the running file manager (Nautilus, Dolphin, Nemo, Thunar 3+, etc.).
+    // Fall back to opening the parent directory via QDesktopServices when no
+    // file manager is registered on the session bus.
+    const QString fileUrl = QUrl::fromLocalFile(resolution.preferredPath).toString();
+    const auto session = QDBusConnection::sessionBus();
+    const auto *iface = session.interface();
+    if (iface && iface->isServiceRegistered(QStringLiteral("org.freedesktop.FileManager1"))) {
+        auto msg = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.FileManager1"),
+                                                  QStringLiteral("/org/freedesktop/FileManager1"),
+                                                  QStringLiteral("org.freedesktop.FileManager1"),
+                                                  QStringLiteral("ShowItems"));
+        msg << QStringList{fileUrl} << QString{};
+        session.asyncCall(msg);
+    } else {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
+    }
     statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
 }
 

@@ -311,6 +311,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *retryPendingRatingTags = ratingTagsMenu->addAction(QStringLiteral("Retry pending rating writes"));
 
     auto *playbackMenu = new QMenu(QStringLiteral("Playback"), this);
+    QAction *findCurrentTrack = playbackMenu->addAction(QStringLiteral("Find current track in library"));
     QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
 
@@ -473,6 +474,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(syncCurrentArtistRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentArtistRatingTagsRequested);
     connect(syncAllSavedRatingTags, &QAction::triggered, this, &PlayerBar::syncAllSavedRatingTagsRequested);
     connect(retryPendingRatingTags, &QAction::triggered, this, &PlayerBar::retryPendingRatingTagsRequested);
+    connect(findCurrentTrack, &QAction::triggered, this, &PlayerBar::currentTrackLibraryRequested);
     connect(playbackOutput, &QAction::triggered, this, &PlayerBar::playbackProfileRequested);
     connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
