@@ -4,6 +4,7 @@ build-arch*/
 .qt/
 *.user
 *.autosave
+*.o
 compile_commands.json
 musicbee-wine/
 resources/*.png
