@@ -21,6 +21,10 @@ public:
 public slots:
     void configure(bool enabled, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &cachePath);
     void trackStarted(const Track &track);
+    // Resume an already-in-progress listen (e.g. scrobbler toggled on mid-track,
+    // or playback restored with a non-zero position).  elapsedMs is how much of
+    // this track has already been played; playing is the current play/pause state.
+    void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
     void playbackStateChanged(bool playing);
     void startAuthentication(const QString &apiKey, const QString &sharedSecret);
     void cancelAuthentication();
@@ -80,6 +84,7 @@ private:
     qint64 m_scrobbleTimestampSecs = 0;
     qint64 m_requiredMs = 0;
     qint64 m_accumulatedMs = 0;
+    qint64 m_lastNowPlayingSecs = 0;
     QElapsedTimer m_segmentTimer;
     QList<LastFmApi::Scrobble> m_pendingScrobbles;
     int m_consecutiveFailures = 0;

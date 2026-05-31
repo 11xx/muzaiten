@@ -20,6 +20,10 @@ public:
 public slots:
     void configure(bool enabled, const QString &token, const QString &cachePath);
     void trackStarted(const Track &track);
+    // Resume an already-in-progress listen (e.g. scrobbler toggled on mid-track,
+    // or playback restored with a non-zero position).  elapsedMs is how much of
+    // this track has already been played; playing is the current play/pause state.
+    void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
     void playbackStateChanged(bool playing);
 
 signals:
@@ -65,6 +69,7 @@ private:
     qint64 m_listenTimestampSecs = 0;
     qint64 m_requiredMs = 0;
     qint64 m_accumulatedMs = 0;
+    qint64 m_lastPlayingNowSecs = 0;
     QElapsedTimer m_segmentTimer;
     QList<QJsonObject> m_pendingListens;
     int m_consecutiveFailures = 0;

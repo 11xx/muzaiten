@@ -22,6 +22,9 @@ constexpr qint64 maxRequiredListenMs = 4 * 60 * 1000;
 constexpr int maxListensPerImport = 99;
 constexpr int maxConsecutiveSubmissionFailures = 3;
 constexpr auto apiUrl = "https://api.listenbrainz.org/1/submit-listens";
+// Minimum seconds between "playing_now" resubmissions on play/resume, to
+// prevent play-pause spam from flooding ListenBrainz with update requests.
+constexpr qint64 kPlayingNowResubmitMinSecs = 30;
 
 QString trackTitle(const Track &track)
 {
@@ -95,6 +98,29 @@ void ListenBrainzScrobbler::trackStarted(const Track &track)
     submitPlayingNow(track);
 }
 
+void ListenBrainzScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
+{
+    m_currentTrack = track;
+    m_hasCurrentTrack = true;
+    m_playing = playing;
+    m_requiredMs = requiredListenMs(track);
+    m_accumulatedMs = std::max<qint64>(0, elapsedMs);
+    // Anchor the listen timestamp to when the track originally began so that
+    // the completed listen reports the real start time.
+    m_listenTimestampSecs = QDateTime::currentSecsSinceEpoch() - m_accumulatedMs / 1000;
+    // If we already passed the listen threshold assume it was submitted by the
+    // prior session — mark submitted to avoid a duplicate.
+    m_listenSubmitted = (m_accumulatedMs >= m_requiredMs);
+    m_segmentTimer.restart();
+
+    if (m_playing && !m_listenSubmitted) {
+        m_progressTimer->start();
+        submitPlayingNow(track);
+    } else {
+        m_progressTimer->stop();
+    }
+}
+
 void ListenBrainzScrobbler::playbackStateChanged(bool playing)
 {
     if (!m_hasCurrentTrack || m_playing == playing) {
@@ -110,6 +136,12 @@ void ListenBrainzScrobbler::playbackStateChanged(bool playing)
     m_playing = playing;
     if (m_playing && !m_listenSubmitted) {
         m_progressTimer->start();
+        // Re-send "playing now" on resume, but rate-limit to avoid flooding
+        // ListenBrainz when the user rapidly toggles play/pause.
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        if (now - m_lastPlayingNowSecs >= kPlayingNowResubmitMinSecs) {
+            submitPlayingNow(m_currentTrack);
+        }
     }
 }
 
@@ -148,6 +180,7 @@ void ListenBrainzScrobbler::submitPlayingNow(const Track &track)
         return;
     }
 
+    m_lastPlayingNowSecs = QDateTime::currentSecsSinceEpoch();
     QJsonArray payload;
     QJsonObject nowPlaying;
     nowPlaying.insert(QStringLiteral("track_metadata"), metadataObject(track));

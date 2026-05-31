@@ -109,6 +109,7 @@ private:
     void playTrack(const Track &track, bool notifyScrobbler = true, bool startPaused = false);
     void presentTrack(const Track &track, bool notifyScrobbler = true);
     void notifyScrobblersTrackStarted(const Track &track);
+    void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
