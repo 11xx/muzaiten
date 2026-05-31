@@ -495,14 +495,14 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Search view
     connect(m_searchView, &SearchView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_searchView, &SearchView::playNextRequested, this, &MainWindow::playNextTracks);
     connect(m_searchView, &SearchView::playNowRequested, this, [this](const QVector<Track> &tracks) {
         if (tracks.isEmpty()) return;
         addTracksToQueue(tracks);
         playQueueIndex(static_cast<int>(m_queue.size()) - static_cast<int>(tracks.size()));
     });
-    connect(m_searchView, &SearchView::leaveRequested, this, [this]() {
-        switchMainView(MainView::LibraryPanels);
-    });
+    connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
+    connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
@@ -589,12 +589,15 @@ MainWindow::MainWindow(QWidget *parent)
     });
     auto *searchShortcut = new QShortcut(QKeySequence(QStringLiteral("3")), this);
     connect(searchShortcut, &QShortcut::activated, this, [this]() {
-        // Don't steal '3' from text inputs other than the search box itself.
-        QWidget *fw = QApplication::focusWidget();
-        if (qobject_cast<QLineEdit *>(fw) != nullptr && fw != m_searchView->findChild<QLineEdit *>()) {
+        // While a text field has focus (including the search box), let '3' type.
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
             return;
         }
-        switchMainView(MainView::Search);
+        if (m_mainView == MainView::Search) {
+            m_searchView->forceRefresh();  // re-press 3 in browse mode forces a refresh
+        } else {
+            switchMainView(MainView::Search);
+        }
     });
     auto *jumpToPlayingShortcut = new QShortcut(QKeySequence(QStringLiteral("o")), this);
     connect(jumpToPlayingShortcut, &QShortcut::activated, this, [this]() {

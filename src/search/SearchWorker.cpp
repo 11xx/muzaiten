@@ -46,6 +46,11 @@ void SearchWorker::buildIndex()
     emit indexReady(m_index.size());
 }
 
+void SearchWorker::clearIndex()
+{
+    m_index.clear();
+}
+
 void SearchWorker::runQuery(quint64 queryId, const QString &queryString, bool fuzzyMode)
 {
     // Record the latest query id; if a newer one arrives while we're computing,

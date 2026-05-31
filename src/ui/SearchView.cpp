@@ -13,20 +13,33 @@
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QHideEvent>
+#include <QItemSelectionModel>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QMenu>
+#include <QMouseEvent>
 #include <QPalette>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include <algorithm>
+
 Q_DECLARE_METATYPE(QVector<Search::ScoredResult>)
 Q_DECLARE_METATYPE(Search::SearchRecord)
 Q_DECLARE_METATYPE(Search::ScoredResult)
+
+namespace {
+// Keep the index resident for this long after the search view is hidden, so
+// re-opening search feels instant. After it elapses the index memory is freed.
+constexpr int kIndexCleanupMs = 120000; // 2 minutes
+}
 
 // Build a minimal Track from a SearchRecord — sufficient for playback and display.
 static Track trackFromRecord(const Search::SearchRecord &rec)
@@ -101,6 +114,9 @@ void SearchView::setupUi()
     m_resultList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_resultList->setFrameShape(QFrame::NoFrame);
     m_resultList->setFocusPolicy(Qt::StrongFocus);
+    m_resultList->setContextMenuPolicy(Qt::CustomContextMenu);
+    // The cursor is driven explicitly; suppress Qt's type-ahead keyboard search.
+    m_resultList->setTabKeyNavigation(false);
 
     m_model    = new SearchResultsModel(this);
     m_delegate = new SearchResultDelegate(this);
@@ -111,16 +127,38 @@ void SearchView::setupUi()
 
     layout->addWidget(m_resultList, 1);
 
-    // Debounce timer
+    // Debounce timer — short, just to coalesce rapid keystrokes.
     m_debounce = new QTimer(this);
     m_debounce->setSingleShot(true);
-    m_debounce->setInterval(60);
+    m_debounce->setInterval(20);
+
+    // Cleanup timer — frees the resident index a while after the view is hidden.
+    m_cleanupTimer = new QTimer(this);
+    m_cleanupTimer->setSingleShot(true);
+    m_cleanupTimer->setInterval(kIndexCleanupMs);
 
     // Connections
     connect(m_searchBox, &QLineEdit::textChanged, this, &SearchView::onTextChanged);
     connect(m_debounce,  &QTimer::timeout,         this, &SearchView::onDebounceTimeout);
+    connect(m_cleanupTimer, &QTimer::timeout,      this, &SearchView::onCleanupTimeout);
 
-    // Intercept key events on the result list so Tab and special keys work.
+    connect(m_resultList, &QListView::doubleClicked, this, &SearchView::onDoubleClicked);
+    connect(m_resultList, &QListView::customContextMenuRequested, this, &SearchView::showContextMenu);
+
+    // Mirror the model's current index into the delegate so the cursor row is
+    // always highlighted, even while the search box keeps keyboard focus.
+    connect(m_resultList->selectionModel(), &QItemSelectionModel::currentChanged,
+            this, [this](const QModelIndex &cur, const QModelIndex &) {
+                m_delegate->setCurrentRow(cur.isValid() ? cur.row() : -1);
+                m_resultList->viewport()->update();
+            });
+    connect(m_resultList->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, [this](const QItemSelection &, const QItemSelection &) {
+                m_resultList->viewport()->update();
+            });
+
+    // Intercept keys: the search box owns input, the list owns it after a click.
+    m_searchBox->installEventFilter(this);
     m_resultList->installEventFilter(this);
     m_resultList->viewport()->installEventFilter(this);
 
@@ -137,88 +175,55 @@ void SearchView::changeEvent(QEvent *event)
     }
 }
 
+void SearchView::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    m_cleanupTimer->stop();           // staying resident
+    if (!m_dbPath.isEmpty()) {
+        ensureIndexLoaded(m_dbPath);  // rebuild if it was freed while hidden
+    }
+}
+
+void SearchView::hideEvent(QHideEvent *event)
+{
+    QWidget::hideEvent(event);
+    // Keep the index for a buffer window, then free it.
+    m_cleanupTimer->start();
+}
+
 bool SearchView::eventFilter(QObject *watched, QEvent *event)
 {
-    // Key events from the list view
-    if (watched == m_resultList) {
-        if (event->type() == QEvent::KeyPress) {
-            auto *ke = static_cast<QKeyEvent *>(event);
-            switch (ke->key()) {
-            case Qt::Key_Return:
-            case Qt::Key_Enter:
-                activateSelection(ke->modifiers() & Qt::AltModifier);
-                return true;
-            case Qt::Key_Tab:
-                // Toggle selection on current item, move down
-                {
-                    const QModelIndex cur = m_resultList->currentIndex();
-                    if (cur.isValid()) {
-                        m_resultList->selectionModel()->select(
-                            cur,
-                            QItemSelectionModel::Toggle);
-                        const int nextRow = cur.row() + 1;
-                        if (nextRow < m_model->rowCount()) {
-                            m_resultList->setCurrentIndex(m_model->index(nextRow));
-                        }
-                    }
-                }
-                return true;
-            case Qt::Key_Space:
-                if (ke->modifiers() & Qt::ControlModifier) {
-                    // Ctrl+Space = toggle selection like Tab
-                    const QModelIndex cur = m_resultList->currentIndex();
-                    if (cur.isValid()) {
-                        m_resultList->selectionModel()->select(
-                            cur, QItemSelectionModel::Toggle);
-                    }
-                    return true;
-                }
-                break;
-            case Qt::Key_A:
-                if (ke->modifiers() & Qt::ControlModifier) {
-                    m_resultList->selectAll();
-                    return true;
-                }
-                break;
-            case Qt::Key_F:
-                if (ke->modifiers() & Qt::ControlModifier) {
-                    toggleFuzzyMode();
-                    return true;
-                }
-                break;
-            case Qt::Key_Escape:
-                emit leaveRequested();
-                return true;
-            case Qt::Key_P:
-                if (ke->modifiers() & Qt::ControlModifier) {
-                    // Ctrl+P = move up
-                    const QModelIndex cur = m_resultList->currentIndex();
-                    if (cur.isValid() && cur.row() > 0) {
-                        m_resultList->setCurrentIndex(m_model->index(cur.row() - 1));
-                    }
-                    return true;
-                }
-                break;
-            case Qt::Key_N:
-                if (ke->modifiers() & Qt::ControlModifier) {
-                    // Ctrl+N = move down
-                    const QModelIndex cur = m_resultList->currentIndex();
-                    if (cur.isValid()) {
-                        const int next = cur.row() + 1;
-                        if (next < m_model->rowCount()) {
-                            m_resultList->setCurrentIndex(m_model->index(next));
-                        }
-                    }
-                    return true;
-                }
-                break;
-            default:
-                break;
-            }
+    // Key handling on the search box (input mode) and the list (browse mode).
+    if (watched == m_searchBox && event->type() == QEvent::KeyPress) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        if (handleNavKey(ke)) {
+            return true;
         }
+        // Everything else (printable text, editing keys) goes to the line edit.
+        return false;
     }
 
-    // Wheel events on the list viewport for Ctrl+scroll density
+    if (watched == m_resultList && event->type() == QEvent::KeyPress) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        // In browse mode, '/' returns to the search box.
+        if (ke->key() == Qt::Key_Slash && ke->modifiers() == Qt::NoModifier) {
+            focusSearchBox();
+            return true;
+        }
+        if (handleNavKey(ke)) {
+            return true;
+        }
+        // Typing a printable character jumps back to the box and forwards it.
+        const QString text = ke->text();
+        if (!text.isEmpty() && text[0].isPrint()) {
+            focusSearchBox();
+            m_searchBox->setText(m_searchBox->text() + text);
+            return true;
+        }
+        return false;
+    }
+
+    // Wheel + hover on the list viewport.
     if (watched == m_resultList->viewport()) {
         if (event->type() == QEvent::Wheel) {
             auto *we = static_cast<QWheelEvent *>(event);
@@ -246,17 +251,75 @@ bool SearchView::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+bool SearchView::handleNavKey(QKeyEvent *ke)
+{
+    const auto mods = ke->modifiers();
+    const int key = ke->key();
+    const bool ctrl = mods & Qt::ControlModifier;
+    const int pageStep = std::max(1, m_resultList->height() / std::max(1, m_delegate->rowHeight() > 0
+                                                                        ? m_delegate->rowHeight()
+                                                                        : 64));
+
+    // Force refresh
+    if (key == Qt::Key_F5) { forceRefresh(); return true; }
+
+    // Navigation (cursor moves without disturbing marks)
+    if (key == Qt::Key_Down  || (ctrl && key == Qt::Key_N)) { moveCursor(+1); return true; }
+    if (key == Qt::Key_Up    || (ctrl && key == Qt::Key_P)) { moveCursor(-1); return true; }
+    if (key == Qt::Key_PageDown) { moveCursor(+pageStep); return true; }
+    if (key == Qt::Key_PageUp)   { moveCursor(-pageStep); return true; }
+    if (key == Qt::Key_Home && !ctrl) { moveCursor(-1000000000); return true; }
+    if (key == Qt::Key_End  && !ctrl) { moveCursor(+1000000000); return true; }
+
+    // Activate (Enter = queue, Alt+Enter = play now)
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        activateSelection(mods & Qt::AltModifier);
+        return true;
+    }
+
+    // Multi-select marks
+    if (key == Qt::Key_Tab) { toggleMarkAtCursor(); moveCursor(+1); return true; }
+    if (ctrl && key == Qt::Key_Space) { toggleMarkAtCursor(); return true; }
+    if (ctrl && key == Qt::Key_A) { m_resultList->selectAll(); return true; }
+
+    // Fuzzy toggle
+    if (ctrl && key == Qt::Key_F) { toggleFuzzyMode(); return true; }
+
+    // Escape / Ctrl+G: two-stage — clear text, then release input focus.
+    if (key == Qt::Key_Escape || (ctrl && key == Qt::Key_G)) { escapeOrClear(); return true; }
+
+    return false;
+}
+
 void SearchView::focusSearchBox()
 {
     m_searchBox->setFocus();
-    m_searchBox->selectAll();
+    m_searchBox->deselect();
+    m_searchBox->setCursorPosition(static_cast<int>(m_searchBox->text().length()));
+}
+
+void SearchView::releaseInputFocus()
+{
+    // Move focus to the list so window shortcuts (1/2/3) work, and '/' / Ctrl+P/N
+    // navigation stays available.
+    m_resultList->setFocus();
+}
+
+void SearchView::escapeOrClear()
+{
+    if (!m_searchBox->text().isEmpty()) {
+        m_searchBox->clear();          // first press: clear the query
+    } else {
+        releaseInputFocus();           // second press: leave input mode
+    }
 }
 
 void SearchView::ensureIndexLoaded(const QString &dbPath)
 {
-    if (m_indexLoaded && m_worker) return;
-    setupWorker(dbPath);
     m_dbPath = dbPath;
+    setupWorker(dbPath);
+    if (m_indexLoaded || m_buildPending) return;
+    m_buildPending = true;
     QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);
 }
 
@@ -264,7 +327,15 @@ void SearchView::invalidateIndex(const QString &dbPath)
 {
     m_dbPath = dbPath;
     if (!m_worker) return;
+    m_buildPending = true;
     QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);
+}
+
+void SearchView::forceRefresh()
+{
+    if (m_dbPath.isEmpty()) return;
+    m_statusLabel->setText(QStringLiteral("Refreshing…"));
+    invalidateIndex(m_dbPath);
 }
 
 void SearchView::setupWorker(const QString &dbPath)
@@ -296,9 +367,21 @@ void SearchView::teardownWorker()
     }
 }
 
+void SearchView::onCleanupTimeout()
+{
+    if (isVisible()) return;  // became visible again
+    if (m_worker) {
+        QMetaObject::invokeMethod(m_worker, "clearIndex", Qt::QueuedConnection);
+    }
+    m_indexLoaded = false;
+    m_buildPending = false;
+    m_totalIndexed = 0;
+    m_model->clear();
+}
+
 void SearchView::onTextChanged()
 {
-    m_debounce->start(); // restart the 60ms debounce
+    m_debounce->start(); // restart the debounce
 }
 
 void SearchView::onDebounceTimeout()
@@ -325,14 +408,15 @@ void SearchView::submitQuery()
 void SearchView::onIndexReady(int count)
 {
     m_indexLoaded = true;
+    m_buildPending = false;
     m_totalIndexed = count;
     updateStatusLabel();
-    // Re-run the current query against the new index
-    submitQuery();
+    submitQuery(); // re-run the current query against the new index
 }
 
 void SearchView::onIndexError(const QString &error)
 {
+    m_buildPending = false;
     m_statusLabel->setText(QStringLiteral("Index error: %1").arg(error));
 }
 
@@ -340,11 +424,18 @@ void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> r
 {
     if (queryId != m_queryId) return; // stale result from a superseded query
 
-    // Each ScoredResult carries an embedded copy of its SearchRecord, so there is
-    // no cross-thread pointer sharing: the model and delegate work entirely with
-    // the data in the ScoredResult vector, which was copied into the signal payload
-    // when it crossed thread boundaries.
+    // Each ScoredResult embeds a copy of its SearchRecord, so the model/delegate
+    // work entirely with data already copied across the thread boundary.
     m_model->setResults(std::move(results));
+
+    // Always place the cursor on the first result (no mark) so keyboard
+    // navigation works immediately, like a text cursor.
+    if (m_model->rowCount() > 0) {
+        m_resultList->scrollToTop();
+        setCursorRow(0, /*select=*/false);
+    } else {
+        m_delegate->setCurrentRow(-1);
+    }
     updateStatusLabel();
 }
 
@@ -357,34 +448,74 @@ void SearchView::updateStatusLabel()
     const int matchCount = m_model->rowCount();
     const QString modeStr = m_fuzzyMode ? QStringLiteral("fuzzy") : QStringLiteral("exact");
     if (m_searchBox->text().isEmpty()) {
-        m_statusLabel->setText(QStringLiteral("%1 tracks  ·  %2")
-                                    .arg(m_totalIndexed)
-                                    .arg(modeStr));
+        m_statusLabel->setText(QStringLiteral("%1 tracks  ·  %2").arg(m_totalIndexed).arg(modeStr));
     } else {
         m_statusLabel->setText(QStringLiteral("%1 / %2  ·  %3")
-                                    .arg(matchCount)
-                                    .arg(m_totalIndexed)
-                                    .arg(modeStr));
+                                    .arg(matchCount).arg(m_totalIndexed).arg(modeStr));
     }
+}
+
+void SearchView::moveCursor(int delta)
+{
+    const int rows = m_model->rowCount();
+    if (rows == 0) return;
+    const QModelIndex cur = m_resultList->currentIndex();
+    const int row = cur.isValid() ? cur.row() : 0;
+    setCursorRow(std::clamp(row + delta, 0, rows - 1), /*select=*/false);
+}
+
+void SearchView::setCursorRow(int row, bool select)
+{
+    const QModelIndex idx = m_model->index(row, 0);
+    if (!idx.isValid()) return;
+    auto *sm = m_resultList->selectionModel();
+    sm->setCurrentIndex(idx, select ? QItemSelectionModel::ClearAndSelect
+                                     : QItemSelectionModel::NoUpdate);
+    m_resultList->scrollTo(idx, QAbstractItemView::EnsureVisible);
+}
+
+void SearchView::toggleMarkAtCursor()
+{
+    const QModelIndex cur = m_resultList->currentIndex();
+    if (!cur.isValid()) return;
+    m_resultList->selectionModel()->select(cur, QItemSelectionModel::Toggle);
+}
+
+Track SearchView::trackAt(const QModelIndex &index) const
+{
+    if (!index.isValid()) return {};
+    const auto recVar = index.data(SearchResultsModel::SearchRecordRole);
+    if (!recVar.isValid()) return {};
+    return trackFromRecord(qvariant_cast<Search::SearchRecord>(recVar));
 }
 
 QVector<Track> SearchView::selectedTracks() const
 {
     const QModelIndexList sel = m_resultList->selectionModel()->selectedIndexes();
-    // If nothing selected, use the current (focused) item
-    const QModelIndexList &indices = sel.isEmpty()
+    const QModelIndexList indices = sel.isEmpty()
         ? QModelIndexList{m_resultList->currentIndex()}
         : sel;
 
     QVector<Track> tracks;
     tracks.reserve(indices.size());
     for (const QModelIndex &idx : indices) {
-        if (!idx.isValid()) continue;
-        const auto recVar = idx.data(SearchResultsModel::SearchRecordRole);
-        if (!recVar.isValid()) continue;
-        tracks.append(trackFromRecord(qvariant_cast<Search::SearchRecord>(recVar)));
+        const Track t = trackAt(idx);
+        if (!t.path.isEmpty()) tracks.append(t);
     }
     return tracks;
+}
+
+QVector<Track> SearchView::tracksForAction(const QModelIndex &clicked) const
+{
+    auto *sm = m_resultList->selectionModel();
+    if (clicked.isValid() && sm->isSelected(clicked)) {
+        return selectedTracks();  // act on the whole multi-selection
+    }
+    if (clicked.isValid()) {
+        const Track t = trackAt(clicked);
+        return t.path.isEmpty() ? QVector<Track>{} : QVector<Track>{t};
+    }
+    return selectedTracks();
 }
 
 void SearchView::activateSelection(bool playNow)
@@ -398,6 +529,47 @@ void SearchView::activateSelection(bool playNow)
     }
 }
 
+void SearchView::onDoubleClicked(const QModelIndex &index)
+{
+    const QVector<Track> tracks = tracksForAction(index);
+    if (!tracks.isEmpty()) {
+        emit playNowRequested(tracks);
+    }
+}
+
+void SearchView::showContextMenu(const QPoint &pos)
+{
+    const QModelIndex idx = m_resultList->indexAt(pos);
+    if (!idx.isValid()) return;
+
+    const Track single = trackAt(idx);
+    const QVector<Track> targets = tracksForAction(idx);
+    if (targets.isEmpty()) return;
+
+    QMenu menu(this);
+    const QString many = targets.size() > 1
+        ? QStringLiteral(" (%1)").arg(targets.size()) : QString();
+
+    menu.addAction(QStringLiteral("Play now%1").arg(many), this, [this, targets]() {
+        emit playNowRequested(targets);
+    });
+    menu.addAction(QStringLiteral("Add to queue%1").arg(many), this, [this, targets]() {
+        emit addToQueueRequested(targets);
+    });
+    menu.addAction(QStringLiteral("Play next%1").arg(many), this, [this, targets]() {
+        emit playNextRequested(targets);
+    });
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("Find in library"), this, [this, single]() {
+        emit findInLibraryRequested(single);
+    });
+    menu.addAction(QStringLiteral("Open containing directory"), this, [this, single]() {
+        emit findFileRequested(single);
+    });
+
+    menu.exec(m_resultList->viewport()->mapToGlobal(pos));
+}
+
 void SearchView::toggleFuzzyMode()
 {
     m_fuzzyMode = !m_fuzzyMode;
@@ -409,7 +581,7 @@ void SearchView::adjustRowHeight(int delta)
 {
     const QFontMetrics fm(font());
     const int lineH = fm.height();
-    const int minH  = lineH * 4 + 6;  // at least 4 lines with minimal padding
+    const int minH  = lineH * 4 + 6;
     const int maxH  = lineH * 4 + 40;
 
     if (m_rowHeight == 0) {
@@ -417,7 +589,7 @@ void SearchView::adjustRowHeight(int delta)
     }
     m_rowHeight = std::clamp(m_rowHeight + delta, minH, maxH);
     m_delegate->setRowHeight(m_rowHeight);
-    // Force a re-layout by hiding and showing the viewport
-    m_resultList->setUniformItemSizes(false);
+    // Re-layout so the new row height takes effect.
+    m_resultList->doItemsLayout();
     m_resultList->viewport()->update();
 }

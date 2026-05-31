@@ -16,6 +16,8 @@ public:
 
     void setHoveredRow(int row);
     int  hoveredRow() const { return m_hoveredRow; }
+    void setCurrentRow(int row);     // the keyboard "cursor" row (always-on highlight)
+    int  currentRow() const { return m_currentRow; }
     void setRowHeight(int height);   // density control (Ctrl+scroll)
     int  rowHeight() const { return m_rowHeight; }
 
@@ -32,5 +34,6 @@ private:
                               const QFontMetrics &fm) const;
 
     int m_hoveredRow = -1;
+    int m_currentRow = -1;
     int m_rowHeight  = 0; // 0 = auto from font
 };

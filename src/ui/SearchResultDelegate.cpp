@@ -4,7 +4,6 @@
 #include "search/SearchRecord.h"
 #include "ui/SearchResultsModel.h"
 
-#include <QApplication>
 #include <QFontMetrics>
 #include <QIcon>
 #include <QPainter>
@@ -54,6 +53,11 @@ SearchResultDelegate::SearchResultDelegate(QObject *parent)
 void SearchResultDelegate::setHoveredRow(int row)
 {
     m_hoveredRow = row;
+}
+
+void SearchResultDelegate::setCurrentRow(int row)
+{
+    m_currentRow = row;
 }
 
 void SearchResultDelegate::setRowHeight(int height)
@@ -142,18 +146,33 @@ void SearchResultDelegate::paint(QPainter *painter,
     QStyleOptionViewItem opt(option);
     initStyleOption(&opt, index);
 
-    const bool selected = opt.state & QStyle::State_Selected;
+    const bool selected = opt.state & QStyle::State_Selected;   // multi-select "marks"
+    const bool current  = (m_currentRow == index.row());        // keyboard cursor
     const bool hovered  = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
 
-    // Background (same pattern as DenseTableDelegate)
+    // Background: marked rows get the full Highlight fill; the cursor row (when
+    // not also marked) gets a medium Highlight wash so it reads as a moving
+    // "selection cursor" even while the search box keeps keyboard focus.
     if (selected) {
         painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
+    } else if (current) {
+        QColor cur = opt.palette.color(QPalette::Highlight);
+        cur.setAlpha(72);
+        painter->fillRect(opt.rect, cur);
     } else if (hovered) {
         QColor hover = opt.palette.color(QPalette::Highlight);
         hover.setAlpha(34);
         painter->fillRect(opt.rect, hover);
     } else if (index.row() % 2 == 1) {
         painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
+    }
+
+    // Cursor accent bar on the left edge.
+    if (current) {
+        const QColor barColor = selected
+            ? opt.palette.color(QPalette::HighlightedText)
+            : opt.palette.color(QPalette::Highlight);
+        painter->fillRect(QRect(opt.rect.left(), opt.rect.top(), 3, opt.rect.height()), barColor);
     }
 
     // Resolve record and match ranges
@@ -263,14 +282,6 @@ void SearchResultDelegate::paint(QPainter *painter,
                                                QIcon::Normal, QIcon::Off);
         drawHighlightedText(painter, lineRect(3), Qt::AlignLeft, rec.path,
                             sr.ranges.pathPositions, secondaryColor, matchColor, fm);
-    }
-
-    // Focus indicator
-    if (opt.state & QStyle::State_HasFocus) {
-        QStyleOptionFocusRect frOpt;
-        frOpt.initFrom(opt.widget);
-        frOpt.rect = opt.rect.adjusted(1, 1, -1, -1);
-        QApplication::style()->drawPrimitive(QStyle::PE_FrameFocusRect, &frOpt, painter, opt.widget);
     }
 
     painter->restore();

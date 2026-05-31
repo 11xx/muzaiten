@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Track.h"
 #include "search/SearchIndex.h"
 #include "search/SearchRecord.h"
 
@@ -9,6 +10,7 @@
 class QLabel;
 class QLineEdit;
 class QListView;
+class QModelIndex;
 class QThread;
 class QTimer;
 class SearchResultDelegate;
@@ -18,29 +20,34 @@ namespace Search {
 class SearchWorker;
 }
 
-struct Track;
-
 class SearchView : public QWidget {
     Q_OBJECT
 public:
     explicit SearchView(QWidget *parent = nullptr);
     ~SearchView() override;
 
-    // Called by MainWindow when the view becomes visible for the first time.
+    // Called by MainWindow when the view becomes visible; builds the in-memory
+    // index from the database on first use (kept resident for the session, with
+    // a delayed release after the view is hidden — see the cleanup timer).
     void ensureIndexLoaded(const QString &dbPath);
-    // Rebuild the index (called after a scan / MPD import finishes).
+    // Force a rebuild of the index (after a scan/import, or manual F5 / re-press 3).
     void invalidateIndex(const QString &dbPath);
+    void forceRefresh();
 
-    // Give focus to the search box.
+    // Give keyboard focus to the search box ("input mode").
     void focusSearchBox();
 
 signals:
     void addToQueueRequested(QVector<Track> tracks);
+    void playNextRequested(QVector<Track> tracks);
     void playNowRequested(QVector<Track> tracks);
-    void leaveRequested();
+    void findInLibraryRequested(Track track);
+    void findFileRequested(Track track);
 
 protected:
     void changeEvent(QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
@@ -49,6 +56,9 @@ private slots:
     void onIndexReady(int count);
     void onIndexError(const QString &error);
     void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results);
+    void onCleanupTimeout();
+    void showContextMenu(const QPoint &pos);
+    void onDoubleClicked(const QModelIndex &index);
 
 private:
     void setupUi();
@@ -56,7 +66,18 @@ private:
     void teardownWorker();
     void submitQuery();
     void updateStatusLabel();
+
+    // Returns true if the key was a navigation/action key we handled.
+    bool handleNavKey(class QKeyEvent *ke);
+    void moveCursor(int delta);
+    void setCursorRow(int row, bool select = false);
+    void toggleMarkAtCursor();
+    void escapeOrClear();
+    void releaseInputFocus();
+
     QVector<Track> selectedTracks() const;
+    QVector<Track> tracksForAction(const QModelIndex &clicked) const;
+    Track trackAt(const QModelIndex &index) const;
     void activateSelection(bool playNow);
     void toggleFuzzyMode();
     void adjustRowHeight(int delta);
@@ -67,12 +88,14 @@ private:
     SearchResultsModel   *m_model        = nullptr;
     SearchResultDelegate *m_delegate     = nullptr;
     QTimer               *m_debounce     = nullptr;
+    QTimer               *m_cleanupTimer = nullptr;
 
     QThread              *m_workerThread = nullptr;
     Search::SearchWorker *m_worker       = nullptr;
 
     QString   m_dbPath;
     bool      m_indexLoaded  = false;
+    bool      m_buildPending = false;
     bool      m_fuzzyMode    = false;
     quint64   m_queryId      = 0;
     int       m_totalIndexed = 0;
