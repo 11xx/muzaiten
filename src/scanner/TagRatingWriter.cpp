@@ -31,11 +31,9 @@ TagRatingWriteResult TagRatingWriter::writeRating(const QString &path, int ratin
     const Track reread = TagReader().read(path);
     if (reread.rating0To100 != normalized) {
         result.error = QStringLiteral("Written rating was not present after re-read");
-        result.fileRating0To100 = reread.rating0To100;
         return result;
     }
 
     result.ok = true;
-    result.fileRating0To100 = normalized;
     return result;
 }

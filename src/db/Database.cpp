@@ -621,7 +621,6 @@ bool Database::setPendingTrackRatingWrite(const QString &trackPath, int rating0T
     static const QStringList allowed = {
         QStringLiteral("pending"),
         QStringLiteral("synced"),
-        QStringLiteral("blocked_existing_tag"),
         QStringLiteral("blocked_no_writable_path"),
         QStringLiteral("failed"),
     };

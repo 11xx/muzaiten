@@ -1003,10 +1003,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     restoreTrackTableViewState();
 
     if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
-        Track syncTrack = track;
-        syncTrack.hasUserRating = true;
-        syncTrack.effectiveRating0To100 = rating0To100;
-        startRatingTagSync({syncTrack}, static_cast<int>(RatingTagSyncRequest::Scope::Track));
+        schedulePendingRatingTagSync();
     }
 }
 
@@ -1014,6 +1011,11 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
 {
     if (tracks.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("No rating tags to sync"), 5000);
+        return;
+    }
+    if (m_ratingTagSyncRunning) {
+        m_ratingTagSyncPending = true;
+        statusBar()->showMessage(QStringLiteral("Rating tag sync already running; queued latest pending writes"), 5000);
         return;
     }
 
@@ -1024,6 +1026,7 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
 
     auto *thread = new QThread(this);
     auto *worker = new RatingTagSyncWorker(databasePath(), request);
+    m_ratingTagSyncRunning = true;
     worker->moveToThread(thread);
     connect(thread, &QThread::started, worker, &RatingTagSyncWorker::run);
     connect(worker, &RatingTagSyncWorker::progress, this, [this](int checked, int total, const QString &) {
@@ -1033,9 +1036,8 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
         if (!error.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("Rating tag sync"), error);
         } else {
-            statusBar()->showMessage(QStringLiteral("Rating tag sync complete: %1 written, %2 tag-won, %3 no writable path, %4 failed")
+            statusBar()->showMessage(QStringLiteral("Rating tag sync complete: %1 written, %2 no writable path, %3 failed")
                                          .arg(summary.written)
-                                         .arg(summary.tagWon)
                                          .arg(summary.noWritablePath)
                                          .arg(summary.failed),
                                      10000);
@@ -1076,11 +1078,32 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
         refreshPlayNextRange();
         saveQueueState();
         restoreTrackTableViewState();
+        m_ratingTagSyncRunning = false;
+        const bool runPendingAgain = m_ratingTagSyncPending;
+        m_ratingTagSyncPending = false;
         worker->deleteLater();
         thread->quit();
+        if (runPendingAgain) {
+            QTimer::singleShot(0, this, [this]() {
+                startRatingTagSync(m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));
+            });
+        }
     });
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
+}
+
+void MainWindow::schedulePendingRatingTagSync()
+{
+    m_ratingTagSyncPending = true;
+    statusBar()->showMessage(QStringLiteral("Queued rating tag write"), 3000);
+    QTimer::singleShot(0, this, [this]() {
+        if (m_ratingTagSyncRunning || !m_ratingTagSyncPending) {
+            return;
+        }
+        m_ratingTagSyncPending = false;
+        startRatingTagSync(m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));
+    });
 }
 
 void MainWindow::syncCurrentTrackRatingTags()

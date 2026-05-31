@@ -5,7 +5,6 @@
 #include "scanner/TagRatingWriter.h"
 #include "scanner/TagReader.h"
 
-#include <QFileInfo>
 #include <QUuid>
 
 RatingTagSyncWorker::RatingTagSyncWorker(QString databasePath, RatingTagSyncRequest request)
@@ -59,18 +58,6 @@ void RatingTagSyncWorker::run()
             database.updateScannedTrackRating(track.path, reread.rating0To100, reread.ratingSource, reread.fileSize, reread.fileMtime);
             database.clearPendingTrackRatingWrite(track.path);
             ++summary.written;
-            continue;
-        }
-        if (write.existingTagWon) {
-            const QFileInfo info(writePath.preferredPath);
-            database.updateScannedTrackRating(track.path,
-                                             write.fileRating0To100,
-                                             Rating::Source::MusicBeeCompatible,
-                                             info.size(),
-                                             info.lastModified().toSecsSinceEpoch());
-            database.setUserTrackRating(track.path, write.fileRating0To100);
-            database.clearPendingTrackRatingWrite(track.path);
-            ++summary.tagWon;
             continue;
         }
 
