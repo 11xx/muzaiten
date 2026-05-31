@@ -2232,6 +2232,11 @@ void MainWindow::appendAndPlayTrack(const Track &track)
 
     for (int index = 0; index < m_queue.size(); ++index) {
         if (m_queue.at(index).path == track.path) {
+            // Reset before jumping so playQueueIndex's guard always clears any
+            // stale play-next boundary. Without this, a boundary that coincides
+            // with m_queue.size() (left over from playing the last track) would
+            // survive the guard check and spuriously badge all trailing entries.
+            m_playNextInsertIndex = -1;
             playQueueIndex(index);
             return;
         }
