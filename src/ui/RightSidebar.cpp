@@ -1268,6 +1268,7 @@ void RightSidebar::setAlbumArt(const QString &imagePath)
 {
     const bool valid = !imagePath.isEmpty() && QFileInfo::exists(imagePath);
     const QString effectivePath = valid ? imagePath : AlbumArtFallback::resourcePath(palette());
+    m_usingArtFallback = !valid;
 
     if (effectivePath.isEmpty()) {
         m_albumArt->setPixmap({});
@@ -1285,6 +1286,7 @@ void RightSidebar::setAlbumArt(const QImage &image)
         setAlbumArt(QString());
         return;
     }
+    m_usingArtFallback = false;
     m_albumArt->setText({});
     static_cast<AlbumArtLabel *>(m_albumArt)->setSourceImage(image);
 }
@@ -1713,6 +1715,11 @@ void RightSidebar::changeEvent(QEvent *event)
         restyleTrackInfoLabels();
         updateTrackInfoLabels();
         m_trackInfoPane->update();
+        m_queueTable->viewport()->update();
+        m_queueTable->horizontalHeader()->viewport()->update();
+    }
+    if ((event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange) && m_usingArtFallback) {
+        setAlbumArt(QString());
     }
 }
 

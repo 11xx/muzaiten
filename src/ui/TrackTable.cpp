@@ -409,6 +409,17 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
     sortByColumn(sortColumn(), sortOrder());
 }
 
+void TrackTable::changeEvent(QEvent *event)
+{
+    QTableView::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange
+        || event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::StyleChange) {
+        viewport()->update();
+        horizontalHeader()->viewport()->update();
+    }
+}
+
 void TrackTable::mouseMoveEvent(QMouseEvent *event)
 {
     const QModelIndex index = indexAt(event->pos());
