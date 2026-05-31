@@ -48,7 +48,9 @@ make smoke
 make run
 ```
 
-The `Makefile` is a thin wrapper around CMake. Direct CMake usage is also supported:
+The `Makefile` is a thin wrapper around CMake. `make run`, `make test`, and `make smoke` use the existing build; run `make build` explicitly after code changes. `make dev` is the build-and-run convenience target for an isolated development profile.
+
+Direct CMake usage is also supported:
 
 ```sh
 cmake -S . -B build -G Ninja
