@@ -412,22 +412,6 @@ int Database::missingTrackCount() const
     return 0;
 }
 
-QStringList Database::tracksWithoutFullMetadata(int limit) const
-{
-    QStringList paths;
-    QSqlQuery query(m_db);
-    QString sql = QStringLiteral("SELECT path FROM tracks WHERE missing = 0 AND id NOT IN (SELECT track_id FROM track_metadata)");
-    if (limit > 0) {
-        sql += QStringLiteral(" LIMIT %1").arg(limit);
-    }
-    if (!query.exec(sql)) {
-        return paths;
-    }
-    while (query.next()) {
-        paths.append(query.value(0).toString());
-    }
-    return paths;
-}
 
 MetadataBlob::FullMetadata Database::fullMetadata(const QString &path) const
 {

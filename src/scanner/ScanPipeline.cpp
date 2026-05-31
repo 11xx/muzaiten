@@ -82,7 +82,6 @@ ScanPipeline::ScanPipeline(QString rootPath, int scanRootId,
                            QHash<QString, QPair<qint64, qint64>> fingerprints,
                            Options options, QObject *parent)
     : QObject(parent)
-    , m_mode(Mode::Scan)
     , m_rootPath(std::move(rootPath))
     , m_scanRootId(scanRootId)
     , m_fingerprints(std::move(fingerprints))
@@ -90,21 +89,9 @@ ScanPipeline::ScanPipeline(QString rootPath, int scanRootId,
 {
 }
 
-ScanPipeline::ScanPipeline(QStringList backfillPaths, Options options, QObject *parent)
-    : QObject(parent)
-    , m_mode(Mode::Backfill)
-    , m_backfillPaths(std::move(backfillPaths))
-    , m_options(options)
-{
-}
-
 void ScanPipeline::run()
 {
-    if (m_mode == Mode::Scan) {
-        runScan();
-    } else {
-        runBackfill();
-    }
+    runScan();
 }
 
 void ScanPipeline::cancel()
@@ -168,19 +155,6 @@ void ScanPipeline::runScan()
     emit finished(enumerated, indexed, skipped, m_cancel);
 }
 
-void ScanPipeline::runBackfill()
-{
-    std::vector<std::string> paths;
-    paths.reserve(static_cast<std::size_t>(m_backfillPaths.size()));
-    for (const QString &path : m_backfillPaths) {
-        paths.push_back(path.toStdString());
-    }
-
-    const qint64 total = static_cast<qint64>(paths.size());
-    emit progress(total, total, 0, QStringLiteral("backfill"));
-    const qint64 indexed = processPaths(paths, total, QStringLiteral("backfill"));
-    emit finished(total, indexed, 0, m_cancel);
-}
 
 qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 enumerated, const QString &phase)
 {

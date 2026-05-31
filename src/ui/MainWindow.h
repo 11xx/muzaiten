@@ -148,8 +148,6 @@ private:
     void markScannedTracksMissing(const QStringList &paths);
     void removeMissingTracks();
     void finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
-    void maybeStartMetadataBackfill();
-    void finishMetadataBackfill();
     void onArtworkReady(const QString &token, const QImage &image, quint64 generation);
     void onArtworkMissing(const QString &token, quint64 generation);
     QString databasePath() const;
@@ -198,8 +196,6 @@ private:
     QThread *m_scanThread = nullptr;
     ScanPipeline *m_scanPipeline = nullptr;
     bool m_forceFullRescan = false;
-    QThread *m_backfillThread = nullptr;
-    ScanPipeline *m_backfillPipeline = nullptr;
     std::unique_ptr<ArtworkCache> m_artworkCache;
     quint64 m_currentArtGeneration = 0;
     QThread *m_listenBrainzThread = nullptr;
