@@ -23,6 +23,9 @@ constexpr int maxScrobblesPerBatch = 50;
 constexpr int maxConsecutiveSubmissionFailures = 3;
 constexpr int authPollIntervalMs = 3000;
 constexpr int maxAuthPollAttempts = 60;
+// Minimum seconds between "now playing" resubmissions on play/resume, to
+// prevent play-pause spam from flooding Last.fm with update requests.
+constexpr qint64 kNowPlayingResubmitMinSecs = 30;
 constexpr int errorTokenNotAuthorized = 14;
 constexpr int errorTokenExpired = 15;
 constexpr auto apiRootUrl = "https://ws.audioscrobbler.com/2.0/";
@@ -149,6 +152,29 @@ void LastFmScrobbler::trackStarted(const Track &track)
     submitNowPlaying(track);
 }
 
+void LastFmScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
+{
+    m_currentTrack = track;
+    m_hasCurrentTrack = true;
+    m_playing = playing;
+    m_requiredMs = requiredListenMs(track);
+    m_accumulatedMs = std::max<qint64>(0, elapsedMs);
+    // Anchor the scrobble timestamp to when the track originally began so that
+    // the completed-scrobble reports the real start time.
+    m_scrobbleTimestampSecs = QDateTime::currentSecsSinceEpoch() - m_accumulatedMs / 1000;
+    // If we already passed the listen threshold assume it was scrobbled by the
+    // prior session — mark submitted to avoid a duplicate.
+    m_scrobbleSubmitted = (m_accumulatedMs >= m_requiredMs);
+    m_segmentTimer.restart();
+
+    if (m_playing && !m_scrobbleSubmitted) {
+        m_progressTimer->start();
+        submitNowPlaying(track);
+    } else {
+        m_progressTimer->stop();
+    }
+}
+
 void LastFmScrobbler::playbackStateChanged(bool playing)
 {
     if (!m_hasCurrentTrack || m_playing == playing) {
@@ -164,6 +190,12 @@ void LastFmScrobbler::playbackStateChanged(bool playing)
     m_playing = playing;
     if (m_playing && !m_scrobbleSubmitted) {
         m_progressTimer->start();
+        // Re-send "now playing" on resume, but rate-limit to avoid flooding
+        // Last.fm when the user rapidly toggles play/pause.
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        if (now - m_lastNowPlayingSecs >= kNowPlayingResubmitMinSecs) {
+            submitNowPlaying(m_currentTrack);
+        }
     }
 }
 
@@ -250,6 +282,7 @@ void LastFmScrobbler::submitNowPlaying(const Track &track)
         return;
     }
 
+    m_lastNowPlayingSecs = QDateTime::currentSecsSinceEpoch();
     LastFmApi::Params params;
     LastFmApi::addParam(params, QStringLiteral("method"), QStringLiteral("track.updateNowPlaying"));
     LastFmApi::addParam(params, QStringLiteral("api_key"), m_apiKey);

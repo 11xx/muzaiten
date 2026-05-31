@@ -1547,9 +1547,16 @@ void MainWindow::restoreSavedPlaybackState()
             m_playerBar->setPosition(positionMs, std::max<qint64>(m_playback->duration(), m_currentTrack.durationMs));
             m_mpris->setPositionMs(positionMs);
         }
-        if (state != QStringLiteral("paused") && m_playback->state() == PlaybackBackend::State::Playing) {
-            notifyScrobblersTrackStarted(m_currentTrack);
-        }
+        // Resume the scrobble session at the restored position rather than
+        // starting a fresh one (which would lose already-elapsed time and
+        // re-scrobble tracks that crossed the threshold before the restart).
+        // For a paused restore, set up the session now so that when the user
+        // later hits play, playbackStateChanged() continues the session
+        // (including sending a rate-limited "now playing") without waiting
+        // for the next track.
+        const bool playing = state != QStringLiteral("paused")
+            && m_playback->state() == PlaybackBackend::State::Playing;
+        resumeScrobblers(m_currentTrack, std::max<qint64>(0, positionMs), playing);
         savePlaybackState(true);
     });
 }
@@ -1882,6 +1889,15 @@ void MainWindow::setListenBrainzEnabled(bool enabled)
 {
     m_database->setSetting(QStringLiteral("listenbrainz.enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
     configureListenBrainz();
+    // If a track is already playing when the scrobbler is toggled on, catch up
+    // so it doesn't miss the current track.  The queued configure() runs first
+    // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
+    if (enabled && !m_currentTrack.path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
+        const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
+        const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
+        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
+                                  Q_ARG(Track, m_currentTrack), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+    }
     statusBar()->showMessage(enabled ? QStringLiteral("ListenBrainz scrobbling enabled") : QStringLiteral("ListenBrainz scrobbling disabled"), 3000);
 }
 
@@ -1964,6 +1980,15 @@ void MainWindow::setLastFmEnabled(bool enabled)
 {
     m_database->setSetting(QStringLiteral("lastfm.enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
     configureLastFm();
+    // If a track is already playing when the scrobbler is toggled on, catch up
+    // so it doesn't miss the current track.  The queued configure() runs first
+    // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
+    if (enabled && !m_currentTrack.path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
+        const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
+        const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
+                                  Q_ARG(Track, m_currentTrack), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+    }
     statusBar()->showMessage(enabled ? QStringLiteral("Last.fm scrobbling enabled") : QStringLiteral("Last.fm scrobbling disabled"), 3000);
 }
 
@@ -2189,6 +2214,14 @@ void MainWindow::notifyScrobblersTrackStarted(const Track &track)
 {
     QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
     QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+}
+
+void MainWindow::resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing)
+{
+    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
+                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+    QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
+                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
 }
 
 void MainWindow::appendAndPlayTrack(const Track &track)
