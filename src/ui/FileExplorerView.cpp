@@ -489,7 +489,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     QAction *play = menu.addAction(QStringLiteral("Play"));
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
-    QAction *findFile = menu.addAction(QStringLiteral("Find file"));
+    QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
 
     QMenu *ratingMenu = menu.addMenu(QStringLiteral("Rating"));
     QHash<QAction *, int> ratingActions;

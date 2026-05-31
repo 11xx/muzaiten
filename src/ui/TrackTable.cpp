@@ -505,7 +505,7 @@ void TrackTable::showCellMenu(const QPoint &pos)
 
     const Track track = model()->index(index.row(), 0).data(TrackRole).value<Track>();
     menu.addSeparator();
-    QAction *findFile = menu.addAction(QStringLiteral("Find file"));
+    QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
     connect(findFile, &QAction::triggered, this, [this, track]() {
         emit findFileRequested(track);
     });

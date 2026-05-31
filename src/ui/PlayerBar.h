@@ -39,6 +39,7 @@ signals:
     void retryPendingRatingTagsRequested();
     void playbackProfileRequested();
     void playbackResumeRequested();
+    void currentTrackLibraryRequested();
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdImportRequested();

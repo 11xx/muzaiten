@@ -41,6 +41,7 @@ signals:
     void artistRequested(const QString &artistName);
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);
+    void currentTrackLibraryRequested();
     void viewSettingsChanged();
 
 private:
@@ -75,6 +76,7 @@ private:
     QString m_trackInfoMetadataPattern;
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
+    int m_currentIndex = -1;
     int m_playNextBegin = -1;
     int m_playNextEnd = -1;
     bool m_showPlayNextBadge = true;

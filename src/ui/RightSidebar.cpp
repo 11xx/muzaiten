@@ -1254,6 +1254,7 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
     // (reveal == true) scroll the playing row into view.
     const int rowCount = m_queueTable->model()->rowCount();
     const int current = (index >= 0 && index < rowCount) ? index : -1;
+    m_currentIndex = current;
 
     static_cast<QueueTableView *>(m_queueTable)->setCurrentPlayingRow(current);
     if (auto *delegate = qobject_cast<QueueItemDelegate *>(m_queueTable->itemDelegate())) {
@@ -1791,7 +1792,11 @@ void RightSidebar::showQueueMenu(const QPoint &pos)
         emit queueTrackActivated(row);
     });
     menu.addSeparator();
-    QAction *findFile = menu.addAction(QStringLiteral("Find file"));
+    if (row == m_currentIndex) {
+        QAction *findCurrent = menu.addAction(QStringLiteral("Find current track in library"));
+        connect(findCurrent, &QAction::triggered, this, &RightSidebar::currentTrackLibraryRequested);
+    }
+    QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
     connect(findFile, &QAction::triggered, this, [this, track]() {
         emit findFileRequested(track);
     });
