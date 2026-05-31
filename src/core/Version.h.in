@@ -1,5 +1,5 @@
 #pragma once
 
-#define MUZAITEN_VERSION "@PROJECT_VERSION@"
+#define MUZAITEN_VERSION "@MUZAITEN_VERSION@"
 #define MUZAITEN_APP_ID "org.11xx.muzaiten"
 #define MUZAITEN_APP_NAME "muzaiten"

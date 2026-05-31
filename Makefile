@@ -20,9 +20,9 @@ help:
 		'Targets:' \
 		'  make configure  Configure the CMake build directory' \
 		'  make build      Configure and build the project' \
-		'  make test       Build and run the test suite' \
-		'  make smoke      Build and run the offscreen startup smoke test' \
-		'  make run        Build and launch the app with --verbose (XDG dirs)' \
+		'  make test       Run the test suite for the existing build' \
+		'  make smoke      Run the existing build offscreen as a startup smoke test' \
+		'  make run        Launch the existing build with --verbose (XDG dirs)' \
 		'  make dev        Build and launch with isolated ./dev-state (MUZAITEN_DEV_STATE)' \
 		'  make clean      Remove build outputs from $(BUILD_DIR)' \
 		'  make distclean  Alias for clean' \
@@ -51,17 +51,17 @@ build: configure
 
 rebuild: clean build
 
-test: build
+test:
 	$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure
 
-smoke: build
+smoke:
 	timeout 2s env QT_QPA_PLATFORM=$(QT_QPA_PLATFORM) ./$(APP); \
 	status=$$?; \
 	if [ $$status -ne 0 ] && [ $$status -ne 124 ]; then \
 		exit $$status; \
 	fi
 
-run: build
+run:
 	./$(APP) --verbose
 
 # Dev launcher: MUZAITEN_DEV_STATE points all dirs at ./dev-state (CWD-relative),
