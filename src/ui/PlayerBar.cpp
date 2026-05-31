@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QProxyStyle>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -65,6 +66,22 @@ protected:
             }
         }
         QMenuBar::mousePressEvent(event);
+    }
+};
+
+class MenuPaddingStyle final : public QProxyStyle {
+public:
+    explicit MenuPaddingStyle(QStyle *baseStyle)
+        : QProxyStyle(baseStyle)
+    {
+    }
+
+    int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr, const QWidget *widget = nullptr) const override
+    {
+        if (metric == QStyle::PM_MenuButtonIndicator) {
+            return QProxyStyle::pixelMetric(metric, option, widget) + 10;
+        }
+        return QProxyStyle::pixelMetric(metric, option, widget);
     }
 };
 
@@ -310,14 +327,9 @@ void styleMenu(QMenu *menu)
     if (menu == nullptr) {
         return;
     }
-    menu->setStyleSheet(QStringLiteral(
-        "QMenu::item {"
-        "  padding: 4px 34px 4px 24px;"
-        "}"
-        "QMenu::item:selected {"
-        "  background: palette(highlight);"
-        "  color: palette(highlighted-text);"
-        "}"));
+    auto *style = new MenuPaddingStyle(menu->style());
+    style->setParent(menu);
+    menu->setStyle(style);
 }
 
 } // namespace
