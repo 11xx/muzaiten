@@ -140,12 +140,7 @@ void PlaybackProfileDialog::updateModeVisibility()
 
 void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
 {
-    // Migrate legacy "exclusive" key to "bit-perfect".
-    const QString mode = profile.mode == QStringLiteral("exclusive")
-                             ? QStringLiteral("bit-perfect")
-                             : profile.mode;
-
-    const int modeIndex = m_mode->findData(mode);
+    const int modeIndex = m_mode->findData(profile.mode);
     m_mode->setCurrentIndex(modeIndex >= 0 ? modeIndex : 0);
 
     const int sinkIndex = m_sink->findData(profile.sink);
