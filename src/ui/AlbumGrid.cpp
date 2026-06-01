@@ -40,6 +40,7 @@ enum Roles {
     RepresentativeDirRole = Qt::UserRole + 10,
     ArtworkGenerationRole = Qt::UserRole + 11,
     LoadingRole = Qt::UserRole + 12,
+    AlbumYearRole = Qt::UserRole + 13,
 };
 
 QString alignmentToString(Qt::Alignment alignment)
@@ -75,6 +76,18 @@ QRect alignedRatingCell(const QRect &anchorRect, const QRect &textRect, int star
         left = anchorRect.left() + ((anchorRect.width() - starsWidth) / 2) - hitPadding;
     }
     return {left, textRect.bottom() + 4, starsWidth + (hitPadding * 2), starSize};
+}
+
+int yearFromAlbum(const Album &album)
+{
+    for (const QString &candidate : {album.originalDate, album.date}) {
+        bool ok = false;
+        const int year = candidate.trimmed().left(4).toInt(&ok);
+        if (ok) {
+            return year;
+        }
+    }
+    return 0;
 }
 
 } // namespace
@@ -194,6 +207,19 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
     if (m_showLoading && m_loadingCount > 0) {
         m_spinnerTimer->start();
     }
+
+    if (itemModel->rowCount() > 0) {
+        int targetRow = 0;
+        if (!m_selectedAlbumTitle.isEmpty()) {
+            for (int row = 0; row < itemModel->rowCount(); ++row) {
+                if (itemModel->index(row, 0).data(AlbumTitleRole).toString() == m_selectedAlbumTitle) {
+                    targetRow = row;
+                    break;
+                }
+            }
+        }
+        setCurrentRow(targetRow);
+    }
 }
 
 void AlbumGrid::applySort()
@@ -228,6 +254,7 @@ void AlbumGrid::populateItemFromAlbum(QStandardItem *item, const Album &album)
     item->setData(album.representativeDir, RepresentativeDirRole);
     item->setData(m_artworkGeneration, ArtworkGenerationRole);
     item->setData(m_showLoading, LoadingRole);
+    item->setData(yearFromAlbum(album), AlbumYearRole);
     item->setData(m_effectiveArtSize, ArtSizeRole);
     item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
     item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
@@ -276,6 +303,80 @@ void AlbumGrid::setSelectedAlbumTitle(const QString &albumTitle)
 {
     m_selectedAlbumTitle = albumTitle;
     applySettingsToItems();
+}
+
+int AlbumGrid::rowCount() const
+{
+    return model() != nullptr ? model()->rowCount() : 0;
+}
+
+int AlbumGrid::currentRow() const
+{
+    const QModelIndex index = currentIndex();
+    return index.isValid() ? index.row() : -1;
+}
+
+void AlbumGrid::setCurrentRow(int row)
+{
+    if (model() == nullptr || model()->rowCount() == 0) {
+        return;
+    }
+    const int safeRow = std::clamp(row, 0, model()->rowCount() - 1);
+    const QModelIndex index = model()->index(safeRow, 0);
+    selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    setCurrentIndex(index);
+    scrollTo(index, QAbstractItemView::EnsureVisible);
+}
+
+void AlbumGrid::activateCurrentAlbum()
+{
+    const QString title = currentAlbumTitle();
+    if (!title.isEmpty()) {
+        emit albumSelectionToggled(title);
+    }
+}
+
+QString AlbumGrid::currentAlbumTitle() const
+{
+    const QModelIndex index = currentIndex();
+    return index.isValid() ? index.data(AlbumTitleRole).toString() : QString();
+}
+
+QVector<Search::MatchDocument> AlbumGrid::searchDocuments() const
+{
+    QVector<Search::MatchDocument> docs;
+    if (model() == nullptr) {
+        return docs;
+    }
+    docs.reserve(model()->rowCount());
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QModelIndex index = model()->index(row, 0);
+        const QString title = index.data(AlbumTitleRole).toString();
+        const QString artist = index.data(AlbumArtistRole).toString();
+        const QString path = index.data(RepresentativeDirRole).toString();
+        const QString free = QStringLiteral("%1 %2 %3").arg(title, artist, path);
+        QVector<Search::MatchNumeric> numeric;
+        const int year = index.data(AlbumYearRole).toInt();
+        if (year > 0) {
+            numeric.push_back({Search::TermKind::Year, year});
+        }
+        const int rating = index.data(RatingRole).toInt();
+        if (rating >= 0) {
+            numeric.push_back({Search::TermKind::Rating, rating});
+        }
+        docs.push_back({
+            row,
+            {
+                {Search::MatchFieldRole::Title, title, title.toLower(), 400},
+                {Search::MatchFieldRole::Album, title, title.toLower(), 200},
+                {Search::MatchFieldRole::AlbumArtist, artist, artist.toLower(), 300},
+                {Search::MatchFieldRole::Path, path, path.toLower(), 60},
+                {Search::MatchFieldRole::Free, free, free.toLower(), 100},
+            },
+            numeric,
+        });
+    }
+    return docs;
 }
 
 QString AlbumGrid::viewSettingsJson() const

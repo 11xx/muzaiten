@@ -1227,9 +1227,16 @@ RightSidebar::RightSidebar(QWidget *parent)
 
 void RightSidebar::setQueue(const QVector<Track> &tracks)
 {
+    const int priorRow = queueCurrentRow();
     m_tracks = tracks;
     if (auto *queueModel = qobject_cast<QueueTableModel *>(m_queueTable->model())) {
         queueModel->setTracks(tracks);
+    }
+    if (!tracks.isEmpty()) {
+        const int row = priorRow >= 0 && priorRow < tracks.size()
+            ? priorRow
+            : (m_currentQueueIndex >= 0 && m_currentQueueIndex < tracks.size() ? m_currentQueueIndex : 0);
+        setQueueCurrentRow(row);
     }
     // Defer until Qt finalizes the post-reset layout (scrollbar visibility may change).
     QTimer::singleShot(0, this, [this]() {
@@ -1254,6 +1261,7 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
     // (reveal == true) scroll the playing row into view.
     const int rowCount = m_queueTable->model()->rowCount();
     const int current = (index >= 0 && index < rowCount) ? index : -1;
+    m_currentQueueIndex = current;
 
     static_cast<QueueTableView *>(m_queueTable)->setCurrentPlayingRow(current);
     if (auto *delegate = qobject_cast<QueueItemDelegate *>(m_queueTable->itemDelegate())) {
@@ -1264,6 +1272,86 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
     if (reveal && current >= 0) {
         m_queueTable->scrollTo(m_queueTable->model()->index(current, 0), QAbstractItemView::PositionAtCenter);
     }
+}
+
+QWidget *RightSidebar::queueNavigationWidget() const
+{
+    return m_queueTable;
+}
+
+int RightSidebar::queueRowCount() const
+{
+    return m_queueTable != nullptr && m_queueTable->model() != nullptr ? m_queueTable->model()->rowCount() : 0;
+}
+
+int RightSidebar::queueCurrentRow() const
+{
+    const QModelIndex index = m_queueTable != nullptr ? m_queueTable->currentIndex() : QModelIndex();
+    return index.isValid() ? index.row() : -1;
+}
+
+void RightSidebar::setQueueCurrentRow(int row)
+{
+    if (m_queueTable == nullptr || m_queueTable->model() == nullptr || m_queueTable->model()->rowCount() == 0) {
+        return;
+    }
+    const int safeRow = std::clamp(row, 0, m_queueTable->model()->rowCount() - 1);
+    const QModelIndex index = m_queueTable->model()->index(safeRow, 0);
+    m_queueTable->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    m_queueTable->setCurrentIndex(index);
+    m_queueTable->scrollTo(index, QAbstractItemView::EnsureVisible);
+}
+
+void RightSidebar::moveQueueCurrentRow(int delta)
+{
+    if (queueRowCount() == 0) {
+        return;
+    }
+    const int row = queueCurrentRow() >= 0 ? queueCurrentRow() : 0;
+    setQueueCurrentRow(std::clamp(row + delta, 0, queueRowCount() - 1));
+}
+
+void RightSidebar::activateCurrentQueueTrack()
+{
+    const int row = queueCurrentRow();
+    if (row >= 0 && row < m_tracks.size()) {
+        emit queueTrackActivated(row);
+    }
+}
+
+QVector<Search::MatchDocument> RightSidebar::queueSearchDocuments() const
+{
+    QVector<Search::MatchDocument> docs;
+    docs.reserve(m_tracks.size());
+    for (int row = 0; row < m_tracks.size(); ++row) {
+        const Track &track = m_tracks.at(row);
+        const QString title = track.title.isEmpty() ? track.filename : track.title;
+        const QString free = QStringLiteral("%1 %2 %3 %4 %5")
+                                 .arg(title,
+                                      track.artistName,
+                                      track.albumArtistName,
+                                      track.albumTitle,
+                                      track.path);
+        QVector<Search::MatchNumeric> numeric;
+        const int year = displayYear(track).toInt();
+        if (year > 0) numeric.push_back({Search::TermKind::Year, year});
+        if (track.effectiveRating0To100 >= 0) numeric.push_back({Search::TermKind::Rating, track.effectiveRating0To100});
+        if (track.durationMs > 0) numeric.push_back({Search::TermKind::DurationMs, track.durationMs});
+        docs.push_back({
+            row,
+            {
+                {Search::MatchFieldRole::Title, title, title.toLower(), 400},
+                {Search::MatchFieldRole::Artist, track.artistName, track.artistName.toLower(), 300},
+                {Search::MatchFieldRole::AlbumArtist, track.albumArtistName, track.albumArtistName.toLower(), 300},
+                {Search::MatchFieldRole::Album, track.albumTitle, track.albumTitle.toLower(), 200},
+                {Search::MatchFieldRole::Filename, track.filename, track.filename.toLower(), 60},
+                {Search::MatchFieldRole::Path, track.path, track.path.toLower(), 60},
+                {Search::MatchFieldRole::Free, free, free.toLower(), 100},
+            },
+            numeric,
+        });
+    }
+    return docs;
 }
 
 void RightSidebar::setAlbumArt(const QString &imagePath)

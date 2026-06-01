@@ -405,8 +405,104 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
     if (trackModel == nullptr) {
         return;
     }
+    const QString currentPath = currentIndex().isValid()
+        ? currentIndex().data(TrackRole).value<Track>().path
+        : QString();
     trackModel->setTracks(tracks);
     sortByColumn(sortColumn(), sortOrder());
+    if (!currentPath.isEmpty()) {
+        selectTrackByPath(currentPath);
+    }
+    if (!currentIndex().isValid() && model()->rowCount() > 0) {
+        setCurrentRow(0);
+    }
+}
+
+int TrackTable::rowCount() const
+{
+    return model() != nullptr ? model()->rowCount() : 0;
+}
+
+int TrackTable::currentRow() const
+{
+    const QModelIndex index = currentIndex();
+    return index.isValid() ? index.row() : -1;
+}
+
+void TrackTable::setCurrentRow(int row)
+{
+    if (model() == nullptr || model()->rowCount() == 0) {
+        return;
+    }
+    const int safeRow = std::clamp(row, 0, model()->rowCount() - 1);
+    const QModelIndex index = model()->index(safeRow, 0);
+    selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    setCurrentIndex(index);
+    scrollTo(index, QAbstractItemView::EnsureVisible);
+}
+
+void TrackTable::moveCurrentRow(int delta)
+{
+    if (rowCount() == 0) {
+        return;
+    }
+    const int row = currentRow() >= 0 ? currentRow() : 0;
+    setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1));
+}
+
+void TrackTable::activateCurrentTrack()
+{
+    const QModelIndex index = currentIndex();
+    if (!index.isValid()) {
+        return;
+    }
+    const Track track = model()->index(index.row(), 0).data(TrackRole).value<Track>();
+    if (!track.path.isEmpty()) {
+        emit trackActivated(track);
+    }
+}
+
+QVector<Search::MatchDocument> TrackTable::searchDocuments() const
+{
+    QVector<Search::MatchDocument> docs;
+    if (model() == nullptr) {
+        return docs;
+    }
+    docs.reserve(model()->rowCount());
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
+        const QString title = track.title.isEmpty() ? track.filename : track.title;
+        const QString free = QStringLiteral("%1 %2 %3 %4 %5 %6")
+                                 .arg(title,
+                                      track.artistName,
+                                      track.albumArtistName,
+                                      track.albumTitle,
+                                      track.filename,
+                                      track.path);
+        QVector<Search::MatchNumeric> numeric;
+        const int year = displayYear(track).toInt();
+        if (year > 0) numeric.push_back({Search::TermKind::Year, year});
+        if (track.effectiveRating0To100 >= 0) numeric.push_back({Search::TermKind::Rating, track.effectiveRating0To100});
+        if (track.durationMs > 0) numeric.push_back({Search::TermKind::DurationMs, track.durationMs});
+        if (track.sampleRateHz > 0) numeric.push_back({Search::TermKind::SampleRateHz, track.sampleRateHz});
+        if (track.bitrateKbps > 0) numeric.push_back({Search::TermKind::BitrateKbps, track.bitrateKbps});
+        if (track.channels > 0) numeric.push_back({Search::TermKind::Channels, track.channels});
+        docs.push_back({
+            row,
+            {
+                {Search::MatchFieldRole::Title, title, title.toLower(), 400},
+                {Search::MatchFieldRole::Artist, track.artistName, track.artistName.toLower(), 300},
+                {Search::MatchFieldRole::AlbumArtist, track.albumArtistName, track.albumArtistName.toLower(), 300},
+                {Search::MatchFieldRole::Album, track.albumTitle, track.albumTitle.toLower(), 200},
+                {Search::MatchFieldRole::Filename, track.filename, track.filename.toLower(), 60},
+                {Search::MatchFieldRole::Path, track.path, track.path.toLower(), 60},
+                {Search::MatchFieldRole::Codec, track.codec, track.codec.toLower(), 60},
+                {Search::MatchFieldRole::Free, free, free.toLower(), 100},
+            },
+            numeric,
+        });
+    }
+    return docs;
 }
 
 void TrackTable::changeEvent(QEvent *event)

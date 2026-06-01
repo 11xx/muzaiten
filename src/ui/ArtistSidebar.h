@@ -1,5 +1,7 @@
 #pragma once
 
+#include "search/SearchMatcher.h"
+
 #include <QWidget>
 
 #include <QString>
@@ -7,7 +9,6 @@
 
 class Artist;
 class QListView;
-class QLineEdit;
 class QStandardItemModel;
 class QTabBar;
 
@@ -23,6 +24,13 @@ public:
     void applyViewSettingsJson(const QString &json);
     void setMpdAvailable(bool available);
     void setLibrarySourceIndex(int index);
+    QWidget *navigationWidget() const;
+    int rowCount() const;
+    int currentRow() const;
+    void setCurrentRow(int row);
+    void moveCurrentRow(int delta, bool activate);
+    void activateCurrentArtist();
+    QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:
     void artistSelected(const QString &artistName);
@@ -38,7 +46,6 @@ protected:
 
 private:
     QTabBar *m_tabBar = nullptr;
-    QLineEdit *m_filter = nullptr;
     QListView *m_view = nullptr;
     QStandardItemModel *m_model = nullptr;
     bool m_showAlbumCount = true;
