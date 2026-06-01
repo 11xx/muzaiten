@@ -398,8 +398,9 @@ public:
             opt.palette.setColor(QPalette::Text, SelectionColors::selectedText(opt));
         } else {
             opt.state &= ~QStyle::State_MouseOver;
-            opt.state &= ~QStyle::State_Selected;
         }
+        opt.state &= ~QStyle::State_MouseOver;
+        opt.state &= ~QStyle::State_Selected;
         opt.features &= ~QStyleOptionViewItem::Alternate;
         opt.backgroundBrush = Qt::NoBrush;
         opt.displayAlignment = opt.displayAlignment | Qt::AlignVCenter;
@@ -1304,7 +1305,7 @@ void RightSidebar::setQueueCurrentRow(int row)
     const QModelIndex index = m_queueTable->model()->index(safeRow, 0);
     m_queueTable->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     m_queueTable->setCurrentIndex(index);
-    m_queueTable->scrollTo(index, QAbstractItemView::EnsureVisible);
+    m_queueTable->scrollTo(index, QAbstractItemView::PositionAtCenter);
 }
 
 void RightSidebar::moveQueueCurrentRow(int delta)

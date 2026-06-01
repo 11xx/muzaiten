@@ -38,8 +38,9 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
         opt.palette.setColor(QPalette::Text, SelectionColors::selectedText(opt));
     } else {
         opt.state &= ~QStyle::State_MouseOver;
-        opt.state &= ~QStyle::State_Selected;
     }
+    opt.state &= ~QStyle::State_MouseOver;
+    opt.state &= ~QStyle::State_Selected;
     opt.features &= ~QStyleOptionViewItem::Alternate;
     opt.backgroundBrush = Qt::NoBrush;
     opt.displayAlignment = opt.displayAlignment | Qt::AlignVCenter;
