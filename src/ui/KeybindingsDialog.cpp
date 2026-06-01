@@ -30,6 +30,10 @@ QString actionLabel(const QString &action)
         {QString::fromLatin1(MainPanelAction::PlayNow), QStringLiteral("Play now")},
         {QString::fromLatin1(MainPanelAction::AddToQueue), QStringLiteral("Add to queue")},
         {QString::fromLatin1(MainPanelAction::PlayNext), QStringLiteral("Play next")},
+        {QString::fromLatin1(MainPanelAction::Mark), QStringLiteral("Mark item")},
+        {QString::fromLatin1(MainPanelAction::MarkAll), QStringLiteral("Mark all")},
+        {QString::fromLatin1(MainPanelAction::Unmark), QStringLiteral("Unmark item")},
+        {QString::fromLatin1(MainPanelAction::UnmarkAll), QStringLiteral("Unmark all")},
         {QString::fromLatin1(MainPanelAction::Search), QStringLiteral("Panel search")},
         {QString::fromLatin1(MainPanelAction::SearchNext), QStringLiteral("Next match")},
         {QString::fromLatin1(MainPanelAction::SearchPrevious), QStringLiteral("Previous match")},
@@ -73,14 +77,14 @@ void fillBindings(QTableWidget *table, const KeyBindingMap &bindings)
     table->resizeRowsToContents();
 }
 
-const KeyBindingProfile *profileByName(const QVector<KeyBindingProfile> &profiles, const QString &name)
+KeyBindingMap bindingsForProfile(const QVector<KeyBindingProfile> &profiles, const QString &name)
 {
     for (const KeyBindingProfile &profile : profiles) {
         if (profile.name == name) {
-            return &profile;
+            return profile.bindings;
         }
     }
-    return profiles.isEmpty() ? nullptr : &profiles.first();
+    return profiles.isEmpty() ? KeyBindingMap{} : profiles.first().bindings;
 }
 
 void addGlobalRows(QTableWidget *table, const QVector<std::pair<QString, QString>> &rows)
@@ -211,8 +215,7 @@ QTableWidget *KeybindingsDialog::makeBindingsTable(QWidget *parent)
 
 void KeybindingsDialog::rebuildMainPanelBindings()
 {
-    const KeyBindingProfile *profile = profileByName(defaultMainPanelKeyBindingProfiles(), mainPanelProfileName());
-    fillBindings(m_mainPanelBindings, profile != nullptr ? profile->bindings : KeyBindingMap{});
+    fillBindings(m_mainPanelBindings, bindingsForProfile(defaultMainPanelKeyBindingProfiles(), mainPanelProfileName()));
     addGlobalRows(m_mainPanelBindings, {
         {QStringLiteral("1"), QStringLiteral("Switch to Library panels")},
         {QStringLiteral("o"), QStringLiteral("Find current track in library")},
@@ -221,8 +224,7 @@ void KeybindingsDialog::rebuildMainPanelBindings()
 
 void KeybindingsDialog::rebuildFileExplorerBindings()
 {
-    const KeyBindingProfile *profile = profileByName(defaultKeyBindingProfiles(), fileExplorerProfileName());
-    fillBindings(m_fileExplorerBindings, profile != nullptr ? profile->bindings : KeyBindingMap{});
+    fillBindings(m_fileExplorerBindings, bindingsForProfile(defaultKeyBindingProfiles(), fileExplorerProfileName()));
     addGlobalRows(m_fileExplorerBindings, {
         {QStringLiteral("2"), QStringLiteral("Toggle Library/Free-roam explorer")},
     });
