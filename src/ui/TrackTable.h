@@ -1,17 +1,17 @@
 #pragma once
 
-#include <QTableView>
 #include <QVector>
 #include <QPersistentModelIndex>
 
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
+#include "ui/NavigableTableView.h"
 
 class QEvent;
 class QMouseEvent;
 class QWheelEvent;
 
-class TrackTable final : public QTableView {
+class TrackTable final : public NavigableTableView {
     Q_OBJECT
 
 public:
@@ -21,7 +21,6 @@ public:
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void setHeaderHeight(int height);
-    void setNavigationScrollPadding(int rows);
     int sortColumn() const;
     Qt::SortOrder sortOrder() const;
     int verticalScrollValue() const;
@@ -58,5 +57,4 @@ private:
 
     QPersistentModelIndex m_hoverRatingIndex;
     int m_hoveredRow = -1;
-    int m_navigationScrollPadding = 3;
 };

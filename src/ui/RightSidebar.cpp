@@ -3,11 +3,11 @@
 #include "ui/AlbumArtFallback.h"
 #include "ui/DenseTableDelegate.h"
 #include "ui/NeighborColumnResizer.h"
+#include "ui/NavigableTableView.h"
 #include "ui/OverlayScrollBar.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
-#include "ui/TableNavigationScroll.h"
 
 #include <QAction>
 #include <QAbstractItemView>
@@ -94,10 +94,10 @@ enum QueueRoles {
     PlayNextOrdinalRole = Qt::UserRole + 3,
 };
 
-class QueueTableView final : public QTableView {
+class QueueTableView final : public NavigableTableView {
 public:
     explicit QueueTableView(QWidget *parent = nullptr)
-        : QTableView(parent)
+        : NavigableTableView(parent)
     {
     }
 
@@ -195,7 +195,7 @@ public:
 protected:
     void resizeEvent(QResizeEvent *event) override
     {
-        QTableView::resizeEvent(event);
+        NavigableTableView::resizeEvent(event);
         fitVisibleColumnsToViewport();
     }
 
@@ -210,7 +210,7 @@ protected:
             event->setDropAction(Qt::MoveAction);
             event->accept();
         } else {
-            QTableView::dragEnterEvent(event);
+            NavigableTableView::dragEnterEvent(event);
         }
     }
 
@@ -222,14 +222,14 @@ protected:
             event->setDropAction(Qt::MoveAction);
             event->accept();
         } else {
-            QTableView::dragMoveEvent(event);
+            NavigableTableView::dragMoveEvent(event);
         }
         setDropIndicatorRow(rowForDropPosition(event->position().toPoint()));
     }
 
     void dragLeaveEvent(QDragLeaveEvent *event) override
     {
-        QTableView::dragLeaveEvent(event);
+        NavigableTableView::dragLeaveEvent(event);
         setDropIndicatorRow(-1);
     }
 
@@ -245,14 +245,14 @@ protected:
             }
             event->acceptProposedAction();
         } else {
-            QTableView::dropEvent(event);
+            NavigableTableView::dropEvent(event);
         }
         setDropIndicatorRow(-1);
     }
 
     void paintEvent(QPaintEvent *event) override
     {
-        QTableView::paintEvent(event);
+        NavigableTableView::paintEvent(event);
         if (model() == nullptr) {
             return;
         }
@@ -1109,8 +1109,6 @@ RightSidebar::RightSidebar(QWidget *parent)
     auto *queueView = new QueueTableView(m_splitter);
     m_queueTable = queueView;
     m_queueTable->setModel(queueModel);
-    m_queueTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_queueTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_queueTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_queueTable->setDragEnabled(true);
     m_queueTable->setAcceptDrops(true);
@@ -1287,7 +1285,9 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
 
 void RightSidebar::setNavigationScrollPadding(int rows)
 {
-    m_navigationScrollPadding = std::max(0, rows);
+    if (m_queueTable != nullptr) {
+        m_queueTable->setNavigationScrollPadding(rows);
+    }
 }
 
 QWidget *RightSidebar::queueNavigationWidget() const
@@ -1302,8 +1302,7 @@ int RightSidebar::queueRowCount() const
 
 int RightSidebar::queueCurrentRow() const
 {
-    const QModelIndex index = m_queueTable != nullptr ? m_queueTable->currentIndex() : QModelIndex();
-    return index.isValid() ? index.row() : -1;
+    return m_queueTable != nullptr ? m_queueTable->currentNavigationRow() : -1;
 }
 
 void RightSidebar::setQueueCurrentRow(int row)
@@ -1313,14 +1312,9 @@ void RightSidebar::setQueueCurrentRow(int row)
 
 void RightSidebar::setQueueCurrentRow(int row, int scrollDirection)
 {
-    if (m_queueTable == nullptr || m_queueTable->model() == nullptr || m_queueTable->model()->rowCount() == 0) {
-        return;
+    if (m_queueTable != nullptr) {
+        m_queueTable->setCurrentNavigationRow(row, scrollDirection);
     }
-    const int safeRow = std::clamp(row, 0, m_queueTable->model()->rowCount() - 1);
-    const QModelIndex index = m_queueTable->model()->index(safeRow, 0);
-    m_queueTable->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-    m_queueTable->setCurrentIndex(index);
-    TableNavigationScroll::keepRowAtPadding(m_queueTable, safeRow, scrollDirection, m_navigationScrollPadding);
 }
 
 void RightSidebar::moveQueueCurrentRow(int delta)

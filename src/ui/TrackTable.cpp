@@ -6,7 +6,6 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
-#include "ui/TableNavigationScroll.h"
 
 #include <QAction>
 #include <QAbstractTableModel>
@@ -251,7 +250,7 @@ int columnFromKey(const QString &key)
 } // namespace
 
 TrackTable::TrackTable(QWidget *parent)
-    : QTableView(parent)
+    : NavigableTableView(parent)
 {
     setModel(new TrackTableModel(this));
     auto *denseDelegate = new DenseTableDelegate(this);
@@ -260,8 +259,6 @@ TrackTable::TrackTable(QWidget *parent)
     setItemDelegateForColumn(0, ratingDelegate);
     setSortingEnabled(true);
     setAlternatingRowColors(true);
-    setSelectionBehavior(QAbstractItemView::SelectRows);
-    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setShowGrid(false);
     setWordWrap(false);
     setMouseTracking(true);
@@ -315,17 +312,10 @@ void TrackTable::selectTrackByPath(const QString &path)
     for (int row = 0; row < model()->rowCount(); ++row) {
         const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
         if (track.path == path) {
-            selectRow(row);
-            setCurrentIndex(model()->index(row, 0));
-            scrollTo(model()->index(row, 0), QAbstractItemView::PositionAtCenter);
+            setCurrentNavigationRow(row);
             return;
         }
     }
-}
-
-void TrackTable::setNavigationScrollPadding(int rows)
-{
-    m_navigationScrollPadding = std::max(0, rows);
 }
 
 int TrackTable::sortColumn() const
@@ -432,8 +422,7 @@ int TrackTable::rowCount() const
 
 int TrackTable::currentRow() const
 {
-    const QModelIndex index = currentIndex();
-    return index.isValid() ? index.row() : -1;
+    return currentNavigationRow();
 }
 
 void TrackTable::setCurrentRow(int row)
@@ -443,14 +432,7 @@ void TrackTable::setCurrentRow(int row)
 
 void TrackTable::setCurrentRow(int row, int scrollDirection)
 {
-    if (model() == nullptr || model()->rowCount() == 0) {
-        return;
-    }
-    const int safeRow = std::clamp(row, 0, model()->rowCount() - 1);
-    const QModelIndex index = model()->index(safeRow, 0);
-    selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-    setCurrentIndex(index);
-    TableNavigationScroll::keepRowAtPadding(this, safeRow, scrollDirection, m_navigationScrollPadding);
+    setCurrentNavigationRow(row, scrollDirection);
 }
 
 void TrackTable::moveCurrentRow(int delta)
