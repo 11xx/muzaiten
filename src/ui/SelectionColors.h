@@ -35,4 +35,19 @@ inline QColor selectedText(const QStyleOptionViewItem &option)
         : option.palette.color(QPalette::Text);
 }
 
+inline void applySelectedPalette(QStyleOptionViewItem *option)
+{
+    if (option == nullptr) {
+        return;
+    }
+
+    const QColor fill = selectedFill(*option);
+    const QColor text = selectedText(*option);
+    for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+        option->palette.setColor(group, QPalette::Highlight, fill);
+        option->palette.setColor(group, QPalette::HighlightedText, text);
+        option->palette.setColor(group, QPalette::Text, text);
+    }
+}
+
 } // namespace SelectionColors
