@@ -28,6 +28,7 @@ public:
     // changes and narrow rating refreshes pass false (no spinner).
     void setAlbums(const QVector<Album> &albums, bool freshLoad = false);
     void setSelectedAlbumTitle(const QString &albumTitle);
+    void setRememberedOutlineVisible(bool visible);
     int loadingAngle() const { return m_loadingAngle; }
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
@@ -80,11 +81,14 @@ private:
     void clearItemLoading(int row);
     void reselectMarkedAlbums();
     void setCurrentAlbumMarked(bool marked);
+    void refreshRememberedOutline();
+    void setCurrentRowInternal(int row, bool clearRememberedOutline);
 
 private:
     ArtworkCache *m_artworkCache = nullptr;
     QString m_selectedAlbumTitle;
     QSet<QString> m_markedAlbumTitles;
+    bool m_rememberedOutlineVisible = false;
     QVector<Album> m_sourceAlbums;  // unsorted source list from last setAlbums call
     QVector<Album> m_pendingAlbums;
     QTimer *m_populateTimer = nullptr;
