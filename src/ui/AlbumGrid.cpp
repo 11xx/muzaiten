@@ -451,6 +451,9 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    setCurrentIndex(index);
+
     const QString title = index.data(AlbumTitleRole).toString();
     const int rating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos());
     if (rating >= 0) {

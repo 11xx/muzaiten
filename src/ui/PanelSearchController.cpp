@@ -403,25 +403,23 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
 
     if (event->modifiers() == Qt::NoModifier) {
         if (event->key() == Qt::Key_N) {
+            if (target->clearNarrowing) {
+                target->clearNarrowing();
+            }
             focusTracks();
             return true;
         }
-        if (event->key() == Qt::Key_H || event->key() == Qt::Key_Left) {
-            target->moveCurrentInGrid(-1, 0);
-            return true;
-        }
-        if (event->key() == Qt::Key_L || event->key() == Qt::Key_Right) {
-            target->moveCurrentInGrid(+1, 0);
+        if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             return true;
         }
     }
 
     if (action == QString::fromLatin1(MainPanelAction::MoveDown)) {
-        target->moveCurrentInGrid(0, +1);
+        target->moveCurrentInGrid(+1, 0);
         return true;
     }
     if (action == QString::fromLatin1(MainPanelAction::MoveUp)) {
-        target->moveCurrentInGrid(0, -1);
+        target->moveCurrentInGrid(-1, 0);
         return true;
     }
     return false;
@@ -448,7 +446,12 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::PageDown)) movePage(+1);
     else if (action == QString::fromLatin1(MainPanelAction::PageUp)) movePage(-1);
     else if (action == QString::fromLatin1(MainPanelAction::FocusPrevious)) focusRelative(-1);
-    else if (action == QString::fromLatin1(MainPanelAction::FocusNext)) focusRelative(+1);
+    else if (action == QString::fromLatin1(MainPanelAction::FocusNext)) {
+        if (m_activePanel == MainPanelId::Albums) {
+            activateCurrent();
+        }
+        focusRelative(+1);
+    }
     else if (action == QString::fromLatin1(MainPanelAction::FocusQueue)) focusQueue();
     else if (action == QString::fromLatin1(MainPanelAction::FocusTracks)) focusTracks();
     else if (action == QString::fromLatin1(MainPanelAction::Activate)) activateCurrent();
@@ -457,6 +460,7 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::SearchPrevious)) cycleMatch(-1);
     else if (action == QString::fromLatin1(MainPanelAction::Escape)) {
         if (isVisible()) escapeSearch();
+        else if (MainPanelTarget *target = targetForId(m_activePanel); target != nullptr && target->clearNarrowing) target->clearNarrowing();
         else return false;
     } else {
         return false;

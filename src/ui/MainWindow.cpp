@@ -418,6 +418,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_rightSidebar->activateCurrentQueueTrack(); },
         {},
         {},
+        {},
         [this]() { return m_rightSidebar->queueSearchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -428,6 +429,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_artistSidebar->currentRow(); },
         [this](int row) { m_artistSidebar->setCurrentRow(row); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
+        {},
         {},
         {},
         [this]() { return m_artistSidebar->searchDocuments(); },
@@ -442,6 +444,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_albumGrid->activateCurrentAlbum(); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
+        [this]() { clearAlbumFilter(); },
         [this]() { return m_albumGrid->searchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -454,6 +457,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_trackTable->activateCurrentTrack(); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         {},
+        [this]() { clearAlbumFilter(); },
         [this]() { return m_trackTable->searchDocuments(); },
     });
     connect(m_panelSearch, &PanelSearchController::statusMessage, this, [this](const QString &message, int timeoutMs) {
@@ -1036,6 +1040,20 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
 {
     rememberTrackTableViewState();
     m_selectedAlbumTitle = (m_selectedAlbumTitle == albumTitle) ? QString() : albumTitle;
+    rememberCurrentSourceSelection();
+    refreshAlbumGrid();
+    refreshTrackTable();
+    restoreTrackTableViewState();
+    saveExplorerState();
+}
+
+void MainWindow::clearAlbumFilter()
+{
+    if (m_selectedAlbumTitle.isEmpty()) {
+        return;
+    }
+    rememberTrackTableViewState();
+    m_selectedAlbumTitle.clear();
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
