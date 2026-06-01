@@ -33,6 +33,7 @@ public:
     int rowCount() const;
     int currentRow() const;
     void setCurrentRow(int row);
+    void moveCurrentByGrid(int horizontal, int vertical);
     void activateCurrentAlbum();
     QString currentAlbumTitle() const;
     QVector<Search::MatchDocument> searchDocuments() const;
@@ -53,6 +54,7 @@ protected:
 
 private:
     QRect ratingRectForIndex(const QModelIndex &index) const;
+    int gridColumnCount() const;
     void showContextMenu(const QPoint &pos);
     // Recomputes the effective cell/art sizes so a whole number of columns at the
     // configured base width fills the viewport, distributing the slack instead of

@@ -328,6 +328,18 @@ void AlbumGrid::setCurrentRow(int row)
     scrollTo(index, QAbstractItemView::EnsureVisible);
 }
 
+void AlbumGrid::moveCurrentByGrid(int horizontal, int vertical)
+{
+    if (model() == nullptr || model()->rowCount() == 0) {
+        return;
+    }
+
+    const int current = currentRow() >= 0 ? currentRow() : 0;
+    const int columns = gridColumnCount();
+    const int target = current + horizontal + (vertical * columns);
+    setCurrentRow(std::clamp(target, 0, model()->rowCount() - 1));
+}
+
 void AlbumGrid::activateCurrentAlbum()
 {
     const QString title = currentAlbumTitle();
@@ -514,6 +526,13 @@ QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
     const QRect textRect(artRect.left(), artRect.bottom() + 6, artRect.width(), 58);
     const QRect ratingCell = alignedRatingCell(artRect, textRect, m_starSize, m_textAlignment);
     return StarRating::ratingRect(ratingCell, m_starSize);
+}
+
+int AlbumGrid::gridColumnCount() const
+{
+    const int cellWidth = gridSize().width() > 0 ? gridSize().width() : m_effectiveCellWidth;
+    const int stride = std::max(1, cellWidth + spacing());
+    return std::max(1, (viewport()->width() + spacing()) / stride);
 }
 
 void AlbumGrid::showContextMenu(const QPoint &pos)

@@ -21,6 +21,8 @@ struct MainPanelTarget {
     std::function<int()> currentRow;
     std::function<void(int row)> setCurrentRow;
     std::function<void()> activateCurrent;
+    std::function<void()> prepareForFocus;
+    std::function<void(int horizontal, int vertical)> moveCurrentInGrid;
     std::function<QVector<Search::MatchDocument>()> documents;
 };
 
@@ -74,6 +76,7 @@ private:
     void focusTracks();
     void activateCurrent();
     void cycleMatch(int direction);
+    bool handleAlbumGridKey(QKeyEvent *event, const QString &action);
     bool handlePanelKey(QKeyEvent *event, MainPanelId panel);
     bool handleSearchKey(QKeyEvent *event);
     int pageStepForActivePanel() const;
