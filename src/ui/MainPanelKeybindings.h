@@ -26,6 +26,10 @@ namespace MainPanelAction {
     inline constexpr auto PlayNow = "play_now";
     inline constexpr auto AddToQueue = "add_to_queue";
     inline constexpr auto PlayNext = "play_next";
+    inline constexpr auto Mark = "mark";
+    inline constexpr auto MarkAll = "mark_all";
+    inline constexpr auto Unmark = "unmark";
+    inline constexpr auto UnmarkAll = "unmark_all";
     inline constexpr auto Search = "search";
     inline constexpr auto SearchNext = "search_next";
     inline constexpr auto SearchPrevious = "search_previous";

@@ -25,6 +25,10 @@ struct MainPanelTarget {
     std::function<void()> playCurrentNow;
     std::function<void()> addCurrentToQueue;
     std::function<void()> playNextCurrent;
+    std::function<void()> markCurrent;
+    std::function<void()> markAll;
+    std::function<void()> unmarkCurrent;
+    std::function<void()> unmarkAll;
     std::function<void()> prepareForFocus;
     std::function<void(int horizontal, int vertical)> moveCurrentInGrid;
     std::function<void()> clearNarrowing;
@@ -84,6 +88,10 @@ private:
     void playCurrentNow();
     void addCurrentToQueue();
     void playNextCurrent();
+    void markCurrent();
+    void markAll();
+    void unmarkCurrent();
+    void unmarkAll();
     void cycleMatch(int direction);
     bool handleAlbumGridKey(QKeyEvent *event, const QString &action);
     bool handlePanelKey(QKeyEvent *event, MainPanelId panel);

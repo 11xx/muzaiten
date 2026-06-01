@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QSet>
 #include <QVector>
 #include <QPersistentModelIndex>
 
@@ -35,6 +36,10 @@ public:
     void activateCurrentTrack();
     void addCurrentTrackToQueue();
     void playNextCurrentTrack();
+    void markCurrentTrack();
+    void markAllTracks();
+    void unmarkCurrentTrack();
+    void unmarkAllTracks();
     QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:
@@ -55,8 +60,12 @@ private:
     void showHeaderMenu(const QPoint &pos);
     void showCellMenu(const QPoint &pos);
     QVector<Track> tracksForContextRow(int row) const;
+    QVector<Track> tracksForActionRow(int row) const;
+    void reselectMarkedRows();
+    void setCurrentTrackMarked(bool marked);
     void setHoveredRow(int row);
 
     QPersistentModelIndex m_hoverRatingIndex;
+    QSet<QString> m_markedTrackPaths;
     int m_hoveredRow = -1;
 };

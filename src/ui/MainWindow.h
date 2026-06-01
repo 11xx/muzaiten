@@ -99,6 +99,7 @@ private:
     void configureTrackInfoPanel();
     void configureAlbumArtResolution();
     void configureSearchRanking();
+    void configureKeybindings();
     void loadSearchRankingConfig();
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
@@ -135,6 +136,7 @@ private:
     // "next" track can never drift from the visible order.
     void syncQueueState();
     void playAlbumNow(const QString &albumTitle);
+    void playAlbumsNow(const QStringList &albumTitles);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
     void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false);

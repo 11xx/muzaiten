@@ -90,6 +90,7 @@ set(MUZAITEN_SOURCES
     src/ui/DenseTableDelegate.cpp
     src/ui/FileExplorerView.cpp
     src/ui/FileExplorerKeybindings.cpp
+    src/ui/KeybindingsDialog.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
     src/ui/MainPanelKeybindings.cpp
@@ -165,6 +166,7 @@ set(MUZAITEN_HEADERS
     src/ui/DenseTableDelegate.h
     src/ui/FileExplorerView.h
     src/ui/FileExplorerKeybindings.h
+    src/ui/KeybindingsDialog.h
     src/ui/LinkRootsDialog.h
     src/ui/KeyBindingTypes.h
     src/ui/MainWindow.h
