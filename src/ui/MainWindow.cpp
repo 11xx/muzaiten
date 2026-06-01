@@ -404,6 +404,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_trackTable, &TrackTable::trackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
+    connect(m_albumGrid, &AlbumGrid::albumSelectionCleared, this, &MainWindow::clearAlbumFilter);
     connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);

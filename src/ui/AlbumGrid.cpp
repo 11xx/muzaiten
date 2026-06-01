@@ -150,6 +150,8 @@ void AlbumGrid::setArtworkCache(ArtworkCache *cache)
 
 void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
 {
+    const QString previousCurrentTitle = currentAlbumTitle();
+
     m_populateTimer->stop();
     m_artworkTimer->stop();
     m_spinnerTimer->stop();
@@ -210,9 +212,10 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
 
     if (itemModel->rowCount() > 0) {
         int targetRow = 0;
-        if (!m_selectedAlbumTitle.isEmpty()) {
+        const QString targetTitle = !m_selectedAlbumTitle.isEmpty() ? m_selectedAlbumTitle : previousCurrentTitle;
+        if (!targetTitle.isEmpty()) {
             for (int row = 0; row < itemModel->rowCount(); ++row) {
-                if (itemModel->index(row, 0).data(AlbumTitleRole).toString() == m_selectedAlbumTitle) {
+                if (itemModel->index(row, 0).data(AlbumTitleRole).toString() == targetTitle) {
                     targetRow = row;
                     break;
                 }
@@ -538,11 +541,17 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
 
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
+    event->accept();
 
     const QString title = index.data(AlbumTitleRole).toString();
     const int rating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos());
     if (rating >= 0) {
         emit albumRatingChanged(index.data(AlbumArtistRole).toString(), title, rating);
+        return;
+    }
+
+    if (!m_selectedAlbumTitle.isEmpty()) {
+        emit albumSelectionCleared();
         return;
     }
 

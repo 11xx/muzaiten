@@ -206,3 +206,22 @@ target_link_libraries(test_keybindings_dialog PRIVATE Qt6::Core Qt6::Gui Qt6::Wi
 target_compile_features(test_keybindings_dialog PRIVATE cxx_std_26)
 add_test(NAME test_keybindings_dialog COMMAND test_keybindings_dialog)
 set_tests_properties(test_keybindings_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_album_grid
+    test_album_grid.cpp
+    ../src/ui/AlbumGrid.cpp
+    ../src/ui/AlbumGridDelegate.cpp
+    ../src/ui/AlbumArtFallback.cpp
+    ../src/ui/OverlayScrollBar.cpp
+    ../src/ui/StarRating.cpp
+    ../src/core/MusicSort.cpp
+    ../src/core/Rating.cpp
+    ArtworkCacheStub.cpp
+    ../src/scanner/ArtworkCache.h
+    ../resources/resources.qrc
+)
+target_include_directories(test_album_grid PRIVATE ../src ${CMAKE_CURRENT_BINARY_DIR}/../generated)
+target_link_libraries(test_album_grid PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Sql Qt6::Test)
+target_compile_features(test_album_grid PRIVATE cxx_std_26)
+add_test(NAME test_album_grid COMMAND test_album_grid)
+set_tests_properties(test_album_grid PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
