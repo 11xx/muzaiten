@@ -24,12 +24,14 @@
 #include "ui/FileExplorerView.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
+#include "ui/PanelSearchController.h"
 #include "ui/PlaybackProfileDialog.h"
 #include "ui/PlaybackResumeDialog.h"
 #include "ui/RankingDialog.h"
 #include "ui/RightSidebar.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
+#include "ui/MainPanelKeybindings.h"
 #include "search/RankConfig.h"
 #include "ui/TrackTable.h"
 
@@ -297,6 +299,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_freeRoamFileExplorer->setRootPath(QDir::homePath());
     m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
     m_searchView = new SearchView(m_mainStack);
+    m_panelSearch = new PanelSearchController(central);
 
     m_mainStack->addWidget(m_rootSplitter);
     m_mainStack->addWidget(m_libraryFileExplorer);
@@ -304,6 +307,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_mainStack->addWidget(m_searchView);
 
     centralLayout->addWidget(m_mainStack, 1);
+    centralLayout->addWidget(m_panelSearch, 0);
     setCentralWidget(central);
 
     m_scanProgress = new QProgressBar(this);
@@ -404,6 +408,55 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
+    m_panelSearch->registerTarget({
+        MainPanelId::Queue,
+        QStringLiteral("Queue"),
+        m_rightSidebar->queueNavigationWidget(),
+        [this]() { return m_rightSidebar->queueRowCount(); },
+        [this]() { return m_rightSidebar->queueCurrentRow(); },
+        [this](int row) { m_rightSidebar->setQueueCurrentRow(row); },
+        [this]() { m_rightSidebar->activateCurrentQueueTrack(); },
+        [this]() { return m_rightSidebar->queueSearchDocuments(); },
+    });
+    m_panelSearch->registerTarget({
+        MainPanelId::Artists,
+        QStringLiteral("Artists"),
+        m_artistSidebar->navigationWidget(),
+        [this]() { return m_artistSidebar->rowCount(); },
+        [this]() { return m_artistSidebar->currentRow(); },
+        [this](int row) {
+            m_artistSidebar->setCurrentRow(row);
+            m_artistSidebar->activateCurrentArtist();
+        },
+        [this]() { m_artistSidebar->activateCurrentArtist(); },
+        [this]() { return m_artistSidebar->searchDocuments(); },
+    });
+    m_panelSearch->registerTarget({
+        MainPanelId::Albums,
+        QStringLiteral("Albums"),
+        m_albumGrid,
+        [this]() { return m_albumGrid->rowCount(); },
+        [this]() { return m_albumGrid->currentRow(); },
+        [this](int row) { m_albumGrid->setCurrentRow(row); },
+        [this]() { m_albumGrid->activateCurrentAlbum(); },
+        [this]() { return m_albumGrid->searchDocuments(); },
+    });
+    m_panelSearch->registerTarget({
+        MainPanelId::Tracks,
+        QStringLiteral("Tracks"),
+        m_trackTable,
+        [this]() { return m_trackTable->rowCount(); },
+        [this]() { return m_trackTable->currentRow(); },
+        [this](int row) { m_trackTable->setCurrentRow(row); },
+        [this]() { m_trackTable->activateCurrentTrack(); },
+        [this]() { return m_trackTable->searchDocuments(); },
+    });
+    connect(m_panelSearch, &PanelSearchController::statusMessage, this, [this](const QString &message, int timeoutMs) {
+        statusBar()->showMessage(message, timeoutMs);
+    });
+    connect(m_panelSearch, &PanelSearchController::activePanelChanged, this, [this](MainPanelId) {
+        saveMainWindowViewSettings();
+    });
     connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, [this](int index) { playQueueIndex(index); });
@@ -905,6 +958,9 @@ void MainWindow::refreshArtists()
         m_artistSidebar->setMpdAvailable(sourceId > 0);
         const QVector<Artist> artists = m_database->mpdAlbumArtists();
         m_artistSidebar->setArtists(artists);
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->refreshPanel(MainPanelId::Artists);
+        }
         if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
             selectArtist(m_currentArtist);
             return;
@@ -928,6 +984,9 @@ void MainWindow::refreshArtists()
 
     const QVector<Artist> artists = m_database->albumArtists();
     m_artistSidebar->setArtists(artists);
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->refreshPanel(MainPanelId::Artists);
+    }
 
     if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
         selectArtist(m_currentArtist);
@@ -988,6 +1047,9 @@ void MainWindow::refreshAlbumGrid(bool freshLoad)
         m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist), freshLoad);
     }
     m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->refreshPanel(MainPanelId::Albums);
+    }
 }
 
 void MainWindow::refreshTrackTable()
@@ -999,6 +1061,9 @@ void MainWindow::refreshTrackTable()
         m_trackTable->setTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), m_selectedAlbumTitle));
     } else {
         m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist, m_selectedAlbumTitle));
+    }
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->refreshPanel(MainPanelId::Tracks);
     }
 }
 
@@ -1262,6 +1327,14 @@ void MainWindow::loadViewSettings()
     m_libraryFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
     m_freeRoamFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
 
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->setKeyBindingProfileName(m_state->setting(QStringLiteral("mainPanel.keyBindingProfile"),
+                                                                 defaultMainPanelKeyBindingProfileName()));
+        const QJsonArray focusOrder = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainPanel.focusOrder")).toUtf8()).array();
+        m_panelSearch->setFocusOrder(mainPanelFocusOrderFromJson(focusOrder));
+        m_panelSearch->setActivePanelFromString(m_state->setting(QStringLiteral("mainPanel.activePanel")));
+    }
+
     switchMainView(m_mainView);
     applySharedTableSettings();
 }
@@ -1305,7 +1378,16 @@ void MainWindow::saveMainWindowViewSettings()
     root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
     root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);
     root.insert(QStringLiteral("freeRoamDirectory"), m_freeRoamDirectory);
+    if (m_panelSearch != nullptr) {
+        root.insert(QStringLiteral("activePanel"), mainPanelIdToString(m_panelSearch->activePanel()));
+    }
     m_state->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    if (m_panelSearch != nullptr) {
+        m_state->setSetting(QStringLiteral("mainPanel.keyBindingProfile"), m_panelSearch->keyBindingProfileName());
+        m_state->setSetting(QStringLiteral("mainPanel.focusOrder"),
+                            QString::fromUtf8(QJsonDocument(mainPanelFocusOrderToJson(m_panelSearch->focusOrder())).toJson(QJsonDocument::Compact)));
+        m_state->setSetting(QStringLiteral("mainPanel.activePanel"), mainPanelIdToString(m_panelSearch->activePanel()));
+    }
 }
 
 void MainWindow::switchMainView(MainView view)
@@ -1314,14 +1396,26 @@ void MainWindow::switchMainView(MainView view)
     m_playerBar->setExplorerOptionsVisible(view != MainView::LibraryPanels && view != MainView::Search);
     if (view == MainView::LibraryPanels) {
         m_mainStack->setCurrentWidget(m_rootSplitter);
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->activateForMainView();
+        }
     } else if (view == MainView::LibraryFileExplorer) {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->deactivateForNonMainView();
+        }
         refreshLibraryFileExplorer();
         m_mainStack->setCurrentWidget(m_libraryFileExplorer);
     } else if (view == MainView::Search) {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->deactivateForNonMainView();
+        }
         m_mainStack->setCurrentWidget(m_searchView);
         m_searchView->ensureIndexLoaded(databasePath());
         m_searchView->focusSearchBox();
     } else {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->deactivateForNonMainView();
+        }
         m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
         m_mainStack->setCurrentWidget(m_freeRoamFileExplorer);
     }
@@ -2595,6 +2689,9 @@ void MainWindow::syncQueueState()
     m_rightSidebar->setQueue(m_queue);
     m_rightSidebar->setCurrentIndex(m_queueIndex);
     refreshPlayNextRange();
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->refreshPanel(MainPanelId::Queue);
+    }
     prepareNextQueueTrack();
     saveQueueState();
 }
