@@ -416,6 +416,8 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_rightSidebar->queueCurrentRow(); },
         [this](int row) { m_rightSidebar->setQueueCurrentRow(row); },
         [this]() { m_rightSidebar->activateCurrentQueueTrack(); },
+        {},
+        {},
         [this]() { return m_rightSidebar->queueSearchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -424,11 +426,10 @@ MainWindow::MainWindow(QWidget *parent)
         m_artistSidebar->navigationWidget(),
         [this]() { return m_artistSidebar->rowCount(); },
         [this]() { return m_artistSidebar->currentRow(); },
-        [this](int row) {
-            m_artistSidebar->setCurrentRow(row);
-            m_artistSidebar->activateCurrentArtist();
-        },
+        [this](int row) { m_artistSidebar->setCurrentRow(row); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
+        {},
+        {},
         [this]() { return m_artistSidebar->searchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -439,6 +440,8 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_albumGrid->currentRow(); },
         [this](int row) { m_albumGrid->setCurrentRow(row); },
         [this]() { m_albumGrid->activateCurrentAlbum(); },
+        [this]() { m_artistSidebar->activateCurrentArtist(); },
+        [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { return m_albumGrid->searchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -449,6 +452,8 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_trackTable->currentRow(); },
         [this](int row) { m_trackTable->setCurrentRow(row); },
         [this]() { m_trackTable->activateCurrentTrack(); },
+        [this]() { m_artistSidebar->activateCurrentArtist(); },
+        {},
         [this]() { return m_trackTable->searchDocuments(); },
     });
     connect(m_panelSearch, &PanelSearchController::statusMessage, this, [this](const QString &message, int timeoutMs) {
@@ -1013,10 +1018,12 @@ void MainWindow::refreshArtists()
 
 void MainWindow::selectArtist(const QString &artistName)
 {
-    rememberTrackTableViewState();
-    if (m_currentArtist != artistName) {
-        m_selectedAlbumTitle.clear();
+    if (m_currentArtist == artistName) {
+        return;
     }
+
+    rememberTrackTableViewState();
+    m_selectedAlbumTitle.clear();
     m_currentArtist = artistName;
     rememberCurrentSourceSelection();
     refreshAlbumGrid(true);

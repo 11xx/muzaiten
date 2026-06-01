@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QSignalBlocker>
+#include <QTimer>
 
 #include <algorithm>
 
@@ -85,6 +86,11 @@ void PanelSearchController::activateForMainView()
         setActivePanel(MainPanelId::Artists, false);
     }
     updateSearchUi();
+    QTimer::singleShot(0, this, [this]() {
+        if (m_mainViewActive && !m_edit->hasFocus()) {
+            focusActivePanel();
+        }
+    });
 }
 
 void PanelSearchController::deactivateForNonMainView()
@@ -111,6 +117,11 @@ void PanelSearchController::setActivePanel(MainPanelId id, bool focus)
     const bool changed = !m_hasActivePanel || m_activePanel != id;
     m_activePanel = id;
     m_hasActivePanel = true;
+    if (changed) {
+        if (MainPanelTarget *target = targetForId(id); target != nullptr && target->prepareForFocus) {
+            target->prepareForFocus();
+        }
+    }
     if (focus) {
         focusActivePanel();
     }
@@ -363,18 +374,56 @@ void PanelSearchController::cycleMatch(int direction)
     updateSearchUi();
 }
 
+bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &action)
+{
+    if (m_activePanel != MainPanelId::Albums) {
+        return false;
+    }
+    MainPanelTarget *target = targetForId(MainPanelId::Albums);
+    if (target == nullptr || !target->moveCurrentInGrid) {
+        return false;
+    }
+
+    if (event->modifiers() == Qt::NoModifier) {
+        if (event->key() == Qt::Key_N) {
+            focusTracks();
+            return true;
+        }
+        if (event->key() == Qt::Key_H || event->key() == Qt::Key_Left) {
+            target->moveCurrentInGrid(-1, 0);
+            return true;
+        }
+        if (event->key() == Qt::Key_L || event->key() == Qt::Key_Right) {
+            target->moveCurrentInGrid(+1, 0);
+            return true;
+        }
+    }
+
+    if (action == QString::fromLatin1(MainPanelAction::MoveDown)) {
+        target->moveCurrentInGrid(0, +1);
+        return true;
+    }
+    if (action == QString::fromLatin1(MainPanelAction::MoveUp)) {
+        target->moveCurrentInGrid(0, -1);
+        return true;
+    }
+    return false;
+}
+
 bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
 {
     Q_UNUSED(panel)
     const QString action = m_keyBindings.value(keySequenceForEvent(event));
-    if (action.isEmpty()) {
+    if (action.isEmpty() && m_activePanel != MainPanelId::Albums) {
         return false;
     }
 
-    if (m_activePanel == MainPanelId::Albums && action == QString::fromLatin1(MainPanelAction::MoveDown)
-        && event->key() == Qt::Key_N && event->modifiers() == Qt::NoModifier) {
-        focusTracks();
+    if (handleAlbumGridKey(event, action)) {
         return true;
+    }
+
+    if (action.isEmpty()) {
+        return false;
     }
 
     if (action == QString::fromLatin1(MainPanelAction::MoveDown)) moveCurrent(+1);
