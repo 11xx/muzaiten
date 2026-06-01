@@ -9,7 +9,7 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
     KeyBindingProfile profile;
     profile.name = QStringLiteral("dired_hjkl");
     profile.label = QStringLiteral("Main panels: dired + hjkl");
-    profile.hintText = QStringLiteral("j/n↓ k/p↑ h← l→ q queue / search M-n/M-p matches Ret play Spc+ M-Spc▶▶");
+    profile.hintText = QStringLiteral("j/n↓ k/p↑ h← l→ q queue / search m mark u unmark Ret play Spc+ M-Spc▶▶");
     profile.bindings = {
         {Qt::Key_J, MoveDown},
         {Qt::Key_N, MoveDown},
@@ -35,6 +35,10 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
         {QKeySequence(Qt::AltModifier | Qt::Key_Enter), PlayNow},
         {Qt::Key_Space, AddToQueue},
         {QKeySequence(Qt::AltModifier | Qt::Key_Space), PlayNext},
+        {Qt::Key_M, Mark},
+        {QKeySequence(Qt::ShiftModifier | Qt::Key_M), MarkAll},
+        {Qt::Key_U, Unmark},
+        {QKeySequence(Qt::ShiftModifier | Qt::Key_U), UnmarkAll},
         {Qt::Key_Escape, Escape},
         {QKeySequence(Qt::ControlModifier | Qt::Key_G), Escape},
     };

@@ -220,6 +220,21 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
         }
         setCurrentRow(targetRow);
     }
+    QSet<QString> availableTitles;
+    for (int row = 0; row < itemModel->rowCount(); ++row) {
+        const QString title = itemModel->index(row, 0).data(AlbumTitleRole).toString();
+        if (!title.isEmpty()) {
+            availableTitles.insert(title);
+        }
+    }
+    for (auto it = m_markedAlbumTitles.begin(); it != m_markedAlbumTitles.end();) {
+        if (!availableTitles.contains(*it)) {
+            it = m_markedAlbumTitles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    reselectMarkedAlbums();
 }
 
 void AlbumGrid::applySort()
@@ -326,6 +341,7 @@ void AlbumGrid::setCurrentRow(int row)
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
     scrollTo(index, QAbstractItemView::EnsureVisible);
+    reselectMarkedAlbums();
 }
 
 void AlbumGrid::moveCurrentByGrid(int horizontal, int vertical)
@@ -350,17 +366,50 @@ void AlbumGrid::activateCurrentAlbum()
 
 void AlbumGrid::addCurrentAlbumToQueue()
 {
-    const QString title = currentAlbumTitle();
-    if (!title.isEmpty()) {
+    for (const QString &title : albumTitlesForAction()) {
         emit albumAddToQueueRequested(title);
     }
 }
 
 void AlbumGrid::playNextCurrentAlbum()
 {
-    const QString title = currentAlbumTitle();
-    if (!title.isEmpty()) {
+    for (const QString &title : albumTitlesForAction()) {
         emit albumPlayNextRequested(title);
+    }
+}
+
+void AlbumGrid::markCurrentAlbum()
+{
+    setCurrentAlbumMarked(true);
+}
+
+void AlbumGrid::markAllAlbums()
+{
+    if (model() == nullptr) {
+        return;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QString title = model()->index(row, 0).data(AlbumTitleRole).toString();
+        if (!title.isEmpty()) {
+            m_markedAlbumTitles.insert(title);
+        }
+    }
+    reselectMarkedAlbums();
+}
+
+void AlbumGrid::unmarkCurrentAlbum()
+{
+    setCurrentAlbumMarked(false);
+}
+
+void AlbumGrid::unmarkAllAlbums()
+{
+    m_markedAlbumTitles.clear();
+    if (selectionModel() != nullptr) {
+        selectionModel()->clearSelection();
+    }
+    if (currentIndex().isValid()) {
+        setCurrentRow(currentIndex().row());
     }
 }
 
@@ -368,6 +417,26 @@ QString AlbumGrid::currentAlbumTitle() const
 {
     const QModelIndex index = currentIndex();
     return index.isValid() ? index.data(AlbumTitleRole).toString() : QString();
+}
+
+QStringList AlbumGrid::albumTitlesForAction() const
+{
+    if (model() == nullptr) {
+        return {};
+    }
+    if (m_markedAlbumTitles.isEmpty()) {
+        const QString title = currentAlbumTitle();
+        return title.isEmpty() ? QStringList() : QStringList{title};
+    }
+
+    QStringList titles;
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QString title = model()->index(row, 0).data(AlbumTitleRole).toString();
+        if (!title.isEmpty() && m_markedAlbumTitles.contains(title)) {
+            titles.push_back(title);
+        }
+    }
+    return titles;
 }
 
 QVector<Search::MatchDocument> AlbumGrid::searchDocuments() const
@@ -694,6 +763,38 @@ void AlbumGrid::applySettingsToItems()
         item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
     }
     viewport()->update();
+}
+
+void AlbumGrid::reselectMarkedAlbums()
+{
+    if (model() == nullptr || selectionModel() == nullptr || m_markedAlbumTitles.isEmpty()) {
+        return;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QModelIndex index = model()->index(row, 0);
+        const QString title = index.data(AlbumTitleRole).toString();
+        if (!title.isEmpty() && m_markedAlbumTitles.contains(title)) {
+            selectionModel()->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+    }
+}
+
+void AlbumGrid::setCurrentAlbumMarked(bool marked)
+{
+    const QString title = currentAlbumTitle();
+    if (title.isEmpty()) {
+        return;
+    }
+    if (marked) {
+        m_markedAlbumTitles.insert(title);
+    } else {
+        m_markedAlbumTitles.remove(title);
+    }
+    reselectMarkedAlbums();
+    if (!marked && currentIndex().isValid() && selectionModel() != nullptr) {
+        selectionModel()->select(currentIndex(), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
+        selectionModel()->select(currentIndex(), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
 }
 
 void AlbumGrid::loadNextAlbumArtwork()

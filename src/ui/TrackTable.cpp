@@ -406,6 +406,20 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
         ? currentIndex().data(TrackRole).value<Track>().path
         : QString();
     trackModel->setTracks(tracks);
+    QSet<QString> availablePaths;
+    availablePaths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            availablePaths.insert(track.path);
+        }
+    }
+    for (auto it = m_markedTrackPaths.begin(); it != m_markedTrackPaths.end();) {
+        if (!availablePaths.contains(*it)) {
+            it = m_markedTrackPaths.erase(it);
+        } else {
+            ++it;
+        }
+    }
     sortByColumn(sortColumn(), sortOrder());
     if (!currentPath.isEmpty()) {
         selectTrackByPath(currentPath);
@@ -419,6 +433,7 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
             setCurrentRow(std::clamp(row, 0, model()->rowCount() - 1));
         }
     }
+    reselectMarkedRows();
 }
 
 int TrackTable::rowCount() const
@@ -439,6 +454,7 @@ void TrackTable::setCurrentRow(int row)
 void TrackTable::setCurrentRow(int row, int scrollDirection)
 {
     setCurrentNavigationRow(row, scrollDirection);
+    reselectMarkedRows();
 }
 
 void TrackTable::moveCurrentRow(int delta)
@@ -468,7 +484,7 @@ void TrackTable::addCurrentTrackToQueue()
     if (!index.isValid()) {
         return;
     }
-    const QVector<Track> tracks = tracksForContextRow(index.row());
+    const QVector<Track> tracks = tracksForActionRow(index.row());
     if (!tracks.isEmpty()) {
         emit addToQueueRequested(tracks);
     }
@@ -480,9 +496,44 @@ void TrackTable::playNextCurrentTrack()
     if (!index.isValid()) {
         return;
     }
-    const QVector<Track> tracks = tracksForContextRow(index.row());
+    const QVector<Track> tracks = tracksForActionRow(index.row());
     if (!tracks.isEmpty()) {
         emit playNextRequested(tracks);
+    }
+}
+
+void TrackTable::markCurrentTrack()
+{
+    setCurrentTrackMarked(true);
+}
+
+void TrackTable::markAllTracks()
+{
+    if (model() == nullptr) {
+        return;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
+        if (!track.path.isEmpty()) {
+            m_markedTrackPaths.insert(track.path);
+        }
+    }
+    reselectMarkedRows();
+}
+
+void TrackTable::unmarkCurrentTrack()
+{
+    setCurrentTrackMarked(false);
+}
+
+void TrackTable::unmarkAllTracks()
+{
+    m_markedTrackPaths.clear();
+    if (selectionModel() != nullptr) {
+        selectionModel()->clearSelection();
+    }
+    if (currentIndex().isValid()) {
+        setCurrentNavigationRow(currentIndex().row());
     }
 }
 
@@ -667,6 +718,61 @@ QVector<Track> TrackTable::tracksForContextRow(int row) const
         }
     }
     return tracks;
+}
+
+QVector<Track> TrackTable::tracksForActionRow(int row) const
+{
+    if (model() == nullptr) {
+        return {};
+    }
+    if (m_markedTrackPaths.isEmpty()) {
+        const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
+        return track.path.isEmpty() ? QVector<Track>() : QVector<Track>{track};
+    }
+
+    QVector<Track> tracks;
+    tracks.reserve(m_markedTrackPaths.size());
+    for (int currentRow = 0; currentRow < model()->rowCount(); ++currentRow) {
+        const Track track = model()->index(currentRow, 0).data(TrackRole).value<Track>();
+        if (!track.path.isEmpty() && m_markedTrackPaths.contains(track.path)) {
+            tracks.push_back(track);
+        }
+    }
+    return tracks;
+}
+
+void TrackTable::reselectMarkedRows()
+{
+    if (model() == nullptr || selectionModel() == nullptr || m_markedTrackPaths.isEmpty()) {
+        return;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
+        if (!track.path.isEmpty() && m_markedTrackPaths.contains(track.path)) {
+            selectionModel()->select(model()->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+    }
+}
+
+void TrackTable::setCurrentTrackMarked(bool marked)
+{
+    if (model() == nullptr || !currentIndex().isValid()) {
+        return;
+    }
+    const Track track = model()->index(currentIndex().row(), 0).data(TrackRole).value<Track>();
+    if (track.path.isEmpty()) {
+        return;
+    }
+    if (marked) {
+        m_markedTrackPaths.insert(track.path);
+    } else {
+        m_markedTrackPaths.remove(track.path);
+    }
+    reselectMarkedRows();
+    if (!marked && selectionModel() != nullptr) {
+        selectionModel()->select(currentIndex(), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
+        selectionModel()->select(currentIndex(), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
 }
 
 void TrackTable::wheelEvent(QWheelEvent *event)

@@ -402,6 +402,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *trackInfoPaneSettings = settingsMenu->addAction(QStringLiteral("Track information panel..."));
     QAction *albumArtResolution = settingsMenu->addAction(QStringLiteral("Album art resolution..."));
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
+    QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
     settingsMenu->addSeparator();
@@ -559,6 +560,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
     connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
+    connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);

@@ -22,6 +22,7 @@
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/FileExplorerView.h"
+#include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelSearchController.h"
@@ -424,6 +425,10 @@ MainWindow::MainWindow(QWidget *parent)
         {},
         {},
         {},
+        {},
+        {},
+        {},
+        {},
         [this]() { return m_rightSidebar->queueSearchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -441,6 +446,10 @@ MainWindow::MainWindow(QWidget *parent)
         {},
         {},
         {},
+        {},
+        {},
+        {},
+        {},
         [this]() { return m_artistSidebar->searchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -452,9 +461,13 @@ MainWindow::MainWindow(QWidget *parent)
         [this](int row) { m_albumGrid->setCurrentRow(row); },
         {},
         [this]() { narrowAlbumFilter(m_albumGrid->currentAlbumTitle()); },
-        [this]() { playAlbumNow(m_albumGrid->currentAlbumTitle()); },
+        [this]() { playAlbumsNow(m_albumGrid->albumTitlesForAction()); },
         [this]() { m_albumGrid->addCurrentAlbumToQueue(); },
         [this]() { m_albumGrid->playNextCurrentAlbum(); },
+        [this]() { m_albumGrid->markCurrentAlbum(); },
+        [this]() { m_albumGrid->markAllAlbums(); },
+        [this]() { m_albumGrid->unmarkCurrentAlbum(); },
+        [this]() { m_albumGrid->unmarkAllAlbums(); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { clearAlbumFilter(); },
@@ -472,6 +485,10 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_trackTable->activateCurrentTrack(); },
         [this]() { m_trackTable->addCurrentTrackToQueue(); },
         [this]() { m_trackTable->playNextCurrentTrack(); },
+        [this]() { m_trackTable->markCurrentTrack(); },
+        [this]() { m_trackTable->markAllTracks(); },
+        [this]() { m_trackTable->unmarkCurrentTrack(); },
+        [this]() { m_trackTable->unmarkAllTracks(); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         {},
         [this]() { clearAlbumFilter(); },
@@ -530,6 +547,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
     connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
+    connect(m_playerBar, &PlayerBar::keybindingsRequested, this, &MainWindow::configureKeybindings);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
@@ -2032,6 +2050,32 @@ void MainWindow::configureAlbumArtResolution()
     }
 }
 
+void MainWindow::configureKeybindings()
+{
+    KeybindingsDialog dialog(this);
+    if (m_panelSearch != nullptr) {
+        dialog.setMainPanelProfileName(m_panelSearch->keyBindingProfileName());
+    }
+    dialog.setFileExplorerProfileName(m_libraryFileExplorer->keyBindingProfileName());
+    dialog.setFileExplorerKeyHintsVisible(m_libraryFileExplorer->isKeyHintBarVisible());
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->setKeyBindingProfileName(dialog.mainPanelProfileName());
+        saveMainWindowViewSettings();
+    }
+    m_libraryFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+    m_freeRoamFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+    m_libraryFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
+    m_freeRoamFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
+    m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), dialog.fileExplorerProfileName());
+    m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"),
+                        dialog.fileExplorerKeyHintsVisible() ? QStringLiteral("true") : QStringLiteral("false"));
+}
+
 void MainWindow::jumpToTrackInfoArtist(const QString &artistName)
 {
     if (artistName.isEmpty()) {
@@ -2809,13 +2853,25 @@ void MainWindow::syncQueueState()
 
 void MainWindow::playAlbumNow(const QString &albumTitle)
 {
-    if (m_currentArtist.isEmpty() || albumTitle.isEmpty()) {
+    playAlbumsNow(albumTitle.isEmpty() ? QStringList() : QStringList{albumTitle});
+}
+
+void MainWindow::playAlbumsNow(const QStringList &albumTitles)
+{
+    if (m_currentArtist.isEmpty() || albumTitles.isEmpty()) {
         return;
     }
 
-    const QVector<Track> tracks = m_librarySource == LibrarySource::Mpd
-        ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
-        : m_database->tracksForArtist(m_currentArtist, albumTitle);
+    QVector<Track> tracks;
+    for (const QString &albumTitle : albumTitles) {
+        if (albumTitle.isEmpty()) {
+            continue;
+        }
+        const QVector<Track> albumTracks = m_librarySource == LibrarySource::Mpd
+            ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
+            : m_database->tracksForArtist(m_currentArtist, albumTitle);
+        tracks += albumTracks;
+    }
     if (tracks.isEmpty()) {
         return;
     }

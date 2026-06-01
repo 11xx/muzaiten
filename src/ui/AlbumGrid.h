@@ -5,6 +5,7 @@
 #include "search/SearchMatcher.h"
 
 #include <QListView>
+#include <QSet>
 #include <QVector>
 
 class ArtworkCache;
@@ -37,7 +38,12 @@ public:
     void activateCurrentAlbum();
     void addCurrentAlbumToQueue();
     void playNextCurrentAlbum();
+    void markCurrentAlbum();
+    void markAllAlbums();
+    void unmarkCurrentAlbum();
+    void unmarkAllAlbums();
     QString currentAlbumTitle() const;
+    QStringList albumTitlesForAction() const;
     QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:
@@ -71,10 +77,13 @@ private:
     void onArtworkReady(const QString &token, const QImage &image, quint64 generation);
     void onArtworkMissing(const QString &token, quint64 generation);
     void clearItemLoading(int row);
+    void reselectMarkedAlbums();
+    void setCurrentAlbumMarked(bool marked);
 
 private:
     ArtworkCache *m_artworkCache = nullptr;
     QString m_selectedAlbumTitle;
+    QSet<QString> m_markedAlbumTitles;
     QVector<Album> m_sourceAlbums;  // unsorted source list from last setAlbums call
     QVector<Album> m_pendingAlbums;
     QTimer *m_populateTimer = nullptr;

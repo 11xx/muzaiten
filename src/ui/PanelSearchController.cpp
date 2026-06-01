@@ -414,6 +414,46 @@ void PanelSearchController::playNextCurrent()
     }
 }
 
+void PanelSearchController::markCurrent()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (!target->markCurrent) {
+            return;
+        }
+        target->markCurrent();
+        moveCurrent(+1);
+    }
+}
+
+void PanelSearchController::markAll()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (target->markAll) {
+            target->markAll();
+        }
+    }
+}
+
+void PanelSearchController::unmarkCurrent()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (!target->unmarkCurrent) {
+            return;
+        }
+        target->unmarkCurrent();
+        moveCurrent(+1);
+    }
+}
+
+void PanelSearchController::unmarkAll()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (target->unmarkAll) {
+            target->unmarkAll();
+        }
+    }
+}
+
 void PanelSearchController::cycleMatch(int direction)
 {
     PanelState &state = m_state[m_activePanel];
@@ -519,6 +559,10 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::PlayNow)) playCurrentNow();
     else if (action == QString::fromLatin1(MainPanelAction::AddToQueue)) addCurrentToQueue();
     else if (action == QString::fromLatin1(MainPanelAction::PlayNext)) playNextCurrent();
+    else if (action == QString::fromLatin1(MainPanelAction::Mark)) markCurrent();
+    else if (action == QString::fromLatin1(MainPanelAction::MarkAll)) markAll();
+    else if (action == QString::fromLatin1(MainPanelAction::Unmark)) unmarkCurrent();
+    else if (action == QString::fromLatin1(MainPanelAction::UnmarkAll)) unmarkAll();
     else if (action == QString::fromLatin1(MainPanelAction::Search)) openSearch();
     else if (action == QString::fromLatin1(MainPanelAction::SearchNext)) cycleMatch(+1);
     else if (action == QString::fromLatin1(MainPanelAction::SearchPrevious)) cycleMatch(-1);
