@@ -39,12 +39,13 @@ void NavigableTableView::setCurrentNavigationRow(int row, int direction)
 
     const int safeRow = std::clamp(row, 0, model()->rowCount() - 1);
     const QModelIndex index = model()->index(safeRow, 0);
+    const int previousTopRow = verticalScrollBar() != nullptr ? verticalScrollBar()->value() : 0;
 
     if (selectionModel() != nullptr) {
         selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     }
     setCurrentIndex(index);
-    scrollNavigationRowToAnchor(safeRow, direction);
+    scrollNavigationRowToAnchor(safeRow, direction, previousTopRow);
 
 }
 
@@ -94,7 +95,7 @@ void NavigableTableView::currentChanged(const QModelIndex &current, const QModel
     }
 }
 
-void NavigableTableView::scrollNavigationRowToAnchor(int row, int direction)
+void NavigableTableView::scrollNavigationRowToAnchor(int row, int direction, int previousTopRow)
 {
     if (model() == nullptr || verticalScrollBar() == nullptr || viewport() == nullptr) {
         return;
@@ -104,7 +105,7 @@ void NavigableTableView::scrollNavigationRowToAnchor(int row, int direction)
     const int visibleRows = std::max(1, viewport()->height() / rowHeightPx);
     const int padding = std::clamp(m_navigationScrollPadding, 0, std::max(0, visibleRows - 1));
     QScrollBar *bar = verticalScrollBar();
-    const int topRow = bar->value();
+    const int topRow = std::clamp(previousTopRow, bar->minimum(), bar->maximum());
     int desiredTop = topRow;
 
     if (direction > 0) {
@@ -126,7 +127,7 @@ void NavigableTableView::scrollNavigationRowToAnchor(int row, int direction)
     }
 
     desiredTop = std::clamp(desiredTop, bar->minimum(), bar->maximum());
-    if (desiredTop != topRow) {
+    if (desiredTop != bar->value()) {
         bar->setValue(desiredTop);
     }
 }

@@ -184,3 +184,13 @@ target_include_directories(test_main_panel_keybindings PRIVATE ../src)
 target_link_libraries(test_main_panel_keybindings PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 target_compile_features(test_main_panel_keybindings PRIVATE cxx_std_26)
 add_test(NAME test_main_panel_keybindings COMMAND test_main_panel_keybindings)
+
+add_executable(test_navigation_scroll
+    test_navigation_scroll.cpp
+    ../src/ui/NavigableTableView.cpp
+)
+target_include_directories(test_navigation_scroll PRIVATE ../src)
+target_link_libraries(test_navigation_scroll PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_navigation_scroll PRIVATE cxx_std_26)
+add_test(NAME test_navigation_scroll COMMAND test_navigation_scroll)
+set_tests_properties(test_navigation_scroll PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
