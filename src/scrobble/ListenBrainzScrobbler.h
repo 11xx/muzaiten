@@ -33,6 +33,7 @@ signals:
 private slots:
     void checkListenProgress();
     void retryPending();
+    void submitPendingTrackStartPlayingNow();
 
 private:
     enum class SubmissionKind {
@@ -41,6 +42,7 @@ private:
     };
 
     void submitPlayingNow(const Track &track);
+    void submitPlayingNowForTrackStart(const Track &track);
     void submitCompletedListen();
     void submitPayload(const QJsonObject &payload, SubmissionKind kind);
     QJsonObject listenObject(const Track &track, qint64 listenedAt) const;
@@ -58,6 +60,7 @@ private:
     QNetworkAccessManager *m_network = nullptr;
     QTimer *m_progressTimer = nullptr;
     QTimer *m_retryTimer = nullptr;
+    QTimer *m_trackStartPlayingNowTimer = nullptr;
     bool m_enabled = false;
     QString m_token;
     QString m_cachePath;
@@ -71,6 +74,8 @@ private:
     qint64 m_accumulatedMs = 0;
     qint64 m_lastPlayingNowSecs = 0;
     QElapsedTimer m_segmentTimer;
+    Track m_pendingTrackStartPlayingNow;
+    bool m_hasPendingTrackStartPlayingNow = false;
     QList<QJsonObject> m_pendingListens;
     int m_consecutiveFailures = 0;
 };

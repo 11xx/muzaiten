@@ -40,6 +40,7 @@ private slots:
     void checkListenProgress();
     void retryPending();
     void pollAuthSession();
+    void submitPendingTrackStartNowPlaying();
 
 private:
     enum class RequestKind {
@@ -50,6 +51,7 @@ private:
     };
 
     void submitNowPlaying(const Track &track);
+    void submitNowPlayingForTrackStart(const Track &track);
     void submitCompletedScrobble();
     void submitScrobbleBatch(const QList<LastFmApi::Scrobble> &submitted);
     void postParams(LastFmApi::Params params, RequestKind kind, int submittedScrobbleCount = 0);
@@ -71,6 +73,7 @@ private:
     QTimer *m_progressTimer = nullptr;
     QTimer *m_retryTimer = nullptr;
     QTimer *m_authPollTimer = nullptr;
+    QTimer *m_trackStartNowPlayingTimer = nullptr;
     bool m_enabled = false;
     QString m_apiKey;
     QString m_sharedSecret;
@@ -86,6 +89,8 @@ private:
     qint64 m_accumulatedMs = 0;
     qint64 m_lastNowPlayingSecs = 0;
     QElapsedTimer m_segmentTimer;
+    Track m_pendingTrackStartNowPlaying;
+    bool m_hasPendingTrackStartNowPlaying = false;
     QList<LastFmApi::Scrobble> m_pendingScrobbles;
     int m_consecutiveFailures = 0;
     QString m_pendingAuthToken;
