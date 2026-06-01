@@ -5,6 +5,7 @@
 #include <QJsonObject>
 
 #include "core/Track.h"
+#include "search/SearchMatcher.h"
 
 class QImage;
 class QLabel;
@@ -30,6 +31,13 @@ public:
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void setHeaderHeight(int height);
+    QWidget *queueNavigationWidget() const;
+    int queueRowCount() const;
+    int queueCurrentRow() const;
+    void setQueueCurrentRow(int row);
+    void moveQueueCurrentRow(int delta);
+    void activateCurrentQueueTrack();
+    QVector<Search::MatchDocument> queueSearchDocuments() const;
 
 signals:
     void queueTrackActivated(int index);
@@ -76,6 +84,7 @@ private:
     QString m_trackInfoMetadataPattern;
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
+    int m_currentQueueIndex = -1;
     int m_playNextBegin = -1;
     int m_playNextEnd = -1;
     bool m_showPlayNextBadge = true;

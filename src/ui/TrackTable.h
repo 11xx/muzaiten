@@ -5,6 +5,7 @@
 #include <QPersistentModelIndex>
 
 #include "core/Track.h"
+#include "search/SearchMatcher.h"
 
 class QEvent;
 class QMouseEvent;
@@ -26,6 +27,12 @@ public:
     void restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int verticalScrollValue);
     // Selects and scrolls to the row whose track has this path (no-op if absent).
     void selectTrackByPath(const QString &path);
+    int rowCount() const;
+    int currentRow() const;
+    void setCurrentRow(int row);
+    void moveCurrentRow(int delta);
+    void activateCurrentTrack();
+    QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:
     void trackActivated(const Track &track);

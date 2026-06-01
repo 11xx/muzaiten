@@ -2,6 +2,7 @@
 
 #include "core/Album.h"
 #include "core/MusicSort.h"
+#include "search/SearchMatcher.h"
 
 #include <QListView>
 #include <QVector>
@@ -29,6 +30,12 @@ public:
     int loadingAngle() const { return m_loadingAngle; }
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
+    int rowCount() const;
+    int currentRow() const;
+    void setCurrentRow(int row);
+    void activateCurrentAlbum();
+    QString currentAlbumTitle() const;
+    QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:
     void albumSelectionToggled(const QString &albumTitle);

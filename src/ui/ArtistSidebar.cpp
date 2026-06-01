@@ -7,7 +7,6 @@
 #include <QApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLineEdit>
 #include <QListView>
 #include <QMenu>
 #include <QPainter>
@@ -115,10 +114,6 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &ArtistSidebar::librarySourceChanged);
 
-    m_filter = new QLineEdit(this);
-    m_filter->setPlaceholderText(QStringLiteral("Filter album artists"));
-    layout->addWidget(m_filter);
-
     m_model = new QStandardItemModel(this);
     m_model->appendRow(new QStandardItem(QStringLiteral("Pick a library folder")));
 
@@ -149,6 +144,9 @@ void ArtistSidebar::setArtists(const QVector<Artist> &artists)
         m_model->appendRow(item);
     }
     applyRowHeight();
+    if (m_model->rowCount() > 0 && !m_view->currentIndex().isValid()) {
+        setCurrentRow(0);
+    }
 }
 
 void ArtistSidebar::setMpdAvailable(bool available)
@@ -187,6 +185,77 @@ bool ArtistSidebar::selectArtist(const QString &artistName)
         return true;
     }
     return false;
+}
+
+QWidget *ArtistSidebar::navigationWidget() const
+{
+    return m_view;
+}
+
+int ArtistSidebar::rowCount() const
+{
+    return m_model != nullptr ? m_model->rowCount() : 0;
+}
+
+int ArtistSidebar::currentRow() const
+{
+    const QModelIndex index = m_view != nullptr ? m_view->currentIndex() : QModelIndex();
+    return index.isValid() ? index.row() : -1;
+}
+
+void ArtistSidebar::setCurrentRow(int row)
+{
+    if (m_model == nullptr || m_view == nullptr || m_model->rowCount() == 0) {
+        return;
+    }
+    const int safeRow = std::clamp(row, 0, m_model->rowCount() - 1);
+    const QModelIndex index = m_model->index(safeRow, 0);
+    m_view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    m_view->setCurrentIndex(index);
+    m_view->scrollTo(index, QAbstractItemView::EnsureVisible);
+}
+
+void ArtistSidebar::moveCurrentRow(int delta, bool activate)
+{
+    if (rowCount() == 0) {
+        return;
+    }
+    const int row = currentRow() >= 0 ? currentRow() : 0;
+    setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1));
+    if (activate) {
+        activateCurrentArtist();
+    }
+}
+
+void ArtistSidebar::activateCurrentArtist()
+{
+    const QModelIndex index = m_view != nullptr ? m_view->currentIndex() : QModelIndex();
+    if (index.isValid()) {
+        emit artistSelected(index.data(Qt::UserRole).toString());
+    }
+}
+
+QVector<Search::MatchDocument> ArtistSidebar::searchDocuments() const
+{
+    QVector<Search::MatchDocument> docs;
+    if (m_model == nullptr) {
+        return docs;
+    }
+    docs.reserve(m_model->rowCount());
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        const QModelIndex index = m_model->index(row, 0);
+        const QString name = index.data(Qt::UserRole).toString();
+        docs.push_back({
+            row,
+            {
+                {Search::MatchFieldRole::Title, name, name.toLower(), 400},
+                {Search::MatchFieldRole::Artist, name, name.toLower(), 300},
+                {Search::MatchFieldRole::Free, name, name.toLower(), 100},
+            },
+            {},
+        });
+    }
+    return docs;
 }
 
 QString ArtistSidebar::viewSettingsJson() const
