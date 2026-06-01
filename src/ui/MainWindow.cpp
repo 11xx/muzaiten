@@ -469,7 +469,10 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_albumGrid->markAllAlbums(); },
         [this]() { m_albumGrid->unmarkCurrentAlbum(); },
         [this]() { m_albumGrid->unmarkAllAlbums(); },
-        [this]() { m_artistSidebar->activateCurrentArtist(); },
+        [this]() {
+            m_albumGrid->setRememberedOutlineVisible(false);
+            m_artistSidebar->activateCurrentArtist();
+        },
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { clearAlbumFilter(); },
         [this]() { return m_albumGrid->searchDocuments(); },

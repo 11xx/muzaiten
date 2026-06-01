@@ -5,6 +5,11 @@
 
 #include <memory>
 
+namespace {
+constexpr int AlbumTitleRole = Qt::UserRole;
+constexpr int RememberedOutlineRole = Qt::UserRole + 14;
+}
+
 class AlbumGridTest final : public QObject {
     Q_OBJECT
 
@@ -54,7 +59,7 @@ void AlbumGridTest::mouseClickClearsExistingNarrowingBeforeRenarrowing()
     QSignalSpy toggled(grid.get(), &AlbumGrid::albumSelectionToggled);
     QSignalSpy cleared(grid.get(), &AlbumGrid::albumSelectionCleared);
 
-    const QString firstClickedTitle = grid->model()->index(1, 0).data(Qt::UserRole).toString();
+    const QString firstClickedTitle = grid->model()->index(1, 0).data(AlbumTitleRole).toString();
     clickRow(grid.get(), 1);
     QCOMPARE(toggled.count(), 1);
     QCOMPARE(toggled.takeFirst().at(0).toString(), firstClickedTitle);
@@ -69,11 +74,16 @@ void AlbumGridTest::mouseClickClearsExistingNarrowingBeforeRenarrowing()
         grid->setAlbums(albums, false);
     });
 
-    const QString secondClickedTitle = grid->model()->index(2, 0).data(Qt::UserRole).toString();
+    const QString secondClickedTitle = grid->model()->index(2, 0).data(AlbumTitleRole).toString();
     clickRow(grid.get(), 2);
     QCOMPARE(cleared.count(), 1);
     QCOMPARE(toggled.count(), 0);
     QCOMPARE(grid->currentAlbumTitle(), secondClickedTitle);
+    QVERIFY(grid->currentIndex().data(RememberedOutlineRole).toBool());
+
+    grid->setCurrentRow(1);
+    QVERIFY(!grid->currentIndex().data(RememberedOutlineRole).toBool());
+    grid->setCurrentRow(2);
 
     clickRow(grid.get(), 2);
     QCOMPARE(toggled.count(), 1);

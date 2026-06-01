@@ -20,6 +20,7 @@ enum Roles {
     CellPaddingRole = Qt::UserRole + 7,
     StarSizeRole = Qt::UserRole + 8,
     LoadingRole = Qt::UserRole + 12,
+    RememberedOutlineRole = Qt::UserRole + 14,
 };
 
 QString titleFromDisplay(const QString &display)
@@ -92,15 +93,23 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     QStyleOptionViewItem opt(option);
     initStyleOption(&opt, index);
-    const bool current = opt.state & QStyle::State_Selected;
+    const bool selected = opt.state & QStyle::State_Selected;
+    const bool rememberedOutline = selected && index.data(RememberedOutlineRole).toBool();
+    const bool filledSelection = selected && !rememberedOutline;
     opt.state &= ~QStyle::State_MouseOver;
     opt.state &= ~QStyle::State_Selected;
 
     QApplication::style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, opt.widget);
-    if (current) {
+    if (filledSelection) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(SelectionColors::selectedFill(option));
         painter->drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 6, 6);
+    } else if (rememberedOutline) {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(SelectionColors::selectedFill(option), 2);
+        painter->setPen(pen);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(option.rect.adjusted(3, 3, -4, -4), 6, 6);
     }
 
     const int padding = index.data(CellPaddingRole).toInt() > 0 ? index.data(CellPaddingRole).toInt() : 8;
@@ -134,14 +143,14 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     const QRect titleRect(artRect.left(), artRect.bottom() + 5, artRect.width(), opt.fontMetrics.height() * 2 + 2);
     const QRect yearRect(artRect.left(), titleRect.bottom() + 1, artRect.width(), opt.fontMetrics.height());
-    painter->setPen(current ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Text));
+    painter->setPen(filledSelection ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Text));
     const auto alignment = static_cast<Qt::Alignment>(index.data(TextAlignmentRole).toInt());
     const QString display = index.data(Qt::DisplayRole).toString();
     painter->drawText(titleRect, alignment | Qt::AlignTop, elidedToTwoLines(titleFromDisplay(display), opt.font, opt.fontMetrics, titleRect.width()));
 
     const QString year = yearFromDisplay(display);
     if (!year.isEmpty()) {
-        painter->setPen(current ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Disabled, QPalette::Text));
+        painter->setPen(filledSelection ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Disabled, QPalette::Text));
         painter->drawText(yearRect, alignment | Qt::AlignVCenter, year);
     }
 

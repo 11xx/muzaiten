@@ -41,6 +41,7 @@ enum Roles {
     ArtworkGenerationRole = Qt::UserRole + 11,
     LoadingRole = Qt::UserRole + 12,
     AlbumYearRole = Qt::UserRole + 13,
+    RememberedOutlineRole = Qt::UserRole + 14,
 };
 
 QString alignmentToString(Qt::Alignment alignment)
@@ -221,7 +222,7 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
                 }
             }
         }
-        setCurrentRow(targetRow);
+        setCurrentRowInternal(targetRow, false);
     }
     QSet<QString> availableTitles;
     for (int row = 0; row < itemModel->rowCount(); ++row) {
@@ -273,6 +274,7 @@ void AlbumGrid::populateItemFromAlbum(QStandardItem *item, const Album &album)
     item->setData(m_artworkGeneration, ArtworkGenerationRole);
     item->setData(m_showLoading, LoadingRole);
     item->setData(yearFromAlbum(album), AlbumYearRole);
+    item->setData(false, RememberedOutlineRole);
     item->setData(m_effectiveArtSize, ArtSizeRole);
     item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
     item->setToolTip(QStringLiteral("%1 tracks").arg(album.trackCount));
@@ -320,7 +322,19 @@ void AlbumGrid::appendNextAlbumBatch()
 void AlbumGrid::setSelectedAlbumTitle(const QString &albumTitle)
 {
     m_selectedAlbumTitle = albumTitle;
+    if (!m_selectedAlbumTitle.isEmpty()) {
+        m_rememberedOutlineVisible = false;
+    }
     applySettingsToItems();
+}
+
+void AlbumGrid::setRememberedOutlineVisible(bool visible)
+{
+    if (m_rememberedOutlineVisible == visible) {
+        return;
+    }
+    m_rememberedOutlineVisible = visible;
+    refreshRememberedOutline();
 }
 
 int AlbumGrid::rowCount() const
@@ -336,8 +350,16 @@ int AlbumGrid::currentRow() const
 
 void AlbumGrid::setCurrentRow(int row)
 {
+    setCurrentRowInternal(row, true);
+}
+
+void AlbumGrid::setCurrentRowInternal(int row, bool clearRememberedOutline)
+{
     if (model() == nullptr || model()->rowCount() == 0) {
         return;
+    }
+    if (clearRememberedOutline) {
+        m_rememberedOutlineVisible = false;
     }
     const int safeRow = std::clamp(row, 0, model()->rowCount() - 1);
     const QModelIndex index = model()->index(safeRow, 0);
@@ -345,6 +367,7 @@ void AlbumGrid::setCurrentRow(int row)
     setCurrentIndex(index);
     scrollTo(index, QAbstractItemView::EnsureVisible);
     reselectMarkedAlbums();
+    refreshRememberedOutline();
 }
 
 void AlbumGrid::moveCurrentByGrid(int horizontal, int vertical)
@@ -363,6 +386,8 @@ void AlbumGrid::activateCurrentAlbum()
 {
     const QString title = currentAlbumTitle();
     if (!title.isEmpty()) {
+        m_rememberedOutlineVisible = false;
+        refreshRememberedOutline();
         emit albumSelectionToggled(title);
     }
 }
@@ -551,10 +576,14 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
     }
 
     if (!m_selectedAlbumTitle.isEmpty()) {
+        m_rememberedOutlineVisible = true;
+        refreshRememberedOutline();
         emit albumSelectionCleared();
         return;
     }
 
+    m_rememberedOutlineVisible = false;
+    refreshRememberedOutline();
     emit albumSelectionToggled(title);
 }
 
@@ -771,6 +800,7 @@ void AlbumGrid::applySettingsToItems()
         item->setData(m_starSize, StarSizeRole);
         item->setData(QSize(m_effectiveCellWidth, m_effectiveCellHeight), Qt::SizeHintRole);
     }
+    refreshRememberedOutline();
     viewport()->update();
 }
 
@@ -804,6 +834,19 @@ void AlbumGrid::setCurrentAlbumMarked(bool marked)
         selectionModel()->select(currentIndex(), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
         selectionModel()->select(currentIndex(), QItemSelectionModel::Select | QItemSelectionModel::Rows);
     }
+}
+
+void AlbumGrid::refreshRememberedOutline()
+{
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        return;
+    }
+    const int current = currentRow();
+    for (int row = 0; row < itemModel->rowCount(); ++row) {
+        itemModel->item(row)->setData(m_rememberedOutlineVisible && row == current, RememberedOutlineRole);
+    }
+    viewport()->update();
 }
 
 void AlbumGrid::loadNextAlbumArtwork()
