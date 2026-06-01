@@ -404,6 +404,7 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
     if (event->modifiers() == Qt::NoModifier) {
         if (event->key() == Qt::Key_N) {
             activateCurrent();
+            focusTracks();
             return true;
         }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
@@ -442,13 +443,15 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::MoveUp)) moveCurrent(-1);
     else if (action == QString::fromLatin1(MainPanelAction::PageDown)) movePage(+1);
     else if (action == QString::fromLatin1(MainPanelAction::PageUp)) movePage(-1);
-    else if (action == QString::fromLatin1(MainPanelAction::FocusPrevious)) focusRelative(-1);
-    else if (action == QString::fromLatin1(MainPanelAction::FocusNext)) {
-        if (m_activePanel == MainPanelId::Albums) {
+    else if (action == QString::fromLatin1(MainPanelAction::FocusPrevious)) {
+        if (m_activePanel == MainPanelId::Tracks) {
             if (MainPanelTarget *target = targetForId(m_activePanel); target != nullptr && target->clearNarrowing) {
                 target->clearNarrowing();
             }
         }
+        focusRelative(-1);
+    }
+    else if (action == QString::fromLatin1(MainPanelAction::FocusNext)) {
         focusRelative(+1);
     }
     else if (action == QString::fromLatin1(MainPanelAction::FocusQueue)) focusQueue();

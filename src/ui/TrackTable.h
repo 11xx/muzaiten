@@ -21,6 +21,7 @@ public:
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void setHeaderHeight(int height);
+    void setNavigationScrollPadding(int rows);
     int sortColumn() const;
     Qt::SortOrder sortOrder() const;
     int verticalScrollValue() const;
@@ -56,4 +57,5 @@ private:
 
     QPersistentModelIndex m_hoverRatingIndex;
     int m_hoveredRow = -1;
+    int m_navigationScrollPadding = 3;
 };
