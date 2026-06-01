@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QKeySequence>
-#include <QMap>
+#include "ui/KeyBindingTypes.h"
+
 #include <QString>
 #include <QVector>
 
@@ -23,15 +23,6 @@ namespace ExplorerAction {
     inline constexpr auto GoToStart       = "go_to_start";
     inline constexpr auto Escape          = "escape";
 }
-
-using KeyBindingMap = QMap<QKeySequence, QString>;
-
-struct KeyBindingProfile {
-    QString name;
-    QString label;
-    QString hintText;
-    KeyBindingMap bindings;
-};
 
 QVector<KeyBindingProfile> defaultKeyBindingProfiles();
 KeyBindingMap bindingMapForProfile(const QString &name);

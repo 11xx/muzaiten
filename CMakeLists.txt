@@ -92,6 +92,7 @@ set(MUZAITEN_SOURCES
     src/ui/FileExplorerKeybindings.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
+    src/ui/MainPanelKeybindings.cpp
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlaybackResumeDialog.cpp
     src/ui/PlayerBar.cpp
@@ -163,7 +164,9 @@ set(MUZAITEN_HEADERS
     src/ui/FileExplorerView.h
     src/ui/FileExplorerKeybindings.h
     src/ui/LinkRootsDialog.h
+    src/ui/KeyBindingTypes.h
     src/ui/MainWindow.h
+    src/ui/MainPanelKeybindings.h
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
