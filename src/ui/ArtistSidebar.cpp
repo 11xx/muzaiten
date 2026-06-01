@@ -11,6 +11,7 @@
 #include <QListView>
 #include <QMenu>
 #include <QPainter>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
@@ -122,6 +123,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view->setModel(m_model);
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
     m_view->setUniformItemSizes(true);
+    m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->viewport()->installEventFilter(this);
     OverlayScrollBar::install(m_view);
@@ -182,7 +184,7 @@ bool ArtistSidebar::selectArtist(const QString &artistName)
         const QSignalBlocker blocker(m_view->selectionModel());
         m_view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
         m_view->setCurrentIndex(index);
-        m_view->scrollTo(index, QAbstractItemView::PositionAtCenter);
+        m_view->scrollTo(index, QAbstractItemView::EnsureVisible);
         return true;
     }
     return false;
@@ -191,6 +193,11 @@ bool ArtistSidebar::selectArtist(const QString &artistName)
 QWidget *ArtistSidebar::navigationWidget() const
 {
     return m_view;
+}
+
+void ArtistSidebar::setNavigationScrollPadding(int rows)
+{
+    m_navigationScrollPadding = std::max(0, rows);
 }
 
 int ArtistSidebar::rowCount() const
@@ -206,14 +213,20 @@ int ArtistSidebar::currentRow() const
 
 void ArtistSidebar::setCurrentRow(int row)
 {
+    setCurrentRow(row, 0);
+}
+
+void ArtistSidebar::setCurrentRow(int row, int scrollDirection)
+{
     if (m_model == nullptr || m_view == nullptr || m_model->rowCount() == 0) {
         return;
     }
     const int safeRow = std::clamp(row, 0, m_model->rowCount() - 1);
     const QModelIndex index = m_model->index(safeRow, 0);
+    const int previousTopRow = m_view->verticalScrollBar() != nullptr ? m_view->verticalScrollBar()->value() : 0;
     m_view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     m_view->setCurrentIndex(index);
-    m_view->scrollTo(index, QAbstractItemView::EnsureVisible);
+    scrollRowToNavigationAnchor(safeRow, scrollDirection, previousTopRow);
 }
 
 void ArtistSidebar::moveCurrentRow(int delta, bool activate)
@@ -222,9 +235,46 @@ void ArtistSidebar::moveCurrentRow(int delta, bool activate)
         return;
     }
     const int row = currentRow() >= 0 ? currentRow() : 0;
-    setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1));
+    setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1), delta);
     if (activate) {
         activateCurrentArtist();
+    }
+}
+
+void ArtistSidebar::scrollRowToNavigationAnchor(int row, int direction, int previousTopRow)
+{
+    if (m_model == nullptr || m_view == nullptr || m_view->verticalScrollBar() == nullptr || m_view->viewport() == nullptr) {
+        return;
+    }
+
+    const int rowHeightPx = std::max(1, m_rowHeight);
+    const int visibleRows = std::max(1, m_view->viewport()->height() / rowHeightPx);
+    const int padding = std::clamp(m_navigationScrollPadding, 0, std::max(0, visibleRows - 1));
+    QScrollBar *bar = m_view->verticalScrollBar();
+    const int topRow = std::clamp(previousTopRow, bar->minimum(), bar->maximum());
+    int desiredTop = topRow;
+
+    if (direction > 0) {
+        const int anchor = visibleRows - 1 - padding;
+        if (row - topRow > anchor) {
+            desiredTop = row - anchor;
+        }
+    } else if (direction < 0) {
+        const int anchor = padding;
+        if (row - topRow < anchor) {
+            desiredTop = row - anchor;
+        }
+    } else {
+        if (row < topRow) {
+            desiredTop = row;
+        } else if (row >= topRow + visibleRows) {
+            desiredTop = row - visibleRows + 1;
+        }
+    }
+
+    desiredTop = std::clamp(desiredTop, bar->minimum(), bar->maximum());
+    if (desiredTop != bar->value()) {
+        bar->setValue(desiredTop);
     }
 }
 

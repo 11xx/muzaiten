@@ -25,9 +25,11 @@ public:
     void setMpdAvailable(bool available);
     void setLibrarySourceIndex(int index);
     QWidget *navigationWidget() const;
+    void setNavigationScrollPadding(int rows);
     int rowCount() const;
     int currentRow() const;
     void setCurrentRow(int row);
+    void setCurrentRow(int row, int scrollDirection);
     void moveCurrentRow(int delta, bool activate);
     void activateCurrentArtist();
     QVector<Search::MatchDocument> searchDocuments() const;
@@ -40,6 +42,7 @@ signals:
 private:
     void showContextMenu(const QPoint &pos);
     void applyRowHeight();
+    void scrollRowToNavigationAnchor(int row, int direction, int previousTopRow);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -50,5 +53,6 @@ private:
     QStandardItemModel *m_model = nullptr;
     bool m_showAlbumCount = true;
     int m_rowHeight = 18;
+    int m_navigationScrollPadding = 3;
     bool m_mpdAvailable = false;
 };

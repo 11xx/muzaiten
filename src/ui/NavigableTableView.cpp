@@ -34,6 +34,8 @@ int NavigableTableView::currentNavigationRow() const
 void NavigableTableView::setCurrentNavigationRow(int row, int direction)
 {
     if (model() == nullptr || model()->rowCount() == 0) {
+        clearSelection();
+        setCurrentIndex({});
         return;
     }
 
@@ -46,17 +48,10 @@ void NavigableTableView::setCurrentNavigationRow(int row, int direction)
     }
     setCurrentIndex(index);
     scrollNavigationRowToAnchor(safeRow, direction, previousTopRow);
-
 }
 
 void NavigableTableView::setMainPanelActive(bool active)
 {
-    if (m_mainPanelActive == active
-        && property("mainPanelActive").toBool() == active
-        && viewport()->property("mainPanelActive").toBool() == active) {
-        return;
-    }
-
     m_mainPanelActive = active;
     setProperty("mainPanelActive", active);
     viewport()->setProperty("mainPanelActive", active);
@@ -88,6 +83,11 @@ void NavigableTableView::rowsAboutToBeRemoved(const QModelIndex &parent, int sta
 void NavigableTableView::currentChanged(const QModelIndex &current, const QModelIndex &previous)
 {
     QTableView::currentChanged(current, previous);
+    if (current.isValid()
+        && selectionModel() != nullptr
+        && !selectionModel()->isRowSelected(current.row(), current.parent())) {
+        selectionModel()->select(current, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
     updateRow(previous);
     updateRow(current);
     if (current.isValid() && previous.row() != current.row()) {
