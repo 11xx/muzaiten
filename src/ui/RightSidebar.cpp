@@ -265,7 +265,11 @@ protected:
             const int y = rowViewportPosition(m_currentPlayingRow);
             const int h = rowHeight(m_currentPlayingRow);
             if (h > 0 && y + h > 0 && y < viewport()->height()) {
-                painter.fillRect(QRect(0, y, 3, h), palette().color(QPalette::Highlight));
+                QColor color = palette().color(QPalette::Highlight);
+                if (!SelectionColors::isActiveMainPanel(viewport())) {
+                    color.setAlpha(110);
+                }
+                painter.fillRect(QRect(0, y, 3, h), color);
             }
         }
 
@@ -384,7 +388,7 @@ public:
             // Distinct, column-independent tint for the currently playing row
             // (every visible cell, regardless of which columns are shown).
             QColor tint = opt.palette.color(QPalette::Highlight);
-            tint.setAlpha(48);
+            tint.setAlpha(SelectionColors::isActiveMainPanel(option.widget) ? 48 : 24);
             painter->fillRect(opt.rect, tint);
         } else if (index.row() % 2 == 1) {
             painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));

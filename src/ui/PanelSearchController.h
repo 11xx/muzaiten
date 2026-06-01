@@ -23,6 +23,7 @@ struct MainPanelTarget {
     std::function<void()> activateCurrent;
     std::function<void()> prepareForFocus;
     std::function<void(int horizontal, int vertical)> moveCurrentInGrid;
+    std::function<void()> clearNarrowing;
     std::function<QVector<Search::MatchDocument>()> documents;
 };
 

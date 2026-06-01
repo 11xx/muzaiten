@@ -92,17 +92,23 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     QStyleOptionViewItem opt(option);
     initStyleOption(&opt, index);
-    const bool selected = opt.state & QStyle::State_Selected;
+    const bool current = opt.state & QStyle::State_Selected;
+    const bool narrowed = index.data(SelectedRole).toBool();
+    opt.state &= ~QStyle::State_MouseOver;
     opt.state &= ~QStyle::State_Selected;
 
     QApplication::style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, opt.widget);
-    if (selected) {
+    if (narrowed) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(SelectionColors::selectedFill(option));
         painter->drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 6, 6);
     }
-    if (index.data(SelectedRole).toBool()) {
-        painter->setPen(QPen(opt.palette.color(QPalette::Highlight), 2));
+    if (current) {
+        QColor outline = opt.palette.color(QPalette::Highlight);
+        if (!SelectionColors::isActiveMainPanel(option.widget)) {
+            outline.setAlpha(120);
+        }
+        painter->setPen(QPen(outline, 2));
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 6, 6);
     }
@@ -138,14 +144,14 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
 
     const QRect titleRect(artRect.left(), artRect.bottom() + 5, artRect.width(), opt.fontMetrics.height() * 2 + 2);
     const QRect yearRect(artRect.left(), titleRect.bottom() + 1, artRect.width(), opt.fontMetrics.height());
-    painter->setPen(selected ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Text));
+    painter->setPen(narrowed ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Text));
     const auto alignment = static_cast<Qt::Alignment>(index.data(TextAlignmentRole).toInt());
     const QString display = index.data(Qt::DisplayRole).toString();
     painter->drawText(titleRect, alignment | Qt::AlignTop, elidedToTwoLines(titleFromDisplay(display), opt.font, opt.fontMetrics, titleRect.width()));
 
     const QString year = yearFromDisplay(display);
     if (!year.isEmpty()) {
-        painter->setPen(selected ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Disabled, QPalette::Text));
+        painter->setPen(narrowed ? SelectionColors::selectedText(option) : opt.palette.color(QPalette::Disabled, QPalette::Text));
         painter->drawText(yearRect, alignment | Qt::AlignVCenter, year);
     }
 
