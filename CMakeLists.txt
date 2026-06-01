@@ -95,6 +95,7 @@ set(MUZAITEN_SOURCES
     src/ui/MainPanelKeybindings.cpp
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlaybackResumeDialog.cpp
+    src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
     src/ui/RankingDialog.cpp
     src/ui/RightSidebar.cpp
@@ -167,6 +168,7 @@ set(MUZAITEN_HEADERS
     src/ui/KeyBindingTypes.h
     src/ui/MainWindow.h
     src/ui/MainPanelKeybindings.h
+    src/ui/PanelSearchController.h
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h

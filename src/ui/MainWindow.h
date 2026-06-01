@@ -19,6 +19,7 @@ class ListenBrainzScrobbler;
 class LastFmScrobbler;
 class MprisService;
 class PlayerBar;
+class PanelSearchController;
 class PlaybackBackend;
 class QTimer;
 class QProgressBar;
@@ -177,6 +178,7 @@ private:
     FileExplorerView *m_libraryFileExplorer = nullptr;
     FileExplorerView *m_freeRoamFileExplorer = nullptr;
     SearchView       *m_searchView = nullptr;
+    PanelSearchController *m_panelSearch = nullptr;
     QProgressBar *m_scanProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
     PlaybackBackend *m_playback = nullptr;
