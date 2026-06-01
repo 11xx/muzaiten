@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QStringList>
 
 #include "core/Track.h"
 #include "core/ScanRoot.h"
@@ -55,6 +56,7 @@ private:
     void showArtist(const QString &artistName, bool forceReload, bool clearAlbumSelectionOnArtistChange);
     void selectAlbumFilter(const QString &albumTitle);
     void narrowAlbumFilter(const QString &albumTitle);
+    void narrowAlbumFilters(const QStringList &albumTitles);
     void clearAlbumFilter();
     void refreshAlbumGrid(bool freshLoad = false);
     void refreshTrackTable();
@@ -192,6 +194,7 @@ private:
     std::unique_ptr<SettingsStore> m_state;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
+    QStringList m_selectedAlbumTitles;
     QString m_loadedPanelArtist;
     QString m_loadedPanelAlbumFilter;
     QString m_localArtist;

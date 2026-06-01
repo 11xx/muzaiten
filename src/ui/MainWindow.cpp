@@ -82,6 +82,18 @@ Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 
 namespace {
 
+QString albumFilterKey(const QStringList &albumTitles)
+{
+    return albumTitles.join(QLatin1Char('\n'));
+}
+
+QStringList normalizedAlbumTitles(QStringList albumTitles)
+{
+    albumTitles.removeAll(QString());
+    albumTitles.removeDuplicates();
+    return albumTitles;
+}
+
 PlaybackProfile playbackProfileFromJson(const QString &json)
 {
     PlaybackProfile profile;
@@ -405,6 +417,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
     connect(m_albumGrid, &AlbumGrid::albumSelectionCleared, this, &MainWindow::clearAlbumFilter);
+    connect(m_albumGrid, &AlbumGrid::albumSelectionNarrowRequested, this, &MainWindow::narrowAlbumFilters);
     connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
@@ -461,7 +474,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_albumGrid->currentRow(); },
         [this](int row) { m_albumGrid->setCurrentRow(row); },
         {},
-        [this]() { narrowAlbumFilter(m_albumGrid->currentAlbumTitle()); },
+        [this]() { narrowAlbumFilters(m_albumGrid->albumTitlesForAction()); },
         [this]() { playAlbumsNow(m_albumGrid->albumTitlesForAction()); },
         [this]() { m_albumGrid->addCurrentAlbumToQueue(); },
         [this]() { m_albumGrid->playNextCurrentAlbum(); },
@@ -1015,6 +1028,7 @@ void MainWindow::refreshArtists()
         }
         if (!m_currentArtist.isEmpty()) {
             m_currentArtist.clear();
+            m_selectedAlbumTitles.clear();
             m_selectedAlbumTitle.clear();
             m_loadedPanelArtist.clear();
             m_loadedPanelAlbumFilter.clear();
@@ -1027,6 +1041,7 @@ void MainWindow::refreshArtists()
         }
         if (artists.isEmpty()) {
             m_currentArtist.clear();
+            m_selectedAlbumTitles.clear();
             m_selectedAlbumTitle.clear();
             m_loadedPanelArtist.clear();
             m_loadedPanelAlbumFilter.clear();
@@ -1049,6 +1064,7 @@ void MainWindow::refreshArtists()
 
     if (!m_currentArtist.isEmpty()) {
         m_currentArtist.clear();
+        m_selectedAlbumTitles.clear();
         m_selectedAlbumTitle.clear();
         m_loadedPanelArtist.clear();
         m_loadedPanelAlbumFilter.clear();
@@ -1063,6 +1079,7 @@ void MainWindow::refreshArtists()
 
     if (artists.isEmpty()) {
         m_currentArtist.clear();
+        m_selectedAlbumTitles.clear();
         m_selectedAlbumTitle.clear();
         m_loadedPanelArtist.clear();
         m_loadedPanelAlbumFilter.clear();
@@ -1083,9 +1100,10 @@ void MainWindow::showArtist(const QString &artistName, bool forceReload, bool cl
     }
 
     const bool artistChanged = m_currentArtist != artistName;
-    const QString nextAlbumFilter = (artistChanged && clearAlbumSelectionOnArtistChange)
-        ? QString()
-        : m_selectedAlbumTitle;
+    const QStringList nextAlbumFilters = (artistChanged && clearAlbumSelectionOnArtistChange)
+        ? QStringList()
+        : m_selectedAlbumTitles;
+    const QString nextAlbumFilter = albumFilterKey(nextAlbumFilters);
     const bool sourceChanged = m_loadedPanelSource != m_librarySource;
     const bool albumFilterChanged = m_loadedPanelAlbumFilter != nextAlbumFilter;
     const bool shouldReload = forceReload
@@ -1101,13 +1119,14 @@ void MainWindow::showArtist(const QString &artistName, bool forceReload, bool cl
 
     rememberTrackTableViewState();
     m_currentArtist = artistName;
-    m_selectedAlbumTitle = nextAlbumFilter;
+    m_selectedAlbumTitles = nextAlbumFilters;
+    m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
     rememberCurrentSourceSelection();
     refreshAlbumGrid(forceReload || artistChanged);
     refreshTrackTable();
     restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
-    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
@@ -1115,47 +1134,58 @@ void MainWindow::showArtist(const QString &artistName, bool forceReload, bool cl
 void MainWindow::selectAlbumFilter(const QString &albumTitle)
 {
     rememberTrackTableViewState();
-    m_selectedAlbumTitle = (m_selectedAlbumTitle == albumTitle) ? QString() : albumTitle;
+    m_selectedAlbumTitles = (m_selectedAlbumTitles.size() == 1 && m_selectedAlbumTitles.first() == albumTitle)
+        ? QStringList()
+        : QStringList{albumTitle};
+    m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
-    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
 
 void MainWindow::narrowAlbumFilter(const QString &albumTitle)
 {
-    if (albumTitle.isEmpty() || m_selectedAlbumTitle == albumTitle) {
+    narrowAlbumFilters(albumTitle.isEmpty() ? QStringList() : QStringList{albumTitle});
+}
+
+void MainWindow::narrowAlbumFilters(const QStringList &albumTitles)
+{
+    const QStringList nextAlbumTitles = normalizedAlbumTitles(albumTitles);
+    if (nextAlbumTitles.isEmpty() || nextAlbumTitles == m_selectedAlbumTitles) {
         return;
     }
     rememberTrackTableViewState();
-    m_selectedAlbumTitle = albumTitle;
+    m_selectedAlbumTitles = nextAlbumTitles;
+    m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
-    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
 
 void MainWindow::clearAlbumFilter()
 {
-    if (m_selectedAlbumTitle.isEmpty()) {
+    if (m_selectedAlbumTitles.isEmpty()) {
         return;
     }
     rememberTrackTableViewState();
+    m_selectedAlbumTitles.clear();
     m_selectedAlbumTitle.clear();
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
-    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
@@ -1182,9 +1212,25 @@ void MainWindow::refreshTrackTable()
         return;
     }
     if (m_librarySource == LibrarySource::Mpd) {
-        m_trackTable->setTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), m_selectedAlbumTitle));
+        if (m_selectedAlbumTitles.isEmpty()) {
+            m_trackTable->setTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory()));
+        } else {
+            QVector<Track> tracks;
+            for (const QString &albumTitle : m_selectedAlbumTitles) {
+                tracks += m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle);
+            }
+            m_trackTable->setTracks(tracks);
+        }
     } else {
-        m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist, m_selectedAlbumTitle));
+        if (m_selectedAlbumTitles.isEmpty()) {
+            m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist));
+        } else {
+            QVector<Track> tracks;
+            for (const QString &albumTitle : m_selectedAlbumTitles) {
+                tracks += m_database->tracksForArtist(m_currentArtist, albumTitle);
+            }
+            m_trackTable->setTracks(tracks);
+        }
     }
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Tracks);
@@ -1584,6 +1630,7 @@ void MainWindow::revealTrackInLibrary(const Track &track)
         if (!artist.isEmpty()) {
             // Narrow to the album as part of the reveal. h from Tracks clears
             // that narrowing, so jumping back to the full artist remains cheap.
+            m_selectedAlbumTitles = track.albumTitle.isEmpty() ? QStringList() : QStringList{track.albumTitle};
             m_selectedAlbumTitle = track.albumTitle;
             m_artistSidebar->selectArtist(artist);
             showArtist(artist, false, false);
@@ -1740,10 +1787,10 @@ void MainWindow::rememberCurrentSourceSelection()
 {
     if (m_librarySource == LibrarySource::Mpd) {
         m_mpdArtist = m_currentArtist;
-        m_mpdAlbumTitle = m_selectedAlbumTitle;
+        m_mpdAlbumTitle = albumFilterKey(m_selectedAlbumTitles);
     } else {
         m_localArtist = m_currentArtist;
-        m_localAlbumTitle = m_selectedAlbumTitle;
+        m_localAlbumTitle = albumFilterKey(m_selectedAlbumTitles);
     }
 }
 
@@ -1751,11 +1798,12 @@ void MainWindow::restoreCurrentSourceSelection()
 {
     if (m_librarySource == LibrarySource::Mpd) {
         m_currentArtist = m_mpdArtist;
-        m_selectedAlbumTitle = m_mpdAlbumTitle;
+        m_selectedAlbumTitles = normalizedAlbumTitles(m_mpdAlbumTitle.split(QLatin1Char('\n')));
     } else {
         m_currentArtist = m_localArtist;
-        m_selectedAlbumTitle = m_localAlbumTitle;
+        m_selectedAlbumTitles = normalizedAlbumTitles(m_localAlbumTitle.split(QLatin1Char('\n')));
     }
+    m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
 }
 
 void MainWindow::loadPlaybackProfile()
@@ -2200,6 +2248,7 @@ void MainWindow::onLibrarySourceChanged(int index)
     if (m_librarySource == LibrarySource::Mpd && m_database->mpdSourceId() <= 0) {
         m_artistSidebar->setMpdAvailable(false);
         m_currentArtist.clear();
+        m_selectedAlbumTitles.clear();
         m_selectedAlbumTitle.clear();
         m_loadedPanelArtist.clear();
         m_loadedPanelAlbumFilter.clear();
