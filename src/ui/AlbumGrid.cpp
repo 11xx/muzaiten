@@ -9,6 +9,7 @@
 #include "ui/StarRating.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QIcon>
 #include <QImage>
 #include <QJsonDocument>
@@ -16,8 +17,10 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPixmap>
+#include <QRubberBand>
 #include <QScrollBar>
 #include <QStandardItemModel>
+#include <QStyleHints>
 #include <QTimer>
 #include <QResizeEvent>
 #include <QWheelEvent>
@@ -104,6 +107,7 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setTextElideMode(Qt::ElideRight);
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -123,6 +127,9 @@ AlbumGrid::AlbumGrid(QWidget *parent)
         m_loadingAngle = (m_loadingAngle + 30) % 360;
         viewport()->update();
     });
+    m_dragScrollTimer = new QTimer(this);
+    m_dragScrollTimer->setInterval(40);
+    connect(m_dragScrollTimer, &QTimer::timeout, this, &AlbumGrid::updateDragAutoscroll);
 
     auto *model = new QStandardItemModel(this);
     auto *item = new QStandardItem(QStringLiteral("No library loaded"));
@@ -362,6 +369,9 @@ void AlbumGrid::setCurrentRowInternal(int row, bool clearRememberedOutline)
         m_rememberedOutlineVisible = false;
     }
     const int safeRow = std::clamp(row, 0, model()->rowCount() - 1);
+    if (clearRememberedOutline) {
+        m_shiftAnchorRow = safeRow;
+    }
     const QModelIndex index = model()->index(safeRow, 0);
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
@@ -539,6 +549,32 @@ void AlbumGrid::applyViewSettingsJson(const QString &json)
 
 void AlbumGrid::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_leftButtonPressed && !m_pressStartedOnRating) {
+        m_dragCurrentPos = event->pos();
+        if (!m_dragSelecting
+            && (m_dragCurrentPos - m_dragStartPos).manhattanLength() >= QApplication::styleHints()->startDragDistance()) {
+            m_dragSelecting = true;
+            if (m_rubberBand == nullptr) {
+                m_rubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
+            }
+            m_rubberBand->setGeometry(QRect(m_dragStartPos, m_dragCurrentPos).normalized());
+            m_rubberBand->show();
+        }
+        if (m_dragSelecting) {
+            m_rubberBand->setGeometry(QRect(m_dragStartPos, m_dragCurrentPos).normalized());
+            updateRubberBandSelection();
+            updateDragAutoscroll();
+            event->accept();
+            return;
+        }
+        event->accept();
+        return;
+    }
+    if (m_leftButtonPressed) {
+        event->accept();
+        return;
+    }
+
     const QModelIndex index = indexAt(event->pos());
     auto *itemModel = qobject_cast<QStandardItemModel *>(model());
     if (itemModel != nullptr) {
@@ -564,16 +600,88 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-    setCurrentIndex(index);
+    m_leftButtonPressed = true;
+    m_dragSelecting = false;
+    m_dragStartPos = event->pos();
+    m_dragCurrentPos = event->pos();
+    m_dragModifiers = event->modifiers();
+    m_dragBaseMarkedAlbumTitles = m_markedAlbumTitles;
+    m_pressStartedOnRating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos()) >= 0;
+    if (m_shiftAnchorRow < 0) {
+        m_shiftAnchorRow = currentRow() >= 0 ? currentRow() : index.row();
+    }
     event->accept();
+}
 
-    const QString title = index.data(AlbumTitleRole).toString();
-    const int rating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos());
-    if (rating >= 0) {
-        emit albumRatingChanged(index.data(AlbumArtistRole).toString(), title, rating);
+void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
+{
+    const QModelIndex index = indexAt(event->pos());
+    if (event->button() != Qt::LeftButton || !m_leftButtonPressed) {
+        QListView::mouseReleaseEvent(event);
         return;
     }
+
+    m_leftButtonPressed = false;
+    m_dragScrollTimer->stop();
+    if (m_dragSelecting) {
+        finishRubberBandSelection();
+        event->accept();
+        return;
+    }
+
+    stopDragSelection();
+    if (!index.isValid()) {
+        event->accept();
+        return;
+    }
+
+    const int rating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos());
+    const QString title = index.data(AlbumTitleRole).toString();
+    if (rating >= 0) {
+        emit albumRatingChanged(index.data(AlbumArtistRole).toString(), title, rating);
+        event->accept();
+        return;
+    }
+
+    if (event->modifiers() & Qt::ShiftModifier) {
+        const int anchor = std::clamp(m_shiftAnchorRow >= 0 ? m_shiftAnchorRow : index.row(), 0, model()->rowCount() - 1);
+        const int first = std::min(anchor, index.row());
+        const int last = std::max(anchor, index.row());
+        m_markedAlbumTitles.clear();
+        for (int row = first; row <= last; ++row) {
+            const QString rowTitle = titleForRow(row);
+            if (!rowTitle.isEmpty()) {
+                m_markedAlbumTitles.insert(rowTitle);
+            }
+        }
+        m_rememberedOutlineVisible = false;
+        setCurrentRowInternal(index.row(), false);
+        applyMarkedAlbumSelection();
+        event->accept();
+        return;
+    }
+
+    if (event->modifiers() & Qt::ControlModifier) {
+        if (!title.isEmpty()) {
+            if (m_markedAlbumTitles.contains(title)) {
+                m_markedAlbumTitles.remove(title);
+            } else {
+                m_markedAlbumTitles.insert(title);
+            }
+        }
+        m_shiftAnchorRow = index.row();
+        m_rememberedOutlineVisible = false;
+        setCurrentRowInternal(index.row(), false);
+        applyMarkedAlbumSelection();
+        event->accept();
+        return;
+    }
+
+    m_markedAlbumTitles.clear();
+    m_shiftAnchorRow = index.row();
+    selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    setCurrentIndex(index);
+
 
     if (!m_selectedAlbumTitle.isEmpty()) {
         m_rememberedOutlineVisible = true;
@@ -585,6 +693,7 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
     m_rememberedOutlineVisible = false;
     refreshRememberedOutline();
     emit albumSelectionToggled(title);
+    event->accept();
 }
 
 void AlbumGrid::leaveEvent(QEvent *event)
@@ -818,6 +927,29 @@ void AlbumGrid::reselectMarkedAlbums()
     }
 }
 
+void AlbumGrid::applyMarkedAlbumSelection()
+{
+    if (model() == nullptr || selectionModel() == nullptr) {
+        return;
+    }
+    selectionModel()->clearSelection();
+    if (m_markedAlbumTitles.isEmpty()) {
+        if (currentIndex().isValid()) {
+            selectionModel()->select(currentIndex(), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+        refreshRememberedOutline();
+        return;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QModelIndex index = model()->index(row, 0);
+        const QString title = index.data(AlbumTitleRole).toString();
+        if (!title.isEmpty() && m_markedAlbumTitles.contains(title)) {
+            selectionModel()->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+    }
+    refreshRememberedOutline();
+}
+
 void AlbumGrid::setCurrentAlbumMarked(bool marked)
 {
     const QString title = currentAlbumTitle();
@@ -847,6 +979,107 @@ void AlbumGrid::refreshRememberedOutline()
         itemModel->item(row)->setData(m_rememberedOutlineVisible && row == current, RememberedOutlineRole);
     }
     viewport()->update();
+}
+
+void AlbumGrid::updateRubberBandSelection()
+{
+    if (model() == nullptr || selectionModel() == nullptr || m_rubberBand == nullptr) {
+        return;
+    }
+
+    const QRect rect = m_rubberBand->geometry().normalized();
+    QSet<QString> touchedTitles;
+    int lastTouchedRow = -1;
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QModelIndex index = model()->index(row, 0);
+        if (visualRect(index).intersects(rect)) {
+            const QString title = index.data(AlbumTitleRole).toString();
+            if (!title.isEmpty()) {
+                touchedTitles.insert(title);
+                lastTouchedRow = row;
+            }
+        }
+    }
+
+    if (m_dragModifiers & Qt::ControlModifier) {
+        m_markedAlbumTitles = m_dragBaseMarkedAlbumTitles;
+        for (const QString &title : touchedTitles) {
+            if (m_markedAlbumTitles.contains(title)) {
+                m_markedAlbumTitles.remove(title);
+            } else {
+                m_markedAlbumTitles.insert(title);
+            }
+        }
+    } else if (m_dragModifiers & Qt::ShiftModifier) {
+        m_markedAlbumTitles = m_dragBaseMarkedAlbumTitles;
+        m_markedAlbumTitles.unite(touchedTitles);
+    } else {
+        m_markedAlbumTitles = touchedTitles;
+    }
+
+    if (lastTouchedRow >= 0) {
+        m_rememberedOutlineVisible = false;
+        setCurrentRowInternal(lastTouchedRow, false);
+    }
+    applyMarkedAlbumSelection();
+}
+
+void AlbumGrid::finishRubberBandSelection()
+{
+    updateRubberBandSelection();
+    if (currentRow() >= 0) {
+        m_shiftAnchorRow = currentRow();
+    }
+    stopDragSelection();
+}
+
+void AlbumGrid::updateDragAutoscroll()
+{
+    if (!m_dragSelecting || m_rubberBand == nullptr) {
+        m_dragScrollTimer->stop();
+        return;
+    }
+
+    constexpr int margin = 36;
+    const int y = m_dragCurrentPos.y();
+    int delta = 0;
+    if (y < margin) {
+        delta = -std::max(4, margin - y);
+    } else if (y > viewport()->height() - margin) {
+        delta = std::max(4, y - (viewport()->height() - margin));
+    }
+
+    if (delta == 0) {
+        m_dragScrollTimer->stop();
+        return;
+    }
+
+    verticalScrollBar()->setValue(verticalScrollBar()->value() + delta);
+    m_dragCurrentPos.setY(std::clamp(m_dragCurrentPos.y(), 0, viewport()->height()));
+    m_rubberBand->setGeometry(QRect(m_dragStartPos, m_dragCurrentPos).normalized());
+    updateRubberBandSelection();
+    if (!m_dragScrollTimer->isActive()) {
+        m_dragScrollTimer->start();
+    }
+}
+
+void AlbumGrid::stopDragSelection()
+{
+    m_dragSelecting = false;
+    m_leftButtonPressed = false;
+    m_pressStartedOnRating = false;
+    m_dragScrollTimer->stop();
+    if (m_rubberBand != nullptr) {
+        m_rubberBand->hide();
+    }
+}
+
+QString AlbumGrid::titleForRow(int row) const
+{
+    if (model() == nullptr || row < 0 || row >= model()->rowCount()) {
+        return {};
+    }
+    return model()->index(row, 0).data(AlbumTitleRole).toString();
 }
 
 void AlbumGrid::loadNextAlbumArtwork()

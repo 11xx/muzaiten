@@ -12,6 +12,7 @@ class ArtworkCache;
 class QEvent;
 class QImage;
 class QMouseEvent;
+class QRubberBand;
 class QStandardItem;
 class QTimer;
 class QWheelEvent;
@@ -58,6 +59,7 @@ signals:
 protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -83,6 +85,12 @@ private:
     void setCurrentAlbumMarked(bool marked);
     void refreshRememberedOutline();
     void setCurrentRowInternal(int row, bool clearRememberedOutline);
+    void applyMarkedAlbumSelection();
+    void updateRubberBandSelection();
+    void finishRubberBandSelection();
+    void updateDragAutoscroll();
+    void stopDragSelection();
+    QString titleForRow(int row) const;
 
 private:
     ArtworkCache *m_artworkCache = nullptr;
@@ -94,6 +102,16 @@ private:
     QTimer *m_populateTimer = nullptr;
     QTimer *m_artworkTimer = nullptr;
     QTimer *m_spinnerTimer = nullptr;
+    QTimer *m_dragScrollTimer = nullptr;
+    QRubberBand *m_rubberBand = nullptr;
+    QSet<QString> m_dragBaseMarkedAlbumTitles;
+    QPoint m_dragStartPos;
+    QPoint m_dragCurrentPos;
+    Qt::KeyboardModifiers m_dragModifiers = Qt::NoModifier;
+    int m_shiftAnchorRow = -1;
+    bool m_leftButtonPressed = false;
+    bool m_dragSelecting = false;
+    bool m_pressStartedOnRating = false;
     bool m_showLoading = false;
     int m_loadingCount = 0;
     int m_loadingAngle = 0;
