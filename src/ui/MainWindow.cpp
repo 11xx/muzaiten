@@ -976,21 +976,27 @@ void MainWindow::refreshArtists()
             m_panelSearch->refreshPanel(MainPanelId::Artists);
         }
         if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
-            selectArtist(m_currentArtist);
+            showArtist(m_currentArtist, true, false);
             return;
         }
         if (!m_currentArtist.isEmpty()) {
             m_currentArtist.clear();
             m_selectedAlbumTitle.clear();
+            m_loadedPanelArtist.clear();
+            m_loadedPanelAlbumFilter.clear();
+            m_loadedPanelSource = m_librarySource;
         }
         if (!artists.isEmpty() && m_currentArtist.isEmpty()) {
-            selectArtist(artists.first().name);
             m_artistSidebar->selectArtist(artists.first().name);
+            showArtist(artists.first().name, true, true);
             return;
         }
         if (artists.isEmpty()) {
             m_currentArtist.clear();
             m_selectedAlbumTitle.clear();
+            m_loadedPanelArtist.clear();
+            m_loadedPanelAlbumFilter.clear();
+            m_loadedPanelSource = m_librarySource;
             rememberCurrentSourceSelection();
         }
         return;
@@ -1003,41 +1009,72 @@ void MainWindow::refreshArtists()
     }
 
     if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
-        selectArtist(m_currentArtist);
+        showArtist(m_currentArtist, true, false);
         return;
     }
 
     if (!m_currentArtist.isEmpty()) {
         m_currentArtist.clear();
         m_selectedAlbumTitle.clear();
+        m_loadedPanelArtist.clear();
+        m_loadedPanelAlbumFilter.clear();
+        m_loadedPanelSource = m_librarySource;
     }
 
     if (!artists.isEmpty() && m_currentArtist.isEmpty()) {
-        selectArtist(artists.first().name);
         m_artistSidebar->selectArtist(artists.first().name);
+        showArtist(artists.first().name, true, true);
         return;
     }
 
     if (artists.isEmpty()) {
         m_currentArtist.clear();
         m_selectedAlbumTitle.clear();
+        m_loadedPanelArtist.clear();
+        m_loadedPanelAlbumFilter.clear();
+        m_loadedPanelSource = m_librarySource;
         rememberCurrentSourceSelection();
     }
 }
 
 void MainWindow::selectArtist(const QString &artistName)
 {
-    if (m_currentArtist == artistName) {
+    showArtist(artistName, false, true);
+}
+
+void MainWindow::showArtist(const QString &artistName, bool forceReload, bool clearAlbumSelectionOnArtistChange)
+{
+    if (artistName.isEmpty()) {
+        return;
+    }
+
+    const bool artistChanged = m_currentArtist != artistName;
+    const QString nextAlbumFilter = (artistChanged && clearAlbumSelectionOnArtistChange)
+        ? QString()
+        : m_selectedAlbumTitle;
+    const bool sourceChanged = m_loadedPanelSource != m_librarySource;
+    const bool albumFilterChanged = m_loadedPanelAlbumFilter != nextAlbumFilter;
+    const bool shouldReload = forceReload
+        || artistChanged
+        || m_loadedPanelArtist != artistName
+        || sourceChanged
+        || albumFilterChanged
+        || m_loadedPanelArtist.isEmpty();
+
+    if (!shouldReload) {
         return;
     }
 
     rememberTrackTableViewState();
-    m_selectedAlbumTitle.clear();
     m_currentArtist = artistName;
+    m_selectedAlbumTitle = nextAlbumFilter;
     rememberCurrentSourceSelection();
-    refreshAlbumGrid(true);
+    refreshAlbumGrid(forceReload || artistChanged);
     refreshTrackTable();
     restoreTrackTableViewState();
+    m_loadedPanelArtist = m_currentArtist;
+    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
 
@@ -1049,6 +1086,9 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
+    m_loadedPanelArtist = m_currentArtist;
+    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
 
@@ -1063,6 +1103,9 @@ void MainWindow::narrowAlbumFilter(const QString &albumTitle)
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
+    m_loadedPanelArtist = m_currentArtist;
+    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
 
@@ -1077,6 +1120,9 @@ void MainWindow::clearAlbumFilter()
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
+    m_loadedPanelArtist = m_currentArtist;
+    m_loadedPanelAlbumFilter = m_selectedAlbumTitle;
+    m_loadedPanelSource = m_librarySource;
     saveExplorerState();
 }
 
@@ -2091,6 +2137,9 @@ void MainWindow::onLibrarySourceChanged(int index)
         m_artistSidebar->setMpdAvailable(false);
         m_currentArtist.clear();
         m_selectedAlbumTitle.clear();
+        m_loadedPanelArtist.clear();
+        m_loadedPanelAlbumFilter.clear();
+        m_loadedPanelSource = m_librarySource;
         rememberCurrentSourceSelection();
         m_albumGrid->setAlbums({});
         m_trackTable->setTracks({});

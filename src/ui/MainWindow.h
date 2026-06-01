@@ -52,6 +52,7 @@ private:
     void loadExistingLibrary();
     void refreshArtists();
     void selectArtist(const QString &artistName);
+    void showArtist(const QString &artistName, bool forceReload, bool clearAlbumSelectionOnArtistChange);
     void selectAlbumFilter(const QString &albumTitle);
     void narrowAlbumFilter(const QString &albumTitle);
     void clearAlbumFilter();
@@ -188,6 +189,8 @@ private:
     std::unique_ptr<SettingsStore> m_state;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
+    QString m_loadedPanelArtist;
+    QString m_loadedPanelAlbumFilter;
     QString m_localArtist;
     QString m_localAlbumTitle;
     QString m_mpdArtist;
@@ -201,6 +204,7 @@ private:
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;
     LibrarySource m_librarySource = LibrarySource::Local;
+    LibrarySource m_loadedPanelSource = LibrarySource::Local;
     MainView m_mainView = MainView::LibraryPanels;
     QString m_libraryExplorerDirectory;
     QString m_freeRoamDirectory;
