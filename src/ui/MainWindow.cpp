@@ -1585,6 +1585,9 @@ void MainWindow::revealTrackInLibrary(const Track &track)
             showArtist(artist, false, false);
         }
         m_trackTable->selectTrackByPath(track.path);
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->setActivePanel(MainPanelId::Tracks, true);
+        }
         break;
     }
     case MainView::LibraryFileExplorer:
