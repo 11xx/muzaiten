@@ -375,7 +375,42 @@ void PanelSearchController::focusTracks()
 void PanelSearchController::activateCurrent()
 {
     if (MainPanelTarget *target = targetForId(m_activePanel)) {
-        target->activateCurrent();
+        if (target->activateCurrent) {
+            target->activateCurrent();
+        }
+    }
+}
+
+void PanelSearchController::playCurrentNow()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (target->playCurrentNow) {
+            target->playCurrentNow();
+        } else if (target->activateCurrent) {
+            target->activateCurrent();
+        }
+    }
+}
+
+void PanelSearchController::addCurrentToQueue()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (!target->addCurrentToQueue) {
+            return;
+        }
+        target->addCurrentToQueue();
+        moveCurrent(+1);
+    }
+}
+
+void PanelSearchController::playNextCurrent()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (!target->playNextCurrent) {
+            return;
+        }
+        target->playNextCurrent();
+        moveCurrent(+1);
     }
 }
 
@@ -418,11 +453,21 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
             focusTracks();
             return true;
         }
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            activateCurrent();
+            return true;
+        }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
             return true;
         }
     }
 
+    if (action == QString::fromLatin1(MainPanelAction::PlayNow)) {
+        if (event->modifiers() & Qt::AltModifier) {
+            playCurrentNow();
+        }
+        return true;
+    }
     if (action == QString::fromLatin1(MainPanelAction::MoveDown)) {
         target->moveCurrentInGrid(+1, 0);
         return true;
@@ -471,6 +516,9 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::FocusQueue)) focusQueue();
     else if (action == QString::fromLatin1(MainPanelAction::FocusTracks)) focusTracks();
     else if (action == QString::fromLatin1(MainPanelAction::Activate)) activateCurrent();
+    else if (action == QString::fromLatin1(MainPanelAction::PlayNow)) playCurrentNow();
+    else if (action == QString::fromLatin1(MainPanelAction::AddToQueue)) addCurrentToQueue();
+    else if (action == QString::fromLatin1(MainPanelAction::PlayNext)) playNextCurrent();
     else if (action == QString::fromLatin1(MainPanelAction::Search)) openSearch();
     else if (action == QString::fromLatin1(MainPanelAction::SearchNext)) cycleMatch(+1);
     else if (action == QString::fromLatin1(MainPanelAction::SearchPrevious)) cycleMatch(-1);

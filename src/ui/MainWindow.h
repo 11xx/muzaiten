@@ -134,6 +134,7 @@ private:
     // changes queue contents or order MUST end by calling this so the prepared
     // "next" track can never drift from the visible order.
     void syncQueueState();
+    void playAlbumNow(const QString &albumTitle);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
     void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false);

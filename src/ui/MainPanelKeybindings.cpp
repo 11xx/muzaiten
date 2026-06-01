@@ -9,7 +9,7 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
     KeyBindingProfile profile;
     profile.name = QStringLiteral("dired_hjkl");
     profile.label = QStringLiteral("Main panels: dired + hjkl");
-    profile.hintText = QStringLiteral("j/n↓ k/p↑ h← l→ q queue / search M-n/M-p matches Ret/Spc activate");
+    profile.hintText = QStringLiteral("j/n↓ k/p↑ h← l→ q queue / search M-n/M-p matches Ret play Spc+ M-Spc▶▶");
     profile.bindings = {
         {Qt::Key_J, MoveDown},
         {Qt::Key_N, MoveDown},
@@ -29,9 +29,12 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
         {Qt::Key_Slash, Search},
         {QKeySequence(Qt::AltModifier | Qt::Key_N), SearchNext},
         {QKeySequence(Qt::AltModifier | Qt::Key_P), SearchPrevious},
-        {Qt::Key_Return, Activate},
-        {Qt::Key_Enter, Activate},
-        {Qt::Key_Space, Activate},
+        {Qt::Key_Return, PlayNow},
+        {Qt::Key_Enter, PlayNow},
+        {QKeySequence(Qt::AltModifier | Qt::Key_Return), PlayNow},
+        {QKeySequence(Qt::AltModifier | Qt::Key_Enter), PlayNow},
+        {Qt::Key_Space, AddToQueue},
+        {QKeySequence(Qt::AltModifier | Qt::Key_Space), PlayNext},
         {Qt::Key_Escape, Escape},
         {QKeySequence(Qt::ControlModifier | Qt::Key_G), Escape},
     };

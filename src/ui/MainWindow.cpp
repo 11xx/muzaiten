@@ -421,6 +421,9 @@ MainWindow::MainWindow(QWidget *parent)
         {},
         {},
         {},
+        {},
+        {},
+        {},
         [this]() { return m_rightSidebar->queueSearchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -435,6 +438,9 @@ MainWindow::MainWindow(QWidget *parent)
         {},
         {},
         {},
+        {},
+        {},
+        {},
         [this]() { return m_artistSidebar->searchDocuments(); },
     });
     m_panelSearch->registerTarget({
@@ -446,6 +452,9 @@ MainWindow::MainWindow(QWidget *parent)
         [this](int row) { m_albumGrid->setCurrentRow(row); },
         {},
         [this]() { narrowAlbumFilter(m_albumGrid->currentAlbumTitle()); },
+        [this]() { playAlbumNow(m_albumGrid->currentAlbumTitle()); },
+        [this]() { m_albumGrid->addCurrentAlbumToQueue(); },
+        [this]() { m_albumGrid->playNextCurrentAlbum(); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { clearAlbumFilter(); },
@@ -460,6 +469,9 @@ MainWindow::MainWindow(QWidget *parent)
         [this](int row) { m_trackTable->setCurrentRow(row); },
         [this](int row, int direction) { m_trackTable->setCurrentRow(row, direction); },
         [this]() { m_trackTable->activateCurrentTrack(); },
+        [this]() { m_trackTable->activateCurrentTrack(); },
+        [this]() { m_trackTable->addCurrentTrackToQueue(); },
+        [this]() { m_trackTable->playNextCurrentTrack(); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         {},
         [this]() { clearAlbumFilter(); },
@@ -1548,11 +1560,11 @@ void MainWindow::revealTrackInLibrary(const Track &track)
             ? track.albumArtistName
             : track.artistName;
         if (!artist.isEmpty()) {
-            // Show all of the artist's tracks (drop any album filter) so the
-            // target track is guaranteed visible, then select it.
-            m_selectedAlbumTitle.clear();
+            // Narrow to the album as part of the reveal. h from Tracks clears
+            // that narrowing, so jumping back to the full artist remains cheap.
+            m_selectedAlbumTitle = track.albumTitle;
             m_artistSidebar->selectArtist(artist);
-            selectArtist(artist);
+            showArtist(artist, false, false);
         }
         m_trackTable->selectTrackByPath(track.path);
         break;
@@ -2793,6 +2805,24 @@ void MainWindow::syncQueueState()
     }
     prepareNextQueueTrack();
     saveQueueState();
+}
+
+void MainWindow::playAlbumNow(const QString &albumTitle)
+{
+    if (m_currentArtist.isEmpty() || albumTitle.isEmpty()) {
+        return;
+    }
+
+    const QVector<Track> tracks = m_librarySource == LibrarySource::Mpd
+        ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
+        : m_database->tracksForArtist(m_currentArtist, albumTitle);
+    if (tracks.isEmpty()) {
+        return;
+    }
+
+    const int startIndex = static_cast<int>(m_queue.size());
+    addTracksToQueue(tracks);
+    playQueueIndex(startIndex);
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)

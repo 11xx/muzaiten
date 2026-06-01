@@ -348,6 +348,22 @@ void AlbumGrid::activateCurrentAlbum()
     }
 }
 
+void AlbumGrid::addCurrentAlbumToQueue()
+{
+    const QString title = currentAlbumTitle();
+    if (!title.isEmpty()) {
+        emit albumAddToQueueRequested(title);
+    }
+}
+
+void AlbumGrid::playNextCurrentAlbum()
+{
+    const QString title = currentAlbumTitle();
+    if (!title.isEmpty()) {
+        emit albumPlayNextRequested(title);
+    }
+}
+
 QString AlbumGrid::currentAlbumTitle() const
 {
     const QModelIndex index = currentIndex();

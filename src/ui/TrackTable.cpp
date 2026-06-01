@@ -462,6 +462,30 @@ void TrackTable::activateCurrentTrack()
     }
 }
 
+void TrackTable::addCurrentTrackToQueue()
+{
+    const QModelIndex index = currentIndex();
+    if (!index.isValid()) {
+        return;
+    }
+    const QVector<Track> tracks = tracksForContextRow(index.row());
+    if (!tracks.isEmpty()) {
+        emit addToQueueRequested(tracks);
+    }
+}
+
+void TrackTable::playNextCurrentTrack()
+{
+    const QModelIndex index = currentIndex();
+    if (!index.isValid()) {
+        return;
+    }
+    const QVector<Track> tracks = tracksForContextRow(index.row());
+    if (!tracks.isEmpty()) {
+        emit playNextRequested(tracks);
+    }
+}
+
 QVector<Search::MatchDocument> TrackTable::searchDocuments() const
 {
     QVector<Search::MatchDocument> docs;
