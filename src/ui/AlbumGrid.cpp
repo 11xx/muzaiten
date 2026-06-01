@@ -830,6 +830,17 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
     const QModelIndex index = indexAt(pos);
     if (index.isValid()) {
         const QString albumTitle = index.data(AlbumTitleRole).toString();
+        const bool useMarkedSelection = !m_markedAlbumTitles.isEmpty();
+        QStringList selectionTitles = useMarkedSelection
+            ? albumTitlesForAction()
+            : QStringList{albumTitle};
+        selectionTitles.removeAll(QString());
+        QAction *narrow = menu.addAction(useMarkedSelection
+            ? QStringLiteral("Narrow to selection")
+            : QStringLiteral("Narrow to album"));
+        connect(narrow, &QAction::triggered, this, [this, selectionTitles]() {
+            emit albumSelectionNarrowRequested(selectionTitles);
+        });
         QAction *playNext = menu.addAction(QStringLiteral("Play next"));
         connect(playNext, &QAction::triggered, this, [this, albumTitle]() {
             emit albumPlayNextRequested(albumTitle);
