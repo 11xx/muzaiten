@@ -9,7 +9,7 @@ namespace TableNavigationScroll {
 
 inline constexpr int kDefaultPaddingRows = 3;
 
-inline void ensureRowVisible(QTableView *table, int row, int paddingRows = kDefaultPaddingRows)
+inline void keepRowAtPadding(QTableView *table, int row, int direction, int paddingRows = kDefaultPaddingRows)
 {
     if (table == nullptr || table->model() == nullptr || row < 0 || row >= table->model()->rowCount()) {
         return;
@@ -30,11 +30,26 @@ inline void ensureRowVisible(QTableView *table, int row, int paddingRows = kDefa
         return;
     }
 
-    if (top < padding) {
-        bar->setValue(bar->value() + top - padding);
-    } else if (bottom > viewportHeight - padding) {
-        bar->setValue(bar->value() + bottom - (viewportHeight - padding));
+    if (direction > 0) {
+        if (bottom > viewportHeight - padding) {
+            bar->setValue(bar->value() + bottom - (viewportHeight - padding));
+        }
+    } else if (direction < 0) {
+        if (top < padding) {
+            bar->setValue(bar->value() + top - padding);
+        }
+    } else {
+        if (top < padding) {
+            bar->setValue(bar->value() + top - padding);
+        } else if (bottom > viewportHeight - padding) {
+            bar->setValue(bar->value() + bottom - (viewportHeight - padding));
+        }
     }
+}
+
+inline void ensureRowVisible(QTableView *table, int row, int paddingRows = kDefaultPaddingRows)
+{
+    keepRowAtPadding(table, row, 0, paddingRows);
 }
 
 } // namespace TableNavigationScroll

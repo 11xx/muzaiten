@@ -20,6 +20,7 @@ struct MainPanelTarget {
     std::function<int()> rowCount;
     std::function<int()> currentRow;
     std::function<void(int row)> setCurrentRow;
+    std::function<void(int row, int scrollDirection)> setCurrentRowWithDirection;
     std::function<void()> activateCurrent;
     std::function<void()> prepareForFocus;
     std::function<void(int horizontal, int vertical)> moveCurrentInGrid;

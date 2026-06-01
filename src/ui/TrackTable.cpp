@@ -438,6 +438,11 @@ int TrackTable::currentRow() const
 
 void TrackTable::setCurrentRow(int row)
 {
+    setCurrentRow(row, 0);
+}
+
+void TrackTable::setCurrentRow(int row, int scrollDirection)
+{
     if (model() == nullptr || model()->rowCount() == 0) {
         return;
     }
@@ -445,7 +450,7 @@ void TrackTable::setCurrentRow(int row)
     const QModelIndex index = model()->index(safeRow, 0);
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
-    TableNavigationScroll::ensureRowVisible(this, safeRow, m_navigationScrollPadding);
+    TableNavigationScroll::keepRowAtPadding(this, safeRow, scrollDirection, m_navigationScrollPadding);
 }
 
 void TrackTable::moveCurrentRow(int delta)
@@ -454,7 +459,7 @@ void TrackTable::moveCurrentRow(int delta)
         return;
     }
     const int row = currentRow() >= 0 ? currentRow() : 0;
-    setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1));
+    setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1), delta);
 }
 
 void TrackTable::activateCurrentTrack()
