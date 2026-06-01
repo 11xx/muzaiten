@@ -35,6 +35,8 @@ public:
     void setCurrentRow(int row);
     void moveCurrentByGrid(int horizontal, int vertical);
     void activateCurrentAlbum();
+    void addCurrentAlbumToQueue();
+    void playNextCurrentAlbum();
     QString currentAlbumTitle() const;
     QVector<Search::MatchDocument> searchDocuments() const;
 

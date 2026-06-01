@@ -22,6 +22,9 @@ struct MainPanelTarget {
     std::function<void(int row)> setCurrentRow;
     std::function<void(int row, int scrollDirection)> setCurrentRowWithDirection;
     std::function<void()> activateCurrent;
+    std::function<void()> playCurrentNow;
+    std::function<void()> addCurrentToQueue;
+    std::function<void()> playNextCurrent;
     std::function<void()> prepareForFocus;
     std::function<void(int horizontal, int vertical)> moveCurrentInGrid;
     std::function<void()> clearNarrowing;
@@ -78,6 +81,9 @@ private:
     void focusQueue();
     void focusTracks();
     void activateCurrent();
+    void playCurrentNow();
+    void addCurrentToQueue();
+    void playNextCurrent();
     void cycleMatch(int direction);
     bool handleAlbumGridKey(QKeyEvent *event, const QString &action);
     bool handlePanelKey(QKeyEvent *event, MainPanelId panel);

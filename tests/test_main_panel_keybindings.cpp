@@ -19,8 +19,10 @@ private slots:
         QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_V)), QString::fromLatin1(MainPanelAction::PageUp));
         QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_N)), QString::fromLatin1(MainPanelAction::SearchNext));
         QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_P)), QString::fromLatin1(MainPanelAction::SearchPrevious));
-        QCOMPARE(bindings.value(QKeySequence(Qt::Key_Return)), QString::fromLatin1(MainPanelAction::Activate));
-        QCOMPARE(bindings.value(QKeySequence(Qt::Key_Space)), QString::fromLatin1(MainPanelAction::Activate));
+        QCOMPARE(bindings.value(QKeySequence(Qt::Key_Return)), QString::fromLatin1(MainPanelAction::PlayNow));
+        QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_Return)), QString::fromLatin1(MainPanelAction::PlayNow));
+        QCOMPARE(bindings.value(QKeySequence(Qt::Key_Space)), QString::fromLatin1(MainPanelAction::AddToQueue));
+        QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_Space)), QString::fromLatin1(MainPanelAction::PlayNext));
         QCOMPARE(bindings.value(QKeySequence(Qt::Key_Escape)), QString::fromLatin1(MainPanelAction::Escape));
         QCOMPARE(bindings.value(QKeySequence(Qt::ControlModifier | Qt::Key_G)), QString::fromLatin1(MainPanelAction::Escape));
     }

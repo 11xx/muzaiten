@@ -33,6 +33,8 @@ public:
     void setCurrentRow(int row, int scrollDirection);
     void moveCurrentRow(int delta);
     void activateCurrentTrack();
+    void addCurrentTrackToQueue();
+    void playNextCurrentTrack();
     QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:

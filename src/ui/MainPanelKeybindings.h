@@ -23,6 +23,9 @@ namespace MainPanelAction {
     inline constexpr auto FocusQueue = "focus_queue";
     inline constexpr auto FocusTracks = "focus_tracks";
     inline constexpr auto Activate = "activate";
+    inline constexpr auto PlayNow = "play_now";
+    inline constexpr auto AddToQueue = "add_to_queue";
+    inline constexpr auto PlayNext = "play_next";
     inline constexpr auto Search = "search";
     inline constexpr auto SearchNext = "search_next";
     inline constexpr auto SearchPrevious = "search_previous";
