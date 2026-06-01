@@ -94,12 +94,20 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
     QStyleOptionViewItem opt(option);
     initStyleOption(&opt, index);
     const bool selected = opt.state & QStyle::State_Selected;
+    const bool hovered = opt.state & QStyle::State_MouseOver;
     const bool rememberedOutline = selected && index.data(RememberedOutlineRole).toBool();
     const bool filledSelection = selected && !rememberedOutline;
     opt.state &= ~QStyle::State_MouseOver;
     opt.state &= ~QStyle::State_Selected;
 
     QApplication::style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, opt.widget);
+    if (hovered) {
+        QColor hover = option.palette.color(QPalette::Highlight);
+        hover.setAlpha(filledSelection ? 42 : 24);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(hover);
+        painter->drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 6, 6);
+    }
     if (filledSelection) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(SelectionColors::selectedFill(option));
@@ -110,6 +118,14 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         painter->setPen(pen);
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(option.rect.adjusted(3, 3, -4, -4), 6, 6);
+    }
+    if (hovered && selected) {
+        QColor hoverEdge = option.palette.color(QPalette::HighlightedText);
+        hoverEdge.setAlpha(90);
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setPen(QPen(hoverEdge, 1));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(option.rect.adjusted(4, 4, -5, -5), 5, 5);
     }
 
     const int padding = index.data(CellPaddingRole).toInt() > 0 ? index.data(CellPaddingRole).toInt() : 8;
