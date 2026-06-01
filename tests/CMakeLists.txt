@@ -175,3 +175,12 @@ target_include_directories(test_result_ranker PRIVATE ../src)
 target_link_libraries(test_result_ranker PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_result_ranker PRIVATE cxx_std_26)
 add_test(NAME test_result_ranker COMMAND test_result_ranker)
+
+add_executable(test_main_panel_keybindings
+    test_main_panel_keybindings.cpp
+    ../src/ui/MainPanelKeybindings.cpp
+)
+target_include_directories(test_main_panel_keybindings PRIVATE ../src)
+target_link_libraries(test_main_panel_keybindings PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_compile_features(test_main_panel_keybindings PRIVATE cxx_std_26)
+add_test(NAME test_main_panel_keybindings COMMAND test_main_panel_keybindings)
