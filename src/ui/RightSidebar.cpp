@@ -7,6 +7,7 @@
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
+#include "ui/TableNavigationScroll.h"
 
 #include <QAction>
 #include <QAbstractItemView>
@@ -1280,6 +1281,11 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
     }
 }
 
+void RightSidebar::setNavigationScrollPadding(int rows)
+{
+    m_navigationScrollPadding = std::max(0, rows);
+}
+
 QWidget *RightSidebar::queueNavigationWidget() const
 {
     return m_queueTable;
@@ -1305,7 +1311,7 @@ void RightSidebar::setQueueCurrentRow(int row)
     const QModelIndex index = m_queueTable->model()->index(safeRow, 0);
     m_queueTable->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     m_queueTable->setCurrentIndex(index);
-    m_queueTable->scrollTo(index, QAbstractItemView::PositionAtCenter);
+    TableNavigationScroll::ensureRowVisible(m_queueTable, safeRow, m_navigationScrollPadding);
 }
 
 void RightSidebar::moveQueueCurrentRow(int delta)

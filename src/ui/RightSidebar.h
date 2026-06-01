@@ -31,6 +31,7 @@ public:
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void setHeaderHeight(int height);
+    void setNavigationScrollPadding(int rows);
     QWidget *queueNavigationWidget() const;
     int queueRowCount() const;
     int queueCurrentRow() const;
@@ -85,6 +86,7 @@ private:
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
     int m_currentQueueIndex = -1;
+    int m_navigationScrollPadding = 3;
     int m_playNextBegin = -1;
     int m_playNextEnd = -1;
     bool m_showPlayNextBadge = true;

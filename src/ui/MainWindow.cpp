@@ -32,6 +32,7 @@
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/MainPanelKeybindings.h"
+#include "ui/TableNavigationScroll.h"
 #include "search/RankConfig.h"
 #include "ui/TrackTable.h"
 
@@ -441,7 +442,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_albumGrid->rowCount(); },
         [this]() { return m_albumGrid->currentRow(); },
         [this](int row) { m_albumGrid->setCurrentRow(row); },
-        [this]() { m_albumGrid->activateCurrentAlbum(); },
+        [this]() { narrowAlbumFilter(m_albumGrid->currentAlbumTitle()); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { clearAlbumFilter(); },
@@ -1047,6 +1048,20 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
     saveExplorerState();
 }
 
+void MainWindow::narrowAlbumFilter(const QString &albumTitle)
+{
+    if (albumTitle.isEmpty() || m_selectedAlbumTitle == albumTitle) {
+        return;
+    }
+    rememberTrackTableViewState();
+    m_selectedAlbumTitle = albumTitle;
+    rememberCurrentSourceSelection();
+    refreshAlbumGrid();
+    refreshTrackTable();
+    restoreTrackTableViewState();
+    saveExplorerState();
+}
+
 void MainWindow::clearAlbumFilter()
 {
     if (m_selectedAlbumTitle.isEmpty()) {
@@ -1359,6 +1374,11 @@ void MainWindow::loadViewSettings()
         m_panelSearch->setFocusOrder(mainPanelFocusOrderFromJson(focusOrder));
         m_panelSearch->setActivePanelFromString(m_state->setting(QStringLiteral("mainPanel.activePanel")));
     }
+    const int mainPanelScrollPadding = std::clamp(m_state->setting(QStringLiteral("mainPanel.scrollPadding"),
+                                                                   QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
+                                                  0, 20);
+    m_rightSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
+    m_trackTable->setNavigationScrollPadding(mainPanelScrollPadding);
 
     switchMainView(m_mainView);
     applySharedTableSettings();

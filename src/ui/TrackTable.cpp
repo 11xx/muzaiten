@@ -6,6 +6,7 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
+#include "ui/TableNavigationScroll.h"
 
 #include <QAction>
 #include <QAbstractTableModel>
@@ -20,6 +21,7 @@
 #include <QByteArray>
 #include <QWheelEvent>
 
+#include <algorithm>
 #include <limits>
 
 namespace {
@@ -321,6 +323,11 @@ void TrackTable::selectTrackByPath(const QString &path)
     }
 }
 
+void TrackTable::setNavigationScrollPadding(int rows)
+{
+    m_navigationScrollPadding = std::max(0, rows);
+}
+
 int TrackTable::sortColumn() const
 {
     return horizontalHeader()->sortIndicatorSection();
@@ -438,7 +445,7 @@ void TrackTable::setCurrentRow(int row)
     const QModelIndex index = model()->index(safeRow, 0);
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
-    scrollTo(index, QAbstractItemView::PositionAtCenter);
+    TableNavigationScroll::ensureRowVisible(this, safeRow, m_navigationScrollPadding);
 }
 
 void TrackTable::moveCurrentRow(int delta)

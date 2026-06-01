@@ -53,6 +53,7 @@ private:
     void refreshArtists();
     void selectArtist(const QString &artistName);
     void selectAlbumFilter(const QString &albumTitle);
+    void narrowAlbumFilter(const QString &albumTitle);
     void clearAlbumFilter();
     void refreshAlbumGrid(bool freshLoad = false);
     void refreshTrackTable();
