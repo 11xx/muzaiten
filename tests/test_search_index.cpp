@@ -187,6 +187,20 @@ private slots:
         QCOMPARE(results[0].rec.title, QStringLiteral("Miles Davis Special"));
     }
 
+    void refactorStillScoreSortsInsteadOfDisplayOrder()
+    {
+        SearchIndex idx;
+        idx.build({
+            makeRecord(QStringLiteral("Path Only"), QStringLiteral("Artist"),
+                       QStringLiteral("Album"), QStringLiteral("/music/blue/path_only.flac")),
+            makeRecord(QStringLiteral("Blue Title"), QStringLiteral("Artist"),
+                       QStringLiteral("Album"), QStringLiteral("/music/zzz/blue_title.flac")),
+        });
+        const auto results = idx.match(SearchQuery::parse(QStringLiteral("blue")), false);
+        QCOMPARE(results.size(), 2);
+        QCOMPARE(results[0].rec.title, QStringLiteral("Blue Title"));
+    }
+
     void fuzzyMode_matchesSubsequence()
     {
         SearchIndex idx;
