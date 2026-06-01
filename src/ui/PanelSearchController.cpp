@@ -66,6 +66,7 @@ void PanelSearchController::registerTarget(MainPanelTarget target)
     }
     m_state.insert(target.id, {});
     m_targets.push_back(std::move(target));
+    updatePanelActiveProperties();
 }
 
 void PanelSearchController::setKeyBindingProfileName(const QString &name)
@@ -85,6 +86,7 @@ void PanelSearchController::activateForMainView()
     if (!m_hasActivePanel) {
         setActivePanel(MainPanelId::Artists, false);
     }
+    updatePanelActiveProperties();
     updateSearchUi();
     QTimer::singleShot(0, this, [this]() {
         if (m_mainViewActive && !m_edit->hasFocus()) {
@@ -97,6 +99,7 @@ void PanelSearchController::deactivateForNonMainView()
 {
     m_mainViewActive = false;
     setVisible(false);
+    updatePanelActiveProperties();
 }
 
 void PanelSearchController::refreshPanel(MainPanelId id)
@@ -125,6 +128,7 @@ void PanelSearchController::setActivePanel(MainPanelId id, bool focus)
     if (focus) {
         focusActivePanel();
     }
+    updatePanelActiveProperties();
     updateSearchUi();
     if (changed) {
         emit activePanelChanged(id);
@@ -200,6 +204,19 @@ MainPanelTarget *PanelSearchController::targetForWidget(QWidget *widget)
         return nullptr;
     }
     return targetForId(m_widgetToPanel.value(widget));
+}
+
+void PanelSearchController::updatePanelActiveProperties()
+{
+    for (const MainPanelTarget &target : m_targets) {
+        const bool active = m_mainViewActive && m_hasActivePanel && target.id == m_activePanel;
+        target.focusWidget->setProperty("mainPanelActive", active);
+        target.focusWidget->update();
+        if (auto *view = qobject_cast<QAbstractItemView *>(target.focusWidget)) {
+            view->viewport()->setProperty("mainPanelActive", active);
+            view->viewport()->update();
+        }
+    }
 }
 
 void PanelSearchController::focusActivePanel()

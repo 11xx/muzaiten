@@ -1,5 +1,6 @@
 #include "ui/StarRatingDelegate.h"
 
+#include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 
 #include <QEvent>
@@ -51,7 +52,7 @@ void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     const bool selected = option.state & QStyle::State_Selected;
     const bool hovered = (m_hoveredRow == index.row()) || (option.state & QStyle::State_MouseOver);
     if (selected) {
-        painter->fillRect(option.rect, option.palette.color(QPalette::Highlight));
+        painter->fillRect(option.rect, SelectionColors::selectedFill(option));
     } else if (hovered) {
         QColor hover = option.palette.color(QPalette::Highlight);
         hover.setAlpha(34);

@@ -1,5 +1,7 @@
 #include "ui/DenseTableDelegate.h"
 
+#include "ui/SelectionColors.h"
+
 #include <QPainter>
 #include <QStyleOptionViewItem>
 #include <QWidget>
@@ -23,7 +25,7 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
 
     if (selected) {
-        painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
+        painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
     } else if (hovered) {
         QColor hover = opt.palette.color(QPalette::Highlight);
         hover.setAlpha(34);
@@ -33,7 +35,7 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     }
 
     if (selected) {
-        opt.palette.setColor(QPalette::Text, opt.palette.color(QPalette::HighlightedText));
+        opt.palette.setColor(QPalette::Text, SelectionColors::selectedText(opt));
     } else {
         opt.state &= ~QStyle::State_MouseOver;
         opt.state &= ~QStyle::State_Selected;
