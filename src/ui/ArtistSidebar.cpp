@@ -2,6 +2,7 @@
 
 #include "core/Artist.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/SelectionColors.h"
 
 #include <QAction>
 #include <QApplication>
@@ -41,7 +42,7 @@ public:
         const bool selected = opt.state & QStyle::State_Selected;
         const bool hovered = opt.state & QStyle::State_MouseOver;
         if (selected) {
-            painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
+            painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
         } else if (hovered) {
             QColor hover = opt.palette.color(QPalette::Highlight);
             hover.setAlpha(34);
@@ -56,15 +57,15 @@ public:
         const bool showCount = index.data(Qt::UserRole + 2).toBool();
 
         painter->save();
-        painter->setPen(selected ? option.palette.color(QPalette::HighlightedText) : option.palette.color(QPalette::Text));
+        painter->setPen(selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Text));
         QRect nameRect = textRect;
         if (showCount && countValue.isValid()) {
             const QString count = QString::number(countValue.toInt());
             const int countWidth = option.fontMetrics.horizontalAdvance(count) + 8;
             nameRect.setRight(textRect.right() - countWidth);
-            painter->setPen(selected ? option.palette.color(QPalette::HighlightedText) : option.palette.color(QPalette::Disabled, QPalette::Text));
+            painter->setPen(selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Disabled, QPalette::Text));
             painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, count);
-            painter->setPen(selected ? option.palette.color(QPalette::HighlightedText) : option.palette.color(QPalette::Text));
+            painter->setPen(selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Text));
         }
         painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter, option.fontMetrics.elidedText(name, Qt::ElideRight, nameRect.width()));
         painter->restore();

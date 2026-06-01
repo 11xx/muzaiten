@@ -4,6 +4,7 @@
 #include "ui/DenseTableDelegate.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
@@ -374,7 +375,7 @@ public:
         const bool playing = index.row() == m_currentRow;
 
         if (selected) {
-            painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
+            painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
         } else if (hovered) {
             QColor hover = opt.palette.color(QPalette::Highlight);
             hover.setAlpha(34);
@@ -390,7 +391,7 @@ public:
         }
 
         if (selected) {
-            opt.palette.setColor(QPalette::Text, opt.palette.color(QPalette::HighlightedText));
+            opt.palette.setColor(QPalette::Text, SelectionColors::selectedText(opt));
         } else {
             opt.state &= ~QStyle::State_MouseOver;
             opt.state &= ~QStyle::State_Selected;
@@ -404,7 +405,7 @@ public:
             const int ordinal = index.data(PlayNextOrdinalRole).toInt();
             if (ordinal > 0) {
                 painter->save();
-                QColor color = option.palette.color(selected ? QPalette::HighlightedText : QPalette::Highlight);
+                QColor color = selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Highlight);
                 color.setAlpha(selected ? 160 : 130);
                 painter->setPen(color);
                 QFont f = painter->font();

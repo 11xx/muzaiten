@@ -63,6 +63,7 @@ private:
     MainPanelTarget *targetForId(MainPanelId id);
     const MainPanelTarget *targetForId(MainPanelId id) const;
     MainPanelTarget *targetForWidget(QWidget *widget);
+    void updatePanelActiveProperties();
     void focusActivePanel();
     void openSearch();
     void escapeSearch();
