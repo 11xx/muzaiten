@@ -410,8 +410,14 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
     if (!currentPath.isEmpty()) {
         selectTrackByPath(currentPath);
     }
-    if (!currentIndex().isValid() && model()->rowCount() > 0) {
-        setCurrentRow(0);
+    if (model()->rowCount() > 0) {
+        const int row = currentIndex().isValid() ? currentIndex().row() : 0;
+        const bool rowSelected = selectionModel() != nullptr
+            && currentIndex().isValid()
+            && selectionModel()->isRowSelected(currentIndex().row(), currentIndex().parent());
+        if (!currentIndex().isValid() || !rowSelected) {
+            setCurrentRow(std::clamp(row, 0, model()->rowCount() - 1));
+        }
     }
 }
 

@@ -15,6 +15,8 @@ private slots:
         QCOMPARE(bindings.value(QKeySequence(Qt::Key_L)), QString::fromLatin1(MainPanelAction::FocusNext));
         QCOMPARE(bindings.value(QKeySequence(Qt::Key_Q)), QString::fromLatin1(MainPanelAction::FocusQueue));
         QCOMPARE(bindings.value(QKeySequence(Qt::Key_Slash)), QString::fromLatin1(MainPanelAction::Search));
+        QCOMPARE(bindings.value(QKeySequence(Qt::ControlModifier | Qt::Key_V)), QString::fromLatin1(MainPanelAction::PageDown));
+        QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_V)), QString::fromLatin1(MainPanelAction::PageUp));
         QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_N)), QString::fromLatin1(MainPanelAction::SearchNext));
         QCOMPARE(bindings.value(QKeySequence(Qt::AltModifier | Qt::Key_P)), QString::fromLatin1(MainPanelAction::SearchPrevious));
         QCOMPARE(bindings.value(QKeySequence(Qt::Key_Return)), QString::fromLatin1(MainPanelAction::Activate));

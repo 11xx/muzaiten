@@ -437,7 +437,10 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
 bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
 {
     Q_UNUSED(panel)
-    const QString action = m_keyBindings.value(keySequenceForEvent(event));
+    QString action = m_keyBindings.value(keySequenceForEvent(event));
+    if (action.isEmpty() && event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_V) {
+        action = QString::fromLatin1(MainPanelAction::PageDown);
+    }
     if (action.isEmpty() && m_activePanel != MainPanelId::Albums) {
         return false;
     }

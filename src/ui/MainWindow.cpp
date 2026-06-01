@@ -430,7 +430,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { return m_artistSidebar->rowCount(); },
         [this]() { return m_artistSidebar->currentRow(); },
         [this](int row) { m_artistSidebar->setCurrentRow(row); },
-        {},
+        [this](int row, int direction) { m_artistSidebar->setCurrentRow(row, direction); },
         [this]() { m_artistSidebar->activateCurrentArtist(); },
         {},
         {},
@@ -1428,6 +1428,7 @@ void MainWindow::loadViewSettings()
                                                                    QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
                                                   0, 20);
     m_rightSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
+    m_artistSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
     m_trackTable->setNavigationScrollPadding(mainPanelScrollPadding);
 
     switchMainView(m_mainView);
