@@ -25,6 +25,9 @@ constexpr auto apiUrl = "https://api.listenbrainz.org/1/submit-listens";
 // Minimum seconds between "playing_now" resubmissions on play/resume, to
 // prevent play-pause spam from flooding ListenBrainz with update requests.
 constexpr qint64 kPlayingNowResubmitMinSecs = 30;
+// Minimum seconds between eager "playing_now" updates for new track starts.
+// Rapid skips are coalesced so only the latest selected track is submitted.
+constexpr qint64 kTrackStartPlayingNowMinSecs = 10;
 
 QString trackTitle(const Track &track)
 {
@@ -58,10 +61,13 @@ ListenBrainzScrobbler::ListenBrainzScrobbler(QObject *parent)
     m_network = new QNetworkAccessManager(this);
     m_progressTimer = new QTimer(this);
     m_retryTimer = new QTimer(this);
+    m_trackStartPlayingNowTimer = new QTimer(this);
     m_progressTimer->setInterval(1000);
     m_retryTimer->setInterval(60000);
+    m_trackStartPlayingNowTimer->setSingleShot(true);
     connect(m_progressTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::checkListenProgress);
     connect(m_retryTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::retryPending);
+    connect(m_trackStartPlayingNowTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::submitPendingTrackStartPlayingNow);
 }
 
 void ListenBrainzScrobbler::configure(bool enabled, const QString &token, const QString &cachePath)
@@ -95,7 +101,7 @@ void ListenBrainzScrobbler::trackStarted(const Track &track)
     m_segmentTimer.restart();
     m_progressTimer->start();
 
-    submitPlayingNow(track);
+    submitPlayingNowForTrackStart(track);
 }
 
 void ListenBrainzScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
@@ -190,6 +196,37 @@ void ListenBrainzScrobbler::submitPlayingNow(const Track &track)
     body.insert(QStringLiteral("listen_type"), QStringLiteral("playing_now"));
     body.insert(QStringLiteral("payload"), payload);
     submitPayload(body, SubmissionKind::PlayingNow);
+}
+
+void ListenBrainzScrobbler::submitPlayingNowForTrackStart(const Track &track)
+{
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    if (m_lastPlayingNowSecs == 0 || now - m_lastPlayingNowSecs >= kTrackStartPlayingNowMinSecs) {
+        m_hasPendingTrackStartPlayingNow = false;
+        m_trackStartPlayingNowTimer->stop();
+        submitPlayingNow(track);
+        return;
+    }
+
+    m_pendingTrackStartPlayingNow = track;
+    m_hasPendingTrackStartPlayingNow = true;
+    const qint64 delayMs = std::max<qint64>(1, (kTrackStartPlayingNowMinSecs - (now - m_lastPlayingNowSecs)) * 1000);
+    m_trackStartPlayingNowTimer->start(static_cast<int>(delayMs));
+}
+
+void ListenBrainzScrobbler::submitPendingTrackStartPlayingNow()
+{
+    if (!m_hasPendingTrackStartPlayingNow) {
+        return;
+    }
+
+    const Track track = m_pendingTrackStartPlayingNow;
+    m_hasPendingTrackStartPlayingNow = false;
+    if (!m_playing || m_listenSubmitted || !m_hasCurrentTrack || track.path != m_currentTrack.path) {
+        return;
+    }
+
+    submitPlayingNow(track);
 }
 
 void ListenBrainzScrobbler::submitCompletedListen()
