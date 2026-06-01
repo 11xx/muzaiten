@@ -507,7 +507,7 @@ QVector<Search::MatchDocument> TrackTable::searchDocuments() const
 
 void TrackTable::changeEvent(QEvent *event)
 {
-    QTableView::changeEvent(event);
+    NavigableTableView::changeEvent(event);
     if (event->type() == QEvent::PaletteChange
         || event->type() == QEvent::ApplicationPaletteChange
         || event->type() == QEvent::StyleChange) {

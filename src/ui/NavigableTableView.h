@@ -24,10 +24,12 @@ protected:
     void rowsInserted(const QModelIndex &parent, int start, int end) override;
     void rowsAboutToBeRemoved(const QModelIndex &parent, int start, int end) override;
     void currentChanged(const QModelIndex &current, const QModelIndex &previous) override;
+    void changeEvent(QEvent *event) override;
 
 private:
     void scrollNavigationRowToAnchor(int row, int direction, int previousTopRow);
     void updateRow(const QModelIndex &index);
+    void refreshInactiveHighlight();
 
     int m_navigationScrollPadding = 3;
     bool m_mainPanelActive = false;
