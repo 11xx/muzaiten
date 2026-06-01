@@ -1,6 +1,8 @@
 #include "ui/NavigableTableView.h"
+#include "ui/SelectionColors.h"
 
 #include <QHeaderView>
+#include <QPalette>
 #include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTest>
@@ -14,6 +16,7 @@ private slots:
     void downMovementAnchorsAtBottomPadding();
     void upMovementAnchorsAtTopPadding();
     void directJumpUsesMinimalVisibilityScroll();
+    void inactivePanelDimsSelectionHighlight();
 
 private:
     static NavigableTableView *makeView(QStandardItemModel *model);
@@ -86,6 +89,29 @@ void NavigationScrollTest::directJumpUsesMinimalVisibilityScroll()
 
     view->setCurrentNavigationRow(20, 0);
     QCOMPARE(view->verticalScrollBar()->value(), 11);
+}
+
+// QTableView paints the selected-row background itself through the palette
+// Highlight role, so an out-of-focus panel must dim that role to mirror the
+// dimming list-view delegates get for free. Guards against the highlight
+// staying at full strength when the panel is inactive.
+void NavigationScrollTest::inactivePanelDimsSelectionHighlight()
+{
+    QStandardItemModel model(10, 1);
+    std::unique_ptr<NavigableTableView> view(makeView(&model));
+
+    view->setMainPanelActive(true);
+    const QColor activeHighlight = view->palette().color(QPalette::Highlight);
+    const QColor base = view->palette().color(QPalette::Base);
+
+    view->setMainPanelActive(false);
+    const QColor inactiveHighlight = view->palette().color(QPalette::Highlight);
+
+    QVERIFY(inactiveHighlight != activeHighlight);
+    QCOMPARE(inactiveHighlight, SelectionColors::dimmedHighlight(base, activeHighlight));
+
+    view->setMainPanelActive(true);
+    QCOMPARE(view->palette().color(QPalette::Highlight), activeHighlight);
 }
 
 QTEST_MAIN(NavigationScrollTest)

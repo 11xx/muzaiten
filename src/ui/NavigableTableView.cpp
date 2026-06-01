@@ -1,6 +1,10 @@
 #include "ui/NavigableTableView.h"
 
+#include "ui/SelectionColors.h"
+
 #include <QAbstractItemModel>
+#include <QApplication>
+#include <QEvent>
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QScrollBar>
@@ -55,12 +59,42 @@ void NavigableTableView::setMainPanelActive(bool active)
     m_mainPanelActive = active;
     setProperty("mainPanelActive", active);
     viewport()->setProperty("mainPanelActive", active);
+    refreshInactiveHighlight();
     viewport()->update();
 }
 
 bool NavigableTableView::mainPanelActive() const
 {
     return m_mainPanelActive;
+}
+
+void NavigableTableView::refreshInactiveHighlight()
+{
+    // Unlike list views, QTableView paints the selected-row background itself
+    // through the palette Highlight role, so clearing State_Selected in the item
+    // delegate is not enough to dim a remembered selection when the panel is out
+    // of focus. Dim the Highlight role directly while inactive, recomputed from
+    // the inherited palette so runtime theme changes are honored.
+    QPalette pal = QApplication::palette(this);
+    if (!m_mainPanelActive) {
+        const QColor dim = SelectionColors::dimmedHighlight(pal.color(QPalette::Base),
+                                                            pal.color(QPalette::Highlight));
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+            pal.setColor(group, QPalette::Highlight, dim);
+        }
+    }
+    setPalette(pal);
+}
+
+void NavigableTableView::changeEvent(QEvent *event)
+{
+    QTableView::changeEvent(event);
+    // Re-derive the dimmed Highlight after an app-wide palette or style change.
+    // PaletteChange is excluded so our own setPalette() override does not recurse.
+    if (event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::StyleChange) {
+        refreshInactiveHighlight();
+    }
 }
 
 void NavigableTableView::rowsInserted(const QModelIndex &parent, int start, int end)
