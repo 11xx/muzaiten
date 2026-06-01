@@ -6,11 +6,11 @@
 
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
+#include "ui/NavigableTableView.h"
 
 class QImage;
 class QLabel;
 class QSplitter;
-class QTableView;
 class QTableWidget;
 class QWidget;
 
@@ -70,7 +70,7 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    QTableView *m_queueTable = nullptr;
+    NavigableTableView *m_queueTable = nullptr;
     QLabel *m_albumArt = nullptr;
     QWidget *m_trackInfoPane = nullptr;
     QWidget *m_trackInfoTitle = nullptr;
@@ -87,7 +87,6 @@ private:
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
     int m_currentQueueIndex = -1;
-    int m_navigationScrollPadding = 3;
     int m_playNextBegin = -1;
     int m_playNextEnd = -1;
     bool m_showPlayNextBadge = true;

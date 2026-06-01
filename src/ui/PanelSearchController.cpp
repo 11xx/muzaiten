@@ -1,6 +1,7 @@
 #include "ui/PanelSearchController.h"
 
 #include "search/SearchQuery.h"
+#include "ui/NavigableTableView.h"
 
 #include <QAbstractItemView>
 #include <QEvent>
@@ -210,11 +211,16 @@ void PanelSearchController::updatePanelActiveProperties()
 {
     for (const MainPanelTarget &target : m_targets) {
         const bool active = m_mainViewActive && m_hasActivePanel && target.id == m_activePanel;
-        target.focusWidget->setProperty("mainPanelActive", active);
-        target.focusWidget->update();
-        if (auto *view = qobject_cast<QAbstractItemView *>(target.focusWidget)) {
+        if (auto *table = qobject_cast<NavigableTableView *>(target.focusWidget)) {
+            table->setMainPanelActive(active);
+        } else if (auto *view = qobject_cast<QAbstractItemView *>(target.focusWidget)) {
+            target.focusWidget->setProperty("mainPanelActive", active);
+            target.focusWidget->update();
             view->viewport()->setProperty("mainPanelActive", active);
             view->viewport()->update();
+        } else {
+            target.focusWidget->setProperty("mainPanelActive", active);
+            target.focusWidget->update();
         }
     }
 }
