@@ -31,6 +31,7 @@ public:
     int rowCount() const;
     int currentRow() const;
     void setCurrentRow(int row);
+    void setCurrentRow(int row, int scrollDirection);
     void moveCurrentRow(int delta);
     void activateCurrentTrack();
     QVector<Search::MatchDocument> searchDocuments() const;

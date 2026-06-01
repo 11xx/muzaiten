@@ -23,7 +23,7 @@ inline QColor selectedFill(const QStyleOptionViewItem &option)
 {
     QColor color = option.palette.color(QPalette::Highlight);
     if (!isActiveMainPanel(option.widget)) {
-        color.setAlpha(58);
+        color.setAlpha(36);
     }
     return color;
 }

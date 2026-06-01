@@ -329,7 +329,12 @@ void PanelSearchController::moveCurrent(int delta)
             return;
         }
         const int row = target->currentRow() >= 0 ? target->currentRow() : 0;
-        target->setCurrentRow(std::clamp(row + delta, 0, target->rowCount() - 1));
+        const int next = std::clamp(row + delta, 0, target->rowCount() - 1);
+        if (target->setCurrentRowWithDirection) {
+            target->setCurrentRowWithDirection(next, delta);
+        } else {
+            target->setCurrentRow(next);
+        }
     }
 }
 

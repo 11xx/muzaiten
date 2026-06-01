@@ -36,6 +36,7 @@ public:
     int queueRowCount() const;
     int queueCurrentRow() const;
     void setQueueCurrentRow(int row);
+    void setQueueCurrentRow(int row, int scrollDirection);
     void moveQueueCurrentRow(int delta);
     void activateCurrentQueueTrack();
     QVector<Search::MatchDocument> queueSearchDocuments() const;

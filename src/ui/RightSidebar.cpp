@@ -396,7 +396,11 @@ public:
         }
 
         if (selected) {
-            opt.palette.setColor(QPalette::Text, SelectionColors::selectedText(opt));
+            const QColor fill = SelectionColors::selectedFill(opt);
+            const QColor text = SelectionColors::selectedText(opt);
+            opt.palette.setColor(QPalette::Highlight, fill);
+            opt.palette.setColor(QPalette::HighlightedText, text);
+            opt.palette.setColor(QPalette::Text, text);
         } else {
             opt.state &= ~QStyle::State_MouseOver;
         }
@@ -1304,6 +1308,11 @@ int RightSidebar::queueCurrentRow() const
 
 void RightSidebar::setQueueCurrentRow(int row)
 {
+    setQueueCurrentRow(row, 0);
+}
+
+void RightSidebar::setQueueCurrentRow(int row, int scrollDirection)
+{
     if (m_queueTable == nullptr || m_queueTable->model() == nullptr || m_queueTable->model()->rowCount() == 0) {
         return;
     }
@@ -1311,7 +1320,7 @@ void RightSidebar::setQueueCurrentRow(int row)
     const QModelIndex index = m_queueTable->model()->index(safeRow, 0);
     m_queueTable->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     m_queueTable->setCurrentIndex(index);
-    TableNavigationScroll::ensureRowVisible(m_queueTable, safeRow, m_navigationScrollPadding);
+    TableNavigationScroll::keepRowAtPadding(m_queueTable, safeRow, scrollDirection, m_navigationScrollPadding);
 }
 
 void RightSidebar::moveQueueCurrentRow(int delta)
@@ -1320,7 +1329,7 @@ void RightSidebar::moveQueueCurrentRow(int delta)
         return;
     }
     const int row = queueCurrentRow() >= 0 ? queueCurrentRow() : 0;
-    setQueueCurrentRow(std::clamp(row + delta, 0, queueRowCount() - 1));
+    setQueueCurrentRow(std::clamp(row + delta, 0, queueRowCount() - 1), delta);
 }
 
 void RightSidebar::activateCurrentQueueTrack()
