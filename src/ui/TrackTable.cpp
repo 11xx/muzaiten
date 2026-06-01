@@ -438,7 +438,7 @@ void TrackTable::setCurrentRow(int row)
     const QModelIndex index = model()->index(safeRow, 0);
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
-    scrollTo(index, QAbstractItemView::EnsureVisible);
+    scrollTo(index, QAbstractItemView::PositionAtCenter);
 }
 
 void TrackTable::moveCurrentRow(int delta)

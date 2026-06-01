@@ -403,10 +403,7 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
 
     if (event->modifiers() == Qt::NoModifier) {
         if (event->key() == Qt::Key_N) {
-            if (target->clearNarrowing) {
-                target->clearNarrowing();
-            }
-            focusTracks();
+            activateCurrent();
             return true;
         }
         if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) {
@@ -448,7 +445,9 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::FocusPrevious)) focusRelative(-1);
     else if (action == QString::fromLatin1(MainPanelAction::FocusNext)) {
         if (m_activePanel == MainPanelId::Albums) {
-            activateCurrent();
+            if (MainPanelTarget *target = targetForId(m_activePanel); target != nullptr && target->clearNarrowing) {
+                target->clearNarrowing();
+            }
         }
         focusRelative(+1);
     }
