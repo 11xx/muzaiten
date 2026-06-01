@@ -26,7 +26,7 @@ protected:
     void currentChanged(const QModelIndex &current, const QModelIndex &previous) override;
 
 private:
-    void scrollNavigationRowToAnchor(int row, int direction);
+    void scrollNavigationRowToAnchor(int row, int direction, int previousTopRow);
     void updateRow(const QModelIndex &index);
 
     int m_navigationScrollPadding = 3;
