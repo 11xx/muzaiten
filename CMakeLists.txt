@@ -78,6 +78,7 @@ set(MUZAITEN_SOURCES
     src/search/RankConfig.cpp
     src/search/ResultRanker.cpp
     src/search/SearchIndex.cpp
+    src/search/SearchMatcher.cpp
     src/search/SearchQuery.cpp
     src/search/SearchWorker.cpp
     src/ui/AlbumGrid.cpp
@@ -148,6 +149,7 @@ set(MUZAITEN_HEADERS
     src/search/RankConfig.h
     src/search/ResultRanker.h
     src/search/SearchIndex.h
+    src/search/SearchMatcher.h
     src/search/SearchQuery.h
     src/search/SearchRecord.h
     src/search/SearchWorker.h

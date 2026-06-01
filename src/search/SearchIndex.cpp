@@ -1,6 +1,7 @@
 #include "search/SearchIndex.h"
 
 #include "search/FuzzyMatch.h"
+#include "search/SearchMatcher.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
 
@@ -10,203 +11,6 @@
 namespace Search {
 
 namespace {
-
-// ---- numeric comparison helper --------------------------------------------
-
-bool compareNumeric(qint64 trackValue, CompareOp op, qint64 queryValue)
-{
-    switch (op) {
-    case CompareOp::Eq: return trackValue == queryValue;
-    case CompareOp::Ne: return trackValue != queryValue;
-    case CompareOp::Lt: return trackValue <  queryValue;
-    case CompareOp::Le: return trackValue <= queryValue;
-    case CompareOp::Gt: return trackValue >  queryValue;
-    case CompareOp::Ge: return trackValue >= queryValue;
-    }
-    return false;
-}
-
-int yearFromDate(const QString &date)
-{
-    if (date.length() >= 4) {
-        bool ok;
-        const int y = date.left(4).toInt(&ok);
-        if (ok) return y;
-    }
-    return 0;
-}
-
-bool isBoundaryChar(QChar c)
-{
-    return c.isSpace() || c == QLatin1Char('/') || c == QLatin1Char('-')
-        || c == QLatin1Char('_') || c == QLatin1Char('.') || c == QLatin1Char('(')
-        || c == QLatin1Char('[') || c == QLatin1Char(',');
-}
-
-// Cheap exact-substring score for one (already-lowercased) field.
-// Returns INT_MIN when the field does not match the term.
-int exactFieldScore(const QString &norm, const Term &term, int weight)
-{
-    const QString &needle = term.text;
-    if (norm.isEmpty() || needle.isEmpty()) return INT_MIN;
-
-    if (term.prefixAnchor && term.suffixAnchor) {
-        return norm == needle ? weight + 40 : INT_MIN;
-    }
-    if (term.prefixAnchor) {
-        return norm.startsWith(needle) ? weight + 30 : INT_MIN;
-    }
-    if (term.suffixAnchor) {
-        return norm.endsWith(needle) ? weight + 12 : INT_MIN;
-    }
-
-    const int idx = static_cast<int>(norm.indexOf(needle));
-    if (idx < 0) return INT_MIN;
-
-    int s = weight;
-    if (idx == 0) {
-        s += 25;
-    } else if (isBoundaryChar(norm[idx - 1])) {
-        s += 18;
-    }
-    s += std::max(0, 20 - idx);  // earlier matches rank slightly higher
-    return s;
-}
-
-// Two-pointer subsequence test (both args already lowercased) — a cheap reject
-// before paying for the fuzzy DP.
-bool isSubsequence(const QString &hay, const QString &needle)
-{
-    int j = 0;
-    const int n = static_cast<int>(needle.length());
-    const int h = static_cast<int>(hay.length());
-    if (n > h) return false;
-    for (int i = 0; i < h && j < n; ++i) {
-        if (hay[i] == needle[j]) ++j;
-    }
-    return j == n;
-}
-
-int fuzzyFieldScore(const QString &norm, const QString &needle, int weight)
-{
-    if (!isSubsequence(norm, needle)) return INT_MIN;
-    // Both strings are lowercase already, so case-sensitive matching is correct
-    // and avoids per-character case folding. No positions in the hot path.
-    const MatchResult mr = fuzzyMatchV2(norm, needle, /*caseSensitive=*/true, /*withPositions=*/false);
-    return mr.matched() ? weight + mr.score : INT_MIN;
-}
-
-int fieldWeight(HighlightField f)
-{
-    switch (f) {
-    case HighlightField::Title:  return 400;
-    case HighlightField::Artist: return 300;
-    case HighlightField::Album:  return 200;
-    case HighlightField::Path:   return 60;
-    }
-    return 100;
-}
-
-// Best text score for a term across the fields it applies to. Returns INT_MIN
-// if no field matched.
-int textTermScore(const SearchRecord &rec, const Term &term, bool fuzzyMode)
-{
-    const bool exact = term.forceExact || !fuzzyMode;
-    auto fieldScore = [&](const QString &norm, int weight) {
-        return exact ? exactFieldScore(norm, term, weight)
-                     : fuzzyFieldScore(norm, term.text, weight);
-    };
-
-    int best = INT_MIN;
-    auto consider = [&](int s) { if (s > best) best = s; };
-
-    switch (term.kind) {
-    case TermKind::TitleText:
-        consider(fieldScore(rec.normTitle, fieldWeight(HighlightField::Title)));
-        break;
-    case TermKind::ArtistText:
-        consider(fieldScore(rec.normArtist, fieldWeight(HighlightField::Artist)));
-        consider(fieldScore(rec.normAlbumArtist, fieldWeight(HighlightField::Artist)));
-        break;
-    case TermKind::AlbumArtistText:
-        consider(fieldScore(rec.normAlbumArtist, fieldWeight(HighlightField::Artist)));
-        break;
-    case TermKind::AlbumText:
-        consider(fieldScore(rec.normAlbum, fieldWeight(HighlightField::Album)));
-        break;
-    case TermKind::PathText:
-        consider(fieldScore(rec.normPath, fieldWeight(HighlightField::Path)));
-        break;
-    case TermKind::FilenameText:
-        consider(fieldScore(rec.normFilename, fieldWeight(HighlightField::Path)));
-        break;
-    case TermKind::FreeText:
-    default:
-        consider(fieldScore(rec.normTitle, fieldWeight(HighlightField::Title)));
-        consider(fieldScore(rec.normArtist, fieldWeight(HighlightField::Artist)));
-        consider(fieldScore(rec.normAlbumArtist, fieldWeight(HighlightField::Artist)));
-        consider(fieldScore(rec.normAlbum, fieldWeight(HighlightField::Album)));
-        consider(fieldScore(rec.normPath, fieldWeight(HighlightField::Path)));
-        break;
-    }
-    return best;
-}
-
-// Returns true if the term matches the record; on match, *score holds its
-// contribution. Numeric/codec tokens are direct comparisons.
-bool termMatches(const SearchRecord &rec, const Term &term, bool fuzzyMode, int *score)
-{
-    *score = 0;
-    switch (term.kind) {
-    case TermKind::Year: {
-        const int y = yearFromDate(rec.date);
-        const bool m = y > 0 && compareNumeric(y, term.op, term.numericValue);
-        if (m) *score = 60;
-        return m;
-    }
-    case TermKind::Rating: {
-        const bool m = rec.rating0To100 >= 0 && compareNumeric(rec.rating0To100, term.op, term.numericValue);
-        if (m) *score = 60;
-        return m;
-    }
-    case TermKind::DurationMs: {
-        const bool m = rec.durationMs > 0 && compareNumeric(rec.durationMs, term.op, term.numericValue);
-        if (m) *score = 60;
-        return m;
-    }
-    case TermKind::SampleRateHz: {
-        const bool m = rec.sampleRateHz > 0 && compareNumeric(rec.sampleRateHz, term.op, term.numericValue);
-        if (m) *score = 60;
-        return m;
-    }
-    case TermKind::BitrateKbps: {
-        const bool m = rec.bitrateKbps > 0 && compareNumeric(rec.bitrateKbps, term.op, term.numericValue);
-        if (m) *score = 60;
-        return m;
-    }
-    case TermKind::Channels: {
-        const bool m = rec.channels > 0 && compareNumeric(rec.channels, term.op, term.numericValue);
-        if (m) *score = 60;
-        return m;
-    }
-    case TermKind::Extension: {
-        const bool m = !rec.codec.isEmpty() && rec.codec == term.text;
-        if (m) *score = 80;
-        return m;
-    }
-    case TermKind::CodecText: {
-        const bool m = !rec.codec.isEmpty() && rec.codec.contains(term.text);
-        if (m) *score = 60;
-        return m;
-    }
-    default: {
-        const int s = textTermScore(rec, term, fuzzyMode);
-        if (s == INT_MIN) return false;
-        *score = s;
-        return true;
-    }
-    }
-}
 
 // ---- highlight helpers (delegate, on-screen rows only) --------------------
 
@@ -265,16 +69,8 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
         }
         if (excluded) continue;
 
-        int total = 0;
-        bool ok = true;
-        for (const Term &term : query.terms) {
-            int s = 0;
-            bool m = termMatches(rec, term, fuzzyMode, &s);
-            if (term.negate) { m = !m; s = 0; }
-            if (!m) { ok = false; break; }
-            total += s;
-        }
-        if (ok) candidates.push_back({i, total});
+        const int score = matchSearchRecord(rec, query, fuzzyMode);
+        if (score != INT_MIN) candidates.push_back({i, score});
     }
 
     if (totalMatches) *totalMatches = static_cast<int>(candidates.size());
