@@ -49,18 +49,25 @@ bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, c
 
 void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
-    const bool selected = option.state & QStyle::State_Selected;
-    const bool hovered = (m_hoveredRow == index.row()) || (option.state & QStyle::State_MouseOver);
+    QStyleOptionViewItem opt(option);
+    initStyleOption(&opt, index);
+
+    const bool selected = opt.state & QStyle::State_Selected;
+    const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
     if (selected) {
-        painter->fillRect(option.rect, SelectionColors::selectedFill(option));
+        painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
+        SelectionColors::applySelectedPalette(&opt);
     } else if (hovered) {
-        QColor hover = option.palette.color(QPalette::Highlight);
+        QColor hover = opt.palette.color(QPalette::Highlight);
         hover.setAlpha(34);
-        painter->fillRect(option.rect, hover);
+        painter->fillRect(opt.rect, hover);
     } else if (index.row() % 2 == 1) {
-        painter->fillRect(option.rect, option.palette.color(QPalette::AlternateBase));
+        painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
     }
+    opt.state &= ~QStyle::State_MouseOver;
+    opt.state &= ~QStyle::State_Selected;
+
     const int value = index.data(Qt::UserRole).toInt();
     const int hoverValue = index.data(Qt::UserRole + 2).isValid() ? index.data(Qt::UserRole + 2).toInt() : StarRating::unset;
-    StarRating::paint(painter, StarRating::ratingRect(option.rect, 18), value, hoverValue, option.palette, 18);
+    StarRating::paint(painter, StarRating::ratingRect(opt.rect, 18), value, hoverValue, opt.palette, 18);
 }

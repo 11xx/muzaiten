@@ -396,11 +396,7 @@ public:
         }
 
         if (selected) {
-            const QColor fill = SelectionColors::selectedFill(opt);
-            const QColor text = SelectionColors::selectedText(opt);
-            opt.palette.setColor(QPalette::Highlight, fill);
-            opt.palette.setColor(QPalette::HighlightedText, text);
-            opt.palette.setColor(QPalette::Text, text);
+            SelectionColors::applySelectedPalette(&opt);
         } else {
             opt.state &= ~QStyle::State_MouseOver;
         }
