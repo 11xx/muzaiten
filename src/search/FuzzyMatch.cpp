@@ -50,7 +50,10 @@ static CharClass charClassOf(QChar c)
 
 static int16_t bonusFor(CharClass prev, CharClass cur)
 {
-    if (cur >= CharClass::NonWord) {
+    // fzf: `class > charNonWord` — a word boundary requires the matched char to
+    // be a delimiter or word char, not a non-word symbol itself (which falls
+    // through to bonusNonWord below).
+    if (cur > CharClass::NonWord) {
         switch (prev) {
         case CharClass::White:     return bonusBoundaryWhite;
         case CharClass::Delimiter: return bonusBoundaryDelimiter;
@@ -155,7 +158,7 @@ MatchResult exactMatchNaive(const QString &text,
             if (consecutive == 0) {
                 firstBonusInRun = bonus;
             } else {
-                if (bonus >= bonusBoundaryWhite && bonus > firstBonusInRun) {
+                if (bonus >= bonusBoundary && bonus > firstBonusInRun) {
                     firstBonusInRun = bonus;
                 }
                 bonus = std::max({static_cast<int16_t>(bonus),
@@ -237,7 +240,7 @@ static MatchResult fuzzyMatchV1(const QString &text,
             if (consecutive == 0) {
                 firstBonusInRun = bonus;
             } else {
-                if (bonus >= bonusBoundaryWhite && bonus > firstBonusInRun) {
+                if (bonus >= bonusBoundary && bonus > firstBonusInRun) {
                     firstBonusInRun = bonus;
                 }
                 bonus = std::max({static_cast<int16_t>(bonus),
@@ -413,7 +416,7 @@ MatchResult fuzzyMatchV2(const QString &text,
                 consecutive = static_cast<int16_t>(cdiag + 1);
                 if (consecutive > 1) {
                     const int16_t fb = (col - consecutive + 1 >= 0) ? B[col - consecutive + 1] : 0;
-                    if (b >= bonusBoundaryWhite && b > fb) {
+                    if (b >= bonusBoundary && b > fb) {
                         consecutive = 1;
                     } else {
                         b = std::max({b, static_cast<int16_t>(bonusConsecutive), fb});
