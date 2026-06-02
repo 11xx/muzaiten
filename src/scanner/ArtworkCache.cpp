@@ -121,13 +121,28 @@ ArtworkCache::ArtworkCache(QString dbPath, int artSize, QObject *parent)
 
 ArtworkCache::~ArtworkCache()
 {
-    m_thread->quit();
-    m_thread->wait(5000);
+    if (m_thread != nullptr) {
+        if (m_thread->isRunning()) {
+            // A QSqlDatabase connection may only be touched from the thread that
+            // created it (here, the worker via initialize()). Close and release
+            // the handle on that thread while its event loop is still running,
+            // before we stop it.
+            QMetaObject::invokeMethod(this, "shutdown", Qt::BlockingQueuedConnection);
+        }
+        m_thread->quit();
+        m_thread->wait(5000);
+    }
+    // Safe from any thread now that no QSqlDatabase object references the
+    // connection (shutdown() reset m_db on the worker thread).
+    QSqlDatabase::removeDatabase(m_connectionName);
+}
+
+void ArtworkCache::shutdown()
+{
     if (m_db.isValid()) {
         m_db.close();
     }
     m_db = QSqlDatabase();
-    QSqlDatabase::removeDatabase(m_connectionName);
 }
 
 void ArtworkCache::initialize()
