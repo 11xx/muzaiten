@@ -1,0 +1,31 @@
+# Maintainer: Lucas Gabriel <g at 11xx dot org>
+pkgname=muzaiten-bin
+# Date-based, matching the release artifact (YYYY.MM.DD.HHMMSS.g<sha>).
+# Bump this and sha256sums for every published release.
+pkgver=2026.06.02.000000.g0000000
+pkgrel=1
+pkgdesc="Native music player for local libraries, with ratings and scrobbling (prebuilt, bundled Last.fm credentials)"
+arch=('x86_64')
+url="https://codeberg.org/11xx/muzaiten"
+license=('Unlicense')
+depends=('qt6-base' 'qt6-multimedia' 'taglib' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd')
+optdepends=('gst-plugins-good: extra audio decoders and sinks'
+            'gst-plugin-pipewire: PipeWire audio output'
+            'gst-plugins-bad: additional codecs (e.g. Musepack, APE)'
+            'mpd: browse an MPD library alongside local sources')
+provides=('muzaiten')
+conflicts=('muzaiten' 'muzaiten-git')
+options=('!strip')  # build-release.sh already strips the binary
+source=("muzaiten-${pkgver}-${CARCH}.tar.zst::https://codeberg.org/11xx/muzaiten/releases/download/${pkgver}/muzaiten-${pkgver}-${CARCH}.tar.zst")
+# Replace with the checksum from dist/<tarball>.sha256 produced by build-release.sh.
+sha256sums=('SKIP')
+
+package() {
+    # The tarball is a prefixed tree (usr/bin, usr/share/...) staged by
+    # packaging/build-release.sh.
+    tar -C "$pkgdir" -xf "muzaiten-${pkgver}-${CARCH}.tar.zst"
+    # Re-home the license directory under this package's name.
+    if [[ -d "$pkgdir/usr/share/licenses/muzaiten" ]]; then
+        mv "$pkgdir/usr/share/licenses/muzaiten" "$pkgdir/usr/share/licenses/$pkgname"
+    fi
+}
