@@ -14,7 +14,6 @@
 #include "mpris/MprisService.h"
 #include "scanner/ArtworkCache.h"
 #include "scanner/ScanPipeline.h"
-#include "scanner/ArtworkResolver.h"
 #include "scanner/RatingTagSyncWorker.h"
 #include "scrobble/LastFmCredentials.h"
 #include "scrobble/LastFmScrobbler.h"
@@ -1146,11 +1145,6 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
     saveExplorerState();
-}
-
-void MainWindow::narrowAlbumFilter(const QString &albumTitle)
-{
-    narrowAlbumFilters(albumTitle.isEmpty() ? QStringList() : QStringList{albumTitle});
 }
 
 void MainWindow::narrowAlbumFilters(const QStringList &albumTitles)
