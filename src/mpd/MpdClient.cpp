@@ -180,22 +180,31 @@ QStringList MpdClient::command(const QString &commandName, const QStringList &ar
 
 QString MpdClient::readResponse(QString *error)
 {
-    QString response;
+    QByteArray buffer;
     while (true) {
         if (!m_socket->waitForReadyRead(5000)) {
             if (error != nullptr) {
                 *error = m_socket->errorString();
             }
-            return response;
+            return QString::fromUtf8(buffer).trimmed();
         }
 
-        response += QString::fromUtf8(m_socket->readAll());
-        if (response.endsWith(QStringLiteral("OK\n")) || response.contains(QStringLiteral("\nACK "))) {
+        // Accumulate raw bytes and decode once at the end: a multi-byte UTF-8
+        // sequence in a tag can straddle two TCP reads, and decoding each chunk
+        // on its own would corrupt the split character into U+FFFD.
+        buffer += m_socket->readAll();
+        // A successful reply ends with "OK\n"; an error is a single
+        // "ACK [code@idx] {cmd} message\n" line. When that ACK is the first
+        // line it has no preceding newline, so match the start too — otherwise
+        // the loop blocks until the 5s timeout and reports a bogus socket error.
+        if (buffer.endsWith("OK\n") || buffer.startsWith("ACK ") || buffer.contains("\nACK ")) {
             break;
         }
     }
 
-    if (response.contains(QStringLiteral("\nACK ")) && error != nullptr) {
+    QString response = QString::fromUtf8(buffer);
+    if ((response.startsWith(QStringLiteral("ACK ")) || response.contains(QStringLiteral("\nACK ")))
+        && error != nullptr) {
         *error = response.trimmed();
     }
     if (response.endsWith(QStringLiteral("OK\n"))) {
