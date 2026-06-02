@@ -760,8 +760,16 @@ MainWindow::~MainWindow()
         m_lastFmThread->wait(3000);
     }
     if (m_mpdImportThread != nullptr) {
+        // run() can be blocked on network I/O; cancel() (atomic) makes it and the
+        // MpdClient waits return promptly. Then join unconditionally so the worker
+        // never outlives the window and touches its DB connection during teardown.
+        if (m_mpdImportWorker != nullptr) {
+            m_mpdImportWorker->cancel();
+        }
         m_mpdImportThread->quit();
-        m_mpdImportThread->wait(3000);
+        if (!m_mpdImportThread->wait(5000)) {
+            m_mpdImportThread->wait();
+        }
     }
 }
 

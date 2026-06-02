@@ -27,12 +27,18 @@ void MpdImportWorker::run()
 {
     QString error;
     MpdClient client;
+    client.setCancelFlag(&m_cancel);
+
     if (!client.connectToServer(m_host, m_port, m_timeoutMs, &error)) {
-        emit finished(0, error);
+        emit finished(0, m_cancel.load() ? QString() : error);
         return;
     }
 
     const QVector<MpdTrack> tracks = client.listAllInfo(&error);
+    if (m_cancel.load()) {
+        emit finished(0, {});
+        return;
+    }
     if (!error.isEmpty()) {
         emit finished(0, error);
         return;
@@ -64,6 +70,12 @@ void MpdImportWorker::run()
     const int totalTracks = static_cast<int>(std::min<qsizetype>(tracks.size(), std::numeric_limits<int>::max()));
     int imported = 0;
     for (const MpdTrack &track : tracks) {
+        if (m_cancel.load()) {
+            // Leave the transaction uncommitted; the local Database rolls it
+            // back when it goes out of scope, so a cancelled import is discarded.
+            emit finished(imported, {});
+            return;
+        }
         if (!database.upsertMpdTrack(sourceId, track)) {
             emit finished(imported, database.lastError());
             return;
