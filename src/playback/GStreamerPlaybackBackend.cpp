@@ -5,6 +5,8 @@
 #include <gst/gst.h>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <mutex>
 
 #include <fcntl.h>
@@ -221,20 +223,19 @@ void GStreamerPlaybackBackend::resume()
     }
 
     if (m_softPaused) {
-        const qint64 seekTo = m_resumePositionMs;
         m_softPaused = false;
-        // Re-preroll: READY→PAUSED.  Block until the pipeline has prerolled
-        // (typically <50 ms for local files) so we can seek reliably before
-        // letting it play.
+        // Re-preroll asynchronously: READY→PAUSED.  We must NOT block the GUI
+        // thread waiting for preroll — a slow/contended device could freeze the
+        // UI for seconds.  Remember the resume position; handleMessage() applies
+        // the seek and transitions to PLAYING once GST_MESSAGE_ASYNC_DONE shows
+        // the pipeline has prerolled.
+        m_pendingSeekMs = std::max<qint64>(0, m_resumePositionMs);
         gst_element_set_state(m_playbin, GST_STATE_PAUSED);
-        gst_element_get_state(m_playbin, nullptr, nullptr, 5 * GST_SECOND);
-        if (seekTo > 0) {
-            gst_element_seek_simple(m_playbin,
-                                    GST_FORMAT_TIME,
-                                    static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH
-                                                              | GST_SEEK_FLAG_KEY_UNIT),
-                                    static_cast<gint64>(seekTo) * GST_MSECOND);
-        }
+        // Reflect the user's intent immediately; STATE_CHANGED messages are
+        // suppressed while a resume seek is pending so the UI doesn't flicker
+        // through Paused.
+        updateState(State::Playing);
+        return;
     }
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
 }
@@ -353,20 +354,30 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         return;
     }
 
-    configureSink();
+    if (!configureSink()) {
+        // configureSink already reported the error and set State::Error; don't
+        // advertise the pipeline as healthy or wire up gapless signalling.
+        return;
+    }
     setVolume(m_volume);
     g_signal_connect(m_playbin, "about-to-finish", G_CALLBACK(GStreamerPlaybackBackend::aboutToFinishCallback), this);
     emit technicalInfoChanged(QStringLiteral("GStreamer backend using %1").arg(playbinName));
 }
 
-void GStreamerPlaybackBackend::configureSink()
+bool GStreamerPlaybackBackend::configureSink()
 {
     GstElement *sink = makeSink(m_profile);
     if (sink == nullptr) {
+        // Drive into Error (matching the playbin-missing and bus-error paths)
+        // rather than letting playbin silently auto-plug its default sink — a
+        // bit-perfect/explicit-device profile must not fall through to shared
+        // output without the user knowing.
+        updateState(State::Error);
         emit errorOccurred(QStringLiteral("No usable GStreamer audio sink is available"));
-        return;
+        return false;
     }
     g_object_set(G_OBJECT(m_playbin), "audio-sink", sink, nullptr);
+    return true;
 }
 
 void GStreamerPlaybackBackend::poll()
@@ -449,6 +460,24 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         updateState(State::Stopped);
         emit finished();
         break;
+    case GST_MESSAGE_ASYNC_DONE:
+        // Preroll (or a flushing seek) has completed.  If a soft-pause resume is
+        // pending, this is the safe point to seek to the saved position and
+        // start playing — without ever having blocked the GUI thread.
+        if (m_pendingSeekMs >= 0 && GST_MESSAGE_SRC(message) == GST_OBJECT(m_playbin)) {
+            const qint64 seekTo = m_pendingSeekMs;
+            m_pendingSeekMs = -1; // clear first so the post-seek ASYNC_DONE is a no-op
+            if (seekTo > 0) {
+                gst_element_seek_simple(m_playbin,
+                                        GST_FORMAT_TIME,
+                                        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH
+                                                                  | GST_SEEK_FLAG_KEY_UNIT),
+                                        static_cast<gint64>(seekTo) * GST_MSECOND);
+            }
+            gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+            updateState(State::Playing);
+        }
+        break;
     case GST_MESSAGE_STATE_CHANGED:
         if (GST_MESSAGE_SRC(message) == GST_OBJECT(m_playbin)) {
             GstState oldState = GST_STATE_NULL;
@@ -457,10 +486,12 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             gst_message_parse_state_changed(message, &oldState, &newState, &pending);
             Q_UNUSED(oldState)
             Q_UNUSED(pending)
-            // While soft-paused the pipeline is transitioning to READY to release
-            // the audio device; suppress those intermediate state messages so the
-            // UI stays in Paused and we don't notify scrobblers/MPRIS of a stop.
-            if (!m_softPaused) {
+            // Suppress intermediate state messages when:
+            //  - soft-paused: pipeline is dropping to READY to release the device
+            //    (keep the UI in Paused, don't tell scrobblers/MPRIS we stopped);
+            //  - a resume seek is pending: pipeline briefly sits in PAUSED while
+            //    re-prerolling, but the user already asked to play.
+            if (!m_softPaused && m_pendingSeekMs < 0) {
                 updateState(stateFromGst(newState));
             }
         }
@@ -529,23 +560,53 @@ QString GStreamerPlaybackBackend::sourceUriForPlayback(const QUrl &url, MemFdBuf
     // Copy the entire file synchronously into the memfd.  Any preloadPercent > 0
     // is treated as "full file in RAM" in v1 — the percentage controls the
     // opt-in threshold, not a partial-copy amount.
+    bool copyComplete = false;
     {
         std::array<char, 256 * 1024> chunk{};
         off_t remaining = fileSize;
-        while (remaining > 0) {
+        bool failed = false;
+        while (remaining > 0 && !failed) {
             const ssize_t nr = ::read(srcFd, chunk.data(),
                                       std::min<off_t>(remaining,
                                                       static_cast<off_t>(chunk.size())));
-            if (nr <= 0) {
+            if (nr < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                failed = true; // read error (e.g. flaky network mount)
                 break;
             }
-            if (::write(mfd, chunk.data(), static_cast<size_t>(nr)) != nr) {
+            if (nr == 0) {
+                failed = true; // unexpected EOF before fileSize bytes
                 break;
+            }
+            // Flush the whole chunk, tolerating short/interrupted writes.
+            size_t off = 0;
+            while (off < static_cast<size_t>(nr)) {
+                const ssize_t nw = ::write(mfd, chunk.data() + off,
+                                           static_cast<size_t>(nr) - off);
+                if (nw < 0) {
+                    if (errno == EINTR) {
+                        continue;
+                    }
+                    failed = true; // write error (e.g. ENOSPC on tmpfs)
+                    break;
+                }
+                off += static_cast<size_t>(nw);
             }
             remaining -= nr;
         }
+        copyComplete = !failed && remaining == 0;
     }
     ::close(srcFd);
+
+    if (!copyComplete) {
+        // A partial copy would leave the ftruncate'd memfd zero-filled past the
+        // failure point, so GStreamer would play a truncated/garbage tail.
+        // Fall back to streaming the real file instead of serving corruption.
+        ::close(mfd);
+        return uriForUrl(url);
+    }
 
     // Rewind so GStreamer reads from the start.
     ::lseek(mfd, 0, SEEK_SET);
