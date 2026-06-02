@@ -2358,7 +2358,7 @@ QString MainWindow::lastFmApiKey() const
         apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
     }
     if (apiKey.isEmpty()) {
-        apiKey = QString::fromLatin1(LastFmCredentials::defaultApiKey).trimmed();
+        apiKey = QString::fromStdString(LastFmCredentials::defaultApiKey()).trimmed();
     }
     return apiKey;
 }
@@ -2370,7 +2370,7 @@ QString MainWindow::lastFmSharedSecret() const
         secret = QString::fromLocal8Bit(qgetenv("LASTFM_SHARED_SECRET")).trimmed();
     }
     if (secret.isEmpty()) {
-        secret = QString::fromLatin1(LastFmCredentials::defaultSharedSecret).trimmed();
+        secret = QString::fromStdString(LastFmCredentials::defaultSharedSecret()).trimmed();
     }
     return secret;
 }
@@ -2379,15 +2379,15 @@ bool MainWindow::hasDefaultLastFmCredentials() const
 {
     // Returns true when env vars or build-time defaults supply both key and secret
     // (without consulting the DB — those are user overrides, not "defaults").
-    const auto fromEnvOrDefault = [](const char *envVar, const char *buildDefault) {
+    const auto fromEnvOrDefault = [](const char *envVar, const std::string &buildDefault) {
         QString v = QString::fromLocal8Bit(qgetenv(envVar)).trimmed();
         if (v.isEmpty()) {
-            v = QString::fromLatin1(buildDefault).trimmed();
+            v = QString::fromStdString(buildDefault).trimmed();
         }
         return v;
     };
-    return !fromEnvOrDefault("LASTFM_API_KEY", LastFmCredentials::defaultApiKey).isEmpty()
-        && !fromEnvOrDefault("LASTFM_SHARED_SECRET", LastFmCredentials::defaultSharedSecret).isEmpty();
+    return !fromEnvOrDefault("LASTFM_API_KEY", LastFmCredentials::defaultApiKey()).isEmpty()
+        && !fromEnvOrDefault("LASTFM_SHARED_SECRET", LastFmCredentials::defaultSharedSecret()).isEmpty();
 }
 
 void MainWindow::configureLastFm()
