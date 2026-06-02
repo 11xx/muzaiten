@@ -995,7 +995,8 @@ void FileExplorerView::applyKeyAction(const QString &action)
 
     } else if (action == PageDown) {
         if (item != nullptr) {
-            const int visible = std::max(1, m_tree->viewport()->height() / m_tree->sizeHintForRow(0));
+            const int rowHeight = std::max(1, m_tree->sizeHintForRow(0));
+            const int visible = std::max(1, m_tree->viewport()->height() / rowHeight);
             const int target = std::min(m_tree->topLevelItemCount() - 1,
                                         m_tree->indexOfTopLevelItem(item) + visible);
             m_tree->setCurrentItem(m_tree->topLevelItem(target));
@@ -1004,7 +1005,8 @@ void FileExplorerView::applyKeyAction(const QString &action)
 
     } else if (action == PageUp) {
         if (item != nullptr) {
-            const int visible = std::max(1, m_tree->viewport()->height() / m_tree->sizeHintForRow(0));
+            const int rowHeight = std::max(1, m_tree->sizeHintForRow(0));
+            const int visible = std::max(1, m_tree->viewport()->height() / rowHeight);
             const int target = std::max(0, m_tree->indexOfTopLevelItem(item) - visible);
             m_tree->setCurrentItem(m_tree->topLevelItem(target));
             m_tree->scrollToItem(m_tree->topLevelItem(target), center);
