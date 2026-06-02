@@ -24,6 +24,10 @@ void ArtworkCache::initialize()
 {
 }
 
+void ArtworkCache::shutdown()
+{
+}
+
 void ArtworkCache::handleRequest(const QString &, const QString &, const QString &, quint64)
 {
 }
