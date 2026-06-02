@@ -1,5 +1,6 @@
 #include "mpd/MpdClient.h"
 
+#include <QElapsedTimer>
 #include <QTcpSocket>
 
 #include <algorithm>
@@ -114,17 +115,55 @@ bool MpdClient::isReadOnlyCommand(const QString &command)
     return allowed.contains(command.toLower());
 }
 
+bool MpdClient::waitForConnectedInterruptible(int timeoutMs)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (!isCancelled()) {
+        const int remaining = timeoutMs - static_cast<int>(timer.elapsed());
+        if (remaining <= 0) {
+            return false;
+        }
+        if (m_socket->waitForConnected(std::min(remaining, 100))) {
+            return true;
+        }
+        if (m_socket->state() == QAbstractSocket::UnconnectedState) {
+            return false; // connection failed outright (not just still pending)
+        }
+    }
+    return false;
+}
+
+bool MpdClient::waitForReadableInterruptible(int timeoutMs)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (!isCancelled()) {
+        const int remaining = timeoutMs - static_cast<int>(timer.elapsed());
+        if (remaining <= 0) {
+            return false;
+        }
+        if (m_socket->waitForReadyRead(std::min(remaining, 100))) {
+            return true;
+        }
+        if (m_socket->state() != QAbstractSocket::ConnectedState) {
+            return false; // peer closed or socket error
+        }
+    }
+    return false;
+}
+
 bool MpdClient::connectToServer(const QString &host, quint16 port, int timeoutMs, QString *error)
 {
     m_socket->connectToHost(host, port);
-    if (!m_socket->waitForConnected(timeoutMs)) {
+    if (!waitForConnectedInterruptible(timeoutMs)) {
         if (error != nullptr) {
             *error = m_socket->errorString();
         }
         return false;
     }
 
-    if (!m_socket->waitForReadyRead(timeoutMs)) {
+    if (!waitForReadableInterruptible(timeoutMs)) {
         if (error != nullptr) {
             *error = m_socket->errorString();
         }
@@ -182,9 +221,9 @@ QString MpdClient::readResponse(QString *error)
 {
     QByteArray buffer;
     while (true) {
-        if (!m_socket->waitForReadyRead(5000)) {
+        if (!waitForReadableInterruptible(5000)) {
             if (error != nullptr) {
-                *error = m_socket->errorString();
+                *error = isCancelled() ? QStringLiteral("MPD import cancelled") : m_socket->errorString();
             }
             return QString::fromUtf8(buffer).trimmed();
         }
