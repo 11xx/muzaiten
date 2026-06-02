@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.11xx.muzaiten</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Unlicense</project_license>
+  <name>muzaiten</name>
+  <summary>Native music player for local libraries</summary>
+
+  <description>
+    <p>
+      muzaiten is a native Linux music player focused on local-library
+      browsing, queue-based playback, album artwork, ratings, and scrobbling.
+      It is inspired by MusicBee and ncmpcpp.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Local library scanner with source-directory management and incremental rescans</li>
+      <li>Album-artist sidebar, album grid, artist track table, and queue sidebar</li>
+      <li>Keyboard-oriented library and free-roam file explorers</li>
+      <li>Cached album artwork from folder and embedded images</li>
+      <li>GStreamer playback with PipeWire/PulseAudio/ALSA sinks and an exclusive bit-perfect mode</li>
+      <li>User ratings with optional MusicBee-compatible rating-tag writeback</li>
+      <li>ListenBrainz and Last.fm scrobbling</li>
+      <li>fzf-style library search and an optional MPD bridge</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">org.11xx.muzaiten.desktop</launchable>
+
+  <url type="homepage">https://codeberg.org/11xx/muzaiten</url>
+  <url type="bugtracker">https://codeberg.org/11xx/muzaiten/issues</url>
+  <url type="vcs-browser">https://codeberg.org/11xx/muzaiten</url>
+
+  <developer id="org.11xx">
+    <name>11xx</name>
+  </developer>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main window (dark)</caption>
+      <image>https://codeberg.org/11xx/muzaiten/raw/branch/master/docs/assets/screenshot-dark.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Main window (light)</caption>
+      <image>https://codeberg.org/11xx/muzaiten/raw/branch/master/docs/assets/screenshot-light.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1"/>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>player</keyword>
+    <keyword>library</keyword>
+    <keyword>scrobble</keyword>
+    <keyword>mpd</keyword>
+  </keywords>
+
+  <releases>
+    <release version="continuous" type="development" date="2026-06-02">
+      <description>
+        <p>Rolling release built from the latest source. See the repository for changes.</p>
+      </description>
+    </release>
+  </releases>
+</component>

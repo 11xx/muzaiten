@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=muzaiten
+GenericName=Music Player
+Comment=Native music player for local libraries, with ratings and scrobbling
+Exec=muzaiten
+Icon=org.11xx.muzaiten
+Terminal=false
+Categories=AudioVideo;Audio;Player;Qt;
+Keywords=music;player;audio;library;scrobble;mpd;listenbrainz;lastfm;
+StartupNotify=true
+StartupWMClass=org.11xx.muzaiten

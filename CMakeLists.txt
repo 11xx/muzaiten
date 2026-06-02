@@ -213,6 +213,24 @@ target_compile_options(muzaiten PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
+# Installation (freedesktop integration). Lets distro packaging and `make dev`
+# alike drop the binary plus a desktop entry, icon, and AppStream metadata into
+# the standard prefix.
+include(GNUInstallDirs)
+
+install(TARGETS muzaiten
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(FILES packaging/org.11xx.muzaiten.desktop
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
+)
+install(FILES packaging/org.11xx.muzaiten.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo
+)
+install(FILES packaging/org.11xx.muzaiten.svg
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+)
+
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)

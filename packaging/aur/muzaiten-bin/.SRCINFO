@@ -1,0 +1,26 @@
+pkgbase = muzaiten-bin
+	pkgdesc = Native music player for local libraries, with ratings and scrobbling (prebuilt, bundled Last.fm credentials)
+	pkgver = 2026.06.02.000000.g0000000
+	pkgrel = 1
+	url = https://codeberg.org/11xx/muzaiten
+	arch = x86_64
+	license = Unlicense
+	depends = qt6-base
+	depends = qt6-multimedia
+	depends = taglib
+	depends = gstreamer
+	depends = gst-plugins-base-libs
+	depends = glib2
+	depends = zstd
+	optdepends = gst-plugins-good: extra audio decoders and sinks
+	optdepends = gst-plugin-pipewire: PipeWire audio output
+	optdepends = gst-plugins-bad: additional codecs (e.g. Musepack, APE)
+	optdepends = mpd: browse an MPD library alongside local sources
+	provides = muzaiten
+	conflicts = muzaiten
+	conflicts = muzaiten-git
+	options = !strip
+	source = muzaiten-2026.06.02.000000.g0000000-x86_64.tar.zst::https://codeberg.org/11xx/muzaiten/releases/download/2026.06.02.000000.g0000000/muzaiten-2026.06.02.000000.g0000000-x86_64.tar.zst
+	sha256sums = SKIP
+
+pkgname = muzaiten-bin
