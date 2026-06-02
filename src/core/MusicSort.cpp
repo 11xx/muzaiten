@@ -35,7 +35,10 @@ int cmpStr(const QString &a, const QString &b)
 {
     // Natural ordering: embedded numbers compare by value, so "2" sorts before
     // "11" instead of character-by-character ("11" before "2"). Case-insensitive.
-    static const QCollator collator = [] {
+    // thread_local, not static: QCollator::compare() mutates the underlying ICU
+    // collator state, so a single shared instance is not safe for the concurrent
+    // sorts that run on UI and worker threads.
+    thread_local const QCollator collator = [] {
         QCollator c;
         c.setNumericMode(true);
         c.setCaseSensitivity(Qt::CaseInsensitive);

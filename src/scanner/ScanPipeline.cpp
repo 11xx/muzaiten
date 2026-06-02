@@ -11,6 +11,7 @@
 #include <QThread>
 
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -199,7 +200,15 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
             }
 
             std::unique_lock<std::mutex> lock(mutex);
-            notFull.wait(lock, [&]() { return results.size() < highWater || m_cancel; });
+            // wait_for, not wait: cancel() flips the atomic m_cancel from another
+            // thread but cannot notify this (function-local) condition variable,
+            // so re-check the predicate periodically to keep cancellation prompt
+            // even when the consumer has stopped draining. The highWater cap is
+            // still honored — we only proceed once results.size() < highWater or
+            // we are cancelling.
+            while (!notFull.wait_for(lock, std::chrono::milliseconds(100),
+                                     [&]() { return results.size() < highWater || m_cancel; })) {
+            }
             results.push_back(std::move(track));
             notEmpty.notify_one();
         }
