@@ -67,6 +67,28 @@ make dev
 ./build/muzaiten --dev-state
 ```
 
+## Install
+
+On Arch Linux (AUR):
+
+- `muzaiten-bin` — prebuilt binary with bundled default Last.fm credentials; no
+  compilation required.
+- `muzaiten-git` — builds the latest commit from source; ships without a default
+  Last.fm key (add your own in the app).
+
+From source, into a prefix:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+sudo cmake --install build   # /usr/local by default; pass -DCMAKE_INSTALL_PREFIX=/usr to override
+```
+
+Installing drops the `muzaiten` binary plus a desktop entry, scalable icon, and
+AppStream metadata into the prefix. Release packaging, the AUR packages, and the
+Last.fm credential threat model are documented in
+[docs/distribution.md](docs/distribution.md).
+
 ## Runtime State
 
 By default, muzaiten uses XDG paths:
@@ -223,4 +245,4 @@ Unsupported files are hidden by default. Enable `Settings > List unsupported fil
 ## Notes
 
 - The app ID is `org.11xx.muzaiten` when a matching desktop entry is installed. Local development launches without an installed desktop file skip portal app-ID registration.
-- Last.fm default credentials, if used for distribution builds, are injected at build time with `MUZAITEN_LASTFM_API_KEY` and `MUZAITEN_LASTFM_SHARED_SECRET`; they are not stored in source.
+- Last.fm default credentials, if used for distribution builds, are injected at build time with `MUZAITEN_LASTFM_API_KEY` and `MUZAITEN_LASTFM_SHARED_SECRET`; they are never stored in source and are XOR-obfuscated in the binary (obfuscation, not real secrecy — see [docs/distribution.md](docs/distribution.md)).
