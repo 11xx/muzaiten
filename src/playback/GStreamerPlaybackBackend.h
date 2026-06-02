@@ -66,7 +66,7 @@ private:
     static void aboutToFinishCallback(GstElement *playbin, void *userData);
 
     void rebuildPipeline();
-    void configureSink();
+    bool configureSink();
     void poll();
     void pollBus();
     void pollPosition();
