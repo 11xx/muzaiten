@@ -238,9 +238,11 @@ bool MprisService::canSeek() const
 void MprisService::setTrack(const Track &track)
 {
     m_track = track;
-    if (track.durationMs > 0) {
-        m_durationMs = track.durationMs;
-    }
+    // Reset unconditionally: when the track is cleared ({} on queue-clear /
+    // end-of-queue) or switched to one whose duration is not yet known, keeping
+    // the previous value left a stale mpris:length and CanSeek=true exposed to
+    // MPRIS clients.
+    m_durationMs = track.durationMs > 0 ? track.durationMs : 0;
     emitPropertiesChanged(QString::fromLatin1(playerInterface),
                           {{QStringLiteral("Metadata"), metadata()},
                            {QStringLiteral("CanSeek"), canSeek()},
