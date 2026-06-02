@@ -557,11 +557,11 @@ void AlbumGrid::mouseMoveEvent(QMouseEvent *event)
             if (m_rubberBand == nullptr) {
                 m_rubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
             }
-            m_rubberBand->setGeometry(QRect(m_dragStartPos, m_dragCurrentPos).normalized());
+            setRubberBandGeometry(currentDragRect());
             m_rubberBand->show();
         }
         if (m_dragSelecting) {
-            m_rubberBand->setGeometry(QRect(m_dragStartPos, m_dragCurrentPos).normalized());
+            setRubberBandGeometry(currentDragRect());
             updateRubberBandSelection();
             updateDragAutoscroll();
             event->accept();
@@ -604,6 +604,7 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
     m_dragSelecting = false;
     m_dragStartPos = event->pos();
     m_dragCurrentPos = event->pos();
+    m_dragStartScroll = verticalScrollBar()->value();
     m_dragModifiers = event->modifiers();
     m_dragBaseMarkedAlbumTitles = m_markedAlbumTitles;
     m_pressStartedOnRating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos()) >= 0;
@@ -1067,7 +1068,7 @@ void AlbumGrid::updateDragAutoscroll()
 
     verticalScrollBar()->setValue(verticalScrollBar()->value() + delta);
     m_dragCurrentPos.setY(std::clamp(m_dragCurrentPos.y(), 0, viewport()->height()));
-    m_rubberBand->setGeometry(QRect(m_dragStartPos, m_dragCurrentPos).normalized());
+    setRubberBandGeometry(currentDragRect());
     updateRubberBandSelection();
     if (!m_dragScrollTimer->isActive()) {
         m_dragScrollTimer->start();
@@ -1083,6 +1084,30 @@ void AlbumGrid::stopDragSelection()
     if (m_rubberBand != nullptr) {
         m_rubberBand->hide();
     }
+}
+
+QRect AlbumGrid::currentDragRect() const
+{
+    // Anchor the start corner in content space: as autoscroll changes the
+    // scroll position, the start point tracks the items it was placed over
+    // instead of staying pinned to a now-scrolled-away viewport position.
+    const int scrollDelta = m_dragStartScroll - verticalScrollBar()->value();
+    const QPoint start(m_dragStartPos.x(), m_dragStartPos.y() + scrollDelta);
+    return QRect(start, m_dragCurrentPos).normalized();
+}
+
+void AlbumGrid::setRubberBandGeometry(const QRect &rect)
+{
+    if (m_rubberBand == nullptr) {
+        return;
+    }
+    const QRect previous = m_rubberBand->geometry();
+    m_rubberBand->setGeometry(rect);
+    // The viewport is custom-painted, so QRubberBand moving over empty (item-less)
+    // background does not force the content beneath the old border to redraw,
+    // leaving a stale frame trail. Repaint the swept region (old ∪ new, with a
+    // little slack for the border width) so no trail remains.
+    viewport()->update(previous.united(rect).adjusted(-2, -2, 2, 2));
 }
 
 QString AlbumGrid::titleForRow(int row) const

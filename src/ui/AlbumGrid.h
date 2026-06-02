@@ -91,6 +91,11 @@ private:
     void finishRubberBandSelection();
     void updateDragAutoscroll();
     void stopDragSelection();
+    // Drag-select rubber band: the start corner is anchored in content space so
+    // it tracks the items as autoscroll moves the view; setRubberBandGeometry
+    // also repaints the swept region so the moving border leaves no trail.
+    QRect currentDragRect() const;
+    void setRubberBandGeometry(const QRect &rect);
     QString titleForRow(int row) const;
 
 private:
@@ -108,6 +113,7 @@ private:
     QSet<QString> m_dragBaseMarkedAlbumTitles;
     QPoint m_dragStartPos;
     QPoint m_dragCurrentPos;
+    int m_dragStartScroll = 0;  // vertical scroll value when the drag began
     Qt::KeyboardModifiers m_dragModifiers = Qt::NoModifier;
     int m_shiftAnchorRow = -1;
     bool m_leftButtonPressed = false;
