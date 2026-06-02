@@ -266,10 +266,8 @@ protected:
             const int y = rowViewportPosition(m_currentPlayingRow);
             const int h = rowHeight(m_currentPlayingRow);
             if (h > 0 && y + h > 0 && y < viewport()->height()) {
-                QColor color = palette().color(QPalette::Highlight);
-                if (!SelectionColors::isActiveMainPanel(viewport())) {
-                    color.setAlpha(110);
-                }
+                // Special item: full-strength accent regardless of panel focus.
+                const QColor color = palette().color(QPalette::Highlight);
                 painter.fillRect(QRect(0, y, 3, h), color);
             }
         }
@@ -387,9 +385,12 @@ public:
             painter->fillRect(opt.rect, hover);
         } else if (playing) {
             // Distinct, column-independent tint for the currently playing row
-            // (every visible cell, regardless of which columns are shown).
+            // (every visible cell, regardless of which columns are shown). The
+            // playing row is a special item: keep it highlighted at full strength
+            // even when the panel is out of focus, unlike the selection highlight
+            // which intentionally dims on blur.
             QColor tint = opt.palette.color(QPalette::Highlight);
-            tint.setAlpha(SelectionColors::isActiveMainPanel(option.widget) ? 48 : 24);
+            tint.setAlpha(48);
             painter->fillRect(opt.rect, tint);
         } else if (index.row() % 2 == 1) {
             painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
