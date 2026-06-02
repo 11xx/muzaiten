@@ -1,28 +1,26 @@
 # Roadmap
 
-## 2026.5.23
+Versions are date-based (`YYYY.MM.DD.HHMMSS.g<sha>`), derived from the committed
+HEAD. There is no separate semantic version.
 
-- Read-only library browser.
-- Album artist sidebar.
-- Album grid with cover art.
-- Expanded album track details.
-- Artist-wide track table.
-- Rating display and sorting.
+## Shipped
 
-## 2026.5.23.x
+- Read-only library browser: album-artist sidebar, album grid with cover art,
+  expanded album track details, and an artist-wide track table.
+- Library scanner with source-directory management, incremental rescans,
+  missing-file marking, and cached artwork from folder and embedded images.
+- Ratings: display, sorting, and explicit MusicBee-compatible rating-tag
+  writeback (see [data-safety.md](data-safety.md)).
+- Queue-based playback (ncmpcpp-influenced) through a GStreamer backend, with
+  configurable output: PipeWire / PulseAudio / ALSA sinks and an exclusive
+  bit-perfect ALSA mode, plus resume behavior.
+- fzf-style library search across the whole library, including MPD tracks.
+- Scrobbling to both ListenBrainz and Last.fm (now-playing + completed listens).
+- Optional MPD bridge for browsing MPD libraries alongside local sources.
+- MPRIS service and persistent UI state.
 
-- Scanner fixes.
-- Rating extraction fixes based on real files.
-- UI polish.
+## Planned / ideas
 
-## Later
-
-- Queue model influenced by ncmpcpp.
-- Optional MPD bridge.
-- Native playback.
-- PipeWire normal mode.
-- Strict bit-perfect playback mode via PipeWire or ALSA after testing.
-- Explicit rating tag writes.
-- MusicBrainz lookup.
-- ListenBrainz scrobbling.
-
+- MusicBrainz network lookup (IDs are already read from tags when present).
+- Bit-depth-aware audio-quality scoring in search ranking.
+- Broader playlist import/export.
