@@ -331,6 +331,16 @@ qint64 ListenBrainzScrobbler::playedMs() const
     return m_accumulatedMs + (m_playing && m_segmentTimer.isValid() ? m_segmentTimer.elapsed() : 0);
 }
 
+static bool isValidCachedListen(const QJsonObject &listen)
+{
+    if (listen.value(QStringLiteral("listened_at")).toInteger() <= 0) {
+        return false;
+    }
+    const QJsonObject meta = listen.value(QStringLiteral("track_metadata")).toObject();
+    return !meta.value(QStringLiteral("artist_name")).toString().trimmed().isEmpty()
+        && !meta.value(QStringLiteral("track_name")).toString().trimmed().isEmpty();
+}
+
 void ListenBrainzScrobbler::loadPending()
 {
     m_pendingListens.clear();
@@ -339,9 +349,12 @@ void ListenBrainzScrobbler::loadPending()
         return;
     }
 
+    // Drop malformed entries (missing timestamp/artist/track). An invalid listen
+    // is rejected by the server forever and, sitting at the front of the queue,
+    // would block every valid listen behind it.
     const QJsonArray listens = QJsonDocument::fromJson(file.readAll()).array();
     for (const QJsonValue &listen : listens) {
-        if (listen.isObject()) {
+        if (listen.isObject() && isValidCachedListen(listen.toObject())) {
             m_pendingListens.push_back(listen.toObject());
         }
     }
@@ -391,11 +404,17 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
             disableScrobbling(QStringLiteral("ListenBrainz token was rejected. Scrobbling has been disabled."));
             return;
         }
-        ++m_consecutiveFailures;
         emit submissionFailed(message);
-        if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
-            disableScrobbling(QStringLiteral("ListenBrainz submissions failed %1 times. Scrobbling has been disabled.")
-                                  .arg(maxConsecutiveSubmissionFailures));
+        // Only real listen submissions count toward permanent disablement.
+        // 'playing now' updates are best-effort (a transient 429/500 on a
+        // throttled ping must never disable scrobbling) — this mirrors
+        // LastFmScrobbler, where only scrobble failures touch the counter.
+        if (kind == SubmissionKind::Listen) {
+            ++m_consecutiveFailures;
+            if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
+                disableScrobbling(QStringLiteral("ListenBrainz submissions failed %1 times. Scrobbling has been disabled.")
+                                      .arg(maxConsecutiveSubmissionFailures));
+            }
         }
         return;
     }
