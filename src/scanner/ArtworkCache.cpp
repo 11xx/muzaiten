@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QPainter>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -84,7 +85,26 @@ QByteArray toPng(const QImage &image)
     return bytes;
 }
 
-QImage embeddedArt(const QString &filePath)
+// Decode through QImageReader, pre-scaling so neither dimension exceeds maxDim.
+// size() reads only the header, so an oversized (decompression-bomb) image is
+// never fully decoded to native resolution just to be downscaled to the cached
+// art size moments later.
+QImage decodeBounded(QImageReader &reader, int maxDim)
+{
+    const QSize native = reader.size();
+    if (native.isValid() && (native.width() > maxDim || native.height() > maxDim)) {
+        reader.setScaledSize(native.scaled(maxDim, maxDim, Qt::KeepAspectRatio));
+    }
+    return reader.read();
+}
+
+QImage folderArtImage(const QString &path, int maxDim)
+{
+    QImageReader reader(path);
+    return decodeBounded(reader, maxDim);
+}
+
+QImage embeddedArt(const QString &filePath, int maxDim)
 {
     if (filePath.isEmpty()) {
         return {};
@@ -102,7 +122,11 @@ QImage embeddedArt(const QString &filePath)
     if (data.isEmpty()) {
         return {};
     }
-    return QImage::fromData(reinterpret_cast<const uchar *>(data.data()), static_cast<int>(data.size()));
+    QByteArray bytes(data.data(), static_cast<qsizetype>(data.size()));
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&buffer);
+    return decodeBounded(reader, maxDim);
 }
 
 } // namespace
@@ -187,7 +211,7 @@ void ArtworkCache::handleRequest(const QString &token, const QString &directory,
         const QString key = cacheKeyFor(folder, 'f', artSize);
         QImage cached = lookupBlob(key);
         if (cached.isNull()) {
-            cached = squareArt(QImage(folder), artSize);
+            cached = squareArt(folderArtImage(folder, artSize), artSize);
             if (!cached.isNull()) {
                 storeBlob(key, kSourceFolder, cached, toPng(cached));
             }
@@ -203,7 +227,7 @@ void ArtworkCache::handleRequest(const QString &token, const QString &directory,
         const QString key = cacheKeyFor(filePath, 'e', artSize);
         QImage cached = lookupBlob(key);
         if (cached.isNull()) {
-            cached = squareArt(embeddedArt(filePath), artSize);
+            cached = squareArt(embeddedArt(filePath, artSize), artSize);
             if (!cached.isNull()) {
                 storeBlob(key, kSourceEmbedded, cached, toPng(cached));
             }
