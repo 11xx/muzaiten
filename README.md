@@ -79,15 +79,15 @@ On Arch Linux (AUR):
 From source, into a prefix:
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-sudo cmake --install build   # /usr/local by default; pass -DCMAKE_INSTALL_PREFIX=/usr to override
+make build CMAKE_BUILD_TYPE=Release
+sudo make install PREFIX=/usr      # PREFIX defaults to whatever was configured (/usr/local)
 ```
 
 Installing drops the `muzaiten` binary plus a desktop entry, scalable icon, and
-AppStream metadata into the prefix. Release packaging, the AUR packages, and the
-Last.fm credential threat model are documented in
-[docs/distribution.md](docs/distribution.md).
+AppStream metadata into the prefix. (`make` here is only a thin alias for the
+fixed CMake commands — use `cmake`/`cmake --install` directly if you need finer
+control.) Release packaging, the AUR packages, and the Last.fm credential threat
+model are documented in [docs/distribution.md](docs/distribution.md).
 
 ## Runtime State
 
