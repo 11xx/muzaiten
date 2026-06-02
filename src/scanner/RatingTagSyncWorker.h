@@ -8,6 +8,8 @@
 #include <QString>
 #include <QVector>
 
+#include <atomic>
+
 struct RatingTagSyncRequest {
     enum class Scope {
         Track,
@@ -47,5 +49,7 @@ signals:
 private:
     QString m_databasePath;
     RatingTagSyncRequest m_request;
-    bool m_cancel = false;
+    // Written by cancel() (potentially from another thread) and read by run();
+    // atomic to avoid a data race, matching ScanPipeline::m_cancel.
+    std::atomic_bool m_cancel = false;
 };
