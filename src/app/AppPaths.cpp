@@ -53,12 +53,12 @@ QString combinedRoot()
     if (qApp != nullptr) {
         const QString cliRoot = qApp->property("muzaiten.stateRoot").toString().trimmed();
         if (!cliRoot.isEmpty()) {
-            return QDir(cliRoot).absolutePath();
+            return QDir(expandUser(cliRoot)).absolutePath();
         }
     }
     const QString envRoot = qEnvironmentVariable("MUZAITEN_STATE_ROOT").trimmed();
     if (!envRoot.isEmpty()) {
-        return QDir(envRoot).absolutePath();
+        return QDir(expandUser(envRoot)).absolutePath();
     }
     const bool dev = (qApp != nullptr && qApp->property("muzaiten.devState").toBool())
         || qEnvironmentVariableIsSet("MUZAITEN_DEV_STATE");
@@ -79,12 +79,12 @@ QString resolve(const char *flagProperty,
     if (qApp != nullptr) {
         const QString flag = qApp->property(flagProperty).toString().trimmed();
         if (!flag.isEmpty()) {
-            return ensure(QDir(flag).absolutePath());
+            return ensure(QDir(expandUser(flag)).absolutePath());
         }
     }
     const QString fromEnv = qEnvironmentVariable(envVar).trimmed();
     if (!fromEnv.isEmpty()) {
-        return ensure(QDir(fromEnv).absolutePath());
+        return ensure(QDir(expandUser(fromEnv)).absolutePath());
     }
     const QString root = combinedRoot();
     if (!root.isEmpty()) {

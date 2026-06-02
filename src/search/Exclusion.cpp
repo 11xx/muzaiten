@@ -24,10 +24,11 @@ ExcludeMatcher::ExcludeMatcher(const ExcludeRule &rule)
 
     if (hasInterior) {
         m_kind = Kind::Regex;
+        // UnanchoredWildcardConversion already produces a substring-style
+        // (unanchored) pattern, which is exactly what an exclusion glob wants,
+        // so m_regex is used as-is — no further anchoring adjustment.
         m_regex = QRegularExpression::fromWildcard(
             g, Qt::CaseInsensitive, QRegularExpression::UnanchoredWildcardConversion);
-        // Wildcard conversion anchors the whole string; we want substring-style
-        // containment, so rebuild unanchored when there are no anchoring needs.
         m_valid = m_regex.isValid();
         return;
     }

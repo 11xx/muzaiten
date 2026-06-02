@@ -139,7 +139,8 @@ public:
 
     bool setData(const QModelIndex &index, const QVariant &value, int role) override
     {
-        if (!index.isValid() || role != HoverRatingRole || index.column() != 0 || index.row() >= m_hoverRatings.size()) {
+        if (!index.isValid() || role != HoverRatingRole || index.column() != 0
+            || index.row() < 0 || index.row() >= m_hoverRatings.size()) {
             return false;
         }
         m_hoverRatings[index.row()] = value.toInt();
