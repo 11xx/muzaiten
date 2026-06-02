@@ -81,9 +81,15 @@ Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 
 namespace {
 
+// Album titles are joined into one key string (for persistence and change
+// detection) and split back. Use the ASCII Unit Separator (0x1F), which cannot
+// occur in a real tag value, so a title that itself contains a newline still
+// round-trips to a single filter entry instead of several bogus ones.
+constexpr char16_t kAlbumFilterSeparator = u'\x1F';
+
 QString albumFilterKey(const QStringList &albumTitles)
 {
-    return albumTitles.join(QLatin1Char('\n'));
+    return albumTitles.join(QChar(kAlbumFilterSeparator));
 }
 
 QStringList normalizedAlbumTitles(QStringList albumTitles)
@@ -1205,26 +1211,12 @@ void MainWindow::refreshTrackTable()
     if (m_currentArtist.isEmpty()) {
         return;
     }
+    // One query for the whole selection (empty = whole artist), ordered by the
+    // normal album sort instead of selection order.
     if (m_librarySource == LibrarySource::Mpd) {
-        if (m_selectedAlbumTitles.isEmpty()) {
-            m_trackTable->setTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory()));
-        } else {
-            QVector<Track> tracks;
-            for (const QString &albumTitle : m_selectedAlbumTitles) {
-                tracks += m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle);
-            }
-            m_trackTable->setTracks(tracks);
-        }
+        m_trackTable->setTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), m_selectedAlbumTitles));
     } else {
-        if (m_selectedAlbumTitles.isEmpty()) {
-            m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist));
-        } else {
-            QVector<Track> tracks;
-            for (const QString &albumTitle : m_selectedAlbumTitles) {
-                tracks += m_database->tracksForArtist(m_currentArtist, albumTitle);
-            }
-            m_trackTable->setTracks(tracks);
-        }
+        m_trackTable->setTracks(m_database->tracksForArtist(m_currentArtist, m_selectedAlbumTitles));
     }
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Tracks);
@@ -1792,10 +1784,10 @@ void MainWindow::restoreCurrentSourceSelection()
 {
     if (m_librarySource == LibrarySource::Mpd) {
         m_currentArtist = m_mpdArtist;
-        m_selectedAlbumTitles = normalizedAlbumTitles(m_mpdAlbumTitle.split(QLatin1Char('\n')));
+        m_selectedAlbumTitles = normalizedAlbumTitles(m_mpdAlbumTitle.split(QChar(kAlbumFilterSeparator)));
     } else {
         m_currentArtist = m_localArtist;
-        m_selectedAlbumTitles = normalizedAlbumTitles(m_localAlbumTitle.split(QLatin1Char('\n')));
+        m_selectedAlbumTitles = normalizedAlbumTitles(m_localAlbumTitle.split(QChar(kAlbumFilterSeparator)));
     }
     m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
 }

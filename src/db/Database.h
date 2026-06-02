@@ -73,9 +73,13 @@ public:
     QVector<Artist> mpdAlbumArtists() const;
     QVector<Album> mpdAlbumsForArtist(const QString &albumArtist, const QString &musicDirectory) const;
     QVector<Track> mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QString &albumTitleFilter = {}) const;
+    // Narrow to several albums in a single query (album-sort order). An empty
+    // list returns the whole artist; empty entries are ignored.
+    QVector<Track> mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QStringList &albumTitleFilters) const;
     QVector<Artist> albumArtists() const;
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;
+    QVector<Track> tracksForArtist(const QString &albumArtist, const QStringList &albumTitleFilters) const;
     // Lightweight row set for building the search index — all non-missing local tracks.
     QVector<Search::SearchRecord> allTracksForSearch() const;
     // Lightweight row set for MPD-imported tracks.

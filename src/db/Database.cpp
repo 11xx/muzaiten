@@ -92,6 +92,17 @@ QString enabledLibraryRootPredicate(const QString &trackAlias)
         .arg(trackAlias);
 }
 
+// "?, ?, ..." for an IN (...) clause with `count` bound parameters.
+QString sqlPlaceholders(qsizetype count)
+{
+    QStringList marks;
+    marks.reserve(count);
+    for (qsizetype i = 0; i < count; ++i) {
+        marks << QStringLiteral("?");
+    }
+    return marks.join(QStringLiteral(", "));
+}
+
 } // namespace
 
 Database::Database(QString connectionName)
@@ -540,6 +551,15 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
 
 QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter) const
 {
+    return tracksForArtist(albumArtist,
+                           albumTitleFilter.isEmpty() ? QStringList() : QStringList{albumTitleFilter});
+}
+
+QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStringList &albumTitleFilters) const
+{
+    QStringList filters = albumTitleFilters;
+    filters.removeAll(QString());
+
     QVector<Track> tracks;
     QSqlQuery query(m_db);
     QString sql = QStringLiteral(
@@ -552,14 +572,14 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
     }
-    if (!albumTitleFilter.isEmpty()) {
-        sql += QStringLiteral(" AND t.album_title = ?");
+    if (!filters.isEmpty()) {
+        sql += QStringLiteral(" AND t.album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
     }
     sql += QStringLiteral(" ORDER BY lower(t.album_title), t.disc_number, t.track_number, lower(t.title)");
     query.prepare(sql);
     query.addBindValue(albumArtist);
-    if (!albumTitleFilter.isEmpty()) {
-        query.addBindValue(albumTitleFilter);
+    for (const QString &filter : filters) {
+        query.addBindValue(filter);
     }
     query.exec();
     while (query.next()) {
@@ -1410,6 +1430,15 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
 
 QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QString &albumTitleFilter) const
 {
+    return mpdTracksForArtist(albumArtist, musicDirectory,
+                              albumTitleFilter.isEmpty() ? QStringList() : QStringList{albumTitleFilter});
+}
+
+QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QStringList &albumTitleFilters) const
+{
+    QStringList filters = albumTitleFilters;
+    filters.removeAll(QString());
+
     QVector<Track> tracks;
     QSqlQuery query(m_db);
     QString sql = QStringLiteral(
@@ -1417,14 +1446,14 @@ QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QS
         "track_number, disc_number, duration_ms, date "
         "FROM mpd_tracks "
         "WHERE album_artist_name = ?");
-    if (!albumTitleFilter.isEmpty()) {
-        sql += QStringLiteral(" AND album_title = ?");
+    if (!filters.isEmpty()) {
+        sql += QStringLiteral(" AND album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
     }
     sql += QStringLiteral(" ORDER BY lower(album_title), disc_number, track_number, lower(title)");
     query.prepare(sql);
     query.addBindValue(albumArtist);
-    if (!albumTitleFilter.isEmpty()) {
-        query.addBindValue(albumTitleFilter);
+    for (const QString &filter : filters) {
+        query.addBindValue(filter);
     }
     query.exec();
     while (query.next()) {
