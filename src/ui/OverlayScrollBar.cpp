@@ -183,6 +183,12 @@ bool OverlayScrollBar::eventFilter(QObject *watched, QEvent *event)
     case QEvent::MouseMove: {
         auto *mouse = static_cast<QMouseEvent *>(event);
         if (m_dragging) {
+            if (!(mouse->buttons() & Qt::LeftButton)) {
+                // Button released somewhere we never saw the release; stop.
+                m_dragging = false;
+                update();
+                break;
+            }
             const int delta = mouse->pos().y() - m_dragStartPos;
             const int total = m_scrollBar->maximum() - m_scrollBar->minimum();
             if (m_dragTrack > 0 && total > 0) {
@@ -203,9 +209,10 @@ bool OverlayScrollBar::eventFilter(QObject *watched, QEvent *event)
     }
 
     case QEvent::Leave:
-        if (m_dragging) {
-            m_dragging = false;
-        }
+        // Don't abort an in-progress drag: like a real scrollbar, dragging
+        // continues (via the press's implicit mouse grab) until the button is
+        // released, even if the cursor strays off the viewport. Only the idle
+        // hover indicator is cleared here.
         setHovered(false);
         break;
 
