@@ -18,6 +18,7 @@ public:
     bool isOpen() const;
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
+    bool removeSetting(const QString &key);
 
 private:
     QString m_connectionName;

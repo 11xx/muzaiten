@@ -79,3 +79,14 @@ bool SettingsStore::setSetting(const QString &key, const QString &value)
     query.addBindValue(value);
     return query.exec();
 }
+
+bool SettingsStore::removeSetting(const QString &key)
+{
+    if (!m_db.isOpen()) {
+        return false;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM settings WHERE key = ?"));
+    query.addBindValue(key);
+    return query.exec();
+}
