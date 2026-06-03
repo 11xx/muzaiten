@@ -5,6 +5,7 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueStore.h"
+#include "ui/ResponsiveColumnLayout.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -12,6 +13,7 @@
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
 #include <QAction>
+#include <QActionGroup>
 #include <QDataStream>
 #include <QFileInfo>
 #include <QHeaderView>
@@ -25,6 +27,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -86,10 +89,84 @@ int preferredWidthForColumn(int column, QueueTablePreset preset)
 {
     if (const ColumnSpec *spec = specForColumn(column)) {
         return preset == QueueTablePreset::FullScreen
-            ? std::max(spec->minWidth, spec->fullScreenWeight * 12)
+            ? std::max(spec->minWidth, spec->fullScreenWeight * 2)
             : spec->sidebarPreferredWidth;
     }
     return 60;
+}
+
+QString columnKey(int column)
+{
+    if (const ColumnSpec *spec = specForColumn(column)) {
+        return QString::fromLatin1(spec->key);
+    }
+    return {};
+}
+
+ResponsiveColumnPriority defaultPriorityForColumn(int column)
+{
+    switch (column) {
+    case 1:
+        return ResponsiveColumnPriority::Keep;
+    case 4:
+    case 5:
+    case 2:
+        return ResponsiveColumnPriority::Normal;
+    default:
+        return ResponsiveColumnPriority::HideEarly;
+    }
+}
+
+QVector<int> queueResponsiveDropOrder()
+{
+    return {7, 0, 3, 8, 6, 2, 5, 4, 1};
+}
+
+QVector<ResponsiveColumnSpec> responsiveSpecsForPreset(QueueTablePreset preset)
+{
+    QVector<ResponsiveColumnSpec> specs;
+    for (int column : queueResponsiveDropOrder()) {
+        if (const ColumnSpec *spec = specForColumn(column)) {
+            specs.push_back({
+                spec->index,
+                QString::fromLatin1(spec->key),
+                preferredWidthForColumn(spec->index, preset),
+                minWidthForColumn(spec->index),
+                defaultPriorityForColumn(spec->index),
+                spec->index == 1,
+            });
+        }
+    }
+    return specs;
+}
+
+QVector<int> defaultVisibleColumnsForPreset(QueueTablePreset preset)
+{
+    return preset == QueueTablePreset::FullScreen
+        ? QVector<int>{4, 8, 1, 5, 6, 2}
+        : QVector<int>{0, 1, 3};
+}
+
+QSet<QString> defaultVisibleKeysForPreset(QueueTablePreset preset)
+{
+    QSet<QString> keys;
+    for (int column : defaultVisibleColumnsForPreset(preset)) {
+        keys.insert(columnKey(column));
+    }
+    return keys;
+}
+
+QString priorityLabel(ResponsiveColumnPriority priority)
+{
+    switch (priority) {
+    case ResponsiveColumnPriority::Keep:
+        return QStringLiteral("Keep");
+    case ResponsiveColumnPriority::Normal:
+        return QStringLiteral("Normal");
+    case ResponsiveColumnPriority::HideEarly:
+        return QStringLiteral("Hide early");
+    }
+    return QStringLiteral("Normal");
 }
 
 QString ratingText(int rating0To100)
@@ -190,88 +267,9 @@ public:
         return m_currentPlayingRow;
     }
 
-    void fitVisibleColumnsToViewport(int fixedColumn = -1)
-    {
-        if (model() == nullptr || m_fittingColumns) {
-            return;
-        }
-
-        QVector<int> visibleColumns;
-        int totalWidth = 0;
-        for (int column = 0; column < model()->columnCount(); ++column) {
-            if (isColumnHidden(column)) {
-                continue;
-            }
-            visibleColumns.push_back(column);
-            totalWidth += std::max(minWidthForColumn(column), columnWidth(column));
-        }
-        if (visibleColumns.isEmpty()) {
-            return;
-        }
-
-        const int targetWidth = viewport()->width();
-        if (targetWidth <= 0 || totalWidth == targetWidth) {
-            return;
-        }
-
-        const QSignalBlocker blocker(horizontalHeader());
-        m_fittingColumns = true;
-
-        QVector<int> adjustableColumns;
-        int fixedWidth = 0;
-        int adjustableWidth = 0;
-        for (int column : visibleColumns) {
-            const int width = std::max(minWidthForColumn(column), columnWidth(column));
-            if (column == fixedColumn) {
-                fixedWidth += width;
-                continue;
-            }
-            adjustableColumns.push_back(column);
-            adjustableWidth += width;
-        }
-
-        if (adjustableColumns.isEmpty()) {
-            m_fittingColumns = false;
-            return;
-        }
-
-        int sumAdjustableMin = 0;
-        for (int col : adjustableColumns) {
-            sumAdjustableMin += minWidthForColumn(col);
-        }
-
-        if (fixedColumn >= 0) {
-            const int maxFixed = targetWidth - sumAdjustableMin;
-            if (fixedWidth > maxFixed) {
-                fixedWidth = std::max(minWidthForColumn(fixedColumn), maxFixed);
-                setColumnWidth(fixedColumn, fixedWidth);
-            }
-        }
-
-        const int availableWidth = std::max(sumAdjustableMin, targetWidth - fixedWidth);
-        int remainingWidth = availableWidth;
-        for (int index = 0; index < adjustableColumns.size(); ++index) {
-            const int column = adjustableColumns.at(index);
-            const int minW = minWidthForColumn(column);
-            const int width = index == adjustableColumns.size() - 1
-                ? std::max(minW, remainingWidth)
-                : std::max(minW, (columnWidth(column) * availableWidth) / std::max(1, adjustableWidth));
-            setColumnWidth(column, width);
-            remainingWidth -= width;
-        }
-
-        m_fittingColumns = false;
-    }
-
     std::function<void(const QVector<int> &rows, int destinationRow)> rowsMoveRequested;
 
 protected:
-    void resizeEvent(QResizeEvent *event) override
-    {
-        NavigableTableView::resizeEvent(event);
-        fitVisibleColumnsToViewport();
-    }
-
     bool isQueueDrag(const QMimeData *mime) const
     {
         return mime != nullptr && mime->hasFormat(QString::fromLatin1(queueRowsMimeType));
@@ -383,7 +381,6 @@ private:
     QueueTablePreset m_preset = QueueTablePreset::Sidebar;
     int m_dropIndicatorRow = -1;
     int m_currentPlayingRow = -1;
-    bool m_fittingColumns = false;
 };
 
 class QueueItemDelegate final : public QStyledItemDelegate {
@@ -745,6 +742,7 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     }
     layout->addWidget(m_view, 1);
 
+    m_columnLayout = new ResponsiveColumnLayout(m_view, responsiveSpecsForPreset(preset), this);
     applyPresetDefaults();
 
     connect(m_view, &QTableView::doubleClicked, this, [this](const QModelIndex &index) {
@@ -758,11 +756,14 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     });
     auto *queueColumnResizer = NeighborColumnResizer::install(
         m_view->horizontalHeader(), [](int column) { return minWidthForColumn(column); });
-    connect(queueColumnResizer, &NeighborColumnResizer::columnResized, this, [this]() {
+    connect(queueColumnResizer, qOverload<int, int>(&NeighborColumnResizer::columnResized), this, [this](int leftLogical, int rightLogical) {
+        m_columnLayout->updateBaselineWidthsForResize(leftLogical, rightLogical);
+    });
+    connect(m_columnLayout, &ResponsiveColumnLayout::layoutSettingsChanged, this, [this]() {
         emit viewSettingsChanged();
     });
     connect(m_view->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this](int, int) {
-        static_cast<QueueTableView *>(m_view)->fitVisibleColumnsToViewport();
+        m_columnLayout->relayout();
         scheduleRestoreScrollToCurrentRow();
     });
     connect(m_view, &QWidget::customContextMenuRequested, this, &QueueTable::showQueueMenu);
@@ -801,7 +802,7 @@ void QueueTable::setQueueStore(QueueStore *store)
         }
         QTimer::singleShot(0, this, [this]() {
             if (m_preset == QueueTablePreset::Sidebar || m_view->isVisible()) {
-                static_cast<QueueTableView *>(m_view)->fitVisibleColumnsToViewport();
+                m_columnLayout->relayout();
             }
             scheduleRestoreScrollToCurrentRow();
         });
@@ -818,8 +819,9 @@ void QueueTable::setQueueStore(QueueStore *store)
 QString QueueTable::viewSettingsJson() const
 {
     QJsonArray visibleColumns;
+    const QSet<QString> userVisible = m_columnLayout->userVisibleColumns();
     for (const ColumnSpec &spec : columns) {
-        if (!m_view->isColumnHidden(spec.index)) {
+        if (userVisible.contains(QString::fromLatin1(spec.key))) {
             visibleColumns.append(QString::fromLatin1(spec.key));
         }
     }
@@ -829,6 +831,8 @@ QString QueueTable::viewSettingsJson() const
     root.insert(QStringLiteral("headerHeight"), m_view->horizontalHeader()->height());
     root.insert(QStringLiteral("rowHeight"), m_view->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_view->horizontalHeader()->saveState().toBase64()));
+    m_columnLayout->writeSavedWidthsJson(&root);
+    m_columnLayout->writePrioritiesJson(&root);
     root.insert(QStringLiteral("currentRow"), currentRow());
     root.insert(QStringLiteral("showPlayNextBadge"), m_showPlayNextBadge);
     root.insert(QStringLiteral("showPlayNextTitleAccent"), m_showPlayNextTitleAccent);
@@ -843,15 +847,15 @@ void QueueTable::applyViewSettingsJson(const QString &json)
 
     const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
     const QJsonArray visible = root.value(QStringLiteral("visibleColumns")).toArray();
+    QSet<QString> visibleKeys = m_columnLayout->userVisibleColumns();
     if (!visible.isEmpty()) {
-        QStringList visibleKeys;
+        visibleKeys.clear();
         for (const QJsonValue &value : visible) {
-            visibleKeys.push_back(value.toString());
+            const QString key = value.toString();
+            if (!key.isEmpty()) {
+                visibleKeys.insert(key);
+            }
         }
-        for (const ColumnSpec &spec : columns) {
-            m_view->setColumnHidden(spec.index, !visibleKeys.contains(QString::fromLatin1(spec.key)));
-        }
-        static_cast<QueueTableView *>(m_view)->fitVisibleColumnsToViewport();
     }
 
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
@@ -860,8 +864,10 @@ void QueueTable::applyViewSettingsJson(const QString &json)
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
     if (!headerState.isEmpty()) {
         m_view->horizontalHeader()->restoreState(headerState);
-        static_cast<QueueTableView *>(m_view)->fitVisibleColumnsToViewport();
     }
+    m_columnLayout->applySavedWidthsJson(root);
+    m_columnLayout->applyPrioritiesJson(root);
+    m_columnLayout->setUserVisibleColumns(visibleKeys);
 
     m_showPlayNextBadge = root.value(QStringLiteral("showPlayNextBadge")).toBool(true);
     static_cast<QueueTableModel *>(m_model)->setShowPlayNextBadge(m_showPlayNextBadge);
@@ -887,7 +893,6 @@ void QueueTable::resetViewSettings()
     const int defaultRowHeight = m_preset == QueueTablePreset::FullScreen ? 20 : 18;
     m_view->verticalHeader()->setDefaultSectionSize(defaultRowHeight);
     applyPresetDefaults();
-    static_cast<QueueTableView *>(m_view)->fitVisibleColumnsToViewport();
     m_view->viewport()->update();
     emit viewSettingsChanged();
 }
@@ -998,18 +1003,42 @@ void QueueTable::changeEvent(QEvent *event)
 void QueueTable::showHeaderMenu(const QPoint &pos)
 {
     QMenu menu(this);
+    QSet<QString> visibleKeys = m_columnLayout->userVisibleColumns();
     for (const ColumnSpec &spec : columns) {
         QAction *action = menu.addAction(QString::fromLatin1(spec.label));
         action->setCheckable(true);
-        action->setChecked(!m_view->isColumnHidden(spec.index));
-        connect(action, &QAction::toggled, this, [this, column = spec.index](bool checked) {
-            m_view->setColumnHidden(column, !checked);
-            if (checked && m_view->columnWidth(column) <= minWidthForColumn(column)) {
-                m_view->setColumnWidth(column, preferredWidthForColumn(column, m_preset));
+        const QString key = QString::fromLatin1(spec.key);
+        action->setChecked(visibleKeys.contains(key));
+        connect(action, &QAction::toggled, this, [this, key](bool checked) {
+            QSet<QString> keys = m_columnLayout->userVisibleColumns();
+            if (checked) {
+                keys.insert(key);
+            } else {
+                keys.remove(key);
             }
-            static_cast<QueueTableView *>(m_view)->fitVisibleColumnsToViewport();
+            m_columnLayout->setUserVisibleColumns(keys);
             emit viewSettingsChanged();
         });
+    }
+    menu.addSeparator();
+
+    QMenu *priorityMenu = menu.addMenu(QStringLiteral("Responsive priority"));
+    for (const ColumnSpec &spec : columns) {
+        const QString key = QString::fromLatin1(spec.key);
+        QMenu *columnMenu = priorityMenu->addMenu(QString::fromLatin1(spec.label));
+        auto *group = new QActionGroup(columnMenu);
+        group->setExclusive(true);
+        for (const ResponsiveColumnPriority priority : {ResponsiveColumnPriority::Keep,
+                                                        ResponsiveColumnPriority::Normal,
+                                                        ResponsiveColumnPriority::HideEarly}) {
+            QAction *action = columnMenu->addAction(priorityLabel(priority));
+            action->setCheckable(true);
+            action->setActionGroup(group);
+            action->setChecked(m_columnLayout->columnPriority(key) == priority);
+            connect(action, &QAction::triggered, this, [this, key, priority]() {
+                m_columnLayout->setColumnPriority(key, priority);
+            });
+        }
     }
     menu.addSeparator();
 
@@ -1243,16 +1272,12 @@ void QueueTable::setHoveredRow(int row)
 
 void QueueTable::applyPresetDefaults()
 {
-    const QVector<int> visible = m_preset == QueueTablePreset::FullScreen
-        ? QVector<int>{4, 8, 1, 5, 6, 2}
-        : QVector<int>{0, 1, 3};
-    for (const ColumnSpec &spec : columns) {
-        m_view->setColumnHidden(spec.index, !visible.contains(spec.index));
-        m_view->setColumnWidth(spec.index, preferredWidthForColumn(spec.index, m_preset));
-    }
+    const QVector<int> visible = defaultVisibleColumnsForPreset(m_preset);
     for (int visual = 0; visual < visible.size(); ++visual) {
         m_view->horizontalHeader()->moveSection(m_view->horizontalHeader()->visualIndex(visible.at(visual)), visual);
     }
+    m_columnLayout->resetToDefaults();
+    m_columnLayout->setUserVisibleColumns(defaultVisibleKeysForPreset(m_preset));
 }
 
 void QueueTable::setHeaderHeight(int height)

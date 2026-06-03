@@ -9,6 +9,7 @@ class QueueStore;
 class QAbstractTableModel;
 class QStyledItemDelegate;
 class QTableView;
+class ResponsiveColumnLayout;
 class StarRatingDelegate;
 
 enum class QueueTablePreset {
@@ -74,6 +75,7 @@ private:
     QAbstractTableModel *m_model = nullptr;
     QStyledItemDelegate *m_itemDelegate = nullptr;
     StarRatingDelegate *m_ratingDelegate = nullptr;
+    ResponsiveColumnLayout *m_columnLayout = nullptr;
     int m_hoveredRow = -1;
     int m_pendingRestoreRow = -1;
     bool m_showPlayNextBadge = true;
