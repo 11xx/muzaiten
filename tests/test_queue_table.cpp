@@ -1,5 +1,6 @@
 #include "ui/QueueStore.h"
 #include "ui/QueueTable.h"
+#include "ui/ResponsiveColumnLayout.h"
 
 #include <QAbstractItemModel>
 #include <QHeaderView>
@@ -82,9 +83,11 @@ private slots:
     void settingsRoundTripVisibleColumns()
     {
         QueueTable first(QueueTablePreset::FullScreen);
-        auto *firstView = first.findChild<QTableView *>();
-        QVERIFY(firstView != nullptr);
-        firstView->setColumnHidden(7, false);
+        auto *firstLayout = first.findChild<ResponsiveColumnLayout *>();
+        QVERIFY(firstLayout != nullptr);
+        QSet<QString> visible = firstLayout->userVisibleColumns();
+        visible.insert(QStringLiteral("year"));
+        firstLayout->setUserVisibleColumns(visible);
         const QString json = first.viewSettingsJson();
 
         QueueTable second(QueueTablePreset::FullScreen);
@@ -93,6 +96,19 @@ private slots:
         QVERIFY(secondView != nullptr);
         QVERIFY(!secondView->isColumnHidden(7));
         QVERIFY(!secondView->isColumnHidden(2));
+    }
+
+    void defaultResponsivePriorities()
+    {
+        QueueTable table(QueueTablePreset::FullScreen);
+        auto *layout = table.findChild<ResponsiveColumnLayout *>();
+        QVERIFY(layout != nullptr);
+
+        QCOMPARE(layout->columnPriority(QStringLiteral("title")), ResponsiveColumnPriority::Keep);
+        QCOMPARE(layout->columnPriority(QStringLiteral("duration")), ResponsiveColumnPriority::HideEarly);
+        QCOMPARE(layout->columnPriority(QStringLiteral("track")), ResponsiveColumnPriority::HideEarly);
+        QCOMPARE(layout->columnPriority(QStringLiteral("year")), ResponsiveColumnPriority::HideEarly);
+        QCOMPARE(layout->columnPriority(QStringLiteral("position")), ResponsiveColumnPriority::HideEarly);
     }
 
     void currentPlayingDoesNotStealSelection()

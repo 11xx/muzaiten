@@ -204,6 +204,25 @@ target_compile_features(test_queue_table PRIVATE cxx_std_26)
 add_test(NAME test_queue_table COMMAND test_queue_table)
 set_tests_properties(test_queue_table PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_responsive_column_layout
+    test_responsive_column_layout.cpp
+    ../src/ui/ResponsiveColumnLayout.cpp
+    ../src/ui/TrackTable.cpp
+    ../src/ui/DenseTableDelegate.cpp
+    ../src/ui/NavigableTableView.cpp
+    ../src/ui/NeighborColumnResizer.cpp
+    ../src/ui/OverlayScrollBar.cpp
+    ../src/ui/StarRating.cpp
+    ../src/ui/StarRatingDelegate.cpp
+    ../src/core/MusicSort.cpp
+    ../src/core/Rating.cpp
+)
+target_include_directories(test_responsive_column_layout PRIVATE ../src)
+target_link_libraries(test_responsive_column_layout PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_responsive_column_layout PRIVATE cxx_std_26)
+add_test(NAME test_responsive_column_layout COMMAND test_responsive_column_layout)
+set_tests_properties(test_responsive_column_layout PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp
     ../src/ui/KeybindingsDialog.cpp
