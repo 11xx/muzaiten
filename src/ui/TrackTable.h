@@ -11,6 +11,7 @@
 class QEvent;
 class QMouseEvent;
 class QWheelEvent;
+class ResponsiveColumnLayout;
 
 class TrackTable final : public NavigableTableView {
     Q_OBJECT
@@ -68,5 +69,6 @@ private:
 
     QPersistentModelIndex m_hoverRatingIndex;
     QSet<QString> m_markedTrackPaths;
+    ResponsiveColumnLayout *m_columnLayout = nullptr;
     int m_hoveredRow = -1;
 };
