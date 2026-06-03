@@ -2,6 +2,7 @@
 
 #include <QEvent>
 #include <QHeaderView>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSignalBlocker>
 #include <QTableView>
@@ -59,6 +60,64 @@ bool ResponsiveColumnLayout::isResponsiveAbsorber(const QString &key) const
     return false;
 }
 
+void ResponsiveColumnLayout::setColumnMinimumWidth(const QString &key, int width)
+{
+    if (const ResponsiveColumnSpec *spec = specForKey(key)) {
+        const int clamped = std::clamp(width, std::max(1, spec->minWidth), 2000);
+        if (minForSpec(*spec) == clamped) {
+            return;
+        }
+        m_minimumWidths.insert(key, clamped);
+        if (m_baselineWidths.value(key, spec->preferredWidth) < clamped) {
+            m_baselineWidths.insert(key, clamped);
+        }
+        relayout();
+        emit layoutSettingsChanged();
+    }
+}
+
+int ResponsiveColumnLayout::columnMinimumWidth(const QString &key) const
+{
+    if (const ResponsiveColumnSpec *spec = specForKey(key)) {
+        return minForSpec(*spec);
+    }
+    return 0;
+}
+
+int ResponsiveColumnLayout::defaultColumnMinimumWidth(const QString &key) const
+{
+    if (const ResponsiveColumnSpec *spec = specForKey(key)) {
+        return std::max(1, spec->minWidth);
+    }
+    return 0;
+}
+
+void ResponsiveColumnLayout::setDropOrderKeys(const QStringList &keys)
+{
+    QStringList ordered;
+    for (const QString &key : keys) {
+        if (specForKey(key) != nullptr && !ordered.contains(key)) {
+            ordered.push_back(key);
+        }
+    }
+    for (const ResponsiveColumnSpec &spec : m_specs) {
+        if (!ordered.contains(spec.key)) {
+            ordered.push_back(spec.key);
+        }
+    }
+    if (m_dropOrderKeys == ordered) {
+        return;
+    }
+    m_dropOrderKeys = ordered;
+    relayout();
+    emit layoutSettingsChanged();
+}
+
+QStringList ResponsiveColumnLayout::dropOrderKeys() const
+{
+    return m_dropOrderKeys;
+}
+
 void ResponsiveColumnLayout::applySavedWidthsJson(const QJsonObject &root)
 {
     const QJsonObject widths = root.value(QStringLiteral("columnWidths")).toObject();
@@ -108,6 +167,63 @@ void ResponsiveColumnLayout::writePrioritiesJson(QJsonObject *root) const
     root->insert(QStringLiteral("responsivePriorities"), priorities);
 }
 
+void ResponsiveColumnLayout::applyMinimumWidthsJson(const QJsonObject &root)
+{
+    const QJsonObject widths = root.value(QStringLiteral("responsiveMinWidths")).toObject();
+    for (const ResponsiveColumnSpec &spec : m_specs) {
+        const int saved = widths.value(spec.key).toInt(spec.minWidth);
+        m_minimumWidths.insert(spec.key, std::clamp(saved, std::max(1, spec.minWidth), 2000));
+        if (m_baselineWidths.value(spec.key, spec.preferredWidth) < minForSpec(spec)) {
+            m_baselineWidths.insert(spec.key, minForSpec(spec));
+        }
+    }
+}
+
+void ResponsiveColumnLayout::writeMinimumWidthsJson(QJsonObject *root) const
+{
+    if (root == nullptr) {
+        return;
+    }
+    QJsonObject widths;
+    for (const ResponsiveColumnSpec &spec : m_specs) {
+        widths.insert(spec.key, minForSpec(spec));
+    }
+    root->insert(QStringLiteral("responsiveMinWidths"), widths);
+}
+
+void ResponsiveColumnLayout::applyDropOrderJson(const QJsonObject &root)
+{
+    const QJsonArray order = root.value(QStringLiteral("responsiveDropOrder")).toArray();
+    QStringList ordered;
+    for (const QJsonValue &value : order) {
+        const QString key = value.toString();
+        if (specForKey(key) != nullptr && !ordered.contains(key)) {
+            ordered.push_back(key);
+        }
+    }
+    if (ordered.isEmpty()) {
+        return;
+    }
+    for (const ResponsiveColumnSpec &spec : m_specs) {
+        if (!ordered.contains(spec.key)) {
+            ordered.push_back(spec.key);
+        }
+    }
+    m_dropOrderKeys = ordered;
+}
+
+void ResponsiveColumnLayout::writeDropOrderJson(QJsonObject *root) const
+{
+    if (root == nullptr) {
+        return;
+    }
+    QJsonArray order;
+    for (const QString &key : m_dropOrderKeys) {
+        order.append(key);
+    }
+    root->insert(QStringLiteral("responsiveDropOrder"), order);
+}
+
 void ResponsiveColumnLayout::updateBaselineWidthsForResize(int leftLogical, int rightLogical)
 {
     if (m_view == nullptr) {
@@ -141,11 +257,15 @@ void ResponsiveColumnLayout::resetToDefaults()
 {
     m_userVisibleKeys.clear();
     m_baselineWidths.clear();
+    m_minimumWidths.clear();
     m_priorities.clear();
+    m_dropOrderKeys.clear();
     for (const ResponsiveColumnSpec &spec : m_specs) {
         m_userVisibleKeys.insert(spec.key);
+        m_minimumWidths.insert(spec.key, std::max(1, spec.minWidth));
         m_baselineWidths.insert(spec.key, std::max(minForSpec(spec), spec.preferredWidth));
         m_priorities.insert(spec.key, spec.defaultPriority);
+        m_dropOrderKeys.push_back(spec.key);
     }
     relayout();
 }
@@ -166,12 +286,7 @@ void ResponsiveColumnLayout::relayout()
     }
     QVector<int> droppable;
     for (const ResponsiveColumnPriority priority : {ResponsiveColumnPriority::HideEarly, ResponsiveColumnPriority::Normal}) {
-        for (int specIndex : visible) {
-            const ResponsiveColumnSpec &spec = m_specs.at(specIndex);
-            if (columnPriority(spec.key) == priority) {
-                droppable.push_back(specIndex);
-            }
-        }
+        droppable.append(orderedSpecIndexesByDropOrder(priority, visible));
     }
 
     while (!visible.isEmpty() && !fitsWithoutResponsiveHiding(visible, availableWidth)) {
@@ -245,7 +360,29 @@ int ResponsiveColumnLayout::baselineForSpec(const ResponsiveColumnSpec &spec) co
 
 int ResponsiveColumnLayout::minForSpec(const ResponsiveColumnSpec &spec) const
 {
-    return std::max(1, spec.minWidth);
+    return std::max(std::max(1, spec.minWidth), m_minimumWidths.value(spec.key, spec.minWidth));
+}
+
+QVector<int> ResponsiveColumnLayout::orderedSpecIndexesByDropOrder(ResponsiveColumnPriority priority,
+                                                                  const QVector<int> &visible) const
+{
+    QVector<int> result;
+    for (const QString &key : m_dropOrderKeys) {
+        for (int specIndex : visible) {
+            const ResponsiveColumnSpec &spec = m_specs.at(specIndex);
+            if (spec.key == key && columnPriority(spec.key) == priority && !result.contains(specIndex)) {
+                result.push_back(specIndex);
+                break;
+            }
+        }
+    }
+    for (int specIndex : visible) {
+        const ResponsiveColumnSpec &spec = m_specs.at(specIndex);
+        if (columnPriority(spec.key) == priority && !result.contains(specIndex)) {
+            result.push_back(specIndex);
+        }
+    }
+    return result;
 }
 
 QVector<int> ResponsiveColumnLayout::userVisibleSpecIndexes() const
@@ -283,23 +420,15 @@ QVector<ResponsiveColumnLayout::LayoutColumn> ResponsiveColumnLayout::computeWid
 
     const int target = std::max(availableWidth, minTotal);
     if (baselineTotal <= target) {
-        int remainingExtra = target - baselineTotal;
-        const bool absorberGetsSmallExtra = absorberSpecIndex >= 0 && remainingExtra <= 120;
-        int assigned = 0;
+        const int remainingExtra = target - baselineTotal;
         for (int i = 0; i < specIndexes.size(); ++i) {
             const int specIndex = specIndexes.at(i);
             const ResponsiveColumnSpec &spec = m_specs.at(specIndex);
             int width = baselineForSpec(spec);
-            if (absorberGetsSmallExtra) {
-                if (specIndex == absorberSpecIndex) {
-                    width += remainingExtra;
-                }
-            } else if (remainingExtra > 0) {
-                const int extra = i == specIndexes.size() - 1
-                    ? remainingExtra - assigned
-                    : (baselineForSpec(spec) * remainingExtra) / std::max(1, baselineTotal);
-                width += extra;
-                assigned += extra;
+            if (specIndex == absorberSpecIndex) {
+                width += remainingExtra;
+            } else if (absorberSpecIndex < 0 && remainingExtra > 0) {
+                width += i == specIndexes.size() - 1 ? remainingExtra : 0;
             }
             result.push_back({specIndex, std::max(minForSpec(spec), width)});
         }

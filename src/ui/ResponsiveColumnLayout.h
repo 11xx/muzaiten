@@ -38,12 +38,21 @@ public:
     void setColumnPriority(const QString &key, ResponsiveColumnPriority priority);
     ResponsiveColumnPriority columnPriority(const QString &key) const;
     bool isResponsiveAbsorber(const QString &key) const;
+    void setColumnMinimumWidth(const QString &key, int width);
+    int columnMinimumWidth(const QString &key) const;
+    int defaultColumnMinimumWidth(const QString &key) const;
+    void setDropOrderKeys(const QStringList &keys);
+    QStringList dropOrderKeys() const;
 
     void applySavedWidthsJson(const QJsonObject &root);
     void writeSavedWidthsJson(QJsonObject *root) const;
 
     void applyPrioritiesJson(const QJsonObject &root);
     void writePrioritiesJson(QJsonObject *root) const;
+    void applyMinimumWidthsJson(const QJsonObject &root);
+    void writeMinimumWidthsJson(QJsonObject *root) const;
+    void applyDropOrderJson(const QJsonObject &root);
+    void writeDropOrderJson(QJsonObject *root) const;
 
     void updateBaselineWidthsForResize(int leftLogical, int rightLogical);
     int baselineWidth(const QString &key) const;
@@ -67,6 +76,8 @@ private:
     const ResponsiveColumnSpec *specForLogicalIndex(int logicalIndex) const;
     int baselineForSpec(const ResponsiveColumnSpec &spec) const;
     int minForSpec(const ResponsiveColumnSpec &spec) const;
+    QVector<int> orderedSpecIndexesByDropOrder(ResponsiveColumnPriority priority,
+                                               const QVector<int> &visible) const;
     QVector<int> userVisibleSpecIndexes() const;
     QVector<LayoutColumn> computeWidths(const QVector<int> &specIndexes, int availableWidth) const;
     bool fitsWithoutResponsiveHiding(const QVector<int> &specIndexes, int availableWidth) const;
@@ -78,6 +89,8 @@ private:
     QVector<ResponsiveColumnSpec> m_specs;
     QSet<QString> m_userVisibleKeys;
     QHash<QString, int> m_baselineWidths;
+    QHash<QString, int> m_minimumWidths;
     QHash<QString, ResponsiveColumnPriority> m_priorities;
+    QStringList m_dropOrderKeys;
     bool m_applyingLayout = false;
 };
