@@ -3,11 +3,14 @@
 #include "core/MusicSort.h"
 #include "core/Track.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/ResponsiveColumnLayout.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QAbstractTableModel>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -249,6 +252,105 @@ int columnFromKey(const QString &key)
     return 0;
 }
 
+int minWidthForColumn(int column)
+{
+    switch (column) {
+    case 0:
+        return 56;
+    case 1:
+        return 36;
+    case 2:
+        return 120;
+    case 3:
+    case 4:
+        return 80;
+    case 5:
+        return 48;
+    case 6:
+        return 40;
+    default:
+        return 36;
+    }
+}
+
+int preferredWidthForColumn(int column)
+{
+    switch (column) {
+    case 0:
+        return 72;
+    case 1:
+        return 48;
+    case 2:
+        return 360;
+    case 3:
+        return 180;
+    case 4:
+        return 160;
+    case 5:
+        return 70;
+    case 6:
+        return 58;
+    default:
+        return 80;
+    }
+}
+
+ResponsiveColumnPriority defaultPriorityForColumn(int column)
+{
+    switch (column) {
+    case 2:
+        return ResponsiveColumnPriority::Keep;
+    case 3:
+    case 4:
+        return ResponsiveColumnPriority::Normal;
+    default:
+        return ResponsiveColumnPriority::HideEarly;
+    }
+}
+
+QVector<int> trackResponsiveDropOrder()
+{
+    return {6, 1, 5, 0, 3, 4, 2};
+}
+
+QVector<ResponsiveColumnSpec> trackResponsiveSpecs()
+{
+    QVector<ResponsiveColumnSpec> specs;
+    for (int column : trackResponsiveDropOrder()) {
+        specs.push_back({
+            column,
+            columnKey(column),
+            preferredWidthForColumn(column),
+            minWidthForColumn(column),
+            defaultPriorityForColumn(column),
+            column == 2,
+        });
+    }
+    return specs;
+}
+
+QSet<QString> allTrackColumnKeys()
+{
+    QSet<QString> keys;
+    for (const ColumnSpec &spec : columns) {
+        keys.insert(QString::fromLatin1(spec.key));
+    }
+    return keys;
+}
+
+QString priorityLabel(ResponsiveColumnPriority priority)
+{
+    switch (priority) {
+    case ResponsiveColumnPriority::Keep:
+        return QStringLiteral("Keep");
+    case ResponsiveColumnPriority::Normal:
+        return QStringLiteral("Normal");
+    case ResponsiveColumnPriority::HideEarly:
+        return QStringLiteral("Hide early");
+    }
+    return QStringLiteral("Normal");
+}
+
 } // namespace
 
 TrackTable::TrackTable(QWidget *parent)
@@ -266,15 +368,20 @@ TrackTable::TrackTable(QWidget *parent)
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
     horizontalHeader()->setStretchLastSection(false);
-    horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     horizontalHeader()->setSectionsMovable(true);
     horizontalHeader()->setFixedHeight(20);
+    horizontalHeader()->setMinimumSectionSize(8);
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);
     verticalHeader()->setVisible(false);
     setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     setContextMenuPolicy(Qt::CustomContextMenu);
+
+    m_columnLayout = new ResponsiveColumnLayout(this, trackResponsiveSpecs(), this);
+    m_columnLayout->resetToDefaults();
+    m_columnLayout->setUserVisibleColumns(allTrackColumnKeys());
 
     connect(ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
         const Track track = index.data(TrackRole).value<Track>();
@@ -291,7 +398,12 @@ TrackTable::TrackTable(QWidget *parent)
     connect(horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
         emit viewSettingsChanged();
     });
-    connect(horizontalHeader(), &QHeaderView::sectionResized, this, [this]() {
+    auto *trackColumnResizer = NeighborColumnResizer::install(
+        horizontalHeader(), [](int column) { return minWidthForColumn(column); });
+    connect(trackColumnResizer, qOverload<int, int>(&NeighborColumnResizer::columnResized), this, [this](int leftLogical, int rightLogical) {
+        m_columnLayout->updateBaselineWidthsForResize(leftLogical, rightLogical);
+    });
+    connect(m_columnLayout, &ResponsiveColumnLayout::layoutSettingsChanged, this, [this]() {
         emit viewSettingsChanged();
     });
 
@@ -346,8 +458,9 @@ void TrackTable::restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int v
 QString TrackTable::viewSettingsJson() const
 {
     QJsonArray visibleColumns;
+    const QSet<QString> userVisible = m_columnLayout->userVisibleColumns();
     for (const ColumnSpec &spec : columns) {
-        if (!isColumnHidden(spec.index)) {
+        if (userVisible.contains(QString::fromLatin1(spec.key))) {
             visibleColumns.append(QString::fromLatin1(spec.key));
         }
     }
@@ -359,6 +472,8 @@ QString TrackTable::viewSettingsJson() const
     root.insert(QStringLiteral("rowHeight"), verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), horizontalHeader()->height());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(horizontalHeader()->saveState().toBase64()));
+    m_columnLayout->writeSavedWidthsJson(&root);
+    m_columnLayout->writePrioritiesJson(&root);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -370,13 +485,14 @@ void TrackTable::applyViewSettingsJson(const QString &json)
 
     const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
     const QJsonArray visible = root.value(QStringLiteral("visibleColumns")).toArray();
+    QSet<QString> visibleKeys = m_columnLayout->userVisibleColumns();
     if (!visible.isEmpty()) {
-        QStringList visibleKeys;
+        visibleKeys.clear();
         for (const QJsonValue &value : visible) {
-            visibleKeys.push_back(value.toString());
-        }
-        for (const ColumnSpec &spec : columns) {
-            setColumnHidden(spec.index, !visibleKeys.contains(QString::fromLatin1(spec.key)));
+            const QString key = value.toString();
+            if (!key.isEmpty()) {
+                visibleKeys.insert(key);
+            }
         }
     }
 
@@ -391,21 +507,25 @@ void TrackTable::applyViewSettingsJson(const QString &json)
     if (!headerState.isEmpty()) {
         horizontalHeader()->restoreState(headerState);
     }
+    horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_columnLayout->applySavedWidthsJson(root);
+    m_columnLayout->applyPrioritiesJson(root);
+    m_columnLayout->setUserVisibleColumns(visibleKeys);
 }
 
 void TrackTable::resetViewSettings()
 {
     const QSignalBlocker headerBlocker(horizontalHeader());
     for (const ColumnSpec &spec : columns) {
-        setColumnHidden(spec.index, false);
         horizontalHeader()->setSectionResizeMode(spec.index, QHeaderView::Interactive);
     }
-    horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     const int columnCount = static_cast<int>(std::size(columns));
     for (int visual = 0; visual < columnCount; ++visual) {
         const int logical = columns[visual].index;
         horizontalHeader()->moveSection(horizontalHeader()->visualIndex(logical), visual);
     }
+    m_columnLayout->resetToDefaults();
+    m_columnLayout->setUserVisibleColumns(allTrackColumnKeys());
     setHeaderHeight(20);
     verticalHeader()->setDefaultSectionSize(20);
     emit viewSettingsChanged();
@@ -660,14 +780,41 @@ void TrackTable::setHoveredRow(int row)
 void TrackTable::showHeaderMenu(const QPoint &pos)
 {
     QMenu menu(this);
+    QSet<QString> visibleKeys = m_columnLayout->userVisibleColumns();
     for (const ColumnSpec &spec : columns) {
         QAction *action = menu.addAction(QString::fromLatin1(spec.label));
         action->setCheckable(true);
-        action->setChecked(!isColumnHidden(spec.index));
-        connect(action, &QAction::toggled, this, [this, column = spec.index](bool checked) {
-            setColumnHidden(column, !checked);
+        const QString key = QString::fromLatin1(spec.key);
+        action->setChecked(visibleKeys.contains(key));
+        connect(action, &QAction::toggled, this, [this, key](bool checked) {
+            QSet<QString> keys = m_columnLayout->userVisibleColumns();
+            if (checked) {
+                keys.insert(key);
+            } else {
+                keys.remove(key);
+            }
+            m_columnLayout->setUserVisibleColumns(keys);
             emit viewSettingsChanged();
         });
+    }
+    menu.addSeparator();
+    QMenu *priorityMenu = menu.addMenu(QStringLiteral("Responsive priority"));
+    for (const ColumnSpec &spec : columns) {
+        const QString key = QString::fromLatin1(spec.key);
+        QMenu *columnMenu = priorityMenu->addMenu(QString::fromLatin1(spec.label));
+        auto *group = new QActionGroup(columnMenu);
+        group->setExclusive(true);
+        for (const ResponsiveColumnPriority priority : {ResponsiveColumnPriority::Keep,
+                                                        ResponsiveColumnPriority::Normal,
+                                                        ResponsiveColumnPriority::HideEarly}) {
+            QAction *action = columnMenu->addAction(priorityLabel(priority));
+            action->setCheckable(true);
+            action->setActionGroup(group);
+            action->setChecked(m_columnLayout->columnPriority(key) == priority);
+            connect(action, &QAction::triggered, this, [this, key, priority]() {
+                m_columnLayout->setColumnPriority(key, priority);
+            });
+        }
     }
     menu.addSeparator();
     QAction *resetLayout = menu.addAction(QStringLiteral("Reset table layout to defaults"));
