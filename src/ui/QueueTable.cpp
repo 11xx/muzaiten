@@ -6,6 +6,7 @@
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueStore.h"
 #include "ui/ResponsiveColumnLayout.h"
+#include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -49,7 +50,7 @@ struct ColumnSpec {
 
 constexpr ColumnSpec columns[] = {
     {"position", "#", 0, 38, 4},
-    {"title", "Title", 1, 180, 94},
+    {"title", "Title", 1, 180, 94, 140},
     {"ratingEdit", "Rating", 2, 96, 7, 56},
     {"rating", "Rating (short)", 3, 56, 6, 12},
     {"artist", "Artist", 4, 120, 27},
@@ -162,11 +163,20 @@ QString priorityLabel(ResponsiveColumnPriority priority)
     case ResponsiveColumnPriority::Keep:
         return QStringLiteral("Keep");
     case ResponsiveColumnPriority::Normal:
-        return QStringLiteral("Normal");
+        return QStringLiteral("Hide later");
     case ResponsiveColumnPriority::HideEarly:
         return QStringLiteral("Hide early");
     }
-    return QStringLiteral("Normal");
+    return QStringLiteral("Hide later");
+}
+
+QVector<ResponsiveColumnOption> responsiveColumnOptions()
+{
+    QVector<ResponsiveColumnOption> options;
+    for (const ColumnSpec &spec : columns) {
+        options.push_back({QString::fromLatin1(spec.key), QString::fromLatin1(spec.label)});
+    }
+    return options;
 }
 
 QString ratingText(int rating0To100)
@@ -833,6 +843,8 @@ QString QueueTable::viewSettingsJson() const
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_view->horizontalHeader()->saveState().toBase64()));
     m_columnLayout->writeSavedWidthsJson(&root);
     m_columnLayout->writePrioritiesJson(&root);
+    m_columnLayout->writeMinimumWidthsJson(&root);
+    m_columnLayout->writeDropOrderJson(&root);
     root.insert(QStringLiteral("currentRow"), currentRow());
     root.insert(QStringLiteral("showPlayNextBadge"), m_showPlayNextBadge);
     root.insert(QStringLiteral("showPlayNextTitleAccent"), m_showPlayNextTitleAccent);
@@ -865,8 +877,10 @@ void QueueTable::applyViewSettingsJson(const QString &json)
     if (!headerState.isEmpty()) {
         m_view->horizontalHeader()->restoreState(headerState);
     }
-    m_columnLayout->applySavedWidthsJson(root);
     m_columnLayout->applyPrioritiesJson(root);
+    m_columnLayout->applyMinimumWidthsJson(root);
+    m_columnLayout->applyDropOrderJson(root);
+    m_columnLayout->applySavedWidthsJson(root);
     m_columnLayout->setUserVisibleColumns(visibleKeys);
 
     m_showPlayNextBadge = root.value(QStringLiteral("showPlayNextBadge")).toBool(true);
@@ -1041,6 +1055,12 @@ void QueueTable::showHeaderMenu(const QPoint &pos)
         }
     }
     menu.addSeparator();
+
+    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
+    connect(responsiveOptions, &QAction::triggered, this, [this]() {
+        ResponsiveColumnOptionsDialog dialog(m_columnLayout, responsiveColumnOptions(), this);
+        dialog.exec();
+    });
 
     QAction *badgeAction = menu.addAction(QStringLiteral("Show play-next badge in # column"));
     badgeAction->setCheckable(true);
