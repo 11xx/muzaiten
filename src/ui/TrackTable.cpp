@@ -16,6 +16,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QTime>
 #include <QByteArray>
 #include <QWheelEvent>
@@ -392,6 +393,24 @@ void TrackTable::applyViewSettingsJson(const QString &json)
     }
 }
 
+void TrackTable::resetViewSettings()
+{
+    const QSignalBlocker headerBlocker(horizontalHeader());
+    for (const ColumnSpec &spec : columns) {
+        setColumnHidden(spec.index, false);
+        horizontalHeader()->setSectionResizeMode(spec.index, QHeaderView::Interactive);
+    }
+    horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    const int columnCount = static_cast<int>(std::size(columns));
+    for (int visual = 0; visual < columnCount; ++visual) {
+        const int logical = columns[visual].index;
+        horizontalHeader()->moveSection(horizontalHeader()->visualIndex(logical), visual);
+    }
+    setHeaderHeight(20);
+    verticalHeader()->setDefaultSectionSize(20);
+    emit viewSettingsChanged();
+}
+
 void TrackTable::setHeaderHeight(int height)
 {
     horizontalHeader()->setFixedHeight(std::clamp(height, 18, 40));
@@ -650,6 +669,9 @@ void TrackTable::showHeaderMenu(const QPoint &pos)
             emit viewSettingsChanged();
         });
     }
+    menu.addSeparator();
+    QAction *resetLayout = menu.addAction(QStringLiteral("Reset table layout to defaults"));
+    connect(resetLayout, &QAction::triggered, this, &TrackTable::resetViewSettings);
     menu.exec(horizontalHeader()->mapToGlobal(pos));
 }
 

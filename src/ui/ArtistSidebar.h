@@ -22,6 +22,7 @@ public:
     bool selectArtist(const QString &artistName);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
+    void resetViewSettings();
     void setMpdAvailable(bool available);
     void setLibrarySourceIndex(int index);
     QWidget *navigationWidget() const;

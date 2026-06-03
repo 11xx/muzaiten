@@ -33,6 +33,7 @@ public:
     int loadingAngle() const { return m_loadingAngle; }
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
+    void resetViewSettings();
     int rowCount() const;
     int currentRow() const;
     void setCurrentRow(int row);

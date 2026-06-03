@@ -547,6 +547,23 @@ void AlbumGrid::applyViewSettingsJson(const QString &json)
     applySettingsToItems();
 }
 
+void AlbumGrid::resetViewSettings()
+{
+    m_cellWidth = 204;
+    m_cellHeight = 292;
+    m_artSize = 176;
+    m_spacing = 6;
+    m_textAlignment = Qt::AlignHCenter;
+    m_starSize = 18;
+    m_sortField = MusicSort::SortField::Year;
+    m_sortDescending = true;
+    m_sortReverseGroups = false;
+    applySettingsToView();
+    applySettingsToItems();
+    applySort();
+    emit viewSettingsChanged();
+}
+
 void AlbumGrid::mouseMoveEvent(QMouseEvent *event)
 {
     if (m_leftButtonPressed && !m_pressStartedOnRating) {

@@ -329,6 +329,14 @@ void ArtistSidebar::applyViewSettingsJson(const QString &json)
     applyRowHeight();
 }
 
+void ArtistSidebar::resetViewSettings()
+{
+    m_showAlbumCount = true;
+    m_rowHeight = 18;
+    applyRowHeight();
+    emit viewSettingsChanged();
+}
+
 void ArtistSidebar::applyRowHeight()
 {
     for (int row = 0; row < m_model->rowCount(); ++row) {
@@ -367,5 +375,8 @@ void ArtistSidebar::showContextMenu(const QPoint &pos)
         applyRowHeight();
         emit viewSettingsChanged();
     });
+    menu.addSeparator();
+    QAction *reset = menu.addAction(QStringLiteral("Reset sidebar layout to defaults"));
+    connect(reset, &QAction::triggered, this, &ArtistSidebar::resetViewSettings);
     menu.exec(m_view->viewport()->mapToGlobal(pos));
 }
