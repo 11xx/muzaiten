@@ -4,6 +4,8 @@
 
 class QLabel;
 class QSlider;
+class QImage;
+class AlbumArtView;
 
 class PlayerBar final : public QWidget {
     Q_OBJECT
@@ -18,6 +20,9 @@ public:
     void setLastFmEnabled(bool enabled);
     void setListUnsupportedFiles(bool show);
     void setExplorerOptionsVisible(bool visible);
+    void setQueueViewLayoutActive(bool active);
+    void setAlbumArt(const QString &imagePath);
+    void setAlbumArt(const QImage &image);
     void setCompactMenu(bool compact);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
@@ -50,6 +55,7 @@ signals:
     void albumArtResolutionRequested();
     void searchRankingRequested();
     void keybindingsRequested();
+    void resetViewPreferencesRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void lastFmEnabledChanged(bool enabled);
@@ -81,8 +87,10 @@ private:
     QLabel *m_subtitle = nullptr;
     QLabel *m_nowPlaying = nullptr;
     QWidget *m_rating = nullptr;
+    AlbumArtView *m_albumArt = nullptr;
     QLabel *m_elapsed = nullptr;
     QLabel *m_duration = nullptr;
     QSlider *m_progress = nullptr;
     bool m_hasTrack = false;
+    bool m_usingArtFallback = true;
 };

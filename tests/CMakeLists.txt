@@ -185,11 +185,30 @@ target_compile_features(test_navigation_scroll PRIVATE cxx_std_26)
 add_test(NAME test_navigation_scroll COMMAND test_navigation_scroll)
 set_tests_properties(test_navigation_scroll PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_queue_table
+    test_queue_table.cpp
+    ../src/ui/QueueKeybindings.cpp
+    ../src/ui/QueueStore.cpp
+    ../src/ui/QueueTable.cpp
+    ../src/ui/NavigableTableView.cpp
+    ../src/ui/NeighborColumnResizer.cpp
+    ../src/ui/OverlayScrollBar.cpp
+    ../src/core/Rating.cpp
+    ../src/ui/StarRating.cpp
+    ../src/ui/StarRatingDelegate.cpp
+)
+target_include_directories(test_queue_table PRIVATE ../src)
+target_link_libraries(test_queue_table PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_queue_table PRIVATE cxx_std_26)
+add_test(NAME test_queue_table COMMAND test_queue_table)
+set_tests_properties(test_queue_table PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp
     ../src/ui/KeybindingsDialog.cpp
     ../src/ui/MainPanelKeybindings.cpp
     ../src/ui/FileExplorerKeybindings.cpp
+    ../src/ui/QueueKeybindings.cpp
 )
 target_include_directories(test_keybindings_dialog PRIVATE ../src)
 target_link_libraries(test_keybindings_dialog PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)

@@ -81,6 +81,7 @@ set(MUZAITEN_SOURCES
     src/search/SearchQuery.cpp
     src/search/SearchWorker.cpp
     src/ui/AlbumGrid.cpp
+    src/ui/AlbumArtView.cpp
     src/ui/NeighborColumnResizer.cpp
     src/ui/OverlayScrollBar.cpp
     src/ui/AlbumGridDelegate.cpp
@@ -98,6 +99,10 @@ set(MUZAITEN_SOURCES
     src/ui/PlaybackResumeDialog.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
+    src/ui/QueueKeybindings.cpp
+    src/ui/QueueScreen.cpp
+    src/ui/QueueStore.cpp
+    src/ui/QueueTable.cpp
     src/ui/RankingDialog.cpp
     src/ui/RightSidebar.cpp
     src/ui/SearchResultDelegate.cpp
@@ -157,6 +162,7 @@ set(MUZAITEN_HEADERS
     src/search/SearchWorker.h
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
+    src/ui/AlbumArtView.h
     src/ui/NeighborColumnResizer.h
     src/ui/OverlayScrollBar.h
     src/ui/AlbumArtFallback.h
@@ -174,6 +180,10 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
+    src/ui/QueueKeybindings.h
+    src/ui/QueueScreen.h
+    src/ui/QueueStore.h
+    src/ui/QueueTable.h
     src/ui/RankingDialog.h
     src/ui/RightSidebar.h
     src/ui/SearchResultDelegate.h
