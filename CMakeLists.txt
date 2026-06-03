@@ -83,6 +83,7 @@ set(MUZAITEN_SOURCES
     src/ui/AlbumGrid.cpp
     src/ui/AlbumArtView.cpp
     src/ui/NeighborColumnResizer.cpp
+    src/ui/ResponsiveColumnLayout.cpp
     src/ui/OverlayScrollBar.cpp
     src/ui/AlbumGridDelegate.cpp
     src/ui/AlbumArtFallback.cpp
@@ -164,6 +165,7 @@ set(MUZAITEN_HEADERS
     src/ui/AlbumGridDelegate.h
     src/ui/AlbumArtView.h
     src/ui/NeighborColumnResizer.h
+    src/ui/ResponsiveColumnLayout.h
     src/ui/OverlayScrollBar.h
     src/ui/AlbumArtFallback.h
     src/ui/ArtistSidebar.h
