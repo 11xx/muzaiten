@@ -87,6 +87,22 @@ private slots:
         QCOMPARE(layout.userVisibleColumns(), allBasicKeys());
     }
 
+    void wideExpansionOnlyResizesAbsorber()
+    {
+        QTableView view;
+        QStandardItemModel model;
+        prepareView(&view, &model);
+        ResponsiveColumnLayout layout(&view, basicSpecs());
+        layout.setUserVisibleColumns(allBasicKeys());
+
+        view.resize(900, 120);
+        layout.relayout();
+        QCOMPARE(view.columnWidth(0), 600);
+        QCOMPARE(view.columnWidth(1), 120);
+        QCOMPARE(view.columnWidth(2), 120);
+        QCOMPARE(view.columnWidth(3), 60);
+    }
+
     void priorityPersists()
     {
         QTableView view;
@@ -105,6 +121,58 @@ private slots:
         second.applyPrioritiesJson(root);
 
         QCOMPARE(second.columnPriority(QStringLiteral("album")), ResponsiveColumnPriority::HideEarly);
+    }
+
+    void minimumWidthPersistsAndControlsAbsorberShrink()
+    {
+        QTableView view;
+        QStandardItemModel model;
+        prepareView(&view, &model);
+        ResponsiveColumnLayout first(&view, basicSpecs());
+        first.setUserVisibleColumns(allBasicKeys());
+        first.setColumnMinimumWidth(QStringLiteral("title"), 220);
+
+        view.resize(460, 120);
+        first.relayout();
+        QCOMPARE(view.columnWidth(0), 220);
+        QVERIFY(!view.isColumnHidden(1));
+        QVERIFY(!view.isColumnHidden(2));
+        QVERIFY(view.isColumnHidden(3));
+
+        QJsonObject root;
+        first.writeMinimumWidthsJson(&root);
+
+        QTableView secondView;
+        QStandardItemModel secondModel;
+        prepareView(&secondView, &secondModel);
+        ResponsiveColumnLayout second(&secondView, basicSpecs());
+        second.applyMinimumWidthsJson(root);
+        QCOMPARE(second.columnMinimumWidth(QStringLiteral("title")), 220);
+    }
+
+    void dropOrderPersistsAndControlsTieBreaks()
+    {
+        QTableView view;
+        QStandardItemModel model;
+        prepareView(&view, &model);
+        ResponsiveColumnLayout first(&view, basicSpecs());
+        first.setUserVisibleColumns({QStringLiteral("title"), QStringLiteral("artist"), QStringLiteral("album")});
+        first.setDropOrderKeys({QStringLiteral("artist"), QStringLiteral("album"), QStringLiteral("title")});
+
+        view.resize(240, 120);
+        first.relayout();
+        QVERIFY(view.isColumnHidden(1));
+        QVERIFY(!view.isColumnHidden(2));
+
+        QJsonObject root;
+        first.writeDropOrderJson(&root);
+
+        QTableView secondView;
+        QStandardItemModel secondModel;
+        prepareView(&secondView, &secondModel);
+        ResponsiveColumnLayout second(&secondView, basicSpecs());
+        second.applyDropOrderJson(root);
+        QCOMPARE(second.dropOrderKeys().at(0), QStringLiteral("artist"));
     }
 
     void keepColumnsNeverAutoHide()
