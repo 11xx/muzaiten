@@ -192,6 +192,7 @@ add_executable(test_queue_table
     ../src/ui/QueueTable.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/NeighborColumnResizer.cpp
+    ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/OverlayScrollBar.cpp
     ../src/core/Rating.cpp
     ../src/ui/StarRating.cpp
