@@ -107,4 +107,5 @@ void NeighborColumnResizer::onSectionResized(int logicalIndex, int oldSize, int 
     m_adjusting = false;
 
     emit columnResized();
+    emit columnResized(logicalIndex, rightLogical);
 }

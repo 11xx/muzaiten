@@ -28,6 +28,7 @@ public:
 signals:
     // Emitted once per user-driven trade (not for the internal neighbor update).
     void columnResized();
+    void columnResized(int leftLogical, int rightLogical);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
