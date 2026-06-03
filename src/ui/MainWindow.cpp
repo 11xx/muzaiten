@@ -719,33 +719,7 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
 
-    auto *libraryPanelsShortcut = new QShortcut(QKeySequence(QStringLiteral("1")), this);
-    connect(libraryPanelsShortcut, &QShortcut::activated, this, [this]() {
-        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
-            return;
-        }
-        switchMainView(MainView::LibraryPanels);
-    });
-    auto *fileExplorerShortcut = new QShortcut(QKeySequence(QStringLiteral("2")), this);
-    connect(fileExplorerShortcut, &QShortcut::activated, this, [this]() {
-        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
-            return;
-        }
-        toggleFileExplorerView();
-    });
-    auto *searchShortcut = new QShortcut(QKeySequence(QStringLiteral("3")), this);
-    connect(searchShortcut, &QShortcut::activated, this, [this]() {
-        // While a text field has focus (including the search box), let '3' type.
-        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
-            return;
-        }
-        if (m_mainView == MainView::Search) {
-            m_searchView->forceRefresh();  // re-press 3 in browse mode forces a refresh
-        } else {
-            switchMainView(MainView::Search);
-        }
-    });
-    auto *queueShortcut = new QShortcut(QKeySequence(QStringLiteral("`")), this);
+    auto *queueShortcut = new QShortcut(QKeySequence(QStringLiteral("1")), this);
     connect(queueShortcut, &QShortcut::activated, this, [this]() {
         if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
             return;
@@ -754,6 +728,32 @@ MainWindow::MainWindow(QWidget *parent)
             m_queueScreen->revealCurrentPlaying();
         } else {
             switchMainView(MainView::Queue);
+        }
+    });
+    auto *libraryPanelsShortcut = new QShortcut(QKeySequence(QStringLiteral("2")), this);
+    connect(libraryPanelsShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        switchMainView(MainView::LibraryPanels);
+    });
+    auto *fileExplorerShortcut = new QShortcut(QKeySequence(QStringLiteral("3")), this);
+    connect(fileExplorerShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        toggleFileExplorerView();
+    });
+    auto *searchShortcut = new QShortcut(QKeySequence(QStringLiteral("4")), this);
+    connect(searchShortcut, &QShortcut::activated, this, [this]() {
+        // While a text field has focus (including the search box), let '4' type.
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        if (m_mainView == MainView::Search) {
+            m_searchView->forceRefresh();  // re-press 4 in browse mode forces a refresh
+        } else {
+            switchMainView(MainView::Search);
         }
     });
     auto *jumpToPlayingShortcut = new QShortcut(QKeySequence(QStringLiteral("o")), this);
