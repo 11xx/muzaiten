@@ -386,7 +386,6 @@ TrackTable::TrackTable(QWidget *parent)
     verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);
     verticalHeader()->setVisible(false);
-    setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     setContextMenuPolicy(Qt::CustomContextMenu);
 
     m_columnLayout = new ResponsiveColumnLayout(this, trackResponsiveSpecs(), this);

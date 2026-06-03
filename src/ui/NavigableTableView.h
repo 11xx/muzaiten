@@ -8,6 +8,8 @@ class NavigableTableView : public QTableView {
 public:
     explicit NavigableTableView(QWidget *parent = nullptr);
 
+    void refreshTheme();
+
     void setNavigationScrollPadding(int rows);
     int navigationScrollPadding() const;
 
@@ -30,7 +32,9 @@ private:
     void scrollNavigationRowToAnchor(int row, int direction, int previousTopRow);
     void updateRow(const QModelIndex &index);
     void refreshInactiveHighlight();
+    void refreshWidgetTheme(QWidget *widget);
 
     int m_navigationScrollPadding = 3;
     bool m_mainPanelActive = false;
+    bool m_refreshingPalette = false;
 };

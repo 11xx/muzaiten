@@ -61,6 +61,7 @@ constexpr ColumnSpec columns[] = {
 };
 
 constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
+constexpr int kCellHorizontalPadding = 3;
 
 enum QueueRoles {
     TrackRole = Qt::UserRole + 1,
@@ -462,6 +463,7 @@ public:
         if (index.column() == 6 || index.column() == 8) {
             opt.displayAlignment = Qt::AlignRight | Qt::AlignVCenter;
         }
+        opt.rect.adjust(kCellHorizontalPadding, 0, -kCellHorizontalPadding, 0);
         QStyledItemDelegate::paint(painter, opt, index);
 
         if (m_showTitleAccent && index.column() == 1) {
@@ -474,7 +476,7 @@ public:
                 QFont f = painter->font();
                 f.setPointSizeF(f.pointSizeF() * 0.8);
                 painter->setFont(f);
-                painter->drawText(option.rect.adjusted(0, 0, -4, 0),
+                painter->drawText(opt.rect.adjusted(0, 0, -4, 0),
                                   Qt::AlignRight | Qt::AlignVCenter,
                                   QString::number(ordinal));
                 painter->restore();
@@ -744,7 +746,6 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     m_view->setAlternatingRowColors(true);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_view->setStyleSheet(QStringLiteral("QTableView::item { padding: 0 3px; }"));
     m_view->installEventFilter(this);
     m_view->viewport()->installEventFilter(this);
     if (preset == QueueTablePreset::FullScreen) {
@@ -1009,6 +1010,9 @@ void QueueTable::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) {
+        if (auto *view = qobject_cast<NavigableTableView *>(m_view)) {
+            view->refreshTheme();
+        }
         m_view->viewport()->update();
         m_view->horizontalHeader()->viewport()->update();
     }
