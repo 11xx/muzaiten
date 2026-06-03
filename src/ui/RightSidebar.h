@@ -6,10 +6,11 @@
 
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
-#include "ui/NavigableTableView.h"
+#include "ui/QueueTable.h"
 
 class QImage;
 class QLabel;
+class QueueStore;
 class QSplitter;
 class QTableWidget;
 class QWidget;
@@ -20,6 +21,7 @@ class RightSidebar final : public QWidget {
 public:
     explicit RightSidebar(QWidget *parent = nullptr);
 
+    void setQueueStore(QueueStore *store);
     void setQueue(const QVector<Track> &tracks);
     void setPlayNextRange(int begin, int end);
     void setCurrentIndex(int index, bool reveal = false);
@@ -30,6 +32,7 @@ public:
     void configureTrackInfoPanel(QWidget *parent);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
+    void resetViewSettings();
     void setHeaderHeight(int height);
     void setNavigationScrollPadding(int rows);
     QWidget *queueNavigationWidget() const;
@@ -55,10 +58,7 @@ signals:
     void viewSettingsChanged();
 
 private:
-    void showHeaderMenu(const QPoint &pos);
-    void showQueueMenu(const QPoint &pos);
     void showTrackInfoLabelMenu(const QPoint &pos);
-    void setQueueHoveredRow(int row);
     void applyTrackInfoSettingsJson(const QJsonObject &root);
     QJsonArray trackInfoSettingsJson() const;
     void updateTrackInfoLabels();
@@ -70,7 +70,8 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    NavigableTableView *m_queueTable = nullptr;
+    QueueTable *m_queueTable = nullptr;
+    QueueStore *m_queueStore = nullptr;
     QLabel *m_albumArt = nullptr;
     QWidget *m_trackInfoPane = nullptr;
     QWidget *m_trackInfoTitle = nullptr;

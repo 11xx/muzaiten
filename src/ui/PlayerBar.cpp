@@ -1,11 +1,15 @@
 #include "ui/PlayerBar.h"
 
+#include "ui/AlbumArtFallback.h"
+#include "ui/AlbumArtView.h"
 #include "ui/StarRating.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QCursor>
+#include <QFileInfo>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -403,6 +407,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *albumArtResolution = settingsMenu->addAction(QStringLiteral("Album art resolution..."));
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
     QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
+    QAction *resetViewPreferences = settingsMenu->addAction(QStringLiteral("Reset view preferences to defaults"));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
     settingsMenu->addSeparator();
@@ -455,6 +460,12 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *controls = new QHBoxLayout;
     controls->setContentsMargins(8, 6, 10, 8);
     controls->setSpacing(10);
+
+    m_albumArt = new AlbumArtView(this);
+    m_albumArt->setFixedSize(56, 56);
+    m_albumArt->setText(QStringLiteral("Album art"));
+    m_albumArt->setVisible(false);
+    controls->addWidget(m_albumArt, 0, Qt::AlignVCenter);
 
     auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
     controls->addWidget(previous);
@@ -561,6 +572,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
     connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
+    connect(resetViewPreferences, &QAction::triggered, this, &PlayerBar::resetViewPreferencesRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
@@ -631,6 +643,45 @@ void PlayerBar::setExplorerOptionsVisible(bool visible)
     }
 }
 
+void PlayerBar::setQueueViewLayoutActive(bool active)
+{
+    if (m_albumArt != nullptr) {
+        m_albumArt->setVisible(active);
+    }
+}
+
+void PlayerBar::setAlbumArt(const QString &imagePath)
+{
+    if (m_albumArt == nullptr) {
+        return;
+    }
+    const bool valid = !imagePath.isEmpty() && QFileInfo::exists(imagePath);
+    const QString effectivePath = valid ? imagePath : AlbumArtFallback::resourcePath(palette());
+    m_usingArtFallback = !valid;
+
+    if (effectivePath.isEmpty()) {
+        m_albumArt->setPixmap({});
+        m_albumArt->setText(QStringLiteral("Album art"));
+        return;
+    }
+
+    m_albumArt->setText({});
+    m_albumArt->setSourcePath(effectivePath);
+}
+
+void PlayerBar::setAlbumArt(const QImage &image)
+{
+    if (image.isNull()) {
+        setAlbumArt(QString());
+        return;
+    }
+    m_usingArtFallback = false;
+    if (m_albumArt != nullptr) {
+        m_albumArt->setText({});
+        m_albumArt->setSourceImage(image);
+    }
+}
+
 void PlayerBar::setCompactMenu(bool compact)
 {
     if (m_compactMenu != nullptr) {
@@ -683,6 +734,9 @@ void PlayerBar::changeEvent(QEvent *event)
             m_menuButton->setIcon(menuHamburgerIcon(palette()));
         }
         updateShuffleIcon();
+        if (m_usingArtFallback) {
+            setAlbumArt(QString());
+        }
     }
 }
 

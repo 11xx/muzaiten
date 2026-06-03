@@ -29,6 +29,8 @@ class QStackedWidget;
 class QSplitter;
 class QThread;
 class MpdImportWorker;
+class QueueScreen;
+class QueueStore;
 class RightSidebar;
 class TrackTable;
 class ScanPipeline;
@@ -36,7 +38,7 @@ class ArtworkCache;
 class SearchView;
 
 enum class LibrarySource { Local, Mpd };
-enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search };
+enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue };
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -72,7 +74,10 @@ private:
     void saveAlbumGridViewSettings();
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
+    void saveQueueScreenViewSettings();
     void saveMainWindowViewSettings();
+    void saveAllViewSettings();
+    void resetViewPreferences();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();
@@ -182,6 +187,8 @@ private:
     AlbumGrid *m_albumGrid = nullptr;
     TrackTable *m_trackTable = nullptr;
     RightSidebar *m_rightSidebar = nullptr;
+    QueueScreen *m_queueScreen = nullptr;
+    QueueStore *m_queueStore = nullptr;
     FileExplorerView *m_libraryFileExplorer = nullptr;
     FileExplorerView *m_freeRoamFileExplorer = nullptr;
     SearchView       *m_searchView = nullptr;

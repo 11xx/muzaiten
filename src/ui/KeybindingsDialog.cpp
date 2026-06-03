@@ -2,6 +2,7 @@
 
 #include "ui/FileExplorerKeybindings.h"
 #include "ui/MainPanelKeybindings.h"
+#include "ui/QueueKeybindings.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -47,6 +48,11 @@ QString actionLabel(const QString &action)
         {QString::fromLatin1(ExplorerAction::FindFile), QStringLiteral("Find file")},
         {QString::fromLatin1(ExplorerAction::GoHome), QStringLiteral("Go home")},
         {QString::fromLatin1(ExplorerAction::GoToStart), QStringLiteral("Go to start")},
+        {QString::fromLatin1(QueueAction::RemoveSelected), QStringLiteral("Remove selected")},
+        {QString::fromLatin1(QueueAction::ClearQueue), QStringLiteral("Clear queue")},
+        {QString::fromLatin1(QueueAction::ClearPlayNext), QStringLiteral("Clear play-next priority")},
+        {QString::fromLatin1(QueueAction::FindLibrary), QStringLiteral("Find in library")},
+        {QString::fromLatin1(QueueAction::JumpPlaying), QStringLiteral("Jump to currently playing")},
     };
     return labels.value(action, action);
 }
@@ -157,6 +163,19 @@ KeybindingsDialog::KeybindingsDialog(QWidget *parent)
     searchLayout->addWidget(searchBindings, 1);
     tabs->addTab(searchTab, QStringLiteral("3 Search"));
 
+    auto *queueTab = new QWidget(tabs);
+    auto *queueLayout = new QVBoxLayout(queueTab);
+    queueLayout->addWidget(new QLabel(QStringLiteral("Screen `: Queue"), queueTab));
+    m_queueProfile = new QComboBox(queueTab);
+    for (const KeyBindingProfile &profile : defaultQueueKeyBindingProfiles()) {
+        m_queueProfile->addItem(profile.label, profile.name);
+    }
+    queueLayout->addWidget(m_queueProfile);
+    m_queueBindings = makeBindingsTable(queueTab);
+    queueLayout->addWidget(m_queueBindings, 1);
+    tabs->addTab(queueTab, QStringLiteral("` Queue"));
+    connect(m_queueProfile, &QComboBox::currentIndexChanged, this, &KeybindingsDialog::rebuildQueueBindings);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -164,6 +183,7 @@ KeybindingsDialog::KeybindingsDialog(QWidget *parent)
 
     rebuildMainPanelBindings();
     rebuildFileExplorerBindings();
+    rebuildQueueBindings();
 }
 
 void KeybindingsDialog::setMainPanelProfileName(const QString &name)
@@ -190,6 +210,19 @@ void KeybindingsDialog::setFileExplorerProfileName(const QString &name)
 QString KeybindingsDialog::fileExplorerProfileName() const
 {
     return m_fileExplorerProfile->currentData().toString();
+}
+
+void KeybindingsDialog::setQueueProfileName(const QString &name)
+{
+    const int index = m_queueProfile->findData(name);
+    if (index >= 0) {
+        m_queueProfile->setCurrentIndex(index);
+    }
+}
+
+QString KeybindingsDialog::queueProfileName() const
+{
+    return m_queueProfile->currentData().toString();
 }
 
 void KeybindingsDialog::setFileExplorerKeyHintsVisible(bool visible)
@@ -227,5 +260,13 @@ void KeybindingsDialog::rebuildFileExplorerBindings()
     fillBindings(m_fileExplorerBindings, bindingsForProfile(defaultKeyBindingProfiles(), fileExplorerProfileName()));
     addGlobalRows(m_fileExplorerBindings, {
         {QStringLiteral("2"), QStringLiteral("Toggle Library/Free-roam explorer")},
+    });
+}
+
+void KeybindingsDialog::rebuildQueueBindings()
+{
+    fillBindings(m_queueBindings, bindingsForProfile(defaultQueueKeyBindingProfiles(), queueProfileName()));
+    addGlobalRows(m_queueBindings, {
+        {QStringLiteral("`"), QStringLiteral("Switch to Queue / jump to currently playing")},
     });
 }
