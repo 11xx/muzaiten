@@ -193,6 +193,7 @@ add_executable(test_queue_table
     ../src/ui/NavigableTableView.cpp
     ../src/ui/NeighborColumnResizer.cpp
     ../src/ui/ResponsiveColumnLayout.cpp
+    ../src/ui/ResponsiveColumnOptionsDialog.cpp
     ../src/ui/OverlayScrollBar.cpp
     ../src/core/Rating.cpp
     ../src/ui/StarRating.cpp
@@ -207,6 +208,7 @@ set_tests_properties(test_queue_table PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 add_executable(test_responsive_column_layout
     test_responsive_column_layout.cpp
     ../src/ui/ResponsiveColumnLayout.cpp
+    ../src/ui/ResponsiveColumnOptionsDialog.cpp
     ../src/ui/TrackTable.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp

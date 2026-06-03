@@ -6,6 +6,7 @@
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
 #include "ui/ResponsiveColumnLayout.h"
+#include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
@@ -260,7 +261,7 @@ int minWidthForColumn(int column)
     case 1:
         return 36;
     case 2:
-        return 120;
+        return 160;
     case 3:
     case 4:
         return 80;
@@ -344,11 +345,20 @@ QString priorityLabel(ResponsiveColumnPriority priority)
     case ResponsiveColumnPriority::Keep:
         return QStringLiteral("Keep");
     case ResponsiveColumnPriority::Normal:
-        return QStringLiteral("Normal");
+        return QStringLiteral("Hide later");
     case ResponsiveColumnPriority::HideEarly:
         return QStringLiteral("Hide early");
     }
-    return QStringLiteral("Normal");
+    return QStringLiteral("Hide later");
+}
+
+QVector<ResponsiveColumnOption> responsiveColumnOptions()
+{
+    QVector<ResponsiveColumnOption> options;
+    for (const ColumnSpec &spec : columns) {
+        options.push_back({QString::fromLatin1(spec.key), QString::fromLatin1(spec.label)});
+    }
+    return options;
 }
 
 } // namespace
@@ -474,6 +484,8 @@ QString TrackTable::viewSettingsJson() const
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(horizontalHeader()->saveState().toBase64()));
     m_columnLayout->writeSavedWidthsJson(&root);
     m_columnLayout->writePrioritiesJson(&root);
+    m_columnLayout->writeMinimumWidthsJson(&root);
+    m_columnLayout->writeDropOrderJson(&root);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -508,8 +520,10 @@ void TrackTable::applyViewSettingsJson(const QString &json)
         horizontalHeader()->restoreState(headerState);
     }
     horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    m_columnLayout->applySavedWidthsJson(root);
     m_columnLayout->applyPrioritiesJson(root);
+    m_columnLayout->applyMinimumWidthsJson(root);
+    m_columnLayout->applyDropOrderJson(root);
+    m_columnLayout->applySavedWidthsJson(root);
     m_columnLayout->setUserVisibleColumns(visibleKeys);
 }
 
@@ -816,6 +830,12 @@ void TrackTable::showHeaderMenu(const QPoint &pos)
             });
         }
     }
+    menu.addSeparator();
+    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
+    connect(responsiveOptions, &QAction::triggered, this, [this]() {
+        ResponsiveColumnOptionsDialog dialog(m_columnLayout, responsiveColumnOptions(), this);
+        dialog.exec();
+    });
     menu.addSeparator();
     QAction *resetLayout = menu.addAction(QStringLiteral("Reset table layout to defaults"));
     connect(resetLayout, &QAction::triggered, this, &TrackTable::resetViewSettings);
