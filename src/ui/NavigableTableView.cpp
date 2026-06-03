@@ -8,6 +8,8 @@
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QScrollBar>
+#include <QScopedValueRollback>
+#include <QStyle>
 
 #include <algorithm>
 
@@ -77,23 +79,35 @@ void NavigableTableView::refreshInactiveHighlight()
     // the inherited palette so runtime theme changes are honored.
     QPalette pal = QApplication::palette(this);
     if (!m_mainPanelActive) {
-        const QColor dim = SelectionColors::dimmedHighlight(pal.color(QPalette::Base),
-                                                            pal.color(QPalette::Highlight));
         for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+            const QColor dim = SelectionColors::dimmedHighlight(pal.color(group, QPalette::Base),
+                                                                pal.color(group, QPalette::Highlight));
             pal.setColor(group, QPalette::Highlight, dim);
         }
     }
+    const QScopedValueRollback guard(m_refreshingPalette, true);
     setPalette(pal);
+}
+
+void NavigableTableView::refreshTheme()
+{
+    refreshInactiveHighlight();
+    refreshWidgetTheme(this);
+    refreshWidgetTheme(viewport());
+    refreshWidgetTheme(horizontalHeader());
+    refreshWidgetTheme(horizontalHeader() != nullptr ? horizontalHeader()->viewport() : nullptr);
+    refreshWidgetTheme(verticalHeader());
+    refreshWidgetTheme(verticalHeader() != nullptr ? verticalHeader()->viewport() : nullptr);
 }
 
 void NavigableTableView::changeEvent(QEvent *event)
 {
     QTableView::changeEvent(event);
-    // Re-derive the dimmed Highlight after an app-wide palette or style change.
-    // PaletteChange is excluded so our own setPalette() override does not recurse.
-    if (event->type() == QEvent::ApplicationPaletteChange
-        || event->type() == QEvent::StyleChange) {
-        refreshInactiveHighlight();
+    if (!m_refreshingPalette
+        && (event->type() == QEvent::PaletteChange
+            || event->type() == QEvent::ApplicationPaletteChange
+            || event->type() == QEvent::StyleChange)) {
+        refreshTheme();
     }
 }
 
@@ -175,4 +189,16 @@ void NavigableTableView::updateRow(const QModelIndex &index)
     if (rect.isValid()) {
         viewport()->update(QRect(0, rect.top(), viewport()->width(), rect.height()));
     }
+}
+
+void NavigableTableView::refreshWidgetTheme(QWidget *widget)
+{
+    if (widget == nullptr) {
+        return;
+    }
+    if (widget->style() != nullptr) {
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+    }
+    widget->update();
 }

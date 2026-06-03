@@ -1,6 +1,8 @@
 #include "ui/NavigableTableView.h"
 #include "ui/SelectionColors.h"
 
+#include <QApplication>
+#include <QCoreApplication>
 #include <QHeaderView>
 #include <QPalette>
 #include <QScrollBar>
@@ -17,6 +19,7 @@ private slots:
     void upMovementAnchorsAtTopPadding();
     void directJumpUsesMinimalVisibilityScroll();
     void inactivePanelDimsSelectionHighlight();
+    void applicationPaletteChangeRefreshesViewAndHeaders();
 
 private:
     static NavigableTableView *makeView(QStandardItemModel *model);
@@ -112,6 +115,30 @@ void NavigationScrollTest::inactivePanelDimsSelectionHighlight()
 
     view->setMainPanelActive(true);
     QCOMPARE(view->palette().color(QPalette::Highlight), activeHighlight);
+}
+
+void NavigationScrollTest::applicationPaletteChangeRefreshesViewAndHeaders()
+{
+    QStandardItemModel model(10, 1);
+    std::unique_ptr<NavigableTableView> view(makeView(&model));
+    view->setMainPanelActive(true);
+
+    const QPalette original = QApplication::palette();
+    QPalette custom = original;
+    custom.setColor(QPalette::Base, QColor(12, 34, 56));
+    custom.setColor(QPalette::Button, QColor(65, 43, 21));
+    custom.setColor(QPalette::Highlight, QColor(98, 76, 54));
+
+    QApplication::setPalette(custom);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(view->palette().color(QPalette::Base), custom.color(QPalette::Base));
+    QCOMPARE(view->palette().color(QPalette::Highlight), custom.color(QPalette::Highlight));
+    QCOMPARE(view->viewport()->palette().color(QPalette::Base), custom.color(QPalette::Base));
+    QCOMPARE(view->horizontalHeader()->palette().color(QPalette::Button), custom.color(QPalette::Button));
+
+    QApplication::setPalette(original);
+    QCoreApplication::processEvents();
 }
 
 QTEST_MAIN(NavigationScrollTest)

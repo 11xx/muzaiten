@@ -6,6 +6,12 @@
 #include <QStyleOptionViewItem>
 #include <QWidget>
 
+namespace {
+
+constexpr int kCellHorizontalPadding = 3;
+
+} // namespace
+
 DenseTableDelegate::DenseTableDelegate(QObject *parent)
     : QStyledItemDelegate(parent)
 {
@@ -44,5 +50,6 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     opt.features &= ~QStyleOptionViewItem::Alternate;
     opt.backgroundBrush = Qt::NoBrush;
     opt.displayAlignment = opt.displayAlignment | Qt::AlignVCenter;
+    opt.rect.adjust(kCellHorizontalPadding, 0, -kCellHorizontalPadding, 0);
     QStyledItemDelegate::paint(painter, opt, index);
 }
