@@ -5,8 +5,11 @@
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QRegularExpression>
 #include <QSpinBox>
+#include <QStyle>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -92,17 +95,32 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
                        "Always enabled in bit-perfect mode."));
     m_form->addRow(QString(), m_releaseSinkOnPause);
 
-    // RAM preload
-    m_preloadPercent = new QSpinBox(this);
-    m_preloadPercent->setRange(0, 100);
-    m_preloadPercent->setSuffix(QStringLiteral("%"));
-    m_preloadPercent->setSpecialValueText(QStringLiteral("Off"));
-    m_preloadPercent->setToolTip(
-        QStringLiteral("Copy this percentage of each track into RAM before playback begins. "
-                       "0 = off (reads from disk normally). "
-                       "Any non-zero value loads the whole file into RAM, eliminating disk "
-                       "re-reads on resume and decoupling playback from slow or network mounts."));
-    m_form->addRow(QStringLiteral("Preload into RAM"), m_preloadPercent);
+    // Disk read-ahead: warm the page cache ahead of the playhead.
+    const QString readAheadHelp =
+        QStringLiteral("Keeps roughly this much of the upcoming track warm in the OS page "
+                       "cache (RAM) ahead of the playhead, so reads from slow disks or "
+                       "network mounts don't stutter. Uses reclaimable cache, not extra app "
+                       "memory; the system's own read-ahead still applies when Off.");
+    m_readAheadMb = new QSpinBox(this);
+    m_readAheadMb->setRange(0, 1024);
+    m_readAheadMb->setSingleStep(16);
+    m_readAheadMb->setSuffix(QStringLiteral(" MB"));
+    m_readAheadMb->setSpecialValueText(QStringLiteral("Off"));
+    m_readAheadMb->setToolTip(readAheadHelp);
+
+    auto *readAheadInfo = new QToolButton(this);
+    readAheadInfo->setAutoRaise(true);
+    readAheadInfo->setIcon(style()->standardIcon(QStyle::SP_MessageBoxInformation));
+    readAheadInfo->setToolTip(readAheadHelp);
+    readAheadInfo->setFocusPolicy(Qt::NoFocus);
+    readAheadInfo->setAccessibleName(QStringLiteral("Disk read-ahead help"));
+
+    auto *readAheadRow = new QHBoxLayout;
+    readAheadRow->setContentsMargins(0, 0, 0, 0);
+    readAheadRow->addWidget(m_readAheadMb);
+    readAheadRow->addWidget(readAheadInfo);
+    readAheadRow->addStretch(1);
+    m_form->addRow(QStringLiteral("Disk read-ahead"), readAheadRow);
 
     connect(m_mode, &QComboBox::currentIndexChanged, this, [this]() {
         updateModeVisibility();
@@ -159,7 +177,7 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     m_softwareVolume->setChecked(profile.softwareVolume);
     m_allowResample->setChecked(profile.allowResample);
     m_releaseSinkOnPause->setChecked(profile.releaseSinkOnPause);
-    m_preloadPercent->setValue(std::clamp(profile.preloadPercent, 0, 100));
+    m_readAheadMb->setValue(std::clamp(profile.readAheadMb, 0, 1024));
 
     updateModeVisibility();
 }
@@ -186,7 +204,7 @@ PlaybackProfile PlaybackProfileDialog::profile() const
         p.allowResample      = m_allowResample->isChecked();
         p.releaseSinkOnPause = m_releaseSinkOnPause->isChecked();
     }
-    p.preloadPercent = m_preloadPercent->value();
+    p.readAheadMb = m_readAheadMb->value();
 
     return p;
 }

@@ -29,5 +29,5 @@ private:
     QCheckBox *m_softwareVolume = nullptr;
     QCheckBox *m_allowResample = nullptr;
     QCheckBox *m_releaseSinkOnPause = nullptr;
-    QSpinBox *m_preloadPercent = nullptr;
+    QSpinBox *m_readAheadMb = nullptr;
 };

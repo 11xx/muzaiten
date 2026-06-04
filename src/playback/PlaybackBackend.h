@@ -41,8 +41,8 @@ public:
     virtual bool hasSource() const = 0;
     virtual qint64 position() const = 0;
     virtual qint64 duration() const = 0;
-    // Called after a gapless track advance so the backend can promote the
-    // prepared-track preload buffer to current and discard the old one.
+    // Called after a gapless track advance so the backend can re-point any
+    // per-track resources (e.g. read-ahead) at the newly-current track.
     virtual void onGaplessTrackAdvanced() {}
 
 signals:
