@@ -418,16 +418,16 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
 
-    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, playbackMenu, mpdMenu, scrobblersMenu, viewMenu, settingsMenu};
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, viewMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
     for (QMenu *menu : styledMenus) {
         styleMenu(menu);
     }
 
     compactMenu->addMenu(fileMenu);
+    compactMenu->addMenu(viewMenu);
     compactMenu->addMenu(playbackMenu);
     compactMenu->addMenu(mpdMenu);
     compactMenu->addMenu(scrobblersMenu);
-    compactMenu->addMenu(viewMenu);
     compactMenu->addMenu(settingsMenu);
 
     m_menuStrip = new QWidget(this);
@@ -453,10 +453,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->setContentsMargins(0, 0, 0, 0);
     restyleMenuBar();
     m_menuBar->addMenu(fileMenu);
+    m_menuBar->addMenu(viewMenu);
     m_menuBar->addMenu(playbackMenu);
     m_menuBar->addMenu(mpdMenu);
     m_menuBar->addMenu(scrobblersMenu);
-    m_menuBar->addMenu(viewMenu);
     m_menuBar->addMenu(settingsMenu);
     menuStripLayout->addWidget(m_menuButton);
     menuStripLayout->addWidget(m_menuBar, 1);
