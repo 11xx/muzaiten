@@ -123,6 +123,32 @@ private slots:
         QVERIFY(re.score > 0);
         QVERIFY(rf.score > 0);
     }
+
+    void fuzzyMatch_scratchReuseIsStable()
+    {
+        // Regression for the thread_local DP slab: fuzzyMatchV2 reuses scratch
+        // buffers across calls, so a result must never depend on call history.
+        // Compute once, churn the scratch with wider/narrower matches, recompute —
+        // score, extent and positions must be byte-for-byte identical.
+        const QString text = QStringLiteral("the dark side of the moon");
+        const QString pat  = QStringLiteral("dsm");
+        const MatchResult first = fuzzyMatchV2(text, pat, false, /*withPositions=*/true);
+        QVERIFY(first.matched());
+
+        // Grow the matrix far wider, then shrink it — a stale cell left behind by a
+        // wide call would corrupt the narrow recompute if zero-fill were wrong.
+        fuzzyMatchV2(QStringLiteral("a considerably longer haystack used to widen the dp matrix a lot"),
+                     QStringLiteral("aclhtwtdma"), false, true);
+        fuzzyMatchV2(QStringLiteral("xy"), QStringLiteral("x"), false, true);
+        fuzzyMatchV2(QStringLiteral("kind of blue by miles davis"), QStringLiteral("kobmd"), false, false);
+
+        const MatchResult again = fuzzyMatchV2(text, pat, false, /*withPositions=*/true);
+        QCOMPARE(again.matched(), first.matched());
+        QCOMPARE(again.score, first.score);
+        QCOMPARE(again.start, first.start);
+        QCOMPARE(again.end, first.end);
+        QCOMPARE(again.positions, first.positions);
+    }
 };
 
 QTEST_MAIN(TestFuzzyMatch)

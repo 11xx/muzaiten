@@ -18,6 +18,30 @@
 
 namespace Search {
 
+// ---- scratch slab ----------------------------------------------------------
+// fuzzyMatchV2 is called once per text field per record — millions of times for
+// a single keystroke over a large library. Allocating its DP scratch on every
+// call dominates the cost and, worse, serialises parallel scans on the heap
+// allocator's lock. Mirror fzf's slab: one reusable scratch per thread, grown
+// on demand and reset (not reallocated) each call.
+namespace {
+
+struct FuzzyScratch {
+    QVector<QChar>   T;       // normalized text over the candidate range
+    QVector<int16_t> B;       // boundary bonus per position
+    QVector<int32_t> F;       // first occurrence offset per pattern char
+    QVector<int16_t> H0, C0;  // first DP row (score / consecutive)
+    QVector<int16_t> H, C;    // DP matrix, M rows × width
+};
+
+FuzzyScratch &fuzzyScratch()
+{
+    thread_local FuzzyScratch s;
+    return s;
+}
+
+} // namespace
+
 // ---- character class -------------------------------------------------------
 
 enum class CharClass : int {
@@ -310,10 +334,15 @@ MatchResult fuzzyMatchV2(const QString &text,
 
     const int rangeN = maxIdx - minIdx;
 
-    // Build T (normalized chars), B (bonus), F (first occurrence per pattern char)
-    QVector<QChar> T(rangeN);
-    QVector<int16_t> B(rangeN);
-    QVector<int32_t> F(M, -1);
+    // Build T (normalized chars), B (bonus), F (first occurrence per pattern char).
+    // Reuse this thread's scratch; resize keeps the capacity across calls.
+    FuzzyScratch &sc = fuzzyScratch();
+    sc.T.resize(rangeN);
+    sc.B.resize(rangeN);
+    sc.F.fill(-1, M);
+    QVector<QChar>   &T = sc.T;
+    QVector<int16_t> &B = sc.B;
+    QVector<int32_t> &F = sc.F;
 
     CharClass prevClass = (minIdx > 0) ? charClassOf(text[minIdx - 1]) : CharClass::White;
     int pidx = 0;
@@ -340,8 +369,10 @@ MatchResult fuzzyMatchV2(const QString &text,
         }
     }
 
-    QVector<int16_t> H0(rangeN, 0);
-    QVector<int16_t> C0(rangeN, 0);
+    sc.H0.resize(rangeN);
+    sc.C0.resize(rangeN);
+    QVector<int16_t> &H0 = sc.H0;
+    QVector<int16_t> &C0 = sc.C0;
     int16_t maxScore = 0;
     int maxScorePos = 0;
     bool inGap = false;
@@ -379,8 +410,13 @@ MatchResult fuzzyMatchV2(const QString &text,
     // Phase 3: Fill DP matrix H[M × width], C[M × width] over [f0, lastIdx]
     const int width = lastIdx - f0 + 1;
     if (width <= 0) return {};
-    QVector<int16_t> H(width * M, 0);
-    QVector<int16_t> C(width * M, 0);
+    // Zero-fill: cells outside each row's active span are read as neighbours, so
+    // stale values from a previous call would corrupt the score. fill() reuses
+    // the existing capacity.
+    sc.H.fill(0, width * M);
+    sc.C.fill(0, width * M);
+    QVector<int16_t> &H = sc.H;
+    QVector<int16_t> &C = sc.C;
     // Copy H0/C0 into first row
     for (int off = 0; off < width; ++off) {
         H[off]       = H0[f0 + off];
