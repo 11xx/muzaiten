@@ -4,6 +4,7 @@
 
 #include <QAbstractItemModel>
 #include <QHeaderView>
+#include <QLineEdit>
 #include <QTableView>
 #include <QTest>
 
@@ -153,6 +154,43 @@ private slots:
         QCOMPARE(view->model()->index(2, 0).data(Qt::UserRole + 3).toInt(), 2);
         store.setPlayNextRange(-1, -1);
         QCOMPARE(view->model()->index(1, 0).data(Qt::UserRole + 3).toInt(), 0);
+    }
+
+    void slashSearchJumpsToFirstMatchingRow()
+    {
+        QueueStore store;
+        Track a; a.path = QStringLiteral("/a.flac"); a.title = QStringLiteral("Alpha");
+        Track b; b.path = QStringLiteral("/b.flac"); b.title = QStringLiteral("Beta");
+        Track c; c.path = QStringLiteral("/c.flac"); c.title = QStringLiteral("Gamma");
+        Track d; d.path = QStringLiteral("/d.flac"); d.title = QStringLiteral("Gamma II");
+        store.setTracks({a, b, c, d});
+
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+
+        // The inline search bar exists for the full-screen queue.
+        auto *edit = table.findChild<QLineEdit *>();
+        QVERIFY(edit != nullptr);
+
+        // Typing drives the same matcher the main panels use; two rows match
+        // "gamma" and the cursor jumps to the first (row 2).
+        edit->setText(QStringLiteral("gamma"));
+        QCOMPARE(table.currentRow(), 2);
+
+        edit->setText(QStringLiteral("beta"));
+        QCOMPARE(table.currentRow(), 1);
+
+        // A query with no matches leaves the cursor where it was.
+        edit->setText(QStringLiteral("zzz-no-such-track"));
+        QCOMPARE(table.currentRow(), 1);
+    }
+
+    void sidebarQueueHasNoInlineSearchBar()
+    {
+        // The sidebar queue gets its search from PanelSearchController instead,
+        // so it must not build its own inline search bar.
+        QueueTable table(QueueTablePreset::Sidebar);
+        QVERIFY(table.findChild<QLineEdit *>() == nullptr);
     }
 };
 

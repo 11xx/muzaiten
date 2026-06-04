@@ -53,6 +53,9 @@ QString actionLabel(const QString &action)
         {QString::fromLatin1(QueueAction::ClearPlayNext), QStringLiteral("Clear play-next priority")},
         {QString::fromLatin1(QueueAction::FindLibrary), QStringLiteral("Find in library")},
         {QString::fromLatin1(QueueAction::JumpPlaying), QStringLiteral("Jump to currently playing")},
+        {QString::fromLatin1(QueueAction::Search), QStringLiteral("Search queue")},
+        {QString::fromLatin1(QueueAction::SearchNext), QStringLiteral("Next match")},
+        {QString::fromLatin1(QueueAction::SearchPrevious), QStringLiteral("Previous match")},
     };
     return labels.value(action, action);
 }
