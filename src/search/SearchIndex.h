@@ -9,7 +9,9 @@
 //
 // build() replaces the current index atomically.
 // match() is const and thread-safe from a single thread (do NOT call from
-// multiple threads simultaneously without external locking).
+// multiple threads simultaneously without external locking). Internally it fans
+// the per-record scan across cores for large indexes — heavy under fuzzy mode —
+// so calling it concurrently would oversubscribe.
 
 #include "search/Exclusion.h"
 #include "search/FuzzyMatch.h"

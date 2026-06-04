@@ -236,6 +236,54 @@ private slots:
         QVERIFY(unique.size() >= 14);
     }
 
+    void largeIndex_parallelScanCoversEveryRowOnce()
+    {
+        // Large indexes are scanned by several threads over contiguous slices.
+        // Plant known matches straddling chunk boundaries (multiples of the
+        // per-thread chunk) and at the first/last rows, then confirm each is
+        // found exactly once — no record skipped or double-scored at a seam.
+        const int N = 20000;
+        QVector<SearchRecord> recs;
+        recs.reserve(N);
+        for (int i = 0; i < N; ++i) {
+            // Filler that never matches "zylophone"; carries its row in `date`.
+            recs.push_back(makeRecord(QStringLiteral("Filler Song"), QStringLiteral("Nobody"),
+                                      QStringLiteral("Misc"), {}, QString::number(i)));
+        }
+        QList<int> hitRows = {0, 1, N - 2, N - 1};
+        for (int b = 2500; b < N; b += 2500) {
+            hitRows << (b - 1) << b << (b + 1); // straddle each likely seam
+        }
+        for (int row : hitRows) {
+            recs[row] = makeRecord(QStringLiteral("Zylophone Dreams"), QStringLiteral("Nobody"),
+                                   QStringLiteral("Misc"), {}, QString::number(row));
+        }
+
+        SearchIndex idx;
+        idx.build(recs);
+
+        for (bool fuzzy : {false, true}) {
+            int total = -1;
+            const auto res = idx.match(SearchQuery::parse(QStringLiteral("zylophone")), fuzzy, {}, &total);
+            QCOMPARE(total, static_cast<int>(hitRows.size()));
+            QCOMPARE(res.size(), static_cast<int>(hitRows.size()));
+
+            // Exactly the planted rows, each once (set equality catches any
+            // boundary skip or duplicate).
+            QSet<int> found;
+            for (const auto &r : res) {
+                found.insert(r.rec.date.toInt());
+            }
+            QCOMPARE(found, QSet<int>(hitRows.begin(), hitRows.end()));
+
+            // Equal-score ties resolve by ascending original row, and the merge
+            // must preserve that across slices.
+            for (int k = 1; k < res.size(); ++k) {
+                QVERIFY(res[k].rec.date.toInt() > res[k - 1].rec.date.toInt());
+            }
+        }
+    }
+
     void totalMatchesReported()
     {
         SearchIndex idx;

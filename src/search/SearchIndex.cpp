@@ -5,8 +5,12 @@
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
 
+#include <QThread>
+
 #include <algorithm>
 #include <climits>
+#include <thread>
+#include <vector>
 
 namespace Search {
 
@@ -54,23 +58,67 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     // Phase 1: cheap boolean filter + lightweight score. No positions, no
     // per-record allocations — only record indices are collected.
     struct Candidate { int index; int score; };
-    QVector<Candidate> candidates;
-    candidates.reserve(1024);
-
     const int n = static_cast<int>(m_records.size());
-    for (int i = 0; i < n; ++i) {
-        const SearchRecord &rec = m_records[i];
 
-        // Exclusions are an early reject, before any relevance scoring, so they
-        // only reduce work and never consume the result cap.
-        bool excluded = false;
-        for (const ExcludeMatcher &ex : excludes) {
-            if (ex.matches(rec)) { excluded = true; break; }
+    // Score the half-open slice [lo, hi) into `out`. Records are scored
+    // independently, so slices run on separate threads with no shared mutable
+    // state — fuzzyMatchV2's scratch is thread_local, one slab per thread.
+    const auto scoreRange = [&](int lo, int hi, QVector<Candidate> &out) {
+        for (int i = lo; i < hi; ++i) {
+            const SearchRecord &rec = m_records[i];
+
+            // Exclusions are an early reject, before any relevance scoring, so
+            // they only reduce work and never consume the result cap.
+            bool excluded = false;
+            for (const ExcludeMatcher &ex : excludes) {
+                if (ex.matches(rec)) { excluded = true; break; }
+            }
+            if (excluded) continue;
+
+            const int score = matchSearchRecord(rec, query, fuzzyMode);
+            if (score != INT_MIN) out.push_back({i, score});
         }
-        if (excluded) continue;
+    };
 
-        const int score = matchSearchRecord(rec, query, fuzzyMode);
-        if (score != INT_MIN) candidates.push_back({i, score});
+    // Fan the scan across cores. Fuzzy scoring is an order of magnitude heavier
+    // than exact, and a 90k-track library is the dominant per-keystroke cost, so
+    // this scan is the one place worth the thread spawn. Leave a core for the
+    // GUI/audio threads, and stay serial for small indexes where the spawn and
+    // join wouldn't pay off.
+    int workers = std::clamp(QThread::idealThreadCount() - 1, 1, 12);
+    constexpr int kMinPerThread = 2500;
+    workers = std::clamp(n / kMinPerThread, 1, workers);
+
+    QVector<Candidate> candidates;
+    if (workers <= 1) {
+        candidates.reserve(1024);
+        scoreRange(0, n, candidates);
+    } else {
+        QVector<QVector<Candidate>> partials(workers);
+        std::vector<std::thread> threads;
+        threads.reserve(static_cast<std::size_t>(workers - 1));
+        const int chunk = (n + workers - 1) / workers;
+        for (int w = 0; w + 1 < workers; ++w) {
+            const int lo = w * chunk;
+            const int hi = std::min(n, lo + chunk);
+            threads.emplace_back(scoreRange, lo, hi, std::ref(partials[w]));
+        }
+        scoreRange((workers - 1) * chunk, n, partials[workers - 1]); // last slice here
+
+        for (std::thread &t : threads) {
+            t.join();
+        }
+
+        // Concatenate in slice order: chunks are ascending contiguous ranges, so
+        // the merged list stays index-ordered and ties break exactly as before.
+        int total = 0;
+        for (const QVector<Candidate> &p : partials) {
+            total += static_cast<int>(p.size());
+        }
+        candidates.reserve(total);
+        for (const QVector<Candidate> &p : partials) {
+            candidates += p;
+        }
     }
 
     if (totalMatches) *totalMatches = static_cast<int>(candidates.size());
