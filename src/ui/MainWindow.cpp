@@ -122,8 +122,15 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
     profile.replayGain = root.value(QStringLiteral("replayGain")).toBool(profile.replayGain);
     profile.allowResample = root.value(QStringLiteral("allowResample")).toBool(profile.allowResample);
     profile.releaseSinkOnPause = root.value(QStringLiteral("releaseSinkOnPause")).toBool(profile.releaseSinkOnPause);
-    profile.preloadPercent = std::clamp(
-        root.value(QStringLiteral("preloadPercent")).toInt(profile.preloadPercent), 0, 100);
+    if (root.contains(QStringLiteral("readAheadMb"))) {
+        profile.readAheadMb = std::clamp(
+            root.value(QStringLiteral("readAheadMb")).toInt(profile.readAheadMb), 0, 1024);
+    } else {
+        // Migrate the legacy "preload into RAM" percentage: any non-zero value
+        // meant "whole file in RAM", which maps to read-ahead enabled.
+        const int legacyPreload = root.value(QStringLiteral("preloadPercent")).toInt(0);
+        profile.readAheadMb = legacyPreload > 0 ? 32 : 0;
+    }
     return profile;
 }
 
@@ -140,7 +147,7 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("replayGain"), profile.replayGain);
     root.insert(QStringLiteral("allowResample"), profile.allowResample);
     root.insert(QStringLiteral("releaseSinkOnPause"), profile.releaseSinkOnPause);
-    root.insert(QStringLiteral("preloadPercent"), profile.preloadPercent);
+    root.insert(QStringLiteral("readAheadMb"), profile.readAheadMb);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 

@@ -5,40 +5,8 @@
 #include <QMutex>
 #include <QTimer>
 
-#include <unistd.h> // ::close
-
 using GstElement = struct _GstElement;
 using GstMessage = struct _GstMessage;
-
-// RAII wrapper for a memfd file descriptor used to hold a preloaded track
-// in RAM.  GStreamer opens the memfd via /proc/self/fd/<fd> and holds its
-// own fd; closing ours here doesn't affect GStreamer's ongoing read.
-struct MemFdBuffer {
-    int fd = -1;
-
-    MemFdBuffer() = default;
-    ~MemFdBuffer() { clear(); }
-    MemFdBuffer(const MemFdBuffer &) = delete;
-    MemFdBuffer &operator=(const MemFdBuffer &) = delete;
-    MemFdBuffer(MemFdBuffer &&o) noexcept : fd(o.fd) { o.fd = -1; }
-    MemFdBuffer &operator=(MemFdBuffer &&o) noexcept
-    {
-        if (this != &o) {
-            clear();
-            fd = o.fd;
-            o.fd = -1;
-        }
-        return *this;
-    }
-
-    void clear()
-    {
-        if (fd >= 0) {
-            ::close(fd);
-            fd = -1;
-        }
-    }
-};
 
 class GStreamerPlaybackBackend final : public PlaybackBackend {
     Q_OBJECT
@@ -73,11 +41,22 @@ private:
     void handleMessage(GstMessage *message);
     void updateState(State state);
     QString uriForUrl(const QUrl &url) const;
-    // Returns a URI to use for GStreamer: either a plain file:// URI (preload
-    // off) or a file:///proc/self/fd/<n> pointing at a RAM-backed memfd.
-    // Fills |buf| with the memfd handle (pass m_currentPreload or
-    // m_preparedPreload as appropriate).
-    QString sourceUriForPlayback(const QUrl &url, MemFdBuffer &buf);
+    // Whether two profiles differ in any field that requires tearing down and
+    // rebuilding the pipeline (sink/device/mode/...).  Read-ahead is not such a
+    // field — it can change live without interrupting playback.
+    static bool outputConfigDiffers(const PlaybackProfile &a, const PlaybackProfile &b);
+
+    // Read-ahead: warm the OS page cache ahead of the playhead via
+    // posix_fadvise so reads from slow/network mounts don't stutter.  Driven by
+    // the existing poll timer; holds a private O_RDONLY fd on the current file
+    // purely to issue advice (the kernel caches per-inode, so this also benefits
+    // playbin's own filesrc reads).  No file data is copied into app memory.
+    void startReadAhead(const QUrl &url);
+    void pumpReadAhead(qint64 positionMs);
+    void stopReadAhead();
+    // Best-effort: pull the first read-ahead window of |url| into the page cache
+    // now, then drop the fd.  Used to warm the gapless-next track's head.
+    void warmFileHead(const QUrl &url) const;
 
     PlaybackProfile m_profile;
     GstElement *m_playbin = nullptr;
@@ -98,8 +77,9 @@ private:
     // Pending seek to apply once the pipeline prerolls after a soft-pause resume.
     qint64 m_pendingSeekMs = -1;
 
-    // In-RAM preload buffers: current track and the gaplessly-prepared next
-    // track.  Each holds at most one open memfd; cleared on stop/play/advance.
-    MemFdBuffer m_currentPreload;
-    MemFdBuffer m_preparedPreload;
+    // Read-ahead state: a private fd on the current file plus the byte size and
+    // the furthest offset we've already advised (the sliding watermark).
+    int m_readAheadFd = -1;
+    qint64 m_readAheadSize = 0;
+    qint64 m_readAheadAdvised = 0;
 };

@@ -5,18 +5,11 @@
 #include <gst/gst.h>
 
 #include <algorithm>
-#include <array>
-#include <cerrno>
 #include <mutex>
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
-
-#ifndef MFD_CLOEXEC
-#define MFD_CLOEXEC 0x0001U
-#endif
 
 namespace {
 
@@ -124,12 +117,47 @@ GStreamerPlaybackBackend::~GStreamerPlaybackBackend()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    stopReadAhead();
 }
 
 void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
 {
+    // Only rebuild the pipeline when an output-affecting field actually changes;
+    // read-ahead (and any other non-output tweak) must not tear down a playing
+    // pipeline.  This keeps a settings change seamless for the user.
+    const bool rebuild = (m_playbin == nullptr) || outputConfigDiffers(m_profile, profile);
     m_profile = profile;
-    rebuildPipeline();
+    if (rebuild) {
+        rebuildPipeline();
+        return;
+    }
+
+    // Apply the read-ahead change live against the current source.
+    if (m_profile.readAheadMb <= 0) {
+        stopReadAhead();
+    } else if (m_readAheadFd < 0) {
+        QString uri;
+        {
+            QMutexLocker locker(&m_mutex);
+            uri = m_currentUri;
+        }
+        if (!uri.isEmpty()) {
+            startReadAhead(QUrl::fromEncoded(uri.toUtf8()));
+        }
+    }
+}
+
+bool GStreamerPlaybackBackend::outputConfigDiffers(const PlaybackProfile &a,
+                                                   const PlaybackProfile &b)
+{
+    return a.backend != b.backend
+        || a.mode != b.mode
+        || a.sink != b.sink
+        || a.device != b.device
+        || a.softwareVolume != b.softwareVolume
+        || a.replayGain != b.replayGain
+        || a.allowResample != b.allowResample
+        || a.releaseSinkOnPause != b.releaseSinkOnPause;
 }
 
 void GStreamerPlaybackBackend::play(const QUrl &url)
@@ -142,8 +170,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     m_pendingSeekMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
 
-    const QString uri = sourceUriForPlayback(url, m_currentPreload);
-    m_preparedPreload.clear();
+    const QString uri = uriForUrl(url);
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri = uri;
@@ -152,6 +179,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     }
     g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+    startReadAhead(url);
 }
 
 void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
@@ -164,8 +192,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     m_pendingSeekMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
 
-    const QString uri = sourceUriForPlayback(url, m_currentPreload);
-    m_preparedPreload.clear();
+    const QString uri = uriForUrl(url);
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri = uri;
@@ -176,15 +203,18 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     // Transition only to PAUSED: pipeline prerolls (buffering the first frame)
     // but the audio sink never produces output. No blip.
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+    startReadAhead(url);
 }
 
 void GStreamerPlaybackBackend::prepareNext(const QUrl &url)
 {
     QString uri;
-    if (url.isEmpty()) {
-        m_preparedPreload.clear();
-    } else {
-        uri = sourceUriForPlayback(url, m_preparedPreload);
+    if (!url.isEmpty()) {
+        uri = uriForUrl(url);
+        // Pull the next track's head into the page cache now so the gapless
+        // hand-off doesn't stall on a cold read; the persistent sliding window
+        // is set up later in onGaplessTrackAdvanced().
+        warmFileHead(url);
     }
     QMutexLocker locker(&m_mutex);
     m_preparedUri = uri;
@@ -247,9 +277,7 @@ void GStreamerPlaybackBackend::stop()
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
-    // Release preload buffers after GStreamer has closed its fds (NULL above).
-    m_currentPreload.clear();
-    m_preparedPreload.clear();
+    stopReadAhead();
     // Clear all source state so hasSource() is honest after stop/end-of-queue.
     {
         QMutexLocker locker(&m_mutex);
@@ -340,8 +368,6 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
-    m_currentPreload.clear();
-    m_preparedPreload.clear();
 
     m_playbin = gst_element_factory_make("playbin3", "muzaiten-playbin");
     const QString playbinName = m_playbin != nullptr ? QStringLiteral("playbin3") : QStringLiteral("playbin");
@@ -436,6 +462,9 @@ void GStreamerPlaybackBackend::pollPosition()
     if (emitPreparedStarted) {
         emit preparedTrackStarted();
     }
+
+    // Slide the read-ahead window forward to track the playhead.
+    pumpReadAhead(m_positionMs);
 }
 
 void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
@@ -517,100 +546,103 @@ QString GStreamerPlaybackBackend::uriForUrl(const QUrl &url) const
 
 void GStreamerPlaybackBackend::onGaplessTrackAdvanced()
 {
-    // The prepared track has become the current one; promote the buffer so
-    // the old current-preload memfd is closed and the prepared slot is free.
-    m_currentPreload = std::move(m_preparedPreload);
+    // The prepared track has become the current one (no play() call fires for a
+    // gapless advance), so re-point the read-ahead window at the new file.
+    QString uri;
+    {
+        QMutexLocker locker(&m_mutex);
+        uri = m_currentUri;
+    }
+    if (!uri.isEmpty()) {
+        startReadAhead(QUrl::fromEncoded(uri.toUtf8()));
+    } else {
+        stopReadAhead();
+    }
 }
 
-QString GStreamerPlaybackBackend::sourceUriForPlayback(const QUrl &url, MemFdBuffer &buf)
-{
-    buf.clear();
+namespace {
+constexpr qint64 kMiB = 1024 * 1024;
+} // namespace
 
-    if (m_profile.preloadPercent <= 0 || !url.isLocalFile()) {
-        return uriForUrl(url);
+void GStreamerPlaybackBackend::startReadAhead(const QUrl &url)
+{
+    stopReadAhead();
+
+    if (m_profile.readAheadMb <= 0 || !url.isLocalFile()) {
+        return;
     }
 
     const std::string path = url.toLocalFile().toStdString();
-    const int srcFd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (srcFd < 0) {
-        return uriForUrl(url);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return; // best-effort: leave read-ahead off
     }
 
     struct stat st{};
-    if (::fstat(srcFd, &st) != 0 || st.st_size <= 0) {
-        ::close(srcFd);
-        return uriForUrl(url);
-    }
-    const off_t fileSize = st.st_size;
-
-    // Create an anonymous in-RAM file.
-    const int mfd = static_cast<int>(
-        ::syscall(SYS_memfd_create, "muzaiten-preload", MFD_CLOEXEC));
-    if (mfd < 0) {
-        ::close(srcFd);
-        return uriForUrl(url);
+    if (::fstat(fd, &st) != 0 || st.st_size <= 0) {
+        ::close(fd);
+        return;
     }
 
-    if (::ftruncate(mfd, fileSize) != 0) {
-        ::close(mfd);
-        ::close(srcFd);
-        return uriForUrl(url);
+    m_readAheadFd = fd;
+    m_readAheadSize = static_cast<qint64>(st.st_size);
+    m_readAheadAdvised = 0;
+    // Hint sequential access so the kernel widens its own read-ahead window;
+    // then prime the head of the file immediately.
+    ::posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+    pumpReadAhead(0);
+}
+
+void GStreamerPlaybackBackend::pumpReadAhead(qint64 positionMs)
+{
+    if (m_readAheadFd < 0 || m_profile.readAheadMb <= 0 || m_readAheadSize <= 0) {
+        return;
     }
 
-    // Copy the entire file synchronously into the memfd.  Any preloadPercent > 0
-    // is treated as "full file in RAM" in v1 — the percentage controls the
-    // opt-in threshold, not a partial-copy amount.
-    bool copyComplete = false;
-    {
-        std::array<char, 256 * 1024> chunk{};
-        off_t remaining = fileSize;
-        bool failed = false;
-        while (remaining > 0 && !failed) {
-            const ssize_t nr = ::read(srcFd, chunk.data(),
-                                      std::min<off_t>(remaining,
-                                                      static_cast<off_t>(chunk.size())));
-            if (nr < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                failed = true; // read error (e.g. flaky network mount)
-                break;
-            }
-            if (nr == 0) {
-                failed = true; // unexpected EOF before fileSize bytes
-                break;
-            }
-            // Flush the whole chunk, tolerating short/interrupted writes.
-            size_t off = 0;
-            while (off < static_cast<size_t>(nr)) {
-                const ssize_t nw = ::write(mfd, chunk.data() + off,
-                                           static_cast<size_t>(nr) - off);
-                if (nw < 0) {
-                    if (errno == EINTR) {
-                        continue;
-                    }
-                    failed = true; // write error (e.g. ENOSPC on tmpfs)
-                    break;
-                }
-                off += static_cast<size_t>(nw);
-            }
-            remaining -= nr;
-        }
-        copyComplete = !failed && remaining == 0;
-    }
-    ::close(srcFd);
-
-    if (!copyComplete) {
-        // A partial copy would leave the ftruncate'd memfd zero-filled past the
-        // failure point, so GStreamer would play a truncated/garbage tail.
-        // Fall back to streaming the real file instead of serving corruption.
-        ::close(mfd);
-        return uriForUrl(url);
+    // Estimate the current byte offset from the playback ratio (approximate for
+    // VBR, which is fine — this is only a cache hint).
+    qint64 offset = 0;
+    if (positionMs > 0 && m_durationMs > 0) {
+        offset = m_readAheadSize * std::min<qint64>(positionMs, m_durationMs) / m_durationMs;
     }
 
-    // Rewind so GStreamer reads from the start.
-    ::lseek(mfd, 0, SEEK_SET);
+    const qint64 window = static_cast<qint64>(m_profile.readAheadMb) * kMiB;
+    // A large backward seek lands before the warmed region: rewind the watermark
+    // so the new neighbourhood gets pulled in again.
+    if (offset + window < m_readAheadAdvised) {
+        m_readAheadAdvised = offset;
+    }
 
-    buf.fd = mfd;
-    return QStringLiteral("file:///proc/self/fd/%1").arg(mfd);
+    const qint64 desiredEnd = std::min(m_readAheadSize, offset + window);
+    if (desiredEnd > m_readAheadAdvised) {
+        ::posix_fadvise(m_readAheadFd, m_readAheadAdvised,
+                        desiredEnd - m_readAheadAdvised, POSIX_FADV_WILLNEED);
+        m_readAheadAdvised = desiredEnd;
+    }
+}
+
+void GStreamerPlaybackBackend::stopReadAhead()
+{
+    if (m_readAheadFd >= 0) {
+        ::close(m_readAheadFd);
+        m_readAheadFd = -1;
+    }
+    m_readAheadSize = 0;
+    m_readAheadAdvised = 0;
+}
+
+void GStreamerPlaybackBackend::warmFileHead(const QUrl &url) const
+{
+    if (m_profile.readAheadMb <= 0 || !url.isLocalFile()) {
+        return;
+    }
+    const std::string path = url.toLocalFile().toStdString();
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return;
+    }
+    // Page cache is per-inode, so the warmed pages persist after we drop the fd.
+    ::posix_fadvise(fd, 0, static_cast<qint64>(m_profile.readAheadMb) * kMiB,
+                    POSIX_FADV_WILLNEED);
+    ::close(fd);
 }
