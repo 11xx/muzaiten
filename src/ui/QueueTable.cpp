@@ -1231,6 +1231,8 @@ bool QueueTable::handleKeyPress(QKeyEvent *event)
         cycleSearchMatch(+1);
     } else if (action == QString::fromLatin1(QueueAction::SearchPrevious)) {
         cycleSearchMatch(-1);
+    } else if (action == QString::fromLatin1(QueueAction::Escape)) {
+        escapeSearch();
     } else {
         return false;
     }
@@ -1357,6 +1359,10 @@ bool QueueTable::handleSearchEditKey(QKeyEvent *event)
         return true;
     }
     const QString action = m_keyBindings.value(keySequenceForEvent(event));
+    if (action == QString::fromLatin1(QueueAction::Escape)) {
+        escapeSearch();
+        return true;
+    }
     if (action == QString::fromLatin1(QueueAction::SearchNext)) {
         cycleSearchMatch(+1);
         return true;
