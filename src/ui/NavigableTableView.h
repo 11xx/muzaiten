@@ -7,6 +7,7 @@ class NavigableTableView : public QTableView {
 
 public:
     explicit NavigableTableView(QWidget *parent = nullptr);
+    ~NavigableTableView() override;
 
     void refreshTheme();
 
@@ -27,6 +28,7 @@ protected:
     void rowsAboutToBeRemoved(const QModelIndex &parent, int start, int end) override;
     void currentChanged(const QModelIndex &current, const QModelIndex &previous) override;
     void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void scrollNavigationRowToAnchor(int row, int direction, int previousTopRow);
