@@ -1,5 +1,6 @@
 #include "ui/QueueStore.h"
 #include "ui/QueueTable.h"
+#include "ui/QueueKeybindings.h"
 #include "ui/ResponsiveColumnLayout.h"
 
 #include <QAbstractItemModel>
@@ -12,6 +13,14 @@ class QueueTableTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void defaultBindingsTreatCtrlGAsEscape()
+    {
+        const KeyBindingMap bindings = queueBindingMapForProfile(QStringLiteral("dired_hjkl"));
+
+        QCOMPARE(bindings.value(QKeySequence(Qt::Key_Escape)), QString::fromLatin1(QueueAction::Escape));
+        QCOMPARE(bindings.value(QKeySequence(Qt::ControlModifier | Qt::Key_G)), QString::fromLatin1(QueueAction::Escape));
+    }
+
     void fullScreenDefaultsUseNcmpcppOrderWithRatingLast()
     {
         QueueTable table(QueueTablePreset::FullScreen);

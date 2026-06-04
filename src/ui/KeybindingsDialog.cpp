@@ -56,6 +56,7 @@ QString actionLabel(const QString &action)
         {QString::fromLatin1(QueueAction::Search), QStringLiteral("Search queue")},
         {QString::fromLatin1(QueueAction::SearchNext), QStringLiteral("Next match")},
         {QString::fromLatin1(QueueAction::SearchPrevious), QStringLiteral("Previous match")},
+        {QString::fromLatin1(QueueAction::Escape), QStringLiteral("Escape / clear")},
     };
     return labels.value(action, action);
 }
