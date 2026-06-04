@@ -66,6 +66,7 @@ private:
     void reselectMarkedRows();
     void setCurrentTrackMarked(bool marked);
     void setHoveredRow(int row);
+    void updateHoverFromCursor();
 
     QPersistentModelIndex m_hoverRatingIndex;
     QSet<QString> m_markedTrackPaths;

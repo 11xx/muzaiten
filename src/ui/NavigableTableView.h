@@ -22,12 +22,17 @@ public:
 
 signals:
     void navigationRowChanged(int row);
+    // Emitted after the viewport scrolls (wheel, scrollbar, or keyboard), so
+    // owners can re-derive the hovered row from the cursor — a scroll moves a
+    // different row under a stationary mouse without firing a mouse-move.
+    void contentsScrolled();
 
 protected:
     void rowsInserted(const QModelIndex &parent, int start, int end) override;
     void rowsAboutToBeRemoved(const QModelIndex &parent, int start, int end) override;
     void currentChanged(const QModelIndex &current, const QModelIndex &previous) override;
     void changeEvent(QEvent *event) override;
+    void scrollContentsBy(int dx, int dy) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:

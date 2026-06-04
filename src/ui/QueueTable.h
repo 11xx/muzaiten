@@ -61,6 +61,7 @@ private:
     void showHeaderMenu(const QPoint &pos);
     void showQueueMenu(const QPoint &pos);
     void setHoveredRow(int row);
+    void updateHoverFromCursor();
     void applyPresetDefaults();
     void setHeaderHeight(int height);
     bool handleKeyPress(QKeyEvent *event);

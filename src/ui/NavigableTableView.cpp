@@ -122,6 +122,12 @@ void NavigableTableView::changeEvent(QEvent *event)
     }
 }
 
+void NavigableTableView::scrollContentsBy(int dx, int dy)
+{
+    QTableView::scrollContentsBy(dx, dy);
+    emit contentsScrolled();
+}
+
 bool NavigableTableView::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == qApp
