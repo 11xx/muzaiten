@@ -39,8 +39,9 @@ Q_DECLARE_METATYPE(Search::ScoredResult)
 
 namespace {
 // Keep the index resident for this long after the search view is hidden, so
-// re-opening search feels instant. After it elapses the index memory is freed.
-constexpr int kIndexCleanupMs = 120000; // 2 minutes
+// re-opening search feels instant. After it elapses the index memory is freed
+// (it's the bulk of the app's heap for a large library, so reclaim it promptly).
+constexpr int kIndexCleanupMs = 60000; // 1 minute
 }
 
 // Build a minimal Track from a SearchRecord — sufficient for playback and display.
