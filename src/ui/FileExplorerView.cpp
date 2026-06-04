@@ -11,11 +11,13 @@
 #include <QDirIterator>
 #include <QEvent>
 #include <QFileInfo>
+#include <QFont>
 #include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QPalette>
 #include <QMenu>
 #include <QPushButton>
 #include <QScrollBar>
@@ -120,7 +122,12 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     auto *barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(8, 4, 8, 4);
     m_modeTitle = new QLabel(bar);
-    m_modeTitle->setStyleSheet(QStringLiteral("font-weight: bold; padding-right: 12px;"));
+    // Bold via the font (not a stylesheet): a stylesheet pins the widget's
+    // resolved palette, so the text colour would ignore live theme changes.
+    QFont modeTitleFont = m_modeTitle->font();
+    modeTitleFont.setBold(true);
+    m_modeTitle->setFont(modeTitleFont);
+    m_modeTitle->setContentsMargins(0, 0, 12, 0);
     auto *up = new QPushButton(QStringLiteral("Up"), bar);
     up->setFixedHeight(24);
     m_pathLabel = new QLabel(bar);
@@ -155,9 +162,7 @@ FileExplorerView::FileExplorerView(QWidget *parent)
 
     m_hintBar = new QWidget(this);
     m_hintBar->setAutoFillBackground(true);
-    QPalette hintPalette = m_hintBar->palette();
-    hintPalette.setColor(QPalette::Window, hintPalette.color(QPalette::Window).darker(108));
-    m_hintBar->setPalette(hintPalette);
+    applyHintBarPalette();
     auto *hintLayout = new QHBoxLayout(m_hintBar);
     hintLayout->setContentsMargins(8, 1, 8, 1);
     m_hintLabel = new QLabel(m_hintBar);
@@ -551,6 +556,28 @@ void FileExplorerView::showEvent(QShowEvent *event)
     // the configured key bindings work immediately (previously they only
     // activated after a click moved focus into the tree).
     m_tree->setFocus(Qt::OtherFocusReason);
+}
+
+void FileExplorerView::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange
+        || event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::StyleChange) {
+        applyHintBarPalette();
+    }
+}
+
+void FileExplorerView::applyHintBarPalette()
+{
+    if (m_hintBar == nullptr) {
+        return;
+    }
+    // Derive from the live (inherited) application palette each time so both the
+    // darkened background and the inherited text colour stay current.
+    QPalette hintPalette = palette();
+    hintPalette.setColor(QPalette::Window, hintPalette.color(QPalette::Window).darker(108));
+    m_hintBar->setPalette(hintPalette);
 }
 
 void FileExplorerView::navigateUp()

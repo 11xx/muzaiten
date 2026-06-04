@@ -72,6 +72,7 @@ signals:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
     void refreshFreeRoam();
@@ -95,6 +96,10 @@ private:
 
     void applyKeyAction(const QString &action);
     void updateHintBar();
+    // Recompute the hint-bar palette from the live application palette so the
+    // bar (background + text) tracks theme changes instead of freezing the
+    // colors captured at construction.
+    void applyHintBarPalette();
 
     QLabel *m_pathLabel = nullptr;
     QLabel *m_modeTitle = nullptr;
