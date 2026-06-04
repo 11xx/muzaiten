@@ -22,6 +22,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCursor>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLine>
@@ -430,7 +431,10 @@ public:
         initStyleOption(&opt, index);
 
         const bool selected = opt.state & QStyle::State_Selected;
-        const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
+        // Hover is strictly row-based (driven by m_hoveredRow, which the view
+        // keeps in sync on mouse-move and scroll) — never the single cell under
+        // the pointer, so the whole row always highlights.
+        const bool hovered = (m_hoveredRow == index.row());
         const bool playing = index.row() == m_currentRow;
 
         const bool forcePlayingHighlight = playing && m_forcePlayingHighlight;
@@ -738,6 +742,9 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_view->setWordWrap(false);
     m_view->setMouseTracking(true);
     m_view->viewport()->setMouseTracking(true);
+    // A scroll slides a different row under a stationary cursor with no
+    // mouse-move; re-derive the hovered row from the cursor on every scroll.
+    connect(queueView, &NavigableTableView::contentsScrolled, this, &QueueTable::updateHoverFromCursor);
     m_view->verticalHeader()->setVisible(false);
     m_view->verticalHeader()->setDefaultSectionSize(preset == QueueTablePreset::FullScreen ? 20 : 18);
     m_view->verticalHeader()->setMinimumSectionSize(preset == QueueTablePreset::FullScreen ? 20 : 18);
@@ -1468,6 +1475,17 @@ void QueueTable::setHoveredRow(int row)
         const QRect rect = m_view->visualRect(m_model->index(row, 0));
         m_view->viewport()->update(QRect(0, rect.top(), m_view->viewport()->width(), rect.height()));
     }
+}
+
+void QueueTable::updateHoverFromCursor()
+{
+    const QPoint pos = m_view->viewport()->mapFromGlobal(QCursor::pos());
+    if (!m_view->viewport()->rect().contains(pos)) {
+        setHoveredRow(-1);
+        return;
+    }
+    const QModelIndex index = m_view->indexAt(pos);
+    setHoveredRow(index.isValid() ? index.row() : -1);
 }
 
 void QueueTable::applyPresetDefaults()

@@ -18,6 +18,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMenu>
+#include <QCursor>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -377,6 +378,9 @@ TrackTable::TrackTable(QWidget *parent)
     setWordWrap(false);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
+    // Scrolling moves a different row under a stationary cursor without a
+    // mouse-move, so re-derive the hovered row from the cursor on every scroll.
+    connect(this, &NavigableTableView::contentsScrolled, this, &TrackTable::updateHoverFromCursor);
     horizontalHeader()->setStretchLastSection(false);
     horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     horizontalHeader()->setSectionsMovable(true);
@@ -764,6 +768,17 @@ void TrackTable::leaveEvent(QEvent *event)
         m_hoverRatingIndex = QModelIndex();
     }
     QTableView::leaveEvent(event);
+}
+
+void TrackTable::updateHoverFromCursor()
+{
+    const QPoint pos = viewport()->mapFromGlobal(QCursor::pos());
+    if (!viewport()->rect().contains(pos)) {
+        setHoveredRow(-1);
+        return;
+    }
+    const QModelIndex index = indexAt(pos);
+    setHoveredRow(index.isValid() ? index.row() : -1);
 }
 
 void TrackTable::setHoveredRow(int row)

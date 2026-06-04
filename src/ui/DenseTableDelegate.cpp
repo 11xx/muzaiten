@@ -28,7 +28,9 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     initStyleOption(&opt, index);
 
     const bool selected = opt.state & QStyle::State_Selected;
-    const bool hovered = (m_hoveredRow == index.row()) || (opt.state & QStyle::State_MouseOver);
+    // Row-based hover only (m_hoveredRow tracks the cursor on move and scroll);
+    // never the lone cell under the pointer.
+    const bool hovered = (m_hoveredRow == index.row());
 
     if (selected) {
         painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
