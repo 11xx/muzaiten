@@ -10,15 +10,26 @@
 #include <QScrollBar>
 #include <QScopedValueRollback>
 #include <QStyle>
+#include <QTimer>
 
 #include <algorithm>
 
 NavigableTableView::NavigableTableView(QWidget *parent)
     : QTableView(parent)
 {
+    if (qApp != nullptr) {
+        qApp->installEventFilter(this);
+    }
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
+}
+
+NavigableTableView::~NavigableTableView()
+{
+    if (qApp != nullptr) {
+        qApp->removeEventFilter(this);
+    }
 }
 
 void NavigableTableView::setNavigationScrollPadding(int rows)
@@ -109,6 +120,18 @@ void NavigableTableView::changeEvent(QEvent *event)
             || event->type() == QEvent::StyleChange)) {
         refreshTheme();
     }
+}
+
+bool NavigableTableView::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == qApp
+        && (event->type() == QEvent::ApplicationPaletteChange
+            || event->type() == QEvent::ApplicationFontChange)) {
+        QTimer::singleShot(0, this, [this]() {
+            refreshTheme();
+        });
+    }
+    return QTableView::eventFilter(watched, event);
 }
 
 void NavigableTableView::rowsInserted(const QModelIndex &parent, int start, int end)

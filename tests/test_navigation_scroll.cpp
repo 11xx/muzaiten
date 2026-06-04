@@ -20,6 +20,7 @@ private slots:
     void directJumpUsesMinimalVisibilityScroll();
     void inactivePanelDimsSelectionHighlight();
     void applicationPaletteChangeRefreshesViewAndHeaders();
+    void hiddenApplicationPaletteChangeRefreshesView();
 
 private:
     static NavigableTableView *makeView(QStandardItemModel *model);
@@ -136,6 +137,28 @@ void NavigationScrollTest::applicationPaletteChangeRefreshesViewAndHeaders()
     QCOMPARE(view->palette().color(QPalette::Highlight), custom.color(QPalette::Highlight));
     QCOMPARE(view->viewport()->palette().color(QPalette::Base), custom.color(QPalette::Base));
     QCOMPARE(view->horizontalHeader()->palette().color(QPalette::Button), custom.color(QPalette::Button));
+
+    QApplication::setPalette(original);
+    QCoreApplication::processEvents();
+}
+
+void NavigationScrollTest::hiddenApplicationPaletteChangeRefreshesView()
+{
+    QStandardItemModel model(10, 1);
+    NavigableTableView view;
+    view.setModel(&model);
+    view.setMainPanelActive(true);
+
+    const QPalette original = QApplication::palette();
+    QPalette custom = original;
+    custom.setColor(QPalette::Base, QColor(23, 45, 67));
+    custom.setColor(QPalette::Highlight, QColor(89, 67, 45));
+
+    QApplication::setPalette(custom);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(view.palette().color(QPalette::Base), custom.color(QPalette::Base));
+    QCOMPARE(view.palette().color(QPalette::Highlight), custom.color(QPalette::Highlight));
 
     QApplication::setPalette(original);
     QCoreApplication::processEvents();
