@@ -78,6 +78,7 @@ private:
     void saveMainWindowViewSettings();
     void saveAllViewSettings();
     void resetViewPreferences();
+    void openPanelOrderDialog();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();

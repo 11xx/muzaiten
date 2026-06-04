@@ -97,6 +97,7 @@ set(MUZAITEN_SOURCES
     src/ui/MainWindow.cpp
     src/ui/MainPanelKeybindings.cpp
     src/ui/NavigableTableView.cpp
+    src/ui/PanelOrderDialog.cpp
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlaybackResumeDialog.cpp
     src/ui/PanelSearchController.cpp
@@ -181,6 +182,7 @@ set(MUZAITEN_HEADERS
     src/ui/MainPanelKeybindings.h
     src/ui/NavigableTableView.h
     src/ui/PanelSearchController.h
+    src/ui/PanelOrderDialog.h
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h

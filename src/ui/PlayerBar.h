@@ -56,6 +56,7 @@ signals:
     void searchRankingRequested();
     void keybindingsRequested();
     void resetViewPreferencesRequested();
+    void panelOrderRequested();
     void listenBrainzEnabledChanged(bool enabled);
     void listenBrainzTokenRequested();
     void lastFmEnabledChanged(bool enabled);

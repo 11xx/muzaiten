@@ -25,6 +25,7 @@
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/PlayerBar.h"
+#include "ui/PanelOrderDialog.h"
 #include "ui/PanelSearchController.h"
 #include "ui/PlaybackProfileDialog.h"
 #include "ui/PlaybackResumeDialog.h"
@@ -601,6 +602,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
     connect(m_playerBar, &PlayerBar::keybindingsRequested, this, &MainWindow::configureKeybindings);
     connect(m_playerBar, &PlayerBar::resetViewPreferencesRequested, this, &MainWindow::resetViewPreferences);
+    connect(m_playerBar, &PlayerBar::panelOrderRequested, this, &MainWindow::openPanelOrderDialog);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
@@ -1694,6 +1696,20 @@ void MainWindow::resetViewPreferences()
 
     saveAllViewSettings();
     statusBar()->showMessage(QStringLiteral("View preferences reset to defaults"), 4000);
+}
+
+void MainWindow::openPanelOrderDialog()
+{
+    if (m_panelSearch == nullptr) {
+        return;
+    }
+    PanelOrderDialog dialog(m_panelSearch->focusOrder(), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_panelSearch->setFocusOrder(dialog.resultOrder());
+    m_state->setSetting(QStringLiteral("mainPanel.focusOrder"),
+                        QString::fromUtf8(QJsonDocument(mainPanelFocusOrderToJson(m_panelSearch->focusOrder())).toJson(QJsonDocument::Compact)));
 }
 
 void MainWindow::switchMainView(MainView view)

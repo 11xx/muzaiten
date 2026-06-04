@@ -399,23 +399,26 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_lastFmEnabled->setCheckable(true);
     QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings..."));
 
-    auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
-    m_trackInfoPaneVisible = settingsMenu->addAction(QStringLiteral("Show track information pane"));
+    auto *viewMenu = new QMenu(QStringLiteral("View"), this);
+    m_trackInfoPaneVisible = viewMenu->addAction(QStringLiteral("Show track information pane"));
     m_trackInfoPaneVisible->setCheckable(true);
     m_trackInfoPaneVisible->setChecked(true);
-    QAction *trackInfoPaneSettings = settingsMenu->addAction(QStringLiteral("Track information panel..."));
-    QAction *albumArtResolution = settingsMenu->addAction(QStringLiteral("Album art resolution..."));
-    QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
-    QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
-    QAction *resetViewPreferences = settingsMenu->addAction(QStringLiteral("Reset view preferences to defaults"));
-    m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
-    m_compactMenu->setCheckable(true);
-    settingsMenu->addSeparator();
-    m_listUnsupportedFiles = settingsMenu->addAction(QStringLiteral("List unsupported files in explorer"));
+    QAction *trackInfoPaneSettings = viewMenu->addAction(QStringLiteral("Track information panel..."));
+    QAction *albumArtResolution = viewMenu->addAction(QStringLiteral("Album art resolution..."));
+    QAction *customizePanelOrder = viewMenu->addAction(QStringLiteral("Panel order..."));
+    viewMenu->addSeparator();
+    m_listUnsupportedFiles = viewMenu->addAction(QStringLiteral("List unsupported files in explorer"));
     m_listUnsupportedFiles->setCheckable(true);
     m_listUnsupportedFiles->setVisible(false); // only relevant in file-explorer view
+    QAction *resetViewPreferences = viewMenu->addAction(QStringLiteral("Reset view preferences to defaults"));
 
-    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
+    auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
+    QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
+    QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
+    m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
+    m_compactMenu->setCheckable(true);
+
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, playbackMenu, mpdMenu, scrobblersMenu, viewMenu, settingsMenu};
     for (QMenu *menu : styledMenus) {
         styleMenu(menu);
     }
@@ -424,6 +427,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     compactMenu->addMenu(playbackMenu);
     compactMenu->addMenu(mpdMenu);
     compactMenu->addMenu(scrobblersMenu);
+    compactMenu->addMenu(viewMenu);
     compactMenu->addMenu(settingsMenu);
 
     m_menuStrip = new QWidget(this);
@@ -452,6 +456,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->addMenu(playbackMenu);
     m_menuBar->addMenu(mpdMenu);
     m_menuBar->addMenu(scrobblersMenu);
+    m_menuBar->addMenu(viewMenu);
     m_menuBar->addMenu(settingsMenu);
     menuStripLayout->addWidget(m_menuButton);
     menuStripLayout->addWidget(m_menuBar, 1);
@@ -573,6 +578,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
     connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
     connect(resetViewPreferences, &QAction::triggered, this, &PlayerBar::resetViewPreferencesRequested);
+    connect(customizePanelOrder, &QAction::triggered, this, &PlayerBar::panelOrderRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);

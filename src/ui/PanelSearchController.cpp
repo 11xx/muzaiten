@@ -79,6 +79,12 @@ void PanelSearchController::setKeyBindingProfileName(const QString &name)
 void PanelSearchController::setFocusOrder(const QVector<MainPanelId> &order)
 {
     m_focusOrder = order.isEmpty() ? defaultMainPanelFocusOrder() : order;
+    // If the active panel was removed from the order, snap to the first one so
+    // h/l navigation (which indexes the active panel into m_focusOrder) keeps
+    // working.
+    if (m_hasActivePanel && !m_focusOrder.contains(m_activePanel)) {
+        setActivePanel(m_focusOrder.first(), false);
+    }
 }
 
 void PanelSearchController::activateForMainView()

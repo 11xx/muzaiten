@@ -120,7 +120,9 @@ QJsonArray mainPanelFocusOrderToJson(const QVector<MainPanelId> &order)
 QVector<MainPanelId> mainPanelFocusOrderFromJson(const QJsonArray &array)
 {
     const QVector<MainPanelId> fallback = defaultMainPanelFocusOrder();
-    if (array.size() != fallback.size()) {
+    // Accept any non-empty subset of unique, valid panel ids so panels can be
+    // removed from the h/l focus order. Fall back to defaults on empty/invalid.
+    if (array.isEmpty() || array.size() > fallback.size()) {
         return fallback;
     }
 
@@ -136,5 +138,5 @@ QVector<MainPanelId> mainPanelFocusOrderFromJson(const QJsonArray &array)
         seen.insert(text);
         order.push_back(id);
     }
-    return order.size() == fallback.size() ? order : fallback;
+    return order;
 }
