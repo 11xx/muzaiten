@@ -5,6 +5,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
@@ -101,6 +102,23 @@ QString sqlPlaceholders(qsizetype count)
         marks << QStringLiteral("?");
     }
     return marks.join(QStringLiteral(", "));
+}
+
+// Collapse a repeated string (album/artist/codec/date and their lowercased
+// forms) to a single shared COW buffer, so the in-memory search index holds one
+// allocation per distinct value instead of one per track.  QString is implicitly
+// shared, so callers and the matcher read it exactly as before.
+QString internString(QHash<QString, QString> &pool, const QString &value)
+{
+    if (value.isEmpty()) {
+        return value;
+    }
+    const auto it = pool.constFind(value);
+    if (it != pool.constEnd()) {
+        return it.value();
+    }
+    pool.insert(value, value);
+    return value;
 }
 
 } // namespace
@@ -1360,31 +1378,34 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
     if (!query.exec(sql)) {
         return records;
     }
+    // Dedup pool for the high-repetition fields (one buffer per distinct value).
+    QHash<QString, QString> pool;
     while (query.next()) {
         Search::SearchRecord rec;
         rec.path              = query.value(0).toString();
         rec.filename          = query.value(1).toString();
         rec.title             = query.value(2).toString();
-        rec.artistName        = query.value(3).toString();
-        rec.albumArtistName   = query.value(4).toString();
-        rec.albumTitle        = query.value(5).toString();
-        rec.date              = query.value(6).toString();
+        rec.artistName        = internString(pool, query.value(3).toString());
+        rec.albumArtistName   = internString(pool, query.value(4).toString());
+        rec.albumTitle        = internString(pool, query.value(5).toString());
+        rec.date              = internString(pool, query.value(6).toString());
         rec.durationMs        = query.value(7).toLongLong();
         rec.sampleRateHz      = query.value(8).toInt();
         rec.bitrateKbps       = query.value(9).toInt();
         rec.channels          = query.value(10).toInt();
-        rec.codec             = query.value(11).toString();
+        rec.codec             = internString(pool, query.value(11).toString());
         rec.rating0To100      = query.value(12).isNull() ? -1 : query.value(12).toInt();
         rec.trackNumber       = query.value(13).toInt();
         rec.discNumber        = query.value(14).toInt();
         rec.fileMtime         = query.value(15).toLongLong();
         rec.fileSize          = query.value(16).toLongLong();
         rec.source            = Search::TrackSource::Local;
-        // Pre-compute lowercased versions for case-insensitive matching
+        // Pre-compute lowercased versions for case-insensitive matching; intern
+        // the repeated ones (path/title/filename are near-unique, left as-is).
         rec.normTitle        = rec.title.toLower();
-        rec.normArtist       = rec.artistName.toLower();
-        rec.normAlbumArtist  = rec.albumArtistName.toLower();
-        rec.normAlbum        = rec.albumTitle.toLower();
+        rec.normArtist       = internString(pool, rec.artistName.toLower());
+        rec.normAlbumArtist  = internString(pool, rec.albumArtistName.toLower());
+        rec.normAlbum        = internString(pool, rec.albumTitle.toLower());
         rec.normFilename     = rec.filename.toLower();
         rec.normPath         = rec.path.toLower();
         records.push_back(std::move(rec));
@@ -1403,24 +1424,25 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
     if (!query.exec(sql)) {
         return records;
     }
+    QHash<QString, QString> pool;
     while (query.next()) {
         Search::SearchRecord rec;
         rec.path            = query.value(0).toString();
         rec.filename        = rec.path.section(QLatin1Char('/'), -1);
         rec.title           = query.value(1).toString();
-        rec.artistName      = query.value(2).toString();
-        rec.albumArtistName = query.value(3).toString();
-        rec.albumTitle      = query.value(4).toString();
-        rec.date            = query.value(5).toString();
+        rec.artistName      = internString(pool, query.value(2).toString());
+        rec.albumArtistName = internString(pool, query.value(3).toString());
+        rec.albumTitle      = internString(pool, query.value(4).toString());
+        rec.date            = internString(pool, query.value(5).toString());
         rec.durationMs      = query.value(6).toLongLong();
         rec.trackNumber     = query.value(7).toInt();
         rec.discNumber      = query.value(8).toInt();
         rec.rating0To100    = -1;
         rec.source          = Search::TrackSource::Mpd;
         rec.normTitle        = rec.title.toLower();
-        rec.normArtist       = rec.artistName.toLower();
-        rec.normAlbumArtist  = rec.albumArtistName.toLower();
-        rec.normAlbum        = rec.albumTitle.toLower();
+        rec.normArtist       = internString(pool, rec.artistName.toLower());
+        rec.normAlbumArtist  = internString(pool, rec.albumArtistName.toLower());
+        rec.normAlbum        = internString(pool, rec.albumTitle.toLower());
         rec.normFilename     = rec.filename.toLower();
         rec.normPath         = rec.path.toLower();
         records.push_back(std::move(rec));
