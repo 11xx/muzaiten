@@ -12,6 +12,11 @@ CMAKE_BUILD_TYPE           ?=
 PREFIX                     ?=
 # Ninja is "ninja" on Arch/Debian and "ninja-build" on Fedora; detect either.
 NINJA                      ?= $(shell command -v ninja 2>/dev/null || command -v ninja-build 2>/dev/null)
+# Fast linker, auto-detected and a no-op when absent: the relink after every edit
+# is the bulk of an incremental build, and mold/lld cut it ~5x. (A compiler cache
+# like ccache/sccache buys little here — the C++-modules build makes objects
+# non-cacheable — so it's intentionally not wired in.) Override: `LINKER_TYPE=`.
+LINKER_TYPE                ?= $(if $(shell command -v mold 2>/dev/null),MOLD,$(if $(shell command -v ld.lld 2>/dev/null),LLD,))
 QT_QPA_PLATFORM            ?= offscreen
 MUZAITEN_LASTFM_API_KEY    ?=
 MUZAITEN_LASTFM_SHARED_SECRET ?=
@@ -49,6 +54,7 @@ configure:
 	$(CMAKE) -S . -B $(BUILD_DIR) -G $(CMAKE_GENERATOR) \
 		$(if $(NINJA),-DCMAKE_MAKE_PROGRAM="$(NINJA)") \
 		$(if $(CMAKE_BUILD_TYPE),-DCMAKE_BUILD_TYPE="$(CMAKE_BUILD_TYPE)") \
+		$(if $(LINKER_TYPE),-DCMAKE_LINKER_TYPE="$(LINKER_TYPE)") \
 		-DMUZAITEN_LASTFM_API_KEY="$(MUZAITEN_LASTFM_API_KEY)" \
 		-DMUZAITEN_LASTFM_SHARED_SECRET="$(MUZAITEN_LASTFM_SHARED_SECRET)"
 
