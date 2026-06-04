@@ -198,6 +198,9 @@ add_executable(test_queue_table
     ../src/core/Rating.cpp
     ../src/ui/StarRating.cpp
     ../src/ui/StarRatingDelegate.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
 )
 target_include_directories(test_queue_table PRIVATE ../src)
 target_link_libraries(test_queue_table PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)

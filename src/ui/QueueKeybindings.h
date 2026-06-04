@@ -17,6 +17,9 @@ namespace QueueAction {
     inline constexpr auto FindLibrary    = "find_library";
     inline constexpr auto FindFile       = "find_file";
     inline constexpr auto JumpPlaying    = "jump_playing";
+    inline constexpr auto Search         = "search";
+    inline constexpr auto SearchNext     = "search_next";
+    inline constexpr auto SearchPrevious = "search_previous";
 }
 
 QVector<KeyBindingProfile> defaultQueueKeyBindingProfiles();

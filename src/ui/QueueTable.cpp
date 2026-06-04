@@ -17,12 +17,15 @@
 #include <QActionGroup>
 #include <QDataStream>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLine>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -753,6 +756,27 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     }
     layout->addWidget(m_view, 1);
 
+    if (preset == QueueTablePreset::FullScreen) {
+        m_searchBar = new QWidget(this);
+        auto *searchLayout = new QHBoxLayout(m_searchBar);
+        searchLayout->setContentsMargins(8, 4, 8, 4);
+        searchLayout->setSpacing(6);
+        m_searchPrompt = new QLabel(QStringLiteral("Search Queue:"), m_searchBar);
+        m_searchEdit = new QLineEdit(m_searchBar);
+        m_searchEdit->setClearButtonEnabled(true);
+        m_searchStatus = new QLabel(m_searchBar);
+        m_searchStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        searchLayout->addWidget(m_searchPrompt);
+        searchLayout->addWidget(m_searchEdit, 1);
+        searchLayout->addWidget(m_searchStatus);
+        m_searchBar->setVisible(false);
+        m_searchEdit->installEventFilter(this);
+        connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+            setSearchQuery(text);
+        });
+        layout->addWidget(m_searchBar);
+    }
+
     m_columnLayout = new ResponsiveColumnLayout(m_view, responsiveSpecsForPreset(preset), this);
     applyPresetDefaults();
 
@@ -817,6 +841,11 @@ void QueueTable::setQueueStore(QueueStore *store)
             }
             scheduleRestoreScrollToCurrentRow();
         });
+        // Recompute matches against the new queue contents without yanking the
+        // cursor; the status line stays accurate while a search is open.
+        if (m_searchBar != nullptr && m_searchBar->isVisible() && !m_searchQuery.isEmpty()) {
+            rebuildSearchMatches(false);
+        }
     });
     connect(m_store, &QueueStore::currentIndexChanged, this, [this](int index) {
         static_cast<QueueTableView *>(m_view)->setCurrentPlayingRow(index);
@@ -978,6 +1007,11 @@ bool QueueTable::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_view && event->type() == QEvent::Show) {
         scheduleRestoreScrollToCurrentRow();
+    }
+    if (m_searchEdit != nullptr && watched == m_searchEdit && event->type() == QEvent::KeyPress) {
+        if (handleSearchEditKey(static_cast<QKeyEvent *>(event))) {
+            return true;
+        }
     }
     if ((watched == m_view || watched == m_view->viewport()) && event->type() == QEvent::KeyPress) {
         if (handleKeyPress(static_cast<QKeyEvent *>(event))) {
@@ -1184,10 +1218,152 @@ bool QueueTable::handleKeyPress(QKeyEvent *event)
         }
     } else if (action == QString::fromLatin1(QueueAction::JumpPlaying)) {
         revealCurrentPlaying();
+    } else if (action == QString::fromLatin1(QueueAction::Search)) {
+        openSearch();
+    } else if (action == QString::fromLatin1(QueueAction::SearchNext)) {
+        cycleSearchMatch(+1);
+    } else if (action == QString::fromLatin1(QueueAction::SearchPrevious)) {
+        cycleSearchMatch(-1);
     } else {
         return false;
     }
     return true;
+}
+
+void QueueTable::openSearch()
+{
+    if (m_searchBar == nullptr) {
+        return;
+    }
+    m_searchBar->setVisible(true);
+    updateSearchUi();
+    const QSignalBlocker blocker(m_searchEdit);
+    m_searchEdit->setText(m_searchQuery);
+    m_searchEdit->setFocus();
+    m_searchEdit->selectAll();
+}
+
+void QueueTable::escapeSearch()
+{
+    if (m_searchBar == nullptr) {
+        return;
+    }
+    // First Escape clears a non-empty query; a second one dismisses the bar.
+    if (!m_searchEdit->text().isEmpty()) {
+        m_searchEdit->clear();
+        return;
+    }
+    m_searchQuery.clear();
+    m_searchMatches.clear();
+    m_searchCurrentMatch = -1;
+    m_searchBar->setVisible(false);
+    navigationWidget()->setFocus();
+}
+
+void QueueTable::setSearchQuery(const QString &query)
+{
+    m_searchQuery = query.trimmed();
+    rebuildSearchMatches(true);
+}
+
+void QueueTable::rebuildSearchMatches(bool jumpToFirst)
+{
+    m_searchMatches.clear();
+    m_searchCurrentMatch = -1;
+
+    if (m_searchQuery.isEmpty()) {
+        updateSearchUi();
+        return;
+    }
+
+    const QVector<Search::MatchDocument> docs =
+        m_store == nullptr ? QVector<Search::MatchDocument>() : m_store->searchDocuments();
+    m_searchMatches = Search::matchDocumentsInDisplayOrder(
+        docs, Search::SearchQuery::parse(m_searchQuery), m_searchFuzzy);
+
+    if (!m_searchMatches.isEmpty()) {
+        int matchIndex = 0;
+        const int current = currentRow();
+        for (int i = 0; i < m_searchMatches.size(); ++i) {
+            if (m_searchMatches.at(i).row >= current) {
+                matchIndex = i;
+                break;
+            }
+        }
+        m_searchCurrentMatch = matchIndex;
+        if (jumpToFirst) {
+            setCurrentRow(m_searchMatches.at(matchIndex).row);
+        }
+    }
+    updateSearchUi();
+}
+
+void QueueTable::updateSearchUi()
+{
+    if (m_searchBar == nullptr) {
+        return;
+    }
+    const QString mode = m_searchFuzzy ? QStringLiteral("fuzzy") : QStringLiteral("exact");
+    const int rows = rowCount();
+    if (rows == 0) {
+        m_searchStatus->setText(QStringLiteral("No rows · %1").arg(mode));
+    } else if (m_searchQuery.isEmpty()) {
+        m_searchStatus->setText(QStringLiteral("%1 rows · %2").arg(rows).arg(mode));
+    } else if (m_searchMatches.isEmpty()) {
+        m_searchStatus->setText(QStringLiteral("No matches · %1").arg(mode));
+    } else {
+        m_searchStatus->setText(QStringLiteral("%1/%2 · %3")
+                                    .arg(m_searchCurrentMatch + 1)
+                                    .arg(m_searchMatches.size())
+                                    .arg(mode));
+    }
+}
+
+void QueueTable::cycleSearchMatch(int direction)
+{
+    if (m_searchBar == nullptr) {
+        return;
+    }
+    if (m_searchQuery.isEmpty()) {
+        openSearch();
+        return;
+    }
+    rebuildSearchMatches(false);
+    if (m_searchMatches.isEmpty()) {
+        return;
+    }
+    if (m_searchCurrentMatch < 0) {
+        m_searchCurrentMatch = 0;
+    } else {
+        const qsizetype size = m_searchMatches.size();
+        const qsizetype next = (static_cast<qsizetype>(m_searchCurrentMatch) + direction + size) % size;
+        m_searchCurrentMatch = static_cast<int>(next);
+    }
+    setCurrentRow(m_searchMatches.at(m_searchCurrentMatch).row);
+    updateSearchUi();
+}
+
+bool QueueTable::handleSearchEditKey(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Escape) {
+        escapeSearch();
+        return true;
+    }
+    const QString action = m_keyBindings.value(keySequenceForEvent(event));
+    if (action == QString::fromLatin1(QueueAction::SearchNext)) {
+        cycleSearchMatch(+1);
+        return true;
+    }
+    if (action == QString::fromLatin1(QueueAction::SearchPrevious)) {
+        cycleSearchMatch(-1);
+        return true;
+    }
+    if (event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_F) {
+        m_searchFuzzy = !m_searchFuzzy;
+        rebuildSearchMatches(false);
+        return true;
+    }
+    return false;
 }
 
 int QueueTable::pageStepRows() const
