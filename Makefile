@@ -2,14 +2,16 @@
 
 -include .env
 
-.PHONY: help configure build rebuild test smoke run dev install clean distclean
+.PHONY: help configure build rebuild test smoke run dev install uninstall clean distclean
 
 BUILD_DIR                  ?= build
 CMAKE                      ?= cmake
 CTEST                      ?= ctest
 CMAKE_GENERATOR            ?= Ninja
 CMAKE_BUILD_TYPE           ?=
-PREFIX                     ?=
+# User-space by default: a plain `make install` lands in ~/.local (no sudo).
+# Override for a system install: `make install PREFIX=/usr` (run with sudo).
+PREFIX                     ?= $(HOME)/.local
 # Ninja is "ninja" on Arch/Debian and "ninja-build" on Fedora; detect either.
 NINJA                      ?= $(shell command -v ninja 2>/dev/null || command -v ninja-build 2>/dev/null)
 # Fast linker, auto-detected and a no-op when absent: the relink after every edit
@@ -31,7 +33,8 @@ help:
 		'  make smoke      Run the existing build offscreen as a startup smoke test' \
 		'  make run        Launch the existing build with --verbose (XDG dirs)' \
 		'  make dev        Build and launch with isolated ./dev-state (MUZAITEN_DEV_STATE)' \
-		'  make install    Install the existing build (cmake --install; usually sudo)' \
+		'  make install    Install the existing build (user-space ~/.local by default)' \
+		'  make uninstall  Remove a prior install (reads $(BUILD_DIR)/install_manifest.txt)' \
 		'  make clean      Remove build outputs from $(BUILD_DIR)' \
 		'  make distclean  Alias for clean' \
 		'' \
@@ -39,7 +42,7 @@ help:
 		'  BUILD_DIR=build-archlinux' \
 		'  CMAKE_GENERATOR=Ninja' \
 		'  CMAKE_BUILD_TYPE=Release' \
-		'  PREFIX=/usr            (install prefix; default is whatever was configured)' \
+		'  PREFIX=/usr            (install prefix; default ~/.local, no sudo)' \
 		'  MUZAITEN_LASTFM_API_KEY=...' \
 		'  MUZAITEN_LASTFM_SHARED_SECRET=...'
 
@@ -82,9 +85,20 @@ dev: build
 	MUZAITEN_DEV_STATE=1 ./$(APP) --verbose
 
 # Installs the existing build. Run `make build` (optionally with
-# CMAKE_BUILD_TYPE=Release) first; this step is usually run with sudo.
+# CMAKE_BUILD_TYPE=Release) first. Defaults to the user-space ~/.local prefix
+# (no sudo); pass PREFIX=/usr (with sudo) for a system-wide install.
 install:
 	$(CMAKE) --install $(BUILD_DIR) $(if $(PREFIX),--prefix "$(PREFIX)")
+
+# Reverses the last `make install` from this build dir by deleting the files it
+# recorded in install_manifest.txt. Prefix-agnostic: it cleans whatever prefix
+# that install used, so `make uninstall` undoes `make install` regardless of the
+# PREFIX you chose. Use sudo if you installed to a system prefix like /usr.
+uninstall:
+	@if [ ! -f "$(BUILD_DIR)/cmake_uninstall.cmake" ]; then \
+		echo "No configured build in '$(BUILD_DIR)'; run 'make build' first."; exit 1; \
+	fi
+	$(CMAKE) -P "$(BUILD_DIR)/cmake_uninstall.cmake"
 
 clean:
 	rm -rf $(BUILD_DIR)

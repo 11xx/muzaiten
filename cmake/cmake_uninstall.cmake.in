@@ -1,0 +1,32 @@
+# Configured into the build tree as cmake_uninstall.cmake and run via the
+# `uninstall` target (or `cmake -P`). Removes exactly the files recorded in
+# install_manifest.txt by the last `cmake --install`.
+#
+# Prefix-agnostic by construction: the manifest stores absolute paths, so this
+# cleans whatever prefix the install used (~/.local by default, /usr, a custom
+# PREFIX, ...). DESTDIR is honored to match staged-install semantics.
+#
+# Only files are removed, never directories: the install touches shared trees
+# (share/applications, icons/hicolor, ...) that other packages also populate.
+
+set(manifest "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+
+if(NOT EXISTS "${manifest}")
+    message(FATAL_ERROR
+        "Cannot find install manifest: ${manifest}\n"
+        "Nothing has been installed from this build dir yet (run 'make install').")
+endif()
+
+file(STRINGS "${manifest}" installed_files)
+foreach(file ${installed_files})
+    set(path "$ENV{DESTDIR}${file}")
+    if(IS_SYMLINK "${path}" OR EXISTS "${path}")
+        message(STATUS "Removing: ${path}")
+        file(REMOVE "${path}")
+        if(EXISTS "${path}")
+            message(WARNING "Failed to remove: ${path}")
+        endif()
+    else()
+        message(STATUS "Already gone: ${path}")
+    endif()
+endforeach()

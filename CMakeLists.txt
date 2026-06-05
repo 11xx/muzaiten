@@ -247,6 +247,22 @@ install(FILES packaging/org.11xx.muzaiten.svg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
 )
 
+# Uninstall: reverse the last `cmake --install` by deleting the files it
+# recorded in install_manifest.txt. CMake ships no uninstall target, so wire up
+# the conventional manifest-driven one. Prefix-agnostic — cleans whatever prefix
+# was installed into (the user-space ~/.local default, /usr, a custom PREFIX).
+if(NOT TARGET uninstall)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
+        IMMEDIATE @ONLY
+    )
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
+        COMMENT "Uninstalling files recorded in install_manifest.txt"
+    )
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)
