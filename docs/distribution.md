@@ -21,6 +21,28 @@ The desktop entry, icon, and metainfo are installed by the normal CMake
 `install()` rules, so `cmake --install` (and therefore every package below) drops
 full freedesktop integration into the prefix.
 
+## Installing from source (local)
+
+`make install` is **user-space by default**: with no `PREFIX` it installs into
+`~/.local`, so a normal install needs no root.
+
+```sh
+make build CMAKE_BUILD_TYPE=Release
+make install                  # -> ~/.local (no sudo)
+sudo make install PREFIX=/usr # system-wide instead
+
+make uninstall                # reverse the last install
+```
+
+`make uninstall` deletes exactly the files the last `make install` recorded in
+`<BUILD_DIR>/install_manifest.txt`. Because that manifest stores absolute paths,
+uninstall is **prefix-agnostic** — it cleans whichever prefix you installed into,
+whether the `~/.local` default or a custom `PREFIX` (use `sudo` for a system
+prefix). Only files are removed, never the shared directories
+(`share/applications`, `icons/hicolor`, …) that other packages also populate.
+Distro packages do not use this path: they stage into `$pkgdir`/`DESTDIR` and let
+the package manager own removal.
+
 ## Package naming (recommendation)
 
 Reserve all three names — `muzaiten`, `muzaiten-bin`, `muzaiten-git` — but
@@ -92,6 +114,39 @@ This produces, under `dist/`:
 
 `<version>` is the date-based `YYYY.MM.DD.HHMMSS.g<sha>` derived from `HEAD`.
 Upload both files to a Codeberg release whose tag is exactly `<version>`.
+
+### Dry-running the prebuilt-dist packaging (dev)
+
+Before uploading an artifact and bumping the published `muzaiten-bin` PKGBUILD,
+you can rehearse the whole prebuilt-dist flow against the freshly built tarball —
+no upload, no checksum bookkeeping:
+
+```sh
+./packaging/build-release.sh --dev-pkgbuild   # or DEV_PKGBUILD=1 ...
+```
+
+This is a hidden dev option (not shown in `--help`). In addition to the normal
+`dist/` tarball, it writes:
+
+```
+dist/aur-dev/muzaiten-dev/
+├── PKGBUILD     # a muzaiten-bin clone, sourcing the local tarball
+├── .SRCINFO
+└── muzaiten-<version>-<arch>.tar.zst   # copied next to the PKGBUILD
+```
+
+The generated `PKGBUILD` sources the local tarball (no protocol → makepkg finds
+it beside the PKGBUILD) with its real `sha256sums`, so you can build and inspect
+the actual package locally:
+
+```sh
+( cd dist/aur-dev/muzaiten-dev && makepkg -f )   # then namcap / pacman -Qlp the result
+```
+
+`dist/` is gitignored, so none of this is published — it only proves the
+prebuilt-dist `package()` produces a correct `/usr` tree before you commit to the
+real release. The dev package mirrors the standard `/usr` tarball, so leave
+`PREFIX` at its default when generating it (the script warns otherwise).
 
 ### Why not a single fully-static binary?
 
