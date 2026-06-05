@@ -71,7 +71,9 @@ void MuzaitenApplication::configureCommandLine()
     const QCommandLineOption verboseOption(verboseNames, QStringLiteral("Enable verbose debug logging."));
     // Path overrides. Default is XDG; these provide explicit, full customization.
     const QCommandLineOption stateRootOption(QStringLiteral("state-root"), QStringLiteral("Store all data/state/cache/config under <path>/{data,state,cache,config}."), QStringLiteral("path"));
-    const QCommandLineOption devStateOption(QStringLiteral("dev-state"), QStringLiteral("Shortcut for --state-root ./dev-state (relative to the current directory)."));
+    // Dev-only shortcut; functional but kept out of --help (HiddenFromHelp).
+    QCommandLineOption devStateOption(QStringLiteral("dev-state"), QStringLiteral("Shortcut for --state-root ./dev-state (relative to the current directory)."));
+    devStateOption.setFlags(QCommandLineOption::HiddenFromHelp);
     const QCommandLineOption dataDirOption(QStringLiteral("data-dir"), QStringLiteral("Override the data directory (library database)."), QStringLiteral("path"));
     const QCommandLineOption stateDirOption(QStringLiteral("state-dir"), QStringLiteral("Override the state directory (UI prefs, session, pending scrobbles)."), QStringLiteral("path"));
     const QCommandLineOption cacheDirOption(QStringLiteral("cache-dir"), QStringLiteral("Override the cache directory (artwork)."), QStringLiteral("path"));
