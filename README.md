@@ -76,15 +76,21 @@ On Arch Linux (AUR):
 - `muzaiten-git` — builds the latest commit from source; ships without a default
   Last.fm key (add your own in the app).
 
-From source, into a prefix:
+From source. `make install` is user-space by default — it installs into
+`~/.local` and needs no root:
 
 ```sh
 make build CMAKE_BUILD_TYPE=Release
-sudo make install PREFIX=/usr      # PREFIX defaults to whatever was configured (/usr/local)
+make install                       # -> ~/.local (no sudo)
+sudo make install PREFIX=/usr      # system-wide instead
+
+make uninstall                     # reverse it (mirrors the PREFIX you used)
 ```
 
 Installing drops the `muzaiten` binary plus a desktop entry, scalable icon, and
-AppStream metadata into the prefix. (`make` here is only a thin alias for the
+AppStream metadata into the prefix. `make uninstall` removes exactly those files
+(it reads `install_manifest.txt`, so it cleans whichever prefix you installed
+into; use `sudo` for a system prefix). (`make` here is only a thin alias for the
 fixed CMake commands — use `cmake`/`cmake --install` directly if you need finer
 control.) Release packaging, the AUR packages, and the Last.fm credential threat
 model are documented in [docs/distribution.md](docs/distribution.md).
