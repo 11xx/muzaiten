@@ -2,6 +2,7 @@
 
 #include "Version.h"
 #include "core/Track.h"
+#include "scanner/TagReader.h"
 #include "ui/MainWindow.h"
 
 #include <QCommandLineParser>
@@ -24,9 +25,17 @@ public:
 
     void printMessage(const TagLib::String &msg) override
     {
-        if (m_verbose) {
-            qWarning().noquote() << "TagLib:" << QString::fromStdString(msg.to8Bit(true)).trimmed();
+        if (!m_verbose) {
+            return;
         }
+        // TagLib calls this synchronously on the thread doing the read, so the
+        // thread-local current file attributes each warning to its source.
+        QString line = QStringLiteral("TagLib: %1").arg(QString::fromStdString(msg.to8Bit(true)).trimmed());
+        const QString file = TagReader::currentScanFile();
+        if (!file.isEmpty()) {
+            line += QStringLiteral("  [while reading %1]").arg(file);
+        }
+        qWarning().noquote() << line;
     }
 
 private:

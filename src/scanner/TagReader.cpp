@@ -101,10 +101,24 @@ int readBitsPerSample(const TagLib::AudioProperties *audio)
     return 0;
 }
 
+// Per-thread path of the read in progress, so the TagLib debug listener can
+// attribute warnings (which fire synchronously on this thread) to the file.
+thread_local QString g_currentScanFile;
+
 } // namespace
+
+QString TagReader::currentScanFile()
+{
+    return g_currentScanFile;
+}
 
 Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetadata) const
 {
+    g_currentScanFile = path;
+    struct ScanFileGuard {
+        ~ScanFileGuard() { g_currentScanFile.clear(); }
+    } scanFileGuard;
+
     QFileInfo info(path);
 
     Track track;
