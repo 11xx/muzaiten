@@ -597,6 +597,19 @@ QStringList Database::enumeratedOnlyPaths(const QString &parentDir, int limit) c
     return paths;
 }
 
+int Database::enumeratedOnlyCount() const
+{
+    QString sql = QStringLiteral("SELECT COUNT(*) FROM tracks t WHERE t.metadata_scanned = 0 AND t.missing = 0");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    QSqlQuery query(m_db);
+    if (query.exec(sql) && query.next()) {
+        return query.value(0).toInt();
+    }
+    return 0;
+}
+
 QHash<QString, TrackFingerprint> Database::trackFingerprints(const QString &rootPrefix) const
 {
     QHash<QString, TrackFingerprint> fingerprints;

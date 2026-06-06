@@ -897,11 +897,15 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     connect(m_scanPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
     connect(m_scanPipeline, &ScanPipeline::progress, this,
             [this](qint64 enumerated, qint64 toProcess, qint64 processed, const QString &phase) {
+                // The foreground pass only enumerates and re-reads *changed* files;
+                // new files are deferred to the background metadata fill.
                 if (phase == QStringLiteral("enumerating")) {
                     statusBar()->showMessage(QStringLiteral("Scanning: enumerating files..."));
-                } else {
-                    statusBar()->showMessage(QStringLiteral("Scanning: %1 of %2 read (%3 found)")
+                } else if (toProcess > 0) {
+                    statusBar()->showMessage(QStringLiteral("Scanning: re-read %1 of %2 changed (%3 found)")
                                                  .arg(processed).arg(toProcess).arg(enumerated));
+                } else {
+                    statusBar()->showMessage(QStringLiteral("Scanning: %1 files found").arg(enumerated));
                 }
             });
     connect(m_scanPipeline, &ScanPipeline::missingReady, this, &MainWindow::markScannedTracksMissing);
@@ -1149,6 +1153,7 @@ void MainWindow::finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 sk
     // ingestScanBatch already refreshed the views incrementally during the chunk;
     // when the whole backlog is drained, do a final browse + search-index refresh.
     if (m_database->enumeratedOnlyPaths({}, 1).isEmpty()) {
+        qCInfo(uiLog) << "background metadata fill complete";
         flushIncrementalRefresh();
         m_searchView->invalidateIndex(databasePath());
         statusBar()->showMessage(QStringLiteral("Library metadata complete"), 4000);
@@ -1170,7 +1175,14 @@ void MainWindow::ensureDirectoryScanned(const QString &directory)
 
 void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
 {
-    qCInfo(uiLog) << "scan finished" << enumerated << indexed << "skipped" << skipped << "canceled" << canceled;
+    // This is the foreground pass finishing (enumerate + re-read changed files), not
+    // the whole library: new files were turned into placeholders and their metadata
+    // is read lazily by the background fill. Report both phases honestly.
+    const int pendingFill = m_database->enumeratedOnlyCount();
+    qCInfo(uiLog).nospace() << "scan pass finished: enumerated " << enumerated
+                            << ", re-read " << indexed << " changed, " << skipped << " unchanged, "
+                            << pendingFill << " queued for background metadata fill"
+                            << (canceled ? " (canceled)" : "");
     const bool sourceScan = m_activeScanRootId > 0;
     const QString finishedRootPath = m_activeScanRootPath;
     if (sourceScan) {
@@ -1181,11 +1193,17 @@ void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, b
     m_scanProgress->setVisible(false);
     m_stopScanButton->setVisible(false);
     m_stopScanButton->setEnabled(false);
-    statusBar()->showMessage(
-        canceled
-            ? QStringLiteral("Scan canceled: %1 read, %2 unchanged").arg(indexed).arg(skipped)
-            : QStringLiteral("Scan complete: %1 found, %2 read, %3 unchanged").arg(enumerated).arg(indexed).arg(skipped),
-        10000);
+    QString summary;
+    if (canceled) {
+        summary = QStringLiteral("Scan canceled: %1 enumerated, %2 unchanged").arg(enumerated).arg(skipped);
+    } else if (pendingFill > 0) {
+        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged) — reading metadata for %4 in the background")
+                      .arg(enumerated).arg(indexed).arg(skipped).arg(pendingFill);
+    } else {
+        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged)")
+                      .arg(enumerated).arg(indexed).arg(skipped);
+    }
+    statusBar()->showMessage(summary, 10000);
     flushIncrementalRefresh();
     // Rebuild the search index with fresh library data
     if (!canceled) {
