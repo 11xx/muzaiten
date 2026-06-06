@@ -1293,8 +1293,14 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     } else {
         m_database->clearPendingTrackRatingWrite(track.path);
     }
-    rememberTrackTableViewState();
-    refreshTrackTable();
+    // Patch the rated row in place instead of rebuilding the whole track table
+    // (a full reload also dropped scroll/selection, hence the old remember/restore
+    // dance). The album grid still refreshes because its star reflects the album's
+    // average track rating, which this edit can shift. track.rating0To100 already
+    // carries the scanned file rating (or unset), so it is the right fallback when
+    // a user rating is cleared.
+    const bool nowHasUserRating = rating0To100 >= 0;
+    m_trackTable->updateTrackRating(track.path, nowHasUserRating ? rating0To100 : track.rating0To100, nowHasUserRating);
     refreshAlbumGrid();
     for (Track &queuedTrack : m_queue) {
         if (queuedTrack.path != track.path) {
@@ -1317,7 +1323,6 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     }
     m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
     refreshPlayNextRange();
-    restoreTrackTableViewState();
 
     if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
         schedulePendingRatingTagSync();
