@@ -125,20 +125,38 @@ void ScanPipeline::runScan()
     std::vector<std::string> toRead;
     toRead.reserve(found.size());
     qint64 skipped = 0;
+    // Brand-new paths become directory-view placeholders right after enumeration
+    // ("fast first pass"): they show their path/size immediately while the tag
+    // read fills in the rest. Only genuinely new paths need one — changed files
+    // already have a visible row, and existing placeholders already exist in the DB.
+    QVector<Track> placeholders;
     for (const DirectoryWalker::Found &item : found) {
         const QString path = QString::fromStdString(item.path);
         seenPaths.insert(path);
-        if (!m_options.forceFullRescan) {
-            const auto it = m_fingerprints.constFind(path);
-            // Skip only fully-scanned rows whose file is unchanged. Enumerated-only
-            // placeholders (metadataScanned == false) fall through to be tag-read.
-            if (it != m_fingerprints.constEnd() && it->mtime == item.mtime
-                && it->size == item.size && it->metadataScanned) {
-                ++skipped;
-                continue;
-            }
+        const auto it = m_fingerprints.constFind(path);
+        const bool known = it != m_fingerprints.constEnd();
+        // Skip only fully-scanned rows whose file is unchanged. Enumerated-only
+        // placeholders (metadataScanned == false) fall through to be tag-read.
+        if (!m_options.forceFullRescan && known && it->mtime == item.mtime
+            && it->size == item.size && it->metadataScanned) {
+            ++skipped;
+            continue;
+        }
+        if (!known) {
+            const QFileInfo info(path);
+            Track placeholder;
+            placeholder.path = path;
+            placeholder.parentDir = info.absolutePath();
+            placeholder.filename = info.fileName();
+            placeholder.title = info.completeBaseName();
+            placeholder.fileSize = item.size;
+            placeholder.fileMtime = item.mtime;
+            placeholders.push_back(std::move(placeholder));
         }
         toRead.push_back(item.path);
+    }
+    if (!m_cancel && !placeholders.isEmpty()) {
+        emit enumeratedReady(placeholders);
     }
 
     emit progress(enumerated, static_cast<qint64>(toRead.size()), 0, QStringLiteral("reading"));

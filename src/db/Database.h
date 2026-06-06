@@ -39,6 +39,10 @@ public:
     void beginScanSession();
     void endScanSession();
     bool upsertTrack(const Track &track);
+    // Fast first pass: insert path-derived placeholder rows (metadata_scanned=0)
+    // for newly-enumerated files, without touching artists/albums. ON CONFLICT DO
+    // NOTHING so it never clobbers an already-scanned row or resets its flag.
+    bool insertEnumeratedPlaceholders(const QVector<Track> &tracks);
     // path -> {file_mtime, file_size, metadata_scanned} for tracks under
     // rootPrefix, for the incremental-rescan diff. Empty rootPrefix returns all
     // tracks. metadata_scanned lets the diff re-queue enumerated-only placeholders.

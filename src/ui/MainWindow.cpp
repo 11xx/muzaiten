@@ -871,6 +871,7 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     m_scanPipeline->moveToThread(m_scanThread);
 
     connect(m_scanThread, &QThread::started, m_scanPipeline, &ScanPipeline::run);
+    connect(m_scanPipeline, &ScanPipeline::enumeratedReady, this, &MainWindow::ingestEnumeratedPlaceholders);
     connect(m_scanPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
     connect(m_scanPipeline, &ScanPipeline::progress, this,
             [this](qint64 enumerated, qint64 toProcess, qint64 processed, const QString &phase) {
@@ -979,6 +980,20 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
         refreshArtists();
         refreshLibraryFileExplorer();
     }
+}
+
+void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty()) {
+        return;
+    }
+    if (!m_database->insertEnumeratedPlaceholders(tracks)) {
+        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
+        return;
+    }
+    // Placeholders are filtered out of the artist/album browse (metadata_scanned),
+    // so only the directory/file view needs refreshing to reveal the new paths.
+    refreshLibraryFileExplorer();
 }
 
 void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)

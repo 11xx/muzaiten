@@ -12,6 +12,7 @@ class SchemaTest final : public QObject {
 
 private slots:
     void migratesFreshDatabase();
+    void enumeratedPlaceholdersStayIsolatedUntilScanned();
     void upsertsTrackAndQueriesArtist();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
@@ -397,6 +398,53 @@ void SchemaTest::mpdTracksRoundTrip()
     QCOMPARE(database.mpdTrackCount(sourceId), 1);
     QVERIFY2(database.clearMpdTracksForSource(sourceId), qPrintable(database.lastError()));
     QCOMPARE(database.mpdTrackCount(sourceId), 0);
+}
+
+void SchemaTest::enumeratedPlaceholdersStayIsolatedUntilScanned()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString connectionName = QStringLiteral("schema-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const Track full = makeTrack(temp, QStringLiteral("01 Song.flac"), 80);
+    Track placeholder;
+    placeholder.path = full.path;
+    placeholder.parentDir = full.parentDir;
+    placeholder.filename = full.filename;
+    placeholder.title = full.filename;
+    placeholder.fileSize = 111;
+    placeholder.fileMtime = 222;
+
+    QVERIFY2(database.insertEnumeratedPlaceholders({placeholder}), qPrintable(database.lastError()));
+
+    // Visible in the directory/file view...
+    const QVector<Track> dirTracks = database.tracksForDirectory(full.parentDir);
+    QCOMPARE(dirTracks.size(), 1);
+    QCOMPARE(dirTracks.first().path, full.path);
+    // ...but isolated from the artist/album browse and the search index.
+    QVERIFY(database.albumArtists().isEmpty());
+    QVERIFY(database.tracksForArtist(QStringLiteral("Album Artist")).isEmpty());
+    QVERIFY(database.allTracksForSearch().isEmpty());
+
+    // The rescan diff must re-queue an enumerated-only placeholder.
+    auto fingerprints = database.trackFingerprints();
+    QVERIFY(fingerprints.contains(full.path));
+    QVERIFY(!fingerprints.value(full.path).metadataScanned);
+
+    // The metadata pass upserts full tags and flips the row to scanned.
+    QVERIFY2(database.upsertTrack(full), qPrintable(database.lastError()));
+    QCOMPARE(database.albumArtists().size(), 1);
+    QCOMPARE(database.tracksForArtist(QStringLiteral("Album Artist")).size(), 1);
+    fingerprints = database.trackFingerprints();
+    QVERIFY(fingerprints.value(full.path).metadataScanned);
+
+    // A late placeholder for an already-scanned path must not reset it (DO NOTHING).
+    QVERIFY2(database.insertEnumeratedPlaceholders({placeholder}), qPrintable(database.lastError()));
+    QCOMPARE(database.albumArtists().size(), 1);
+    fingerprints = database.trackFingerprints();
+    QVERIFY(fingerprints.value(full.path).metadataScanned);
 }
 
 QTEST_MAIN(SchemaTest)

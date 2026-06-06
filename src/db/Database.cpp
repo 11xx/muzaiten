@@ -466,7 +466,8 @@ bool Database::upsertTrack(const Track &track)
     query.prepare(QStringLiteral(
         "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec, bit_depth) "
         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec, bit_depth=excluded.bit_depth "
+        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec, bit_depth=excluded.bit_depth, "
+        "metadata_scanned=1 "
         "RETURNING id"));
     query.addBindValue(track.path);
     query.addBindValue(track.parentDir);
@@ -532,6 +533,40 @@ bool Database::upsertTrack(const Track &track)
                 return false;
             }
         }
+    }
+    return true;
+}
+
+bool Database::insertEnumeratedPlaceholders(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty()) {
+        return true;
+    }
+    if (!m_db.transaction()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO tracks(path, parent_dir, filename, title, file_size, file_mtime, scanned_at, metadata_scanned) "
+        "VALUES(?, ?, ?, ?, ?, ?, datetime('now'), 0) "
+        "ON CONFLICT(path) DO NOTHING"));
+    for (const Track &track : tracks) {
+        query.addBindValue(track.path);
+        query.addBindValue(track.parentDir);
+        query.addBindValue(track.filename);
+        query.addBindValue(track.title);
+        query.addBindValue(track.fileSize);
+        query.addBindValue(track.fileMtime);
+        if (!query.exec()) {
+            m_lastError = query.lastError().text();
+            m_db.rollback();
+            return false;
+        }
+    }
+    if (!m_db.commit()) {
+        m_lastError = m_db.lastError().text();
+        return false;
     }
     return true;
 }

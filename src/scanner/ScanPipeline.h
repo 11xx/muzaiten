@@ -43,6 +43,9 @@ public slots:
     void cancel();
 
 signals:
+    // Path-derived rows for brand-new files, emitted after enumeration and before
+    // the tag read, so the directory/file view can show them immediately.
+    void enumeratedReady(QVector<Track> placeholders);
     void batchReady(QVector<Track> tracks);
     void progress(qint64 enumerated, qint64 toProcess, qint64 processed, QString phase);
     void missingReady(QStringList paths);
