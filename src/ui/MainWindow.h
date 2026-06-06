@@ -78,6 +78,7 @@ private:
     void saveMainWindowViewSettings();
     void saveAllViewSettings();
     void resetViewPreferences();
+    void resetPanelOrder();
     void openPanelOrderDialog();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
@@ -134,6 +135,7 @@ private:
     void removeQueueRows(const QVector<int> &rows);
     void clearQueue();
     void clearPlayNextPriority();
+    void patchQueueTracksFromMetadata(const QVector<Track> &tracks);
     void refreshPlayNextRange();
     // Single funnel for structural queue changes: re-derives and pushes every
     // piece of queue-dependent state (sidebar contents, current row, play-next

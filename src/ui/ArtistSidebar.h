@@ -31,6 +31,7 @@ public:
     void setNavigationScrollPadding(int rows);
     int rowCount() const;
     int currentRow() const;
+    QString currentArtistName() const;
     void setCurrentRow(int row);
     void setCurrentRow(int row, int scrollDirection);
     void moveCurrentRow(int delta, bool activate);

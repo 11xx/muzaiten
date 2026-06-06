@@ -884,7 +884,8 @@ QString QueueTable::viewSettingsJson() const
     m_columnLayout->writeDropOrderJson(&root);
     root.insert(QStringLiteral("currentRow"), currentRow());
     root.insert(QStringLiteral("showPlayNextBadge"), m_showPlayNextBadge);
-    root.insert(QStringLiteral("showPlayNextTitleAccent"), m_showPlayNextTitleAccent);
+    root.insert(QStringLiteral("showPlayNextTitleAccent"),
+                m_preset == QueueTablePreset::FullScreen && m_showPlayNextTitleAccent);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -922,7 +923,8 @@ void QueueTable::applyViewSettingsJson(const QString &json)
 
     m_showPlayNextBadge = root.value(QStringLiteral("showPlayNextBadge")).toBool(true);
     static_cast<QueueTableModel *>(m_model)->setShowPlayNextBadge(m_showPlayNextBadge);
-    m_showPlayNextTitleAccent = root.value(QStringLiteral("showPlayNextTitleAccent")).toBool(false);
+    m_showPlayNextTitleAccent = m_preset == QueueTablePreset::FullScreen
+        && root.value(QStringLiteral("showPlayNextTitleAccent")).toBool(false);
     static_cast<QueueItemDelegate *>(m_itemDelegate)->setShowTitleAccent(m_showPlayNextTitleAccent);
 
     m_pendingRestoreRow = root.value(QStringLiteral("currentRow")).toInt(-1);
@@ -1116,15 +1118,17 @@ void QueueTable::showHeaderMenu(const QPoint &pos)
         emit viewSettingsChanged();
     });
 
-    QAction *accentAction = menu.addAction(QStringLiteral("Show play-next ordinal in title"));
-    accentAction->setCheckable(true);
-    accentAction->setChecked(m_showPlayNextTitleAccent);
-    connect(accentAction, &QAction::toggled, this, [this](bool checked) {
-        m_showPlayNextTitleAccent = checked;
-        static_cast<QueueItemDelegate *>(m_itemDelegate)->setShowTitleAccent(checked);
-        m_view->viewport()->update();
-        emit viewSettingsChanged();
-    });
+    if (m_preset == QueueTablePreset::FullScreen) {
+        QAction *accentAction = menu.addAction(QStringLiteral("Show play-next ordinal in title"));
+        accentAction->setCheckable(true);
+        accentAction->setChecked(m_showPlayNextTitleAccent);
+        connect(accentAction, &QAction::toggled, this, [this](bool checked) {
+            m_showPlayNextTitleAccent = checked;
+            static_cast<QueueItemDelegate *>(m_itemDelegate)->setShowTitleAccent(checked);
+            m_view->viewport()->update();
+            emit viewSettingsChanged();
+        });
+    }
 
     menu.addSeparator();
     QAction *resetLayout = menu.addAction(QStringLiteral("Reset table layout to defaults"));

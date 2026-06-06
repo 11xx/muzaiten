@@ -60,6 +60,7 @@ signals:
     void albumArtResolutionRequested();
     void searchRankingRequested();
     void keybindingsRequested();
+    void resetPanelOrderRequested();
     void resetViewPreferencesRequested();
     void panelOrderRequested();
     void listenBrainzEnabledChanged(bool enabled);

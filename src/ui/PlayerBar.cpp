@@ -421,6 +421,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *trackInfoPaneSettings = viewMenu->addAction(QStringLiteral("Track information panel..."));
     QAction *albumArtResolution = viewMenu->addAction(QStringLiteral("Album art resolution..."));
     QAction *customizePanelOrder = viewMenu->addAction(QStringLiteral("Panel order..."));
+    QAction *resetPanelOrder = viewMenu->addAction(QStringLiteral("Reset panel order to default"));
     viewMenu->addSeparator();
     m_listUnsupportedFiles = viewMenu->addAction(QStringLiteral("List unsupported files in explorer"));
     m_listUnsupportedFiles->setCheckable(true);
@@ -592,6 +593,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
     connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
+    connect(resetPanelOrder, &QAction::triggered, this, &PlayerBar::resetPanelOrderRequested);
     connect(resetViewPreferences, &QAction::triggered, this, &PlayerBar::resetViewPreferencesRequested);
     connect(customizePanelOrder, &QAction::triggered, this, &PlayerBar::panelOrderRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
