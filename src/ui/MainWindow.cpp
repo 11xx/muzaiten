@@ -1295,7 +1295,7 @@ void MainWindow::refreshArtists()
         if (m_panelSearch != nullptr) {
             m_panelSearch->refreshPanel(MainPanelId::Artists);
         }
-        if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
+        if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist, /*reveal=*/false)) {
             showArtist(m_currentArtist, true, false);
             return;
         }
@@ -1330,7 +1330,7 @@ void MainWindow::refreshArtists()
         m_panelSearch->refreshPanel(MainPanelId::Artists);
     }
 
-    if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist)) {
+    if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist, /*reveal=*/false)) {
         showArtist(m_currentArtist, true, false);
         return;
     }

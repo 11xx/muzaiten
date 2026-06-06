@@ -19,7 +19,9 @@ public:
     explicit ArtistSidebar(QWidget *parent = nullptr);
 
     void setArtists(const QVector<Artist> &artists);
-    bool selectArtist(const QString &artistName);
+    // reveal=false selects without scrolling the item into view, so a background
+    // refresh can re-establish selection without disturbing the user's scroll.
+    bool selectArtist(const QString &artistName, bool reveal = true);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();
