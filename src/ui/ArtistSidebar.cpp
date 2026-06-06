@@ -137,6 +137,13 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
 
 void ArtistSidebar::setArtists(const QVector<Artist> &artists)
 {
+    // Preserve the user's selection + scroll across the clear/repopulate, so a
+    // background refresh (the metadata fill re-runs this often) doesn't reset the
+    // list to the top or yank it back to the selected artist.
+    const QModelIndex previousIndex = m_view->currentIndex();
+    const QString previousArtist = previousIndex.isValid() ? previousIndex.data(Qt::UserRole).toString() : QString();
+    const int previousScroll = m_view->verticalScrollBar()->value();
+
     m_model->clear();
     for (const Artist &artist : artists) {
         auto *item = new QStandardItem(artist.name);
@@ -147,7 +154,10 @@ void ArtistSidebar::setArtists(const QVector<Artist> &artists)
         m_model->appendRow(item);
     }
     applyRowHeight();
-    if (m_model->rowCount() > 0 && !m_view->currentIndex().isValid()) {
+
+    if (!previousArtist.isEmpty() && selectArtist(previousArtist, /*reveal=*/false)) {
+        m_view->verticalScrollBar()->setValue(previousScroll);
+    } else if (m_model->rowCount() > 0 && !m_view->currentIndex().isValid()) {
         setCurrentRow(0);
     }
 }
@@ -169,7 +179,7 @@ void ArtistSidebar::setLibrarySourceIndex(int index)
     m_tabBar->setCurrentIndex(safeIndex);
 }
 
-bool ArtistSidebar::selectArtist(const QString &artistName)
+bool ArtistSidebar::selectArtist(const QString &artistName, bool reveal)
 {
     if (artistName.isEmpty()) {
         return false;
@@ -184,7 +194,9 @@ bool ArtistSidebar::selectArtist(const QString &artistName)
         const QSignalBlocker blocker(m_view->selectionModel());
         m_view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
         m_view->setCurrentIndex(index);
-        m_view->scrollTo(index, QAbstractItemView::EnsureVisible);
+        if (reveal) {
+            m_view->scrollTo(index, QAbstractItemView::EnsureVisible);
+        }
         return true;
     }
     return false;
