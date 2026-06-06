@@ -1359,41 +1359,45 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
                                          .arg(summary.failed),
                                      10000);
         }
-        rememberTrackTableViewState();
-        refreshTrackTable();
-        refreshAlbumGrid();
-        for (Track &queuedTrack : m_queue) {
-            const QVector<Track> refreshed = m_database->tracksForArtist(queuedTrack.albumArtistName, queuedTrack.albumTitle);
-            const auto it = std::find_if(refreshed.cbegin(), refreshed.cend(), [&queuedTrack](const Track &track) {
-                return track.path == queuedTrack.path;
-            });
-            if (it != refreshed.cend()) {
-                queuedTrack.rating0To100 = it->rating0To100;
-                queuedTrack.hasUserRating = it->hasUserRating;
-                queuedTrack.effectiveRating0To100 = it->effectiveRating0To100;
-            }
-        }
-        if (!m_currentTrack.path.isEmpty()) {
-            const QVector<Track> refreshed = m_database->tracksForArtist(m_currentTrack.albumArtistName, m_currentTrack.albumTitle);
-            const auto it = std::find_if(refreshed.cbegin(), refreshed.cend(), [this](const Track &track) {
-                return track.path == m_currentTrack.path;
-            });
-            if (it != refreshed.cend()) {
-                m_currentTrack = *it;
-                const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
-                QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
-                if (!m_currentTrack.date.isEmpty()) {
-                    subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
+        // Patch only the rows the worker actually wrote, in place — no full table
+        // reload and no per-queued-track DB requery (the old N+1 main-thread freeze
+        // the user felt "when the tag is written"). The DB is already reconciled by
+        // the worker; the effective rating equals the just-written value.
+        bool currentTrackChanged = false;
+        for (const RatingTagSyncUpdate &update : summary.updates) {
+            const int effective = update.effectiveRating0To100;
+            const bool hasUserRating = effective >= 0;
+            m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
+            for (Track &queuedTrack : m_queue) {
+                if (queuedTrack.path != update.path) {
+                    continue;
                 }
-                m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
-                m_rightSidebar->setTrackInfo(m_currentTrack);
-                m_mpris->setTrack(m_currentTrack);
+                queuedTrack.rating0To100 = effective;
+                queuedTrack.hasUserRating = hasUserRating;
+                queuedTrack.effectiveRating0To100 = effective;
+            }
+            if (m_currentTrack.path == update.path) {
+                m_currentTrack.rating0To100 = effective;
+                m_currentTrack.hasUserRating = hasUserRating;
+                m_currentTrack.effectiveRating0To100 = effective;
+                currentTrackChanged = true;
             }
         }
-        m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
-        refreshPlayNextRange();
-        saveQueueState();
-        restoreTrackTableViewState();
+        if (currentTrackChanged) {
+            const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
+            QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
+            if (!m_currentTrack.date.isEmpty()) {
+                subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
+            }
+            m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
+            m_rightSidebar->setTrackInfo(m_currentTrack);
+            m_mpris->setTrack(m_currentTrack);
+        }
+        if (!summary.updates.isEmpty()) {
+            m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
+            refreshPlayNextRange();
+            saveQueueState();
+        }
         m_ratingTagSyncRunning = false;
         const bool runPendingAgain = m_ratingTagSyncPending;
         m_ratingTagSyncPending = false;
