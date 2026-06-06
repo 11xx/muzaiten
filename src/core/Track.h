@@ -39,6 +39,7 @@ struct Track {
     int sampleRateHz = 0;
     int bitrateKbps = 0;
     int channels = 0;
+    int bitDepth = 0;  // lossless sample bit depth; 0 = unknown / lossy
     QString codec;  // file extension lower-cased, e.g. "flac", "mp3", "opus"
 };
 

@@ -12,6 +12,18 @@
 #include <taglib/tstring.h>
 #include <taglib/tstringlist.h>
 
+// Per-format property subclasses that expose bitsPerSample(). The base
+// AudioProperties does not, so bit depth requires a downcast (see readBitsPerSample).
+#include <taglib/aiffproperties.h>
+#include <taglib/apeproperties.h>
+#include <taglib/dsdiffproperties.h>
+#include <taglib/dsfproperties.h>
+#include <taglib/flacproperties.h>
+#include <taglib/mp4properties.h>
+#include <taglib/trueaudioproperties.h>
+#include <taglib/wavpackproperties.h>
+#include <taglib/wavproperties.h>
+
 namespace {
 
 QString toQString(const TagLib::String &value)
@@ -51,6 +63,44 @@ int firstTrackPart(const TagLib::PropertyMap &properties, const QStringList &key
     return ok ? parsed : 0;
 }
 
+// Bit depth lives on per-format AudioProperties subclasses, not the base class.
+// Probe the lossless formats that expose bitsPerSample(); lossy formats
+// (MP3/Vorbis/Opus/Speex/Musepack) have no fixed sample depth and return 0.
+int readBitsPerSample(const TagLib::AudioProperties *audio)
+{
+    if (audio == nullptr) {
+        return 0;
+    }
+    if (const auto *p = dynamic_cast<const TagLib::FLAC::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::RIFF::WAV::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::RIFF::AIFF::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::APE::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::WavPack::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::MP4::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::DSF::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::DSDIFF::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    if (const auto *p = dynamic_cast<const TagLib::TrueAudio::Properties *>(audio)) {
+        return p->bitsPerSample();
+    }
+    return 0;
+}
+
 } // namespace
 
 Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetadata) const
@@ -79,14 +129,17 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
     }
 
     if (const TagLib::AudioProperties *audio = file.audioProperties()) {
+        const int bitDepth = readBitsPerSample(audio);
         track.durationMs = static_cast<qint64>(audio->lengthInMilliseconds());
         track.bitrateKbps = audio->bitrate();
         track.sampleRateHz = audio->sampleRate();
         track.channels = audio->channels();
+        track.bitDepth = bitDepth;
         if (fullMetadata != nullptr) {
             fullMetadata->bitrateKbps = audio->bitrate();
             fullMetadata->sampleRateHz = audio->sampleRate();
             fullMetadata->channels = audio->channels();
+            fullMetadata->bitDepth = bitDepth;
         }
     }
 
