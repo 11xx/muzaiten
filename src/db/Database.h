@@ -32,6 +32,11 @@ public:
 
     bool beginTransaction();
     bool commitTransaction();
+    // Brackets a scan/ingest run so upsertTrack can memoize artist/album ids
+    // (append-only during a scan) instead of re-querying them per track. The
+    // caches are cleared on begin and end; outside a session no caching happens.
+    void beginScanSession();
+    void endScanSession();
     bool upsertTrack(const Track &track);
     // path -> (file_mtime, file_size) for tracks under rootPrefix, for the
     // incremental-rescan diff. Empty rootPrefix returns all tracks.
@@ -92,4 +97,11 @@ private:
     QString m_connectionName;
     QSqlDatabase m_db;
     QString m_lastError;
+
+    // Per-scan-session id memoization (see beginScanSession). Only consulted
+    // while m_scanSession is true; artists/albums are append-only during a scan
+    // so a resolved id stays valid until the session ends.
+    bool m_scanSession = false;
+    QHash<QString, qint64> m_artistIdCache;
+    QHash<QString, qint64> m_albumIdCache;
 };

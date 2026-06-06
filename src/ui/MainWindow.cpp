@@ -860,6 +860,7 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     m_stopScanButton->setEnabled(true);
     m_stopScanButton->setVisible(true);
     m_lastUiRefreshIndexedTracks = 0;
+    m_database->beginScanSession();
 
     ScanPipeline::Options options;
     options.forceFullRescan = m_forceFullRescan;
@@ -983,6 +984,7 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
 void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
 {
     qCInfo(uiLog) << "scan finished" << enumerated << indexed << "skipped" << skipped << "canceled" << canceled;
+    m_database->endScanSession();
     const bool sourceScan = m_activeScanRootId > 0;
     const QString finishedRootPath = m_activeScanRootPath;
     if (sourceScan) {
