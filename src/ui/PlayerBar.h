@@ -19,6 +19,8 @@ public:
     void setListenBrainzEnabled(bool enabled);
     void setLastFmEnabled(bool enabled);
     void setListUnsupportedFiles(bool show);
+    // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
+    void setScanProfile(int profile);
     void setExplorerOptionsVisible(bool visible);
     void setQueueViewLayoutActive(bool active);
     void setAlbumArt(const QString &imagePath);
@@ -37,6 +39,7 @@ signals:
     void sourceDirectoriesRequested();
     void scanEnabledSourcesRequested();
     void forceRescanRequested();
+    void scanProfileChanged(int profile);
     void removeMissingTracksRequested();
     void syncCurrentTrackRatingTagsRequested();
     void syncCurrentArtistRatingTagsRequested();
@@ -81,6 +84,7 @@ private:
     class QToolButton *m_shuffle = nullptr;
     class QAction *m_compactMenu = nullptr;
     class QAction *m_listUnsupportedFiles = nullptr;
+    class QAction *m_scanProfileActions[3] = {nullptr, nullptr, nullptr};
     class QAction *m_trackInfoPaneVisible = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;
     class QAction *m_lastFmEnabled = nullptr;

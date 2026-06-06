@@ -214,8 +214,34 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
         return 0;
     }
 
+    // Profile-driven floor/ceiling for the adaptive burst engine. We over-provision
+    // `ceiling` worker threads but gate how many actually consume work via
+    // activeTarget: the controller raises it toward ceiling while reads are fast and
+    // lowers it toward floor when per-file latency climbs (a slow/HDD/network mount
+    // saturating). Starting at ceiling = burst by default; nice(10) keeps it gentle
+    // so it never starves the rest of the system.
     const ThreadCounts threads = resolveThreads(m_rootPath, m_options);
-    const int workerCount = std::max(1, threads.tags);
+    const int cores = std::max(2, QThread::idealThreadCount());
+    int floorWorkers = 1;
+    int desiredCeiling = std::max(1, threads.tags);
+    switch (m_options.profile) {
+    case Profile::Background:
+        floorWorkers = 1;
+        desiredCeiling = 2;
+        break;
+    case Profile::Balanced:
+        floorWorkers = 2;
+        desiredCeiling = std::max(2, threads.tags);
+        break;
+    case Profile::Turbo:
+        floorWorkers = std::max(2, threads.tags);
+        desiredCeiling = std::clamp(cores * 2, 4, 16);
+        break;
+    }
+    const int ceilingWorkers = static_cast<int>(
+        std::min<std::size_t>(static_cast<std::size_t>(std::max(1, desiredCeiling)), total));
+    floorWorkers = std::clamp(floorWorkers, 1, ceilingWorkers);
+    const int workerCount = ceilingWorkers;
     const std::size_t highWater = static_cast<std::size_t>(std::max(m_options.batchSize * 4, 1024));
 
     std::deque<Track> results;
@@ -226,9 +252,25 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
     std::atomic<int> activeWorkers = workerCount;
     bool producersDone = false;
 
+    // Adaptive gate + latency signal (separate mutex from the results deque, so the
+    // two never nest).
+    std::mutex gateMutex;
+    std::condition_variable gateCv;
+    std::atomic<int> activeTarget = ceilingWorkers;  // start at burst
+    std::atomic<bool> workExhausted = false;
+    std::atomic<double> avgReadMs = 0.0;
+
+    const auto recordLatency = [&](double ms) {
+        double prev = avgReadMs.load(std::memory_order_relaxed);
+        double next;
+        do {
+            next = prev <= 0.0 ? ms : (prev * 0.8 + ms * 0.2);
+        } while (!avgReadMs.compare_exchange_weak(prev, next, std::memory_order_relaxed));
+    };
+
     const TagReader reader;
 
-    const auto workerFn = [&]() {
+    const auto workerFn = [&](int ordinal) {
         if (m_options.lowPriority) {
             setpriority(PRIO_PROCESS, 0, 10);
         }
@@ -236,11 +278,30 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
             if (m_cancel) {
                 break;
             }
+            // Park while this worker is above the active target. The 100ms timeout
+            // re-checks even if a notify is missed, and the predicate also wakes for
+            // cancel / exhaustion so parked workers always exit (no join() hang).
+            if (ordinal >= activeTarget.load()) {
+                std::unique_lock<std::mutex> lock(gateMutex);
+                gateCv.wait_for(lock, std::chrono::milliseconds(100), [&]() {
+                    return ordinal < activeTarget.load() || m_cancel || workExhausted.load();
+                });
+                if (m_cancel || workExhausted.load()) {
+                    break;
+                }
+                if (ordinal >= activeTarget.load()) {
+                    continue;
+                }
+            }
+
             const std::size_t i = nextIndex.fetch_add(1);
             if (i >= total) {
+                workExhausted.store(true);
+                gateCv.notify_all();
                 break;
             }
 
+            const auto start = std::chrono::steady_clock::now();
             MetadataBlob::FullMetadata full;
             Track track = reader.read(QString::fromStdString(paths[i]), &full);
             if (!MetadataBlob::isEmpty(full)) {
@@ -248,6 +309,9 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
                 track.fullMetadataBlob = encoded.data;
                 track.fullMetadataRawSize = encoded.rawSize;
             }
+            recordLatency(std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - start)
+                              .count());
 
             std::unique_lock<std::mutex> lock(mutex);
             // wait_for, not wait: cancel() flips the atomic m_cancel from another
@@ -273,8 +337,26 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
     std::vector<std::thread> workers;
     workers.reserve(static_cast<std::size_t>(workerCount));
     for (int i = 0; i < workerCount; ++i) {
-        workers.emplace_back(workerFn);
+        workers.emplace_back(workerFn, i);
     }
+
+    // Controller: nudge activeTarget from the measured read-latency EWMA. Read cost
+    // includes the metadata-archive encode, so it reflects real per-file work.
+    constexpr double kRampUpBelowMs = 25.0;    // fast reads -> add a worker
+    constexpr double kBackOffAboveMs = 120.0;  // slow reads (disk saturating) -> drop one
+    const auto adjustActiveTarget = [&]() {
+        const double avg = avgReadMs.load(std::memory_order_relaxed);
+        if (avg <= 0.0) {
+            return;
+        }
+        const int target = activeTarget.load();
+        if (avg > kBackOffAboveMs && target > floorWorkers) {
+            activeTarget.store(target - 1);
+        } else if (avg < kRampUpBelowMs && target < ceilingWorkers) {
+            activeTarget.store(target + 1);
+            gateCv.notify_all();
+        }
+    };
 
     qint64 processed = 0;
     QVector<Track> batch;
@@ -298,6 +380,7 @@ qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 
             emit batchReady(batch);
             batch.clear();
             emit progress(enumerated, static_cast<qint64>(total), processed, phase);
+            adjustActiveTarget();
         }
     }
 

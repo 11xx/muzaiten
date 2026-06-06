@@ -22,12 +22,18 @@ class ScanPipeline final : public QObject {
     Q_OBJECT
 
 public:
+    // Burst posture for the adaptive tag-reader. Background stays gentle; Balanced
+    // ramps to the disk-appropriate thread count; Turbo over-provisions for SSDs.
+    // All three back off automatically when per-file read latency climbs.
+    enum class Profile { Background, Balanced, Turbo };
+
     struct Options {
         int walkerThreads = 0;   // 0 => auto from disk type
         int tagThreads = 0;      // 0 => auto from disk type
         int batchSize = 256;
         bool lowPriority = true;
         bool forceFullRescan = false;  // ignore fingerprint skip, re-read everything
+        Profile profile = Profile::Balanced;
     };
 
     // fingerprints is path -> {mtime,size,metadataScanned} of known tracks under

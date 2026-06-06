@@ -5,6 +5,7 @@
 #include "ui/StarRating.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCursor>
 #include <QFileInfo>
@@ -373,6 +374,17 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *sourceDirectories = fileMenu->addAction(QStringLiteral("Source directories..."));
     QAction *scanEnabledSources = fileMenu->addAction(QStringLiteral("Scan enabled source directories"));
     QAction *forceRescan = fileMenu->addAction(QStringLiteral("Force full rescan"));
+    auto *scanPowerMenu = fileMenu->addMenu(QStringLiteral("Scan power"));
+    auto *scanPowerGroup = new QActionGroup(this);
+    scanPowerGroup->setExclusive(true);
+    const char *scanProfileLabels[3] = {"Background", "Balanced", "Turbo"};
+    for (int i = 0; i < 3; ++i) {
+        m_scanProfileActions[i] = scanPowerMenu->addAction(QString::fromLatin1(scanProfileLabels[i]));
+        m_scanProfileActions[i]->setCheckable(true);
+        scanPowerGroup->addAction(m_scanProfileActions[i]);
+        connect(m_scanProfileActions[i], &QAction::triggered, this, [this, i]() { emit scanProfileChanged(i); });
+    }
+    m_scanProfileActions[1]->setChecked(true);  // Balanced default until set from settings
     QAction *removeMissingTracks = fileMenu->addAction(QStringLiteral("Remove missing tracks"));
     QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
@@ -418,7 +430,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
 
-    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, viewMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
     for (QMenu *menu : styledMenus) {
         styleMenu(menu);
     }
@@ -640,6 +652,16 @@ void PlayerBar::setListUnsupportedFiles(bool show)
     }
     const QSignalBlocker blocker(m_listUnsupportedFiles);
     m_listUnsupportedFiles->setChecked(show);
+}
+
+void PlayerBar::setScanProfile(int profile)
+{
+    if (profile < 0 || profile > 2 || m_scanProfileActions[profile] == nullptr) {
+        return;
+    }
+    // setChecked emits toggled, not triggered (which is what scanProfileChanged is
+    // wired to), so this reflects the stored value without re-emitting.
+    m_scanProfileActions[profile]->setChecked(true);
 }
 
 void PlayerBar::setExplorerOptionsVisible(bool visible)
