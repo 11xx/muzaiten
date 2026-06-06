@@ -1128,8 +1128,13 @@ void MainWindow::startMetadataFill(const QStringList &paths)
     connect(m_fillPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
     connect(m_fillPipeline, &ScanPipeline::progress, this,
             [this](qint64, qint64 toProcess, qint64 processed, const QString &phase) {
+                Q_UNUSED(processed);
                 if (phase == QStringLiteral("filling") && toProcess > 0) {
-                    statusBar()->showMessage(QStringLiteral("Filling metadata: %1 of %2").arg(processed).arg(toProcess), 2000);
+                    // Show the live backlog (this chunk + everything still queued),
+                    // not just the chunk size — one cheap indexed COUNT per batch.
+                    statusBar()->showMessage(
+                        QStringLiteral("Filling metadata: %1 tracks remaining").arg(m_database->enumeratedOnlyCount()),
+                        2000);
                 }
             });
     connect(m_fillPipeline, &ScanPipeline::finished, this, &MainWindow::finishMetadataFill);
