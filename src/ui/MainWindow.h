@@ -146,7 +146,10 @@ private:
     void playAlbumsNow(const QStringList &albumTitles);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
-    void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false);
+    // explicitJump=true marks a user-activated jump (clicking a queue row). A
+    // backward explicit jump turns the skipped-over tracks into the play-next
+    // region; forward jumps and sequential prev/next leave it alone.
+    void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false, bool explicitJump = false);
     void playPreviousTrack();
     void playNextTrack();
     void togglePlayback();
