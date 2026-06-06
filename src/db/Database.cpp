@@ -83,14 +83,37 @@ bool hasScanRoots(QSqlDatabase database)
     return query.exec(QStringLiteral("SELECT 1 FROM scan_roots LIMIT 1")) && query.next();
 }
 
-QString enabledLibraryRootPredicate(const QString &trackAlias)
+QString sqlQuote(const QString &value)
 {
-    return QStringLiteral(
-        "EXISTS ("
-        "SELECT 1 FROM scan_roots sr "
-        "WHERE sr.library_enabled = 1 "
-        "AND (%1.path = sr.path OR %1.path LIKE sr.path || '/%'))")
-        .arg(trackAlias);
+    QString escaped = value;
+    escaped.replace(QLatin1Char('\''), QStringLiteral("''"));
+    return QLatin1Char('\'') + escaped + QLatin1Char('\'');
+}
+
+// Predicate restricting tracks to the enabled library roots. The roots are
+// resolved once by the caller and inlined as an explicit OR chain, instead of a
+// correlated EXISTS subquery that re-scanned scan_roots for every track row (the
+// dominant per-row cost when building the search index over a large library).
+// Empty roots -> "0" (no track matches), matching the old EXISTS semantics when
+// scan_roots exist but none are library-enabled. Paths are SQL- and LIKE-escaped
+// (mirroring trackFingerprints) so arbitrary path characters are handled safely.
+QString enabledLibraryRootPredicate(const QString &trackAlias, const QVector<ScanRoot> &roots)
+{
+    if (roots.isEmpty()) {
+        return QStringLiteral("0");
+    }
+    QStringList clauses;
+    clauses.reserve(roots.size());
+    for (const ScanRoot &root : roots) {
+        QString likePrefix = root.path;
+        likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+        likePrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+        likePrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+        likePrefix += QStringLiteral("/%");
+        clauses << QStringLiteral("%1.path = %2 OR %1.path LIKE %3 ESCAPE '\\'")
+                       .arg(trackAlias, sqlQuote(root.path), sqlQuote(likePrefix));
+    }
+    return QStringLiteral("(") + clauses.join(QStringLiteral(" OR ")) + QStringLiteral(")");
 }
 
 // "?, ?, ..." for an IN (...) clause with `count` bound parameters.
@@ -582,7 +605,7 @@ QVector<Artist> Database::albumArtists() const
     QSqlQuery query(m_db);
     QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t WHERE t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     sql += QStringLiteral(" GROUP BY album_artist_name ORDER BY lower(album_artist_name)");
     query.exec(sql);
@@ -616,7 +639,7 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         "WHERE t.album_artist_name = ? AND t.missing = 0 %2 "
         "GROUP BY t.album_title, uar.rating_0_100")
                       .arg(effectiveTrackRating,
-                           hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"))) : QString()));
+                           hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots())) : QString()));
     query.addBindValue(albumArtist);
     query.exec();
     while (query.next()) {
@@ -658,7 +681,7 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.album_artist_name = ? AND t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     if (!filters.isEmpty()) {
         sql += QStringLiteral(" AND t.album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
@@ -1190,7 +1213,7 @@ QVector<Track> Database::tracksForDirectory(const QString &directory) const
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.parent_dir = ? AND t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     sql += QStringLiteral(" ORDER BY t.disc_number, t.track_number, lower(t.filename)");
     query.prepare(sql);
@@ -1232,7 +1255,7 @@ QStringList Database::localLibraryDirectories(const QString &parentDirectory) co
     QSqlQuery query(m_db);
     QString sql = QStringLiteral("SELECT DISTINCT t.parent_dir FROM tracks t WHERE t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     sql += QStringLiteral(" ORDER BY lower(t.parent_dir)");
     query.exec(sql);
@@ -1443,7 +1466,7 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "WHERE t.missing = 0");
     if (hasScanRoots(m_db)) {
-        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t")));
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     if (!query.exec(sql)) {
         return records;
