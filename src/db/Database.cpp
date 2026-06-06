@@ -382,7 +382,8 @@ bool Database::upsertTrack(const Track &track)
     query.prepare(QStringLiteral(
         "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec) "
         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?) "
-        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec"));
+        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec "
+        "RETURNING id"));
     query.addBindValue(track.path);
     query.addBindValue(track.parentDir);
     query.addBindValue(track.filename);
@@ -418,11 +419,22 @@ bool Database::upsertTrack(const Track &track)
     }
 
     if (!track.fullMetadataBlob.isEmpty()) {
-        QSqlQuery idQuery(m_db);
-        idQuery.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
-        idQuery.addBindValue(track.path);
-        if (idQuery.exec() && idQuery.next()) {
-            const qint64 trackId = idQuery.value(0).toLongLong();
+        // The upsert's RETURNING id gives the row id directly (insert or update),
+        // avoiding a separate SELECT per track. Fall back to a lookup only if the
+        // driver didn't surface the returned row.
+        qint64 trackId = 0;
+        if (query.next()) {
+            trackId = query.value(0).toLongLong();
+        }
+        if (trackId <= 0) {
+            QSqlQuery idQuery(m_db);
+            idQuery.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
+            idQuery.addBindValue(track.path);
+            if (idQuery.exec() && idQuery.next()) {
+                trackId = idQuery.value(0).toLongLong();
+            }
+        }
+        if (trackId > 0) {
             QSqlQuery metaQuery(m_db);
             metaQuery.prepare(QStringLiteral(
                 "INSERT INTO track_metadata(track_id, format, raw_size, data) VALUES(?, 1, ?, ?) "
