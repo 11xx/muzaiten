@@ -3190,10 +3190,16 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
     std::sort(sortedRows.begin(), sortedRows.end());
     sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
 
+    // The play-next region is [m_queueIndex+1, m_playNextInsertIndex). Removing
+    // rows shifts its end left by the number of removed rows that sat before it,
+    // preserving the order/size of the surviving play-next tracks (instead of
+    // collapsing the region). It only empties when every play-next track is gone.
+    const int oldPlayNextInsertIndex = m_playNextInsertIndex;
     QVector<Track> remaining;
     remaining.reserve(m_queue.size());
     int newQueueIndex = -1;
     int removedBeforeCurrent = 0;
+    int removedBeforePlayNextEnd = 0;
     bool removedCurrent = false;
     int removeCursor = 0;
     for (int row = 0; row < m_queue.size(); ++row) {
@@ -3203,6 +3209,9 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
                 ++removedBeforeCurrent;
             } else if (row == m_queueIndex) {
                 removedCurrent = true;
+            }
+            if (row < oldPlayNextInsertIndex) {
+                ++removedBeforePlayNextEnd;
             }
             ++removeCursor;
             continue;
@@ -3218,7 +3227,10 @@ void MainWindow::removeQueueRows(const QVector<int> &rows)
 
     m_queue = remaining;
     m_queueIndex = std::clamp(newQueueIndex, -1, static_cast<int>(m_queue.size()) - 1);
-    m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
+    // Shift the play-next end by removals before it, then clamp into the valid
+    // range; if it lands at/below m_queueIndex+1 the region empties on its own.
+    m_playNextInsertIndex = std::clamp(oldPlayNextInsertIndex - removedBeforePlayNextEnd,
+                                       m_queueIndex + 1, static_cast<int>(m_queue.size()));
     syncQueueState();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
         presentTrack(m_queue.at(m_queueIndex), false);
