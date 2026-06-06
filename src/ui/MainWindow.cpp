@@ -546,13 +546,17 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
     connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
-    connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, [this](int index) { playQueueIndex(index); });
+    connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, [this](int index) {
+        playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
+    });
     connect(m_rightSidebar, &RightSidebar::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_rightSidebar, &RightSidebar::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
-    connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) { playQueueIndex(index); });
+    connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) {
+        playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
+    });
     connect(m_queueScreen, &QueueScreen::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_queueScreen, &QueueScreen::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_queueScreen, &QueueScreen::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
@@ -3356,14 +3360,20 @@ void MainWindow::addAlbumToQueue(const QString &albumTitle)
     }
 }
 
-void MainWindow::playQueueIndex(int index, bool notifyScrobbler, bool startPaused)
+void MainWindow::playQueueIndex(int index, bool notifyScrobbler, bool startPaused, bool explicitJump)
 {
     if (index < 0 || index >= m_queue.size()) {
         return;
     }
 
+    const int previousIndex = m_queueIndex;
     m_queueIndex = index;
-    if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
+    if (explicitJump && previousIndex > index) {
+        // Backward jump to an earlier track: the tracks between the new current and
+        // the old current (inclusive of the old current) become the play-next
+        // region, order unchanged.
+        m_playNextInsertIndex = std::clamp(previousIndex + 1, m_queueIndex + 1, static_cast<int>(m_queue.size()));
+    } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
         m_playNextInsertIndex = m_queueIndex + 1;
     }
     m_queueStore->setCurrentIndex(m_queueIndex);
