@@ -193,6 +193,22 @@ public:
         return row >= 0 && row < m_tracks.size() ? m_tracks.at(row) : Track{};
     }
 
+    // In-place rating patch: updates every row that matches the path without
+    // rebuilding the model, so a rating edit / file-write sync never reloads the
+    // whole table. No-op for paths not currently shown.
+    void updateRating(const QString &path, int effectiveRating, bool hasUserRating)
+    {
+        for (int row = 0; row < m_tracks.size(); ++row) {
+            if (m_tracks[row].path != path) {
+                continue;
+            }
+            m_tracks[row].effectiveRating0To100 = effectiveRating;
+            m_tracks[row].hasUserRating = hasUserRating;
+            const QModelIndex idx = index(row, 0);
+            emit dataChanged(idx, idx, {Qt::DisplayRole, Qt::EditRole, SortRole, TrackRole});
+        }
+    }
+
 private:
     static MusicSort::SortField sortFieldForColumn(int column)
     {
@@ -429,6 +445,16 @@ TrackTable::TrackTable(QWidget *parent)
     });
 
     OverlayScrollBar::install(this);
+}
+
+void TrackTable::updateTrackRating(const QString &path, int effectiveRating, bool hasUserRating)
+{
+    if (path.isEmpty()) {
+        return;
+    }
+    if (auto *trackModel = static_cast<TrackTableModel *>(model())) {
+        trackModel->updateRating(path, effectiveRating, hasUserRating);
+    }
 }
 
 void TrackTable::selectTrackByPath(const QString &path)

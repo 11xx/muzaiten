@@ -58,6 +58,10 @@ void RatingTagSyncWorker::run()
             database.updateScannedTrackRating(track.path, reread.rating0To100, reread.ratingSource, reread.fileSize, reread.fileMtime);
             database.clearPendingTrackRatingWrite(track.path);
             ++summary.written;
+            // The user rating is now persisted in the file and reconciled in the
+            // DB, so the effective rating equals the just-written value. Report it
+            // so the UI can patch the row without a full reload.
+            summary.updates.push_back({track.path, reread.rating0To100});
             continue;
         }
 

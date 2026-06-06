@@ -23,11 +23,19 @@ struct RatingTagSyncRequest {
     QVector<LinkRoot> linkRoots;
 };
 
+// One per successfully-written file: lets the UI patch the affected rows in
+// place instead of re-querying the library after a sync.
+struct RatingTagSyncUpdate {
+    QString path;
+    int effectiveRating0To100 = -1;
+};
+
 struct RatingTagSyncSummary {
     int checked = 0;
     int written = 0;
     int noWritablePath = 0;
     int failed = 0;
+    QVector<RatingTagSyncUpdate> updates;
 };
 
 Q_DECLARE_METATYPE(RatingTagSyncSummary)
