@@ -165,6 +165,7 @@ private:
     void startNextQueuedSourceScan();
     void cancelScan();
     void ingestScanBatch(const QVector<Track> &tracks);
+    void ingestEnumeratedPlaceholders(const QVector<Track> &tracks);
     void markScannedTracksMissing(const QStringList &paths);
     void removeMissingTracks();
     void finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
