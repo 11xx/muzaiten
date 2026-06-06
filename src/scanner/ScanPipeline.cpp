@@ -80,7 +80,7 @@ ThreadCounts resolveThreads(const QString &root, const ScanPipeline::Options &op
 } // namespace
 
 ScanPipeline::ScanPipeline(QString rootPath, int scanRootId,
-                           QHash<QString, QPair<qint64, qint64>> fingerprints,
+                           QHash<QString, TrackFingerprint> fingerprints,
                            Options options, QObject *parent)
     : QObject(parent)
     , m_rootPath(std::move(rootPath))
@@ -130,7 +130,10 @@ void ScanPipeline::runScan()
         seenPaths.insert(path);
         if (!m_options.forceFullRescan) {
             const auto it = m_fingerprints.constFind(path);
-            if (it != m_fingerprints.constEnd() && it->first == item.mtime && it->second == item.size) {
+            // Skip only fully-scanned rows whose file is unchanged. Enumerated-only
+            // placeholders (metadataScanned == false) fall through to be tag-read.
+            if (it != m_fingerprints.constEnd() && it->mtime == item.mtime
+                && it->size == item.size && it->metadataScanned) {
                 ++skipped;
                 continue;
             }

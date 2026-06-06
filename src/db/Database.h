@@ -14,6 +14,7 @@
 #include "core/MetadataBlob.h"
 #include "core/ScanRoot.h"
 #include "core/Track.h"
+#include "core/TrackFingerprint.h"
 #include "fs/LinkRoot.h"
 #include "mpd/MpdTrack.h"
 #include "search/SearchRecord.h"
@@ -38,9 +39,10 @@ public:
     void beginScanSession();
     void endScanSession();
     bool upsertTrack(const Track &track);
-    // path -> (file_mtime, file_size) for tracks under rootPrefix, for the
-    // incremental-rescan diff. Empty rootPrefix returns all tracks.
-    QHash<QString, QPair<qint64, qint64>> trackFingerprints(const QString &rootPrefix = {}) const;
+    // path -> {file_mtime, file_size, metadata_scanned} for tracks under
+    // rootPrefix, for the incremental-rescan diff. Empty rootPrefix returns all
+    // tracks. metadata_scanned lets the diff re-queue enumerated-only placeholders.
+    QHash<QString, TrackFingerprint> trackFingerprints(const QString &rootPrefix = {}) const;
     // Flags the given track paths as missing (file no longer present).
     int markTracksMissing(const QStringList &paths);
     int removeMissingTracks();

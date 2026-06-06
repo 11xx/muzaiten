@@ -1,10 +1,10 @@
 #pragma once
 
 #include "core/Track.h"
+#include "core/TrackFingerprint.h"
 
 #include <QHash>
 #include <QObject>
-#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -30,9 +30,10 @@ public:
         bool forceFullRescan = false;  // ignore fingerprint skip, re-read everything
     };
 
-    // fingerprints is path -> (mtime,size) of known tracks under root.
+    // fingerprints is path -> {mtime,size,metadataScanned} of known tracks under
+    // root; placeholders (metadataScanned == false) are always re-read.
     ScanPipeline(QString rootPath, int scanRootId,
-                 QHash<QString, QPair<qint64, qint64>> fingerprints,
+                 QHash<QString, TrackFingerprint> fingerprints,
                  Options options, QObject *parent = nullptr);
 
     int scanRootId() const { return m_scanRootId; }
@@ -53,7 +54,7 @@ private:
 
     QString m_rootPath;
     int m_scanRootId = 0;
-    QHash<QString, QPair<qint64, qint64>> m_fingerprints;
+    QHash<QString, TrackFingerprint> m_fingerprints;
     Options m_options;
     std::atomic_bool m_cancel = false;
 };
