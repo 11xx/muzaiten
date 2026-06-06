@@ -50,6 +50,9 @@ public:
     // Paths of enumerated-only placeholder rows (metadata_scanned=0) awaiting a tag
     // read, optionally scoped to one directory and/or capped, for the lazy fill.
     QStringList enumeratedOnlyPaths(const QString &parentDir = {}, int limit = 0) const;
+    // Count of the pending metadata-fill backlog (metadata_scanned=0), one indexed
+    // COUNT — for progress display and "queued for fill" messages.
+    int enumeratedOnlyCount() const;
     // Flags the given track paths as missing (file no longer present).
     int markTracksMissing(const QStringList &paths);
     int removeMissingTracks();
