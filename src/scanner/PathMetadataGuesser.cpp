@@ -53,9 +53,15 @@ QString clean(QString text)
     text.replace(QLatin1Char('_'), QLatin1Char(' '));
     static const QRegularExpression emptyBrackets(QStringLiteral("\\(\\s*\\)|\\[\\s*\\]"));
     text.remove(emptyBrackets);
+    static const QRegularExpression leadingYear(QStringLiteral("^\\s*[\\[(]\\s*(?:19|20)\\d{2}\\s*[\\])]\\s*"));
+    text.remove(leadingYear);
+    static const QRegularExpression technicalBracket(QStringLiteral(
+        "\\s*[\\[(][^\\])]*(?:\\b(?:FLAC|MP3|MQA|DSD|SACD|CD|DVD|Blu-ray|bit|kHz|Hz|EAC|Vinyl|LP)\\b|\\d+\\s*(?:bit|kHz|Hz))[^\\])]*[\\])]"),
+        QRegularExpression::CaseInsensitiveOption);
+    text.remove(technicalBracket);
     static const QRegularExpression whitespace(QStringLiteral("\\s{2,}"));
     text.replace(whitespace, QStringLiteral(" "));
-    static const QRegularExpression leadingJunk(QStringLiteral("^[\\s/,:;~\"\\-]+"));
+    static const QRegularExpression leadingJunk(QStringLiteral("^[\\s/,:;~\"\\-@]+"));
     text.remove(leadingJunk);
     static const QRegularExpression trailingJunk(QStringLiteral("[\\s/,:;~\"\\-]+$"));
     text.remove(trailingJunk);
@@ -79,6 +85,39 @@ int takeLeadingTrackNumber(QString &text)
         }
     }
     return 0;
+}
+
+QString withoutTrailingYear(QString text)
+{
+    static const QRegularExpression trailingYear(QStringLiteral("\\s+(?:\\(|\\[)?(?:19|20)\\d{2}(?:\\)|\\])?\\s*$"));
+    text.remove(trailingYear);
+    return clean(text);
+}
+
+bool isLikelyUtilityDirectory(const QString &name)
+{
+    const QString normalized = clean(name).toLower();
+    if (normalized.isEmpty()) {
+        return true;
+    }
+    static const QStringList utilityNames = {
+        QStringLiteral("covers"),
+        QStringLiteral("cover"),
+        QStringLiteral("artwork"),
+        QStringLiteral("art"),
+        QStringLiteral("booklet"),
+        QStringLiteral("booklets"),
+        QStringLiteral("scans"),
+        QStringLiteral("scan"),
+        QStringLiteral("images"),
+        QStringLiteral("image"),
+    };
+    for (const QString &utility : utilityNames) {
+        if (normalized == utility || normalized.startsWith(utility + QLatin1Char(' '))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -106,12 +145,32 @@ GuessedMetadata guess(const QString &filePath, const QString &libraryRoot)
     const QStringList &dirs = parts;
 
     if (dirs.size() >= 2) {
-        guessed.artist = clean(dirs.at(dirs.size() - 2));
-        guessed.album = clean(dirs.at(dirs.size() - 1));
+        const QString rawArtist = dirs.at(dirs.size() - 2);
+        const QString rawAlbum = dirs.at(dirs.size() - 1);
+        if (!isLikelyUtilityDirectory(rawAlbum)) {
+            guessed.artist = clean(rawArtist);
+            guessed.album = clean(rawAlbum);
+
+            const QPair<QString, QString> albumSplit = splitOnFirstSeparator(rawAlbum);
+            if (!albumSplit.second.isEmpty()) {
+                const QString splitArtist = withoutTrailingYear(albumSplit.first);
+                const QString splitAlbum = clean(albumSplit.second);
+                if (!splitAlbum.isEmpty()
+                    && (guessed.artist.isEmpty()
+                        || splitArtist.compare(guessed.artist, Qt::CaseInsensitive) == 0
+                        || rawArtist.startsWith(QLatin1Char('@'))
+                        || guessed.artist.contains(QStringLiteral("collection"), Qt::CaseInsensitive))) {
+                    guessed.artist = splitArtist.isEmpty() ? guessed.artist : splitArtist;
+                    guessed.album = splitAlbum;
+                }
+            }
+        }
     } else if (dirs.size() == 1) {
         // A single containing folder is most useful as the artist (the artist
         // panel groups first); the album fills in from the real tags later.
-        guessed.artist = clean(dirs.at(0));
+        if (!isLikelyUtilityDirectory(dirs.at(0))) {
+            guessed.artist = clean(dirs.at(0));
+        }
     }
 
     QString base = QFileInfo(fileName).completeBaseName();
