@@ -53,6 +53,10 @@ public:
     // Count of the pending metadata-fill backlog (metadata_scanned=0), one indexed
     // COUNT — for progress display and "queued for fill" messages.
     int enumeratedOnlyCount() const;
+    // When true, the artist/album/track browse also includes path-guessed
+    // placeholders (metadata_scanned=0 with a guessed album_artist_name); off keeps
+    // the browse real-data only. Drives the "show guessed metadata" setting.
+    void setGuessedPlaceholdersVisible(bool visible) { m_showGuessedPlaceholders = visible; }
     // Flags the given track paths as missing (file no longer present).
     int markTracksMissing(const QStringList &paths);
     int removeMissingTracks();
@@ -116,4 +120,5 @@ private:
     bool m_scanSession = false;
     QHash<QString, qint64> m_artistIdCache;
     QHash<QString, qint64> m_albumIdCache;
+    bool m_showGuessedPlaceholders = false;
 };

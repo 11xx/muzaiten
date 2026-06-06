@@ -385,6 +385,9 @@ PlayerBar::PlayerBar(QWidget *parent)
         connect(m_scanProfileActions[i], &QAction::triggered, this, [this, i]() { emit scanProfileChanged(i); });
     }
     m_scanProfileActions[1]->setChecked(true);  // Balanced default until set from settings
+    m_showGuessedPlaceholders = fileMenu->addAction(QStringLiteral("Show guessed metadata while scanning"));
+    m_showGuessedPlaceholders->setCheckable(true);
+    connect(m_showGuessedPlaceholders, &QAction::toggled, this, &PlayerBar::showGuessedPlaceholdersChanged);
     QAction *removeMissingTracks = fileMenu->addAction(QStringLiteral("Remove missing tracks"));
     QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
@@ -662,6 +665,15 @@ void PlayerBar::setScanProfile(int profile)
     // setChecked emits toggled, not triggered (which is what scanProfileChanged is
     // wired to), so this reflects the stored value without re-emitting.
     m_scanProfileActions[profile]->setChecked(true);
+}
+
+void PlayerBar::setShowGuessedPlaceholders(bool show)
+{
+    if (m_showGuessedPlaceholders == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_showGuessedPlaceholders);
+    m_showGuessedPlaceholders->setChecked(show);
 }
 
 void PlayerBar::setExplorerOptionsVisible(bool visible)

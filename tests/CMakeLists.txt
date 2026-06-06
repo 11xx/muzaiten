@@ -36,9 +36,19 @@ target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
 
+add_executable(test_path_guesser
+    test_path_guesser.cpp
+    ../src/scanner/PathMetadataGuesser.cpp
+)
+target_include_directories(test_path_guesser PRIVATE ../src)
+target_link_libraries(test_path_guesser PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_path_guesser PRIVATE cxx_std_26)
+add_test(NAME test_path_guesser COMMAND test_path_guesser)
+
 add_executable(test_scan_pipeline
     test_scan_pipeline.cpp
     ../src/scanner/ScanPipeline.cpp
+    ../src/scanner/PathMetadataGuesser.cpp
     ../src/scanner/DirectoryWalker.cpp
     ../src/scanner/LibraryScanner.cpp
     ../src/scanner/TagReader.cpp

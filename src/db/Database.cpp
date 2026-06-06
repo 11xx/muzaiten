@@ -116,6 +116,18 @@ QString enabledLibraryRootPredicate(const QString &trackAlias, const QVector<Sca
     return QStringLiteral("(") + clauses.join(QStringLiteral(" OR ")) + QStringLiteral(")");
 }
 
+// Browse-visibility predicate: fully-scanned rows always, plus path-guessed
+// placeholders (metadata_scanned=0 with a guessed album_artist_name) when the
+// "show guessed metadata" setting is on. Blank placeholders (NULL artist) and the
+// off state both reduce to the plain metadata_scanned=1 check.
+QString visibleTrackPredicate(const QString &alias, bool showGuessed)
+{
+    if (showGuessed) {
+        return QStringLiteral("(%1.metadata_scanned = 1 OR %1.album_artist_name IS NOT NULL)").arg(alias);
+    }
+    return QStringLiteral("%1.metadata_scanned = 1").arg(alias);
+}
+
 // "?, ?, ..." for an IN (...) clause with `count` bound parameters.
 QString sqlPlaceholders(qsizetype count)
 {
@@ -548,14 +560,21 @@ bool Database::insertEnumeratedPlaceholders(const QVector<Track> &tracks)
     }
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "INSERT INTO tracks(path, parent_dir, filename, title, file_size, file_mtime, scanned_at, metadata_scanned) "
-        "VALUES(?, ?, ?, ?, ?, ?, datetime('now'), 0) "
+        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, "
+        "track_number, file_size, file_mtime, scanned_at, metadata_scanned) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 0) "
         "ON CONFLICT(path) DO NOTHING"));
     for (const Track &track : tracks) {
         query.addBindValue(track.path);
         query.addBindValue(track.parentDir);
         query.addBindValue(track.filename);
         query.addBindValue(track.title);
+        // Guessed fields are empty unless the path guesser populated them; store
+        // NULL so blank placeholders stay isolated from the artist/album browse.
+        query.addBindValue(track.artistName.isEmpty() ? QVariant() : QVariant(track.artistName));
+        query.addBindValue(track.albumArtistName.isEmpty() ? QVariant() : QVariant(track.albumArtistName));
+        query.addBindValue(track.albumTitle.isEmpty() ? QVariant() : QVariant(track.albumTitle));
+        query.addBindValue(track.trackNumber > 0 ? QVariant(track.trackNumber) : QVariant());
         query.addBindValue(track.fileSize);
         query.addBindValue(track.fileMtime);
         if (!query.exec()) {
@@ -706,7 +725,8 @@ QVector<Artist> Database::albumArtists() const
 {
     QVector<Artist> artists;
     QSqlQuery query(m_db);
-    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t WHERE t.missing = 0 AND t.metadata_scanned = 1");
+    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t WHERE t.missing = 0 AND ")
+        + visibleTrackPredicate(QStringLiteral("t"), m_showGuessedPlaceholders);
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -739,10 +759,11 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "LEFT JOIN user_album_ratings uar ON uar.album_artist_name = t.album_artist_name AND uar.album_title = t.album_title "
-        "WHERE t.album_artist_name = ? AND t.missing = 0 AND t.metadata_scanned = 1 %2 "
+        "WHERE t.album_artist_name = ? AND t.missing = 0 AND %3 %2 "
         "GROUP BY t.album_title, uar.rating_0_100")
                       .arg(effectiveTrackRating,
-                           hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots())) : QString()));
+                           hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots())) : QString(),
+                           visibleTrackPredicate(QStringLiteral("t"), m_showGuessedPlaceholders)));
     query.addBindValue(albumArtist);
     query.exec();
     while (query.next()) {
@@ -782,7 +803,8 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "WHERE t.album_artist_name = ? AND t.missing = 0 AND t.metadata_scanned = 1");
+        "WHERE t.album_artist_name = ? AND t.missing = 0 AND ")
+        + visibleTrackPredicate(QStringLiteral("t"), m_showGuessedPlaceholders);
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }

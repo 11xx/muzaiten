@@ -2,6 +2,7 @@
 
 #include "core/MetadataBlob.h"
 #include "scanner/DirectoryWalker.h"
+#include "scanner/PathMetadataGuesser.h"
 #include "scanner/TagReader.h"
 
 #include <QDir>
@@ -159,6 +160,18 @@ void ScanPipeline::runScan()
             placeholder.title = info.completeBaseName();
             placeholder.fileSize = item.size;
             placeholder.fileMtime = item.mtime;
+            if (m_options.guessPlaceholders) {
+                // Best-effort path parse so the row can show in the artist/album
+                // browse before its real tags are read (see PathMetadataGuesser).
+                const GuessedMetadata guessed = PathMetadataGuesser::guess(path, m_rootPath);
+                if (!guessed.title.isEmpty()) {
+                    placeholder.title = guessed.title;
+                }
+                placeholder.artistName = guessed.artist;
+                placeholder.albumArtistName = guessed.albumArtist;
+                placeholder.albumTitle = guessed.album;
+                placeholder.trackNumber = guessed.trackNumber;
+            }
             placeholders.push_back(std::move(placeholder));
             continue;
         }

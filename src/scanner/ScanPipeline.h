@@ -33,6 +33,7 @@ public:
         int batchSize = 256;
         bool lowPriority = true;
         bool forceFullRescan = false;  // ignore fingerprint skip, re-read everything
+        bool guessPlaceholders = false;  // fill placeholder artist/album/title from the path
         Profile profile = Profile::Balanced;
     };
 
