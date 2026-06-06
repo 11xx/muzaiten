@@ -53,7 +53,8 @@ private slots:
         QCOMPARE(mainPanelFocusOrderFromJson(QJsonArray{QStringLiteral("queue"),
                                                         QStringLiteral("artists"),
                                                         QStringLiteral("albums"),
-                                                        QStringLiteral("tracks")}),
+                                                        QStringLiteral("tracks"),
+                                                        QStringLiteral("queue")}),
                  defaultMainPanelFocusOrder());
         QCOMPARE(mainPanelFocusOrderFromJson(QJsonArray{QStringLiteral("queue"),
                                                         QStringLiteral("queue"),
