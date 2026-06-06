@@ -590,6 +590,15 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     m_playerBar->setScanProfile(scanProfileSetting());
+    m_database->setGuessedPlaceholdersVisible(guessedPlaceholdersEnabled());
+    m_playerBar->setShowGuessedPlaceholders(guessedPlaceholdersEnabled());
+    connect(m_playerBar, &PlayerBar::showGuessedPlaceholdersChanged, this, [this](bool show) {
+        m_state->setSetting(QStringLiteral("scan.guessedPlaceholders"), show ? QStringLiteral("1") : QStringLiteral("0"));
+        m_database->setGuessedPlaceholdersVisible(show);
+        if (m_librarySource == LibrarySource::Local) {
+            refreshArtists();  // apply the new visibility to the browse immediately
+        }
+    });
     connect(m_playerBar, &PlayerBar::removeMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_playerBar, &PlayerBar::listUnsupportedFilesChanged, this, [this](bool show) {
         m_freeRoamFileExplorer->setShowUnsupportedFiles(show);
@@ -890,6 +899,7 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     ScanPipeline::Options options;
     options.forceFullRescan = m_forceFullRescan;
     options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
+    options.guessPlaceholders = guessedPlaceholdersEnabled();
 
     m_scanThread = new QThread(this);
     m_scanPipeline = new ScanPipeline(m_activeScanRootPath, scanRootId,
@@ -1065,6 +1075,11 @@ int MainWindow::scanProfileSetting() const
         return 2;
     }
     return 1;
+}
+
+bool MainWindow::guessedPlaceholdersEnabled() const
+{
+    return m_state->setting(QStringLiteral("scan.guessedPlaceholders"), QStringLiteral("1")) != QStringLiteral("0");
 }
 
 void MainWindow::ensureIngestSession()

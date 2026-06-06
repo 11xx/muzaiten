@@ -13,6 +13,7 @@ class SchemaTest final : public QObject {
 private slots:
     void migratesFreshDatabase();
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
+    void guessedPlaceholdersFollowVisibilitySetting();
     void upsertsTrackAndQueriesArtist();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
@@ -445,6 +446,54 @@ void SchemaTest::enumeratedPlaceholdersStayIsolatedUntilScanned()
     QCOMPARE(database.albumArtists().size(), 1);
     fingerprints = database.trackFingerprints();
     QVERIFY(fingerprints.value(full.path).metadataScanned);
+}
+
+void SchemaTest::guessedPlaceholdersFollowVisibilitySetting()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString connectionName = QStringLiteral("schema-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    // A path-guessed placeholder: enumerated-only (metadata_scanned=0) but carrying
+    // a guessed album_artist_name.
+    Track guessed;
+    guessed.path = temp.filePath(QStringLiteral("Guessed Artist/Guessed Album/01 Song.flac"));
+    guessed.parentDir = temp.filePath(QStringLiteral("Guessed Artist/Guessed Album"));
+    guessed.filename = QStringLiteral("01 Song.flac");
+    guessed.title = QStringLiteral("Song");
+    guessed.artistName = QStringLiteral("Guessed Artist");
+    guessed.albumArtistName = QStringLiteral("Guessed Artist");
+    guessed.albumTitle = QStringLiteral("Guessed Album");
+    guessed.trackNumber = 1;
+    guessed.fileSize = 1;
+    guessed.fileMtime = 1;
+    QVERIFY2(database.insertEnumeratedPlaceholders({guessed}), qPrintable(database.lastError()));
+
+    // A blank placeholder (no guessed artist) must never appear in the browse.
+    Track blank;
+    blank.path = temp.filePath(QStringLiteral("loose/track.flac"));
+    blank.parentDir = temp.filePath(QStringLiteral("loose"));
+    blank.filename = QStringLiteral("track.flac");
+    blank.title = QStringLiteral("track");
+    blank.fileSize = 1;
+    blank.fileMtime = 1;
+    QVERIFY2(database.insertEnumeratedPlaceholders({blank}), qPrintable(database.lastError()));
+
+    // Setting off (default): guessed rows are hidden from the artist/album browse.
+    QVERIFY(database.albumArtists().isEmpty());
+
+    // Setting on: the guessed row shows (the blank one still does not).
+    database.setGuessedPlaceholdersVisible(true);
+    const QVector<Artist> artists = database.albumArtists();
+    QCOMPARE(artists.size(), 1);
+    QCOMPARE(artists.first().name, QStringLiteral("Guessed Artist"));
+    QCOMPARE(database.tracksForArtist(QStringLiteral("Guessed Artist")).size(), 1);
+
+    // Back off: hidden again.
+    database.setGuessedPlaceholdersVisible(false);
+    QVERIFY(database.albumArtists().isEmpty());
 }
 
 QTEST_MAIN(SchemaTest)

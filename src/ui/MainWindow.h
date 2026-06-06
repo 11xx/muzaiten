@@ -176,6 +176,7 @@ private:
     void ensureDirectoryScanned(const QString &directory);
     QStringList nextFillChunk();
     int scanProfileSetting() const;  // 0 Background, 1 Balanced, 2 Turbo
+    bool guessedPlaceholdersEnabled() const;  // scan.guessedPlaceholders setting (default on)
     void scheduleIncrementalRefresh();  // throttled browse/explorer refresh during ingest
     void flushIncrementalRefresh();     // force a refresh now and stop the throttle
     void ensureIngestSession();
