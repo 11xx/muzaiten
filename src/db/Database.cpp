@@ -315,7 +315,32 @@ bool Database::migrate()
         return false;
     }
 
-    return Schema::currentVersion == 7;
+    // v8: fast-first-pass placeholders + bit depth.
+    //  - metadata_scanned distinguishes enumerated-only placeholder rows (0) from
+    //    fully tag-read rows (1). Existing rows default to 1 so they are unaffected;
+    //    only the new fast-pass insert writes 0. Browse/search queries filter
+    //    metadata_scanned=1; the directory/file view intentionally does not.
+    //  - bit_depth holds the lossless sample bit depth (lossy formats stay NULL).
+    const QVector<QPair<QString, QString>> v8Columns = {
+        {QStringLiteral("metadata_scanned"), QStringLiteral("metadata_scanned INTEGER NOT NULL DEFAULT 1")},
+        {QStringLiteral("bit_depth"),        QStringLiteral("bit_depth INTEGER")},
+    };
+    for (const auto &column : v8Columns) {
+        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+            return false;
+        }
+    }
+    const QStringList v8Statements = {
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_metadata_scanned ON tracks(metadata_scanned)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(8, datetime('now'))"),
+    };
+    for (const QString &statement : v8Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 8;
 }
 
 QString Database::lastError() const
@@ -510,14 +535,14 @@ bool Database::upsertTrack(const Track &track)
     return true;
 }
 
-QHash<QString, QPair<qint64, qint64>> Database::trackFingerprints(const QString &rootPrefix) const
+QHash<QString, TrackFingerprint> Database::trackFingerprints(const QString &rootPrefix) const
 {
-    QHash<QString, QPair<qint64, qint64>> fingerprints;
+    QHash<QString, TrackFingerprint> fingerprints;
     QSqlQuery query(m_db);
     if (rootPrefix.isEmpty()) {
-        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size FROM tracks"));
+        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks"));
     } else {
-        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"));
+        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"));
         query.addBindValue(rootPrefix);
         QString likePrefix = rootPrefix;
         likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
@@ -529,8 +554,11 @@ QHash<QString, QPair<qint64, qint64>> Database::trackFingerprints(const QString 
         return fingerprints;
     }
     while (query.next()) {
-        fingerprints.insert(query.value(0).toString(),
-                            qMakePair(query.value(1).toLongLong(), query.value(2).toLongLong()));
+        TrackFingerprint fingerprint;
+        fingerprint.mtime = query.value(1).toLongLong();
+        fingerprint.size = query.value(2).toLongLong();
+        fingerprint.metadataScanned = query.value(3).toInt() != 0;
+        fingerprints.insert(query.value(0).toString(), fingerprint);
     }
     return fingerprints;
 }
@@ -603,7 +631,7 @@ QVector<Artist> Database::albumArtists() const
 {
     QVector<Artist> artists;
     QSqlQuery query(m_db);
-    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t WHERE t.missing = 0");
+    QString sql = QStringLiteral("SELECT album_artist_name, COUNT(DISTINCT album_title) FROM tracks t WHERE t.missing = 0 AND t.metadata_scanned = 1");
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -636,7 +664,7 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "LEFT JOIN user_album_ratings uar ON uar.album_artist_name = t.album_artist_name AND uar.album_title = t.album_title "
-        "WHERE t.album_artist_name = ? AND t.missing = 0 %2 "
+        "WHERE t.album_artist_name = ? AND t.missing = 0 AND t.metadata_scanned = 1 %2 "
         "GROUP BY t.album_title, uar.rating_0_100")
                       .arg(effectiveTrackRating,
                            hasScanRoots(m_db) ? QStringLiteral("AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots())) : QString()));
@@ -679,7 +707,7 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "WHERE t.album_artist_name = ? AND t.missing = 0");
+        "WHERE t.album_artist_name = ? AND t.missing = 0 AND t.metadata_scanned = 1");
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -1464,7 +1492,7 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         "t.track_number, t.disc_number, t.file_mtime, t.file_size "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
-        "WHERE t.missing = 0");
+        "WHERE t.missing = 0 AND t.metadata_scanned = 1");
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
