@@ -579,6 +579,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
     connect(m_playerBar, &PlayerBar::forceRescanRequested, this, &MainWindow::forceRescanEnabledSourceDirectories);
+    connect(m_playerBar, &PlayerBar::scanProfileChanged, this, [this](int profile) {
+        static const char *const names[3] = {"background", "balanced", "turbo"};
+        if (profile >= 0 && profile <= 2) {
+            m_state->setSetting(QStringLiteral("scan.profile"), QString::fromLatin1(names[profile]));
+        }
+    });
+    m_playerBar->setScanProfile(scanProfileSetting());
     connect(m_playerBar, &PlayerBar::removeMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_playerBar, &PlayerBar::listUnsupportedFilesChanged, this, [this](bool show) {
         m_freeRoamFileExplorer->setShowUnsupportedFiles(show);
@@ -879,6 +886,7 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
 
     ScanPipeline::Options options;
     options.forceFullRescan = m_forceFullRescan;
+    options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
 
     m_scanThread = new QThread(this);
     m_scanPipeline = new ScanPipeline(m_activeScanRootPath, scanRootId,
@@ -1012,6 +1020,18 @@ void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
     refreshLibraryFileExplorer();
 }
 
+int MainWindow::scanProfileSetting() const
+{
+    const QString value = m_state->setting(QStringLiteral("scan.profile"), QStringLiteral("balanced"));
+    if (value == QStringLiteral("background")) {
+        return 0;
+    }
+    if (value == QStringLiteral("turbo")) {
+        return 2;
+    }
+    return 1;
+}
+
 void MainWindow::ensureIngestSession()
 {
     if (!m_ingestSessionActive) {
@@ -1067,6 +1087,7 @@ void MainWindow::startMetadataFill(const QStringList &paths)
     ScanPipeline::Options options;
     options.lowPriority = true;
     options.batchSize = 64;  // small batches keep the UI fill smooth
+    options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
 
     const QString hint = QFileInfo(paths.first()).absolutePath();
     m_fillThread = new QThread(this);

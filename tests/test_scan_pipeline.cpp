@@ -17,6 +17,7 @@ class ScanPipelineTest final : public QObject {
 
 private slots:
     void fastFirstPassDefersThenFills();
+    void turboFillReadsEveryFile();
 
 private:
     static void writeWav(const QString &path, int sampleRate, int bitsPerSample, int channels, int frames);
@@ -161,6 +162,39 @@ void ScanPipelineTest::fastFirstPassDefersThenFills()
         QCOMPARE(run.placeholderCount, 0);
         QCOMPARE(run.batchTrackCount, 0);
     }
+}
+
+void ScanPipelineTest::turboFillReadsEveryFile()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString albumDir = temp.filePath(QStringLiteral("Music/Album"));
+    QVERIFY(QDir().mkpath(albumDir));
+
+    constexpr int kFiles = 50;
+    for (int i = 0; i < kFiles; ++i) {
+        writeWav(albumDir + QStringLiteral("/%1.wav").arg(i, 3, 10, QLatin1Char('0')), 44100, 16, 2, 32);
+    }
+
+    const QString connectionName = QStringLiteral("scan-turbo-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    // Over-provisioned (Turbo) worker pool + the adaptive gate must read every file
+    // exactly once with no lost rows or hang.
+    ScanPipeline::Options options;
+    options.lowPriority = false;
+    options.profile = ScanPipeline::Profile::Turbo;
+    options.batchSize = 4;  // many controller ticks
+
+    QStringList paths;
+    for (int i = 0; i < kFiles; ++i) {
+        paths.append(albumDir + QStringLiteral("/%1.wav").arg(i, 3, 10, QLatin1Char('0')));
+    }
+    ScanPipeline fill(albumDir, paths, options);
+    const ScanRun run = runPipeline(fill, database, /*ingestPlaceholders=*/false);
+    QCOMPARE(run.batchTrackCount, kFiles);
+    QCOMPARE(database.allTracksForSearch().size(), kFiles);
 }
 
 QTEST_MAIN(ScanPipelineTest)

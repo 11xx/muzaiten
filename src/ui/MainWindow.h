@@ -172,6 +172,7 @@ private:
     void finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
     void ensureDirectoryScanned(const QString &directory);
     QStringList nextFillChunk();
+    int scanProfileSetting() const;  // 0 Background, 1 Balanced, 2 Turbo
     void ensureIngestSession();
     void endIngestSessionIfIdle();
     void markScannedTracksMissing(const QStringList &paths);
