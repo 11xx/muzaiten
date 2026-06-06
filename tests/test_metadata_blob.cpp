@@ -21,6 +21,7 @@ void MetadataBlobTest::roundTripsTagsAndTech()
     original.bitrateKbps = 1024;
     original.sampleRateHz = 44100;
     original.channels = 2;
+    original.bitDepth = 24;
     original.codec = QStringLiteral("flac");
 
     const MetadataBlob::Encoded encoded = MetadataBlob::encode(original);
@@ -34,6 +35,7 @@ void MetadataBlobTest::roundTripsTagsAndTech()
     QCOMPARE(decoded.bitrateKbps, 1024);
     QCOMPARE(decoded.sampleRateHz, 44100);
     QCOMPARE(decoded.channels, 2);
+    QCOMPARE(decoded.bitDepth, 24);
     QCOMPARE(decoded.codec, QStringLiteral("flac"));
 }
 
@@ -59,6 +61,10 @@ void MetadataBlobTest::emptyMetadataIsEmpty()
     MetadataBlob::FullMetadata withTech;
     withTech.sampleRateHz = 48000;
     QVERIFY(!MetadataBlob::isEmpty(withTech));
+
+    MetadataBlob::FullMetadata withBitDepth;
+    withBitDepth.bitDepth = 24;
+    QVERIFY(!MetadataBlob::isEmpty(withBitDepth));
 }
 
 void MetadataBlobTest::decodeRejectsGarbage()

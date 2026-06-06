@@ -17,6 +17,7 @@ struct FullMetadata {
     int bitrateKbps = 0;
     int sampleRateHz = 0;
     int channels = 0;
+    int bitDepth = 0;  // lossless sample bit depth; 0 = unknown / lossy
     QString codec;
 };
 

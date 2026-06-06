@@ -464,9 +464,9 @@ bool Database::upsertTrack(const Track &track)
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?) "
-        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec "
+        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec, bit_depth) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec, bit_depth=excluded.bit_depth "
         "RETURNING id"));
     query.addBindValue(track.path);
     query.addBindValue(track.parentDir);
@@ -496,6 +496,7 @@ bool Database::upsertTrack(const Track &track)
     query.addBindValue(track.bitrateKbps > 0 ? QVariant(track.bitrateKbps) : QVariant());
     query.addBindValue(track.channels > 0 ? QVariant(track.channels) : QVariant());
     query.addBindValue(track.codec.isEmpty() ? QVariant() : QVariant(track.codec));
+    query.addBindValue(track.bitDepth > 0 ? QVariant(track.bitDepth) : QVariant());
 
     if (!query.exec()) {
         m_lastError = query.lastError().text();
@@ -1489,7 +1490,7 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
         "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
         "COALESCE(utr.rating_0_100, t.rating_0_100), "
-        "t.track_number, t.disc_number, t.file_mtime, t.file_size "
+        "t.track_number, t.disc_number, t.file_mtime, t.file_size, t.bit_depth "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1");
@@ -1520,6 +1521,7 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         rec.discNumber        = query.value(14).toInt();
         rec.fileMtime         = query.value(15).toLongLong();
         rec.fileSize          = query.value(16).toLongLong();
+        rec.bitDepth          = query.value(17).toInt();
         rec.source            = Search::TrackSource::Local;
         // Pre-compute lowercased versions for case-insensitive matching; intern
         // the repeated ones (path/title/filename are near-unique, left as-is).

@@ -17,6 +17,7 @@ constexpr auto kTechKey = "tech";
 constexpr auto kBitrateKey = "bitrate";
 constexpr auto kSampleRateKey = "sampleRate";
 constexpr auto kChannelsKey = "channels";
+constexpr auto kBitDepthKey = "bitDepth";
 constexpr auto kCodecKey = "codec";
 
 QByteArray toJson(const MetadataBlob::FullMetadata &metadata)
@@ -34,6 +35,7 @@ QByteArray toJson(const MetadataBlob::FullMetadata &metadata)
     tech.insert(QString::fromLatin1(kBitrateKey), metadata.bitrateKbps);
     tech.insert(QString::fromLatin1(kSampleRateKey), metadata.sampleRateHz);
     tech.insert(QString::fromLatin1(kChannelsKey), metadata.channels);
+    tech.insert(QString::fromLatin1(kBitDepthKey), metadata.bitDepth);
     tech.insert(QString::fromLatin1(kCodecKey), metadata.codec);
 
     QJsonObject root;
@@ -62,6 +64,7 @@ MetadataBlob::FullMetadata fromJson(const QByteArray &json)
     metadata.bitrateKbps = tech.value(QString::fromLatin1(kBitrateKey)).toInt();
     metadata.sampleRateHz = tech.value(QString::fromLatin1(kSampleRateKey)).toInt();
     metadata.channels = tech.value(QString::fromLatin1(kChannelsKey)).toInt();
+    metadata.bitDepth = tech.value(QString::fromLatin1(kBitDepthKey)).toInt();
     metadata.codec = tech.value(QString::fromLatin1(kCodecKey)).toString();
     return metadata;
 }
@@ -73,7 +76,7 @@ namespace MetadataBlob {
 bool isEmpty(const FullMetadata &metadata)
 {
     return metadata.tags.isEmpty() && metadata.bitrateKbps == 0 && metadata.sampleRateHz == 0
-        && metadata.channels == 0 && metadata.codec.isEmpty();
+        && metadata.channels == 0 && metadata.bitDepth == 0 && metadata.codec.isEmpty();
 }
 
 Encoded encode(const FullMetadata &metadata)
