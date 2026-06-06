@@ -173,6 +173,8 @@ private:
     void ensureDirectoryScanned(const QString &directory);
     QStringList nextFillChunk();
     int scanProfileSetting() const;  // 0 Background, 1 Balanced, 2 Turbo
+    void scheduleIncrementalRefresh();  // throttled browse/explorer refresh during ingest
+    void flushIncrementalRefresh();     // force a refresh now and stop the throttle
     void ensureIngestSession();
     void endIngestSessionIfIdle();
     void markScannedTracksMissing(const QStringList &paths);
@@ -239,6 +241,8 @@ private:
     ScanPipeline *m_fillPipeline = nullptr;
     QString m_priorityFillDir;       // directory to fill next (on-access prioritization)
     bool m_ingestSessionActive = false;  // spans scan + fill for the artist/album id cache
+    QTimer *m_incrementalRefreshTimer = nullptr;  // throttles browse/explorer refresh during ingest
+    bool m_incrementalRefreshDirty = false;
     std::unique_ptr<ArtworkCache> m_artworkCache;
     quint64 m_currentArtGeneration = 0;
     QThread *m_listenBrainzThread = nullptr;
@@ -251,7 +255,6 @@ private:
     bool m_ratingTagSyncRunning = false;
     bool m_ratingTagSyncPending = false;
     double m_volume = 1.0;
-    qint64 m_lastUiRefreshIndexedTracks = 0;
     QVector<ScanRoot> m_pendingScanRoots;
     int m_activeScanRootId = 0;
     QString m_activeScanRootPath;

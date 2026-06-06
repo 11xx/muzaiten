@@ -876,7 +876,6 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     m_scanProgress->setVisible(true);
     m_stopScanButton->setEnabled(true);
     m_stopScanButton->setVisible(true);
-    m_lastUiRefreshIndexedTracks = 0;
     ensureIngestSession();
     // A foreground scan supersedes the background fill; pause it (it resumes once
     // the scan finishes and re-pumps the placeholder backlog).
@@ -998,12 +997,7 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
         return;
     }
 
-    m_lastUiRefreshIndexedTracks += tracks.size();
-    if (m_lastUiRefreshIndexedTracks >= 512) {
-        m_lastUiRefreshIndexedTracks = 0;
-        refreshArtists();
-        refreshLibraryFileExplorer();
-    }
+    scheduleIncrementalRefresh();
 }
 
 void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
@@ -1015,8 +1009,41 @@ void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
         QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
         return;
     }
-    // Placeholders are filtered out of the artist/album browse (metadata_scanned),
-    // so only the directory/file view needs refreshing to reveal the new paths.
+    // Placeholders only surface in the directory/file view; coalesce the refresh
+    // with the rest of the ingest so a flood of new paths doesn't rebuild per chunk.
+    scheduleIncrementalRefresh();
+}
+
+void MainWindow::scheduleIncrementalRefresh()
+{
+    // Throttle (not debounce): during a continuous scan/fill, batches arrive faster
+    // than the interval, so we refresh at most once per window while dirty rather
+    // than never until the stream pauses. Keeps the browse/explorer filling in
+    // light chunks without rebuilding on every batch.
+    if (m_incrementalRefreshTimer == nullptr) {
+        m_incrementalRefreshTimer = new QTimer(this);
+        m_incrementalRefreshTimer->setSingleShot(true);
+        connect(m_incrementalRefreshTimer, &QTimer::timeout, this, [this]() {
+            if (m_incrementalRefreshDirty) {
+                m_incrementalRefreshDirty = false;
+                refreshArtists();
+                refreshLibraryFileExplorer();
+            }
+        });
+    }
+    m_incrementalRefreshDirty = true;
+    if (!m_incrementalRefreshTimer->isActive()) {
+        m_incrementalRefreshTimer->start(1500);
+    }
+}
+
+void MainWindow::flushIncrementalRefresh()
+{
+    if (m_incrementalRefreshTimer != nullptr) {
+        m_incrementalRefreshTimer->stop();
+    }
+    m_incrementalRefreshDirty = false;
+    refreshArtists();
     refreshLibraryFileExplorer();
 }
 
@@ -1122,8 +1149,7 @@ void MainWindow::finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 sk
     // ingestScanBatch already refreshed the views incrementally during the chunk;
     // when the whole backlog is drained, do a final browse + search-index refresh.
     if (m_database->enumeratedOnlyPaths({}, 1).isEmpty()) {
-        refreshArtists();
-        refreshLibraryFileExplorer();
+        flushIncrementalRefresh();
         m_searchView->invalidateIndex(databasePath());
         statusBar()->showMessage(QStringLiteral("Library metadata complete"), 4000);
     }
@@ -1160,8 +1186,7 @@ void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, b
             ? QStringLiteral("Scan canceled: %1 read, %2 unchanged").arg(indexed).arg(skipped)
             : QStringLiteral("Scan complete: %1 found, %2 read, %3 unchanged").arg(enumerated).arg(indexed).arg(skipped),
         10000);
-    refreshArtists();
-    refreshLibraryFileExplorer();
+    flushIncrementalRefresh();
     // Rebuild the search index with fresh library data
     if (!canceled) {
         m_searchView->invalidateIndex(databasePath());
