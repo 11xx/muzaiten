@@ -52,6 +52,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QInputDialog>
@@ -621,6 +622,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
     connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
     connect(m_playerBar, &PlayerBar::keybindingsRequested, this, &MainWindow::configureKeybindings);
+    connect(m_playerBar, &PlayerBar::resetPanelOrderRequested, this, &MainWindow::resetPanelOrder);
     connect(m_playerBar, &PlayerBar::resetViewPreferencesRequested, this, &MainWindow::resetViewPreferences);
     connect(m_playerBar, &PlayerBar::panelOrderRequested, this, &MainWindow::openPanelOrderDialog);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
@@ -1015,6 +1017,7 @@ void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
         return;
     }
 
+    patchQueueTracksFromMetadata(tracks);
     scheduleIncrementalRefresh();
 }
 
@@ -1306,6 +1309,7 @@ void MainWindow::loadExistingLibrary()
 
 void MainWindow::refreshArtists()
 {
+    const QString sidebarArtistBefore = m_artistSidebar->currentArtistName();
     if (m_librarySource == LibrarySource::Mpd) {
         const qint64 sourceId = m_database->mpdSourceId();
         m_artistSidebar->setMpdAvailable(sourceId > 0);
@@ -1314,7 +1318,11 @@ void MainWindow::refreshArtists()
         if (m_panelSearch != nullptr) {
             m_panelSearch->refreshPanel(MainPanelId::Artists);
         }
-        if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist, /*reveal=*/false)) {
+        const bool preserveNavigationCursor = !sidebarArtistBefore.isEmpty()
+            && sidebarArtistBefore != m_currentArtist
+            && m_artistSidebar->currentArtistName() == sidebarArtistBefore;
+        if (!m_currentArtist.isEmpty()
+            && (preserveNavigationCursor || m_artistSidebar->selectArtist(m_currentArtist, /*reveal=*/false))) {
             showArtist(m_currentArtist, true, false);
             return;
         }
@@ -1349,7 +1357,11 @@ void MainWindow::refreshArtists()
         m_panelSearch->refreshPanel(MainPanelId::Artists);
     }
 
-    if (!m_currentArtist.isEmpty() && m_artistSidebar->selectArtist(m_currentArtist, /*reveal=*/false)) {
+    const bool preserveNavigationCursor = !sidebarArtistBefore.isEmpty()
+        && sidebarArtistBefore != m_currentArtist
+        && m_artistSidebar->currentArtistName() == sidebarArtistBefore;
+    if (!m_currentArtist.isEmpty()
+        && (preserveNavigationCursor || m_artistSidebar->selectArtist(m_currentArtist, /*reveal=*/false))) {
         showArtist(m_currentArtist, true, false);
         return;
     }
@@ -1934,6 +1946,16 @@ void MainWindow::resetViewPreferences()
 
     saveAllViewSettings();
     statusBar()->showMessage(QStringLiteral("View preferences reset to defaults"), 4000);
+}
+
+void MainWindow::resetPanelOrder()
+{
+    if (m_panelSearch == nullptr) {
+        return;
+    }
+    m_panelSearch->setFocusOrder(defaultMainPanelFocusOrder());
+    m_state->removeSetting(QStringLiteral("mainPanel.focusOrder"));
+    statusBar()->showMessage(QStringLiteral("Panel order reset to Artist > Album > Track > Queue"), 4000);
 }
 
 void MainWindow::openPanelOrderDialog()
@@ -3288,6 +3310,60 @@ void MainWindow::clearPlayNextPriority()
     saveQueueState();
 }
 
+void MainWindow::patchQueueTracksFromMetadata(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty() || m_queue.isEmpty()) {
+        return;
+    }
+
+    QHash<QString, Track> byPath;
+    byPath.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            byPath.insert(track.path, track);
+        }
+    }
+    if (byPath.isEmpty()) {
+        return;
+    }
+
+    bool queueChanged = false;
+    bool currentTrackChanged = false;
+    for (Track &queuedTrack : m_queue) {
+        const auto it = byPath.constFind(queuedTrack.path);
+        if (it == byPath.cend()) {
+            continue;
+        }
+        queuedTrack = it.value();
+        queueChanged = true;
+        if (m_currentTrack.path == queuedTrack.path) {
+            m_currentTrack = queuedTrack;
+            currentTrackChanged = true;
+        }
+    }
+
+    if (!queueChanged) {
+        return;
+    }
+
+    m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
+    refreshPlayNextRange();
+    saveQueueState();
+    if (currentTrackChanged) {
+        updateCurrentAlbumArt();
+        const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
+        QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
+        if (!m_currentTrack.date.isEmpty()) {
+            subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
+        }
+        m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
+        m_rightSidebar->setTrackInfo(m_currentTrack);
+        m_mpris->setTrack(m_currentTrack);
+        m_mpris->setDurationMs(m_currentTrack.durationMs);
+        updateMprisCapabilities();
+    }
+}
+
 void MainWindow::refreshPlayNextRange()
 {
     if (m_queueStore != nullptr) {
@@ -3388,6 +3464,11 @@ void MainWindow::playQueueIndex(int index, bool notifyScrobbler, bool startPause
         // the old current (inclusive of the old current) become the play-next
         // region, order unchanged.
         m_playNextInsertIndex = std::clamp(previousIndex + 1, m_queueIndex + 1, static_cast<int>(m_queue.size()));
+    } else if (explicitJump) {
+        // A manual jump to any other row invalidates a previous play-next batch:
+        // those tracks keep their queue positions, but they are no longer the
+        // actual next-priority span after the user picked a new current track.
+        m_playNextInsertIndex = m_queueIndex + 1;
     } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
         m_playNextInsertIndex = m_queueIndex + 1;
     }

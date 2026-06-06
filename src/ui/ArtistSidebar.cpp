@@ -223,6 +223,12 @@ int ArtistSidebar::currentRow() const
     return index.isValid() ? index.row() : -1;
 }
 
+QString ArtistSidebar::currentArtistName() const
+{
+    const QModelIndex index = m_view != nullptr ? m_view->currentIndex() : QModelIndex();
+    return index.isValid() ? index.data(Qt::UserRole).toString() : QString();
+}
+
 void ArtistSidebar::setCurrentRow(int row)
 {
     setCurrentRow(row, 0);
