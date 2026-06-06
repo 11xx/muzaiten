@@ -154,6 +154,12 @@ bool Database::open(const QString &path)
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     pragma.exec(QStringLiteral("PRAGMA foreign_keys=ON"));
     pragma.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
+    // Burst-friendly tuning: keep temp B-trees/sorts in RAM, memory-map the DB
+    // for fewer read syscalls on large-library scans/queries, and give the page
+    // cache ~64 MB (negative = KiB). All are per-connection and safe with WAL.
+    pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+    pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));
+    pragma.exec(QStringLiteral("PRAGMA cache_size=-65536"));
 
     return migrate();
 }
