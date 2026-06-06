@@ -514,14 +514,30 @@ QHash<QString, QPair<qint64, qint64>> Database::trackFingerprints(const QString 
 
 int Database::markTracksMissing(const QStringList &paths)
 {
+    if (paths.isEmpty()) {
+        return 0;
+    }
+    // One UPDATE ... WHERE path IN (...) per chunk inside a single transaction,
+    // instead of a separate exec() per path. Chunked to stay well under SQLite's
+    // bound-parameter limit.
+    constexpr int kChunk = 500;
+    const bool ownTransaction = m_db.transaction();
     int marked = 0;
-    QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("UPDATE tracks SET missing=1, missing_since=datetime('now') WHERE path = ? AND missing = 0"));
-    for (const QString &path : paths) {
-        query.addBindValue(path);
+    for (qsizetype start = 0; start < paths.size(); start += kChunk) {
+        const qsizetype count = std::min<qsizetype>(kChunk, paths.size() - start);
+        QSqlQuery query(m_db);
+        query.prepare(QStringLiteral(
+            "UPDATE tracks SET missing=1, missing_since=datetime('now') WHERE missing = 0 AND path IN (%1)")
+            .arg(sqlPlaceholders(count)));
+        for (qsizetype i = 0; i < count; ++i) {
+            query.addBindValue(paths.at(start + i));
+        }
         if (query.exec()) {
             marked += query.numRowsAffected();
         }
+    }
+    if (ownTransaction) {
+        m_db.commit();
     }
     return marked;
 }
