@@ -571,6 +571,32 @@ bool Database::insertEnumeratedPlaceholders(const QVector<Track> &tracks)
     return true;
 }
 
+QStringList Database::enumeratedOnlyPaths(const QString &parentDir, int limit) const
+{
+    QStringList paths;
+    QString sql = QStringLiteral("SELECT t.path FROM tracks t WHERE t.metadata_scanned = 0 AND t.missing = 0");
+    if (!parentDir.isEmpty()) {
+        sql += QStringLiteral(" AND t.parent_dir = ?");
+    }
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    if (limit > 0) {
+        sql += QStringLiteral(" LIMIT %1").arg(limit);
+    }
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    if (!parentDir.isEmpty()) {
+        query.addBindValue(parentDir);
+    }
+    if (query.exec()) {
+        while (query.next()) {
+            paths.append(query.value(0).toString());
+        }
+    }
+    return paths;
+}
+
 QHash<QString, TrackFingerprint> Database::trackFingerprints(const QString &rootPrefix) const
 {
     QHash<QString, TrackFingerprint> fingerprints;

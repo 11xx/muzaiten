@@ -36,6 +36,23 @@ target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
 
+add_executable(test_scan_pipeline
+    test_scan_pipeline.cpp
+    ../src/scanner/ScanPipeline.cpp
+    ../src/scanner/DirectoryWalker.cpp
+    ../src/scanner/LibraryScanner.cpp
+    ../src/scanner/TagReader.cpp
+    ../src/scanner/TagRating.cpp
+    ../src/core/MetadataBlob.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+    ../src/fs/PathResolver.cpp
+)
+target_include_directories(test_scan_pipeline PRIVATE ../src)
+target_link_libraries(test_scan_pipeline PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD PkgConfig::TAGLIB)
+target_compile_features(test_scan_pipeline PRIVATE cxx_std_26)
+add_test(NAME test_scan_pipeline COMMAND test_scan_pipeline)
+
 add_executable(test_tag_rating
     test_tag_rating.cpp
     ../src/core/Rating.cpp

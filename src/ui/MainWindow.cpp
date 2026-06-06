@@ -788,6 +788,9 @@ MainWindow::MainWindow(QWidget *parent)
     configureLastFm();
     loadExistingLibrary();
     restoreSavedPlaybackState();
+    // Resume the lazy fill if a previous run left placeholder rows (e.g. closed
+    // mid-fill or after a canceled scan). Deferred so the window shows first.
+    QTimer::singleShot(0, this, [this]() { pumpMetadataFill(); });
 }
 
 MainWindow::~MainWindow()
@@ -798,6 +801,13 @@ MainWindow::~MainWindow()
     if (m_scanThread != nullptr) {
         m_scanThread->quit();
         m_scanThread->wait(3000);
+    }
+    if (m_fillPipeline != nullptr) {
+        m_fillPipeline->cancel();
+    }
+    if (m_fillThread != nullptr) {
+        m_fillThread->quit();
+        m_fillThread->wait(3000);
     }
     if (m_listenBrainzThread != nullptr) {
         m_listenBrainzThread->quit();
@@ -860,7 +870,12 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
     m_stopScanButton->setEnabled(true);
     m_stopScanButton->setVisible(true);
     m_lastUiRefreshIndexedTracks = 0;
-    m_database->beginScanSession();
+    ensureIngestSession();
+    // A foreground scan supersedes the background fill; pause it (it resumes once
+    // the scan finishes and re-pumps the placeholder backlog).
+    if (m_fillPipeline != nullptr) {
+        m_fillPipeline->cancel();
+    }
 
     ScanPipeline::Options options;
     options.forceFullRescan = m_forceFullRescan;
@@ -894,6 +909,7 @@ void MainWindow::startScan(const QString &rootPath, int scanRootId)
             startNextQueuedSourceScan();
         } else {
             m_forceFullRescan = false;
+            pumpMetadataFill();  // lazily tag-read the placeholders this scan created
         }
     });
 
@@ -996,10 +1012,118 @@ void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
     refreshLibraryFileExplorer();
 }
 
+void MainWindow::ensureIngestSession()
+{
+    if (!m_ingestSessionActive) {
+        m_database->beginScanSession();
+        m_ingestSessionActive = true;
+    }
+}
+
+void MainWindow::endIngestSessionIfIdle()
+{
+    if (m_ingestSessionActive && m_scanThread == nullptr && m_fillThread == nullptr) {
+        m_database->endScanSession();
+        m_ingestSessionActive = false;
+    }
+}
+
+QStringList MainWindow::nextFillChunk()
+{
+    // Prefer the directory the user is looking at (on-access prioritization),
+    // then drain the rest of the backlog in bounded chunks.
+    if (!m_priorityFillDir.isEmpty()) {
+        const QStringList dirPaths = m_database->enumeratedOnlyPaths(m_priorityFillDir, 256);
+        if (!dirPaths.isEmpty()) {
+            return dirPaths;
+        }
+        m_priorityFillDir.clear();
+    }
+    return m_database->enumeratedOnlyPaths({}, 512);
+}
+
+void MainWindow::pumpMetadataFill()
+{
+    // One ingest worker at a time: never run a fill alongside a foreground scan or
+    // another fill — that would double-read files and thrash a slow/HDD mount.
+    if (m_scanThread != nullptr || m_fillThread != nullptr || m_librarySource != LibrarySource::Local) {
+        return;
+    }
+    const QStringList chunk = nextFillChunk();
+    if (chunk.isEmpty()) {
+        endIngestSessionIfIdle();
+        return;
+    }
+    startMetadataFill(chunk);
+}
+
+void MainWindow::startMetadataFill(const QStringList &paths)
+{
+    if (paths.isEmpty() || m_fillThread != nullptr || m_scanThread != nullptr) {
+        return;
+    }
+    ensureIngestSession();
+
+    ScanPipeline::Options options;
+    options.lowPriority = true;
+    options.batchSize = 64;  // small batches keep the UI fill smooth
+
+    const QString hint = QFileInfo(paths.first()).absolutePath();
+    m_fillThread = new QThread(this);
+    m_fillPipeline = new ScanPipeline(hint, paths, options);
+    m_fillPipeline->moveToThread(m_fillThread);
+    connect(m_fillThread, &QThread::started, m_fillPipeline, &ScanPipeline::run);
+    connect(m_fillPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
+    connect(m_fillPipeline, &ScanPipeline::progress, this,
+            [this](qint64, qint64 toProcess, qint64 processed, const QString &phase) {
+                if (phase == QStringLiteral("filling") && toProcess > 0) {
+                    statusBar()->showMessage(QStringLiteral("Filling metadata: %1 of %2").arg(processed).arg(toProcess), 2000);
+                }
+            });
+    connect(m_fillPipeline, &ScanPipeline::finished, this, &MainWindow::finishMetadataFill);
+    connect(m_fillPipeline, &ScanPipeline::finished, m_fillThread, &QThread::quit);
+    connect(m_fillThread, &QThread::finished, m_fillPipeline, &QObject::deleteLater);
+    connect(m_fillThread, &QThread::finished, m_fillThread, &QObject::deleteLater);
+    connect(m_fillThread, &QThread::finished, this, [this]() {
+        m_fillThread = nullptr;
+        m_fillPipeline = nullptr;
+        pumpMetadataFill();  // next chunk, or end the ingest session when drained
+    });
+    m_fillThread->start();
+}
+
+void MainWindow::finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
+{
+    Q_UNUSED(enumerated);
+    Q_UNUSED(indexed);
+    Q_UNUSED(skipped);
+    Q_UNUSED(canceled);
+    // ingestScanBatch already refreshed the views incrementally during the chunk;
+    // when the whole backlog is drained, do a final browse + search-index refresh.
+    if (m_database->enumeratedOnlyPaths({}, 1).isEmpty()) {
+        refreshArtists();
+        refreshLibraryFileExplorer();
+        m_searchView->invalidateIndex(databasePath());
+        statusBar()->showMessage(QStringLiteral("Library metadata complete"), 4000);
+    }
+}
+
+void MainWindow::ensureDirectoryScanned(const QString &directory)
+{
+    if (directory.isEmpty() || m_librarySource != LibrarySource::Local) {
+        return;
+    }
+    if (m_database->enumeratedOnlyPaths(directory, 1).isEmpty()) {
+        return;  // nothing pending in this directory
+    }
+    // Jump this directory to the front of the fill so opening it reads its tags now.
+    m_priorityFillDir = directory;
+    pumpMetadataFill();
+}
+
 void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
 {
     qCInfo(uiLog) << "scan finished" << enumerated << indexed << "skipped" << skipped << "canceled" << canceled;
-    m_database->endScanSession();
     const bool sourceScan = m_activeScanRootId > 0;
     const QString finishedRootPath = m_activeScanRootPath;
     if (sourceScan) {
@@ -1845,6 +1969,9 @@ void MainWindow::setLibraryExplorerDirectory(const QString &path)
     m_libraryExplorerDirectory = cleanDirectoryPath(path);
     refreshLibraryFileExplorer();
     saveMainWindowViewSettings();
+    // On access: if this directory still holds enumerated-only placeholders, jump
+    // it to the front of the background fill so its tags are read now.
+    ensureDirectoryScanned(m_libraryExplorerDirectory);
 }
 
 void MainWindow::setFreeRoamDirectory(const QString &path)

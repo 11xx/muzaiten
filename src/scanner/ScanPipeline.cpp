@@ -90,9 +90,23 @@ ScanPipeline::ScanPipeline(QString rootPath, int scanRootId,
 {
 }
 
+ScanPipeline::ScanPipeline(QString rootHint, QStringList fillPaths,
+                           Options options, QObject *parent)
+    : QObject(parent)
+    , m_mode(Mode::Fill)
+    , m_rootPath(std::move(rootHint))
+    , m_fillPaths(std::move(fillPaths))
+    , m_options(options)
+{
+}
+
 void ScanPipeline::run()
 {
-    runScan();
+    if (m_mode == Mode::Fill) {
+        runFill();
+    } else {
+        runScan();
+    }
 }
 
 void ScanPipeline::cancel()
@@ -125,24 +139,18 @@ void ScanPipeline::runScan()
     std::vector<std::string> toRead;
     toRead.reserve(found.size());
     qint64 skipped = 0;
-    // Brand-new paths become directory-view placeholders right after enumeration
-    // ("fast first pass"): they show their path/size immediately while the tag
-    // read fills in the rest. Only genuinely new paths need one — changed files
-    // already have a visible row, and existing placeholders already exist in the DB.
+    // Partition the enumeration: new files become directory-view placeholders now
+    // and defer their tag read to the background fill ("lazy"); changed files are
+    // re-read in the foreground (the fast incremental rescan); unchanged scanned
+    // files are skipped; existing placeholders are left for the fill. Deferring new
+    // files is what keeps a first scan fast — the foreground only does enumeration
+    // plus a handful of changed reads.
     QVector<Track> placeholders;
     for (const DirectoryWalker::Found &item : found) {
         const QString path = QString::fromStdString(item.path);
         seenPaths.insert(path);
         const auto it = m_fingerprints.constFind(path);
-        const bool known = it != m_fingerprints.constEnd();
-        // Skip only fully-scanned rows whose file is unchanged. Enumerated-only
-        // placeholders (metadataScanned == false) fall through to be tag-read.
-        if (!m_options.forceFullRescan && known && it->mtime == item.mtime
-            && it->size == item.size && it->metadataScanned) {
-            ++skipped;
-            continue;
-        }
-        if (!known) {
+        if (it == m_fingerprints.constEnd()) {
             const QFileInfo info(path);
             Track placeholder;
             placeholder.path = path;
@@ -152,8 +160,17 @@ void ScanPipeline::runScan()
             placeholder.fileSize = item.size;
             placeholder.fileMtime = item.mtime;
             placeholders.push_back(std::move(placeholder));
+            continue;
         }
-        toRead.push_back(item.path);
+        if (!it->metadataScanned) {
+            // Existing placeholder: already visible; the background fill reads it.
+            continue;
+        }
+        if (m_options.forceFullRescan || it->mtime != item.mtime || it->size != item.size) {
+            toRead.push_back(item.path);
+        } else {
+            ++skipped;
+        }
     }
     if (!m_cancel && !placeholders.isEmpty()) {
         emit enumeratedReady(placeholders);
@@ -177,6 +194,18 @@ void ScanPipeline::runScan()
     emit finished(enumerated, indexed, skipped, m_cancel);
 }
 
+void ScanPipeline::runFill()
+{
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<std::size_t>(m_fillPaths.size()));
+    for (qsizetype i = 0; i < m_fillPaths.size(); ++i) {
+        paths.push_back(m_fillPaths.at(i).toStdString());
+    }
+    const qint64 total = static_cast<qint64>(paths.size());
+    emit progress(total, total, 0, QStringLiteral("filling"));
+    const qint64 indexed = m_cancel ? 0 : processPaths(paths, total, QStringLiteral("filling"));
+    emit finished(total, indexed, 0, m_cancel);
+}
 
 qint64 ScanPipeline::processPaths(const std::vector<std::string> &paths, qint64 enumerated, const QString &phase)
 {

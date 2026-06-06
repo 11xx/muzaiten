@@ -166,6 +166,14 @@ private:
     void cancelScan();
     void ingestScanBatch(const QVector<Track> &tracks);
     void ingestEnumeratedPlaceholders(const QVector<Track> &tracks);
+    // Lazy background metadata fill of placeholder rows.
+    void pumpMetadataFill();
+    void startMetadataFill(const QStringList &paths);
+    void finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
+    void ensureDirectoryScanned(const QString &directory);
+    QStringList nextFillChunk();
+    void ensureIngestSession();
+    void endIngestSessionIfIdle();
     void markScannedTracksMissing(const QStringList &paths);
     void removeMissingTracks();
     void finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
@@ -225,6 +233,11 @@ private:
     QThread *m_scanThread = nullptr;
     ScanPipeline *m_scanPipeline = nullptr;
     bool m_forceFullRescan = false;
+    // Background metadata fill (lazy tag read of enumerated-only placeholders).
+    QThread *m_fillThread = nullptr;
+    ScanPipeline *m_fillPipeline = nullptr;
+    QString m_priorityFillDir;       // directory to fill next (on-access prioritization)
+    bool m_ingestSessionActive = false;  // spans scan + fill for the artist/album id cache
     std::unique_ptr<ArtworkCache> m_artworkCache;
     quint64 m_currentArtGeneration = 0;
     QThread *m_listenBrainzThread = nullptr;

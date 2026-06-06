@@ -47,6 +47,9 @@ public:
     // rootPrefix, for the incremental-rescan diff. Empty rootPrefix returns all
     // tracks. metadata_scanned lets the diff re-queue enumerated-only placeholders.
     QHash<QString, TrackFingerprint> trackFingerprints(const QString &rootPrefix = {}) const;
+    // Paths of enumerated-only placeholder rows (metadata_scanned=0) awaiting a tag
+    // read, optionally scoped to one directory and/or capped, for the lazy fill.
+    QStringList enumeratedOnlyPaths(const QString &parentDir = {}, int limit = 0) const;
     // Flags the given track paths as missing (file no longer present).
     int markTracksMissing(const QStringList &paths);
     int removeMissingTracks();
