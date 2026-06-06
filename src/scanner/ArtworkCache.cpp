@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QPainter>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QThread>
@@ -31,8 +33,102 @@ QStringList folderArtCandidates()
         QStringLiteral("Cover.jpeg"), QStringLiteral("cover.png"),  QStringLiteral("Cover.png"),
         QStringLiteral("folder.jpg"), QStringLiteral("Folder.jpg"), QStringLiteral("folder.png"),
         QStringLiteral("Folder.png"), QStringLiteral("front.jpg"),  QStringLiteral("Front.jpg"),
-        QStringLiteral("front.png"),  QStringLiteral("Front.png"),
+        QStringLiteral("front.jpeg"), QStringLiteral("Front.jpeg"), QStringLiteral("front.png"),
+        QStringLiteral("Front.png"),  QStringLiteral("album.jpg"),  QStringLiteral("Album.jpg"),
+        QStringLiteral("artwork.jpg"), QStringLiteral("Artwork.jpg"),
     };
+}
+
+const QSet<QString> &supportedImageExtensions()
+{
+    static const QSet<QString> extensions = {
+        QStringLiteral("jpg"),
+        QStringLiteral("jpeg"),
+        QStringLiteral("png"),
+        QStringLiteral("webp"),
+        QStringLiteral("bmp"),
+        QStringLiteral("gif"),
+        QStringLiteral("tif"),
+        QStringLiteral("tiff"),
+    };
+    return extensions;
+}
+
+QString normalizedArtName(QString text)
+{
+    text = QFileInfo(text).completeBaseName().toLower();
+    static const QRegularExpression bracketed(QStringLiteral("[\\[(][^\\])]*[\\])]"));
+    text.remove(bracketed);
+    static const QRegularExpression separators(QStringLiteral("[^\\p{L}\\p{N}]+"));
+    text.replace(separators, QStringLiteral(" "));
+    static const QRegularExpression whitespace(QStringLiteral("\\s{2,}"));
+    text.replace(whitespace, QStringLiteral(" "));
+    return text.trimmed();
+}
+
+bool isSupportedImageFile(const QFileInfo &info)
+{
+    return info.isFile() && info.isReadable() && supportedImageExtensions().contains(info.suffix().toLower());
+}
+
+int artCandidateScore(const QFileInfo &info, const QString &albumHint)
+{
+    const QString name = normalizedArtName(info.fileName());
+    if (name.isEmpty()) {
+        return 0;
+    }
+
+    int score = 1; // any image in the album dir is a last-resort fallback
+    if (name == QStringLiteral("cover") || name == QStringLiteral("folder") || name == QStringLiteral("front")) {
+        score = 100;
+    } else if (name.startsWith(QStringLiteral("cover")) || name.startsWith(QStringLiteral("front"))) {
+        score = 90;
+    } else if (name.contains(QStringLiteral("cover")) || name.contains(QStringLiteral("front"))
+               || name.contains(QStringLiteral("folder")) || name.contains(QStringLiteral("album"))
+               || name.contains(QStringLiteral("artwork"))) {
+        score = 75;
+    }
+    if (!albumHint.isEmpty() && (name == albumHint || name.contains(albumHint) || albumHint.contains(name))) {
+        score += 20;
+    }
+    if (name.contains(QStringLiteral("back")) || name.contains(QStringLiteral("booklet"))
+        || name.contains(QStringLiteral("obi")) || name.contains(QStringLiteral("insert"))
+        || name.contains(QStringLiteral("scan"))) {
+        score -= 25;
+    }
+    return score;
+}
+
+QString bestImageInDirectory(const QDir &dir, const QString &albumHint)
+{
+    QFileInfo best;
+    int bestScore = 0;
+    const QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Readable | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &entry : entries) {
+        if (!isSupportedImageFile(entry)) {
+            continue;
+        }
+        const int score = artCandidateScore(entry, albumHint);
+        if (score > bestScore || (score == bestScore && best.isFile() && entry.fileName() < best.fileName())) {
+            best = entry;
+            bestScore = score;
+        }
+    }
+    return bestScore > 0 ? best.absoluteFilePath() : QString();
+}
+
+bool isLikelyArtDirectory(const QFileInfo &info)
+{
+    if (!info.isDir() || !info.isReadable() || info.isSymLink()) {
+        return false;
+    }
+    const QString name = normalizedArtName(info.fileName());
+    return name == QStringLiteral("cover") || name == QStringLiteral("covers")
+        || name == QStringLiteral("art") || name == QStringLiteral("artwork")
+        || name == QStringLiteral("scan") || name == QStringLiteral("scans")
+        || name == QStringLiteral("image") || name == QStringLiteral("images")
+        || name == QStringLiteral("booklet") || name == QStringLiteral("booklets")
+        || name.startsWith(QStringLiteral("cover ")) || name.startsWith(QStringLiteral("covers "));
 }
 
 QString folderArtPath(const QString &directory)
@@ -45,6 +141,21 @@ QString folderArtPath(const QString &directory)
         const QFileInfo candidate(dir.filePath(name));
         if (candidate.isFile() && candidate.isReadable()) {
             return candidate.absoluteFilePath();
+        }
+    }
+    const QString albumHint = normalizedArtName(dir.dirName());
+    const QString direct = bestImageInDirectory(dir, albumHint);
+    if (!direct.isEmpty()) {
+        return direct;
+    }
+    const QFileInfoList subdirs = dir.entryInfoList(QDir::Dirs | QDir::Readable | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &subdir : subdirs) {
+        if (!isLikelyArtDirectory(subdir)) {
+            continue;
+        }
+        const QString nested = bestImageInDirectory(QDir(subdir.absoluteFilePath()), albumHint);
+        if (!nested.isEmpty()) {
+            return nested;
         }
     }
     return {};
