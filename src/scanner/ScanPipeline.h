@@ -36,6 +36,12 @@ public:
                  QHash<QString, TrackFingerprint> fingerprints,
                  Options options, QObject *parent = nullptr);
 
+    // Fill-only mode: read tags for an explicit set of paths (no enumeration, no
+    // missing detection). Used to lazily fill placeholder rows in the background.
+    // rootHint is used only for disk-type detection / thread sizing.
+    ScanPipeline(QString rootHint, QStringList fillPaths,
+                 Options options, QObject *parent = nullptr);
+
     int scanRootId() const { return m_scanRootId; }
 
 public slots:
@@ -52,12 +58,17 @@ signals:
     void finished(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
 
 private:
+    enum class Mode { Scan, Fill };
+
     void runScan();
+    void runFill();
     qint64 processPaths(const std::vector<std::string> &paths, qint64 enumerated, const QString &phase);
 
+    Mode m_mode = Mode::Scan;
     QString m_rootPath;
     int m_scanRootId = 0;
     QHash<QString, TrackFingerprint> m_fingerprints;
+    QStringList m_fillPaths;
     Options m_options;
     std::atomic_bool m_cancel = false;
 };
