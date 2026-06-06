@@ -69,10 +69,10 @@ KeyBindingMap mainPanelBindingMapForProfile(const QString &name)
 QVector<MainPanelId> defaultMainPanelFocusOrder()
 {
     return {
-        MainPanelId::Queue,
         MainPanelId::Artists,
         MainPanelId::Albums,
         MainPanelId::Tracks,
+        MainPanelId::Queue,
     };
 }
 
