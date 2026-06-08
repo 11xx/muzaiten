@@ -3457,17 +3457,15 @@ void MainWindow::playQueueIndex(int index, bool notifyScrobbler, bool startPause
         return;
     }
 
-    const int previousIndex = m_queueIndex;
     m_queueIndex = index;
-    if (explicitJump && previousIndex > index) {
-        // Backward jump to an earlier track: the tracks between the new current and
-        // the old current (inclusive of the old current) become the play-next
-        // region, order unchanged.
-        m_playNextInsertIndex = std::clamp(previousIndex + 1, m_queueIndex + 1, static_cast<int>(m_queue.size()));
-    } else if (explicitJump) {
-        // A manual jump to any other row invalidates a previous play-next batch:
-        // those tracks keep their queue positions, but they are no longer the
-        // actual next-priority span after the user picked a new current track.
+    if (explicitJump) {
+        // A manual jump to any row (forward or backward) clears the play-next
+        // batch: the user picking a new current track supersedes whatever was
+        // queued to play next. Collapsing the region to m_queueIndex+1 drops the
+        // play-next marking while leaving every track in its natural queue order
+        // (nothing is moved). A backward jump must NOT turn the skipped tracks
+        // into a new play-next span — that was misleading and is intentionally
+        // not done here.
         m_playNextInsertIndex = m_queueIndex + 1;
     } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
         m_playNextInsertIndex = m_queueIndex + 1;
