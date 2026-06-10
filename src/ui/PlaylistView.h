@@ -46,17 +46,31 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+    // Display-only ordering. The canonical ordinal is always preserved in the
+    // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
+    enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
+
     void createPlaylist();
     void renameCurrentPlaylist();
     void deleteCurrentPlaylist();
     void removeSelectedItems();
+    void exportCurrentPlaylist();
+    void cycleAddedSort();
+    void sortByColumn(int column);
+    void populateItems();
+    QVector<PlaylistItem> displayItems() const;
     void updateHeader();
 
     QStringList selectedItemPaths(int *startIndex = nullptr) const;
+    // Maps a (possibly sorted) display row to its backing item via the id stored
+    // in the cell's UserRole. Returns nullptr if the row has no live item.
+    const PlaylistItem *itemForDisplayRow(int row) const;
 
     PlaylistDatabase *m_db = nullptr;
     qint64 m_currentPlaylistId = 0;
-    QVector<PlaylistItem> m_items;
+    QVector<PlaylistItem> m_items;   // canonical, ordinal order
+    SortKey m_sortKey = SortKey::Ordinal;
+    bool m_sortDescending = false;
 
     QListWidget *m_playlistList = nullptr;
     QTableWidget *m_itemTable = nullptr;
