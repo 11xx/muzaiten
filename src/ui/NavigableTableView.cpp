@@ -65,6 +65,17 @@ void NavigableTableView::setCurrentNavigationRow(int row, int direction)
     }
     setCurrentIndex(index);
     scrollNavigationRowToAnchor(safeRow, direction, previousTopRow);
+
+    // Guarantee the selected row is genuinely inside the viewport. The anchor
+    // math uses a floored visibleRows estimate and clamps the desired top to the
+    // scrollbar maximum, which on a page-down to the final row can leave that row
+    // resting just past the bottom edge — still current/selected, but scrolled
+    // out of view, so the delegate never paints its highlight. EnsureVisible is a
+    // no-op when the row is already fully shown, so the anchor padding is kept.
+    const QRect rect = visualRect(index);
+    if (!rect.isValid() || !viewport()->rect().contains(rect.center())) {
+        scrollTo(index, QAbstractItemView::EnsureVisible);
+    }
 }
 
 void NavigableTableView::setMainPanelActive(bool active)
