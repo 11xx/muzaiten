@@ -390,6 +390,10 @@ void AlbumGrid::moveCurrentByGrid(int horizontal, int vertical)
     const int columns = gridColumnCount();
     const int target = current + horizontal + (vertical * columns);
     setCurrentRow(std::clamp(target, 0, model()->rowCount() - 1));
+    // Narrowing follows the keyboard cursor: with no marks this re-narrows the
+    // track table to the album now under the cursor; with marks it re-asserts
+    // the marked set (a no-op dedup on the receiver), keeping that narrow live.
+    followNarrowToSelection();
 }
 
 void AlbumGrid::activateCurrentAlbum()
@@ -433,6 +437,7 @@ void AlbumGrid::markAllAlbums()
         }
     }
     reselectMarkedAlbums();
+    followNarrowToSelection();
 }
 
 void AlbumGrid::unmarkCurrentAlbum()
@@ -449,6 +454,7 @@ void AlbumGrid::unmarkAllAlbums()
     if (currentIndex().isValid()) {
         setCurrentRow(currentIndex().row());
     }
+    followNarrowToSelection();
 }
 
 QString AlbumGrid::currentAlbumTitle() const
@@ -675,6 +681,7 @@ void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
         m_rememberedOutlineVisible = false;
         setCurrentRowInternal(index.row(), false);
         applyMarkedAlbumSelection();
+        followNarrowToSelection();
         event->accept();
         return;
     }
@@ -691,6 +698,7 @@ void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
         m_rememberedOutlineVisible = false;
         setCurrentRowInternal(index.row(), false);
         applyMarkedAlbumSelection();
+        followNarrowToSelection();
         event->accept();
         return;
     }
@@ -942,6 +950,11 @@ void AlbumGrid::applySettingsToItems()
     viewport()->update();
 }
 
+void AlbumGrid::followNarrowToSelection()
+{
+    emit albumNarrowFollowRequested(albumTitlesForAction());
+}
+
 void AlbumGrid::reselectMarkedAlbums()
 {
     if (model() == nullptr || selectionModel() == nullptr || m_markedAlbumTitles.isEmpty()) {
@@ -995,6 +1008,7 @@ void AlbumGrid::setCurrentAlbumMarked(bool marked)
         selectionModel()->select(currentIndex(), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
         selectionModel()->select(currentIndex(), QItemSelectionModel::Select | QItemSelectionModel::Rows);
     }
+    followNarrowToSelection();
 }
 
 void AlbumGrid::refreshRememberedOutline()
@@ -1060,6 +1074,8 @@ void AlbumGrid::finishRubberBandSelection()
         m_shiftAnchorRow = currentRow();
     }
     stopDragSelection();
+    // Narrow once on drag release rather than on every intermediate move.
+    followNarrowToSelection();
 }
 
 void AlbumGrid::updateDragAutoscroll()

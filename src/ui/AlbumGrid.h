@@ -53,6 +53,10 @@ signals:
     void albumSelectionToggled(const QString &albumTitle);
     void albumSelectionCleared();
     void albumSelectionNarrowRequested(const QStringList &albumTitles);
+    // Lightweight "narrowing follows selection" — emitted as the cursor moves or
+    // the marked set changes so the track table re-narrows live without the full
+    // grid rebuild that albumSelectionNarrowRequested (n key) triggers.
+    void albumNarrowFollowRequested(const QStringList &albumTitles);
     void albumPlayNextRequested(const QString &albumTitle);
     void albumAddToQueueRequested(const QString &albumTitle);
     void albumRatingChanged(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
@@ -84,6 +88,9 @@ private:
     void onArtworkMissing(const QString &token, quint64 generation);
     void clearItemLoading(int row);
     void reselectMarkedAlbums();
+    // Emits albumNarrowFollowRequested for the current action set (the marked
+    // albums, or the lone current album when nothing is marked).
+    void followNarrowToSelection();
     void setCurrentAlbumMarked(bool marked);
     void refreshRememberedOutline();
     void setCurrentRowInternal(int row, bool clearRememberedOutline);

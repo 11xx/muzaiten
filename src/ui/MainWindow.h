@@ -58,6 +58,7 @@ private:
     void showArtist(const QString &artistName, bool forceReload, bool clearAlbumSelectionOnArtistChange);
     void selectAlbumFilter(const QString &albumTitle);
     void narrowAlbumFilters(const QStringList &albumTitles);
+    void setAlbumNarrowFromGrid(const QStringList &albumTitles);
     void clearAlbumFilter();
     void refreshAlbumGrid(bool freshLoad = false);
     void refreshTrackTable();

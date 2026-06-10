@@ -447,6 +447,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
     connect(m_albumGrid, &AlbumGrid::albumSelectionCleared, this, &MainWindow::clearAlbumFilter);
     connect(m_albumGrid, &AlbumGrid::albumSelectionNarrowRequested, this, &MainWindow::narrowAlbumFilters);
+    connect(m_albumGrid, &AlbumGrid::albumNarrowFollowRequested, this, &MainWindow::setAlbumNarrowFromGrid);
     connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
@@ -1472,6 +1473,30 @@ void MainWindow::narrowAlbumFilters(const QStringList &albumTitles)
     refreshAlbumGrid();
     refreshTrackTable();
     restoreTrackTableViewState();
+    m_loadedPanelArtist = m_currentArtist;
+    m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
+    m_loadedPanelSource = m_librarySource;
+    saveExplorerState();
+}
+
+void MainWindow::setAlbumNarrowFromGrid(const QStringList &albumTitles)
+{
+    // Live "narrowing follows selection" path from the album grid (cursor moves,
+    // mark changes). Unlike narrowAlbumFilters it refreshes only the track table
+    // and updates the grid's narrow highlight in place — no album-grid rebuild —
+    // so it is cheap enough to run on every keystroke. An empty set clears the
+    // narrowing (back to the whole artist).
+    const QStringList next = normalizedAlbumTitles(albumTitles);
+    if (next == m_selectedAlbumTitles) {
+        return;
+    }
+    rememberTrackTableViewState();
+    m_selectedAlbumTitles = next;
+    m_selectedAlbumTitle = next.size() == 1 ? next.first() : QString();
+    rememberCurrentSourceSelection();
+    refreshTrackTable();
+    restoreTrackTableViewState();
+    m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
     m_loadedPanelArtist = m_currentArtist;
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;

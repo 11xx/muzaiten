@@ -549,11 +549,9 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::PageDown)) movePage(+1);
     else if (action == QString::fromLatin1(MainPanelAction::PageUp)) movePage(-1);
     else if (action == QString::fromLatin1(MainPanelAction::FocusPrevious)) {
-        if (m_activePanel == MainPanelId::Tracks) {
-            if (MainPanelTarget *target = targetForId(m_activePanel); target != nullptr && target->clearNarrowing) {
-                target->clearNarrowing();
-            }
-        }
+        // h from Tracks used to clear the album narrowing on the way back to the
+        // grid; now narrowing follows the grid selection live, so we keep it and
+        // just move focus. Escape (below) still clears it explicitly.
         focusRelative(-1);
     }
     else if (action == QString::fromLatin1(MainPanelAction::FocusNext)) {
