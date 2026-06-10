@@ -53,6 +53,7 @@ set(MUZAITEN_SOURCES
     src/core/MusicSort.cpp
     src/core/Rating.cpp
     src/db/Database.cpp
+    src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
@@ -128,10 +129,12 @@ set(MUZAITEN_HEADERS
     src/core/MetadataBlob.h
     src/core/MusicBrainzIds.h
     src/core/MusicSort.h
+    src/core/Playlist.h
     src/core/Rating.h
     src/core/ScanRoot.h
     src/core/Track.h
     src/db/Database.h
+    src/db/PlaylistDatabase.h
     src/db/SettingsStore.h
     src/db/Schema.h
     src/fs/LinkRoot.h

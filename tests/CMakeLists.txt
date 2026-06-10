@@ -36,6 +36,16 @@ target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
 
+add_executable(test_playlist_database
+    test_playlist_database.cpp
+    ../src/db/PlaylistDatabase.cpp
+)
+target_include_directories(test_playlist_database PRIVATE ../src)
+target_link_libraries(test_playlist_database PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_playlist_database PRIVATE cxx_std_26)
+add_test(NAME test_playlist_database COMMAND test_playlist_database)
+set_tests_properties(test_playlist_database PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_path_guesser
     test_path_guesser.cpp
     ../src/scanner/PathMetadataGuesser.cpp

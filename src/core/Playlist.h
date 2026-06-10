@@ -1,0 +1,47 @@
+#pragma once
+
+#include <QMetaType>
+#include <QString>
+#include <QVector>
+#include <QtTypes>
+
+// Rich, self-contained playlist model backed by playlists.sqlite (separate from
+// the scanned library). Items reference library tracks by path AND carry a
+// metadata snapshot plus the search query that produced the match, so a playlist
+// survives rescans, can be exported, and can represent unresolved imports.
+
+enum class PlaylistItemStatus {
+    Matched,    // resolved to a single library track
+    Missing,    // had a track once, but the path is no longer in the library
+    Pending,    // imported text with no confident match yet
+    MultiMatch, // import produced several candidates; awaiting a pick
+};
+
+struct PlaylistItem {
+    qint64 id = 0;
+    qint64 playlistId = 0;
+    int ordinal = 0;            // canonical 0-based position within the playlist
+    QString trackPath;          // library resolve key; empty for pending/missing
+    QString titleSnapshot;
+    QString artistSnapshot;
+    QString albumSnapshot;
+    qint64 durationMs = 0;
+    qint64 addedAt = 0;         // epoch seconds, first added
+    qint64 modifiedAt = 0;      // epoch seconds, last edited
+    QString comment;            // free-form note, e.g. "where this came from"
+    QString query;              // remembered search query used to add/edit it
+    PlaylistItemStatus status = PlaylistItemStatus::Matched;
+};
+
+struct Playlist {
+    qint64 id = 0;
+    QString name;
+    QString comment;
+    qint64 createdAt = 0;       // epoch seconds
+    qint64 updatedAt = 0;       // epoch seconds
+    int itemCount = 0;          // populated by list queries; not stored
+};
+
+Q_DECLARE_METATYPE(PlaylistItem)
+Q_DECLARE_METATYPE(Playlist)
+Q_DECLARE_METATYPE(QVector<PlaylistItem>)
