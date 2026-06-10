@@ -20,6 +20,7 @@ namespace QueueAction {
     inline constexpr auto Search         = "search";
     inline constexpr auto SearchNext     = "search_next";
     inline constexpr auto SearchPrevious = "search_previous";
+    inline constexpr auto AddToPlaylist   = "add_to_playlist";
     inline constexpr auto Escape         = "escape";
 }
 

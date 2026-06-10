@@ -409,6 +409,15 @@ void PanelSearchController::addCurrentToQueue()
     }
 }
 
+void PanelSearchController::addCurrentToPlaylist()
+{
+    if (MainPanelTarget *target = targetForId(m_activePanel)) {
+        if (target->addCurrentToPlaylist) {
+            target->addCurrentToPlaylist();
+        }
+    }
+}
+
 void PanelSearchController::playNextCurrent()
 {
     if (MainPanelTarget *target = targetForId(m_activePanel)) {
@@ -562,6 +571,7 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::Activate)) activateCurrent();
     else if (action == QString::fromLatin1(MainPanelAction::PlayNow)) playCurrentNow();
     else if (action == QString::fromLatin1(MainPanelAction::AddToQueue)) addCurrentToQueue();
+    else if (action == QString::fromLatin1(MainPanelAction::AddToPlaylist)) addCurrentToPlaylist();
     else if (action == QString::fromLatin1(MainPanelAction::PlayNext)) playNextCurrent();
     else if (action == QString::fromLatin1(MainPanelAction::Mark)) markCurrent();
     else if (action == QString::fromLatin1(MainPanelAction::MarkAll)) markAll();

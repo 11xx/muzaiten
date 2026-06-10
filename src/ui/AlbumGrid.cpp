@@ -389,11 +389,10 @@ void AlbumGrid::moveCurrentByGrid(int horizontal, int vertical)
     const int current = currentRow() >= 0 ? currentRow() : 0;
     const int columns = gridColumnCount();
     const int target = current + horizontal + (vertical * columns);
+    // j/k clears marks so only the cursor item is highlighted; auto-narrow is
+    // intentionally skipped — that fires on mouse click/drag-release only.
+    m_markedAlbumTitles.clear();
     setCurrentRow(std::clamp(target, 0, model()->rowCount() - 1));
-    // Narrowing follows the keyboard cursor: with no marks this re-narrows the
-    // track table to the album now under the cursor; with marks it re-asserts
-    // the marked set (a no-op dedup on the receiver), keeping that narrow live.
-    followNarrowToSelection();
 }
 
 void AlbumGrid::activateCurrentAlbum()
@@ -411,6 +410,11 @@ void AlbumGrid::addCurrentAlbumToQueue()
     for (const QString &title : albumTitlesForAction()) {
         emit albumAddToQueueRequested(title);
     }
+}
+
+void AlbumGrid::addCurrentAlbumToPlaylist()
+{
+    emit albumAddToPlaylistRequested(albumTitlesForAction());
 }
 
 void AlbumGrid::playNextCurrentAlbum()
@@ -617,12 +621,13 @@ void AlbumGrid::mouseMoveEvent(QMouseEvent *event)
 
 void AlbumGrid::mousePressEvent(QMouseEvent *event)
 {
-    const QModelIndex index = indexAt(event->pos());
-    if (!index.isValid() || event->button() != Qt::LeftButton) {
+    if (event->button() != Qt::LeftButton) {
         QListView::mousePressEvent(event);
         return;
     }
 
+    // Record press state before knowing whether the pointer is over an item so
+    // that a drag starting from empty space can still grow into a rubber band.
     m_leftButtonPressed = true;
     m_dragSelecting = false;
     m_dragStartPos = event->pos();
@@ -630,7 +635,15 @@ void AlbumGrid::mousePressEvent(QMouseEvent *event)
     m_dragStartScroll = verticalScrollBar()->value();
     m_dragModifiers = event->modifiers();
     m_dragBaseMarkedAlbumTitles = m_markedAlbumTitles;
-    m_pressStartedOnRating = StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos()) >= 0;
+
+    const QModelIndex index = indexAt(event->pos());
+    m_pressStartedOnRating = index.isValid()
+        && StarRating::ratingFromPosition(ratingRectForIndex(index), event->pos()) >= 0;
+
+    if (!index.isValid()) {
+        event->accept();
+        return;
+    }
     if (m_shiftAnchorRow < 0) {
         m_shiftAnchorRow = currentRow() >= 0 ? currentRow() : index.row();
     }

@@ -41,6 +41,8 @@ signals:
     // Re-open the add modal pre-filled with this item's remembered query to edit
     // which track it resolves to.
     void editItemRequested(qint64 playlistId, qint64 itemId, const QString &query);
+    // Open the "choose playlist" dialog for these item paths (e.g. copy to another list).
+    void addToPlaylistRequested(const QStringList &paths);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -72,6 +74,7 @@ private:
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;
 
+    bool m_showCreatedDate = true;
     QListWidget *m_playlistList = nullptr;
     QTableWidget *m_itemTable = nullptr;
     QLabel *m_header = nullptr;

@@ -30,6 +30,7 @@ QVector<KeyBindingProfile> defaultQueueKeyBindingProfiles()
         {Qt::Key_X, ClearPlayNext},
         {Qt::Key_F, FindFile},
         {Qt::Key_L, FindLibrary},
+        {Qt::Key_A, AddToPlaylist},
         {Qt::Key_O, JumpPlaying},
         {Qt::Key_Slash, Search},
         {QKeySequence(Qt::ControlModifier | Qt::Key_S), Search},

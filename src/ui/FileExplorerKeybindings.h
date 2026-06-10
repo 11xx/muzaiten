@@ -19,6 +19,7 @@ namespace ExplorerAction {
     inline constexpr auto PlayNext        = "play_next";
     inline constexpr auto ImportDirectory = "import_directory";
     inline constexpr auto FindFile        = "find_file";
+    inline constexpr auto AddToPlaylist   = "add_to_playlist";
     inline constexpr auto GoHome          = "go_home";
     inline constexpr auto GoToStart       = "go_to_start";
     inline constexpr auto Escape          = "escape";

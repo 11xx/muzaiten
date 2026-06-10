@@ -285,6 +285,11 @@ bool SearchView::handleNavKey(QKeyEvent *ke)
     if (key == Qt::Key_Tab) { toggleMarkAtCursor(); moveCursor(+1); return true; }
     if (ctrl && key == Qt::Key_Space) { toggleMarkAtCursor(); return true; }
     if (ctrl && key == Qt::Key_A) { m_resultList->selectAll(); return true; }
+    if (mods == Qt::NoModifier && key == Qt::Key_A) {
+        const QVector<Track> tracks = selectedTracks();
+        if (!tracks.isEmpty()) { emit addToPlaylistRequested(tracks); }
+        return true;
+    }
 
     // Fuzzy toggle
     if (ctrl && key == Qt::Key_F) { toggleFuzzyMode(); return true; }
@@ -587,6 +592,9 @@ void SearchView::showContextMenu(const QPoint &pos)
     });
     menu.addAction(QStringLiteral("Add to queue%1").arg(many), this, [this, targets]() {
         emit addToQueueRequested(targets);
+    });
+    menu.addAction(QStringLiteral("Add to playlist…%1").arg(many), this, [this, targets]() {
+        emit addToPlaylistRequested(targets);
     });
     menu.addAction(QStringLiteral("Play next%1").arg(many), this, [this, targets]() {
         emit playNextRequested(targets);

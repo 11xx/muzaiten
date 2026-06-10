@@ -1176,6 +1176,17 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(properties, &QAction::triggered, this, [this, track]() {
         emit propertiesRequested(track);
     });
+    menu.addAction(QStringLiteral("Add to playlist…"), this, [this]() {
+        const QVector<int> rows = selectedRowsForAction();
+        QVector<Track> tracks;
+        tracks.reserve(rows.size());
+        for (int r : rows) {
+            if (m_store != nullptr && r >= 0 && r < m_store->tracks().size()) {
+                tracks.push_back(m_store->tracks().at(r));
+            }
+        }
+        if (!tracks.isEmpty()) { emit addToPlaylistRequested(tracks); }
+    });
     QAction *removeSelected = menu.addAction(QStringLiteral("Remove selected"));
     connect(removeSelected, &QAction::triggered, this, [this]() {
         QVector<int> rows;
@@ -1253,6 +1264,16 @@ bool QueueTable::handleKeyPress(QKeyEvent *event)
         if (!track.path.isEmpty()) {
             emit trackLibraryRequested(track);
         }
+    } else if (action == QString::fromLatin1(QueueAction::AddToPlaylist)) {
+        const QVector<int> rows = selectedRowsForAction();
+        QVector<Track> tracks;
+        tracks.reserve(rows.size());
+        for (int r : rows) {
+            if (m_store != nullptr && r >= 0 && r < m_store->tracks().size()) {
+                tracks.push_back(m_store->tracks().at(r));
+            }
+        }
+        if (!tracks.isEmpty()) { emit addToPlaylistRequested(tracks); }
     } else if (action == QString::fromLatin1(QueueAction::JumpPlaying)) {
         revealCurrentPlaying();
     } else if (action == QString::fromLatin1(QueueAction::Search)) {

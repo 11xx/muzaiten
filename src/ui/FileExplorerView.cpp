@@ -494,6 +494,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     QAction *play = menu.addAction(QStringLiteral("Play"));
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
+    QAction *addPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
     QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
     QAction *properties = menu.addAction(QStringLiteral("Properties"));
 
@@ -529,6 +530,8 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         emit playNextRequested(tracks);
     } else if (selected == addQueue) {
         emit addToQueueRequested(tracks);
+    } else if (selected == addPlaylist) {
+        emit addToPlaylistRequested(tracks);
     } else if (selected == findFile) {
         emit findFileRequested(tracks.first());
     } else if (selected == properties) {
@@ -1054,6 +1057,12 @@ void FileExplorerView::applyKeyAction(const QString &action)
         const QVector<Track> tracks = selectedTracks();
         if (!tracks.isEmpty()) {
             emit addToQueueRequested(tracks);
+        }
+
+    } else if (action == AddToPlaylist) {
+        const QVector<Track> tracks = selectedTracks();
+        if (!tracks.isEmpty()) {
+            emit addToPlaylistRequested(tracks);
         }
 
     } else if (action == PlayNext) {

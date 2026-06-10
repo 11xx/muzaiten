@@ -60,6 +60,7 @@ signals:
     void trackActivated(const Track &track);
     void playNextRequested(const QVector<Track> &tracks);
     void addToQueueRequested(const QVector<Track> &tracks);
+    void addToPlaylistRequested(const QVector<Track> &tracks);
     void importDirectoryRequested(const QString &path);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);

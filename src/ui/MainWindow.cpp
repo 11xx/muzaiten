@@ -469,6 +469,16 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
     connect(m_albumGrid, &AlbumGrid::albumPlayReplaceRequested, this, &MainWindow::playAlbumsReplacingQueue);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
+    connect(m_albumGrid, &AlbumGrid::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
+        QVector<Track> tracks;
+        for (const QString &title : titles) {
+            const QVector<Track> albumTracks = m_librarySource == LibrarySource::Mpd
+                ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), title)
+                : m_database->tracksForArtist(m_currentArtist, title);
+            tracks.append(albumTracks);
+        }
+        openAddToPlaylistDialog(tracks);
+    });
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
@@ -538,6 +548,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { clearAlbumFilter(); },
         [this]() { return m_albumGrid->searchDocuments(); },
+        [this]() { m_albumGrid->addCurrentAlbumToPlaylist(); },
     });
     m_panelSearch->registerTarget({
         MainPanelId::Tracks,
@@ -559,6 +570,7 @@ MainWindow::MainWindow(QWidget *parent)
         {},
         [this]() { clearAlbumFilter(); },
         [this]() { return m_trackTable->searchDocuments(); },
+        [this]() { m_trackTable->addCurrentTrackToPlaylist(); },
     });
     connect(m_panelSearch, &PanelSearchController::statusMessage, this, [this](const QString &message, int timeoutMs) {
         statusBar()->showMessage(message, timeoutMs);
@@ -586,6 +598,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_queueScreen, &QueueScreen::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
@@ -673,6 +686,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_trackTable, &TrackTable::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_trackTable, &TrackTable::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
@@ -690,6 +704,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_libraryFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_libraryFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
     connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, &MainWindow::playNextTracks);
@@ -699,6 +714,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_freeRoamFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
 
@@ -713,6 +729,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
 
     // Playlist view (key 5). Resolves stored paths against the live library;
     // playing a playlist replaces the queue (snapshotting the previous one).
@@ -733,6 +750,9 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
+    connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
+        openAddToPlaylistDialog(tracksForPaths(paths));
+    });
 
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
@@ -4026,6 +4046,47 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
 
     dialog->exec();
     delete dialog;
+    m_playlistView->reloadItems();
+    m_playlistView->reloadPlaylists();
+}
+
+void MainWindow::openAddToPlaylistDialog(const QVector<Track> &tracks)
+{
+    if (m_playlistDb == nullptr || tracks.isEmpty()) {
+        return;
+    }
+    const QVector<Playlist> playlists = m_playlistDb->playlists();
+    QStringList names;
+    names.reserve(playlists.size());
+    for (const Playlist &p : playlists) {
+        names << p.name;
+    }
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(
+        this, QStringLiteral("Add to playlist"), QStringLiteral("Playlist:"),
+        names, 0, /*editable=*/true, &ok).trimmed();
+    if (!ok || chosen.isEmpty()) {
+        return;
+    }
+    qint64 id = 0;
+    for (const Playlist &p : playlists) {
+        if (p.name == chosen) {
+            id = p.id;
+            break;
+        }
+    }
+    if (id <= 0) {
+        id = m_playlistDb->createPlaylist(chosen);
+    }
+    if (id <= 0) {
+        return;
+    }
+    for (const Track &track : tracks) {
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        m_playlistDb->addItem(id, playlistItemFromTrack(track, QString()));
+    }
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
 }

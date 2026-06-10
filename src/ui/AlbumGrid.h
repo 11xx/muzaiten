@@ -40,6 +40,7 @@ public:
     void moveCurrentByGrid(int horizontal, int vertical);
     void activateCurrentAlbum();
     void addCurrentAlbumToQueue();
+    void addCurrentAlbumToPlaylist();
     void playNextCurrentAlbum();
     void markCurrentAlbum();
     void markAllAlbums();
@@ -57,6 +58,7 @@ signals:
     // the marked set changes so the track table re-narrows live without the full
     // grid rebuild that albumSelectionNarrowRequested (n key) triggers.
     void albumNarrowFollowRequested(const QStringList &albumTitles);
+    void albumAddToPlaylistRequested(const QStringList &albumTitles);
     void albumPlayNextRequested(const QString &albumTitle);
     void albumPlayReplaceRequested(const QStringList &albumTitles);
     void albumAddToQueueRequested(const QString &albumTitle);

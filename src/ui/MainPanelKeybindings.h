@@ -25,6 +25,7 @@ namespace MainPanelAction {
     inline constexpr auto Activate = "activate";
     inline constexpr auto PlayNow = "play_now";
     inline constexpr auto AddToQueue = "add_to_queue";
+    inline constexpr auto AddToPlaylist = "add_to_playlist";
     inline constexpr auto PlayNext = "play_next";
     inline constexpr auto Mark = "mark";
     inline constexpr auto MarkAll = "mark_all";

@@ -33,6 +33,7 @@ struct MainPanelTarget {
     std::function<void(int horizontal, int vertical)> moveCurrentInGrid;
     std::function<void()> clearNarrowing;
     std::function<QVector<Search::MatchDocument>()> documents;
+    std::function<void()> addCurrentToPlaylist = {};  // optional; null = not supported by this panel
 };
 
 class PanelSearchController final : public QWidget {
@@ -87,6 +88,7 @@ private:
     void activateCurrent();
     void playCurrentNow();
     void addCurrentToQueue();
+    void addCurrentToPlaylist();
     void playNextCurrent();
     void markCurrent();
     void markAll();

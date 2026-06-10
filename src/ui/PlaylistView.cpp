@@ -2,6 +2,7 @@
 
 #include "db/PlaylistDatabase.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
 #include <QHBoxLayout>
@@ -60,6 +61,7 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     m_playlistList = new QListWidget(splitter);
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_playlistList->setWordWrap(true);
     m_playlistList->installEventFilter(this);
 
     m_itemTable = new QTableWidget(splitter);
@@ -114,9 +116,16 @@ void PlaylistView::reloadPlaylists()
     const qint64 keep = m_currentPlaylistId;
     m_playlistList->clear();
     for (const Playlist &playlist : m_db->playlists()) {
-        auto *item = new QListWidgetItem(
-            QStringLiteral("%1  (%2)").arg(playlist.name).arg(playlist.itemCount), m_playlistList);
+        QString text = QStringLiteral("%1  (%2)").arg(playlist.name).arg(playlist.itemCount);
+        if (m_showCreatedDate && playlist.createdAt > 0) {
+            const QString date = QDateTime::fromSecsSinceEpoch(playlist.createdAt).toString(QStringLiteral("d MMM yyyy"));
+            text += QStringLiteral("\n%1").arg(date);
+        }
+        auto *item = new QListWidgetItem(text, m_playlistList);
         item->setData(Qt::UserRole, playlist.id);
+        if (m_showCreatedDate && playlist.createdAt > 0) {
+            item->setSizeHint(QSize(0, 40));
+        }
     }
     if (keep > 0) {
         selectPlaylist(keep);
@@ -258,8 +267,8 @@ void PlaylistView::updateHeader()
 {
     if (m_currentPlaylistId <= 0) {
         m_header->setText(QStringLiteral(
-            "Playlists — a: new   R: rename   D: delete   x: export   l/Enter: open   "
-            "(inside) =/+: add   e: edit   d: remove   s: sort   Enter: play"));
+            "Playlists — a: new   R: rename   D: delete   x: export   =/+: add song   T: toggle date   l/Enter: open   "
+            "(inside) =/+: add   a: add-to-playlist   e: edit   d: remove   s: sort   Enter: play"));
         return;
     }
     const QListWidgetItem *current = m_playlistList->currentItem();
@@ -488,16 +497,26 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         case Qt::Key_Return:
         case Qt::Key_Enter:
         case Qt::Key_Right:
-            if (m_itemTable->rowCount() > 0) {
+            if (m_currentPlaylistId > 0) {
                 m_itemTable->setFocus(Qt::OtherFocusReason);
-                if (m_itemTable->currentRow() < 0) {
+                if (m_itemTable->currentRow() < 0 && m_itemTable->rowCount() > 0) {
                     m_itemTable->setCurrentCell(0, 0);
                 }
             }
             return true;
-        case Qt::Key_A:
+        case Qt::Key_Equal:
+        case Qt::Key_Plus:
+            if (m_currentPlaylistId > 0) {
+                emit addSongRequested(m_currentPlaylistId);
+            }
+            return true;
         case Qt::Key_Insert:
+        case Qt::Key_A:
             createPlaylist();
+            return true;
+        case Qt::Key_T:
+            m_showCreatedDate = !m_showCreatedDate;
+            reloadPlaylists();
             return true;
         case Qt::Key_R:
         case Qt::Key_F2:
@@ -554,6 +573,13 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
                 emit addSongRequested(m_currentPlaylistId);
             }
             return true;
+        case Qt::Key_A: {
+            const QStringList paths = selectedItemPaths();
+            if (!paths.isEmpty()) {
+                emit addToPlaylistRequested(paths);
+            }
+            return true;
+        }
         case Qt::Key_E: {
             const PlaylistItem *item = itemForDisplayRow(m_itemTable->currentRow());
             if (item != nullptr && m_currentPlaylistId > 0) {

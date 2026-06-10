@@ -40,6 +40,7 @@ public:
     void moveCurrentRow(int delta);
     void activateCurrentTrack();
     void addCurrentTrackToQueue();
+    void addCurrentTrackToPlaylist();
     void playNextCurrentTrack();
     void markCurrentTrack();
     void markAllTracks();
@@ -51,6 +52,7 @@ signals:
     void trackActivated(const Track &track);
     void playNextRequested(const QVector<Track> &tracks);
     void addToQueueRequested(const QVector<Track> &tracks);
+    void addToPlaylistRequested(const QVector<Track> &tracks);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);

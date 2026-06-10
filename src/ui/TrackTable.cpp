@@ -673,6 +673,18 @@ void TrackTable::addCurrentTrackToQueue()
     }
 }
 
+void TrackTable::addCurrentTrackToPlaylist()
+{
+    const QModelIndex index = currentIndex();
+    if (!index.isValid()) {
+        return;
+    }
+    const QVector<Track> tracks = tracksForActionRow(index.row());
+    if (!tracks.isEmpty()) {
+        emit addToPlaylistRequested(tracks);
+    }
+}
+
 void TrackTable::playNextCurrentTrack()
 {
     const QModelIndex index = currentIndex();
@@ -902,6 +914,10 @@ void TrackTable::showCellMenu(const QPoint &pos)
     QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
     connect(addToQueue, &QAction::triggered, this, [this, tracks]() {
         emit addToQueueRequested(tracks);
+    });
+    QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
+    connect(addToPlaylist, &QAction::triggered, this, [this, tracks]() {
+        emit addToPlaylistRequested(tracks);
     });
 
     const Track track = model()->index(index.row(), 0).data(TrackRole).value<Track>();

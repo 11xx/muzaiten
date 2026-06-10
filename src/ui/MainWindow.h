@@ -211,6 +211,7 @@ private:
     QVector<Track> tracksForPaths(const QStringList &paths) const;
     void openPlaylistAddModal(qint64 playlistId);
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
+    void openAddToPlaylistDialog(const QVector<Track> &tracks);
     QString resolvedReadPathForTrack(const Track &track) const;
     void rememberTrackTableViewState();
     void restoreTrackTableViewState();

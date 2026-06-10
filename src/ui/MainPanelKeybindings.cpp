@@ -34,6 +34,7 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
         {Qt::Key_Enter, PlayNow},
         {QKeySequence(Qt::AltModifier | Qt::Key_Return), PlayNow},
         {QKeySequence(Qt::AltModifier | Qt::Key_Enter), PlayNow},
+        {Qt::Key_A, AddToPlaylist},
         {Qt::Key_Space, AddToQueue},
         {QKeySequence(Qt::AltModifier | Qt::Key_Space), PlayNext},
         {Qt::Key_M, Mark},

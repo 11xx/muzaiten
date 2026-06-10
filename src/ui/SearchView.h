@@ -45,6 +45,7 @@ public:
 
 signals:
     void addToQueueRequested(QVector<Track> tracks);
+    void addToPlaylistRequested(QVector<Track> tracks);
     void playNextRequested(QVector<Track> tracks);
     void playNowRequested(QVector<Track> tracks);
     void findInLibraryRequested(Track track);
