@@ -104,6 +104,7 @@ set(MUZAITEN_SOURCES
     src/ui/PlaybackResumeDialog.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
+    src/ui/PlaylistView.cpp
     src/ui/QueueKeybindings.cpp
     src/ui/QueueScreen.cpp
     src/ui/QueueStore.cpp
@@ -192,6 +193,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
+    src/ui/PlaylistView.h
     src/ui/QueueKeybindings.h
     src/ui/QueueScreen.h
     src/ui/QueueStore.h

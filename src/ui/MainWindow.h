@@ -11,6 +11,8 @@
 
 class QJsonObject;
 class Database;
+class PlaylistDatabase;
+class PlaylistView;
 class SettingsStore;
 class AlbumGrid;
 class ArtistSidebar;
@@ -39,7 +41,7 @@ class ArtworkCache;
 class SearchView;
 
 enum class LibrarySource { Local, Mpd };
-enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue };
+enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue, Playlist };
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -205,6 +207,10 @@ private:
     void onArtworkReady(const QString &token, const QImage &image, quint64 generation);
     void onArtworkMissing(const QString &token, quint64 generation);
     QString databasePath() const;
+    QString playlistDatabasePath() const;
+    QVector<Track> tracksForPaths(const QStringList &paths) const;
+    void openPlaylistAddModal(qint64 playlistId);
+    void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
     QString resolvedReadPathForTrack(const Track &track) const;
     void rememberTrackTableViewState();
     void restoreTrackTableViewState();
@@ -227,11 +233,13 @@ private:
     FileExplorerView *m_libraryFileExplorer = nullptr;
     FileExplorerView *m_freeRoamFileExplorer = nullptr;
     SearchView       *m_searchView = nullptr;
+    PlaylistView     *m_playlistView = nullptr;
     PanelSearchController *m_panelSearch = nullptr;
     QProgressBar *m_scanProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
     PlaybackBackend *m_playback = nullptr;
     std::unique_ptr<Database> m_database;
+    std::unique_ptr<PlaylistDatabase> m_playlistDb;
     std::unique_ptr<SettingsStore> m_state;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;

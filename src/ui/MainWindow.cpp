@@ -5,6 +5,7 @@
 #include "core/MusicSort.h"
 #include "core/Rating.h"
 #include "db/Database.h"
+#include "db/PlaylistDatabase.h"
 #include "db/SettingsStore.h"
 #include "fs/LinkRoot.h"
 #include "playback/GStreamerPlaybackBackend.h"
@@ -34,6 +35,7 @@
 #include "ui/QueueStore.h"
 #include "ui/RankingDialog.h"
 #include "ui/RightSidebar.h"
+#include "ui/PlaylistView.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/MainPanelKeybindings.h"
@@ -169,6 +171,8 @@ QString mainViewName(MainView view)
         return QStringLiteral("search");
     case MainView::Queue:
         return QStringLiteral("queue");
+    case MainView::Playlist:
+        return QStringLiteral("playlist");
     }
     return QStringLiteral("libraryPanels");
 }
@@ -186,6 +190,9 @@ MainView mainViewFromName(const QString &name)
     }
     if (name == QStringLiteral("queue")) {
         return MainView::Queue;
+    }
+    if (name == QStringLiteral("playlist")) {
+        return MainView::Playlist;
     }
     return MainView::LibraryPanels;
 }
@@ -343,6 +350,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_searchView = new SearchView(m_mainStack);
     m_queueScreen = new QueueScreen(m_mainStack);
     m_queueScreen->setQueueStore(m_queueStore);
+    m_playlistView = new PlaylistView(m_mainStack);
     m_panelSearch = new PanelSearchController(central);
 
     m_mainStack->addWidget(m_rootSplitter);
@@ -350,6 +358,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_mainStack->addWidget(m_freeRoamFileExplorer);
     m_mainStack->addWidget(m_searchView);
     m_mainStack->addWidget(m_queueScreen);
+    m_mainStack->addWidget(m_playlistView);
 
     centralLayout->addWidget(m_mainStack, 1);
     centralLayout->addWidget(m_panelSearch, 0);
@@ -377,6 +386,12 @@ MainWindow::MainWindow(QWidget *parent)
     if (!m_database->open(databasePath())) {
         QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
     }
+
+    m_playlistDb = std::make_unique<PlaylistDatabase>(QStringLiteral("playlists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!m_playlistDb->open(playlistDatabasePath())) {
+        QMessageBox::warning(this, QStringLiteral("Playlists"), m_playlistDb->lastError());
+    }
+    m_playlistView->setDatabase(m_playlistDb.get());
 
     // UI/view prefs and session state live in a separate store under XDG_STATE_HOME
     // so they persist independently of the per-build library database.
@@ -697,6 +712,27 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
+
+    // Playlist view (key 5). Resolves stored paths against the live library;
+    // playing a playlist replaces the queue (snapshotting the previous one).
+    connect(m_playlistView, &PlaylistView::playPathsRequested, this, [this](const QStringList &paths, int startIndex) {
+        const QVector<Track> tracks = tracksForPaths(paths);
+        if (!tracks.isEmpty()) {
+            replaceQueueWithTracks(tracks, startIndex);
+        }
+    });
+    connect(m_playlistView, &PlaylistView::addPathsToQueueRequested, this, [this](const QStringList &paths) {
+        addTracksToQueue(tracksForPaths(paths));
+    });
+    connect(m_playlistView, &PlaylistView::playNextPathsRequested, this, [this](const QStringList &paths) {
+        playNextTracks(tracksForPaths(paths));
+    });
+    connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
+        showTrackProperties(m_database->trackForPath(path));
+    });
+    connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
+    connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
+
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
@@ -803,6 +839,13 @@ MainWindow::MainWindow(QWidget *parent)
         } else {
             switchMainView(MainView::Search);
         }
+    });
+    auto *playlistShortcut = new QShortcut(QKeySequence(QStringLiteral("5")), this);
+    connect(playlistShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        switchMainView(MainView::Playlist);
     });
     auto *jumpToPlayingShortcut = new QShortcut(QKeySequence(QStringLiteral("o")), this);
     connect(jumpToPlayingShortcut, &QShortcut::activated, this, [this]() {
@@ -2042,6 +2085,13 @@ void MainWindow::switchMainView(MainView view)
         }
         m_mainStack->setCurrentWidget(m_queueScreen);
         m_queueScreen->focusQueue();
+    } else if (view == MainView::Playlist) {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->deactivateForNonMainView();
+        }
+        m_playlistView->reloadPlaylists();
+        m_mainStack->setCurrentWidget(m_playlistView);
+        m_playlistView->focusPlaylistList();
     } else {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
@@ -2109,6 +2159,7 @@ void MainWindow::revealTrackInLibrary(const Track &track)
         revealTrackInLibrary(track);
         break;
     case MainView::Queue:
+    case MainView::Playlist:
         switchMainView(MainView::LibraryPanels);
         revealTrackInLibrary(track);
         break;
@@ -3858,6 +3909,43 @@ void MainWindow::updateCurrentAlbumArt()
 QString MainWindow::databasePath() const
 {
     return QDir(AppPaths::dataDir()).filePath(QStringLiteral("library.sqlite"));
+}
+
+QString MainWindow::playlistDatabasePath() const
+{
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("playlists.sqlite"));
+}
+
+QVector<Track> MainWindow::tracksForPaths(const QStringList &paths) const
+{
+    QVector<Track> tracks;
+    tracks.reserve(paths.size());
+    for (const QString &path : paths) {
+        if (path.isEmpty()) {
+            continue;
+        }
+        const Track track = m_database->trackForPath(path);
+        if (!track.path.isEmpty()) {
+            tracks.push_back(track);
+        }
+    }
+    return tracks;
+}
+
+void MainWindow::openPlaylistAddModal(qint64 playlistId)
+{
+    // Fleshed out in the add-song modal slice; for now route through the search
+    // view so a playlist can still be populated.
+    Q_UNUSED(playlistId)
+    statusBar()->showMessage(QStringLiteral("Add-song modal arrives in the next slice"), 4000);
+}
+
+void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query)
+{
+    Q_UNUSED(playlistId)
+    Q_UNUSED(itemId)
+    Q_UNUSED(query)
+    statusBar()->showMessage(QStringLiteral("Item editing arrives in the next slice"), 4000);
 }
 
 QString MainWindow::resolvedReadPathForTrack(const Track &track) const
