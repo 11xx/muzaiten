@@ -54,6 +54,7 @@ signals:
     void artistRequested(const QString &artistName);
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);
+    void propertiesRequested(const Track &track);
     void trackLibraryRequested(const Track &track);
     void viewSettingsChanged();
 

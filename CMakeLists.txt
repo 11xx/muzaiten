@@ -115,6 +115,7 @@ set(MUZAITEN_SOURCES
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
+    src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
     resources/resources.qrc
 )
@@ -200,6 +201,7 @@ set(MUZAITEN_HEADERS
     src/ui/SourceDirectoriesDialog.h
     src/ui/StarRating.h
     src/ui/StarRatingDelegate.h
+    src/ui/TrackPropertiesDialog.h
     src/ui/TrackTable.h
 )
 

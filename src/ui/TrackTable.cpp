@@ -910,6 +910,10 @@ void TrackTable::showCellMenu(const QPoint &pos)
     connect(findFile, &QAction::triggered, this, [this, track]() {
         emit findFileRequested(track);
     });
+    QAction *properties = menu.addAction(QStringLiteral("Properties"));
+    connect(properties, &QAction::triggered, this, [this, track]() {
+        emit propertiesRequested(track);
+    });
 
     if (index.column() == 0 && track.hasUserRating) {
         menu.addSeparator();

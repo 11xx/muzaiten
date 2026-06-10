@@ -39,6 +39,7 @@
 #include "ui/MainPanelKeybindings.h"
 #include "ui/TableNavigationScroll.h"
 #include "search/RankConfig.h"
+#include "ui/TrackPropertiesDialog.h"
 #include "ui/TrackTable.h"
 
 #include <QAction>
@@ -564,6 +565,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_queueScreen, &QueueScreen::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
     connect(m_mpris, &MprisService::raiseRequested, this, [this]() {
@@ -647,7 +649,9 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_trackTable, &TrackTable::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
@@ -659,6 +663,7 @@ MainWindow::MainWindow(QWidget *parent)
         startScan(path);
     });
     connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_libraryFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
     connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, &MainWindow::playNextTracks);
@@ -667,6 +672,7 @@ MainWindow::MainWindow(QWidget *parent)
         startScan(path);
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
 
@@ -680,6 +686,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
@@ -2495,6 +2502,23 @@ void MainWindow::findTrackFile(const Track &track)
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(resolution.preferredPath).absolutePath()));
     }
     statusBar()->showMessage(QStringLiteral("Resolved %1").arg(resolution.preferredPath), 5000);
+}
+
+void MainWindow::showTrackProperties(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+    // The source Track may be a search/queue snapshot missing promoted fields,
+    // so prefer the fully-populated DB record and fall back to the passed copy.
+    Track full = m_database->trackForPath(track.path);
+    if (full.path.isEmpty()) {
+        full = track;
+    }
+    const MetadataBlob::FullMetadata metadata = m_database->fullMetadata(track.path);
+    auto *dialog = new TrackPropertiesDialog(full, metadata, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
 }
 
 void MainWindow::configureTrackInfoPanel()

@@ -495,6 +495,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
     QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
+    QAction *properties = menu.addAction(QStringLiteral("Properties"));
 
     QMenu *ratingMenu = menu.addMenu(QStringLiteral("Rating"));
     QHash<QAction *, int> ratingActions;
@@ -530,6 +531,8 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         emit addToQueueRequested(tracks);
     } else if (selected == findFile) {
         emit findFileRequested(tracks.first());
+    } else if (selected == properties) {
+        emit propertiesRequested(tracks.first());
     } else if (selected != nullptr && ratingActions.contains(selected)) {
         const int rating = ratingActions.value(selected);
         for (const Track &track : tracks) {

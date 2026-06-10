@@ -104,6 +104,7 @@ private:
     void configureLinkRoots();
     void configureSourceDirectories();
     void findTrackFile(const Track &track);
+    void showTrackProperties(const Track &track);
     void configureTrackInfoPanel();
     void configureAlbumArtResolution();
     void configureSearchRanking();

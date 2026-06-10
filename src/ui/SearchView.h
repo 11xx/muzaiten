@@ -49,6 +49,7 @@ signals:
     void playNowRequested(QVector<Track> tracks);
     void findInLibraryRequested(Track track);
     void findFileRequested(Track track);
+    void propertiesRequested(Track track);
 
 protected:
     void changeEvent(QEvent *event) override;

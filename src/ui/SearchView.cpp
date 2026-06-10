@@ -598,6 +598,10 @@ void SearchView::showContextMenu(const QPoint &pos)
     menu.addAction(QStringLiteral("Open containing directory"), this, [this, single]() {
         emit findFileRequested(single);
     });
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("Properties"), this, [this, single]() {
+        emit propertiesRequested(single);
+    });
 
     menu.exec(m_resultList->viewport()->mapToGlobal(pos));
 }

@@ -1172,6 +1172,10 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(findFile, &QAction::triggered, this, [this, track]() {
         emit findFileRequested(track);
     });
+    QAction *properties = menu.addAction(QStringLiteral("Properties"));
+    connect(properties, &QAction::triggered, this, [this, track]() {
+        emit propertiesRequested(track);
+    });
     QAction *removeSelected = menu.addAction(QStringLiteral("Remove selected"));
     connect(removeSelected, &QAction::triggered, this, [this]() {
         QVector<int> rows;
