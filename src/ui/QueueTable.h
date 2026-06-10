@@ -49,6 +49,9 @@ signals:
     void rowsRemoveRequested(const QVector<int> &rows);
     void clearRequested();
     void clearPlayNextPriorityRequested();
+    void saveQueueAsRequested();
+    void restorePreviousQueueRequested();
+    void mergeSavedQueueRequested();
     void findFileRequested(const Track &track);
     void trackLibraryRequested(const Track &track);
     void propertiesRequested(const Track &track);

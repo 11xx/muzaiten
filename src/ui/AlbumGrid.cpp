@@ -867,6 +867,12 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
         connect(narrow, &QAction::triggered, this, [this, selectionTitles]() {
             emit albumSelectionNarrowRequested(selectionTitles);
         });
+        QAction *playReplace = menu.addAction(useMarkedSelection
+            ? QStringLiteral("Play (replace queue)")
+            : QStringLiteral("Play album (replace queue)"));
+        connect(playReplace, &QAction::triggered, this, [this, selectionTitles]() {
+            emit albumPlayReplaceRequested(selectionTitles);
+        });
         QAction *playNext = menu.addAction(QStringLiteral("Play next"));
         connect(playNext, &QAction::triggered, this, [this, albumTitle]() {
             emit albumPlayNextRequested(albumTitle);

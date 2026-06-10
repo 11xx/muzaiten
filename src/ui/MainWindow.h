@@ -9,6 +9,7 @@
 
 #include <memory>
 
+class QJsonObject;
 class Database;
 class SettingsStore;
 class AlbumGrid;
@@ -90,6 +91,10 @@ private:
     void refreshLibraryFileExplorer();
     void loadQueueState();
     void saveQueueState();
+    QJsonObject queueSnapshotObject(const QString &name) const;
+    QVector<Track> tracksFromSnapshotObject(const QJsonObject &snapshot) const;
+    QJsonObject loadQueueSnapshotsRoot() const;
+    void saveQueueSnapshotsRoot(const QJsonObject &root);
     void loadExplorerState();
     void saveExplorerState();
     void applySharedTableSettings();
@@ -148,8 +153,17 @@ private:
     void syncQueueState();
     void playAlbumNow(const QString &albumTitle);
     void playAlbumsNow(const QStringList &albumTitles);
+    void playAlbumsReplacingQueue(const QStringList &albumTitles);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
+    // Queue-playlist snapshots (stored in state.sqlite, distinct from library
+    // playlists). Replacing the queue auto-saves the outgoing one as "previous"
+    // so it can be restored without losing order.
+    void replaceQueueWithTracks(const QVector<Track> &tracks, int playIndex);
+    void snapshotCurrentQueueAsPrevious();
+    void restorePreviousQueue();
+    void saveCurrentQueueAs();
+    void mergeSavedQueueViaPlayNext();
     // explicitJump=true marks a user-activated jump (clicking a queue row). A
     // backward explicit jump turns the skipped-over tracks into the play-next
     // region; forward jumps and sequential prev/next leave it alone.

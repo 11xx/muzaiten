@@ -20,6 +20,9 @@ QueueScreen::QueueScreen(QWidget *parent)
     connect(m_table, &QueueTable::rowsRemoveRequested, this, &QueueScreen::queueRowsRemoveRequested);
     connect(m_table, &QueueTable::clearRequested, this, &QueueScreen::queueClearRequested);
     connect(m_table, &QueueTable::clearPlayNextPriorityRequested, this, &QueueScreen::clearPlayNextPriorityRequested);
+    connect(m_table, &QueueTable::saveQueueAsRequested, this, &QueueScreen::saveQueueAsRequested);
+    connect(m_table, &QueueTable::restorePreviousQueueRequested, this, &QueueScreen::restorePreviousQueueRequested);
+    connect(m_table, &QueueTable::mergeSavedQueueRequested, this, &QueueScreen::mergeSavedQueueRequested);
     connect(m_table, &QueueTable::findFileRequested, this, &QueueScreen::findFileRequested);
     connect(m_table, &QueueTable::propertiesRequested, this, &QueueScreen::propertiesRequested);
     connect(m_table, &QueueTable::trackLibraryRequested, this, &QueueScreen::trackLibraryRequested);

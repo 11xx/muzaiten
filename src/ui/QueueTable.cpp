@@ -1195,6 +1195,21 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(clearQueue, &QAction::triggered, this, [this]() {
         emit clearRequested();
     });
+
+    menu.addSeparator();
+    QAction *saveQueue = menu.addAction(QStringLiteral("Save queue as…"));
+    connect(saveQueue, &QAction::triggered, this, [this]() {
+        emit saveQueueAsRequested();
+    });
+    QAction *restorePrevious = menu.addAction(QStringLiteral("Restore previous queue"));
+    connect(restorePrevious, &QAction::triggered, this, [this]() {
+        emit restorePreviousQueueRequested();
+    });
+    QAction *mergeSaved = menu.addAction(QStringLiteral("Merge saved queue (play next)…"));
+    connect(mergeSaved, &QAction::triggered, this, [this]() {
+        emit mergeSavedQueueRequested();
+    });
+
     menu.exec(m_view->viewport()->mapToGlobal(pos));
 }
 

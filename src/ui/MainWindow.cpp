@@ -55,6 +55,7 @@
 #include <QGroupBox>
 #include <QHash>
 #include <QHBoxLayout>
+#include <QDateTime>
 #include <QImage>
 #include <QInputDialog>
 #include <QLabel>
@@ -63,6 +64,7 @@
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QLoggingCategory>
+#include <QMenu>
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QProgressBar>
@@ -449,6 +451,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumSelectionNarrowRequested, this, &MainWindow::narrowAlbumFilters);
     connect(m_albumGrid, &AlbumGrid::albumNarrowFollowRequested, this, &MainWindow::setAlbumNarrowFromGrid);
     connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
+    connect(m_albumGrid, &AlbumGrid::albumPlayReplaceRequested, this, &MainWindow::playAlbumsReplacingQueue);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumRatingChanged, this, &MainWindow::applyAlbumRating);
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
@@ -567,6 +570,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
+    connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_queueScreen, &QueueScreen::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
     connect(m_mpris, &MprisService::raiseRequested, this, [this]() {
@@ -653,6 +659,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_trackTable, &TrackTable::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
+    connect(m_rightSidebar, &RightSidebar::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_rightSidebar, &RightSidebar::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
     connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
@@ -2183,6 +2192,172 @@ void MainWindow::saveQueueState()
     updateMprisCapabilities();
 }
 
+QJsonObject MainWindow::queueSnapshotObject(const QString &name) const
+{
+    QJsonArray tracks;
+    for (const Track &track : m_queue) {
+        tracks.append(trackToJson(track));
+    }
+    QJsonObject snapshot;
+    snapshot.insert(QStringLiteral("name"), name);
+    snapshot.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
+    snapshot.insert(QStringLiteral("index"), m_queueIndex);
+    snapshot.insert(QStringLiteral("tracks"), tracks);
+    return snapshot;
+}
+
+QVector<Track> MainWindow::tracksFromSnapshotObject(const QJsonObject &snapshot) const
+{
+    QVector<Track> tracks;
+    const QJsonArray array = snapshot.value(QStringLiteral("tracks")).toArray();
+    tracks.reserve(array.size());
+    for (const QJsonValue &value : array) {
+        Track track = trackFromJson(value.toObject());
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        // Re-resolve against the live library so stale snapshot metadata (ratings,
+        // technical fields) is refreshed; keep the snapshot copy if it is gone.
+        const Track refreshed = m_database->trackForPath(track.path);
+        tracks.push_back(refreshed.path.isEmpty() ? track : refreshed);
+    }
+    return tracks;
+}
+
+QJsonObject MainWindow::loadQueueSnapshotsRoot() const
+{
+    return QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.snapshots")).toUtf8()).object();
+}
+
+void MainWindow::saveQueueSnapshotsRoot(const QJsonObject &root)
+{
+    m_state->setSetting(QStringLiteral("queue.snapshots"),
+                        QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::snapshotCurrentQueueAsPrevious()
+{
+    if (m_queue.isEmpty()) {
+        return;
+    }
+    QJsonObject root = loadQueueSnapshotsRoot();
+    root.insert(QStringLiteral("previous"), queueSnapshotObject(QStringLiteral("Previous queue")));
+    saveQueueSnapshotsRoot(root);
+}
+
+void MainWindow::replaceQueueWithTracks(const QVector<Track> &tracks, int playIndex)
+{
+    if (tracks.isEmpty()) {
+        return;
+    }
+    // Preserve the outgoing queue so it can be restored without losing order.
+    snapshotCurrentQueueAsPrevious();
+
+    m_queue.clear();
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            m_queue.push_back(track);
+        }
+    }
+    m_queueIndex = -1;
+    m_playNextInsertIndex = -1;
+    m_queueStore->setTracks(m_queue);
+    const int start = std::clamp(playIndex, 0, static_cast<int>(m_queue.size()) - 1);
+    playQueueIndex(start);
+}
+
+void MainWindow::restorePreviousQueue()
+{
+    const QJsonObject root = loadQueueSnapshotsRoot();
+    const QJsonObject previous = root.value(QStringLiteral("previous")).toObject();
+    const QVector<Track> tracks = tracksFromSnapshotObject(previous);
+    if (tracks.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("No previous queue to restore"), 3000);
+        return;
+    }
+    // Swap: the queue being displaced becomes the new "previous", so restore can
+    // toggle back and forth.
+    const int restoreIndex = std::clamp(previous.value(QStringLiteral("index")).toInt(0),
+                                        0, static_cast<int>(tracks.size()) - 1);
+    replaceQueueWithTracks(tracks, restoreIndex);
+    statusBar()->showMessage(QStringLiteral("Restored previous queue (%1 tracks)").arg(tracks.size()), 4000);
+}
+
+void MainWindow::saveCurrentQueueAs()
+{
+    if (m_queue.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Queue is empty"), 3000);
+        return;
+    }
+    const QString defaultName =
+        QStringLiteral("Queue %1").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")));
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, QStringLiteral("Save queue as"),
+                                               QStringLiteral("Queue-playlist name:"),
+                                               QLineEdit::Normal, defaultName, &ok)
+                             .trimmed();
+    if (!ok || name.isEmpty()) {
+        return;
+    }
+    QJsonObject root = loadQueueSnapshotsRoot();
+    QJsonArray saved = root.value(QStringLiteral("saved")).toArray();
+    // Replace any existing snapshot with the same name, else append.
+    QJsonObject snapshot = queueSnapshotObject(name);
+    bool replaced = false;
+    for (qsizetype i = 0; i < saved.size(); ++i) {
+        if (saved.at(i).toObject().value(QStringLiteral("name")).toString() == name) {
+            saved.replace(i, snapshot);
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        saved.append(snapshot);
+    }
+    root.insert(QStringLiteral("saved"), saved);
+    saveQueueSnapshotsRoot(root);
+    statusBar()->showMessage(QStringLiteral("Saved queue \"%1\"").arg(name), 4000);
+}
+
+void MainWindow::mergeSavedQueueViaPlayNext()
+{
+    const QJsonObject root = loadQueueSnapshotsRoot();
+    QVector<QJsonObject> choices;
+    QStringList labels;
+    const QJsonObject previous = root.value(QStringLiteral("previous")).toObject();
+    if (!previous.isEmpty()) {
+        choices.push_back(previous);
+        labels << QStringLiteral("Previous queue");
+    }
+    for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
+        const QJsonObject snapshot = value.toObject();
+        choices.push_back(snapshot);
+        labels << snapshot.value(QStringLiteral("name")).toString();
+    }
+    if (choices.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("No saved queues"), 3000);
+        return;
+    }
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(this, QStringLiteral("Merge saved queue"),
+                                                 QStringLiteral("Insert via play-next:"),
+                                                 labels, 0, false, &ok);
+    if (!ok || chosen.isEmpty()) {
+        return;
+    }
+    const qsizetype index = labels.indexOf(chosen);
+    if (index < 0) {
+        return;
+    }
+    const QVector<Track> tracks = tracksFromSnapshotObject(choices.at(index));
+    if (tracks.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
+        return;
+    }
+    playNextTracks(tracks);
+    statusBar()->showMessage(QStringLiteral("Merged \"%1\" (%2 tracks)").arg(chosen).arg(tracks.size()), 4000);
+}
+
 void MainWindow::loadExplorerState()
 {
     const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("libraryExplorer.state")).toUtf8()).object();
@@ -3476,6 +3651,23 @@ void MainWindow::playAlbumsNow(const QStringList &albumTitles)
     const int startIndex = static_cast<int>(m_queue.size());
     addTracksToQueue(tracks);
     playQueueIndex(startIndex);
+}
+
+void MainWindow::playAlbumsReplacingQueue(const QStringList &albumTitles)
+{
+    if (m_currentArtist.isEmpty() || albumTitles.isEmpty()) {
+        return;
+    }
+    QVector<Track> tracks;
+    for (const QString &albumTitle : albumTitles) {
+        if (albumTitle.isEmpty()) {
+            continue;
+        }
+        tracks += m_librarySource == LibrarySource::Mpd
+            ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
+            : m_database->tracksForArtist(m_currentArtist, albumTitle);
+    }
+    replaceQueueWithTracks(tracks, 0);
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)
