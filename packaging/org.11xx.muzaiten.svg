@@ -43,11 +43,11 @@
   <circle cx="56" cy="52" r="32" fill="#45407f" opacity="0.5"/>
   <circle cx="56" cy="52" r="32" fill="none" stroke="#ffd98a" stroke-width="2" opacity="0.35"/>
 
-  <!-- floating eighth note -->
-  <g fill="#ffd98a" opacity="0.95">
-    <ellipse cx="100.5" cy="43" rx="4.6" ry="3.4" transform="rotate(-18 100.5 43)"/>
-    <rect x="103.2" y="26" width="2.4" height="17.5" rx="1.2"/>
-    <path d="M105.6 26 C 110 28 113.2 31.5 110.8 38 C 110.9 33 108.6 30.4 105.6 29.6 Z"/>
+  <!-- mitsudomoe: Benzaiten's shrine crest (taiko drum mark / water swirl) -->
+  <g transform="translate(104 36)" fill="#ffd98a" opacity="0.95">
+    <path d="M 0 -10.5 A 10.5 10.5 0 0 1 9.52 4.44 A 5.6 5.6 0 0 0 0.1 0 L 0 -1.65 A 3.6 3.6 0 1 1 0 -8.85 Z"/>
+    <path d="M 0 -10.5 A 10.5 10.5 0 0 1 9.52 4.44 A 5.6 5.6 0 0 0 0.1 0 L 0 -1.65 A 3.6 3.6 0 1 1 0 -8.85 Z" transform="rotate(120)"/>
+    <path d="M 0 -10.5 A 10.5 10.5 0 0 1 9.52 4.44 A 5.6 5.6 0 0 0 0.1 0 L 0 -1.65 A 3.6 3.6 0 1 1 0 -8.85 Z" transform="rotate(240)"/>
   </g>
 
   <!-- Benzaiten's sea -->
@@ -68,14 +68,15 @@
   <g transform="rotate(-12 64 78)" stroke-linejoin="round">
     <!-- neck -->
     <rect x="58.5" y="22" width="11" height="32" rx="2.5" fill="url(#wood)" stroke="#191033" stroke-width="3"/>
-    <!-- bent-back pegbox with pegs -->
+    <!-- bent-back pegbox, 4 staggered lateral pegs (2 per side) -->
     <g transform="translate(64 25) rotate(-58)">
       <g fill="#a9712a" stroke="#191033" stroke-width="2.5">
-        <rect x="-10.5" y="-22" width="21" height="4" rx="2"/>
-        <rect x="-10.5" y="-15" width="21" height="4" rx="2"/>
-        <rect x="-10.5" y="-8" width="21" height="4" rx="2"/>
+        <rect x="-13" y="-23" width="10" height="4.4" rx="2.2"/>
+        <rect x="-13" y="-12.5" width="10" height="4.4" rx="2.2"/>
+        <rect x="3" y="-18" width="10" height="4.4" rx="2.2"/>
+        <rect x="3" y="-7.5" width="10" height="4.4" rx="2.2"/>
       </g>
-      <rect x="-6" y="-26" width="12" height="28" rx="4.5" fill="url(#wood)" stroke="#191033" stroke-width="3"/>
+      <rect x="-5.5" y="-28" width="11" height="30" rx="4" fill="url(#wood)" stroke="#191033" stroke-width="3"/>
     </g>
     <!-- body -->
     <path d="M64 46 C 82 50 95 68 95 88 C 95 107 82 119 64 119 C 46 119 33 107 33 88 C 33 68 46 50 64 46 Z" fill="url(#lute)" stroke="#191033" stroke-width="3"/>
@@ -88,11 +89,12 @@
     </g>
     <!-- crescent moon sound hole -->
     <path transform="rotate(-30 50 76)" d="M50 69 A 7 7 0 1 0 50 83 A 8.75 8.75 0 0 1 50 69 Z" fill="#191033"/>
-    <!-- strings -->
-    <g stroke="#fff3d0" stroke-width="1.8" stroke-linecap="round" opacity="0.95">
-      <line x1="61" y1="29" x2="60" y2="105"/>
-      <line x1="64" y1="29" x2="64" y2="105"/>
-      <line x1="67" y1="29" x2="68" y2="105"/>
+    <!-- 4 strings -->
+    <g stroke="#fff3d0" stroke-width="1.5" stroke-linecap="round" opacity="0.95">
+      <line x1="60.2" y1="29" x2="59.5" y2="105"/>
+      <line x1="62.8" y1="29" x2="62.5" y2="105"/>
+      <line x1="65.4" y1="29" x2="65.5" y2="105"/>
+      <line x1="68" y1="29" x2="68.5" y2="105"/>
     </g>
     <!-- tailpiece -->
     <rect x="57" y="103" width="14" height="8.5" rx="2.5" fill="#e0492c" stroke="#191033" stroke-width="2.5"/>
