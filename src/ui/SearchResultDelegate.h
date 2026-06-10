@@ -2,6 +2,8 @@
 
 #include "search/SearchQuery.h"
 
+#include <QSet>
+#include <QString>
 #include <QStyledItemDelegate>
 
 class SearchResultDelegate : public QStyledItemDelegate {
@@ -24,6 +26,9 @@ public:
     int  rowHeight() const { return m_rowHeight; }
     // The active query/mode, used to compute match highlights for visible rows.
     void setQuery(const Search::SearchQuery &query, bool fuzzyMode);
+    // Paths already present in the playlist being added to (empty in normal
+    // search): those rows get a distinct wash so the user can spot them.
+    void setAddedPaths(const QSet<QString> &paths);
 
 private:
     // Draw a single line of text with highlighted match positions.
@@ -42,4 +47,5 @@ private:
     int m_rowHeight  = 0; // 0 = auto from font
     Search::SearchQuery m_query;
     bool m_fuzzyMode = false;
+    QSet<QString> m_addedPaths;
 };

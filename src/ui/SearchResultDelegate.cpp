@@ -70,6 +70,11 @@ void SearchResultDelegate::setQuery(const Search::SearchQuery &query, bool fuzzy
     m_fuzzyMode = fuzzyMode;
 }
 
+void SearchResultDelegate::setAddedPaths(const QSet<QString> &paths)
+{
+    m_addedPaths = paths;
+}
+
 QSize SearchResultDelegate::sizeHint(const QStyleOptionViewItem &option,
                                       const QModelIndex & /*index*/) const
 {
@@ -170,6 +175,22 @@ void SearchResultDelegate::paint(QPainter *painter,
         painter->fillRect(opt.rect, hover);
     } else if (index.row() % 2 == 1) {
         painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
+    }
+
+    // Already-added rows (playlist add mode): a green-tinted left bar plus a
+    // faint wash so duplicates are obvious while scanning results.
+    if (!m_addedPaths.isEmpty()) {
+        const auto recVar0 = index.data(SearchResultsModel::SearchRecordRole);
+        if (recVar0.isValid()
+            && m_addedPaths.contains(qvariant_cast<Search::SearchRecord>(recVar0).path)) {
+            QColor added(96, 170, 110);
+            if (!selected && !current) {
+                QColor wash = added;
+                wash.setAlpha(40);
+                painter->fillRect(opt.rect, wash);
+            }
+            painter->fillRect(QRect(opt.rect.right() - 3, opt.rect.top(), 3, opt.rect.height()), added);
+        }
     }
 
     // Cursor accent bar on the left edge.

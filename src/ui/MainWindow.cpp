@@ -35,6 +35,7 @@
 #include "ui/QueueStore.h"
 #include "ui/RankingDialog.h"
 #include "ui/RightSidebar.h"
+#include "ui/PlaylistAddDialog.h"
 #include "ui/PlaylistView.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
@@ -3932,20 +3933,101 @@ QVector<Track> MainWindow::tracksForPaths(const QStringList &paths) const
     return tracks;
 }
 
+static PlaylistItem playlistItemFromTrack(const Track &track, const QString &query)
+{
+    PlaylistItem item;
+    item.trackPath = track.path;
+    item.titleSnapshot = track.title.isEmpty() ? track.filename : track.title;
+    item.artistSnapshot = track.artistName.isEmpty() ? track.albumArtistName : track.artistName;
+    item.albumSnapshot = track.albumTitle;
+    item.durationMs = track.durationMs;
+    item.query = query;
+    item.status = PlaylistItemStatus::Matched;
+    return item;
+}
+
 void MainWindow::openPlaylistAddModal(qint64 playlistId)
 {
-    // Fleshed out in the add-song modal slice; for now route through the search
-    // view so a playlist can still be populated.
-    Q_UNUSED(playlistId)
-    statusBar()->showMessage(QStringLiteral("Add-song modal arrives in the next slice"), 4000);
+    if (m_playlistDb == nullptr || playlistId <= 0) {
+        return;
+    }
+    const Playlist playlist = m_playlistDb->playlist(playlistId);
+    auto *dialog = new PlaylistAddDialog(databasePath(), playlist.name, this);
+    // Item ids added during this session, for C-/ undo (newest at the back).
+    auto addedIds = std::make_shared<QVector<qint64>>();
+
+    const auto refreshAdded = [this, dialog, playlistId]() {
+        QSet<QString> paths;
+        for (const PlaylistItem &item : m_playlistDb->items(playlistId)) {
+            if (!item.trackPath.isEmpty()) {
+                paths.insert(item.trackPath);
+            }
+        }
+        dialog->setAddedPaths(paths);
+    };
+    refreshAdded();
+
+    connect(dialog, &PlaylistAddDialog::itemChosen, this,
+            [this, playlistId, addedIds, refreshAdded](const Track &track, const QString &query) {
+                const qint64 id = m_playlistDb->addItem(playlistId, playlistItemFromTrack(track, query));
+                if (id > 0) {
+                    addedIds->push_back(id);
+                }
+                refreshAdded();
+            });
+    connect(dialog, &PlaylistAddDialog::undoRequested, this,
+            [this, playlistId, addedIds, refreshAdded, dialog]() {
+                if (addedIds->isEmpty()) {
+                    return;
+                }
+                const qint64 last = addedIds->takeLast();
+                QString restoreQuery;
+                for (const PlaylistItem &item : m_playlistDb->items(playlistId)) {
+                    if (item.id == last) {
+                        restoreQuery = item.query;
+                        break;
+                    }
+                }
+                m_playlistDb->removeItem(last);
+                refreshAdded();
+                dialog->setQueryText(restoreQuery);
+            });
+
+    dialog->exec();
+    delete dialog;
+    m_playlistView->reloadItems();
+    m_playlistView->reloadPlaylists();
 }
 
 void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query)
 {
-    Q_UNUSED(playlistId)
-    Q_UNUSED(itemId)
-    Q_UNUSED(query)
-    statusBar()->showMessage(QStringLiteral("Item editing arrives in the next slice"), 4000);
+    if (m_playlistDb == nullptr || playlistId <= 0 || itemId <= 0) {
+        return;
+    }
+    const Playlist playlist = m_playlistDb->playlist(playlistId);
+    auto *dialog = new PlaylistAddDialog(databasePath(), playlist.name, this);
+    dialog->setEditMode(true);
+
+    QSet<QString> paths;
+    for (const PlaylistItem &item : m_playlistDb->items(playlistId)) {
+        if (!item.trackPath.isEmpty()) {
+            paths.insert(item.trackPath);
+        }
+    }
+    dialog->setAddedPaths(paths);
+    dialog->setQueryText(query);
+
+    connect(dialog, &PlaylistAddDialog::itemChosen, this,
+            [this, itemId](const Track &track, const QString &chosenQuery) {
+                PlaylistItem item = playlistItemFromTrack(track, chosenQuery);
+                item.id = itemId;
+                m_playlistDb->updateItem(item);
+            });
+
+    dialog->exec();
+    delete dialog;
+    m_playlistView->reloadItems();
+    m_playlistView->reloadPlaylists();
 }
 
 QString MainWindow::resolvedReadPathForTrack(const Track &track) const
