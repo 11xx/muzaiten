@@ -27,6 +27,7 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
         {Qt::Key_L, FocusNext},
         {Qt::Key_Q, FocusQueue},
         {Qt::Key_Slash, Search},
+        {QKeySequence(Qt::ControlModifier | Qt::Key_S), Search},
         {QKeySequence(Qt::AltModifier | Qt::Key_N), SearchNext},
         {QKeySequence(Qt::AltModifier | Qt::Key_P), SearchPrevious},
         {Qt::Key_Return, PlayNow},

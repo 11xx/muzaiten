@@ -208,8 +208,9 @@ bool SearchView::eventFilter(QObject *watched, QEvent *event)
 
     if (watched == m_resultList && event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
-        // In browse mode, '/' returns to the search box.
-        if (ke->key() == Qt::Key_Slash && ke->modifiers() == Qt::NoModifier) {
+        // In browse mode, '/' (or C-s) returns to the search box.
+        if ((ke->key() == Qt::Key_Slash && ke->modifiers() == Qt::NoModifier)
+            || (ke->key() == Qt::Key_S && ke->modifiers() == Qt::ControlModifier)) {
             focusSearchBox();
             return true;
         }

@@ -32,6 +32,7 @@ QVector<KeyBindingProfile> defaultQueueKeyBindingProfiles()
         {Qt::Key_L, FindLibrary},
         {Qt::Key_O, JumpPlaying},
         {Qt::Key_Slash, Search},
+        {QKeySequence(Qt::ControlModifier | Qt::Key_S), Search},
         {QKeySequence(Qt::AltModifier | Qt::Key_N), SearchNext},
         {QKeySequence(Qt::AltModifier | Qt::Key_P), SearchPrevious},
         {Qt::Key_Escape, Escape},
