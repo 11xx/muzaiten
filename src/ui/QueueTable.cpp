@@ -14,6 +14,7 @@
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
 #include <QAction>
+#include <QApplication>
 #include <QActionGroup>
 #include <QDataStream>
 #include <QFileInfo>
@@ -440,7 +441,13 @@ public:
         const bool forcePlayingHighlight = playing && m_forcePlayingHighlight;
 
         if (forcePlayingHighlight) {
-            QColor tint = opt.palette.color(QPalette::Highlight);
+            // The sidebar's currently-playing tint is an always-on indicator, so
+            // it must read from the undimmed application palette rather than the
+            // view palette: when the queue panel loses focus the view's Highlight
+            // role is dimmed (refreshInactiveHighlight) to fade remembered
+            // selections, and sourcing the tint from there would fade the playing
+            // marker along with them.
+            QColor tint = QApplication::palette().color(QPalette::Highlight);
             tint.setAlpha(48);
             painter->fillRect(opt.rect, tint);
         } else if (selected) {
