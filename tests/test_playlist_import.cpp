@@ -2,6 +2,7 @@
 
 #include "playlist/PlaylistImport.h"
 #include "playlist/PlaylistMatcher.h"
+#include "playlist/import/YouTubeImport.h"
 #include "search/SearchIndex.h"
 #include "search/SearchRecord.h"
 
@@ -210,6 +211,44 @@ private slots:
         const auto outcome = PlaylistMatcher::match(m_index, entry);
         QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Matched);
         QCOMPARE(outcome.best.title, QStringLiteral("Karma Police"));
+    }
+
+    // ---- youtube adapter (offline json parsing) ----------------------------
+
+    void youtube_entriesFromJson()
+    {
+        const QByteArray json = R"({
+            "title": "Jazz Mix",
+            "entries": [
+                {"id": "abc123", "title": "So What", "channel": "Miles Davis - Topic", "duration": 540.0},
+                {"id": "def456", "title": "Radiohead - Karma Police", "channel": "someuser", "duration": 261},
+                {"id": "gone", "title": "[Deleted video]", "channel": "", "duration": null}
+            ]
+        })";
+        QString title;
+        const auto entries = YouTubePlaylistFetcher::entriesFromJson(json, &title);
+        QCOMPARE(title, QStringLiteral("Jazz Mix"));
+        QCOMPARE(entries.size(), 2);  // deleted video dropped
+        // YT Music style: bare title, artist from the "- Topic" channel.
+        QCOMPARE(entries.at(0).title, QStringLiteral("So What"));
+        QCOMPARE(entries.at(0).artist, QStringLiteral("Miles Davis"));
+        QCOMPARE(entries.at(0).durationMs, qint64(540000));
+        QCOMPARE(entries.at(0).externalId, QStringLiteral("abc123"));
+        // Plain YouTube style: "Artist - Title" in the video title wins.
+        QCOMPARE(entries.at(1).artist, QStringLiteral("Radiohead"));
+        QCOMPARE(entries.at(1).title, QStringLiteral("Karma Police"));
+    }
+
+    void youtube_urlDetection()
+    {
+        QVERIFY(YouTubePlaylistFetcher::looksLikePlaylistUrl(
+            QStringLiteral("https://music.youtube.com/playlist?list=PLabc")));
+        QVERIFY(YouTubePlaylistFetcher::looksLikePlaylistUrl(
+            QStringLiteral("https://www.youtube.com/watch?v=x&list=PLabc")));
+        QVERIFY(!YouTubePlaylistFetcher::looksLikePlaylistUrl(
+            QStringLiteral("https://www.youtube.com/watch?v=x")));
+        QVERIFY(!YouTubePlaylistFetcher::looksLikePlaylistUrl(
+            QStringLiteral("https://example.com/playlist?list=PLabc")));
     }
 
     void match_foreignPathFallsBackToBasename()

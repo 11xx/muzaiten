@@ -7,10 +7,12 @@
 #include <QVector>
 
 class QLabel;
+class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QTableWidget;
 class QThread;
+class YouTubePlaylistFetcher;
 
 // Import dialog for the playlist view: paste a tracklist (or load an
 // m3u/m3u8/csv/txt file), preview how each line resolves against the library,
@@ -28,6 +30,7 @@ public:
 
 private slots:
     void loadFile();
+    void fetchUrl();
     void runMatch();
     void onProgress(int done, int total);
     void onFinished(QVector<PlaylistImportMatch> results);
@@ -39,6 +42,9 @@ private:
     void updateSummary();
 
     QString m_dbPath;
+    QLineEdit *m_urlBox = nullptr;
+    QPushButton *m_fetchButton = nullptr;
+    YouTubePlaylistFetcher *m_fetcher = nullptr;
     QPlainTextEdit *m_input = nullptr;
     QLabel *m_status = nullptr;
     QPushButton *m_matchButton = nullptr;

@@ -269,6 +269,7 @@ add_executable(test_playlist_import
     test_playlist_import.cpp
     ../src/playlist/PlaylistImport.cpp
     ../src/playlist/PlaylistMatcher.cpp
+    ../src/playlist/import/YouTubeImport.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchIndex.cpp

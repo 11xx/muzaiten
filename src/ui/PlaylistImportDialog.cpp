@@ -1,5 +1,7 @@
 #include "ui/PlaylistImportDialog.h"
 
+#include "playlist/import/YouTubeImport.h"
+
 #include <QColor>
 #include <QDialogButtonBox>
 #include <QFile>
@@ -7,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTableWidget>
@@ -50,6 +53,27 @@ PlaylistImportDialog::PlaylistImportDialog(const QString &dbPath, const QString 
         "or load a file. Nothing is written until you press Add."), this);
     hint->setWordWrap(true);
     layout->addWidget(hint);
+
+    // YouTube / YT Music playlist fetch row (yt-dlp, no account or paid
+    // middleman). Greyed out with an explanation when the tool is missing.
+    auto *urlRow = new QHBoxLayout();
+    m_urlBox = new QLineEdit(this);
+    m_fetchButton = new QPushButton(QStringLiteral("Fetch"), this);
+    const bool haveYtDlp = YouTubePlaylistFetcher::toolAvailable();
+    if (haveYtDlp) {
+        m_urlBox->setPlaceholderText(
+            QStringLiteral("YouTube / YouTube Music playlist URL (public or unlisted)…"));
+    } else {
+        m_urlBox->setPlaceholderText(
+            QStringLiteral("Install yt-dlp to fetch YouTube/YT Music playlists by URL"));
+        m_urlBox->setEnabled(false);
+        m_fetchButton->setEnabled(false);
+    }
+    connect(m_fetchButton, &QPushButton::clicked, this, &PlaylistImportDialog::fetchUrl);
+    connect(m_urlBox, &QLineEdit::returnPressed, this, &PlaylistImportDialog::fetchUrl);
+    urlRow->addWidget(m_urlBox, 1);
+    urlRow->addWidget(m_fetchButton);
+    layout->addLayout(urlRow);
 
     m_input = new QPlainTextEdit(this);
     m_input->setPlaceholderText(QStringLiteral("Miles Davis - So What\nRadiohead - Karma Police\n…"));
@@ -147,6 +171,50 @@ void PlaylistImportDialog::loadFile()
         m_input->setPlainText(QString::fromUtf8(file.readAll()));
     }
     m_status->setText(QStringLiteral("%1 entries loaded — press Match.").arg(entries.size()));
+}
+
+void PlaylistImportDialog::fetchUrl()
+{
+    const QString url = m_urlBox->text().trimmed();
+    if (url.isEmpty() || !YouTubePlaylistFetcher::toolAvailable()) {
+        return;
+    }
+    if (!YouTubePlaylistFetcher::looksLikePlaylistUrl(url)) {
+        m_status->setText(QStringLiteral("Not a YouTube playlist URL (needs a list= parameter)."));
+        return;
+    }
+    if (m_fetcher == nullptr) {
+        m_fetcher = new YouTubePlaylistFetcher(this);
+        connect(m_fetcher, &YouTubePlaylistFetcher::finished, this,
+                [this](const QVector<PlaylistImport::ImportEntry> &entries, const QString &title) {
+                    m_fetchButton->setEnabled(true);
+                    // Render as EXTINF lines: durations survive the normal m3u
+                    // parse and the user can prune lines before matching.
+                    QString text = QStringLiteral("#EXTM3U\n");
+                    for (const PlaylistImport::ImportEntry &entry : entries) {
+                        const QString display = entry.artist.isEmpty()
+                            ? entry.title
+                            : QStringLiteral("%1 - %2").arg(entry.artist, entry.title);
+                        text += QStringLiteral("#EXTINF:%1,%2\n")
+                                    .arg(entry.durationMs / 1000).arg(display);
+                        text += QStringLiteral("https://music.youtube.com/watch?v=%1\n")
+                                    .arg(entry.externalId);
+                    }
+                    m_input->setPlainText(text);
+                    m_status->setText(QStringLiteral("Fetched %1 tracks from \"%2\" — press Match.")
+                                          .arg(entries.size()).arg(title));
+                });
+        connect(m_fetcher, &YouTubePlaylistFetcher::error, this, [this](const QString &message) {
+            m_fetchButton->setEnabled(true);
+            m_status->setText(QStringLiteral("Fetch failed: %1").arg(message));
+        });
+    }
+    if (m_fetcher->isFetching()) {
+        return;
+    }
+    m_fetchButton->setEnabled(false);
+    m_status->setText(QStringLiteral("Fetching playlist… (yt-dlp)"));
+    m_fetcher->fetch(url);
 }
 
 void PlaylistImportDialog::runMatch()

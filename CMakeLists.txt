@@ -100,6 +100,7 @@ set(MUZAITEN_SOURCES
     src/playlist/PlaylistImport.cpp
     src/playlist/PlaylistImportWorker.cpp
     src/playlist/PlaylistMatcher.cpp
+    src/playlist/import/YouTubeImport.cpp
     src/ui/MainPanelKeybindings.cpp
     src/ui/NavigableTableView.cpp
     src/ui/PanelOrderDialog.cpp
@@ -166,6 +167,7 @@ set(MUZAITEN_HEADERS
     src/playlist/PlaylistImport.h
     src/playlist/PlaylistImportWorker.h
     src/playlist/PlaylistMatcher.h
+    src/playlist/import/YouTubeImport.h
     src/scrobble/LastFmApi.h
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
