@@ -17,6 +17,7 @@ public:
 
     QString playbackStatus() const;
     QVariantMap metadata() const;
+    QString currentTrackJson() const;
     double volume() const;
     qlonglong positionUsec() const;
     qlonglong durationUsec() const;
@@ -48,6 +49,7 @@ signals:
 private:
     void emitPropertiesChanged(const QString &interfaceName, const QVariantMap &changedProperties);
     QVariantMap buildMetadata(const Track &track) const;
+    QString buildCurrentTrackJson(const Track &track) const;
     QString trackObjectPath(const Track &track) const;
 
     QString m_serviceName;

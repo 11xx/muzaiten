@@ -10,14 +10,18 @@
 #include <QDBusObjectPath>
 #include <QFileInfo>
 #include <QIODevice>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QUrl>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 constexpr auto objectPath = "/org/mpris/MediaPlayer2";
 constexpr auto rootInterface = "org.mpris.MediaPlayer2";
 constexpr auto playerInterface = "org.mpris.MediaPlayer2.Player";
+constexpr auto muzaitenPlayerInterface = "org.muzaiten.Player";
 
 qlonglong msToUsec(qint64 value)
 {
@@ -35,6 +39,45 @@ QString titleForTrack(const Track &track)
 QString artistForTrack(const Track &track)
 {
     return track.artistName.trimmed().isEmpty() ? track.albumArtistName.trimmed() : track.artistName.trimmed();
+}
+
+double secondsFromMs(qint64 value)
+{
+    return static_cast<double>(std::max<qint64>(0, value)) / 1000.0;
+}
+
+QString ratingSourceName(Rating::Source source)
+{
+    switch (source) {
+    case Rating::Source::None:
+        return QStringLiteral("none");
+    case Rating::Source::MusicBeeCompatible:
+        return QStringLiteral("musicbee_compatible");
+    case Rating::Source::VorbisRating:
+        return QStringLiteral("vorbis_rating");
+    case Rating::Source::Id3Popularimeter:
+        return QStringLiteral("id3_popularimeter");
+    case Rating::Source::Mp4Rate:
+        return QStringLiteral("mp4_rate");
+    case Rating::Source::Unknown:
+        return QStringLiteral("unknown");
+    }
+    return QStringLiteral("unknown");
+}
+
+void insertString(QJsonObject &object, const QString &key, const QString &value)
+{
+    const QString trimmed = value.trimmed();
+    if (!trimmed.isEmpty()) {
+        object.insert(key, trimmed);
+    }
+}
+
+void insertPositive(QJsonObject &object, const QString &key, qint64 value)
+{
+    if (value > 0) {
+        object.insert(key, value);
+    }
 }
 
 class MprisRootAdaptor final : public QDBusAbstractAdaptor {
@@ -145,6 +188,28 @@ private:
     MprisService *m_service = nullptr;
 };
 
+class MuzaitenPlayerAdaptor final : public QDBusAbstractAdaptor {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.muzaiten.Player")
+    Q_PROPERTY(QString CurrentTrackJson READ CurrentTrackJson)
+
+public:
+    explicit MuzaitenPlayerAdaptor(MprisService *service)
+        : QDBusAbstractAdaptor(service)
+        , m_service(service)
+    {
+        setAutoRelaySignals(true);
+    }
+
+    QString CurrentTrackJson() const { return m_service->currentTrackJson(); }
+
+public slots:
+    QString GetCurrentTrackJson() const { return m_service->currentTrackJson(); }
+
+private:
+    MprisService *m_service = nullptr;
+};
+
 } // namespace
 
 MprisService::MprisService(QObject *parent)
@@ -152,6 +217,7 @@ MprisService::MprisService(QObject *parent)
 {
     new MprisRootAdaptor(this);
     new MprisPlayerAdaptor(this);
+    new MuzaitenPlayerAdaptor(this);
 
     auto bus = QDBusConnection::sessionBus();
     const QString baseName = QStringLiteral("org.mpris.MediaPlayer2.muzaiten");
@@ -193,6 +259,11 @@ QString MprisService::playbackStatus() const
 QVariantMap MprisService::metadata() const
 {
     return buildMetadata(m_track);
+}
+
+QString MprisService::currentTrackJson() const
+{
+    return buildCurrentTrackJson(m_track);
 }
 
 double MprisService::volume() const
@@ -247,6 +318,8 @@ void MprisService::setTrack(const Track &track)
                           {{QStringLiteral("Metadata"), metadata()},
                            {QStringLiteral("CanSeek"), canSeek()},
                            {QStringLiteral("CanPlay"), canPlay()}});
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::setPlaybackState(PlaybackBackend::State state)
@@ -258,6 +331,8 @@ void MprisService::setPlaybackState(PlaybackBackend::State state)
     emitPropertiesChanged(QString::fromLatin1(playerInterface),
                           {{QStringLiteral("PlaybackStatus"), playbackStatus()},
                            {QStringLiteral("CanPause"), canPause()}});
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::setPositionMs(qint64 positionMs)
@@ -275,6 +350,8 @@ void MprisService::setDurationMs(qint64 durationMs)
     emitPropertiesChanged(QString::fromLatin1(playerInterface),
                           {{QStringLiteral("Metadata"), metadata()},
                            {QStringLiteral("CanSeek"), canSeek()}});
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::setVolume(double volume0To1)
@@ -285,6 +362,8 @@ void MprisService::setVolume(double volume0To1)
     }
     m_volume = volume;
     emitPropertiesChanged(QString::fromLatin1(playerInterface), {{QStringLiteral("Volume"), m_volume}});
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::setQueueCapabilities(bool canGoPrevious, bool canGoNext, bool canPlay)
@@ -296,6 +375,8 @@ void MprisService::setQueueCapabilities(bool canGoPrevious, bool canGoNext, bool
                           {{QStringLiteral("CanGoPrevious"), m_canGoPrevious},
                            {QStringLiteral("CanGoNext"), m_canGoNext},
                            {QStringLiteral("CanPlay"), m_canPlay}});
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::emitPropertiesChanged(const QString &interfaceName, const QVariantMap &changedProperties)
@@ -345,6 +426,89 @@ QVariantMap MprisService::buildMetadata(const Track &track) const
         map.insert(QStringLiteral("xesam:userRating"), static_cast<double>(track.effectiveRating0To100) / 100.0);
     }
     return map;
+}
+
+QString MprisService::buildCurrentTrackJson(const Track &track) const
+{
+    const qint64 durationMs = track.durationMs > 0 ? track.durationMs : m_durationMs;
+    const qint64 elapsedMs = std::clamp(m_positionMs, qint64{0}, std::max<qint64>(0, durationMs));
+    const double duration = secondsFromMs(durationMs);
+    const double elapsed = secondsFromMs(elapsedMs);
+    const double elapsedPercent = duration > 0.0 ? (elapsed / duration) * 100.0 : 0.0;
+
+    QJsonObject status;
+    status.insert(QStringLiteral("state"), playbackStatus().toLower());
+    status.insert(QStringLiteral("playback"), playbackStatus());
+    status.insert(QStringLiteral("player"), QStringLiteral("muzaiten"));
+    status.insert(QStringLiteral("duration"), duration);
+    status.insert(QStringLiteral("elapsed"), elapsed);
+    status.insert(QStringLiteral("elapsed_percent"), elapsedPercent);
+    status.insert(QStringLiteral("volume"), static_cast<int>(std::lround(m_volume * 100.0)));
+    status.insert(QStringLiteral("can_go_previous"), m_canGoPrevious);
+    status.insert(QStringLiteral("can_go_next"), m_canGoNext);
+    status.insert(QStringLiteral("can_play"), m_canPlay);
+    status.insert(QStringLiteral("can_pause"), canPause());
+    status.insert(QStringLiteral("can_seek"), canSeek());
+
+    QJsonObject tags;
+    insertString(tags, QStringLiteral("title"), titleForTrack(track));
+    insertString(tags, QStringLiteral("artist"), artistForTrack(track));
+    insertString(tags, QStringLiteral("album_artist"), track.albumArtistName);
+    insertString(tags, QStringLiteral("album"), track.albumTitle);
+    insertString(tags, QStringLiteral("date"), track.date);
+    insertString(tags, QStringLiteral("original_date"), track.originalDate);
+    if (track.trackNumber > 0) {
+        tags.insert(QStringLiteral("track"), QString::number(track.trackNumber));
+        tags.insert(QStringLiteral("track_number"), track.trackNumber);
+    }
+    insertPositive(tags, QStringLiteral("track_total"), track.trackTotal);
+    if (track.discNumber > 0) {
+        tags.insert(QStringLiteral("disc"), QString::number(track.discNumber));
+        tags.insert(QStringLiteral("disc_number"), track.discNumber);
+    }
+    insertPositive(tags, QStringLiteral("disc_total"), track.discTotal);
+    insertString(tags, QStringLiteral("musicbrainz_artistid"), track.musicBrainz.artistId);
+    insertString(tags, QStringLiteral("musicbrainz_albumartistid"), track.musicBrainz.albumArtistId);
+    insertString(tags, QStringLiteral("musicbrainz_albumid"), track.musicBrainz.releaseId);
+    insertString(tags, QStringLiteral("musicbrainz_releasegroupid"), track.musicBrainz.releaseGroupId);
+    insertString(tags, QStringLiteral("musicbrainz_trackid"), track.musicBrainz.recordingId);
+    insertString(tags, QStringLiteral("musicbrainz_releasetrackid"), track.musicBrainz.trackId);
+    insertString(tags, QStringLiteral("musicbrainz_workid"), track.musicBrainz.workId);
+
+    QJsonObject audio;
+    insertString(audio, QStringLiteral("codec"), track.codec);
+    insertPositive(audio, QStringLiteral("sample_rate_hz"), track.sampleRateHz);
+    insertPositive(audio, QStringLiteral("bitrate_kbps"), track.bitrateKbps);
+    insertPositive(audio, QStringLiteral("channels"), track.channels);
+    insertPositive(audio, QStringLiteral("bit_depth"), track.bitDepth);
+
+    QJsonObject library;
+    if (track.rating0To100 >= 0) {
+        library.insert(QStringLiteral("rating_0_100"), track.rating0To100);
+    }
+    if (track.effectiveRating0To100 >= 0) {
+        library.insert(QStringLiteral("effective_rating_0_100"), track.effectiveRating0To100);
+    }
+    library.insert(QStringLiteral("rating_source"), ratingSourceName(track.ratingSource));
+    library.insert(QStringLiteral("has_user_rating"), track.hasUserRating);
+    insertPositive(library, QStringLiteral("play_count"), track.playCount);
+
+    QJsonObject file;
+    insertString(file, QStringLiteral("path"), track.path);
+    insertString(file, QStringLiteral("url"), track.path.isEmpty() ? QString() : QUrl::fromLocalFile(track.path).toString());
+    insertString(file, QStringLiteral("parent_dir"), track.parentDir);
+    insertString(file, QStringLiteral("filename"), track.filename);
+    insertPositive(file, QStringLiteral("size"), track.fileSize);
+    insertPositive(file, QStringLiteral("mtime"), track.fileMtime);
+
+    QJsonObject root;
+    insertString(root, QStringLiteral("filename"), track.path);
+    root.insert(QStringLiteral("status"), status);
+    root.insert(QStringLiteral("tags"), tags);
+    root.insert(QStringLiteral("audio"), audio);
+    root.insert(QStringLiteral("library"), library);
+    root.insert(QStringLiteral("file"), file);
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
 QString MprisService::trackObjectPath(const Track &track) const
