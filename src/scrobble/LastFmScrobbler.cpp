@@ -1,9 +1,7 @@
 #include "scrobble/LastFmScrobbler.h"
 
 #include <QDateTime>
-#include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,7 +16,6 @@ Q_LOGGING_CATEGORY(lastFmLog, "muzaiten.lastfm")
 
 namespace {
 
-constexpr qint64 maxRequiredListenMs = 4 * 60 * 1000;
 constexpr int maxScrobblesPerBatch = 50;
 constexpr int maxConsecutiveSubmissionFailures = 3;
 constexpr int authPollIntervalMs = 3000;
@@ -51,47 +48,19 @@ void addCommonTrackParams(LastFmApi::Params &params, const LastFmApi::Scrobble &
     }
 }
 
-QJsonObject scrobbleToJson(const LastFmApi::Scrobble &scrobble)
+// Rebuild a Track from a legacy pending-queue scrobble object so it can be
+// imported into the shared history store.
+Track trackFromLegacyScrobble(const QJsonObject &object)
 {
-    QJsonObject object;
-    object.insert(QStringLiteral("artist"), scrobble.artist);
-    object.insert(QStringLiteral("track"), scrobble.track);
-    object.insert(QStringLiteral("timestamp"), scrobble.timestamp);
-    if (!scrobble.album.isEmpty()) {
-        object.insert(QStringLiteral("album"), scrobble.album);
-    }
-    if (!scrobble.albumArtist.isEmpty()) {
-        object.insert(QStringLiteral("albumArtist"), scrobble.albumArtist);
-    }
-    if (scrobble.trackNumber > 0) {
-        object.insert(QStringLiteral("trackNumber"), scrobble.trackNumber);
-    }
-    if (!scrobble.mbid.isEmpty()) {
-        object.insert(QStringLiteral("mbid"), scrobble.mbid);
-    }
-    if (scrobble.durationSecs > 0) {
-        object.insert(QStringLiteral("duration"), scrobble.durationSecs);
-    }
-    return object;
-}
-
-LastFmApi::Scrobble scrobbleFromJson(const QJsonObject &object)
-{
-    LastFmApi::Scrobble scrobble;
-    scrobble.artist = object.value(QStringLiteral("artist")).toString().trimmed();
-    scrobble.track = object.value(QStringLiteral("track")).toString().trimmed();
-    scrobble.timestamp = static_cast<qint64>(object.value(QStringLiteral("timestamp")).toDouble());
-    scrobble.album = object.value(QStringLiteral("album")).toString().trimmed();
-    scrobble.albumArtist = object.value(QStringLiteral("albumArtist")).toString().trimmed();
-    scrobble.trackNumber = object.value(QStringLiteral("trackNumber")).toInt();
-    scrobble.mbid = object.value(QStringLiteral("mbid")).toString().trimmed();
-    scrobble.durationSecs = object.value(QStringLiteral("duration")).toInt();
-    return scrobble;
-}
-
-bool isValidCachedScrobble(const LastFmApi::Scrobble &scrobble)
-{
-    return !scrobble.artist.isEmpty() && !scrobble.track.isEmpty() && scrobble.timestamp > 0;
+    Track track;
+    track.title = object.value(QStringLiteral("track")).toString().trimmed();
+    track.artistName = object.value(QStringLiteral("artist")).toString().trimmed();
+    track.albumTitle = object.value(QStringLiteral("album")).toString().trimmed();
+    track.albumArtistName = object.value(QStringLiteral("albumArtist")).toString().trimmed();
+    track.trackNumber = object.value(QStringLiteral("trackNumber")).toInt();
+    track.musicBrainz.recordingId = object.value(QStringLiteral("mbid")).toString().trimmed();
+    track.durationMs = static_cast<qint64>(object.value(QStringLiteral("duration")).toInt()) * 1000;
+    return track;
 }
 
 QString responseErrorText(const LastFmApi::Response &response, const QString &transportMessage)
@@ -108,39 +77,65 @@ LastFmScrobbler::LastFmScrobbler(QObject *parent)
     : QObject(parent)
 {
     m_network = new QNetworkAccessManager(this);
-    m_progressTimer = new QTimer(this);
     m_retryTimer = new QTimer(this);
     m_authPollTimer = new QTimer(this);
     m_trackStartNowPlayingTimer = new QTimer(this);
-    m_progressTimer->setInterval(1000);
     m_retryTimer->setInterval(60000);
     m_authPollTimer->setInterval(authPollIntervalMs);
     m_trackStartNowPlayingTimer->setSingleShot(true);
-    connect(m_progressTimer, &QTimer::timeout, this, &LastFmScrobbler::checkListenProgress);
-    connect(m_retryTimer, &QTimer::timeout, this, &LastFmScrobbler::retryPending);
+    connect(m_retryTimer, &QTimer::timeout, this, &LastFmScrobbler::uploadBacklog);
     connect(m_authPollTimer, &QTimer::timeout, this, &LastFmScrobbler::pollAuthSession);
     connect(m_trackStartNowPlayingTimer, &QTimer::timeout, this, &LastFmScrobbler::submitPendingTrackStartNowPlaying);
 }
 
-void LastFmScrobbler::configure(bool enabled, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &cachePath)
+LastFmScrobbler::~LastFmScrobbler() = default;
+
+void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &historyPath, const QString &legacyCachePath)
 {
     m_enabled = enabled;
+    m_uploadAllowed = uploadAllowed;
     m_apiKey = apiKey.trimmed();
     m_sharedSecret = sharedSecret.trimmed();
     m_sessionKey = sessionKey.trimmed();
     m_consecutiveFailures = 0;
-    if (m_cachePath != cachePath) {
-        m_cachePath = cachePath;
-        loadPending();
+    if (m_historyPath != historyPath) {
+        m_historyPath = historyPath;
+        m_history = historyPath.isEmpty() ? nullptr : std::make_unique<ListenHistoryStore>(historyPath);
     }
+    migrateLegacyPending(legacyCachePath);
 
-    if (!m_enabled || !hasCredentials()) {
+    if (!canUpload()) {
         m_retryTimer->stop();
         return;
     }
 
     m_retryTimer->start();
-    retryPending();
+    uploadBacklog();
+}
+
+void LastFmScrobbler::migrateLegacyPending(const QString &legacyCachePath)
+{
+    if (legacyCachePath.isEmpty() || m_history == nullptr || !m_history->isOpen()) {
+        return;
+    }
+    QFile file(legacyCachePath);
+    if (!file.exists()) {
+        return;
+    }
+    if (file.open(QIODevice::ReadOnly)) {
+        const QJsonArray scrobbles = QJsonDocument::fromJson(file.readAll()).array();
+        for (const QJsonValue &value : scrobbles) {
+            const QJsonObject object = value.toObject();
+            const qint64 timestamp = static_cast<qint64>(object.value(QStringLiteral("timestamp")).toDouble());
+            const Track track = trackFromLegacyScrobble(object);
+            if (timestamp > 0 && !track.title.isEmpty() && !track.artistName.isEmpty()) {
+                m_history->importLegacyListen(track, timestamp, ListenHistoryStore::LastFm);
+            }
+        }
+        file.close();
+    }
+    file.remove();
+    qCInfo(lastFmLog) << "migrated legacy pending queue into listen history" << legacyCachePath;
 }
 
 void LastFmScrobbler::trackStarted(const Track &track)
@@ -148,36 +143,17 @@ void LastFmScrobbler::trackStarted(const Track &track)
     m_currentTrack = track;
     m_hasCurrentTrack = true;
     m_playing = true;
-    m_scrobbleSubmitted = false;
-    m_scrobbleTimestampSecs = QDateTime::currentSecsSinceEpoch();
-    m_requiredMs = requiredListenMs(track);
-    m_accumulatedMs = 0;
-    m_segmentTimer.restart();
-    m_progressTimer->start();
-
     submitNowPlayingForTrackStart(track);
 }
 
 void LastFmScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
 {
+    Q_UNUSED(elapsedMs);
     m_currentTrack = track;
     m_hasCurrentTrack = true;
     m_playing = playing;
-    m_requiredMs = requiredListenMs(track);
-    m_accumulatedMs = std::max<qint64>(0, elapsedMs);
-    // Anchor the scrobble timestamp to when the track originally began so that
-    // the completed-scrobble reports the real start time.
-    m_scrobbleTimestampSecs = QDateTime::currentSecsSinceEpoch() - m_accumulatedMs / 1000;
-    // If we already passed the listen threshold assume it was scrobbled by the
-    // prior session — mark submitted to avoid a duplicate.
-    m_scrobbleSubmitted = (m_accumulatedMs >= m_requiredMs);
-    m_segmentTimer.restart();
-
-    if (m_playing && !m_scrobbleSubmitted) {
-        m_progressTimer->start();
+    if (m_playing) {
         submitNowPlaying(track);
-    } else {
-        m_progressTimer->stop();
     }
 }
 
@@ -187,15 +163,8 @@ void LastFmScrobbler::playbackStateChanged(bool playing)
         return;
     }
 
-    if (!playing && m_segmentTimer.isValid()) {
-        m_accumulatedMs += m_segmentTimer.elapsed();
-    } else if (playing) {
-        m_segmentTimer.restart();
-    }
-
     m_playing = playing;
-    if (m_playing && !m_scrobbleSubmitted) {
-        m_progressTimer->start();
+    if (m_playing) {
         // Re-send "now playing" on resume, but rate-limit to avoid flooding
         // Last.fm when the user rapidly toggles play/pause.
         const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -255,29 +224,51 @@ void LastFmScrobbler::pollAuthSession()
     postParams(params, RequestKind::AuthSession);
 }
 
-void LastFmScrobbler::checkListenProgress()
+void LastFmScrobbler::uploadBacklog()
 {
-    if (!m_enabled || !m_playing || !m_hasCurrentTrack || m_scrobbleSubmitted) {
+    if (!canUpload() || m_scrobbleSubmissionInFlight || m_history == nullptr || !m_history->isOpen()) {
         return;
     }
 
-    if (playedMs() >= m_requiredMs) {
-        submitCompletedScrobble();
+    QList<LastFmApi::Scrobble> batch;
+    QList<qint64> submittedIds;
+    while (batch.isEmpty()) {
+        const QList<ListenHistoryStore::Listen> rows = m_history->unsent(ListenHistoryStore::LastFm, maxScrobblesPerBatch);
+        if (rows.isEmpty()) {
+            return;
+        }
+        // Rows the service can never accept (no artist/title, or tracks under
+        // the 30s scrobble minimum) are marked sent up front; left unsent at
+        // the head of the queue they would block every valid listen forever.
+        QList<qint64> skippedIds;
+        for (const ListenHistoryStore::Listen &row : rows) {
+            if (!LastFmApi::hasMinimumMetadata(row.track) || LastFmApi::isKnownTooShortToScrobble(row.track)) {
+                skippedIds.push_back(row.id);
+                continue;
+            }
+            batch.push_back(LastFmApi::scrobbleFromTrack(row.track, row.listenedAtSecs));
+            submittedIds.push_back(row.id);
+        }
+        m_history->markSent(ListenHistoryStore::LastFm, skippedIds);
+        if (skippedIds.isEmpty() && batch.isEmpty()) {
+            return;
+        }
     }
-}
 
-void LastFmScrobbler::retryPending()
-{
-    if (!m_enabled || !hasCredentials() || m_pendingScrobbles.isEmpty() || m_scrobbleSubmissionInFlight) {
-        return;
+    LastFmApi::Params params;
+    LastFmApi::addParam(params, QStringLiteral("method"), QStringLiteral("track.scrobble"));
+    LastFmApi::addParam(params, QStringLiteral("api_key"), m_apiKey);
+    LastFmApi::addParam(params, QStringLiteral("sk"), m_sessionKey);
+    for (int index = 0; index < batch.size(); ++index) {
+        LastFmApi::addScrobbleParams(params, batch.at(index), index);
     }
-
-    submitScrobbleBatch(m_pendingScrobbles.mid(0, maxScrobblesPerBatch));
+    m_scrobbleSubmissionInFlight = true;
+    postParams(params, RequestKind::Scrobble, submittedIds);
 }
 
 void LastFmScrobbler::submitNowPlaying(const Track &track)
 {
-    if (!m_enabled || !hasCredentials()) {
+    if (!canUpload()) {
         return;
     }
     if (!LastFmApi::hasMinimumMetadata(track)) {
@@ -293,7 +284,7 @@ void LastFmScrobbler::submitNowPlaying(const Track &track)
     LastFmApi::addParam(params, QStringLiteral("method"), QStringLiteral("track.updateNowPlaying"));
     LastFmApi::addParam(params, QStringLiteral("api_key"), m_apiKey);
     LastFmApi::addParam(params, QStringLiteral("sk"), m_sessionKey);
-    addCommonTrackParams(params, LastFmApi::scrobbleFromTrack(track, m_scrobbleTimestampSecs));
+    addCommonTrackParams(params, LastFmApi::scrobbleFromTrack(track, 0));
     postParams(params, RequestKind::NowPlaying);
 }
 
@@ -321,53 +312,14 @@ void LastFmScrobbler::submitPendingTrackStartNowPlaying()
 
     const Track track = m_pendingTrackStartNowPlaying;
     m_hasPendingTrackStartNowPlaying = false;
-    if (!m_playing || m_scrobbleSubmitted || !m_hasCurrentTrack || track.path != m_currentTrack.path) {
+    if (!m_playing || !m_hasCurrentTrack || track.path != m_currentTrack.path) {
         return;
     }
 
     submitNowPlaying(track);
 }
 
-void LastFmScrobbler::submitCompletedScrobble()
-{
-    if (!m_hasCurrentTrack || m_scrobbleSubmitted) {
-        return;
-    }
-
-    m_scrobbleSubmitted = true;
-    if (!m_enabled || !hasCredentials()) {
-        return;
-    }
-    if (!LastFmApi::hasMinimumMetadata(m_currentTrack)) {
-        qCWarning(lastFmLog) << "cannot scrobble Last.fm track without tagged title and artist" << m_currentTrack.path;
-        return;
-    }
-    if (LastFmApi::isKnownTooShortToScrobble(m_currentTrack)) {
-        return;
-    }
-
-    cachePendingScrobble(LastFmApi::scrobbleFromTrack(m_currentTrack, m_scrobbleTimestampSecs));
-    retryPending();
-}
-
-void LastFmScrobbler::submitScrobbleBatch(const QList<LastFmApi::Scrobble> &submitted)
-{
-    if (submitted.isEmpty()) {
-        return;
-    }
-
-    LastFmApi::Params params;
-    LastFmApi::addParam(params, QStringLiteral("method"), QStringLiteral("track.scrobble"));
-    LastFmApi::addParam(params, QStringLiteral("api_key"), m_apiKey);
-    LastFmApi::addParam(params, QStringLiteral("sk"), m_sessionKey);
-    for (int index = 0; index < submitted.size(); ++index) {
-        LastFmApi::addScrobbleParams(params, submitted.at(index), index);
-    }
-    m_scrobbleSubmissionInFlight = true;
-    postParams(params, RequestKind::Scrobble, static_cast<int>(submitted.size()));
-}
-
-void LastFmScrobbler::postParams(LastFmApi::Params params, RequestKind kind, int submittedScrobbleCount)
+void LastFmScrobbler::postParams(LastFmApi::Params params, RequestKind kind, const QList<qint64> &submittedIds)
 {
     const QString secret = (kind == RequestKind::AuthToken || kind == RequestKind::AuthSession) ? m_pendingAuthSecret : m_sharedSecret;
     LastFmApi::addParam(params, QStringLiteral("api_sig"), LastFmApi::signature(params, secret));
@@ -378,12 +330,12 @@ void LastFmScrobbler::postParams(LastFmApi::Params params, RequestKind kind, int
     request.setRawHeader("Accept", "application/xml");
 
     QNetworkReply *reply = m_network->post(request, LastFmApi::formBody(params));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, kind, submittedScrobbleCount]() {
-        handleRequestFinished(reply, kind, submittedScrobbleCount);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, kind, submittedIds]() {
+        handleRequestFinished(reply, kind, submittedIds);
     });
 }
 
-void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind kind, int submittedScrobbleCount)
+void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind kind, const QList<qint64> &submittedIds)
 {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
@@ -410,7 +362,7 @@ void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind ki
         handleNowPlayingResponse(response, transportMessage);
         break;
     case RequestKind::Scrobble:
-        handleScrobbleResponse(response, networkError, transportMessage, submittedScrobbleCount);
+        handleScrobbleResponse(response, networkError, transportMessage, submittedIds);
         break;
     }
 }
@@ -493,11 +445,15 @@ void LastFmScrobbler::handleNowPlayingResponse(const LastFmApi::Response &respon
 void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response,
                                              bool networkError,
                                              const QString &transportMessage,
-                                             int submittedScrobbleCount)
+                                             const QList<qint64> &submittedIds)
 {
     if (response.parsed && response.ok) {
         m_consecutiveFailures = 0;
-        removeSubmittedPrefix(submittedScrobbleCount);
+        if (m_history != nullptr) {
+            m_history->markSent(ListenHistoryStore::LastFm, submittedIds);
+        }
+        // Keep draining until the backlog is empty.
+        uploadBacklog();
         return;
     }
 
@@ -516,7 +472,9 @@ void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response
         return;
     case LastFmApi::FailureAction::DropSubmitted:
         m_consecutiveFailures = 0;
-        removeSubmittedPrefix(submittedScrobbleCount);
+        if (m_history != nullptr) {
+            m_history->markSent(ListenHistoryStore::LastFm, submittedIds);
+        }
         emit submissionFailed(message);
         return;
     case LastFmApi::FailureAction::Reauthenticate:
@@ -530,84 +488,16 @@ void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response
     }
 }
 
-qint64 LastFmScrobbler::requiredListenMs(const Track &track) const
-{
-    if (track.durationMs <= 0) {
-        return maxRequiredListenMs;
-    }
-    return std::min(track.durationMs / 2, maxRequiredListenMs);
-}
-
-qint64 LastFmScrobbler::playedMs() const
-{
-    return m_accumulatedMs + (m_playing && m_segmentTimer.isValid() ? m_segmentTimer.elapsed() : 0);
-}
-
-void LastFmScrobbler::loadPending()
-{
-    m_pendingScrobbles.clear();
-    QFile file(m_cachePath);
-    if (m_cachePath.isEmpty() || !file.open(QIODevice::ReadOnly)) {
-        return;
-    }
-
-    const QJsonArray scrobbles = QJsonDocument::fromJson(file.readAll()).array();
-    for (const QJsonValue &value : scrobbles) {
-        if (!value.isObject()) {
-            continue;
-        }
-        const LastFmApi::Scrobble scrobble = scrobbleFromJson(value.toObject());
-        if (isValidCachedScrobble(scrobble)) {
-            m_pendingScrobbles.push_back(scrobble);
-        }
-    }
-}
-
-void LastFmScrobbler::savePending() const
-{
-    if (m_cachePath.isEmpty()) {
-        return;
-    }
-
-    QFileInfo info(m_cachePath);
-    QDir().mkpath(info.absolutePath());
-    QFile file(m_cachePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qCWarning(lastFmLog) << "failed to write pending Last.fm cache" << m_cachePath;
-        return;
-    }
-
-    QJsonArray scrobbles;
-    for (const LastFmApi::Scrobble &scrobble : m_pendingScrobbles) {
-        scrobbles.append(scrobbleToJson(scrobble));
-    }
-    file.write(QJsonDocument(scrobbles).toJson(QJsonDocument::Compact));
-}
-
-void LastFmScrobbler::cachePendingScrobble(const LastFmApi::Scrobble &scrobble)
-{
-    if (!isValidCachedScrobble(scrobble)) {
-        return;
-    }
-    m_pendingScrobbles.push_back(scrobble);
-    savePending();
-}
-
-void LastFmScrobbler::removeSubmittedPrefix(int count)
-{
-    const int removeCount = std::min(count, static_cast<int>(m_pendingScrobbles.size()));
-    if (removeCount <= 0) {
-        return;
-    }
-    m_pendingScrobbles.erase(m_pendingScrobbles.begin(), m_pendingScrobbles.begin() + removeCount);
-    savePending();
-}
-
 void LastFmScrobbler::disableScrobbling(const QString &message)
 {
     m_enabled = false;
     m_retryTimer->stop();
     emit disabledAfterFailures(message);
+}
+
+bool LastFmScrobbler::canUpload() const
+{
+    return m_enabled && m_uploadAllowed && hasCredentials();
 }
 
 bool LastFmScrobbler::hasCredentials() const

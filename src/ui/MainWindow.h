@@ -22,6 +22,8 @@ class QCloseEvent;
 class QImage;
 class ListenBrainzScrobbler;
 class LastFmScrobbler;
+class ListenHistoryStore;
+class ListenTracker;
 class MprisService;
 class PlayerBar;
 class PanelSearchController;
@@ -143,6 +145,9 @@ private:
     void setListenBrainzToken();
     void configureLastFm();
     void setLastFmEnabled(bool enabled);
+    void setScrobbleOffline(bool offline);
+    bool scrobbleOffline() const;
+    QString listenHistoryPath() const;
     void showLastFmSettings();
     QString lastFmApiKey() const;
     QString lastFmSharedSecret() const;
@@ -300,6 +305,8 @@ private:
     bool m_incrementalRefreshDirty = false;
     std::unique_ptr<ArtworkCache> m_artworkCache;
     quint64 m_currentArtGeneration = 0;
+    std::unique_ptr<ListenHistoryStore> m_listenHistory;
+    ListenTracker *m_listenTracker = nullptr;
     QThread *m_listenBrainzThread = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
     QThread *m_lastFmThread = nullptr;

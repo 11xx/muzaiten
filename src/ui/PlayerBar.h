@@ -18,6 +18,7 @@ public:
     void setTrackInfoPaneVisible(bool visible);
     void setListenBrainzEnabled(bool enabled);
     void setLastFmEnabled(bool enabled);
+    void setScrobbleOffline(bool offline);
     void setListUnsupportedFiles(bool show);
     // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
     void setScanProfile(int profile);
@@ -84,6 +85,7 @@ signals:
     void listenBrainzTokenRequested();
     void lastFmEnabledChanged(bool enabled);
     void lastFmSettingsRequested();
+    void scrobbleOfflineChanged(bool offline);
     void previousRequested();
     void playPauseRequested();
     void nextRequested();
@@ -109,6 +111,7 @@ private:
     class QAction *m_trackInfoPaneVisible = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;
     class QAction *m_lastFmEnabled = nullptr;
+    class QAction *m_scrobbleOffline = nullptr;
     QLabel *m_title = nullptr;
     QLabel *m_subtitle = nullptr;
     QLabel *m_nowPlaying = nullptr;

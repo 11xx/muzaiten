@@ -3,9 +3,7 @@
 #include "Version.h"
 
 #include <QDateTime>
-#include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLoggingCategory>
@@ -18,10 +16,10 @@
 Q_LOGGING_CATEGORY(listenBrainzLog, "muzaiten.listenbrainz")
 
 namespace {
-constexpr qint64 maxRequiredListenMs = 4 * 60 * 1000;
 constexpr int maxListensPerImport = 99;
 constexpr int maxConsecutiveSubmissionFailures = 3;
 constexpr auto apiUrl = "https://api.listenbrainz.org/1/submit-listens";
+constexpr auto validateTokenUrl = "https://api.listenbrainz.org/1/validate-token";
 // Minimum seconds between "playing_now" resubmissions on play/resume, to
 // prevent play-pause spam from flooding ListenBrainz with update requests.
 constexpr qint64 kPlayingNowResubmitMinSecs = 30;
@@ -53,40 +51,92 @@ void addArrayIfPresent(QJsonObject &object, const QString &key, const QString &v
     }
 }
 
+// Rebuild a Track from a legacy pending-queue listen object so it can be
+// imported into the shared history store.
+Track trackFromLegacyListen(const QJsonObject &listen)
+{
+    const QJsonObject meta = listen.value(QStringLiteral("track_metadata")).toObject();
+    const QJsonObject info = meta.value(QStringLiteral("additional_info")).toObject();
+    Track track;
+    track.title = meta.value(QStringLiteral("track_name")).toString();
+    track.artistName = meta.value(QStringLiteral("artist_name")).toString();
+    track.albumTitle = meta.value(QStringLiteral("release_name")).toString();
+    track.trackNumber = info.value(QStringLiteral("tracknumber")).toString().toInt();
+    track.durationMs = static_cast<qint64>(info.value(QStringLiteral("duration_ms")).toDouble());
+    track.musicBrainz.releaseId = info.value(QStringLiteral("release_mbid")).toString();
+    track.musicBrainz.recordingId = info.value(QStringLiteral("recording_mbid")).toString();
+    track.musicBrainz.trackId = info.value(QStringLiteral("track_mbid")).toString();
+    const QJsonArray artistMbids = info.value(QStringLiteral("artist_mbids")).toArray();
+    if (!artistMbids.isEmpty()) {
+        track.musicBrainz.artistId = artistMbids.first().toString();
+    }
+    const QJsonArray workMbids = info.value(QStringLiteral("work_mbids")).toArray();
+    if (!workMbids.isEmpty()) {
+        track.musicBrainz.workId = workMbids.first().toString();
+    }
+    return track;
+}
+
 } // namespace
 
 ListenBrainzScrobbler::ListenBrainzScrobbler(QObject *parent)
     : QObject(parent)
 {
     m_network = new QNetworkAccessManager(this);
-    m_progressTimer = new QTimer(this);
     m_retryTimer = new QTimer(this);
     m_trackStartPlayingNowTimer = new QTimer(this);
-    m_progressTimer->setInterval(1000);
     m_retryTimer->setInterval(60000);
     m_trackStartPlayingNowTimer->setSingleShot(true);
-    connect(m_progressTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::checkListenProgress);
-    connect(m_retryTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::retryPending);
+    connect(m_retryTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::uploadBacklog);
     connect(m_trackStartPlayingNowTimer, &QTimer::timeout, this, &ListenBrainzScrobbler::submitPendingTrackStartPlayingNow);
 }
 
-void ListenBrainzScrobbler::configure(bool enabled, const QString &token, const QString &cachePath)
+ListenBrainzScrobbler::~ListenBrainzScrobbler() = default;
+
+void ListenBrainzScrobbler::configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath, const QString &legacyCachePath)
 {
     m_enabled = enabled;
+    m_uploadAllowed = uploadAllowed;
     m_token = token.trimmed();
     m_consecutiveFailures = 0;
-    if (m_cachePath != cachePath) {
-        m_cachePath = cachePath;
-        loadPending();
+    if (m_historyPath != historyPath) {
+        m_historyPath = historyPath;
+        m_history = historyPath.isEmpty() ? nullptr : std::make_unique<ListenHistoryStore>(historyPath);
     }
+    migrateLegacyPending(legacyCachePath);
 
-    if (!m_enabled || m_token.isEmpty()) {
+    if (!canUpload()) {
         m_retryTimer->stop();
         return;
     }
 
     m_retryTimer->start();
-    retryPending();
+    uploadBacklog();
+}
+
+void ListenBrainzScrobbler::migrateLegacyPending(const QString &legacyCachePath)
+{
+    if (legacyCachePath.isEmpty() || m_history == nullptr || !m_history->isOpen()) {
+        return;
+    }
+    QFile file(legacyCachePath);
+    if (!file.exists()) {
+        return;
+    }
+    if (file.open(QIODevice::ReadOnly)) {
+        const QJsonArray listens = QJsonDocument::fromJson(file.readAll()).array();
+        for (const QJsonValue &value : listens) {
+            const QJsonObject listen = value.toObject();
+            const qint64 listenedAt = listen.value(QStringLiteral("listened_at")).toInteger();
+            const Track track = trackFromLegacyListen(listen);
+            if (listenedAt > 0 && !trackTitle(track).isEmpty() && !artistName(track).isEmpty()) {
+                m_history->importLegacyListen(track, listenedAt, ListenHistoryStore::ListenBrainz);
+            }
+        }
+        file.close();
+    }
+    file.remove();
+    qCInfo(listenBrainzLog) << "migrated legacy pending queue into listen history" << legacyCachePath;
 }
 
 void ListenBrainzScrobbler::trackStarted(const Track &track)
@@ -94,36 +144,17 @@ void ListenBrainzScrobbler::trackStarted(const Track &track)
     m_currentTrack = track;
     m_hasCurrentTrack = true;
     m_playing = true;
-    m_listenSubmitted = false;
-    m_listenTimestampSecs = QDateTime::currentSecsSinceEpoch();
-    m_requiredMs = requiredListenMs(track);
-    m_accumulatedMs = 0;
-    m_segmentTimer.restart();
-    m_progressTimer->start();
-
     submitPlayingNowForTrackStart(track);
 }
 
 void ListenBrainzScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
 {
+    Q_UNUSED(elapsedMs);
     m_currentTrack = track;
     m_hasCurrentTrack = true;
     m_playing = playing;
-    m_requiredMs = requiredListenMs(track);
-    m_accumulatedMs = std::max<qint64>(0, elapsedMs);
-    // Anchor the listen timestamp to when the track originally began so that
-    // the completed listen reports the real start time.
-    m_listenTimestampSecs = QDateTime::currentSecsSinceEpoch() - m_accumulatedMs / 1000;
-    // If we already passed the listen threshold assume it was submitted by the
-    // prior session — mark submitted to avoid a duplicate.
-    m_listenSubmitted = (m_accumulatedMs >= m_requiredMs);
-    m_segmentTimer.restart();
-
-    if (m_playing && !m_listenSubmitted) {
-        m_progressTimer->start();
+    if (m_playing) {
         submitPlayingNow(track);
-    } else {
-        m_progressTimer->stop();
     }
 }
 
@@ -133,15 +164,8 @@ void ListenBrainzScrobbler::playbackStateChanged(bool playing)
         return;
     }
 
-    if (!playing && m_segmentTimer.isValid()) {
-        m_accumulatedMs += m_segmentTimer.elapsed();
-    } else if (playing) {
-        m_segmentTimer.restart();
-    }
-
     m_playing = playing;
-    if (m_playing && !m_listenSubmitted) {
-        m_progressTimer->start();
+    if (m_playing) {
         // Re-send "playing now" on resume, but rate-limit to avoid flooding
         // ListenBrainz when the user rapidly toggles play/pause.
         const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -151,38 +175,62 @@ void ListenBrainzScrobbler::playbackStateChanged(bool playing)
     }
 }
 
-void ListenBrainzScrobbler::checkListenProgress()
+void ListenBrainzScrobbler::uploadBacklog()
 {
-    if (!m_enabled || !m_playing || !m_hasCurrentTrack || m_listenSubmitted) {
+    if (!canUpload() || m_listenSubmissionInFlight || m_history == nullptr || !m_history->isOpen()) {
         return;
     }
 
-    if (playedMs() >= m_requiredMs) {
-        submitCompletedListen();
-    }
-}
-
-void ListenBrainzScrobbler::retryPending()
-{
-    if (!m_enabled || m_token.isEmpty() || m_pendingListens.isEmpty() || m_listenSubmissionInFlight) {
-        return;
-    }
-
-    const QList<QJsonObject> submitted = m_pendingListens.mid(0, maxListensPerImport);
     QJsonArray listens;
-    for (const QJsonObject &listen : submitted) {
-        listens.append(listen);
+    QList<qint64> submittedIds;
+    while (listens.isEmpty()) {
+        const QList<ListenHistoryStore::Listen> rows = m_history->unsent(ListenHistoryStore::ListenBrainz, maxListensPerImport);
+        if (rows.isEmpty()) {
+            return;
+        }
+        // Rows the service can never accept (no artist/title) are marked sent
+        // up front; left unsent at the head of the queue they would block
+        // every valid listen behind them forever.
+        QList<qint64> skippedIds;
+        for (const ListenHistoryStore::Listen &row : rows) {
+            if (!hasMinimumMetadata(row.track, /*warn=*/false)) {
+                skippedIds.push_back(row.id);
+                continue;
+            }
+            listens.append(listenObject(row.track, row.listenedAtSecs));
+            submittedIds.push_back(row.id);
+        }
+        m_history->markSent(ListenHistoryStore::ListenBrainz, skippedIds);
+        if (skippedIds.isEmpty() && listens.isEmpty()) {
+            return;
+        }
     }
 
     QJsonObject body;
     body.insert(QStringLiteral("listen_type"), QStringLiteral("import"));
     body.insert(QStringLiteral("payload"), listens);
-    submitPayload(body, SubmissionKind::Listen);
+    submitPayload(body, SubmissionKind::Listen, submittedIds);
+}
+
+void ListenBrainzScrobbler::validateToken(const QString &token)
+{
+    QNetworkRequest request(QUrl(QString::fromLatin1(validateTokenUrl)));
+    request.setTransferTimeout(30000);
+    request.setRawHeader("Accept", "application/json");
+    request.setRawHeader("Authorization", QStringLiteral("Token %1").arg(token.trimmed()).toUtf8());
+
+    QNetworkReply *reply = m_network->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QJsonObject body = QJsonDocument::fromJson(reply->isOpen() ? reply->readAll() : QByteArray()).object();
+        const bool valid = reply->error() == QNetworkReply::NoError && body.value(QStringLiteral("valid")).toBool();
+        emit tokenValidated(valid, body.value(QStringLiteral("user_name")).toString());
+        reply->deleteLater();
+    });
 }
 
 void ListenBrainzScrobbler::submitPlayingNow(const Track &track)
 {
-    if (!m_enabled || m_token.isEmpty() || !hasMinimumMetadata(track)) {
+    if (!canUpload() || !hasMinimumMetadata(track)) {
         return;
     }
 
@@ -222,30 +270,14 @@ void ListenBrainzScrobbler::submitPendingTrackStartPlayingNow()
 
     const Track track = m_pendingTrackStartPlayingNow;
     m_hasPendingTrackStartPlayingNow = false;
-    if (!m_playing || m_listenSubmitted || !m_hasCurrentTrack || track.path != m_currentTrack.path) {
+    if (!m_playing || !m_hasCurrentTrack || track.path != m_currentTrack.path) {
         return;
     }
 
     submitPlayingNow(track);
 }
 
-void ListenBrainzScrobbler::submitCompletedListen()
-{
-    if (!m_hasCurrentTrack || m_listenSubmitted) {
-        return;
-    }
-
-    m_listenSubmitted = true;
-    const QJsonObject listen = listenObject(m_currentTrack, m_listenTimestampSecs);
-    if (!m_enabled || m_token.isEmpty() || !hasMinimumMetadata(m_currentTrack)) {
-        return;
-    }
-
-    cachePendingListen(listen);
-    retryPending();
-}
-
-void ListenBrainzScrobbler::submitPayload(const QJsonObject &payload, SubmissionKind kind)
+void ListenBrainzScrobbler::submitPayload(const QJsonObject &payload, SubmissionKind kind, const QList<qint64> &submittedIds)
 {
     QNetworkRequest request(QUrl(QString::fromLatin1(apiUrl)));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -253,18 +285,13 @@ void ListenBrainzScrobbler::submitPayload(const QJsonObject &payload, Submission
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("Authorization", QStringLiteral("Token %1").arg(m_token).toUtf8());
 
-    QList<QJsonObject> submittedListens;
     if (kind == SubmissionKind::Listen) {
         m_listenSubmissionInFlight = true;
-        const QJsonArray listens = payload.value(QStringLiteral("payload")).toArray();
-        for (const QJsonValue &listen : listens) {
-            submittedListens.push_back(listen.toObject());
-        }
     }
 
     QNetworkReply *reply = m_network->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, kind, submittedListens]() {
-        handleSubmissionFinished(reply, kind, submittedListens);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, kind, submittedIds]() {
+        handleSubmissionFinished(reply, kind, submittedIds);
     });
 }
 
@@ -309,85 +336,21 @@ QJsonObject ListenBrainzScrobbler::additionalInfoObject(const Track &track) cons
     return additionalInfo;
 }
 
-bool ListenBrainzScrobbler::hasMinimumMetadata(const Track &track) const
+bool ListenBrainzScrobbler::hasMinimumMetadata(const Track &track, bool warn) const
 {
     const bool ok = !trackTitle(track).isEmpty() && !artistName(track).isEmpty();
-    if (!ok) {
+    if (!ok && warn) {
         qCWarning(listenBrainzLog) << "cannot submit track without title and artist" << track.path;
     }
     return ok;
 }
 
-qint64 ListenBrainzScrobbler::requiredListenMs(const Track &track) const
+bool ListenBrainzScrobbler::canUpload() const
 {
-    if (track.durationMs <= 0) {
-        return maxRequiredListenMs;
-    }
-    return std::min(track.durationMs / 2, maxRequiredListenMs);
+    return m_enabled && m_uploadAllowed && !m_token.isEmpty();
 }
 
-qint64 ListenBrainzScrobbler::playedMs() const
-{
-    return m_accumulatedMs + (m_playing && m_segmentTimer.isValid() ? m_segmentTimer.elapsed() : 0);
-}
-
-static bool isValidCachedListen(const QJsonObject &listen)
-{
-    if (listen.value(QStringLiteral("listened_at")).toInteger() <= 0) {
-        return false;
-    }
-    const QJsonObject meta = listen.value(QStringLiteral("track_metadata")).toObject();
-    return !meta.value(QStringLiteral("artist_name")).toString().trimmed().isEmpty()
-        && !meta.value(QStringLiteral("track_name")).toString().trimmed().isEmpty();
-}
-
-void ListenBrainzScrobbler::loadPending()
-{
-    m_pendingListens.clear();
-    QFile file(m_cachePath);
-    if (m_cachePath.isEmpty() || !file.open(QIODevice::ReadOnly)) {
-        return;
-    }
-
-    // Drop malformed entries (missing timestamp/artist/track). An invalid listen
-    // is rejected by the server forever and, sitting at the front of the queue,
-    // would block every valid listen behind it.
-    const QJsonArray listens = QJsonDocument::fromJson(file.readAll()).array();
-    for (const QJsonValue &listen : listens) {
-        if (listen.isObject() && isValidCachedListen(listen.toObject())) {
-            m_pendingListens.push_back(listen.toObject());
-        }
-    }
-}
-
-void ListenBrainzScrobbler::savePending() const
-{
-    if (m_cachePath.isEmpty()) {
-        return;
-    }
-
-    QFileInfo info(m_cachePath);
-    QDir().mkpath(info.absolutePath());
-    QFile file(m_cachePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qCWarning(listenBrainzLog) << "failed to write pending ListenBrainz cache" << m_cachePath;
-        return;
-    }
-
-    QJsonArray listens;
-    for (const QJsonObject &listen : m_pendingListens) {
-        listens.append(listen);
-    }
-    file.write(QJsonDocument(listens).toJson(QJsonDocument::Compact));
-}
-
-void ListenBrainzScrobbler::cachePendingListen(const QJsonObject &listen)
-{
-    m_pendingListens.push_back(listen);
-    savePending();
-}
-
-void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<QJsonObject> submittedListens)
+void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<qint64> submittedIds)
 {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QString errorString = reply->errorString();
@@ -402,6 +365,14 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
         reply->deleteLater();
         if (status == 401 || status == 403) {
             disableScrobbling(QStringLiteral("ListenBrainz token was rejected. Scrobbling has been disabled."));
+            return;
+        }
+        if (status == 429) {
+            // Rate limited: back off for the window the server reports
+            // (X-RateLimit-Reset-In, seconds) and don't count it as a failure.
+            bool parsedResetIn = false;
+            const int resetInSecs = reply->rawHeader("X-RateLimit-Reset-In").toInt(&parsedResetIn);
+            m_retryTimer->start(parsedResetIn && resetInSecs > 0 ? (resetInSecs + 1) * 1000 : 60000);
             return;
         }
         emit submissionFailed(message);
@@ -420,9 +391,13 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
     }
 
     m_consecutiveFailures = 0;
-    if (kind == SubmissionKind::Listen && !submittedListens.isEmpty()) {
-        m_pendingListens.erase(m_pendingListens.begin(), m_pendingListens.begin() + std::min(submittedListens.size(), m_pendingListens.size()));
-        savePending();
+    if (m_enabled && m_retryTimer->interval() != 60000) {
+        m_retryTimer->start(60000);
+    }
+    if (kind == SubmissionKind::Listen && !submittedIds.isEmpty() && m_history != nullptr) {
+        m_history->markSent(ListenHistoryStore::ListenBrainz, submittedIds);
+        // Keep draining until the backlog is empty.
+        uploadBacklog();
     }
 
     reply->deleteLater();

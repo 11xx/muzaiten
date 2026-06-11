@@ -413,6 +413,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_lastFmEnabled = scrobblersMenu->addAction(QStringLiteral("Last.fm scrobbling"));
     m_lastFmEnabled->setCheckable(true);
     QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings..."));
+    scrobblersMenu->addSeparator();
+    m_scrobbleOffline = scrobblersMenu->addAction(QStringLiteral("Offline mode (buffer listens locally)"));
+    m_scrobbleOffline->setCheckable(true);
+    m_scrobbleOffline->setToolTip(QStringLiteral("Keep collecting listening history but send nothing; unchecking uploads the buffered backlog."));
 
     auto *viewMenu = new QMenu(QStringLiteral("View"), this);
     m_trackInfoPaneVisible = viewMenu->addAction(QStringLiteral("Show track information pane"));
@@ -648,6 +652,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
     connect(lastFmSettings, &QAction::triggered, this, &PlayerBar::lastFmSettingsRequested);
+    connect(m_scrobbleOffline, &QAction::toggled, this, &PlayerBar::scrobbleOfflineChanged);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
@@ -678,6 +683,15 @@ void PlayerBar::setListenBrainzEnabled(bool enabled)
     }
     const QSignalBlocker blocker(m_listenBrainzEnabled);
     m_listenBrainzEnabled->setChecked(enabled);
+}
+
+void PlayerBar::setScrobbleOffline(bool offline)
+{
+    if (m_scrobbleOffline == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_scrobbleOffline);
+    m_scrobbleOffline->setChecked(offline);
 }
 
 void PlayerBar::setLastFmEnabled(bool enabled)
