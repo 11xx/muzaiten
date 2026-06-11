@@ -79,6 +79,7 @@ constexpr int PlaylistListActiveRole = Qt::UserRole + 5;
 constexpr int PlaylistKindRole = Qt::UserRole + 6;
 constexpr int QueueSnapshotIdRole = Qt::UserRole + 7;
 constexpr int PlaylistMetaRole = Qt::UserRole + 8;
+constexpr int PlaylistSeparatorRole = Qt::UserRole + 9;
 
 struct PlaylistColumnSpec {
     int index;
@@ -167,6 +168,22 @@ PlaylistView::SortKey sortKeyFromString(const QString &value)
     return PlaylistView::SortKey::Ordinal;
 }
 
+int nextSelectablePlaylistRow(QListWidget *list, int row, int direction)
+{
+    if (list == nullptr || list->count() <= 0) {
+        return -1;
+    }
+    row = std::clamp(row, 0, list->count() - 1);
+    while (row >= 0 && row < list->count()) {
+        const QListWidgetItem *item = list->item(row);
+        if (item != nullptr && item->flags().testFlag(Qt::ItemIsSelectable)) {
+            return row;
+        }
+        row += direction < 0 ? -1 : 1;
+    }
+    return std::clamp(row, 0, list->count() - 1);
+}
+
 } // namespace
 
 class PlaylistListDelegate final : public QStyledItemDelegate {
@@ -178,6 +195,9 @@ public:
 
     QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &index) const override
     {
+        if (index.data(PlaylistSeparatorRole).toBool()) {
+            return QSize(160, 20);
+        }
         return index.data(Qt::SizeHintRole).toSize().isValid()
             ? index.data(Qt::SizeHintRole).toSize()
             : QSize(160, 22);
@@ -188,6 +208,26 @@ public:
         QStyleOptionViewItem opt(option);
         initStyleOption(&opt, index);
         opt.text.clear();
+
+        if (index.data(PlaylistSeparatorRole).toBool()) {
+            const QRect lineRect = option.rect.adjusted(8, 0, -8, 0);
+            const int centerY = lineRect.center().y();
+            const QString label = index.data(PlaylistNameRole).toString();
+            const int labelWidth = option.fontMetrics.horizontalAdvance(label) + 12;
+            QRect labelRect = lineRect;
+            labelRect.setWidth(std::min(labelWidth, lineRect.width()));
+            QRect leftLine = lineRect;
+            leftLine.setLeft(labelRect.right() + 6);
+
+            painter->save();
+            painter->setPen(option.palette.color(QPalette::Mid));
+            painter->drawLine(leftLine.left(), centerY, lineRect.right(), centerY);
+            painter->setPen(option.palette.color(QPalette::Disabled, QPalette::Text));
+            painter->drawText(labelRect, Qt::AlignLeft | Qt::AlignVCenter,
+                              option.fontMetrics.elidedText(label, Qt::ElideRight, labelRect.width()));
+            painter->restore();
+            return;
+        }
 
         const bool selected = opt.state & QStyle::State_Selected;
         const bool hovered = opt.state & QStyle::State_MouseOver;
@@ -557,19 +597,8 @@ void PlaylistView::reloadPlaylists()
     const QString keepQueueId = m_currentQueueSnapshotId;
     m_playlistList->clear();
     const bool listActive = m_playlistList->hasFocus() || !m_itemTable->hasFocus();
-    for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
-        auto *item = new QListWidgetItem(queue.name, m_playlistList);
-        item->setData(PlaylistIdRole, 0);
-        item->setData(QueueSnapshotIdRole, queue.id);
-        item->setData(PlaylistKindRole, QStringLiteral("queue"));
-        item->setData(PlaylistNameRole, queue.name);
-        item->setData(PlaylistItemCountRole, queue.items.size());
-        item->setData(PlaylistCreatedAtRole, queue.savedAt);
-        item->setData(PlaylistShowCreatedRole, true);
-        item->setData(PlaylistMetaRole, queue.meta);
-        item->setData(PlaylistListActiveRole, listActive);
-    }
-    for (const Playlist &playlist : m_db->playlists()) {
+    const QVector<Playlist> playlists = m_db->playlists();
+    for (const Playlist &playlist : playlists) {
         QString text = playlist.name;
         auto *item = new QListWidgetItem(text, m_playlistList);
         item->setData(PlaylistIdRole, playlist.id);
@@ -581,6 +610,33 @@ void PlaylistView::reloadPlaylists()
         item->setData(PlaylistShowCreatedRole, m_showCreatedDate);
         item->setData(PlaylistMetaRole, QString());
         item->setData(PlaylistListActiveRole, listActive);
+    }
+    if (!playlists.isEmpty() && !m_savedQueueEntries.isEmpty()) {
+        auto *separator = new QListWidgetItem(QStringLiteral("Saved queues"), m_playlistList);
+        separator->setFlags(Qt::NoItemFlags);
+        separator->setData(PlaylistIdRole, 0);
+        separator->setData(QueueSnapshotIdRole, QString());
+        separator->setData(PlaylistKindRole, QStringLiteral("separator"));
+        separator->setData(PlaylistNameRole, QStringLiteral("Saved queues"));
+        separator->setData(PlaylistItemCountRole, 0);
+        separator->setData(PlaylistCreatedAtRole, 0);
+        separator->setData(PlaylistShowCreatedRole, false);
+        separator->setData(PlaylistMetaRole, QString());
+        separator->setData(PlaylistListActiveRole, listActive);
+        separator->setData(PlaylistSeparatorRole, true);
+    }
+    for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
+        auto *item = new QListWidgetItem(queue.name, m_playlistList);
+        item->setData(PlaylistIdRole, 0);
+        item->setData(QueueSnapshotIdRole, queue.id);
+        item->setData(PlaylistKindRole, QStringLiteral("queue"));
+        item->setData(PlaylistNameRole, queue.name);
+        item->setData(PlaylistItemCountRole, queue.items.size());
+        item->setData(PlaylistCreatedAtRole, queue.savedAt);
+        item->setData(PlaylistShowCreatedRole, true);
+        item->setData(PlaylistMetaRole, queue.meta);
+        item->setData(PlaylistListActiveRole, listActive);
+        item->setData(PlaylistSeparatorRole, false);
     }
     applyPlaylistRowHeights();
     if (!keepQueueId.isEmpty()) {
@@ -1426,11 +1482,13 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         switch (key) {
         case Qt::Key_J:
         case Qt::Key_N:
-            m_playlistList->setCurrentRow(std::min(m_playlistList->count() - 1, m_playlistList->currentRow() + 1));
+            m_playlistList->setCurrentRow(nextSelectablePlaylistRow(
+                m_playlistList, std::min(m_playlistList->count() - 1, m_playlistList->currentRow() + 1), +1));
             return true;
         case Qt::Key_K:
         case Qt::Key_P:
-            m_playlistList->setCurrentRow(std::max(0, m_playlistList->currentRow() - 1));
+            m_playlistList->setCurrentRow(nextSelectablePlaylistRow(
+                m_playlistList, std::max(0, m_playlistList->currentRow() - 1), -1));
             return true;
         case Qt::Key_L:
         case Qt::Key_Right:
