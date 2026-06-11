@@ -22,6 +22,8 @@ private slots:
     void keyboardMarksPersistAcrossGridMovement();
     void mouseMarksClearAndUnnarrowAcrossGridMovement();
     void shiftClickExtendsKeyboardMarks();
+    void unmarkLastKeyboardMarkClearsNarrowing();
+    void unmarkAllClearsNarrowing();
 
 private:
     static QVector<Album> makeAlbums();
@@ -210,6 +212,40 @@ void AlbumGridTest::shiftClickExtendsKeyboardMarks()
     clickRow(grid.get(), 2, Qt::ShiftModifier);
 
     QCOMPARE(grid->albumTitlesForAction(), QStringList({titleAt(grid.get(), 0), titleAt(grid.get(), 1), titleAt(grid.get(), 2)}));
+}
+
+void AlbumGridTest::unmarkLastKeyboardMarkClearsNarrowing()
+{
+    const QVector<Album> albums = makeAlbums();
+    std::unique_ptr<AlbumGrid> grid(makeGrid(albums));
+
+    grid->setCurrentRow(1);
+    grid->markCurrentAlbum();
+    QSignalSpy narrowed(grid.get(), &AlbumGrid::albumNarrowFollowRequested);
+
+    grid->unmarkCurrentAlbum();
+
+    QCOMPARE(narrowed.count(), 1);
+    QCOMPARE(qvariant_cast<QStringList>(narrowed.takeFirst().at(0)), QStringList{});
+    QCOMPARE(grid->albumTitlesForAction(), QStringList{titleAt(grid.get(), 1)});
+}
+
+void AlbumGridTest::unmarkAllClearsNarrowing()
+{
+    const QVector<Album> albums = makeAlbums();
+    std::unique_ptr<AlbumGrid> grid(makeGrid(albums));
+
+    grid->setCurrentRow(0);
+    grid->markCurrentAlbum();
+    grid->setCurrentRow(2);
+    grid->markCurrentAlbum();
+    QSignalSpy narrowed(grid.get(), &AlbumGrid::albumNarrowFollowRequested);
+
+    grid->unmarkAllAlbums();
+
+    QCOMPARE(narrowed.count(), 1);
+    QCOMPARE(qvariant_cast<QStringList>(narrowed.takeFirst().at(0)), QStringList{});
+    QCOMPARE(grid->albumTitlesForAction(), QStringList{titleAt(grid.get(), 2)});
 }
 
 QTEST_MAIN(AlbumGridTest)

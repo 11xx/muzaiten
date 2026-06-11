@@ -462,7 +462,7 @@ void AlbumGrid::unmarkAllAlbums()
     if (currentIndex().isValid()) {
         setCurrentRow(currentIndex().row());
     }
-    followNarrowToSelection();
+    emit albumNarrowFollowRequested({});
 }
 
 QString AlbumGrid::currentAlbumTitle() const
@@ -1040,7 +1040,11 @@ void AlbumGrid::setCurrentAlbumMarked(bool marked)
         selectionModel()->select(currentIndex(), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
         selectionModel()->select(currentIndex(), QItemSelectionModel::Select | QItemSelectionModel::Rows);
     }
-    followNarrowToSelection();
+    if (m_markedAlbumTitles.isEmpty()) {
+        emit albumNarrowFollowRequested({});
+    } else {
+        followNarrowToSelection();
+    }
 }
 
 void AlbumGrid::refreshRememberedOutline()
