@@ -74,6 +74,8 @@ set(MUZAITEN_SOURCES
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
+    src/scrobble/ListenHistoryStore.cpp
+    src/scrobble/ListenTracker.cpp
     src/search/Exclusion.cpp
     src/search/FuzzyMatch.cpp
     src/search/RankConfig.cpp
@@ -172,6 +174,8 @@ set(MUZAITEN_HEADERS
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
     src/scrobble/ListenBrainzScrobbler.h
+    src/scrobble/ListenHistoryStore.h
+    src/scrobble/ListenTracker.h
     src/search/Exclusion.h
     src/search/FuzzyMatch.h
     src/search/RankConfig.h

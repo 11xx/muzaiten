@@ -46,6 +46,16 @@ target_compile_features(test_playlist_database PRIVATE cxx_std_26)
 add_test(NAME test_playlist_database COMMAND test_playlist_database)
 set_tests_properties(test_playlist_database PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_listen_history
+    test_listen_history.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+)
+target_include_directories(test_listen_history PRIVATE ../src)
+target_link_libraries(test_listen_history PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_listen_history PRIVATE cxx_std_26)
+add_test(NAME test_listen_history COMMAND test_listen_history)
+set_tests_properties(test_listen_history PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_path_guesser
     test_path_guesser.cpp
     ../src/scanner/PathMetadataGuesser.cpp
