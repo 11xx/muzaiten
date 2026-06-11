@@ -41,6 +41,19 @@ public:
     // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
     enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
 
+public slots:
+    void createPlaylist();
+    void renameCurrentPlaylist();
+    void deleteCurrentPlaylist();
+    void removeSelectedItems();
+    void exportCurrentPlaylist();
+    void addSongToCurrentPlaylist();
+    void playCurrentPlaylist();
+    void playNextCurrentPlaylist();
+    void addCurrentPlaylistToQueue();
+    void moveCurrentItemUp();
+    void moveCurrentItemDown();
+
 signals:
     void playPathsRequested(const QStringList &paths, int startIndex);
     void addPathsToQueueRequested(const QStringList &paths);
@@ -62,18 +75,11 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    void createPlaylist();
-    void renameCurrentPlaylist();
-    void deleteCurrentPlaylist();
-    void removeSelectedItems();
-    void exportCurrentPlaylist();
     void cycleAddedSort();
     void sortByColumn(int column);
     void populateItems();
     QVector<PlaylistItem> displayItems() const;
     void updateHeader();
-    void playCurrentPlaylist();
-    void addCurrentPlaylistToQueue();
     void playCurrentItem();
     void playNextSelectedItems();
     void addSelectedItemsToQueue();
@@ -85,6 +91,7 @@ private:
     void setCurrentItemRow(int row, int direction = 0);
     int currentItemRow() const;
     void moveSelectedItems(int delta);
+    void applyPlaylistRowHeights();
     QVector<qint64> displayedItemIds() const;
     void updatePaneFocus();
 
@@ -101,6 +108,7 @@ private:
     bool m_sortDescending = false;
 
     bool m_showCreatedDate = true;
+    int m_playlistRowHeight = 22;
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
     PlaylistItemTableModel *m_itemModel = nullptr;

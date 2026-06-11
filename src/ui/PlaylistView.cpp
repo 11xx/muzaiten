@@ -33,6 +33,7 @@
 #include <QStyleOptionViewItem>
 #include <QTextStream>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include <algorithm>
 
@@ -356,6 +357,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_playlistList->setWordWrap(true);
     m_playlistList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_playlistList->installEventFilter(this);
+    m_playlistList->viewport()->installEventFilter(this);
 
     m_itemModel = new PlaylistItemTableModel(this);
     m_itemTable = new NavigableTableView(splitter);
@@ -376,6 +378,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable->verticalHeader()->setMinimumSectionSize(20);
     m_itemTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_itemTable->installEventFilter(this);
+    m_itemTable->viewport()->installEventFilter(this);
     OverlayScrollBar::install(m_itemTable);
 
     splitter->setStretchFactor(0, 1);
@@ -454,6 +457,7 @@ QString PlaylistView::viewSettingsJson() const
     root.insert(QStringLiteral("sortKey"), sortKeyToString(m_sortKey));
     root.insert(QStringLiteral("sortDescending"), m_sortDescending);
     root.insert(QStringLiteral("showCreatedDate"), m_showCreatedDate);
+    root.insert(QStringLiteral("playlistRowHeight"), m_playlistRowHeight);
     root.insert(QStringLiteral("rowHeight"), m_itemTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), m_itemTable->horizontalHeader()->height());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_itemTable->horizontalHeader()->saveState().toBase64()));
@@ -486,6 +490,7 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
     m_sortKey = sortKeyFromString(root.value(QStringLiteral("sortKey")).toString());
     m_sortDescending = root.value(QStringLiteral("sortDescending")).toBool(false);
     m_showCreatedDate = root.value(QStringLiteral("showCreatedDate")).toBool(true);
+    m_playlistRowHeight = std::clamp(root.value(QStringLiteral("playlistRowHeight")).toInt(22), 18, 48);
     m_itemTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
@@ -512,6 +517,7 @@ void PlaylistView::resetViewSettings()
     m_sortKey = SortKey::Ordinal;
     m_sortDescending = false;
     m_showCreatedDate = true;
+    m_playlistRowHeight = 22;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
     m_columnLayout->resetToDefaults();
@@ -542,12 +548,8 @@ void PlaylistView::reloadPlaylists()
         item->setData(PlaylistCreatedAtRole, playlist.createdAt);
         item->setData(PlaylistShowCreatedRole, m_showCreatedDate);
         item->setData(PlaylistListActiveRole, listActive);
-        if (m_showCreatedDate && playlist.createdAt > 0) {
-            item->setSizeHint(QSize(0, 40));
-        } else {
-            item->setSizeHint(QSize(0, 22));
-        }
     }
+    applyPlaylistRowHeights();
     if (keep > 0) {
         selectPlaylist(keep);
     } else if (m_playlistList->count() > 0) {
@@ -786,6 +788,39 @@ void PlaylistView::addCurrentPlaylistToQueue()
     }
 }
 
+void PlaylistView::playNextCurrentPlaylist()
+{
+    if (m_db == nullptr || m_currentPlaylistId <= 0) {
+        return;
+    }
+    QStringList paths;
+    for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
+        if (!item.trackPath.isEmpty()) {
+            paths << item.trackPath;
+        }
+    }
+    if (!paths.isEmpty()) {
+        emit playNextPathsRequested(paths);
+    }
+}
+
+void PlaylistView::addSongToCurrentPlaylist()
+{
+    if (m_currentPlaylistId > 0) {
+        emit addSongRequested(m_currentPlaylistId);
+    }
+}
+
+void PlaylistView::moveCurrentItemUp()
+{
+    moveSelectedItems(-1);
+}
+
+void PlaylistView::moveCurrentItemDown()
+{
+    moveSelectedItems(+1);
+}
+
 void PlaylistView::playCurrentItem()
 {
     int startIndex = 0;
@@ -843,29 +878,12 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     connect(addToQueue, &QAction::triggered, this, &PlaylistView::addCurrentPlaylistToQueue);
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     playNext->setEnabled(m_currentPlaylistId > 0);
-    connect(playNext, &QAction::triggered, this, [this]() {
-        if (m_db == nullptr || m_currentPlaylistId <= 0) {
-            return;
-        }
-        QStringList paths;
-        for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
-            if (!item.trackPath.isEmpty()) {
-                paths << item.trackPath;
-            }
-        }
-        if (!paths.isEmpty()) {
-            emit playNextPathsRequested(paths);
-        }
-    });
+    connect(playNext, &QAction::triggered, this, &PlaylistView::playNextCurrentPlaylist);
 
     menu.addSeparator();
     QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
     addSong->setEnabled(m_currentPlaylistId > 0);
-    connect(addSong, &QAction::triggered, this, [this]() {
-        if (m_currentPlaylistId > 0) {
-            emit addSongRequested(m_currentPlaylistId);
-        }
-    });
+    connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
     menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
     QAction *rename = menu.addAction(QStringLiteral("Rename"));
     rename->setEnabled(m_currentPlaylistId > 0);
@@ -895,11 +913,7 @@ void PlaylistView::showItemMenu(const QPoint &pos)
         QMenu menu(this);
         QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
         addSong->setEnabled(m_currentPlaylistId > 0);
-        connect(addSong, &QAction::triggered, this, [this]() {
-            if (m_currentPlaylistId > 0) {
-                emit addSongRequested(m_currentPlaylistId);
-            }
-        });
+        connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
         menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
         return;
     }
@@ -1108,6 +1122,16 @@ void PlaylistView::updatePaneFocus()
     m_playlistList->viewport()->update();
 }
 
+void PlaylistView::applyPlaylistRowHeights()
+{
+    for (int row = 0; row < m_playlistList->count(); ++row) {
+        QListWidgetItem *item = m_playlistList->item(row);
+        const bool showDate = item->data(PlaylistShowCreatedRole).toBool()
+            && item->data(PlaylistCreatedAtRole).toLongLong() > 0;
+        item->setSizeHint(QSize(0, showDate ? m_playlistRowHeight + 18 : m_playlistRowHeight));
+    }
+}
+
 void PlaylistView::createPlaylist()
 {
     if (m_db == nullptr) {
@@ -1247,6 +1271,10 @@ void PlaylistView::removeSelectedItems()
 
 bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
 {
+    const bool playlistListWatched = m_playlistList != nullptr
+        && (watched == m_playlistList || watched == m_playlistList->viewport());
+    const bool itemTableWatched = m_itemTable != nullptr
+        && (watched == m_itemTable || watched == m_itemTable->viewport());
     if ((watched == m_playlistList || watched == m_itemTable) && event->type() == QEvent::FocusIn) {
         updatePaneFocus();
         return QWidget::eventFilter(watched, event);
@@ -1254,6 +1282,26 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     if ((watched == m_playlistList || watched == m_itemTable) && event->type() == QEvent::FocusOut) {
         updatePaneFocus();
         return QWidget::eventFilter(watched, event);
+    }
+    if (event->type() == QEvent::Wheel) {
+        auto *wheel = static_cast<QWheelEvent *>(event);
+        if (wheel->modifiers() & Qt::ControlModifier) {
+            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
+            if (playlistListWatched) {
+                m_playlistRowHeight = std::clamp(m_playlistRowHeight + step, 18, 48);
+                applyPlaylistRowHeights();
+                emit viewSettingsChanged();
+                wheel->accept();
+                return true;
+            }
+            if (itemTableWatched) {
+                const int rowHeight = std::clamp(m_itemTable->verticalHeader()->defaultSectionSize() + step, 20, 48);
+                m_itemTable->verticalHeader()->setDefaultSectionSize(rowHeight);
+                emit viewSettingsChanged();
+                wheel->accept();
+                return true;
+            }
+        }
     }
     if (event->type() != QEvent::KeyPress) {
         return QWidget::eventFilter(watched, event);
@@ -1290,9 +1338,7 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             return true;
         case Qt::Key_Equal:
         case Qt::Key_Plus:
-            if (m_currentPlaylistId > 0) {
-                emit addSongRequested(m_currentPlaylistId);
-            }
+            addSongToCurrentPlaylist();
             return true;
         case Qt::Key_Insert:
         case Qt::Key_A:
@@ -1353,9 +1399,7 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         }
         case Qt::Key_Equal:  // = and + (shift+=) both open the add-song modal
         case Qt::Key_Plus:
-            if (m_currentPlaylistId > 0) {
-                emit addSongRequested(m_currentPlaylistId);
-            }
+            addSongToCurrentPlaylist();
             return true;
         case Qt::Key_A: {
             addSelectedItemsToPlaylist();

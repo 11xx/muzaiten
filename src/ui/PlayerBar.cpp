@@ -428,19 +428,48 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_listUnsupportedFiles->setVisible(false); // only relevant in file-explorer view
     QAction *resetViewPreferences = viewMenu->addAction(QStringLiteral("Reset view preferences to defaults"));
 
+    auto *queueMenu = new QMenu(QStringLiteral("Queue"), this);
+    QAction *showQueue = queueMenu->addAction(QStringLiteral("Show queue"));
+    queueMenu->addSeparator();
+    QAction *clearPlayNext = queueMenu->addAction(QStringLiteral("Clear play-next priority"));
+    QAction *clearQueue = queueMenu->addAction(QStringLiteral("Clear queue"));
+    queueMenu->addSeparator();
+    QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as..."));
+    QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore previous queue"));
+    QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)..."));
+
+    auto *playlistMenu = new QMenu(QStringLiteral("Playlists"), this);
+    QAction *showPlaylists = playlistMenu->addAction(QStringLiteral("Show playlists"));
+    playlistMenu->addSeparator();
+    QAction *newPlaylist = playlistMenu->addAction(QStringLiteral("New playlist..."));
+    QAction *addSong = playlistMenu->addAction(QStringLiteral("Add song..."));
+    playlistMenu->addSeparator();
+    QAction *playPlaylist = playlistMenu->addAction(QStringLiteral("Play playlist"));
+    QAction *playNextPlaylist = playlistMenu->addAction(QStringLiteral("Play playlist next"));
+    QAction *addPlaylistToQueue = playlistMenu->addAction(QStringLiteral("Add playlist to queue"));
+    playlistMenu->addSeparator();
+    QAction *movePlaylistItemUp = playlistMenu->addAction(QStringLiteral("Move selected item up"));
+    QAction *movePlaylistItemDown = playlistMenu->addAction(QStringLiteral("Move selected item down"));
+    playlistMenu->addSeparator();
+    QAction *renamePlaylist = playlistMenu->addAction(QStringLiteral("Rename playlist"));
+    QAction *exportPlaylist = playlistMenu->addAction(QStringLiteral("Export playlist..."));
+    QAction *deletePlaylist = playlistMenu->addAction(QStringLiteral("Delete playlist"));
+
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
     QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
 
-    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
     for (QMenu *menu : styledMenus) {
         styleMenu(menu);
     }
 
     compactMenu->addMenu(fileMenu);
     compactMenu->addMenu(viewMenu);
+    compactMenu->addMenu(queueMenu);
+    compactMenu->addMenu(playlistMenu);
     compactMenu->addMenu(playbackMenu);
     compactMenu->addMenu(mpdMenu);
     compactMenu->addMenu(scrobblersMenu);
@@ -470,6 +499,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     restyleMenuBar();
     m_menuBar->addMenu(fileMenu);
     m_menuBar->addMenu(viewMenu);
+    m_menuBar->addMenu(queueMenu);
+    m_menuBar->addMenu(playlistMenu);
     m_menuBar->addMenu(playbackMenu);
     m_menuBar->addMenu(mpdMenu);
     m_menuBar->addMenu(scrobblersMenu);
@@ -596,6 +627,23 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(resetPanelOrder, &QAction::triggered, this, &PlayerBar::resetPanelOrderRequested);
     connect(resetViewPreferences, &QAction::triggered, this, &PlayerBar::resetViewPreferencesRequested);
     connect(customizePanelOrder, &QAction::triggered, this, &PlayerBar::panelOrderRequested);
+    connect(showQueue, &QAction::triggered, this, &PlayerBar::queueViewRequested);
+    connect(clearQueue, &QAction::triggered, this, &PlayerBar::queueClearRequested);
+    connect(clearPlayNext, &QAction::triggered, this, &PlayerBar::queueClearPlayNextPriorityRequested);
+    connect(saveQueue, &QAction::triggered, this, &PlayerBar::queueSaveAsRequested);
+    connect(restoreQueue, &QAction::triggered, this, &PlayerBar::queueRestorePreviousRequested);
+    connect(mergeQueue, &QAction::triggered, this, &PlayerBar::queueMergeSavedRequested);
+    connect(showPlaylists, &QAction::triggered, this, &PlayerBar::playlistViewRequested);
+    connect(newPlaylist, &QAction::triggered, this, &PlayerBar::playlistNewRequested);
+    connect(addSong, &QAction::triggered, this, &PlayerBar::playlistAddSongRequested);
+    connect(playPlaylist, &QAction::triggered, this, &PlayerBar::playlistPlayRequested);
+    connect(playNextPlaylist, &QAction::triggered, this, &PlayerBar::playlistPlayNextRequested);
+    connect(addPlaylistToQueue, &QAction::triggered, this, &PlayerBar::playlistAddToQueueRequested);
+    connect(renamePlaylist, &QAction::triggered, this, &PlayerBar::playlistRenameRequested);
+    connect(exportPlaylist, &QAction::triggered, this, &PlayerBar::playlistExportRequested);
+    connect(deletePlaylist, &QAction::triggered, this, &PlayerBar::playlistDeleteRequested);
+    connect(movePlaylistItemUp, &QAction::triggered, this, &PlayerBar::playlistMoveItemUpRequested);
+    connect(movePlaylistItemDown, &QAction::triggered, this, &PlayerBar::playlistMoveItemDownRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);

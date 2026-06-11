@@ -664,6 +664,35 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::resetPanelOrderRequested, this, &MainWindow::resetPanelOrder);
     connect(m_playerBar, &PlayerBar::resetViewPreferencesRequested, this, &MainWindow::resetViewPreferences);
     connect(m_playerBar, &PlayerBar::panelOrderRequested, this, &MainWindow::openPanelOrderDialog);
+    connect(m_playerBar, &PlayerBar::queueViewRequested, this, [this]() { switchMainView(MainView::Queue); });
+    connect(m_playerBar, &PlayerBar::queueClearRequested, this, &MainWindow::clearQueue);
+    connect(m_playerBar, &PlayerBar::queueClearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
+    connect(m_playerBar, &PlayerBar::queueSaveAsRequested, this, &MainWindow::saveCurrentQueueAs);
+    connect(m_playerBar, &PlayerBar::queueRestorePreviousRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_playerBar, &PlayerBar::queueMergeSavedRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
+    connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
+    connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {
+        switchMainView(MainView::Playlist);
+        m_playlistView->createPlaylist();
+    });
+    connect(m_playerBar, &PlayerBar::playlistAddSongRequested, this, [this]() {
+        switchMainView(MainView::Playlist);
+        m_playlistView->addSongToCurrentPlaylist();
+    });
+    connect(m_playerBar, &PlayerBar::playlistPlayRequested, m_playlistView, &PlaylistView::playCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, m_playlistView, &PlaylistView::playNextCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, m_playlistView, &PlaylistView::addCurrentPlaylistToQueue);
+    connect(m_playerBar, &PlayerBar::playlistRenameRequested, this, [this]() {
+        switchMainView(MainView::Playlist);
+        m_playlistView->renameCurrentPlaylist();
+    });
+    connect(m_playerBar, &PlayerBar::playlistExportRequested, m_playlistView, &PlaylistView::exportCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistDeleteRequested, this, [this]() {
+        switchMainView(MainView::Playlist);
+        m_playlistView->deleteCurrentPlaylist();
+    });
+    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, m_playlistView, &PlaylistView::moveCurrentItemUp);
+    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, m_playlistView, &PlaylistView::moveCurrentItemDown);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
