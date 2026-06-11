@@ -255,6 +255,8 @@ bool SearchView::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+// NOTE: the Keybinds-dialog reference for this view lives in
+// ui/ViewKeyReferences.cpp — update it when changing keys here.
 bool SearchView::handleNavKey(QKeyEvent *ke)
 {
     const auto mods = ke->modifiers();
@@ -285,7 +287,8 @@ bool SearchView::handleNavKey(QKeyEvent *ke)
     if (key == Qt::Key_Tab) { toggleMarkAtCursor(); moveCursor(+1); return true; }
     if (ctrl && key == Qt::Key_Space) { toggleMarkAtCursor(); return true; }
     if (ctrl && key == Qt::Key_A) { m_resultList->selectAll(); return true; }
-    if (mods == Qt::NoModifier && key == Qt::Key_A) {
+    // Browse mode only: while the search box has focus, 'a' must type normally.
+    if (mods == Qt::NoModifier && key == Qt::Key_A && m_resultList->hasFocus()) {
         const QVector<Track> tracks = selectedTracks();
         if (!tracks.isEmpty()) { emit addToPlaylistRequested(tracks); }
         return true;
