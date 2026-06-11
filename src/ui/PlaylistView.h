@@ -7,14 +7,16 @@
 #include <QWidget>
 
 class PlaylistDatabase;
+class NavigableTableView;
 class QListWidget;
-class QTableWidget;
 class QLabel;
 class QEvent;
+class QPoint;
+class PlaylistItemTableModel;
 
 // Key-5 playlist management centre: a playlist list on the left and the selected
 // playlist's items on the right. Keyboard-first (emacs + hjkl): h/l switch panes,
-// j/k/n/p move, Enter plays. Owns no data — reads/writes through a
+// j/k/n/p move, Enter plays the focused playlist/item. Owns no data — reads/writes through a
 // PlaylistDatabase supplied by MainWindow and emits path-based signals that
 // MainWindow resolves against the library.
 class PlaylistView final : public QWidget {
@@ -62,8 +64,20 @@ private:
     void populateItems();
     QVector<PlaylistItem> displayItems() const;
     void updateHeader();
+    void playCurrentPlaylist();
+    void addCurrentPlaylistToQueue();
+    void playCurrentItem();
+    void playNextSelectedItems();
+    void addSelectedItemsToQueue();
+    void addSelectedItemsToPlaylist();
+    void editCurrentItem();
+    void showPlaylistMenu(const QPoint &pos);
+    void showItemMenu(const QPoint &pos);
+    void setCurrentItemRow(int row, int direction = 0);
+    int currentItemRow() const;
 
     QStringList selectedItemPaths(int *startIndex = nullptr) const;
+    QStringList selectedOnlyItemPaths() const;
     // Maps a (possibly sorted) display row to its backing item via the id stored
     // in the cell's UserRole. Returns nullptr if the row has no live item.
     const PlaylistItem *itemForDisplayRow(int row) const;
@@ -76,6 +90,7 @@ private:
 
     bool m_showCreatedDate = true;
     QListWidget *m_playlistList = nullptr;
-    QTableWidget *m_itemTable = nullptr;
+    NavigableTableView *m_itemTable = nullptr;
+    PlaylistItemTableModel *m_itemModel = nullptr;
     QLabel *m_header = nullptr;
 };

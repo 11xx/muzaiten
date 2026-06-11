@@ -1,10 +1,16 @@
 #include "ui/PlaylistView.h"
 
 #include "db/PlaylistDatabase.h"
+#include "ui/DenseTableDelegate.h"
+#include "ui/NavigableTableView.h"
+#include "ui/NeighborColumnResizer.h"
+#include "ui/OverlayScrollBar.h"
 
+#include <QAbstractTableModel>
 #include <QDateTime>
 #include <QFile>
 #include <QFileDialog>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -12,9 +18,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QSplitter>
-#include <QTableWidget>
 #include <QTextStream>
 #include <QVBoxLayout>
 
@@ -44,7 +50,135 @@ QString durationText(qint64 ms)
         .arg(totalSeconds % 60, 2, 10, QLatin1Char('0'));
 }
 
+enum PlaylistItemColumn {
+    OrdinalColumn,
+    TitleColumn,
+    ArtistColumn,
+    AlbumColumn,
+    LengthColumn,
+    PlaylistItemColumnCount,
+};
+
+int minWidthForPlaylistItemColumn(int column)
+{
+    switch (column) {
+    case OrdinalColumn: return 38;
+    case TitleColumn: return 120;
+    case ArtistColumn: return 100;
+    case AlbumColumn: return 100;
+    case LengthColumn: return 64;
+    default: return 40;
+    }
+}
+
+int defaultWidthForPlaylistItemColumn(int column)
+{
+    switch (column) {
+    case OrdinalColumn: return 48;
+    case TitleColumn: return 260;
+    case ArtistColumn: return 190;
+    case AlbumColumn: return 220;
+    case LengthColumn: return 76;
+    default: return 100;
+    }
+}
+
 } // namespace
+
+class PlaylistItemTableModel final : public QAbstractTableModel {
+public:
+    explicit PlaylistItemTableModel(QObject *parent = nullptr)
+        : QAbstractTableModel(parent)
+    {
+    }
+
+    int rowCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+    }
+
+    int columnCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : PlaylistItemColumnCount;
+    }
+
+    QVariant data(const QModelIndex &index, int role) const override
+    {
+        if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size()) {
+            return {};
+        }
+
+        const PlaylistItem &item = m_rows.at(index.row());
+        if (role == Qt::UserRole) {
+            return item.id;
+        }
+        if (role == Qt::FontRole && item.status != PlaylistItemStatus::Matched) {
+            QFont font;
+            font.setItalic(true);
+            return font;
+        }
+        if (role == Qt::TextAlignmentRole) {
+            return index.column() == OrdinalColumn || index.column() == LengthColumn
+                ? QVariant(Qt::AlignRight | Qt::AlignVCenter)
+                : QVariant(Qt::AlignLeft | Qt::AlignVCenter);
+        }
+        if (role != Qt::DisplayRole) {
+            return {};
+        }
+
+        switch (index.column()) {
+        case OrdinalColumn:
+            return item.ordinal + 1;
+        case TitleColumn: {
+            const QString status = statusLabel(item.status);
+            return status.isEmpty()
+                ? item.titleSnapshot
+                : QStringLiteral("%1  [%2]").arg(item.titleSnapshot, status);
+        }
+        case ArtistColumn:
+            return item.artistSnapshot;
+        case AlbumColumn:
+            return item.albumSnapshot;
+        case LengthColumn:
+            return durationText(item.durationMs);
+        default:
+            return {};
+        }
+    }
+
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override
+    {
+        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+            return {};
+        }
+        switch (section) {
+        case OrdinalColumn: return QStringLiteral("#");
+        case TitleColumn: return QStringLiteral("Title");
+        case ArtistColumn: return QStringLiteral("Artist");
+        case AlbumColumn: return QStringLiteral("Album");
+        case LengthColumn: return QStringLiteral("Length");
+        default: return {};
+        }
+    }
+
+    void setItems(const QVector<PlaylistItem> &rows)
+    {
+        beginResetModel();
+        m_rows = rows;
+        endResetModel();
+    }
+
+    const PlaylistItem *itemAt(int row) const
+    {
+        if (row < 0 || row >= m_rows.size()) {
+            return nullptr;
+        }
+        return &m_rows.at(row);
+    }
+
+private:
+    QVector<PlaylistItem> m_rows;
+};
 
 PlaylistView::PlaylistView(QWidget *parent)
     : QWidget(parent)
@@ -61,22 +195,33 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     m_playlistList = new QListWidget(splitter);
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setWordWrap(true);
+    m_playlistList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_playlistList->installEventFilter(this);
 
-    m_itemTable = new QTableWidget(splitter);
-    m_itemTable->setColumnCount(5);
-    m_itemTable->setHorizontalHeaderLabels(
-        {QStringLiteral("#"), QStringLiteral("Title"), QStringLiteral("Artist"),
-         QStringLiteral("Album"), QStringLiteral("Length")});
+    m_itemModel = new PlaylistItemTableModel(this);
+    m_itemTable = new NavigableTableView(splitter);
+    m_itemTable->setModel(m_itemModel);
+    m_itemTable->setItemDelegate(new DenseTableDelegate(this));
     m_itemTable->verticalHeader()->setVisible(false);
-    m_itemTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_itemTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_itemTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_itemTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_itemTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    m_itemTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    m_itemTable->setAlternatingRowColors(true);
+    m_itemTable->setShowGrid(false);
+    m_itemTable->setWordWrap(false);
+    m_itemTable->horizontalHeader()->setStretchLastSection(false);
+    m_itemTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_itemTable->horizontalHeader()->setSectionsMovable(false);
+    m_itemTable->horizontalHeader()->setFixedHeight(20);
+    m_itemTable->horizontalHeader()->setMinimumSectionSize(8);
+    m_itemTable->verticalHeader()->setDefaultSectionSize(20);
+    m_itemTable->verticalHeader()->setMinimumSectionSize(20);
+    for (int col = 0; col < PlaylistItemColumnCount; ++col) {
+        m_itemTable->setColumnWidth(col, defaultWidthForPlaylistItemColumn(col));
+    }
+    m_itemTable->setContextMenuPolicy(Qt::CustomContextMenu);
     m_itemTable->installEventFilter(this);
+    OverlayScrollBar::install(m_itemTable);
 
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 3);
@@ -87,6 +232,16 @@ PlaylistView::PlaylistView(QWidget *parent)
     });
     connect(m_itemTable->horizontalHeader(), &QHeaderView::sectionClicked,
             this, &PlaylistView::sortByColumn);
+    NeighborColumnResizer::install(
+        m_itemTable->horizontalHeader(), [](int column) { return minWidthForPlaylistItemColumn(column); });
+    connect(m_playlistList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) {
+        playCurrentPlaylist();
+    });
+    connect(m_itemTable, &QTableView::doubleClicked, this, [this](const QModelIndex &) {
+        playCurrentItem();
+    });
+    connect(m_playlistList, &QWidget::customContextMenuRequested, this, &PlaylistView::showPlaylistMenu);
+    connect(m_itemTable, &QWidget::customContextMenuRequested, this, &PlaylistView::showItemMenu);
 
     updateHeader();
 }
@@ -199,31 +354,11 @@ QVector<PlaylistItem> PlaylistView::displayItems() const
 
 void PlaylistView::populateItems()
 {
-    m_itemTable->setRowCount(0);
+    const int keepRow = currentItemRow();
     const QVector<PlaylistItem> rows = displayItems();
-    m_itemTable->setRowCount(static_cast<int>(rows.size()));
-    for (int row = 0; row < rows.size(); ++row) {
-        const PlaylistItem &item = rows.at(row);
-        const QString status = statusLabel(item.status);
-        const QString titleText = status.isEmpty()
-            ? item.titleSnapshot
-            : QStringLiteral("%1  [%2]").arg(item.titleSnapshot, status);
-        const QStringList cells = {QString::number(item.ordinal + 1), titleText,
-                                   item.artistSnapshot, item.albumSnapshot,
-                                   durationText(item.durationMs)};
-        for (int col = 0; col < cells.size(); ++col) {
-            auto *cell = new QTableWidgetItem(cells.at(col));
-            cell->setData(Qt::UserRole, item.id);  // map display row -> item id
-            if (item.status != PlaylistItemStatus::Matched) {
-                QFont font = cell->font();
-                font.setItalic(true);
-                cell->setFont(font);
-            }
-            m_itemTable->setItem(row, col, cell);
-        }
-    }
-    if (m_itemTable->rowCount() > 0 && m_itemTable->currentRow() < 0) {
-        m_itemTable->setCurrentCell(0, 0);
+    m_itemModel->setItems(rows);
+    if (m_itemModel->rowCount() > 0) {
+        setCurrentItemRow(std::clamp(keepRow, 0, m_itemModel->rowCount() - 1));
     }
     updateHeader();
 }
@@ -267,7 +402,7 @@ void PlaylistView::updateHeader()
 {
     if (m_currentPlaylistId <= 0) {
         m_header->setText(QStringLiteral(
-            "Playlists — a: new   R: rename   D: delete   x: export   =/+: add song   T: toggle date   l/Enter: open   "
+            "Playlists — a: new   R: rename   D: delete   x: export   =/+: add song   T: toggle date   Enter: play   l: open   "
             "(inside) =/+: add   a: add-to-playlist   e: edit   d: remove   s: sort   Enter: play"));
         return;
     }
@@ -278,20 +413,7 @@ void PlaylistView::updateHeader()
 
 const PlaylistItem *PlaylistView::itemForDisplayRow(int row) const
 {
-    if (row < 0) {
-        return nullptr;
-    }
-    const QTableWidgetItem *cell = m_itemTable->item(row, 0);
-    if (cell == nullptr) {
-        return nullptr;
-    }
-    const qint64 id = cell->data(Qt::UserRole).toLongLong();
-    for (const PlaylistItem &item : m_items) {
-        if (item.id == id) {
-            return &item;
-        }
-    }
-    return nullptr;
+    return m_itemModel != nullptr ? m_itemModel->itemAt(row) : nullptr;
 }
 
 QStringList PlaylistView::selectedItemPaths(int *startIndex) const
@@ -299,7 +421,7 @@ QStringList PlaylistView::selectedItemPaths(int *startIndex) const
     QStringList paths;
     int first = -1;
     const QModelIndexList selected = m_itemTable->selectionModel() != nullptr
-        ? m_itemTable->selectionModel()->selectedRows()
+        ? m_itemTable->selectionModel()->selectedRows(0)
         : QModelIndexList();
     if (selected.size() > 1) {
         QVector<int> rows;
@@ -320,8 +442,8 @@ QStringList PlaylistView::selectedItemPaths(int *startIndex) const
     }
     // Single selection: hand the whole playlist (in display order) over so
     // playback continues past the chosen row, with startIndex pointing at it.
-    const int current = m_itemTable->currentRow();
-    for (int row = 0; row < m_itemTable->rowCount(); ++row) {
+    const int current = currentItemRow();
+    for (int row = 0; row < m_itemModel->rowCount(); ++row) {
         const PlaylistItem *item = itemForDisplayRow(row);
         if (item == nullptr || item->trackPath.isEmpty()) {
             continue;
@@ -335,6 +457,223 @@ QStringList PlaylistView::selectedItemPaths(int *startIndex) const
         *startIndex = std::max(0, first);
     }
     return paths;
+}
+
+QStringList PlaylistView::selectedOnlyItemPaths() const
+{
+    QStringList paths;
+    QVector<int> rows;
+    const QModelIndexList selected = m_itemTable->selectionModel() != nullptr
+        ? m_itemTable->selectionModel()->selectedRows(0)
+        : QModelIndexList();
+    if (selected.isEmpty()) {
+        rows.push_back(currentItemRow());
+    } else {
+        rows.reserve(selected.size());
+        for (const QModelIndex &index : selected) {
+            rows.push_back(index.row());
+        }
+        std::sort(rows.begin(), rows.end());
+    }
+
+    for (int row : rows) {
+        const PlaylistItem *item = itemForDisplayRow(row);
+        if (item != nullptr && !item->trackPath.isEmpty()) {
+            paths << item->trackPath;
+        }
+    }
+    return paths;
+}
+
+void PlaylistView::playCurrentPlaylist()
+{
+    if (m_db == nullptr || m_currentPlaylistId <= 0) {
+        return;
+    }
+    QStringList paths;
+    for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
+        if (!item.trackPath.isEmpty()) {
+            paths << item.trackPath;
+        }
+    }
+    if (!paths.isEmpty()) {
+        emit playPathsRequested(paths, 0);
+    }
+}
+
+void PlaylistView::addCurrentPlaylistToQueue()
+{
+    if (m_db == nullptr || m_currentPlaylistId <= 0) {
+        return;
+    }
+    QStringList paths;
+    for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
+        if (!item.trackPath.isEmpty()) {
+            paths << item.trackPath;
+        }
+    }
+    if (!paths.isEmpty()) {
+        emit addPathsToQueueRequested(paths);
+    }
+}
+
+void PlaylistView::playCurrentItem()
+{
+    int startIndex = 0;
+    const QStringList paths = selectedItemPaths(&startIndex);
+    if (!paths.isEmpty()) {
+        emit playPathsRequested(paths, startIndex);
+    }
+}
+
+void PlaylistView::playNextSelectedItems()
+{
+    const QStringList paths = selectedOnlyItemPaths();
+    if (!paths.isEmpty()) {
+        emit playNextPathsRequested(paths);
+    }
+}
+
+void PlaylistView::addSelectedItemsToQueue()
+{
+    const QStringList paths = selectedOnlyItemPaths();
+    if (!paths.isEmpty()) {
+        emit addPathsToQueueRequested(paths);
+    }
+}
+
+void PlaylistView::addSelectedItemsToPlaylist()
+{
+    const QStringList paths = selectedOnlyItemPaths();
+    if (!paths.isEmpty()) {
+        emit addToPlaylistRequested(paths);
+    }
+}
+
+void PlaylistView::editCurrentItem()
+{
+    const PlaylistItem *item = itemForDisplayRow(currentItemRow());
+    if (item != nullptr && m_currentPlaylistId > 0) {
+        emit editItemRequested(m_currentPlaylistId, item->id, item->query);
+    }
+}
+
+void PlaylistView::showPlaylistMenu(const QPoint &pos)
+{
+    const int row = m_playlistList->row(m_playlistList->itemAt(pos));
+    if (row >= 0) {
+        m_playlistList->setCurrentRow(row);
+    }
+
+    QMenu menu(this);
+    QAction *play = menu.addAction(QStringLiteral("Play"));
+    play->setEnabled(m_currentPlaylistId > 0);
+    connect(play, &QAction::triggered, this, &PlaylistView::playCurrentPlaylist);
+    QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
+    addToQueue->setEnabled(m_currentPlaylistId > 0);
+    connect(addToQueue, &QAction::triggered, this, &PlaylistView::addCurrentPlaylistToQueue);
+    QAction *playNext = menu.addAction(QStringLiteral("Play next"));
+    playNext->setEnabled(m_currentPlaylistId > 0);
+    connect(playNext, &QAction::triggered, this, [this]() {
+        if (m_db == nullptr || m_currentPlaylistId <= 0) {
+            return;
+        }
+        QStringList paths;
+        for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
+            if (!item.trackPath.isEmpty()) {
+                paths << item.trackPath;
+            }
+        }
+        if (!paths.isEmpty()) {
+            emit playNextPathsRequested(paths);
+        }
+    });
+
+    menu.addSeparator();
+    QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
+    addSong->setEnabled(m_currentPlaylistId > 0);
+    connect(addSong, &QAction::triggered, this, [this]() {
+        if (m_currentPlaylistId > 0) {
+            emit addSongRequested(m_currentPlaylistId);
+        }
+    });
+    menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
+    QAction *rename = menu.addAction(QStringLiteral("Rename"));
+    rename->setEnabled(m_currentPlaylistId > 0);
+    connect(rename, &QAction::triggered, this, &PlaylistView::renameCurrentPlaylist);
+    QAction *exportAction = menu.addAction(QStringLiteral("Export..."));
+    exportAction->setEnabled(m_currentPlaylistId > 0);
+    connect(exportAction, &QAction::triggered, this, &PlaylistView::exportCurrentPlaylist);
+    QAction *deleteAction = menu.addAction(QStringLiteral("Delete"));
+    deleteAction->setEnabled(m_currentPlaylistId > 0);
+    connect(deleteAction, &QAction::triggered, this, &PlaylistView::deleteCurrentPlaylist);
+
+    menu.exec(m_playlistList->viewport()->mapToGlobal(pos));
+}
+
+void PlaylistView::showItemMenu(const QPoint &pos)
+{
+    const QModelIndex index = m_itemTable->indexAt(pos);
+    if (!index.isValid()) {
+        QMenu menu(this);
+        QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
+        addSong->setEnabled(m_currentPlaylistId > 0);
+        connect(addSong, &QAction::triggered, this, [this]() {
+            if (m_currentPlaylistId > 0) {
+                emit addSongRequested(m_currentPlaylistId);
+            }
+        });
+        menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
+        return;
+    }
+    if (!m_itemTable->selectionModel()->isRowSelected(index.row(), QModelIndex())) {
+        setCurrentItemRow(index.row());
+    } else {
+        m_itemTable->setCurrentIndex(m_itemModel->index(index.row(), 0));
+    }
+
+    const PlaylistItem *item = itemForDisplayRow(index.row());
+    const bool hasPlayableSelection = !selectedOnlyItemPaths().isEmpty();
+    QMenu menu(this);
+    QAction *play = menu.addAction(QStringLiteral("Play"));
+    play->setEnabled(item != nullptr && !item->trackPath.isEmpty());
+    connect(play, &QAction::triggered, this, &PlaylistView::playCurrentItem);
+    QAction *playNext = menu.addAction(QStringLiteral("Play next"));
+    playNext->setEnabled(hasPlayableSelection);
+    connect(playNext, &QAction::triggered, this, &PlaylistView::playNextSelectedItems);
+    QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
+    addToQueue->setEnabled(hasPlayableSelection);
+    connect(addToQueue, &QAction::triggered, this, &PlaylistView::addSelectedItemsToQueue);
+    QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist..."));
+    addToPlaylist->setEnabled(hasPlayableSelection);
+    connect(addToPlaylist, &QAction::triggered, this, &PlaylistView::addSelectedItemsToPlaylist);
+
+    menu.addSeparator();
+    QAction *edit = menu.addAction(QStringLiteral("Edit match"));
+    edit->setEnabled(item != nullptr && m_currentPlaylistId > 0);
+    connect(edit, &QAction::triggered, this, &PlaylistView::editCurrentItem);
+    QAction *properties = menu.addAction(QStringLiteral("Properties"));
+    properties->setEnabled(item != nullptr && !item->trackPath.isEmpty());
+    connect(properties, &QAction::triggered, this, [this, item]() {
+        if (item != nullptr && !item->trackPath.isEmpty()) {
+            emit propertiesForPathRequested(item->trackPath);
+        }
+    });
+    QAction *remove = menu.addAction(QStringLiteral("Remove selected"));
+    remove->setEnabled(item != nullptr);
+    connect(remove, &QAction::triggered, this, &PlaylistView::removeSelectedItems);
+
+    menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
+}
+
+void PlaylistView::setCurrentItemRow(int row, int direction)
+{
+    m_itemTable->setCurrentNavigationRow(row, direction);
+}
+
+int PlaylistView::currentItemRow() const
+{
+    return m_itemTable->currentNavigationRow();
 }
 
 void PlaylistView::createPlaylist()
@@ -451,11 +790,11 @@ void PlaylistView::removeSelectedItems()
         return;
     }
     QVector<int> rows;
-    for (const QModelIndex &index : m_itemTable->selectionModel()->selectedRows()) {
+    for (const QModelIndex &index : m_itemTable->selectionModel()->selectedRows(0)) {
         rows.push_back(index.row());
     }
-    if (rows.isEmpty() && m_itemTable->currentRow() >= 0) {
-        rows.push_back(m_itemTable->currentRow());
+    if (rows.isEmpty() && currentItemRow() >= 0) {
+        rows.push_back(currentItemRow());
     }
     // Resolve to item ids up front (display rows may be sorted), then delete by
     // descending ordinal so the per-removal ordinal compaction stays valid.
@@ -494,15 +833,20 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             m_playlistList->setCurrentRow(std::max(0, m_playlistList->currentRow() - 1));
             return true;
         case Qt::Key_L:
-        case Qt::Key_Return:
-        case Qt::Key_Enter:
         case Qt::Key_Right:
             if (m_currentPlaylistId > 0) {
                 m_itemTable->setFocus(Qt::OtherFocusReason);
-                if (m_itemTable->currentRow() < 0 && m_itemTable->rowCount() > 0) {
-                    m_itemTable->setCurrentCell(0, 0);
+                if (currentItemRow() < 0 && m_itemModel->rowCount() > 0) {
+                    setCurrentItemRow(0);
                 }
             }
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            playCurrentPlaylist();
+            return true;
+        case Qt::Key_Space:
+            addCurrentPlaylistToQueue();
             return true;
         case Qt::Key_Equal:
         case Qt::Key_Plus:
@@ -539,13 +883,11 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         switch (key) {
         case Qt::Key_J:
         case Qt::Key_N:
-            m_itemTable->setCurrentCell(std::min(m_itemTable->rowCount() - 1, m_itemTable->currentRow() + 1),
-                                        std::max(0, m_itemTable->currentColumn()));
+            setCurrentItemRow(std::min(m_itemModel->rowCount() - 1, currentItemRow() + 1), +1);
             return true;
         case Qt::Key_K:
         case Qt::Key_P:
-            m_itemTable->setCurrentCell(std::max(0, m_itemTable->currentRow() - 1),
-                                        std::max(0, m_itemTable->currentColumn()));
+            setCurrentItemRow(std::max(0, currentItemRow() - 1), -1);
             return true;
         case Qt::Key_H:
         case Qt::Key_Left:
@@ -553,18 +895,11 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             return true;
         case Qt::Key_Return:
         case Qt::Key_Enter: {
-            int startIndex = 0;
-            const QStringList paths = selectedItemPaths(&startIndex);
-            if (!paths.isEmpty()) {
-                emit playPathsRequested(paths, startIndex);
-            }
+            playCurrentItem();
             return true;
         }
         case Qt::Key_Space: {
-            const QStringList paths = selectedItemPaths();
-            if (!paths.isEmpty()) {
-                emit addPathsToQueueRequested(paths);
-            }
+            addSelectedItemsToQueue();
             return true;
         }
         case Qt::Key_Equal:  // = and + (shift+=) both open the add-song modal
@@ -574,17 +909,11 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             }
             return true;
         case Qt::Key_A: {
-            const QStringList paths = selectedItemPaths();
-            if (!paths.isEmpty()) {
-                emit addToPlaylistRequested(paths);
-            }
+            addSelectedItemsToPlaylist();
             return true;
         }
         case Qt::Key_E: {
-            const PlaylistItem *item = itemForDisplayRow(m_itemTable->currentRow());
-            if (item != nullptr && m_currentPlaylistId > 0) {
-                emit editItemRequested(m_currentPlaylistId, item->id, item->query);
-            }
+            editCurrentItem();
             return true;
         }
         case Qt::Key_D:
@@ -599,7 +928,7 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             break;
         case Qt::Key_I:
             if (mods == Qt::NoModifier) {
-                const PlaylistItem *item = itemForDisplayRow(m_itemTable->currentRow());
+                const PlaylistItem *item = itemForDisplayRow(currentItemRow());
                 if (item != nullptr && !item->trackPath.isEmpty()) {
                     emit propertiesForPathRequested(item->trackPath);
                 }
