@@ -1437,6 +1437,8 @@ void PlaylistView::removeSelectedItems()
     reloadPlaylists();
 }
 
+// NOTE: the Keybinds-dialog reference for this view lives in
+// ui/ViewKeyReferences.cpp — update it when changing keys here.
 bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
 {
     const bool playlistListWatched = m_playlistList != nullptr

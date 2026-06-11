@@ -271,6 +271,7 @@ add_executable(test_keybindings_dialog
     ../src/ui/MainPanelKeybindings.cpp
     ../src/ui/FileExplorerKeybindings.cpp
     ../src/ui/QueueKeybindings.cpp
+    ../src/ui/ViewKeyReferences.cpp
 )
 target_include_directories(test_keybindings_dialog PRIVATE ../src)
 target_link_libraries(test_keybindings_dialog PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)

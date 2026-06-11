@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Playlist.h"
+#include "ui/KeyBindingTypes.h"
 
 #include <QStringList>
 #include <QVector>
@@ -50,6 +51,10 @@ public:
     // Display-only ordering. The canonical ordinal is always preserved in the
     // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
     enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
+
+    // Key/action reference for the Keybinds dialog. Kept next to eventFilter()
+    // in the .cpp — update both together.
+    static KeyBindingReferenceList keyBindingReference();
 
 public slots:
     void createPlaylist();

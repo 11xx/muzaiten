@@ -120,6 +120,7 @@ set(MUZAITEN_SOURCES
     src/ui/StarRatingDelegate.cpp
     src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
+    src/ui/ViewKeyReferences.cpp
     resources/resources.qrc
 )
 

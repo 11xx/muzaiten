@@ -5,6 +5,7 @@
 #include "search/ResultRanker.h"
 #include "search/SearchIndex.h"
 #include "search/SearchRecord.h"
+#include "ui/KeyBindingTypes.h"
 
 #include <QWidget>
 #include <QVector>
@@ -42,6 +43,10 @@ public:
     // Apply a new ranking/exclusion config: rebuilds the front-end ranker,
     // forwards exclusions to the worker, and re-runs the current query.
     void setRankConfig(const Search::RankConfig &config);
+
+    // Key/action reference for the Keybinds dialog. Kept next to handleNavKey()
+    // in the .cpp — update both together.
+    static KeyBindingReferenceList keyBindingReference();
 
 signals:
     void addToQueueRequested(QVector<Track> tracks);

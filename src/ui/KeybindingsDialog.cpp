@@ -2,7 +2,9 @@
 
 #include "ui/FileExplorerKeybindings.h"
 #include "ui/MainPanelKeybindings.h"
+#include "ui/PlaylistView.h"
 #include "ui/QueueKeybindings.h"
+#include "ui/SearchView.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -70,6 +72,17 @@ void addBindingRow(QTableWidget *table, const QString &key, const QString &actio
 {
     const int row = table->rowCount();
     table->insertRow(row);
+    // An empty key marks a section heading: span both columns, bold text.
+    if (key.isEmpty()) {
+        auto *headingItem = new QTableWidgetItem(action);
+        headingItem->setFlags(headingItem->flags() & ~Qt::ItemIsEditable);
+        QFont font = headingItem->font();
+        font.setBold(true);
+        headingItem->setFont(font);
+        table->setItem(row, 0, headingItem);
+        table->setSpan(row, 0, 1, 2);
+        return;
+    }
     auto *keyItem = new QTableWidgetItem(key);
     auto *actionItem = new QTableWidgetItem(action);
     keyItem->setFlags(keyItem->flags() & ~Qt::ItemIsEditable);
@@ -119,9 +132,24 @@ KeybindingsDialog::KeybindingsDialog(QWidget *parent)
     auto *tabs = new QTabWidget(this);
     layout->addWidget(tabs, 1);
 
+    // Tab order mirrors the global view-switch keys: 1 Queue, 2 Library,
+    // 3 Explorer, 4 Search, 5 Playlists (see the QShortcuts in MainWindow).
+    auto *queueTab = new QWidget(tabs);
+    auto *queueLayout = new QVBoxLayout(queueTab);
+    queueLayout->addWidget(new QLabel(QStringLiteral("Screen 1: Queue"), queueTab));
+    m_queueProfile = new QComboBox(queueTab);
+    for (const KeyBindingProfile &profile : defaultQueueKeyBindingProfiles()) {
+        m_queueProfile->addItem(profile.label, profile.name);
+    }
+    queueLayout->addWidget(m_queueProfile);
+    m_queueBindings = makeBindingsTable(queueTab);
+    queueLayout->addWidget(m_queueBindings, 1);
+    tabs->addTab(queueTab, QStringLiteral("1 Queue"));
+    connect(m_queueProfile, &QComboBox::currentIndexChanged, this, &KeybindingsDialog::rebuildQueueBindings);
+
     auto *mainPanelTab = new QWidget(tabs);
     auto *mainLayout = new QVBoxLayout(mainPanelTab);
-    mainLayout->addWidget(new QLabel(QStringLiteral("Screen 1: Library panels"), mainPanelTab));
+    mainLayout->addWidget(new QLabel(QStringLiteral("Screen 2: Library panels"), mainPanelTab));
     m_mainPanelProfile = new QComboBox(mainPanelTab);
     for (const KeyBindingProfile &profile : defaultMainPanelKeyBindingProfiles()) {
         m_mainPanelProfile->addItem(profile.label, profile.name);
@@ -129,12 +157,12 @@ KeybindingsDialog::KeybindingsDialog(QWidget *parent)
     mainLayout->addWidget(m_mainPanelProfile);
     m_mainPanelBindings = makeBindingsTable(mainPanelTab);
     mainLayout->addWidget(m_mainPanelBindings, 1);
-    tabs->addTab(mainPanelTab, QStringLiteral("1 Library"));
+    tabs->addTab(mainPanelTab, QStringLiteral("2 Library"));
     connect(m_mainPanelProfile, &QComboBox::currentIndexChanged, this, &KeybindingsDialog::rebuildMainPanelBindings);
 
     auto *explorerTab = new QWidget(tabs);
     auto *explorerLayout = new QVBoxLayout(explorerTab);
-    explorerLayout->addWidget(new QLabel(QStringLiteral("Screen 2: File explorer"), explorerTab));
+    explorerLayout->addWidget(new QLabel(QStringLiteral("Screen 3: File explorer"), explorerTab));
     m_fileExplorerProfile = new QComboBox(explorerTab);
     for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
         m_fileExplorerProfile->addItem(profile.label, profile.name);
@@ -144,41 +172,28 @@ KeybindingsDialog::KeybindingsDialog(QWidget *parent)
     explorerLayout->addWidget(m_fileExplorerHints);
     m_fileExplorerBindings = makeBindingsTable(explorerTab);
     explorerLayout->addWidget(m_fileExplorerBindings, 1);
-    tabs->addTab(explorerTab, QStringLiteral("2 Explorer"));
+    tabs->addTab(explorerTab, QStringLiteral("3 Explorer"));
     connect(m_fileExplorerProfile, &QComboBox::currentIndexChanged, this, &KeybindingsDialog::rebuildFileExplorerBindings);
 
     auto *searchTab = new QWidget(tabs);
     auto *searchLayout = new QVBoxLayout(searchTab);
-    searchLayout->addWidget(new QLabel(QStringLiteral("Screen 3: Search"), searchTab));
+    searchLayout->addWidget(new QLabel(QStringLiteral("Screen 4: Search"), searchTab));
     auto *searchBindings = makeBindingsTable(searchTab);
-    addGlobalRows(searchBindings, {
-        {QStringLiteral("3"), QStringLiteral("Switch to Search / refresh Search")},
-        {QStringLiteral("F5"), QStringLiteral("Refresh search index")},
-        {QStringLiteral("Down / Ctrl+N"), QStringLiteral("Move down")},
-        {QStringLiteral("Up / Ctrl+P"), QStringLiteral("Move up")},
-        {QStringLiteral("PageDown / PageUp"), QStringLiteral("Page results")},
-        {QStringLiteral("Return"), QStringLiteral("Add selected results to queue")},
-        {QStringLiteral("Alt+Return"), QStringLiteral("Play selected results now")},
-        {QStringLiteral("Tab / Ctrl+Space"), QStringLiteral("Toggle result mark")},
-        {QStringLiteral("Ctrl+A"), QStringLiteral("Select all results")},
-        {QStringLiteral("Ctrl+F"), QStringLiteral("Toggle fuzzy mode")},
-        {QStringLiteral("Esc / Ctrl+G"), QStringLiteral("Clear search / leave input")},
-    });
+    addGlobalRows(searchBindings, KeyBindingReferenceList{
+        {QStringLiteral("4"), QStringLiteral("Switch to Search / re-press refreshes index")},
+    } + SearchView::keyBindingReference());
     searchLayout->addWidget(searchBindings, 1);
-    tabs->addTab(searchTab, QStringLiteral("3 Search"));
+    tabs->addTab(searchTab, QStringLiteral("4 Search"));
 
-    auto *queueTab = new QWidget(tabs);
-    auto *queueLayout = new QVBoxLayout(queueTab);
-    queueLayout->addWidget(new QLabel(QStringLiteral("Screen `: Queue"), queueTab));
-    m_queueProfile = new QComboBox(queueTab);
-    for (const KeyBindingProfile &profile : defaultQueueKeyBindingProfiles()) {
-        m_queueProfile->addItem(profile.label, profile.name);
-    }
-    queueLayout->addWidget(m_queueProfile);
-    m_queueBindings = makeBindingsTable(queueTab);
-    queueLayout->addWidget(m_queueBindings, 1);
-    tabs->addTab(queueTab, QStringLiteral("` Queue"));
-    connect(m_queueProfile, &QComboBox::currentIndexChanged, this, &KeybindingsDialog::rebuildQueueBindings);
+    auto *playlistTab = new QWidget(tabs);
+    auto *playlistLayout = new QVBoxLayout(playlistTab);
+    playlistLayout->addWidget(new QLabel(QStringLiteral("Screen 5: Playlists"), playlistTab));
+    auto *playlistBindings = makeBindingsTable(playlistTab);
+    addGlobalRows(playlistBindings, KeyBindingReferenceList{
+        {QStringLiteral("5"), QStringLiteral("Switch to Playlists")},
+    } + PlaylistView::keyBindingReference());
+    playlistLayout->addWidget(playlistBindings, 1);
+    tabs->addTab(playlistTab, QStringLiteral("5 Playlists"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -254,7 +269,7 @@ void KeybindingsDialog::rebuildMainPanelBindings()
 {
     fillBindings(m_mainPanelBindings, bindingsForProfile(defaultMainPanelKeyBindingProfiles(), mainPanelProfileName()));
     addGlobalRows(m_mainPanelBindings, {
-        {QStringLiteral("1"), QStringLiteral("Switch to Library panels")},
+        {QStringLiteral("2"), QStringLiteral("Switch to Library panels")},
         {QStringLiteral("o"), QStringLiteral("Find current track in library")},
     });
 }
@@ -263,7 +278,7 @@ void KeybindingsDialog::rebuildFileExplorerBindings()
 {
     fillBindings(m_fileExplorerBindings, bindingsForProfile(defaultKeyBindingProfiles(), fileExplorerProfileName()));
     addGlobalRows(m_fileExplorerBindings, {
-        {QStringLiteral("2"), QStringLiteral("Toggle Library/Free-roam explorer")},
+        {QStringLiteral("3"), QStringLiteral("Toggle Library/Free-roam explorer")},
     });
 }
 
@@ -271,6 +286,7 @@ void KeybindingsDialog::rebuildQueueBindings()
 {
     fillBindings(m_queueBindings, bindingsForProfile(defaultQueueKeyBindingProfiles(), queueProfileName()));
     addGlobalRows(m_queueBindings, {
-        {QStringLiteral("`"), QStringLiteral("Switch to Queue / jump to currently playing")},
+        {QStringLiteral("1"), QStringLiteral("Switch to Queue / reveal currently playing")},
+        {QStringLiteral("o"), QStringLiteral("Reveal currently playing")},
     });
 }
