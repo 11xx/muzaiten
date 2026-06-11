@@ -98,6 +98,13 @@ private:
     QVector<Track> tracksFromSnapshotObject(const QJsonObject &snapshot) const;
     QJsonObject loadQueueSnapshotsRoot() const;
     void saveQueueSnapshotsRoot(const QJsonObject &root);
+    void ensureCurrentQueueIdentity();
+    bool currentQueueBacklogEligible() const;
+    void pushCurrentQueueToBacklog(const QString &name);
+    void adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<Track> &tracks, int playIndex);
+    void prepareQueueForTrackAddition(const QVector<Track> &tracks);
+    void appendTracksToCurrentPlaylist(const QVector<Track> &tracks);
+    void markQueueAsSpontaneous(const QString &id = {});
     void loadExplorerState();
     void saveExplorerState();
     void applySharedTableSettings();
@@ -159,10 +166,14 @@ private:
     void playAlbumsReplacingQueue(const QStringList &albumTitles);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
-    // Queue-playlist snapshots (stored in state.sqlite, distinct from library
-    // playlists). Replacing the queue auto-saves the outgoing one as "previous"
-    // so it can be restored without losing order.
-    void replaceQueueWithTracks(const QVector<Track> &tracks, int playIndex);
+    // Queue snapshots (stored in state.sqlite, distinct from library playlists).
+    // Spontaneous queues keep a stable id and are moved through a short backlog
+    // when displaced, so restoring/mutating one does not create duplicate queue
+    // identities.
+    void replaceQueueWithTracks(const QVector<Track> &tracks, int playIndex,
+                                const QString &sourceKind = {},
+                                qint64 sourcePlaylistId = 0,
+                                const QString &sourceName = {});
     void snapshotCurrentQueueAsPrevious();
     void restorePreviousQueue();
     void saveCurrentQueueAs();
@@ -257,6 +268,10 @@ private:
     QVector<Track> m_queue;
     int m_queueIndex = -1;
     int m_playNextInsertIndex = -1;
+    QString m_queueId;
+    QString m_queueSourceKind = QStringLiteral("queue");
+    qint64 m_queueSourcePlaylistId = 0;
+    QString m_queueSourceName;
     int m_trackSortColumn = 0;
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;
