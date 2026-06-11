@@ -6,6 +6,7 @@
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QLocale>
+#include <QPalette>
 #include <QTextBrowser>
 #include <QVBoxLayout>
 
@@ -67,7 +68,8 @@ QString ratingText(int rating0To100)
 // Builds an HTML two-column table for a labelled section. Rows whose value is
 // empty/placeholder are dropped so the view stays tight, like a file manager's
 // properties pane.
-QString section(const QString &title, const QVector<QPair<QString, QString>> &rows)
+QString section(const QString &title, const QVector<QPair<QString, QString>> &rows,
+                const QString &textColor, const QString &labelColor)
 {
     QString body;
     for (const auto &row : rows) {
@@ -75,17 +77,17 @@ QString section(const QString &title, const QVector<QPair<QString, QString>> &ro
             continue;
         }
         body += QStringLiteral(
-                    "<tr><td style='padding:2px 14px 2px 0; color:palette(mid); "
+                    "<tr><td style='padding:2px 14px 2px 0; color:%3; "
                     "white-space:nowrap; vertical-align:top'>%1</td>"
-                    "<td style='padding:2px 0'>%2</td></tr>")
-                    .arg(escape(row.first), escape(row.second));
+                    "<td style='padding:2px 0; color:%4'>%2</td></tr>")
+                    .arg(escape(row.first), escape(row.second), labelColor, textColor);
     }
     if (body.isEmpty()) {
         return QString();
     }
-    return QStringLiteral("<h3 style='margin:14px 0 4px 0'>%1</h3>"
+    return QStringLiteral("<h3 style='margin:14px 0 4px 0; color:%3'>%1</h3>"
                           "<table cellspacing='0' cellpadding='0'>%2</table>")
-        .arg(escape(title), body);
+        .arg(escape(title), body, textColor);
 }
 
 } // namespace
@@ -128,10 +130,15 @@ void TrackPropertiesDialog::setExtraSection(const QString &title,
 void TrackPropertiesDialog::rebuild()
 {
     const Track &t = m_track;
+    const QPalette pal = m_view->palette();
+    const QString textColor = pal.color(QPalette::Text).name();
+    const QString labelColor = pal.color(QPalette::Disabled, QPalette::Text).name();
+    const QString baseColor = pal.color(QPalette::Base).name();
 
-    QString html = QStringLiteral("<div style='font-family:sans-serif'>");
-    html += QStringLiteral("<h2 style='margin:0'>%1</h2>")
-                .arg(escape(t.title.isEmpty() ? t.filename : t.title));
+    QString html = QStringLiteral("<div style='font-family:sans-serif; color:%1; background:%2'>")
+                       .arg(textColor, baseColor);
+    html += QStringLiteral("<h2 style='margin:0; color:%2'>%1</h2>")
+                .arg(escape(t.title.isEmpty() ? t.filename : t.title), textColor);
     const QString subtitle = [&]() {
         QStringList parts;
         if (!t.artistName.isEmpty()) parts << t.artistName;
@@ -139,8 +146,8 @@ void TrackPropertiesDialog::rebuild()
         return parts.join(QStringLiteral("  ·  "));
     }();
     if (!subtitle.isEmpty()) {
-        html += QStringLiteral("<p style='margin:2px 0 0 0; color:palette(mid)'>%1</p>")
-                    .arg(escape(subtitle));
+        html += QStringLiteral("<p style='margin:2px 0 0 0; color:%2'>%1</p>")
+                    .arg(escape(subtitle), labelColor);
     }
 
     QString audioCodec = m_metadata.codec.isEmpty() ? t.codec : m_metadata.codec;
@@ -159,7 +166,7 @@ void TrackPropertiesDialog::rebuild()
         {QStringLiteral("Bitrate"), bitrate > 0
              ? QStringLiteral("%1 kbps").arg(bitrate) : QString()},
         {QStringLiteral("Channels"), channels > 0 ? QString::number(channels) : QString()},
-    });
+    }, textColor, labelColor);
 
     html += section(QStringLiteral("Library"), {
         {QStringLiteral("Album artist"), t.albumArtistName},
@@ -175,17 +182,17 @@ void TrackPropertiesDialog::rebuild()
         {QStringLiteral("Original date"), t.originalDate},
         {QStringLiteral("Rating"), ratingText(t.effectiveRating0To100)},
         {QStringLiteral("Play count"), t.playCount > 0 ? QString::number(t.playCount) : QString()},
-    });
+    }, textColor, labelColor);
 
     html += section(QStringLiteral("File"), {
         {QStringLiteral("Path"), t.path},
         {QStringLiteral("Size"), humanSize(t.fileSize)},
         {QStringLiteral("Modified"), humanTimestamp(t.fileMtime)},
-    });
+    }, textColor, labelColor);
 
     if (!m_extraRows.isEmpty()) {
         html += section(m_extraTitle.isEmpty() ? QStringLiteral("Playlist") : m_extraTitle,
-                        m_extraRows);
+                        m_extraRows, textColor, labelColor);
     }
 
     // Every captured tag, sorted, so power users can inspect Picard/MusicBrainz
@@ -200,9 +207,10 @@ void TrackPropertiesDialog::rebuild()
                   [](const auto &a, const auto &b) {
                       return a.first.compare(b.first, Qt::CaseInsensitive) < 0;
                   });
-        html += section(QStringLiteral("All tags"), tagRows);
+        html += section(QStringLiteral("All tags"), tagRows, textColor, labelColor);
     } else if (!t.scanError.isEmpty()) {
-        html += section(QStringLiteral("Scan"), {{QStringLiteral("Error"), t.scanError}});
+        html += section(QStringLiteral("Scan"), {{QStringLiteral("Error"), t.scanError}},
+                        textColor, labelColor);
     }
 
     html += QStringLiteral("</div>");

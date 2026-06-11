@@ -79,6 +79,7 @@ private:
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
     void saveQueueScreenViewSettings();
+    void savePlaylistViewSettings();
     void saveMainWindowViewSettings();
     void saveAllViewSettings();
     void resetViewPreferences();

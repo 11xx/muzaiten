@@ -8,6 +8,7 @@
 
 class PlaylistDatabase;
 class NavigableTableView;
+class ResponsiveColumnLayout;
 class QListWidget;
 class QLabel;
 class QEvent;
@@ -32,6 +33,13 @@ public:
 
     qint64 currentPlaylistId() const;
     void focusPlaylistList();
+    QString viewSettingsJson() const;
+    void applyViewSettingsJson(const QString &json);
+    void resetViewSettings();
+    void setHeaderHeight(int height);
+    // Display-only ordering. The canonical ordinal is always preserved in the
+    // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
+    enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
 
 signals:
     void playPathsRequested(const QStringList &paths, int startIndex);
@@ -45,15 +53,15 @@ signals:
     void editItemRequested(qint64 playlistId, qint64 itemId, const QString &query);
     // Open the "choose playlist" dialog for these item paths (e.g. copy to another list).
     void addToPlaylistRequested(const QStringList &paths);
+    void saveQueueAsRequested();
+    void restorePreviousQueueRequested();
+    void mergeSavedQueueRequested();
+    void viewSettingsChanged();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    // Display-only ordering. The canonical ordinal is always preserved in the
-    // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
-    enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
-
     void createPlaylist();
     void renameCurrentPlaylist();
     void deleteCurrentPlaylist();
@@ -73,8 +81,12 @@ private:
     void editCurrentItem();
     void showPlaylistMenu(const QPoint &pos);
     void showItemMenu(const QPoint &pos);
+    void showHeaderMenu(const QPoint &pos);
     void setCurrentItemRow(int row, int direction = 0);
     int currentItemRow() const;
+    void moveSelectedItems(int delta);
+    QVector<qint64> displayedItemIds() const;
+    void updatePaneFocus();
 
     QStringList selectedItemPaths(int *startIndex = nullptr) const;
     QStringList selectedOnlyItemPaths() const;
@@ -92,5 +104,6 @@ private:
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
     PlaylistItemTableModel *m_itemModel = nullptr;
+    ResponsiveColumnLayout *m_columnLayout = nullptr;
     QLabel *m_header = nullptr;
 };

@@ -483,6 +483,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
+    connect(m_playlistView, &PlaylistView::viewSettingsChanged, this, &MainWindow::savePlaylistViewSettings);
     m_panelSearch->registerTarget({
         MainPanelId::Queue,
         QStringLiteral("Queue"),
@@ -753,6 +754,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
     });
+    connect(m_playlistView, &PlaylistView::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
+    connect(m_playlistView, &PlaylistView::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_playlistView, &PlaylistView::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
 
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
@@ -1832,6 +1836,7 @@ void MainWindow::loadViewSettings()
     const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
     m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
     m_queueScreen->applyViewSettingsJson(m_state->setting(QStringLiteral("queueScreen.view")));
+    m_playlistView->applyViewSettingsJson(m_state->setting(QStringLiteral("playlistView.view")));
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
     const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
     m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
@@ -1942,6 +1947,12 @@ void MainWindow::saveQueueScreenViewSettings()
     m_state->setSetting(QStringLiteral("queueScreen.view"), m_queueScreen->viewSettingsJson());
 }
 
+void MainWindow::savePlaylistViewSettings()
+{
+    m_state->setSetting(QStringLiteral("playlistView.view"), m_playlistView->viewSettingsJson());
+    applySharedTableSettings();
+}
+
 void MainWindow::saveMainWindowViewSettings()
 {
     auto sizesToJson = [](const QList<int> &sizes) {
@@ -1978,6 +1989,7 @@ void MainWindow::saveAllViewSettings()
     saveArtistSidebarViewSettings();
     saveRightSidebarViewSettings();
     saveQueueScreenViewSettings();
+    savePlaylistViewSettings();
     saveMainWindowViewSettings();
 }
 
@@ -1987,6 +1999,7 @@ void MainWindow::resetViewPreferences()
         QStringLiteral("trackTable.view"),
         QStringLiteral("rightSidebar.view"),
         QStringLiteral("queueScreen.view"),
+        QStringLiteral("playlistView.view"),
         QStringLiteral("albumGrid.view"),
         QStringLiteral("artistSidebar.view"),
         QStringLiteral("mainWindow.view"),
@@ -2015,6 +2028,7 @@ void MainWindow::resetViewPreferences()
     m_artistSidebar->resetViewSettings();
     m_rightSidebar->resetViewSettings();
     m_queueScreen->resetViewSettings();
+    m_playlistView->resetViewSettings();
 
     m_rootSplitter->setSizes({260, 900, 300});
     m_centerSplitter->setSizes({500, 400});
@@ -2458,9 +2472,11 @@ void MainWindow::applySharedTableSettings()
     const QJsonObject sharedSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("tables.view")).toUtf8()).object();
     const QJsonObject trackSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("trackTable.view")).toUtf8()).object();
     const QJsonObject sidebarSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("rightSidebar.view")).toUtf8()).object();
-    const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(20)));
+    const QJsonObject playlistSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playlistView.view")).toUtf8()).object();
+    const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(playlistSettings.value(QStringLiteral("headerHeight")).toInt(20))));
     m_trackTable->setHeaderHeight(headerHeight);
     m_rightSidebar->setHeaderHeight(headerHeight);
+    m_playlistView->setHeaderHeight(headerHeight);
 
     QJsonObject shared;
     shared.insert(QStringLiteral("headerHeight"), headerHeight);
@@ -3992,6 +4008,8 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
                 const qint64 id = m_playlistDb->addItem(playlistId, playlistItemFromTrack(track, query));
                 if (id > 0) {
                     addedIds->push_back(id);
+                    m_playlistView->reloadItems();
+                    m_playlistView->reloadPlaylists();
                 }
                 refreshAdded();
             });
@@ -4009,6 +4027,8 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
                     }
                 }
                 m_playlistDb->removeItem(last);
+                m_playlistView->reloadItems();
+                m_playlistView->reloadPlaylists();
                 refreshAdded();
                 dialog->setQueryText(restoreQuery);
             });
