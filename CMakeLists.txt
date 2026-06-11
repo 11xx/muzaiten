@@ -98,6 +98,7 @@ set(MUZAITEN_SOURCES
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
     src/playlist/PlaylistImport.cpp
+    src/playlist/PlaylistImportWorker.cpp
     src/playlist/PlaylistMatcher.cpp
     src/ui/MainPanelKeybindings.cpp
     src/ui/NavigableTableView.cpp
@@ -107,6 +108,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
     src/ui/PlaylistAddDialog.cpp
+    src/ui/PlaylistImportDialog.cpp
     src/ui/PlaylistView.cpp
     src/ui/QueueKeybindings.cpp
     src/ui/QueueScreen.cpp
@@ -162,6 +164,7 @@ set(MUZAITEN_HEADERS
     src/scanner/TagReader.h
     src/scanner/TagRatingWriter.h
     src/playlist/PlaylistImport.h
+    src/playlist/PlaylistImportWorker.h
     src/playlist/PlaylistMatcher.h
     src/scrobble/LastFmApi.h
     src/scrobble/LastFmCredentials.h
@@ -200,6 +203,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
     src/ui/PlaylistAddDialog.h
+    src/ui/PlaylistImportDialog.h
     src/ui/PlaylistView.h
     src/ui/QueueKeybindings.h
     src/ui/QueueScreen.h

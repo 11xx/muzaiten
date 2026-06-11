@@ -12,6 +12,7 @@
 //  - CSV: our own export columns (ordinal,title,artist,album,duration_ms,path,
 //    status,query,comment) or any csv with a header naming title/artist columns.
 
+#include <QMetaType>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -52,3 +53,6 @@ QString normalizeForMatch(const QString &text);
 QString stripTitleNoise(const QString &title);
 
 } // namespace PlaylistImport
+
+Q_DECLARE_METATYPE(PlaylistImport::ImportEntry)
+Q_DECLARE_METATYPE(QVector<PlaylistImport::ImportEntry>)

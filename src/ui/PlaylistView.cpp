@@ -969,6 +969,13 @@ void PlaylistView::addSongToCurrentPlaylist()
     }
 }
 
+void PlaylistView::importIntoCurrentPlaylist()
+{
+    if (!currentSelectionIsSavedQueue() && m_currentPlaylistId > 0) {
+        emit importRequested(m_currentPlaylistId);
+    }
+}
+
 void PlaylistView::moveCurrentItemUp()
 {
     moveSelectedItems(-1);
@@ -1052,6 +1059,9 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
     addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
+    QAction *importAction = menu.addAction(QStringLiteral("Import..."));
+    importAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
+    connect(importAction, &QAction::triggered, this, &PlaylistView::importIntoCurrentPlaylist);
     menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
     QAction *rename = menu.addAction(QStringLiteral("Rename"));
     rename->setEnabled(!savedQueue && m_currentPlaylistId > 0);
@@ -1531,6 +1541,9 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             return true;
         case Qt::Key_X:
             exportCurrentPlaylist();
+            return true;
+        case Qt::Key_I:
+            importIntoCurrentPlaylist();
             return true;
         default:
             break;

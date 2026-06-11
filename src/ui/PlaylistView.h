@@ -63,6 +63,7 @@ public slots:
     void removeSelectedItems();
     void exportCurrentPlaylist();
     void addSongToCurrentPlaylist();
+    void importIntoCurrentPlaylist();
     void playCurrentPlaylist();
     void playNextCurrentPlaylist();
     void addCurrentPlaylistToQueue();
@@ -76,6 +77,8 @@ signals:
     void propertiesForPathRequested(const QString &path);
     // Open the add-song modal for the given playlist (RET-driven, task 9).
     void addSongRequested(qint64 playlistId);
+    // Open the bulk import dialog (paste/m3u/csv → matcher) for this playlist.
+    void importRequested(qint64 playlistId);
     // Re-open the add modal pre-filled with this item's remembered query to edit
     // which track it resolves to.
     void editItemRequested(qint64 playlistId, qint64 itemId, const QString &query);

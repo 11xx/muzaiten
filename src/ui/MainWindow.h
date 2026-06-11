@@ -229,6 +229,7 @@ private:
     QString playlistDatabasePath() const;
     QVector<Track> tracksForPaths(const QStringList &paths) const;
     void openPlaylistAddModal(qint64 playlistId);
+    void openPlaylistImportDialog(qint64 playlistId);
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
     void openAddToPlaylistDialog(const QVector<Track> &tracks);
     QString resolvedReadPathForTrack(const Track &track) const;

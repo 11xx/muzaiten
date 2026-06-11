@@ -43,6 +43,7 @@ KeyBindingReferenceList PlaylistView::keyBindingReference()
         {QStringLiteral("r / F2"), QStringLiteral("Rename playlist")},
         {QStringLiteral("d / Delete"), QStringLiteral("Delete playlist")},
         {QStringLiteral("x"), QStringLiteral("Export playlist (m3u8/csv)")},
+        {QStringLiteral("i"), QStringLiteral("Import… (paste/m3u/csv, matched against library)")},
         {QStringLiteral("T"), QStringLiteral("Toggle created-date display")},
         {QString(), QStringLiteral("— Items pane —")},
         {QStringLiteral("j / n"), QStringLiteral("Move down")},

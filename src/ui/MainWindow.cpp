@@ -36,6 +36,7 @@
 #include "ui/RankingDialog.h"
 #include "ui/RightSidebar.h"
 #include "ui/PlaylistAddDialog.h"
+#include "ui/PlaylistImportDialog.h"
 #include "ui/PlaylistView.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
@@ -837,6 +838,7 @@ MainWindow::MainWindow(QWidget *parent)
         showTrackProperties(m_database->trackForPath(path));
     });
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
+    connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
@@ -4453,6 +4455,60 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
     delete dialog;
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+}
+
+void MainWindow::openPlaylistImportDialog(qint64 playlistId)
+{
+    if (m_playlistDb == nullptr || playlistId <= 0) {
+        return;
+    }
+    const Playlist playlist = m_playlistDb->playlist(playlistId);
+    PlaylistImportDialog dialog(databasePath(), playlist.name, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    int added = 0;
+    for (const PlaylistImportMatch &match : dialog.results()) {
+        PlaylistItem item;
+        item.query = match.outcome.queryUsed;
+        switch (match.outcome.decision) {
+        case PlaylistMatcher::Decision::Matched: {
+            const Search::SearchRecord &rec = match.outcome.best;
+            item.trackPath = rec.path;
+            item.titleSnapshot = rec.title;
+            item.artistSnapshot = rec.artistName;
+            item.albumSnapshot = rec.albumTitle;
+            item.durationMs = rec.durationMs;
+            item.status = PlaylistItemStatus::Matched;
+            break;
+        }
+        case PlaylistMatcher::Decision::MultiMatch:
+            item.titleSnapshot = match.entry.title;
+            item.artistSnapshot = match.entry.artist;
+            item.albumSnapshot = match.entry.album;
+            item.durationMs = match.entry.durationMs;
+            item.status = PlaylistItemStatus::MultiMatch;
+            item.candidatePaths = match.outcome.candidatePaths;
+            item.comment = match.entry.rawLine;
+            break;
+        case PlaylistMatcher::Decision::Pending:
+            item.titleSnapshot = match.entry.title;
+            item.artistSnapshot = match.entry.artist;
+            item.albumSnapshot = match.entry.album;
+            item.durationMs = match.entry.durationMs;
+            item.status = PlaylistItemStatus::Pending;
+            item.comment = match.entry.rawLine;
+            break;
+        }
+        if (m_playlistDb->addItem(playlistId, item) > 0) {
+            ++added;
+        }
+    }
+    m_playlistView->reloadItems();
+    m_playlistView->reloadPlaylists();
+    statusBar()->showMessage(QStringLiteral("Imported %1 items into \"%2\"")
+                                 .arg(added).arg(playlist.name), 5000);
 }
 
 void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query)
