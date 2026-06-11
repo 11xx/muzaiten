@@ -389,9 +389,11 @@ void AlbumGrid::moveCurrentByGrid(int horizontal, int vertical)
     const int current = currentRow() >= 0 ? currentRow() : 0;
     const int columns = gridColumnCount();
     const int target = current + horizontal + (vertical * columns);
-    // j/k clears marks so only the cursor item is highlighted; auto-narrow is
-    // intentionally skipped — that fires on mouse click/drag-release only.
-    m_markedAlbumTitles.clear();
+    if (m_marksFromMouse) {
+        m_markedAlbumTitles.clear();
+        m_marksFromMouse = false;
+        emit albumNarrowFollowRequested({});
+    }
     setCurrentRow(std::clamp(target, 0, model()->rowCount() - 1));
 }
 
@@ -440,6 +442,7 @@ void AlbumGrid::markAllAlbums()
             m_markedAlbumTitles.insert(title);
         }
     }
+    m_marksFromMouse = false;
     reselectMarkedAlbums();
     followNarrowToSelection();
 }
@@ -452,6 +455,7 @@ void AlbumGrid::unmarkCurrentAlbum()
 void AlbumGrid::unmarkAllAlbums()
 {
     m_markedAlbumTitles.clear();
+    m_marksFromMouse = false;
     if (selectionModel() != nullptr) {
         selectionModel()->clearSelection();
     }
@@ -668,6 +672,12 @@ void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
 
     stopDragSelection();
     if (!index.isValid()) {
+        if (event->modifiers() == Qt::NoModifier && !m_markedAlbumTitles.isEmpty()) {
+            m_markedAlbumTitles.clear();
+            m_marksFromMouse = false;
+            applyMarkedAlbumSelection();
+            emit albumNarrowFollowRequested({});
+        }
         event->accept();
         return;
     }
@@ -684,13 +694,13 @@ void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
         const int anchor = std::clamp(m_shiftAnchorRow >= 0 ? m_shiftAnchorRow : index.row(), 0, model()->rowCount() - 1);
         const int first = std::min(anchor, index.row());
         const int last = std::max(anchor, index.row());
-        m_markedAlbumTitles.clear();
         for (int row = first; row <= last; ++row) {
             const QString rowTitle = titleForRow(row);
             if (!rowTitle.isEmpty()) {
                 m_markedAlbumTitles.insert(rowTitle);
             }
         }
+        m_marksFromMouse = true;
         m_rememberedOutlineVisible = false;
         setCurrentRowInternal(index.row(), false);
         applyMarkedAlbumSelection();
@@ -706,6 +716,7 @@ void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
             } else {
                 m_markedAlbumTitles.insert(title);
             }
+            m_marksFromMouse = true;
         }
         m_shiftAnchorRow = index.row();
         m_rememberedOutlineVisible = false;
@@ -717,6 +728,7 @@ void AlbumGrid::mouseReleaseEvent(QMouseEvent *event)
     }
 
     m_markedAlbumTitles.clear();
+    m_marksFromMouse = true;
     m_shiftAnchorRow = index.row();
     selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     setCurrentIndex(index);
@@ -1022,6 +1034,7 @@ void AlbumGrid::setCurrentAlbumMarked(bool marked)
     } else {
         m_markedAlbumTitles.remove(title);
     }
+    m_marksFromMouse = false;
     reselectMarkedAlbums();
     if (!marked && currentIndex().isValid() && selectionModel() != nullptr) {
         selectionModel()->select(currentIndex(), QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
@@ -1078,6 +1091,7 @@ void AlbumGrid::updateRubberBandSelection()
     } else {
         m_markedAlbumTitles = touchedTitles;
     }
+    m_marksFromMouse = true;
 
     if (lastTouchedRow >= 0) {
         m_rememberedOutlineVisible = false;

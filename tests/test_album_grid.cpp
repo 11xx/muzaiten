@@ -19,6 +19,9 @@ private slots:
     void mouseClickClearsExistingNarrowingBeforeRenarrowing();
     void ctrlAndShiftClickUpdateMarkedAlbums();
     void dragSelectionMarksIntersectedAlbums();
+    void keyboardMarksPersistAcrossGridMovement();
+    void mouseMarksClearAndUnnarrowAcrossGridMovement();
+    void shiftClickExtendsKeyboardMarks();
 
 private:
     static QVector<Album> makeAlbums();
@@ -158,6 +161,54 @@ void AlbumGridTest::dragSelectionMarksIntersectedAlbums()
     dragRows(grid.get(), 0, 2);
     QCOMPARE(toggled.count(), 0);
     QCOMPARE(cleared.count(), 0);
+    QCOMPARE(grid->albumTitlesForAction(), QStringList({titleAt(grid.get(), 0), titleAt(grid.get(), 1), titleAt(grid.get(), 2)}));
+}
+
+void AlbumGridTest::keyboardMarksPersistAcrossGridMovement()
+{
+    const QVector<Album> albums = makeAlbums();
+    std::unique_ptr<AlbumGrid> grid(makeGrid(albums));
+
+    grid->setCurrentRow(0);
+    grid->markCurrentAlbum();
+    QSignalSpy narrowed(grid.get(), &AlbumGrid::albumNarrowFollowRequested);
+
+    grid->moveCurrentByGrid(+1, 0);
+
+    QCOMPARE(grid->currentRow(), 1);
+    QCOMPARE(grid->albumTitlesForAction(), QStringList{titleAt(grid.get(), 0)});
+    QCOMPARE(narrowed.count(), 0);
+}
+
+void AlbumGridTest::mouseMarksClearAndUnnarrowAcrossGridMovement()
+{
+    const QVector<Album> albums = makeAlbums();
+    std::unique_ptr<AlbumGrid> grid(makeGrid(albums));
+
+    clickRow(grid.get(), 0, Qt::ControlModifier);
+    clickRow(grid.get(), 2, Qt::ControlModifier);
+    QCOMPARE(grid->albumTitlesForAction(), QStringList({titleAt(grid.get(), 0), titleAt(grid.get(), 2)}));
+
+    QSignalSpy narrowed(grid.get(), &AlbumGrid::albumNarrowFollowRequested);
+    grid->moveCurrentByGrid(-1, 0);
+
+    QCOMPARE(grid->currentRow(), 1);
+    QCOMPARE(grid->albumTitlesForAction(), QStringList{titleAt(grid.get(), 1)});
+    QCOMPARE(narrowed.count(), 1);
+    QCOMPARE(qvariant_cast<QStringList>(narrowed.takeFirst().at(0)), QStringList{});
+}
+
+void AlbumGridTest::shiftClickExtendsKeyboardMarks()
+{
+    const QVector<Album> albums = makeAlbums();
+    std::unique_ptr<AlbumGrid> grid(makeGrid(albums));
+
+    grid->setCurrentRow(0);
+    grid->markCurrentAlbum();
+    grid->setCurrentRow(1);
+
+    clickRow(grid.get(), 2, Qt::ShiftModifier);
+
     QCOMPARE(grid->albumTitlesForAction(), QStringList({titleAt(grid.get(), 0), titleAt(grid.get(), 1), titleAt(grid.get(), 2)}));
 }
 

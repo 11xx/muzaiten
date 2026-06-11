@@ -113,6 +113,7 @@ private:
     ArtworkCache *m_artworkCache = nullptr;
     QString m_selectedAlbumTitle;
     QSet<QString> m_markedAlbumTitles;
+    bool m_marksFromMouse = false;
     bool m_rememberedOutlineVisible = false;
     QVector<Album> m_sourceAlbums;  // unsorted source list from last setAlbums call
     QVector<Album> m_pendingAlbums;
