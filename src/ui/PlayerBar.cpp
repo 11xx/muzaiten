@@ -435,7 +435,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *clearQueue = queueMenu->addAction(QStringLiteral("Clear queue"));
     queueMenu->addSeparator();
     QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as..."));
-    QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore previous queue"));
+    QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore saved queue..."));
     QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)..."));
 
     auto *playlistMenu = new QMenu(QStringLiteral("Playlists"), this);

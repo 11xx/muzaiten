@@ -15,6 +15,14 @@ class QEvent;
 class QPoint;
 class PlaylistItemTableModel;
 
+struct SavedQueuePlaylistEntry {
+    QString id;
+    QString name;
+    QString meta;
+    qint64 savedAt = 0;
+    QVector<PlaylistItem> items;
+};
+
 // Key-5 playlist management centre: a playlist list on the left and the selected
 // playlist's items on the right. Keyboard-first (emacs + hjkl): h/l switch panes,
 // j/k/n/p move, Enter plays the focused playlist/item. Owns no data — reads/writes through a
@@ -26,12 +34,14 @@ public:
     explicit PlaylistView(QWidget *parent = nullptr);
 
     void setDatabase(PlaylistDatabase *db);
+    void setSavedQueueEntries(const QVector<SavedQueuePlaylistEntry> &entries);
     void reloadPlaylists();
     void reloadItems();
     // Selects (or re-selects) a playlist by id after an external change.
     void selectPlaylist(qint64 playlistId);
 
     qint64 currentPlaylistId() const;
+    QString currentQueueSnapshotId() const;
     void focusPlaylistList();
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
@@ -69,6 +79,9 @@ signals:
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
     void mergeSavedQueueRequested();
+    void playSavedQueueRequested(const QString &snapshotId, int startIndex);
+    void addSavedQueueToQueueRequested(const QString &snapshotId);
+    void playNextSavedQueueRequested(const QString &snapshotId);
     void viewSettingsChanged();
 
 protected:
@@ -80,6 +93,8 @@ private:
     void populateItems();
     QVector<PlaylistItem> displayItems() const;
     void updateHeader();
+    bool currentSelectionIsSavedQueue() const;
+    QStringList pathsForSavedQueue(const QString &snapshotId, int *startIndex = nullptr) const;
     void playCurrentItem();
     void playNextSelectedItems();
     void addSelectedItemsToQueue();
@@ -103,6 +118,8 @@ private:
 
     PlaylistDatabase *m_db = nullptr;
     qint64 m_currentPlaylistId = 0;
+    QString m_currentQueueSnapshotId;
+    QVector<SavedQueuePlaylistEntry> m_savedQueueEntries;
     QVector<PlaylistItem> m_items;   // canonical, ordinal order
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;

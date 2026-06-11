@@ -76,6 +76,9 @@ constexpr int PlaylistItemCountRole = Qt::UserRole + 2;
 constexpr int PlaylistCreatedAtRole = Qt::UserRole + 3;
 constexpr int PlaylistShowCreatedRole = Qt::UserRole + 4;
 constexpr int PlaylistListActiveRole = Qt::UserRole + 5;
+constexpr int PlaylistKindRole = Qt::UserRole + 6;
+constexpr int QueueSnapshotIdRole = Qt::UserRole + 7;
+constexpr int PlaylistMetaRole = Qt::UserRole + 8;
 
 struct PlaylistColumnSpec {
     int index;
@@ -208,11 +211,12 @@ public:
         const QRect textRect = option.rect.adjusted(6, 0, -6, 0);
         const QString name = index.data(PlaylistNameRole).toString();
         const QString count = QString::number(index.data(PlaylistItemCountRole).toInt());
+        const QString meta = index.data(PlaylistMetaRole).toString();
         const bool showDate = index.data(PlaylistShowCreatedRole).toBool();
         const qint64 createdAt = index.data(PlaylistCreatedAtRole).toLongLong();
-        const QString date = showDate && createdAt > 0
-            ? QDateTime::fromSecsSinceEpoch(createdAt).toString(QStringLiteral("d MMM yyyy"))
-            : QString();
+        const QString detail = !meta.isEmpty()
+            ? meta
+            : (showDate && createdAt > 0 ? QDateTime::fromSecsSinceEpoch(createdAt).toString(QStringLiteral("d MMM yyyy")) : QString());
 
         const QColor primary = selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Text);
         const QColor secondary = selected ? primary : option.palette.color(QPalette::Disabled, QPalette::Text);
@@ -224,7 +228,7 @@ public:
         painter->setPen(secondary);
         painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, count);
         painter->setPen(primary);
-        if (date.isEmpty()) {
+        if (detail.isEmpty()) {
             painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter,
                               option.fontMetrics.elidedText(name, Qt::ElideRight, nameRect.width()));
         } else {
@@ -236,7 +240,7 @@ public:
                               option.fontMetrics.elidedText(name, Qt::ElideRight, top.width()));
             painter->setPen(secondary);
             painter->drawText(bottom, Qt::AlignLeft | Qt::AlignVCenter,
-                              option.fontMetrics.elidedText(date, Qt::ElideRight, bottom.width()));
+                              option.fontMetrics.elidedText(detail, Qt::ElideRight, bottom.width()));
         }
         painter->restore();
     }
@@ -386,6 +390,7 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
         m_currentPlaylistId = currentPlaylistId();
+        m_currentQueueSnapshotId = currentQueueSnapshotId();
         reloadItems();
     });
     connect(m_itemTable->horizontalHeader(), &QHeaderView::sectionClicked,
@@ -429,10 +434,22 @@ void PlaylistView::setDatabase(PlaylistDatabase *db)
     reloadPlaylists();
 }
 
+void PlaylistView::setSavedQueueEntries(const QVector<SavedQueuePlaylistEntry> &entries)
+{
+    m_savedQueueEntries = entries;
+    reloadPlaylists();
+}
+
 qint64 PlaylistView::currentPlaylistId() const
 {
     const QListWidgetItem *item = m_playlistList->currentItem();
     return item != nullptr ? item->data(PlaylistIdRole).toLongLong() : 0;
+}
+
+QString PlaylistView::currentQueueSnapshotId() const
+{
+    const QListWidgetItem *item = m_playlistList->currentItem();
+    return item != nullptr ? item->data(QueueSnapshotIdRole).toString() : QString();
 }
 
 void PlaylistView::focusPlaylistList()
@@ -537,19 +554,45 @@ void PlaylistView::reloadPlaylists()
         return;
     }
     const qint64 keep = m_currentPlaylistId;
+    const QString keepQueueId = m_currentQueueSnapshotId;
     m_playlistList->clear();
     const bool listActive = m_playlistList->hasFocus() || !m_itemTable->hasFocus();
+    for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
+        auto *item = new QListWidgetItem(queue.name, m_playlistList);
+        item->setData(PlaylistIdRole, 0);
+        item->setData(QueueSnapshotIdRole, queue.id);
+        item->setData(PlaylistKindRole, QStringLiteral("queue"));
+        item->setData(PlaylistNameRole, queue.name);
+        item->setData(PlaylistItemCountRole, queue.items.size());
+        item->setData(PlaylistCreatedAtRole, queue.savedAt);
+        item->setData(PlaylistShowCreatedRole, true);
+        item->setData(PlaylistMetaRole, queue.meta);
+        item->setData(PlaylistListActiveRole, listActive);
+    }
     for (const Playlist &playlist : m_db->playlists()) {
         QString text = playlist.name;
         auto *item = new QListWidgetItem(text, m_playlistList);
         item->setData(PlaylistIdRole, playlist.id);
+        item->setData(QueueSnapshotIdRole, QString());
+        item->setData(PlaylistKindRole, QStringLiteral("playlist"));
         item->setData(PlaylistNameRole, playlist.name);
         item->setData(PlaylistItemCountRole, playlist.itemCount);
         item->setData(PlaylistCreatedAtRole, playlist.createdAt);
         item->setData(PlaylistShowCreatedRole, m_showCreatedDate);
+        item->setData(PlaylistMetaRole, QString());
         item->setData(PlaylistListActiveRole, listActive);
     }
     applyPlaylistRowHeights();
+    if (!keepQueueId.isEmpty()) {
+        for (int row = 0; row < m_playlistList->count(); ++row) {
+            if (m_playlistList->item(row)->data(QueueSnapshotIdRole).toString() == keepQueueId) {
+                m_playlistList->setCurrentRow(row);
+                updatePaneFocus();
+                updateHeader();
+                return;
+            }
+        }
+    }
     if (keep > 0) {
         selectPlaylist(keep);
     } else if (m_playlistList->count() > 0) {
@@ -575,7 +618,14 @@ void PlaylistView::selectPlaylist(qint64 playlistId)
 void PlaylistView::reloadItems()
 {
     m_items.clear();
-    if (m_db != nullptr && m_currentPlaylistId > 0) {
+    if (!m_currentQueueSnapshotId.isEmpty()) {
+        for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
+            if (queue.id == m_currentQueueSnapshotId) {
+                m_items = queue.items;
+                break;
+            }
+        }
+    } else if (m_db != nullptr && m_currentPlaylistId > 0) {
         m_items = m_db->items(m_currentPlaylistId);
     }
     populateItems();
@@ -671,6 +721,12 @@ void PlaylistView::sortByColumn(int column)
 
 void PlaylistView::updateHeader()
 {
+    if (currentSelectionIsSavedQueue()) {
+        const QListWidgetItem *current = m_playlistList->currentItem();
+        const QString name = current != nullptr ? current->data(PlaylistNameRole).toString() : QString();
+        m_header->setText(QStringLiteral("%1 — saved queue, %2 items").arg(name).arg(m_items.size()));
+        return;
+    }
     if (m_currentPlaylistId <= 0) {
         m_header->setText(QStringLiteral(
             "Playlists — a: new   R: rename   D: delete   x: export   =/+: add song   T: toggle date   Enter: play   l: open   "
@@ -687,8 +743,42 @@ const PlaylistItem *PlaylistView::itemForDisplayRow(int row) const
     return m_itemModel != nullptr ? m_itemModel->itemAt(row) : nullptr;
 }
 
+bool PlaylistView::currentSelectionIsSavedQueue() const
+{
+    return !m_currentQueueSnapshotId.isEmpty();
+}
+
+QStringList PlaylistView::pathsForSavedQueue(const QString &snapshotId, int *startIndex) const
+{
+    QStringList paths;
+    if (startIndex != nullptr) {
+        *startIndex = 0;
+    }
+    const int current = currentItemRow();
+    for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
+        if (queue.id != snapshotId) {
+            continue;
+        }
+        for (int row = 0; row < queue.items.size(); ++row) {
+            const PlaylistItem &item = queue.items.at(row);
+            if (item.trackPath.isEmpty()) {
+                continue;
+            }
+            if (row == current && startIndex != nullptr) {
+                *startIndex = static_cast<int>(paths.size());
+            }
+            paths << item.trackPath;
+        }
+        break;
+    }
+    return paths;
+}
+
 QStringList PlaylistView::selectedItemPaths(int *startIndex) const
 {
+    if (currentSelectionIsSavedQueue()) {
+        return pathsForSavedQueue(m_currentQueueSnapshotId, startIndex);
+    }
     QStringList paths;
     int first = -1;
     const QModelIndexList selected = m_itemTable->selectionModel() != nullptr
@@ -758,6 +848,10 @@ QStringList PlaylistView::selectedOnlyItemPaths() const
 
 void PlaylistView::playCurrentPlaylist()
 {
+    if (currentSelectionIsSavedQueue()) {
+        emit playSavedQueueRequested(m_currentQueueSnapshotId, 0);
+        return;
+    }
     if (m_db == nullptr || m_currentPlaylistId <= 0) {
         return;
     }
@@ -774,6 +868,10 @@ void PlaylistView::playCurrentPlaylist()
 
 void PlaylistView::addCurrentPlaylistToQueue()
 {
+    if (currentSelectionIsSavedQueue()) {
+        emit addSavedQueueToQueueRequested(m_currentQueueSnapshotId);
+        return;
+    }
     if (m_db == nullptr || m_currentPlaylistId <= 0) {
         return;
     }
@@ -790,6 +888,10 @@ void PlaylistView::addCurrentPlaylistToQueue()
 
 void PlaylistView::playNextCurrentPlaylist()
 {
+    if (currentSelectionIsSavedQueue()) {
+        emit playNextSavedQueueRequested(m_currentQueueSnapshotId);
+        return;
+    }
     if (m_db == nullptr || m_currentPlaylistId <= 0) {
         return;
     }
@@ -806,7 +908,7 @@ void PlaylistView::playNextCurrentPlaylist()
 
 void PlaylistView::addSongToCurrentPlaylist()
 {
-    if (m_currentPlaylistId > 0) {
+    if (!currentSelectionIsSavedQueue() && m_currentPlaylistId > 0) {
         emit addSongRequested(m_currentPlaylistId);
     }
 }
@@ -823,6 +925,14 @@ void PlaylistView::moveCurrentItemDown()
 
 void PlaylistView::playCurrentItem()
 {
+    if (currentSelectionIsSavedQueue()) {
+        int startIndex = 0;
+        const QStringList paths = selectedItemPaths(&startIndex);
+        if (!paths.isEmpty()) {
+            emit playSavedQueueRequested(m_currentQueueSnapshotId, startIndex);
+        }
+        return;
+    }
     int startIndex = 0;
     const QStringList paths = selectedItemPaths(&startIndex);
     if (!paths.isEmpty()) {
@@ -870,35 +980,37 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     }
 
     QMenu menu(this);
+    const bool savedQueue = currentSelectionIsSavedQueue();
+    const bool hasPlayableCollection = savedQueue || m_currentPlaylistId > 0;
     QAction *play = menu.addAction(QStringLiteral("Play"));
-    play->setEnabled(m_currentPlaylistId > 0);
+    play->setEnabled(hasPlayableCollection);
     connect(play, &QAction::triggered, this, &PlaylistView::playCurrentPlaylist);
     QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
-    addToQueue->setEnabled(m_currentPlaylistId > 0);
+    addToQueue->setEnabled(hasPlayableCollection);
     connect(addToQueue, &QAction::triggered, this, &PlaylistView::addCurrentPlaylistToQueue);
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
-    playNext->setEnabled(m_currentPlaylistId > 0);
+    playNext->setEnabled(hasPlayableCollection);
     connect(playNext, &QAction::triggered, this, &PlaylistView::playNextCurrentPlaylist);
 
     menu.addSeparator();
     QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
-    addSong->setEnabled(m_currentPlaylistId > 0);
+    addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
     menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
     QAction *rename = menu.addAction(QStringLiteral("Rename"));
-    rename->setEnabled(m_currentPlaylistId > 0);
+    rename->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(rename, &QAction::triggered, this, &PlaylistView::renameCurrentPlaylist);
     QAction *exportAction = menu.addAction(QStringLiteral("Export..."));
-    exportAction->setEnabled(m_currentPlaylistId > 0);
+    exportAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(exportAction, &QAction::triggered, this, &PlaylistView::exportCurrentPlaylist);
     QAction *deleteAction = menu.addAction(QStringLiteral("Delete"));
-    deleteAction->setEnabled(m_currentPlaylistId > 0);
+    deleteAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(deleteAction, &QAction::triggered, this, &PlaylistView::deleteCurrentPlaylist);
 
     menu.addSeparator();
     QAction *saveQueue = menu.addAction(QStringLiteral("Save current queue as..."));
     connect(saveQueue, &QAction::triggered, this, [this]() { emit saveQueueAsRequested(); });
-    QAction *restoreQueue = menu.addAction(QStringLiteral("Restore previous queue"));
+    QAction *restoreQueue = menu.addAction(QStringLiteral("Restore saved queue..."));
     connect(restoreQueue, &QAction::triggered, this, [this]() { emit restorePreviousQueueRequested(); });
     QAction *mergeQueue = menu.addAction(QStringLiteral("Merge saved queue (play next)..."));
     connect(mergeQueue, &QAction::triggered, this, [this]() { emit mergeSavedQueueRequested(); });
@@ -941,7 +1053,7 @@ void PlaylistView::showItemMenu(const QPoint &pos)
 
     menu.addSeparator();
     QAction *edit = menu.addAction(QStringLiteral("Edit match"));
-    edit->setEnabled(item != nullptr && m_currentPlaylistId > 0);
+    edit->setEnabled(item != nullptr && !currentSelectionIsSavedQueue() && m_currentPlaylistId > 0);
     connect(edit, &QAction::triggered, this, &PlaylistView::editCurrentItem);
     QAction *properties = menu.addAction(QStringLiteral("Properties"));
     properties->setEnabled(item != nullptr && !item->trackPath.isEmpty());
@@ -951,21 +1063,21 @@ void PlaylistView::showItemMenu(const QPoint &pos)
         }
     });
     QAction *remove = menu.addAction(QStringLiteral("Remove selected"));
-    remove->setEnabled(item != nullptr);
+    remove->setEnabled(item != nullptr && !currentSelectionIsSavedQueue());
     connect(remove, &QAction::triggered, this, &PlaylistView::removeSelectedItems);
 
     menu.addSeparator();
     QAction *moveUp = menu.addAction(QStringLiteral("Move up"));
-    moveUp->setEnabled(item != nullptr && m_itemModel->rowCount() > 1);
+    moveUp->setEnabled(item != nullptr && !currentSelectionIsSavedQueue() && m_itemModel->rowCount() > 1);
     connect(moveUp, &QAction::triggered, this, [this]() { moveSelectedItems(-1); });
     QAction *moveDown = menu.addAction(QStringLiteral("Move down"));
-    moveDown->setEnabled(item != nullptr && m_itemModel->rowCount() > 1);
+    moveDown->setEnabled(item != nullptr && !currentSelectionIsSavedQueue() && m_itemModel->rowCount() > 1);
     connect(moveDown, &QAction::triggered, this, [this]() { moveSelectedItems(+1); });
 
     menu.addSeparator();
     QAction *saveQueue = menu.addAction(QStringLiteral("Save current queue as..."));
     connect(saveQueue, &QAction::triggered, this, [this]() { emit saveQueueAsRequested(); });
-    QAction *restoreQueue = menu.addAction(QStringLiteral("Restore previous queue"));
+    QAction *restoreQueue = menu.addAction(QStringLiteral("Restore saved queue..."));
     connect(restoreQueue, &QAction::triggered, this, [this]() { emit restorePreviousQueueRequested(); });
     QAction *mergeQueue = menu.addAction(QStringLiteral("Merge saved queue (play next)..."));
     connect(mergeQueue, &QAction::triggered, this, [this]() { emit mergeSavedQueueRequested(); });
@@ -1322,7 +1434,7 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             return true;
         case Qt::Key_L:
         case Qt::Key_Right:
-            if (m_currentPlaylistId > 0) {
+            if (m_currentPlaylistId > 0 || currentSelectionIsSavedQueue()) {
                 m_itemTable->setFocus(Qt::OtherFocusReason);
                 if (currentItemRow() < 0 && m_itemModel->rowCount() > 0) {
                     setCurrentItemRow(0);

@@ -10,6 +10,7 @@
 #include <memory>
 
 class QJsonObject;
+struct SavedQueuePlaylistEntry;
 class Database;
 class PlaylistDatabase;
 class PlaylistView;
@@ -98,6 +99,12 @@ private:
     QVector<Track> tracksFromSnapshotObject(const QJsonObject &snapshot) const;
     QJsonObject loadQueueSnapshotsRoot() const;
     void saveQueueSnapshotsRoot(const QJsonObject &root);
+    QVector<SavedQueuePlaylistEntry> savedQueuePlaylistEntries() const;
+    QJsonObject queueSnapshotById(const QString &id) const;
+    void refreshSavedQueuePlaylistEntries();
+    void playQueueSnapshotById(const QString &id, int startIndex);
+    void addQueueSnapshotByIdToQueue(const QString &id);
+    void playNextQueueSnapshotById(const QString &id);
     void ensureCurrentQueueIdentity();
     bool currentQueueBacklogEligible() const;
     void pushCurrentQueueToBacklog(const QString &name);

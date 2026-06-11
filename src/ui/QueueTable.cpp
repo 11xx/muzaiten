@@ -1212,7 +1212,7 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(saveQueue, &QAction::triggered, this, [this]() {
         emit saveQueueAsRequested();
     });
-    QAction *restorePrevious = menu.addAction(QStringLiteral("Restore previous queue"));
+    QAction *restorePrevious = menu.addAction(QStringLiteral("Restore saved queue..."));
     connect(restorePrevious, &QAction::triggered, this, [this]() {
         emit restorePreviousQueueRequested();
     });
