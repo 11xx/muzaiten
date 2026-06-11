@@ -12,6 +12,7 @@
 #include "playback/PlaybackBackend.h"
 #include "mpd/MpdConfig.h"
 #include "mpd/MpdImportWorker.h"
+#include "ipc/IpcServer.h"
 #include "mpris/MprisService.h"
 #include "scanner/ArtworkCache.h"
 #include "scanner/ScanPipeline.h"
@@ -690,6 +691,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_mpris, &MprisService::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_mpris, &MprisService::relativeSeekRequested, this, &MainWindow::seekRelativeFromMpris);
     connect(m_mpris, &MprisService::volumeRequested, this, &MainWindow::setVolumeFromMpris);
+    setupIpcServer();
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
@@ -4334,6 +4336,104 @@ void MainWindow::seekRelativeFromMpris(qint64 offsetMs)
     const qint64 duration = std::max<qint64>(0, m_playback->duration());
     const qint64 requested = m_playback->position() + offsetMs;
     m_playback->seek(duration > 0 ? std::clamp<qint64>(requested, 0, duration) : std::max<qint64>(0, requested));
+}
+
+void MainWindow::setupIpcServer()
+{
+    m_ipc = new IpcServer(this);
+    m_ipc->setHandler([this](const QString &command, const QJsonObject &args) {
+        return handleIpcCommand(command, args);
+    });
+    if (!m_ipc->listen()) {
+        qWarning("muzaiten: IPC socket unavailable: %s", qPrintable(m_ipc->lastError()));
+    }
+}
+
+QJsonObject MainWindow::ipcStatus() const
+{
+    // The MPRIS service already mirrors the full player state as JSON (track
+    // tags, audio props, ratings, elapsed/volume/capabilities) — reuse it as
+    // the single source of truth for external consumers.
+    return QJsonDocument::fromJson(m_mpris->currentTrackJson().toUtf8()).object();
+}
+
+QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObject &args)
+{
+    const auto error = [](const QString &message) {
+        return QJsonObject{{QStringLiteral("error"), message}};
+    };
+    const auto status = [this] {
+        return QJsonObject{{QStringLiteral("status"), ipcStatus()}};
+    };
+
+    if (command == QLatin1String("status")) {
+        return ipcStatus();
+    }
+    if (command == QLatin1String("play")) {
+        playFromMpris();
+        return status();
+    }
+    if (command == QLatin1String("pause")) {
+        m_playback->pause();
+        return status();
+    }
+    if (command == QLatin1String("play-pause")) {
+        togglePlayback();
+        return status();
+    }
+    if (command == QLatin1String("stop")) {
+        m_playback->stop();
+        return status();
+    }
+    if (command == QLatin1String("next")) {
+        playNextTrack();
+        return status();
+    }
+    if (command == QLatin1String("prev")) {
+        playPreviousTrack();
+        return status();
+    }
+    if (command == QLatin1String("seek")) {
+        if (args.contains(QStringLiteral("offsetMs"))) {
+            seekRelativeFromMpris(static_cast<qint64>(args.value(QStringLiteral("offsetMs")).toDouble()));
+        } else if (args.contains(QStringLiteral("ms"))) {
+            m_playback->seek(std::max<qint64>(0, static_cast<qint64>(args.value(QStringLiteral("ms")).toDouble())));
+        } else {
+            return error(QStringLiteral("seek needs \"ms\" or \"offsetMs\""));
+        }
+        return status();
+    }
+    if (command == QLatin1String("volume")) {
+        double percent = 0.0;
+        if (args.contains(QStringLiteral("percent"))) {
+            percent = args.value(QStringLiteral("percent")).toDouble();
+        } else if (args.contains(QStringLiteral("deltaPercent"))) {
+            percent = m_volume * 100.0 + args.value(QStringLiteral("deltaPercent")).toDouble();
+        } else {
+            return error(QStringLiteral("volume needs \"percent\" or \"deltaPercent\""));
+        }
+        setVolumeFromMpris(percent / 100.0);
+        return status();
+    }
+    if (command == QLatin1String("rate")) {
+        if (m_currentTrack.path.isEmpty()) {
+            return error(QStringLiteral("no current track to rate"));
+        }
+        if (m_librarySource != LibrarySource::Local) {
+            return error(QStringLiteral("rating is only available for the local library"));
+        }
+        int rating = -1;
+        if (!args.value(QStringLiteral("clear")).toBool()) {
+            rating = args.value(QStringLiteral("rating0To100")).toInt(-1);
+            if (rating < 0 || rating > 100) {
+                return error(QStringLiteral("rate needs \"rating0To100\" in 0..100 or \"clear\": true"));
+            }
+        }
+        const Track rated = m_currentTrack;
+        applyTrackRating(rated, rating);
+        return status();
+    }
+    return error(QStringLiteral("unknown command \"%1\"").arg(command));
 }
 
 void MainWindow::updateMprisCapabilities()

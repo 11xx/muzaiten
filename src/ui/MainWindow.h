@@ -25,6 +25,7 @@ class LastFmScrobbler;
 class ListenHistoryStore;
 class ListenTracker;
 class MprisService;
+class IpcServer;
 class PlayerBar;
 class PanelSearchController;
 class PlaybackBackend;
@@ -200,6 +201,9 @@ private:
     void playFromMpris();
     void setVolumeFromMpris(double volume0To1);
     void seekRelativeFromMpris(qint64 offsetMs);
+    void setupIpcServer();
+    QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
+    QJsonObject ipcStatus() const;
     void updateMprisCapabilities();
     void updatePlaybackPosition();
     void prepareNextQueueTrack();
@@ -314,6 +318,7 @@ private:
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     MprisService *m_mpris = nullptr;
+    IpcServer *m_ipc = nullptr;
     bool m_ratingTagSyncRunning = false;
     bool m_ratingTagSyncPending = false;
     double m_volume = 1.0;

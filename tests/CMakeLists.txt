@@ -323,3 +323,15 @@ target_link_libraries(test_album_grid PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt
 target_compile_features(test_album_grid PRIVATE cxx_std_26)
 add_test(NAME test_album_grid COMMAND test_album_grid)
 set_tests_properties(test_album_grid PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_ipc_server
+    test_ipc_server.cpp
+    ../src/ipc/IpcServer.cpp
+    ../src/ipc/IpcSocket.cpp
+    ../src/app/AppPaths.cpp
+)
+target_include_directories(test_ipc_server PRIVATE ../src)
+target_link_libraries(test_ipc_server PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_compile_features(test_ipc_server PRIVATE cxx_std_26)
+add_test(NAME test_ipc_server COMMAND test_ipc_server)
+set_tests_properties(test_ipc_server PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -59,6 +59,8 @@ set(MUZAITEN_SOURCES
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
     src/mpd/MpdImportWorker.cpp
+    src/ipc/IpcServer.cpp
+    src/ipc/IpcSocket.cpp
     src/mpris/MprisService.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
@@ -152,6 +154,8 @@ set(MUZAITEN_HEADERS
     src/mpd/MpdClient.h
     src/mpd/MpdTrack.h
     src/mpd/MpdImportWorker.h
+    src/ipc/IpcServer.h
+    src/ipc/IpcSocket.h
     src/mpris/MprisService.h
     src/playback/PlaybackBackend.h
     src/playback/PlaybackTypes.h
@@ -255,12 +259,26 @@ target_compile_options(muzaiten PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
+# Command-line client for the IPC socket. QtCore/Network only — shares the
+# state-path resolution (AppPaths) so it always finds the instance matching its
+# environment.
+add_executable(muzaitenctl
+    src/cli/MuzaitenCtl.cpp
+    src/app/AppPaths.cpp
+    src/ipc/IpcSocket.cpp
+)
+target_include_directories(muzaitenctl PRIVATE src)
+target_link_libraries(muzaitenctl PRIVATE Qt6::Core Qt6::Network)
+target_compile_options(muzaitenctl PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+
 # Installation (freedesktop integration). Lets distro packaging and `make dev`
 # alike drop the binary plus a desktop entry, icon, and AppStream metadata into
 # the standard prefix.
 include(GNUInstallDirs)
 
-install(TARGETS muzaiten
+install(TARGETS muzaiten muzaitenctl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(FILES packaging/org.11xx.muzaiten.desktop

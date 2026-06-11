@@ -1,0 +1,110 @@
+#include "ipc/IpcServer.h"
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocalSocket>
+#include <QTemporaryDir>
+#include <QTest>
+
+// Exercises the IPC transport: framing, dispatch to the handler, the ok/error
+// reply envelope, and malformed input. The MainWindow-side command semantics
+// are not under test here — the handler is a stub.
+class IpcServerTest final : public QObject {
+    Q_OBJECT
+
+private slots:
+    void init();
+    void cleanup();
+    void repliesToHandlerResult();
+    void wrapsHandlerErrors();
+    void rejectsMalformedRequests();
+    void handlesMultipleRequestsPerConnection();
+
+private:
+    QJsonObject roundTrip(const QByteArray &line);
+
+    QTemporaryDir m_dir;
+    IpcServer *m_server = nullptr;
+    QString m_path;
+};
+
+void IpcServerTest::init()
+{
+    m_server = new IpcServer(this);
+    m_path = m_dir.filePath(QStringLiteral("ipc.sock"));
+    m_server->setHandler([](const QString &command, const QJsonObject &args) -> QJsonObject {
+        if (command == QLatin1String("echo")) {
+            return {{QStringLiteral("echoed"), args}};
+        }
+        return {{QStringLiteral("error"), QStringLiteral("unknown command \"%1\"").arg(command)}};
+    });
+    QVERIFY2(m_server->listen(m_path), qPrintable(m_server->lastError()));
+}
+
+void IpcServerTest::cleanup()
+{
+    delete m_server;
+    m_server = nullptr;
+}
+
+QJsonObject IpcServerTest::roundTrip(const QByteArray &line)
+{
+    // Server and client share this thread, so pump the event loop (qWaitFor)
+    // instead of using the blocking waitFor* calls, which would starve the
+    // server side.
+    QLocalSocket socket;
+    socket.connectToServer(m_path);
+    if (!QTest::qWaitFor([&] { return socket.state() == QLocalSocket::ConnectedState; }, 2000)) {
+        return {};
+    }
+    socket.write(line + '\n');
+    QByteArray reply;
+    if (!QTest::qWaitFor([&] {
+            reply += socket.readAll();
+            return reply.contains('\n');
+        }, 2000)) {
+        return {};
+    }
+    return QJsonDocument::fromJson(reply.left(reply.indexOf('\n'))).object();
+}
+
+void IpcServerTest::repliesToHandlerResult()
+{
+    const QJsonObject reply = roundTrip(R"({"command":"echo","args":{"value":42}})");
+    QVERIFY(reply.value("ok").toBool());
+    QCOMPARE(reply.value("echoed").toObject().value("value").toInt(), 42);
+}
+
+void IpcServerTest::wrapsHandlerErrors()
+{
+    const QJsonObject reply = roundTrip(R"({"command":"nope"})");
+    QVERIFY(!reply.value("ok").toBool());
+    QCOMPARE(reply.value("error").toString(), QStringLiteral("unknown command \"nope\""));
+}
+
+void IpcServerTest::rejectsMalformedRequests()
+{
+    QVERIFY(!roundTrip("this is not json").value("ok").toBool());
+    QVERIFY(!roundTrip("[1,2,3]").value("ok").toBool());
+    QVERIFY(!roundTrip(R"({"args":{}})").value("ok").toBool());
+}
+
+void IpcServerTest::handlesMultipleRequestsPerConnection()
+{
+    QLocalSocket socket;
+    socket.connectToServer(m_path);
+    QVERIFY(QTest::qWaitFor([&] { return socket.state() == QLocalSocket::ConnectedState; }, 2000));
+    // Two requests in one write: framing must split them into two replies.
+    socket.write(R"({"command":"echo","args":{"n":1}})" "\n" R"({"command":"echo","args":{"n":2}})" "\n");
+    QByteArray data;
+    QVERIFY(QTest::qWaitFor([&] {
+        data += socket.readAll();
+        return data.count('\n') >= 2;
+    }, 2000));
+    const QList<QByteArray> lines = data.split('\n');
+    QCOMPARE(QJsonDocument::fromJson(lines[0]).object().value("echoed").toObject().value("n").toInt(), 1);
+    QCOMPARE(QJsonDocument::fromJson(lines[1]).object().value("echoed").toObject().value("n").toInt(), 2);
+}
+
+QTEST_GUILESS_MAIN(IpcServerTest)
+#include "test_ipc_server.moc"
