@@ -265,6 +265,21 @@ target_compile_features(test_responsive_column_layout PRIVATE cxx_std_26)
 add_test(NAME test_responsive_column_layout COMMAND test_responsive_column_layout)
 set_tests_properties(test_responsive_column_layout PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_playlist_import
+    test_playlist_import.cpp
+    ../src/playlist/PlaylistImport.cpp
+    ../src/playlist/PlaylistMatcher.cpp
+    ../src/search/Exclusion.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/SearchIndex.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
+)
+target_include_directories(test_playlist_import PRIVATE ../src)
+target_link_libraries(test_playlist_import PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_playlist_import PRIVATE cxx_std_26)
+add_test(NAME test_playlist_import COMMAND test_playlist_import)
+
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp
     ../src/ui/KeybindingsDialog.cpp

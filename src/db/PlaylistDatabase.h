@@ -11,7 +11,7 @@
 // versioned independently of the library (its own schema_migrations table).
 class PlaylistDatabase final {
 public:
-    static constexpr int currentSchemaVersion = 1;
+    static constexpr int currentSchemaVersion = 2;
 
     explicit PlaylistDatabase(QString connectionName);
     ~PlaylistDatabase();

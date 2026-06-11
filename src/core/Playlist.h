@@ -2,6 +2,7 @@
 
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QtTypes>
 
@@ -31,6 +32,8 @@ struct PlaylistItem {
     QString comment;            // free-form note, e.g. "where this came from"
     QString query;              // remembered search query used to add/edit it
     PlaylistItemStatus status = PlaylistItemStatus::Matched;
+    QStringList candidatePaths; // MultiMatch: the import's close candidates,
+                                // shown by the edit modal for a quick pick
 };
 
 struct Playlist {

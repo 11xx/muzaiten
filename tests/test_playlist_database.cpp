@@ -1,5 +1,7 @@
 #include "db/PlaylistDatabase.h"
 
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -11,6 +13,7 @@ private slots:
     void itemOrderingAndRemoval();
     void reorderItems();
     void updateItemFields();
+    void candidatesRoundTripAndV1Migration();
 
 private:
     static PlaylistItem makeItem(const QString &path, const QString &title,
@@ -120,6 +123,56 @@ void TestPlaylistDatabase::updateItemFields()
     QCOMPARE(reloaded.comment, QStringLiteral("from youtube"));
     QCOMPARE(reloaded.query, QStringLiteral("new query"));
     QCOMPARE(reloaded.status, PlaylistItemStatus::Pending);
+}
+
+void TestPlaylistDatabase::candidatesRoundTripAndV1Migration()
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath(QStringLiteral("playlists.sqlite"));
+
+    // Build a v1-shaped database (no candidates column) to exercise the ALTER
+    // path in migrate(), not just the fresh CREATE.
+    {
+        QSqlDatabase v1 = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("pl-test-v1"));
+        v1.setDatabaseName(dbPath);
+        QVERIFY(v1.open());
+        QSqlQuery q(v1);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")));
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE playlists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
+                                      "comment TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)")));
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE playlist_items (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                      "playlist_id INTEGER NOT NULL, ordinal INTEGER NOT NULL, track_path TEXT, "
+                                      "title_snapshot TEXT, artist_snapshot TEXT, album_snapshot TEXT, "
+                                      "duration_ms INTEGER NOT NULL DEFAULT 0, added_at INTEGER NOT NULL, "
+                                      "modified_at INTEGER NOT NULL, comment TEXT, query TEXT, "
+                                      "status TEXT NOT NULL DEFAULT 'matched', "
+                                      "FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE)")));
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(1, datetime('now'))")));
+        v1.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("pl-test-v1"));
+
+    PlaylistDatabase db(QStringLiteral("pl-test-5"));
+    QVERIFY(db.open(dbPath));  // migrate() must add the candidates column
+
+    const qint64 id = db.createPlaylist(QStringLiteral("Imported"));
+    PlaylistItem item = makeItem(QString(), QStringLiteral("Hey Jude"));
+    item.status = PlaylistItemStatus::MultiMatch;
+    item.candidatePaths = {QStringLiteral("/a/hey jude.flac"), QStringLiteral("/b/hey jude.mp3")};
+    QVERIFY(db.addItem(id, item) > 0);
+
+    PlaylistItem reloaded = db.items(id).first();
+    QCOMPARE(reloaded.status, PlaylistItemStatus::MultiMatch);
+    QCOMPARE(reloaded.candidatePaths,
+             QStringList({QStringLiteral("/a/hey jude.flac"), QStringLiteral("/b/hey jude.mp3")}));
+
+    // Resolving the pick clears the candidates.
+    reloaded.playlistId = id;
+    reloaded.trackPath = reloaded.candidatePaths.first();
+    reloaded.status = PlaylistItemStatus::Matched;
+    reloaded.candidatePaths.clear();
+    QVERIFY(db.updateItem(reloaded));
+    QCOMPARE(db.items(id).first().candidatePaths, QStringList());
 }
 
 QTEST_MAIN(TestPlaylistDatabase)

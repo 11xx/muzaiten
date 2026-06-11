@@ -97,6 +97,8 @@ set(MUZAITEN_SOURCES
     src/ui/KeybindingsDialog.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/MainWindow.cpp
+    src/playlist/PlaylistImport.cpp
+    src/playlist/PlaylistMatcher.cpp
     src/ui/MainPanelKeybindings.cpp
     src/ui/NavigableTableView.cpp
     src/ui/PanelOrderDialog.cpp
@@ -159,6 +161,8 @@ set(MUZAITEN_HEADERS
     src/scanner/TagRating.h
     src/scanner/TagReader.h
     src/scanner/TagRatingWriter.h
+    src/playlist/PlaylistImport.h
+    src/playlist/PlaylistMatcher.h
     src/scrobble/LastFmApi.h
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
