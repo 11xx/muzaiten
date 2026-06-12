@@ -4,7 +4,6 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSet>
 #include <QSqlQuery>
 #include <QVariant>
 
@@ -112,19 +111,6 @@ QString owedColumn(const QString &service)
     return {};
 }
 
-QSet<QString> listenColumns(QSqlDatabase &db)
-{
-    QSet<QString> columns;
-    QSqlQuery query(db);
-    if (!query.exec(QStringLiteral("PRAGMA table_info(listens)"))) {
-        return columns;
-    }
-    while (query.next()) {
-        columns.insert(query.value(1).toString());
-    }
-    return columns;
-}
-
 } // namespace
 
 const QString ListenHistoryStore::LastFm = QStringLiteral("lastfm");
@@ -170,10 +156,10 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
 
     QSqlQuery version(m_db);
     version.prepare(QStringLiteral(
-        "INSERT INTO meta(key, value) VALUES('schemaVersion', ?) ON CONFLICT(key) DO NOTHING"));
+        "INSERT INTO meta(key, value) VALUES('schemaVersion', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
     version.addBindValue(QString::number(kSchemaVersion));
     version.exec();
-    migrateSchema();
 }
 
 ListenHistoryStore::~ListenHistoryStore()
@@ -188,47 +174,6 @@ ListenHistoryStore::~ListenHistoryStore()
 bool ListenHistoryStore::isOpen() const
 {
     return m_db.isOpen();
-}
-
-void ListenHistoryStore::migrateSchema()
-{
-    if (!m_db.isOpen()) {
-        return;
-    }
-
-    const QSet<QString> columns = listenColumns(m_db);
-    const bool hadOwedLastFm = columns.contains(QStringLiteral("owed_lastfm"));
-    const bool hadOwedListenBrainz = columns.contains(QStringLiteral("owed_listenbrainz"));
-
-    QSqlQuery query(m_db);
-    if (!hadOwedLastFm) {
-        query.exec(QStringLiteral("ALTER TABLE listens ADD COLUMN owed_lastfm INTEGER NOT NULL DEFAULT 0"));
-    }
-    if (!hadOwedListenBrainz) {
-        query.exec(QStringLiteral("ALTER TABLE listens ADD COLUMN owed_listenbrainz INTEGER NOT NULL DEFAULT 0"));
-    }
-
-    // v1 used sent=0 as both "not uploaded" and "owed to this service".
-    // Preserve that backlog on upgrade, then let the new owed flags prevent
-    // future services from claiming listens that happened while disabled.
-    if (!hadOwedLastFm) {
-        query.exec(QStringLiteral("UPDATE listens SET owed_lastfm = CASE WHEN sent_lastfm = 0 THEN 1 ELSE 0 END"));
-    }
-    if (!hadOwedListenBrainz) {
-        query.exec(QStringLiteral("UPDATE listens SET owed_listenbrainz = CASE WHEN sent_listenbrainz = 0 THEN 1 ELSE 0 END"));
-    }
-
-    query.exec(QStringLiteral("DROP INDEX IF EXISTS idx_listens_unsent_lastfm"));
-    query.exec(QStringLiteral("DROP INDEX IF EXISTS idx_listens_unsent_listenbrainz"));
-    query.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_listens_unsent_lastfm ON listens(listened_at) WHERE owed_lastfm = 1 AND sent_lastfm = 0"));
-    query.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_listens_unsent_listenbrainz ON listens(listened_at) WHERE owed_listenbrainz = 1 AND sent_listenbrainz = 0"));
-
-    query.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES('schemaVersion', ?) "
-                                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
-    query.addBindValue(QString::number(kSchemaVersion));
-    query.exec();
 }
 
 qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSecs,

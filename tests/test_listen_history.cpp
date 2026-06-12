@@ -2,8 +2,6 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSqlDatabase>
-#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -18,7 +16,6 @@ private slots:
     void markSentPerService();
     void clearPendingPreservesHistory();
     void markOwedQueuesOnlyUnsentRows();
-    void migrateV1BacklogToOwedFlags();
     void legacyImportMarksOtherServiceSent();
     void invalidListensRejected();
 
@@ -136,54 +133,6 @@ void TestListenHistory::markOwedQueuesOnlyUnsentRows()
 
     QCOMPARE(store.markOwed(ListenHistoryStore::LastFm, {unsentId, sentId}), 1);
     QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 1);
-}
-
-void TestListenHistory::migrateV1BacklogToOwedFlags()
-{
-    QTemporaryDir dir;
-    const QString path = dir.filePath(QStringLiteral("history.sqlite"));
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("v1-history"));
-        db.setDatabaseName(path);
-        QVERIFY(db.open());
-        QSqlQuery query(db);
-        QVERIFY(query.exec(QStringLiteral(
-            "CREATE TABLE listens ("
-            " id INTEGER PRIMARY KEY,"
-            " listened_at INTEGER NOT NULL,"
-            " title TEXT NOT NULL,"
-            " artist TEXT NOT NULL,"
-            " album TEXT,"
-            " path TEXT,"
-            " duration_ms INTEGER,"
-            " track_json TEXT NOT NULL,"
-            " sent_lastfm INTEGER NOT NULL DEFAULT 0,"
-            " sent_listenbrainz INTEGER NOT NULL DEFAULT 0,"
-            " UNIQUE(listened_at, artist, title))")));
-        QVERIFY(query.exec(QStringLiteral("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")));
-        QVERIFY(query.exec(QStringLiteral("INSERT INTO meta(key, value) VALUES('schemaVersion', '1')")));
-        QJsonObject track;
-        track.insert(QStringLiteral("title"), QStringLiteral("Song"));
-        track.insert(QStringLiteral("artist"), QStringLiteral("Artist"));
-        query.prepare(QStringLiteral(
-            "INSERT INTO listens(listened_at, title, artist, track_json, sent_lastfm, sent_listenbrainz) "
-            "VALUES(?, ?, ?, ?, 0, 1)"));
-        query.addBindValue(1000);
-        query.addBindValue(QStringLiteral("Song"));
-        query.addBindValue(QStringLiteral("Artist"));
-        query.addBindValue(QString::fromUtf8(QJsonDocument(track).toJson(QJsonDocument::Compact)));
-        QVERIFY(query.exec());
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(QStringLiteral("v1-history"));
-
-    ListenHistoryStore store(path);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::ListenBrainz), 0);
-    const auto rows = store.historyRows(10);
-    QCOMPARE(rows.size(), 1);
-    QVERIFY(rows.first().owedLastFm);
-    QVERIFY(!rows.first().owedListenBrainz);
 }
 
 void TestListenHistory::legacyImportMarksOtherServiceSent()

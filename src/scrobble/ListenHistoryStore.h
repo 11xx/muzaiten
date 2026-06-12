@@ -72,7 +72,6 @@ private:
     qint64 insertListen(const Track &track, qint64 listenedAtSecs,
                         bool owedLastFm, bool sentLastFm,
                         bool owedListenBrainz, bool sentListenBrainz);
-    void migrateSchema();
 
     QString m_connectionName;
     QSqlDatabase m_db;
