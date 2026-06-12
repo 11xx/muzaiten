@@ -9,6 +9,7 @@
 #include "db/SettingsStore.h"
 #include "fs/LinkRoot.h"
 #include "playback/GStreamerPlaybackBackend.h"
+#include "player/PlayerCore.h"
 #include "playback/PlaybackBackend.h"
 #include "mpd/MpdConfig.h"
 #include "mpd/MpdImportWorker.h"
@@ -431,7 +432,23 @@ MainWindow::MainWindow(QWidget *parent)
     m_stopScanButton->setToolTip(QStringLiteral("Cancel the current library scan"));
     statusBar()->addPermanentWidget(m_stopScanButton);
 
-    m_playback = new GStreamerPlaybackBackend(this);
+    m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
+    m_playback = m_player->backend();
+    m_player->setPathResolver([this](const Track &track) { return resolvedReadPathForTrack(track); });
+    connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
+    connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
+    connect(m_player, &PlayerCore::currentIndexChanged, this, &MainWindow::onPlayerIndexChanged);
+    connect(m_player, &PlayerCore::playNextRangeChanged, this, &MainWindow::refreshPlayNextRange);
+    connect(m_player, &PlayerCore::currentTrackChanged, this, &MainWindow::presentTrack);
+    connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
+    connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
+    connect(m_player, &PlayerCore::volumeChanged, this, [this](double volume) {
+        m_mpris->setVolume(volume);
+    });
+    connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
+        QMessageBox::warning(this, QStringLiteral("Playback"),
+                             QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
+    });
     m_mpris = new MprisService(this);
     m_playbackStateSaveTimer = new QTimer(this);
     m_playbackStateSaveTimer->setSingleShot(true);
@@ -778,14 +795,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
         const int clamped = std::clamp(volume, 0, 100);
-        m_volume = static_cast<double>(clamped) / 100.0;
-        m_playback->setVolume(m_volume);
-        m_mpris->setVolume(m_volume);
+        m_player->setVolume(static_cast<double>(clamped) / 100.0);
         m_state->setSetting(QStringLiteral("volume"), QString::number(clamped));
     });
     connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
-        if (!m_currentTrack.path.isEmpty()) {
-            applyTrackRating(m_currentTrack, rating);
+        if (!m_player->currentTrack().path.isEmpty()) {
+            applyTrackRating(m_player->currentTrack(), rating);
         }
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
@@ -828,7 +843,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_searchView, &SearchView::playNowRequested, this, [this](const QVector<Track> &tracks) {
         if (tracks.isEmpty()) return;
         addTracksToQueue(tracks);
-        playQueueIndex(static_cast<int>(m_queue.size()) - static_cast<int>(tracks.size()));
+        playQueueIndex(static_cast<int>(m_player->queue().size()) - static_cast<int>(tracks.size()));
     });
     connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
@@ -915,7 +930,6 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
-    connect(m_playback, &PlaybackBackend::preparedTrackStarted, this, &MainWindow::advanceAfterPreparedTransition);
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
         const bool playing = state == PlaybackBackend::State::Playing;
         m_playerBar->setPlaying(playing);
@@ -923,17 +937,8 @@ MainWindow::MainWindow(QWidget *parent)
         m_listenTracker->playbackStateChanged(playing);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
         QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        updateMprisCapabilities();
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
-    });
-    connect(m_playback, &PlaybackBackend::finished, this, [this]() {
-        if (m_queueIndex + 1 < m_queue.size()) {
-            playQueueIndex(m_queueIndex + 1);
-        } else {
-            // End of queue: tear the pipeline down so hasSource() is false and
-            // the output device is freed. A later Play will restart cleanly.
-            m_playback->stop();
-            updateMprisCapabilities();
-        }
     });
     connect(m_playback, &PlaybackBackend::errorOccurred, this, [this](const QString &errorString) {
         if (!errorString.isEmpty()) {
@@ -1767,24 +1772,17 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     const bool nowHasUserRating = rating0To100 >= 0;
     m_trackTable->updateTrackRating(track.path, nowHasUserRating ? rating0To100 : track.rating0To100, nowHasUserRating);
     refreshAlbumGrid();
-    for (Track &queuedTrack : m_queue) {
-        if (queuedTrack.path != track.path) {
-            continue;
+    m_player->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
+    if (m_player->currentTrack().path == track.path) {
+        const Track &current = m_player->currentTrack();
+        const QString title = current.title.isEmpty() ? current.filename : current.title;
+        QString subtitle = QStringLiteral("%1 - %2").arg(current.artistName, current.albumTitle);
+        if (!current.date.isEmpty()) {
+            subtitle += QStringLiteral(" (%1)").arg(current.date.left(4));
         }
-        queuedTrack.hasUserRating = rating0To100 >= 0;
-        queuedTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : queuedTrack.rating0To100;
-    }
-    if (m_currentTrack.path == track.path) {
-        m_currentTrack.hasUserRating = rating0To100 >= 0;
-        m_currentTrack.effectiveRating0To100 = rating0To100 >= 0 ? rating0To100 : m_currentTrack.rating0To100;
-        const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
-        QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
-        if (!m_currentTrack.date.isEmpty()) {
-            subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
-        }
-        m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
-        m_rightSidebar->setTrackInfo(m_currentTrack);
-        m_mpris->setTrack(m_currentTrack);
+        m_playerBar->setTrackInfo(title, subtitle, current.effectiveRating0To100);
+        m_rightSidebar->setTrackInfo(current);
+        m_mpris->setTrack(current);
     }
     m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
 
@@ -1837,33 +1835,22 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
             const int effective = update.effectiveRating0To100;
             const bool hasUserRating = effective >= 0;
             m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
-            for (Track &queuedTrack : m_queue) {
-                if (queuedTrack.path != update.path) {
-                    continue;
-                }
-                queuedTrack.rating0To100 = effective;
-                queuedTrack.hasUserRating = hasUserRating;
-                queuedTrack.effectiveRating0To100 = effective;
-            }
-            if (m_currentTrack.path == update.path) {
-                m_currentTrack.rating0To100 = effective;
-                m_currentTrack.hasUserRating = hasUserRating;
-                m_currentTrack.effectiveRating0To100 = effective;
-                currentTrackChanged = true;
-            }
+            currentTrackChanged = m_player->applyRatingSync(update.path, effective) || currentTrackChanged;
         }
         if (currentTrackChanged) {
-            const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
-            QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
-            if (!m_currentTrack.date.isEmpty()) {
-                subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
+            const Track &current = m_player->currentTrack();
+            const QString title = current.title.isEmpty() ? current.filename : current.title;
+            QString subtitle = QStringLiteral("%1 - %2").arg(current.artistName, current.albumTitle);
+            if (!current.date.isEmpty()) {
+                subtitle += QStringLiteral(" (%1)").arg(current.date.left(4));
             }
-            m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
-            m_rightSidebar->setTrackInfo(m_currentTrack);
-            m_mpris->setTrack(m_currentTrack);
+            m_playerBar->setTrackInfo(title, subtitle, current.effectiveRating0To100);
+            m_rightSidebar->setTrackInfo(current);
+            m_mpris->setTrack(current);
         }
         if (!summary.updates.isEmpty()) {
-            m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
+            m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
+                                      m_player->queueIndex() + 1, m_player->playNextInsertIndex());
             refreshPlayNextRange();
             saveQueueState();
         }
@@ -1897,11 +1884,12 @@ void MainWindow::schedulePendingRatingTagSync()
 
 void MainWindow::syncCurrentTrackRatingTags()
 {
-    if (m_librarySource != LibrarySource::Local || m_currentTrack.path.isEmpty() || m_currentTrack.effectiveRating0To100 < 0) {
+    const Track current = m_player->currentTrack();
+    if (m_librarySource != LibrarySource::Local || current.path.isEmpty() || current.effectiveRating0To100 < 0) {
         statusBar()->showMessage(QStringLiteral("No current local rated track to sync"), 5000);
         return;
     }
-    startRatingTagSync({m_currentTrack}, static_cast<int>(RatingTagSyncRequest::Scope::Track));
+    startRatingTagSync({current}, static_cast<int>(RatingTagSyncRequest::Scope::Track));
 }
 
 void MainWindow::syncCurrentArtistRatingTags()
@@ -1956,9 +1944,7 @@ void MainWindow::loadViewSettings()
     m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
 
     const int volume = std::clamp(m_state->setting(QStringLiteral("volume"), QStringLiteral("100")).toInt(), 0, 100);
-    m_volume = static_cast<double>(volume) / 100.0;
-    m_playback->setVolume(m_volume);
-    m_mpris->setVolume(m_volume);
+    m_player->setVolume(static_cast<double>(volume) / 100.0);
     m_playerBar->setVolume(volume);
     m_albumGrid->applyViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
     m_artistSidebar->applyViewSettingsJson(m_state->setting(QStringLiteral("artistSidebar.view")));
@@ -2262,11 +2248,11 @@ void MainWindow::toggleFileExplorerView()
 
 void MainWindow::jumpToPlayingSong()
 {
-    if (m_currentTrack.path.isEmpty()) {
+    if (m_player->currentTrack().path.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Nothing is playing"), 3000);
         return;
     }
-    revealTrackInLibrary(m_currentTrack);
+    revealTrackInLibrary(m_player->currentTrack());
 }
 
 void MainWindow::revealTrackInLibrary(const Track &track)
@@ -2353,22 +2339,23 @@ void MainWindow::refreshLibraryFileExplorer()
 void MainWindow::loadQueueState()
 {
     const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
-    const QJsonArray tracks = root.value(QStringLiteral("tracks")).toArray();
-    m_queue.clear();
-    m_queue.reserve(tracks.size());
-    for (const QJsonValue &value : tracks) {
+    const QJsonArray trackValues = root.value(QStringLiteral("tracks")).toArray();
+    QVector<Track> tracks;
+    tracks.reserve(trackValues.size());
+    for (const QJsonValue &value : trackValues) {
         Track track = trackFromJson(value.toObject());
         if (!track.path.isEmpty()) {
             const Track refreshed = m_database->trackForPath(track.path);
             if (!refreshed.path.isEmpty()) {
                 track = refreshed;
             }
-            m_queue.push_back(track);
+            tracks.push_back(track);
         }
     }
 
-    m_queueIndex = std::clamp(root.value(QStringLiteral("index")).toInt(-1), -1, static_cast<int>(m_queue.size()) - 1);
-    m_playNextInsertIndex = std::clamp(root.value(QStringLiteral("playNextInsertIndex")).toInt(m_queueIndex + 1), 0, static_cast<int>(m_queue.size()));
+    const int savedIndex = root.value(QStringLiteral("index")).toInt(-1);
+    m_player->resetQueue(tracks, savedIndex,
+                         root.value(QStringLiteral("playNextInsertIndex")).toInt(savedIndex + 1));
     m_queueId = root.value(QStringLiteral("queueId")).toString();
     m_queueSourceKind = normalizedQueueSourceKind(root.value(QStringLiteral("queueSourceKind")).toString(QStringLiteral("queue")));
     m_queueSourcePlaylistId = root.value(QStringLiteral("queueSourcePlaylistId")).toString().toLongLong();
@@ -2376,7 +2363,7 @@ void MainWindow::loadQueueState()
         m_queueSourcePlaylistId = static_cast<qint64>(root.value(QStringLiteral("queueSourcePlaylistId")).toDouble(0));
     }
     m_queueSourceName = root.value(QStringLiteral("queueSourceName")).toString();
-    if (m_queue.isEmpty()) {
+    if (m_player->queue().isEmpty()) {
         m_queueId.clear();
         m_queueSourceKind = QStringLiteral("queue");
         m_queueSourcePlaylistId = 0;
@@ -2384,28 +2371,29 @@ void MainWindow::loadQueueState()
     } else {
         ensureCurrentQueueIdentity();
     }
-    m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
-    m_rightSidebar->setCurrentIndex(m_queueIndex, /*reveal=*/true);
+    m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
+                              m_player->queueIndex() + 1, m_player->playNextInsertIndex());
+    m_rightSidebar->setCurrentIndex(m_player->queueIndex(), /*reveal=*/true);
     refreshPlayNextRange();
-    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
-        presentTrack(m_queue.at(m_queueIndex), false);
+    if (m_player->queueIndex() >= 0) {
+        m_player->presentTrack(m_player->queue().at(m_player->queueIndex()));
     }
 }
 
 void MainWindow::saveQueueState()
 {
-    if (!m_queue.isEmpty()) {
+    if (!m_player->queue().isEmpty()) {
         ensureCurrentQueueIdentity();
     }
     QJsonArray tracks;
-    for (const Track &track : m_queue) {
+    for (const Track &track : m_player->queue()) {
         tracks.append(trackToJson(track));
     }
 
     QJsonObject root;
     root.insert(QStringLiteral("tracks"), tracks);
-    root.insert(QStringLiteral("index"), m_queueIndex);
-    root.insert(QStringLiteral("playNextInsertIndex"), m_playNextInsertIndex);
+    root.insert(QStringLiteral("index"), m_player->queueIndex());
+    root.insert(QStringLiteral("playNextInsertIndex"), m_player->playNextInsertIndex());
     root.insert(QStringLiteral("queueId"), m_queueId);
     root.insert(QStringLiteral("queueSourceKind"), m_queueSourceKind);
     root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
@@ -2417,15 +2405,15 @@ void MainWindow::saveQueueState()
 QJsonObject MainWindow::queueSnapshotObject(const QString &name) const
 {
     QJsonArray tracks;
-    for (const Track &track : m_queue) {
+    for (const Track &track : m_player->queue()) {
         tracks.append(trackToJson(track));
     }
     QJsonObject snapshot;
     snapshot.insert(QStringLiteral("id"), m_queueId);
     snapshot.insert(QStringLiteral("name"), name);
     snapshot.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
-    snapshot.insert(QStringLiteral("index"), m_queueIndex);
-    snapshot.insert(QStringLiteral("playNextInsertIndex"), m_playNextInsertIndex);
+    snapshot.insert(QStringLiteral("index"), m_player->queueIndex());
+    snapshot.insert(QStringLiteral("playNextInsertIndex"), m_player->playNextInsertIndex());
     snapshot.insert(QStringLiteral("sourceKind"), m_queueSourceKind);
     snapshot.insert(QStringLiteral("sourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
     snapshot.insert(QStringLiteral("sourceName"), m_queueSourceName);
@@ -2575,7 +2563,7 @@ void MainWindow::ensureCurrentQueueIdentity()
 
 bool MainWindow::currentQueueBacklogEligible() const
 {
-    return !m_queue.isEmpty() && m_queueSourceKind == QStringLiteral("queue");
+    return !m_player->queue().isEmpty() && m_queueSourceKind == QStringLiteral("queue");
 }
 
 void MainWindow::pushCurrentQueueToBacklog(const QString &name)
@@ -2664,7 +2652,6 @@ void MainWindow::adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<T
     if (tracks.isEmpty()) {
         return;
     }
-    m_queue = tracks;
     m_queueId = snapshot.value(QStringLiteral("id")).toString();
     m_queueSourceKind = normalizedQueueSourceKind(snapshot.value(QStringLiteral("sourceKind")).toString(QStringLiteral("queue")));
     m_queueSourcePlaylistId = snapshot.value(QStringLiteral("sourcePlaylistId")).toString().toLongLong();
@@ -2673,10 +2660,9 @@ void MainWindow::adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<T
     }
     m_queueSourceName = snapshot.value(QStringLiteral("sourceName")).toString();
     ensureCurrentQueueIdentity();
-    m_queueIndex = -1;
-    m_playNextInsertIndex = -1;
-    m_queueStore->setTracks(m_queue);
-    const int start = std::clamp(playIndex, 0, static_cast<int>(m_queue.size()) - 1);
+    m_player->resetQueue(tracks);
+    m_queueStore->setTracks(m_player->queue());
+    const int start = std::clamp(playIndex, 0, static_cast<int>(m_player->queue().size()) - 1);
     playQueueIndex(start);
 }
 
@@ -2692,20 +2678,13 @@ void MainWindow::replaceQueueWithTracks(const QVector<Track> &tracks, int playIn
     // playback is reconstructible from its source until it is mutated.
     snapshotCurrentQueueAsPrevious();
 
-    m_queue.clear();
-    for (const Track &track : tracks) {
-        if (!track.path.isEmpty()) {
-            m_queue.push_back(track);
-        }
-    }
-    m_queueIndex = -1;
-    m_playNextInsertIndex = -1;
+    m_player->resetQueue(tracks);
     m_queueId = newQueueIdentity();
     m_queueSourceKind = normalizedQueueSourceKind(sourceKind);
     m_queueSourcePlaylistId = m_queueSourceKind == QStringLiteral("playlist") ? sourcePlaylistId : 0;
     m_queueSourceName = sourceName;
-    m_queueStore->setTracks(m_queue);
-    const int start = std::clamp(playIndex, 0, static_cast<int>(m_queue.size()) - 1);
+    m_queueStore->setTracks(m_player->queue());
+    const int start = std::clamp(playIndex, 0, static_cast<int>(m_player->queue().size()) - 1);
     playQueueIndex(start);
 }
 
@@ -2762,7 +2741,7 @@ void MainWindow::restorePreviousQueue()
 
 void MainWindow::saveCurrentQueueAs()
 {
-    if (m_queue.isEmpty()) {
+    if (m_player->queue().isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Queue is empty"), 3000);
         return;
     }
@@ -2967,19 +2946,19 @@ void MainWindow::savePlaybackState(bool force)
     const QString stateName = playbackStateName(state);
     const bool meaningfulPositionChange = std::llabs(positionMs - m_lastSavedPlaybackPositionMs) >= 5000;
     const bool stateChanged = stateName != m_lastSavedPlaybackState;
-    const bool trackChanged = m_currentTrack.path != m_lastSavedPlaybackTrackPath;
+    const bool trackChanged = m_player->currentTrack().path != m_lastSavedPlaybackTrackPath;
     if (!force && !meaningfulPositionChange && !stateChanged && !trackChanged) {
         return;
     }
 
     QJsonObject root;
-    root.insert(QStringLiteral("queueIndex"), m_queueIndex);
-    root.insert(QStringLiteral("trackPath"), m_currentTrack.path);
+    root.insert(QStringLiteral("queueIndex"), m_player->queueIndex());
+    root.insert(QStringLiteral("trackPath"), m_player->currentTrack().path);
     root.insert(QStringLiteral("positionMs"), QString::number(positionMs));
     root.insert(QStringLiteral("state"), stateName);
     m_state->setSetting(QStringLiteral("playback.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
     m_lastSavedPlaybackPositionMs = positionMs;
-    m_lastSavedPlaybackTrackPath = m_currentTrack.path;
+    m_lastSavedPlaybackTrackPath = m_player->currentTrack().path;
     m_lastSavedPlaybackState = stateName;
 }
 
@@ -2994,7 +2973,8 @@ void MainWindow::restoreSavedPlaybackState()
     const QString trackPath = root.value(QStringLiteral("trackPath")).toString();
     const qint64 positionMs = root.value(QStringLiteral("positionMs")).toString().toLongLong();
     const QString state = root.value(QStringLiteral("state")).toString(QStringLiteral("stopped"));
-    if (queueIndex < 0 || queueIndex >= m_queue.size() || trackPath.isEmpty() || m_queue.at(queueIndex).path != trackPath) {
+    if (queueIndex < 0 || queueIndex >= m_player->queue().size() || trackPath.isEmpty()
+        || m_player->queue().at(queueIndex).path != trackPath) {
         return;
     }
     if (state != QStringLiteral("playing") && state != QStringLiteral("paused")) {
@@ -3013,7 +2993,7 @@ void MainWindow::restoreSavedPlaybackState()
     QTimer::singleShot(250, this, [this, positionMs, state]() {
         if (positionMs > 0) {
             m_playback->seek(positionMs);
-            m_playerBar->setPosition(positionMs, std::max<qint64>(m_playback->duration(), m_currentTrack.durationMs));
+            m_playerBar->setPosition(positionMs, std::max<qint64>(m_playback->duration(), m_player->currentTrack().durationMs));
             m_mpris->setPositionMs(positionMs);
         }
         // Resume the scrobble session at the restored position rather than
@@ -3025,7 +3005,7 @@ void MainWindow::restoreSavedPlaybackState()
         // for the next track.
         const bool playing = state != QStringLiteral("paused")
             && m_playback->state() == PlaybackBackend::State::Playing;
-        resumeScrobblers(m_currentTrack, std::max<qint64>(0, positionMs), playing);
+        resumeScrobblers(m_player->currentTrack(), std::max<qint64>(0, positionMs), playing);
         savePlaybackState(true);
     });
 }
@@ -3477,11 +3457,11 @@ void MainWindow::setListenBrainzEnabled(bool enabled)
     // If a track is already playing when the scrobbler is toggled on, catch up
     // so it doesn't miss the current track.  The queued configure() runs first
     // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
-    if (enabled && !m_currentTrack.path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
+    if (enabled && !m_player->currentTrack().path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
         const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
         const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
-                                  Q_ARG(Track, m_currentTrack), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+                                  Q_ARG(Track, m_player->currentTrack()), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
     }
     statusBar()->showMessage(enabled ? QStringLiteral("ListenBrainz scrobbling enabled") : QStringLiteral("ListenBrainz scrobbling disabled"), 3000);
 }
@@ -3573,11 +3553,11 @@ void MainWindow::setLastFmEnabled(bool enabled)
     // If a track is already playing when the scrobbler is toggled on, catch up
     // so it doesn't miss the current track.  The queued configure() runs first
     // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
-    if (enabled && !m_currentTrack.path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
+    if (enabled && !m_player->currentTrack().path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
         const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
         const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
         QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
-                                  Q_ARG(Track, m_currentTrack), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+                                  Q_ARG(Track, m_player->currentTrack()), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
     }
     statusBar()->showMessage(enabled ? QStringLiteral("Last.fm scrobbling enabled") : QStringLiteral("Last.fm scrobbling disabled"), 3000);
 }
@@ -3757,30 +3737,8 @@ void MainWindow::showLastFmSettings()
     QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
 }
 
-void MainWindow::playTrack(const Track &track, bool notifyScrobbler, bool startPaused)
-{
-    if (track.path.isEmpty()) {
-        return;
-    }
-
-    const QString playbackPath = resolvedReadPathForTrack(track);
-    if (playbackPath.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Playback"), QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
-        return;
-    }
-
-    presentTrack(track, notifyScrobbler);
-    if (startPaused) {
-        m_playback->loadPaused(QUrl::fromLocalFile(playbackPath));
-    } else {
-        m_playback->play(QUrl::fromLocalFile(playbackPath));
-    }
-    prepareNextQueueTrack();
-}
-
 void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
 {
-    m_currentTrack = track;
     updateCurrentAlbumArt();
     const QString title = track.title.isEmpty() ? track.filename : track.title;
     QString subtitle = QStringLiteral("%1 - %2").arg(track.artistName, track.albumTitle);
@@ -3798,6 +3756,44 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
         notifyScrobblersTrackStarted(track);
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
     }
+}
+
+// In-place metadata/rating refresh of the current track: update displays
+// without resetting the position readout or scrobble state.
+void MainWindow::presentCurrentTrackUpdate(const Track &track)
+{
+    updateCurrentAlbumArt();
+    const QString title = track.title.isEmpty() ? track.filename : track.title;
+    QString subtitle = QStringLiteral("%1 - %2").arg(track.artistName, track.albumTitle);
+    if (!track.date.isEmpty()) {
+        subtitle += QStringLiteral(" (%1)").arg(track.date.left(4));
+    }
+    m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
+    m_rightSidebar->setTrackInfo(track);
+    m_mpris->setTrack(track);
+    m_mpris->setDurationMs(track.durationMs);
+    updateMprisCapabilities();
+}
+
+void MainWindow::clearPresentedTrack()
+{
+    m_playerBar->setTrackText({});
+    m_playerBar->setAlbumArt(QString());
+    m_rightSidebar->setTrackInfo({});
+    m_mpris->setTrack({});
+    savePlaybackState(true);
+}
+
+void MainWindow::onPlayerIndexChanged(int index, bool userInitiated)
+{
+    m_queueStore->setCurrentIndex(index);
+    if (userInitiated) {
+        m_rightSidebar->setCurrentIndex(index, /*reveal=*/true);
+        if (m_mainView == MainView::Queue) {
+            m_queueScreen->revealCurrentPlaying();
+        }
+    }
+    saveQueueState();
 }
 
 void MainWindow::notifyScrobblersTrackStarted(const Track &track)
@@ -3818,219 +3814,32 @@ void MainWindow::resumeScrobblers(const Track &track, qint64 elapsedMs, bool pla
 
 void MainWindow::appendAndPlayTrack(const Track &track)
 {
-    if (track.path.isEmpty()) {
-        return;
-    }
-
-    for (int index = 0; index < m_queue.size(); ++index) {
-        if (m_queue.at(index).path == track.path) {
-            // Reset before jumping so playQueueIndex's guard always clears any
-            // stale play-next boundary. Without this, a boundary that coincides
-            // with m_queue.size() (left over from playing the last track) would
-            // survive the guard check and spuriously badge all trailing entries.
-            m_playNextInsertIndex = -1;
-            playQueueIndex(index);
-            return;
-        }
-    }
-
-    prepareQueueForTrackAddition(QVector<Track>{track});
-    m_queue.push_back(track);
-    m_queueStore->setTracks(m_queue);
-    saveQueueState();
-    playQueueIndex(static_cast<int>(m_queue.size() - 1));
+    m_player->appendAndPlay(track);
 }
 
 void MainWindow::playNextTracks(const QVector<Track> &tracks)
 {
-    if (tracks.isEmpty()) {
-        return;
-    }
-    prepareQueueForTrackAddition(tracks);
-
-    if (m_queueIndex < 0 || m_queue.isEmpty()) {
-        const int start = static_cast<int>(m_queue.size());
-        for (const Track &track : tracks) {
-            if (!track.path.isEmpty()) {
-                m_queue.push_back(track);
-            }
-        }
-        if (m_queueIndex < 0 && start < m_queue.size()) {
-            // Show the new rows, then start playback (playQueueIndex prepares next).
-            m_queueStore->setTracks(m_queue);
-            playQueueIndex(start);
-        } else {
-            syncQueueState();
-        }
-        return;
-    }
-
-    int insertAt = m_playNextInsertIndex;
-    if (insertAt <= m_queueIndex || insertAt > m_queue.size()) {
-        insertAt = m_queueIndex + 1;
-    }
-
-    int inserted = 0;
-    for (const Track &track : tracks) {
-        if (track.path.isEmpty()) {
-            continue;
-        }
-        m_queue.insert(insertAt + inserted, track);
-        ++inserted;
-    }
-
-    m_playNextInsertIndex = insertAt + inserted;
-    syncQueueState();
+    m_player->playTracksNext(tracks);
 }
 
 void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
 {
-    prepareQueueForTrackAddition(tracks);
-    for (const Track &track : tracks) {
-        if (!track.path.isEmpty()) {
-            m_queue.push_back(track);
-        }
-    }
-    syncQueueState();
+    m_player->appendTracks(tracks);
 }
 
 void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
 {
-    if (rows.isEmpty() || m_queue.isEmpty()) {
-        return;
-    }
-
-    QVector<int> sortedRows = rows;
-    std::sort(sortedRows.begin(), sortedRows.end());
-    sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
-    sortedRows.erase(std::remove_if(sortedRows.begin(), sortedRows.end(), [this](int row) {
-                         return row < 0 || row >= m_queue.size();
-                     }),
-                     sortedRows.end());
-    if (sortedRows.isEmpty()) {
-        return;
-    }
-
-    // Allow dropping anywhere, including above the current track: newQueueIndex
-    // below tracks where the playing track lands, so playback stays correct.
-    destinationRow = std::clamp(destinationRow, 0, static_cast<int>(m_queue.size()));
-    QVector<Track> moving;
-    moving.reserve(sortedRows.size());
-    int removedBeforeDestination = 0;
-    for (int row : sortedRows) {
-        moving.push_back(m_queue.at(row));
-        if (row < destinationRow) {
-            ++removedBeforeDestination;
-        }
-    }
-    const int adjustedDestination = destinationRow - removedBeforeDestination;
-
-    QVector<Track> remaining;
-    remaining.reserve(m_queue.size() - moving.size());
-    int removeCursor = 0;
-    for (int row = 0; row < m_queue.size(); ++row) {
-        if (removeCursor < sortedRows.size() && sortedRows.at(removeCursor) == row) {
-            ++removeCursor;
-            continue;
-        }
-        remaining.push_back(m_queue.at(row));
-    }
-
-    m_queue = remaining;
-    for (int offset = 0; offset < moving.size(); ++offset) {
-        m_queue.insert(adjustedDestination + offset, moving.at(offset));
-    }
-
-    int newQueueIndex = -1;
-    if (m_queueIndex >= 0) {
-        const auto movedCurrent = std::find(sortedRows.cbegin(), sortedRows.cend(), m_queueIndex);
-        if (movedCurrent != sortedRows.cend()) {
-            newQueueIndex = adjustedDestination + static_cast<int>(std::distance(sortedRows.cbegin(), movedCurrent));
-        } else {
-            const int removedBeforeCurrent = static_cast<int>(std::count_if(sortedRows.cbegin(), sortedRows.cend(), [this](int row) {
-                return row < m_queueIndex;
-            }));
-            newQueueIndex = m_queueIndex - removedBeforeCurrent;
-            if (adjustedDestination <= newQueueIndex) {
-                newQueueIndex += static_cast<int>(moving.size());
-            }
-        }
-    }
-    m_queueIndex = newQueueIndex;
-    // Manually reordering the upcoming tracks collapses the play-next priority
-    // block (its ordinals no longer reflect a single "play next" batch).
-    m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
-    syncQueueState();
+    m_player->moveRows(rows, destinationRow);
 }
 
 void MainWindow::removeQueueRows(const QVector<int> &rows)
 {
-    if (rows.isEmpty() || m_queue.isEmpty()) {
-        return;
-    }
-
-    QVector<int> sortedRows = rows;
-    std::sort(sortedRows.begin(), sortedRows.end());
-    sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
-
-    // The play-next region is [m_queueIndex+1, m_playNextInsertIndex). Removing
-    // rows shifts its end left by the number of removed rows that sat before it,
-    // preserving the order/size of the surviving play-next tracks (instead of
-    // collapsing the region). It only empties when every play-next track is gone.
-    const int oldPlayNextInsertIndex = m_playNextInsertIndex;
-    QVector<Track> remaining;
-    remaining.reserve(m_queue.size());
-    int newQueueIndex = -1;
-    int removedBeforeCurrent = 0;
-    int removedBeforePlayNextEnd = 0;
-    bool removedCurrent = false;
-    int removeCursor = 0;
-    for (int row = 0; row < m_queue.size(); ++row) {
-        const bool remove = removeCursor < sortedRows.size() && sortedRows.at(removeCursor) == row;
-        if (remove) {
-            if (row < m_queueIndex) {
-                ++removedBeforeCurrent;
-            } else if (row == m_queueIndex) {
-                removedCurrent = true;
-            }
-            if (row < oldPlayNextInsertIndex) {
-                ++removedBeforePlayNextEnd;
-            }
-            ++removeCursor;
-            continue;
-        }
-        remaining.push_back(m_queue.at(row));
-    }
-
-    if (!removedCurrent && m_queueIndex >= 0) {
-        newQueueIndex = m_queueIndex - removedBeforeCurrent;
-    } else if (!remaining.isEmpty()) {
-        newQueueIndex = std::min(m_queueIndex - removedBeforeCurrent, static_cast<int>(remaining.size()) - 1);
-    }
-
-    m_queue = remaining;
-    m_queueIndex = std::clamp(newQueueIndex, -1, static_cast<int>(m_queue.size()) - 1);
-    // Shift the play-next end by removals before it, then clamp into the valid
-    // range; if it lands at/below m_queueIndex+1 the region empties on its own.
-    m_playNextInsertIndex = std::clamp(oldPlayNextInsertIndex - removedBeforePlayNextEnd,
-                                       m_queueIndex + 1, static_cast<int>(m_queue.size()));
-    syncQueueState();
-    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
-        presentTrack(m_queue.at(m_queueIndex), false);
-    } else {
-        m_currentTrack = {};
-        m_playback->stop();
-        m_playerBar->setTrackText({});
-        m_playerBar->setAlbumArt(QString());
-        m_rightSidebar->setTrackInfo({});
-        m_mpris->setTrack({});
-        savePlaybackState(true);
-    }
+    m_player->removeRows(rows);
 }
 
 void MainWindow::clearQueue()
 {
-    if (m_queue.isEmpty()) {
+    if (m_player->queue().isEmpty()) {
         return;
     }
     if (QMessageBox::question(this, QStringLiteral("Clear queue"),
@@ -4044,138 +3853,60 @@ void MainWindow::clearQueue()
         return;
     }
 
-    const bool keepCurrent = m_queueIndex >= 0 && m_queueIndex < m_queue.size();
-    const Track current = keepCurrent ? m_queue.at(m_queueIndex) : Track();
+    const bool keepCurrent = m_player->queueIndex() >= 0
+        && !m_player->queue().at(m_player->queueIndex()).path.isEmpty();
     pushCurrentQueueToBacklog(queueLastModifiedName());
 
-    m_queue.clear();
-    m_playNextInsertIndex = -1;
-    if (keepCurrent && !current.path.isEmpty()) {
-        m_queue.push_back(current);
-        m_queueIndex = 0;
+    if (keepCurrent) {
         markQueueAsSpontaneous();
-        syncQueueState();
-        presentTrack(current, false);
+        m_player->clearKeepingCurrent();
         return;
     }
 
-    m_queueIndex = -1;
-    m_currentTrack = {};
     m_queueId.clear();
     m_queueSourceKind = QStringLiteral("queue");
     m_queueSourcePlaylistId = 0;
     m_queueSourceName.clear();
-    syncQueueState();
-    m_playback->stop();
-    m_playerBar->setTrackText({});
-    m_playerBar->setAlbumArt(QString());
-    m_rightSidebar->setTrackInfo({});
-    m_mpris->setTrack({});
-    savePlaybackState(true);
+    m_player->clearAll();
 }
 
 void MainWindow::clearPlayNextPriority()
 {
-    if (m_queueIndex >= 0) {
-        m_playNextInsertIndex = m_queueIndex + 1;
-    } else {
-        m_playNextInsertIndex = -1;
-    }
-    refreshPlayNextRange();
+    m_player->collapsePlayNext();
     saveQueueState();
 }
 
 void MainWindow::patchQueueTracksFromMetadata(const QVector<Track> &tracks)
 {
-    if (tracks.isEmpty() || m_queue.isEmpty()) {
-        return;
-    }
-
-    QHash<QString, Track> byPath;
-    byPath.reserve(tracks.size());
-    for (const Track &track : tracks) {
-        if (!track.path.isEmpty()) {
-            byPath.insert(track.path, track);
-        }
-    }
-    if (byPath.isEmpty()) {
-        return;
-    }
-
-    bool queueChanged = false;
-    bool currentTrackChanged = false;
-    for (Track &queuedTrack : m_queue) {
-        const auto it = byPath.constFind(queuedTrack.path);
-        if (it == byPath.cend()) {
-            continue;
-        }
-        queuedTrack = it.value();
-        queueChanged = true;
-        if (m_currentTrack.path == queuedTrack.path) {
-            m_currentTrack = queuedTrack;
-            currentTrackChanged = true;
-        }
-    }
-
-    if (!queueChanged) {
-        return;
-    }
-
-    m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
-    refreshPlayNextRange();
-    saveQueueState();
-    if (currentTrackChanged) {
-        updateCurrentAlbumArt();
-        const QString title = m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title;
-        QString subtitle = QStringLiteral("%1 - %2").arg(m_currentTrack.artistName, m_currentTrack.albumTitle);
-        if (!m_currentTrack.date.isEmpty()) {
-            subtitle += QStringLiteral(" (%1)").arg(m_currentTrack.date.left(4));
-        }
-        m_playerBar->setTrackInfo(title, subtitle, m_currentTrack.effectiveRating0To100);
-        m_rightSidebar->setTrackInfo(m_currentTrack);
-        m_mpris->setTrack(m_currentTrack);
-        m_mpris->setDurationMs(m_currentTrack.durationMs);
-        updateMprisCapabilities();
-    }
+    m_player->patchTracksFromMetadata(tracks);
 }
 
 void MainWindow::refreshPlayNextRange()
 {
     if (m_queueStore != nullptr) {
-        m_queueStore->setPlayNextRange(m_queueIndex + 1, m_playNextInsertIndex);
+        m_queueStore->setPlayNextRange(m_player->queueIndex() + 1, m_player->playNextInsertIndex());
     }
 }
 
 void MainWindow::syncQueueState()
 {
-    // Defensively clamp the canonical indices so callers can mutate the queue
-    // freely and rely on this one place to keep everything in range.
-    if (m_queue.isEmpty()) {
-        m_queueIndex = -1;
+    // PlayerCore already clamped its indices and re-prepared the gapless
+    // "next" track; push every derived view of the queue in lock-step.
+    if (m_player->queue().isEmpty()) {
         m_queueId.clear();
         m_queueSourceKind = QStringLiteral("queue");
         m_queueSourcePlaylistId = 0;
         m_queueSourceName.clear();
     } else {
-        m_queueIndex = std::clamp(m_queueIndex, -1, static_cast<int>(m_queue.size()) - 1);
         ensureCurrentQueueIdentity();
     }
-    if (m_queueIndex < 0) {
-        m_playNextInsertIndex = -1;
-    } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
-        m_playNextInsertIndex = m_queueIndex + 1;
-    }
 
-    // Push every derived view of the queue in lock-step. Crucially this includes
-    // re-preparing the gapless "next" track: the playback backend pre-buffers
-    // m_queue[m_queueIndex + 1], so reordering/inserting/removing without this
-    // would let a stale track play next while the UI shows a different order.
-    m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
+    m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
+                              m_player->queueIndex() + 1, m_player->playNextInsertIndex());
     refreshPlayNextRange();
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Queue);
     }
-    prepareNextQueueTrack();
     saveQueueState();
 }
 
@@ -4204,7 +3935,7 @@ void MainWindow::playAlbumsNow(const QStringList &albumTitles)
         return;
     }
 
-    const int startIndex = static_cast<int>(m_queue.size());
+    const int startIndex = static_cast<int>(m_player->queue().size());
     addTracksToQueue(tracks);
     playQueueIndex(startIndex);
 }
@@ -4253,88 +3984,37 @@ void MainWindow::addAlbumToQueue(const QString &albumTitle)
 
 void MainWindow::playQueueIndex(int index, bool notifyScrobbler, bool startPaused, bool explicitJump)
 {
-    if (index < 0 || index >= m_queue.size()) {
-        return;
-    }
-
-    m_queueIndex = index;
-    if (explicitJump) {
-        // A manual jump to any row (forward or backward) clears the play-next
-        // batch: the user picking a new current track supersedes whatever was
-        // queued to play next. Collapsing the region to m_queueIndex+1 drops the
-        // play-next marking while leaving every track in its natural queue order
-        // (nothing is moved). A backward jump must NOT turn the skipped tracks
-        // into a new play-next span — that was misleading and is intentionally
-        // not done here.
-        m_playNextInsertIndex = m_queueIndex + 1;
-    } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
-        m_playNextInsertIndex = m_queueIndex + 1;
-    }
-    m_queueStore->setCurrentIndex(m_queueIndex);
-    m_rightSidebar->setCurrentIndex(m_queueIndex, /*reveal=*/true);
-    if (m_mainView == MainView::Queue) {
-        m_queueScreen->revealCurrentPlaying();
-    }
-    refreshPlayNextRange();
-    saveQueueState();
-    playTrack(m_queue.at(m_queueIndex), notifyScrobbler, startPaused);
+    m_player->playAt(index, notifyScrobbler, startPaused, explicitJump);
 }
 
 void MainWindow::playPreviousTrack()
 {
-    if (m_queue.isEmpty()) {
-        return;
-    }
-    playQueueIndex(std::max(0, m_queueIndex - 1));
+    m_player->previous();
 }
 
 void MainWindow::playNextTrack()
 {
-    if (m_queue.isEmpty()) {
-        return;
-    }
-    playQueueIndex(std::min(static_cast<int>(m_queue.size() - 1), m_queueIndex + 1));
+    m_player->next();
 }
 
 void MainWindow::togglePlayback()
 {
-    if (!m_playback->hasSource()) {
-        if (!m_queue.isEmpty()) {
-            playQueueIndex(m_queueIndex >= 0 ? m_queueIndex : 0);
-        }
-        return;
-    }
-
-    if (m_playback->state() == PlaybackBackend::State::Playing) {
-        m_playback->pause();
-    } else {
-        m_playback->resume();
-    }
+    m_player->togglePlayPause();
 }
 
 void MainWindow::playFromMpris()
 {
-    if (m_playback->hasSource()) {
-        m_playback->resume();
-        return;
-    }
-    if (!m_queue.isEmpty()) {
-        playQueueIndex(m_queueIndex >= 0 ? m_queueIndex : 0);
-    }
+    m_player->play();
 }
 
 void MainWindow::setVolumeFromMpris(double volume0To1)
 {
-    m_volume = std::clamp(volume0To1, 0.0, 1.0);
-    m_playback->setVolume(m_volume);
-    m_mpris->setVolume(m_volume);
+    m_player->setVolume(volume0To1);
 }
 
 void MainWindow::seekRelativeFromMpris(qint64 offsetMs)
 {
-    const qint64 duration = std::max<qint64>(0, m_playback->duration());
-    const qint64 requested = m_playback->position() + offsetMs;
-    m_playback->seek(duration > 0 ? std::clamp<qint64>(requested, 0, duration) : std::max<qint64>(0, requested));
+    m_player->seekRelative(offsetMs);
 }
 
 void MainWindow::setupIpcServer()
@@ -4407,7 +4087,7 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         if (args.contains(QStringLiteral("percent"))) {
             percent = args.value(QStringLiteral("percent")).toDouble();
         } else if (args.contains(QStringLiteral("deltaPercent"))) {
-            percent = m_volume * 100.0 + args.value(QStringLiteral("deltaPercent")).toDouble();
+            percent = m_player->volume() * 100.0 + args.value(QStringLiteral("deltaPercent")).toDouble();
         } else {
             return error(QStringLiteral("volume needs \"percent\" or \"deltaPercent\""));
         }
@@ -4415,7 +4095,7 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         return status();
     }
     if (command == QLatin1String("rate")) {
-        if (m_currentTrack.path.isEmpty()) {
+        if (m_player->currentTrack().path.isEmpty()) {
             return error(QStringLiteral("no current track to rate"));
         }
         if (m_librarySource != LibrarySource::Local) {
@@ -4428,7 +4108,7 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
                 return error(QStringLiteral("rate needs \"rating0To100\" in 0..100 or \"clear\": true"));
             }
         }
-        const Track rated = m_currentTrack;
+        const Track rated = m_player->currentTrack();
         applyTrackRating(rated, rating);
         return status();
     }
@@ -4437,9 +4117,9 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
 
 void MainWindow::updateMprisCapabilities()
 {
-    m_mpris->setQueueCapabilities(m_queueIndex > 0,
-                                  m_queueIndex >= 0 && m_queueIndex + 1 < m_queue.size(),
-                                  m_playback->hasSource() || !m_queue.isEmpty());
+    m_mpris->setQueueCapabilities(m_player->queueIndex() > 0,
+                                  m_player->queueIndex() >= 0 && m_player->queueIndex() + 1 < m_player->queue().size(),
+                                  m_playback->hasSource() || !m_player->queue().isEmpty());
 }
 
 void MainWindow::updatePlaybackPosition()
@@ -4450,35 +4130,6 @@ void MainWindow::updatePlaybackPosition()
     if (m_playback->state() == PlaybackBackend::State::Playing || m_playback->state() == PlaybackBackend::State::Paused) {
         schedulePlaybackStateSave(false);
     }
-}
-
-void MainWindow::prepareNextQueueTrack()
-{
-    if (m_queueIndex < 0 || m_queueIndex + 1 >= m_queue.size()) {
-        m_playback->prepareNext({});
-        return;
-    }
-    const Track &nextTrack = m_queue.at(m_queueIndex + 1);
-    const QString nextPath = resolvedReadPathForTrack(nextTrack);
-    m_playback->prepareNext(nextPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(nextPath));
-}
-
-void MainWindow::advanceAfterPreparedTransition()
-{
-    if (m_queueIndex + 1 >= m_queue.size()) {
-        return;
-    }
-
-    m_playback->onGaplessTrackAdvanced();
-    ++m_queueIndex;
-    if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
-        m_playNextInsertIndex = m_queueIndex + 1;
-    }
-    m_queueStore->setCurrentIndex(m_queueIndex);
-    refreshPlayNextRange();
-    presentTrack(m_queue.at(m_queueIndex));
-    saveQueueState();
-    prepareNextQueueTrack();
 }
 
 void MainWindow::rememberTrackTableViewState()
@@ -4505,8 +4156,8 @@ void MainWindow::updateCurrentAlbumArt()
     m_rightSidebar->setAlbumArt(QString());
     m_playerBar->setAlbumArt(QString());
 
-    const QString resolvedPath = resolvedReadPathForTrack(m_currentTrack);
-    const QString directory = resolvedPath.isEmpty() ? m_currentTrack.parentDir : QFileInfo(resolvedPath).absolutePath();
+    const QString resolvedPath = resolvedReadPathForTrack(m_player->currentTrack());
+    const QString directory = resolvedPath.isEmpty() ? m_player->currentTrack().parentDir : QFileInfo(resolvedPath).absolutePath();
     if (m_artworkCache != nullptr) {
         m_artworkCache->requestArtwork(QStringLiteral("current"), directory, resolvedPath, m_currentArtGeneration);
     }

@@ -62,6 +62,7 @@ set(MUZAITEN_SOURCES
     src/ipc/IpcServer.cpp
     src/ipc/IpcSocket.cpp
     src/mpris/MprisService.cpp
+    src/player/PlayerCore.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/DirectoryWalker.cpp
@@ -157,6 +158,7 @@ set(MUZAITEN_HEADERS
     src/ipc/IpcServer.h
     src/ipc/IpcSocket.h
     src/mpris/MprisService.h
+    src/player/PlayerCore.h
     src/playback/PlaybackBackend.h
     src/playback/PlaybackTypes.h
     src/playback/GStreamerPlaybackBackend.h

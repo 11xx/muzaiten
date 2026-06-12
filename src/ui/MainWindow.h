@@ -27,6 +27,7 @@ class ListenTracker;
 class MprisService;
 class IpcServer;
 class PlayerBar;
+class PlayerCore;
 class PanelSearchController;
 class PlaybackBackend;
 class QTimer;
@@ -154,8 +155,10 @@ private:
     QString lastFmSharedSecret() const;
     bool hasDefaultLastFmCredentials() const;
     void onLibrarySourceChanged(int index);
-    void playTrack(const Track &track, bool notifyScrobbler = true, bool startPaused = false);
     void presentTrack(const Track &track, bool notifyScrobbler = true);
+    void presentCurrentTrackUpdate(const Track &track);
+    void clearPresentedTrack();
+    void onPlayerIndexChanged(int index, bool userInitiated);
     void notifyScrobblersTrackStarted(const Track &track);
     void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
     void appendAndPlayTrack(const Track &track);
@@ -167,12 +170,10 @@ private:
     void clearPlayNextPriority();
     void patchQueueTracksFromMetadata(const QVector<Track> &tracks);
     void refreshPlayNextRange();
-    // Single funnel for structural queue changes: re-derives and pushes every
-    // piece of queue-dependent state (sidebar contents, current row, play-next
-    // range, the gapless prepared-next buffer, persisted state) from the
-    // canonical (m_queue, m_queueIndex, m_playNextInsertIndex). Any mutator that
-    // changes queue contents or order MUST end by calling this so the prepared
-    // "next" track can never drift from the visible order.
+    // Handler for PlayerCore::queueChanged: re-derives and pushes every piece
+    // of queue-dependent UI/persisted state (queue store snapshot, queue
+    // identity, panel search, saved queue state) from the player's canonical
+    // queue triple.
     void syncQueueState();
     void playAlbumNow(const QString &albumTitle);
     void playAlbumsNow(const QStringList &albumTitles);
@@ -206,8 +207,6 @@ private:
     QJsonObject ipcStatus() const;
     void updateMprisCapabilities();
     void updatePlaybackPosition();
-    void prepareNextQueueTrack();
-    void advanceAfterPreparedTransition();
     void startScan(const QString &rootPath);
     void startScan(const QString &rootPath, int scanRootId);
     void scanEnabledSourceDirectories();
@@ -267,7 +266,8 @@ private:
     PanelSearchController *m_panelSearch = nullptr;
     QProgressBar *m_scanProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
-    PlaybackBackend *m_playback = nullptr;
+    PlayerCore *m_player = nullptr;
+    PlaybackBackend *m_playback = nullptr;  // m_player->backend(), kept for read/connect convenience
     std::unique_ptr<Database> m_database;
     std::unique_ptr<PlaylistDatabase> m_playlistDb;
     std::unique_ptr<SettingsStore> m_state;
@@ -280,11 +280,7 @@ private:
     QString m_localAlbumTitle;
     QString m_mpdArtist;
     QString m_mpdAlbumTitle;
-    Track m_currentTrack;
     PlaybackProfile m_playbackProfile;
-    QVector<Track> m_queue;
-    int m_queueIndex = -1;
-    int m_playNextInsertIndex = -1;
     QString m_queueId;
     QString m_queueSourceKind = QStringLiteral("queue");
     qint64 m_queueSourcePlaylistId = 0;
@@ -321,7 +317,6 @@ private:
     IpcServer *m_ipc = nullptr;
     bool m_ratingTagSyncRunning = false;
     bool m_ratingTagSyncPending = false;
-    double m_volume = 1.0;
     QVector<ScanRoot> m_pendingScanRoots;
     int m_activeScanRootId = 0;
     QString m_activeScanRootPath;

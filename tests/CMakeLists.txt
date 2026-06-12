@@ -324,6 +324,17 @@ target_compile_features(test_album_grid PRIVATE cxx_std_26)
 add_test(NAME test_album_grid COMMAND test_album_grid)
 set_tests_properties(test_album_grid PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_player_core
+    test_player_core.cpp
+    ../src/player/PlayerCore.cpp
+    ../src/playback/PlaybackBackend.h
+)
+target_include_directories(test_player_core PRIVATE ../src)
+target_link_libraries(test_player_core PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_player_core PRIVATE cxx_std_26)
+add_test(NAME test_player_core COMMAND test_player_core)
+set_tests_properties(test_player_core PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_ipc_server
     test_ipc_server.cpp
     ../src/ipc/IpcServer.cpp
