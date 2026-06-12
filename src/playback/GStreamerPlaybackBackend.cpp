@@ -225,9 +225,11 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     }
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
     // State updates arrive over the bus, which only poll() drains — make sure
-    // the timer is live before the first message lands.
+    // the timer is live before the first message lands.  Don't publish Playing
+    // here: a source that fails to preroll must surface as Error, not flash
+    // Playing first.  handleMessage forwards the real transition (m_targetState
+    // filters the READY/PAUSED hops on the way there).
     m_pollTimer.start();
-    updateState(State::Playing);
     startReadAhead(url);
 }
 
@@ -255,7 +257,8 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     // but the audio sink never produces output. No blip.
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
     m_pollTimer.start();
-    updateState(State::Paused);
+    // As in play(): wait for the bus to confirm the preroll instead of
+    // publishing Paused for a source that may turn out to be unplayable.
     startReadAhead(url);
 }
 
