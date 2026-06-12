@@ -323,6 +323,9 @@ public:
                 ? QVariant(Qt::AlignRight | Qt::AlignVCenter)
                 : QVariant(Qt::AlignLeft | Qt::AlignVCenter);
         }
+        if (role == Qt::ToolTipRole) {
+            return item.comment.isEmpty() ? QVariant() : item.comment;
+        }
         if (role != Qt::DisplayRole) {
             return {};
         }
@@ -610,6 +613,9 @@ void PlaylistView::reloadPlaylists()
         item->setData(PlaylistShowCreatedRole, m_showCreatedDate);
         item->setData(PlaylistMetaRole, QString());
         item->setData(PlaylistListActiveRole, listActive);
+        if (!playlist.comment.isEmpty()) {
+            item->setToolTip(playlist.comment);
+        }
     }
     if (!playlists.isEmpty() && !m_savedQueueEntries.isEmpty()) {
         auto *separator = new QListWidgetItem(QStringLiteral("Saved queues"), m_playlistList);
@@ -1350,6 +1356,43 @@ void PlaylistView::renameCurrentPlaylist()
     reloadPlaylists();
 }
 
+void PlaylistView::editCurrentPlaylistComment()
+{
+    if (m_db == nullptr || m_currentPlaylistId <= 0) {
+        return;
+    }
+    const Playlist playlist = m_db->playlist(m_currentPlaylistId);
+    bool ok = false;
+    const QString comment = QInputDialog::getMultiLineText(this, QStringLiteral("Playlist comment"),
+                                                           QStringLiteral("Comment for \"%1\":").arg(playlist.name),
+                                                           playlist.comment, &ok);
+    if (!ok) {
+        return;
+    }
+    m_db->setPlaylistComment(m_currentPlaylistId, comment.trimmed());
+    reloadPlaylists();
+}
+
+void PlaylistView::editCurrentItemComment()
+{
+    const PlaylistItem *current = itemForDisplayRow(currentItemRow());
+    if (m_db == nullptr || current == nullptr || m_currentPlaylistId <= 0) {
+        return;
+    }
+    const QString label = current->titleSnapshot.isEmpty() ? current->trackPath : current->titleSnapshot;
+    bool ok = false;
+    const QString comment = QInputDialog::getMultiLineText(this, QStringLiteral("Item comment"),
+                                                           QStringLiteral("Comment for \"%1\":").arg(label),
+                                                           current->comment, &ok);
+    if (!ok) {
+        return;
+    }
+    PlaylistItem item = *current;
+    item.comment = comment.trimmed();
+    m_db->updateItem(item);
+    reloadItems();
+}
+
 void PlaylistView::deleteCurrentPlaylist()
 {
     if (m_db == nullptr || m_currentPlaylistId <= 0) {
@@ -1535,6 +1578,9 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         case Qt::Key_F2:
             renameCurrentPlaylist();
             return true;
+        case Qt::Key_C:
+            editCurrentPlaylistComment();
+            return true;
         case Qt::Key_D:
         case Qt::Key_Delete:
             deleteCurrentPlaylist();
@@ -1594,6 +1640,9 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             editCurrentItem();
             return true;
         }
+        case Qt::Key_C:
+            editCurrentItemComment();
+            return true;
         case Qt::Key_D:
         case Qt::Key_Delete:
             removeSelectedItems();

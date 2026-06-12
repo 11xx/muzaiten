@@ -43,6 +43,9 @@ public:
     void setQueryText(const QString &query);
     // In edit mode the dialog chooses a single replacement and closes.
     void setEditMode(bool editMode) { m_editMode = editMode; }
+    // Stored MultiMatch candidates: hoisted to the top of every result list so
+    // the import's shortlist is one keypress away.
+    void setPreferredPaths(const QStringList &paths);
 
 signals:
     // Emitted on RET with the chosen track and the query that produced it.
@@ -80,6 +83,7 @@ private:
     Search::ResultRanker m_ranker;
 
     QString m_playlistName;
+    QSet<QString> m_preferredPaths;
     bool    m_indexLoaded = false;
     bool    m_editMode    = false;
     quint64 m_queryId     = 0;

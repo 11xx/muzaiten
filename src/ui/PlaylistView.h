@@ -59,6 +59,8 @@ public:
 public slots:
     void createPlaylist();
     void renameCurrentPlaylist();
+    void editCurrentPlaylistComment();
+    void editCurrentItemComment();
     void deleteCurrentPlaylist();
     void removeSelectedItems();
     void exportCurrentPlaylist();

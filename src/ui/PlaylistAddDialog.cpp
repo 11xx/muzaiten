@@ -186,6 +186,11 @@ void PlaylistAddDialog::onIndexError(const QString &error)
     m_status->setText(QStringLiteral("Index error: %1").arg(error));
 }
 
+void PlaylistAddDialog::setPreferredPaths(const QStringList &paths)
+{
+    m_preferredPaths = QSet<QString>(paths.cbegin(), paths.cend());
+}
+
 void PlaylistAddDialog::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches)
 {
     if (queryId != m_queryId) {
@@ -193,6 +198,12 @@ void PlaylistAddDialog::onResultsReady(quint64 queryId, QVector<Search::ScoredRe
     }
     m_matchCount = totalMatches;
     m_ranker.sort(results);
+    if (!m_preferredPaths.isEmpty()) {
+        // Keep ranker order within each group, candidates first.
+        std::stable_partition(results.begin(), results.end(), [this](const Search::ScoredResult &result) {
+            return m_preferredPaths.contains(result.rec.path);
+        });
+    }
     m_model->setResults(std::move(results));
     if (m_model->rowCount() > 0) {
         m_list->scrollToTop();

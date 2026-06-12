@@ -4453,18 +4453,25 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     dialog->setEditMode(true);
 
     QSet<QString> paths;
+    PlaylistItem editedItem;
     for (const PlaylistItem &item : m_playlistDb->items(playlistId)) {
         if (!item.trackPath.isEmpty()) {
             paths.insert(item.trackPath);
         }
+        if (item.id == itemId) {
+            editedItem = item;
+        }
     }
     dialog->setAddedPaths(paths);
     dialog->setQueryText(query);
+    // For MultiMatch imports, surface the stored candidate shortlist first.
+    dialog->setPreferredPaths(editedItem.candidatePaths);
 
     connect(dialog, &PlaylistAddDialog::itemChosen, this,
-            [this, itemId](const Track &track, const QString &chosenQuery) {
+            [this, itemId, comment = editedItem.comment](const Track &track, const QString &chosenQuery) {
                 PlaylistItem item = playlistItemFromTrack(track, chosenQuery);
                 item.id = itemId;
+                item.comment = comment;  // a replacement pick must not drop the note
                 m_playlistDb->updateItem(item);
             });
 
