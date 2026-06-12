@@ -13,6 +13,7 @@ public:
     explicit QueueStore(QObject *parent = nullptr);
 
     void setSnapshot(const QVector<Track> &tracks, int currentIndex, int playNextBegin, int playNextEnd);
+    void updateTrackRating(const QString &path, int rating0To100, bool hasUserRating);
     void setTracks(const QVector<Track> &tracks);
     void setCurrentIndex(int index);
     void setPlayNextRange(int begin, int end);
@@ -26,6 +27,7 @@ public:
 signals:
     void tracksAboutToReset();
     void tracksReset();
+    void trackChanged(int row);
     void currentIndexChanged(int currentIndex);
     void playNextRangeChanged(int begin, int end);
 

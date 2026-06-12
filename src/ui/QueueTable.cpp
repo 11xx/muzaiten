@@ -527,6 +527,11 @@ public:
                 m_hoverRatings.fill(StarRating::unset, rowCount());
                 endResetModel();
             });
+            connect(m_store, &QueueStore::trackChanged, this, [this](int row) {
+                if (row >= 0 && row < rowCount()) {
+                    emit dataChanged(index(row, 0), index(row, columnCount() - 1));
+                }
+            });
             connect(m_store, &QueueStore::playNextRangeChanged, this, [this]() {
                 if (rowCount() > 0) {
                     emit dataChanged(index(0, 0), index(rowCount() - 1, 1));

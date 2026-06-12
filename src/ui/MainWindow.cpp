@@ -1786,8 +1786,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
         m_rightSidebar->setTrackInfo(m_currentTrack);
         m_mpris->setTrack(m_currentTrack);
     }
-    m_queueStore->setSnapshot(m_queue, m_queueIndex, m_queueIndex + 1, m_playNextInsertIndex);
-    refreshPlayNextRange();
+    m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
 
     if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
         schedulePendingRatingTagSync();

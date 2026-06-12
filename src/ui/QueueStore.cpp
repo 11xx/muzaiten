@@ -41,6 +41,21 @@ void QueueStore::setSnapshot(const QVector<Track> &tracks, int currentIndex, int
     setPlayNextRange(playNextBegin, playNextEnd);
 }
 
+void QueueStore::updateTrackRating(const QString &path, int rating0To100, bool hasUserRating)
+{
+    // Per-row patch so a rating edit doesn't reset the whole queue model
+    // (which drops scroll position and selection in the queue views).
+    for (int row = 0; row < m_tracks.size(); ++row) {
+        Track &track = m_tracks[row];
+        if (track.path != path) {
+            continue;
+        }
+        track.hasUserRating = hasUserRating;
+        track.effectiveRating0To100 = hasUserRating ? rating0To100 : track.rating0To100;
+        emit trackChanged(row);
+    }
+}
+
 void QueueStore::setTracks(const QVector<Track> &tracks)
 {
     emit tracksAboutToReset();
