@@ -105,9 +105,10 @@ GStreamerPlaybackBackend::GStreamerPlaybackBackend(QObject *parent)
     m_profile.sink = QStringLiteral("auto");
     rebuildPipeline();
 
+    // The poll timer only runs while the pipeline is live (see updateState);
+    // an idle player should not wake the process at 10 Hz.
     m_pollTimer.setInterval(100);
     connect(&m_pollTimer, &QTimer::timeout, this, &GStreamerPlaybackBackend::poll);
-    m_pollTimer.start();
 }
 
 GStreamerPlaybackBackend::~GStreamerPlaybackBackend()
@@ -179,6 +180,9 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     }
     g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+    // State updates arrive over the bus, which only poll() drains — make sure
+    // the timer is live before the first message lands.
+    m_pollTimer.start();
     startReadAhead(url);
 }
 
@@ -203,6 +207,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     // Transition only to PAUSED: pipeline prerolls (buffering the first frame)
     // but the audio sink never produces output. No blip.
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+    m_pollTimer.start();
     startReadAhead(url);
 }
 
@@ -268,6 +273,7 @@ void GStreamerPlaybackBackend::resume()
         return;
     }
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+    m_pollTimer.start();
 }
 
 void GStreamerPlaybackBackend::stop()
@@ -536,6 +542,11 @@ void GStreamerPlaybackBackend::updateState(State state)
         return;
     }
     m_state = state;
+    if (m_state == State::Stopped || m_state == State::Error) {
+        m_pollTimer.stop();
+    } else {
+        m_pollTimer.start();
+    }
     emit stateChanged(m_state);
 }
 
