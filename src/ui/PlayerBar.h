@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QWidget>
 
 class QLabel;
@@ -25,6 +26,7 @@ public:
     void setShowGuessedPlaceholders(bool show);
     void setExplorerOptionsVisible(bool visible);
     void setQueueViewLayoutActive(bool active);
+    void setPlaylistViewActionsActive(bool active);
     void setAlbumArt(const QString &imagePath);
     void setAlbumArt(const QImage &image);
     void setCompactMenu(bool compact);
@@ -112,6 +114,7 @@ private:
     class QAction *m_listenBrainzEnabled = nullptr;
     class QAction *m_lastFmEnabled = nullptr;
     class QAction *m_scrobbleOffline = nullptr;
+    QList<class QAction *> m_playlistViewActions;
     QLabel *m_title = nullptr;
     QLabel *m_subtitle = nullptr;
     QLabel *m_nowPlaying = nullptr;

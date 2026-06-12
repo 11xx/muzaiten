@@ -458,6 +458,17 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *renamePlaylist = playlistMenu->addAction(QStringLiteral("Rename playlist"));
     QAction *exportPlaylist = playlistMenu->addAction(QStringLiteral("Export playlist..."));
     QAction *deletePlaylist = playlistMenu->addAction(QStringLiteral("Delete playlist"));
+    m_playlistViewActions = {
+        addSong,
+        playPlaylist,
+        playNextPlaylist,
+        addPlaylistToQueue,
+        movePlaylistItemUp,
+        movePlaylistItemDown,
+        renamePlaylist,
+        exportPlaylist,
+        deletePlaylist,
+    };
 
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
@@ -660,6 +671,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     });
 
     setCompactMenu(false);
+    setPlaylistViewActionsActive(false);
 }
 
 void PlayerBar::setTrackText(const QString &text)
@@ -751,6 +763,15 @@ void PlayerBar::setQueueViewLayoutActive(bool active)
 {
     if (m_albumArt != nullptr) {
         m_albumArt->setVisible(active);
+    }
+}
+
+void PlayerBar::setPlaylistViewActionsActive(bool active)
+{
+    for (QAction *action : m_playlistViewActions) {
+        if (action != nullptr) {
+            action->setEnabled(active);
+        }
     }
 }
 

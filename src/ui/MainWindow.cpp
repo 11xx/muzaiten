@@ -768,23 +768,50 @@ MainWindow::MainWindow(QWidget *parent)
         m_playlistView->createPlaylist();
     });
     connect(m_playerBar, &PlayerBar::playlistAddSongRequested, this, [this]() {
-        switchMainView(MainView::Playlist);
-        m_playlistView->addSongToCurrentPlaylist();
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->addSongToCurrentPlaylist();
+        }
     });
-    connect(m_playerBar, &PlayerBar::playlistPlayRequested, m_playlistView, &PlaylistView::playCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, m_playlistView, &PlaylistView::playNextCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, m_playlistView, &PlaylistView::addCurrentPlaylistToQueue);
+    connect(m_playerBar, &PlayerBar::playlistPlayRequested, this, [this]() {
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->playCurrentPlaylist();
+        }
+    });
+    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, this, [this]() {
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->playNextCurrentPlaylist();
+        }
+    });
+    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, this, [this]() {
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->addCurrentPlaylistToQueue();
+        }
+    });
     connect(m_playerBar, &PlayerBar::playlistRenameRequested, this, [this]() {
-        switchMainView(MainView::Playlist);
-        m_playlistView->renameCurrentPlaylist();
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->renameCurrentPlaylist();
+        }
     });
-    connect(m_playerBar, &PlayerBar::playlistExportRequested, m_playlistView, &PlaylistView::exportCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistExportRequested, this, [this]() {
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->exportCurrentPlaylist();
+        }
+    });
     connect(m_playerBar, &PlayerBar::playlistDeleteRequested, this, [this]() {
-        switchMainView(MainView::Playlist);
-        m_playlistView->deleteCurrentPlaylist();
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->deleteCurrentPlaylist();
+        }
     });
-    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, m_playlistView, &PlaylistView::moveCurrentItemUp);
-    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, m_playlistView, &PlaylistView::moveCurrentItemDown);
+    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, this, [this]() {
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->moveCurrentItemUp();
+        }
+    });
+    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, this, [this]() {
+        if (m_mainView == MainView::Playlist) {
+            m_playlistView->moveCurrentItemDown();
+        }
+    });
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
@@ -2283,6 +2310,7 @@ void MainWindow::switchMainView(MainView view)
     m_mainView = view;
     m_playerBar->setExplorerOptionsVisible(view == MainView::LibraryFileExplorer || view == MainView::FreeRoamFileExplorer);
     m_playerBar->setQueueViewLayoutActive(view == MainView::Queue);
+    m_playerBar->setPlaylistViewActionsActive(view == MainView::Playlist);
     if (view == MainView::LibraryPanels) {
         m_mainStack->setCurrentWidget(m_rootSplitter);
         if (m_panelSearch != nullptr) {
