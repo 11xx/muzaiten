@@ -201,6 +201,9 @@ void ListenBrainzScrobbler::uploadBacklog()
             submittedIds.push_back(row.id);
         }
         m_history->markSent(ListenHistoryStore::ListenBrainz, skippedIds);
+        if (!skippedIds.isEmpty()) {
+            emit backlogProcessed(0, static_cast<int>(skippedIds.size()), m_history->pendingCount(ListenHistoryStore::ListenBrainz));
+        }
         if (skippedIds.isEmpty() && listens.isEmpty()) {
             return;
         }
@@ -396,6 +399,7 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
     }
     if (kind == SubmissionKind::Listen && !submittedIds.isEmpty() && m_history != nullptr) {
         m_history->markSent(ListenHistoryStore::ListenBrainz, submittedIds);
+        emit backlogProcessed(static_cast<int>(submittedIds.size()), 0, m_history->pendingCount(ListenHistoryStore::ListenBrainz));
         // Keep draining until the backlog is empty.
         uploadBacklog();
     }

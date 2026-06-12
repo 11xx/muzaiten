@@ -39,6 +39,7 @@ public slots:
 
 signals:
     void submissionFailed(QString message);
+    void backlogProcessed(int sentCount, int skippedCount, int remainingCount);
     void disabledAfterFailures(QString message);
     void tokenValidated(bool valid, QString username);
 

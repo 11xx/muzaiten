@@ -250,6 +250,9 @@ void LastFmScrobbler::uploadBacklog()
             submittedIds.push_back(row.id);
         }
         m_history->markSent(ListenHistoryStore::LastFm, skippedIds);
+        if (!skippedIds.isEmpty()) {
+            emit backlogProcessed(0, static_cast<int>(skippedIds.size()), m_history->pendingCount(ListenHistoryStore::LastFm));
+        }
         if (skippedIds.isEmpty() && batch.isEmpty()) {
             return;
         }
@@ -451,6 +454,7 @@ void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response
         m_consecutiveFailures = 0;
         if (m_history != nullptr) {
             m_history->markSent(ListenHistoryStore::LastFm, submittedIds);
+            emit backlogProcessed(static_cast<int>(submittedIds.size()), 0, m_history->pendingCount(ListenHistoryStore::LastFm));
         }
         // Keep draining until the backlog is empty.
         uploadBacklog();

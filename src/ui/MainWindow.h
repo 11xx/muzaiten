@@ -148,6 +148,9 @@ private:
     void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;
     void configureListenBrainz();
+    void showListeningHistory();
+    void clearScrobbleBacklog(const QString &service);
+    void triggerScrobbleUpload(const QString &service);
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
     void configureLastFm();

@@ -413,18 +413,23 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
     QAction *mpdImport = mpdMenu->addAction(QStringLiteral("Import MPD library metadata"));
 
+    auto *historyMenu = new QMenu(QStringLiteral("History"), this);
+    QAction *listeningHistory = historyMenu->addAction(QStringLiteral("Listening history..."));
     auto *scrobblersMenu = new StayOpenMenu(QStringLiteral("Scrobblers"), this);
     m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
     m_listenBrainzEnabled->setCheckable(true);
     QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token..."));
+    QAction *clearListenBrainzBacklog = scrobblersMenu->addAction(QStringLiteral("Clear ListenBrainz backlog"));
     scrobblersMenu->addSeparator();
     m_lastFmEnabled = scrobblersMenu->addAction(QStringLiteral("Last.fm scrobbling"));
     m_lastFmEnabled->setCheckable(true);
     QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings..."));
+    QAction *clearLastFmBacklog = scrobblersMenu->addAction(QStringLiteral("Clear Last.fm backlog"));
     scrobblersMenu->addSeparator();
     m_scrobbleOffline = scrobblersMenu->addAction(QStringLiteral("Offline mode (buffer listens locally)"));
     m_scrobbleOffline->setCheckable(true);
     m_scrobbleOffline->setToolTip(QStringLiteral("Keep collecting listening history but send nothing; unchecking uploads the buffered backlog."));
+    historyMenu->addMenu(scrobblersMenu);
 
     auto *viewMenu = new QMenu(QStringLiteral("View"), this);
     m_trackInfoPaneVisible = viewMenu->addAction(QStringLiteral("Show track information pane"));
@@ -479,12 +484,13 @@ PlayerBar::PlayerBar(QWidget *parent)
     };
 
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
+    settingsMenu->addMenu(mpdMenu);
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
     QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
 
-    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, mpdMenu, scrobblersMenu, settingsMenu};
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, mpdMenu, historyMenu, scrobblersMenu, settingsMenu};
     for (QMenu *menu : styledMenus) {
         styleMenu(menu);
     }
@@ -494,8 +500,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     compactMenu->addMenu(queueMenu);
     compactMenu->addMenu(playlistMenu);
     compactMenu->addMenu(playbackMenu);
-    compactMenu->addMenu(mpdMenu);
-    compactMenu->addMenu(scrobblersMenu);
+    compactMenu->addMenu(historyMenu);
     compactMenu->addMenu(settingsMenu);
 
     m_menuStrip = new QWidget(this);
@@ -525,8 +530,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->addMenu(queueMenu);
     m_menuBar->addMenu(playlistMenu);
     m_menuBar->addMenu(playbackMenu);
-    m_menuBar->addMenu(mpdMenu);
-    m_menuBar->addMenu(scrobblersMenu);
+    m_menuBar->addMenu(historyMenu);
     m_menuBar->addMenu(settingsMenu);
     menuStripLayout->addWidget(m_menuButton);
     menuStripLayout->addWidget(m_menuBar, 1);
@@ -640,6 +644,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
+    connect(listeningHistory, &QAction::triggered, this, &PlayerBar::listeningHistoryRequested);
     connect(m_compactMenu, &QAction::toggled, this, &PlayerBar::compactMenuChanged);
     connect(m_listUnsupportedFiles, &QAction::toggled, this, &PlayerBar::listUnsupportedFilesChanged);
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
@@ -669,8 +674,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(movePlaylistItemDown, &QAction::triggered, this, &PlayerBar::playlistMoveItemDownRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
+    connect(clearListenBrainzBacklog, &QAction::triggered, this, &PlayerBar::listenBrainzBacklogClearRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
     connect(lastFmSettings, &QAction::triggered, this, &PlayerBar::lastFmSettingsRequested);
+    connect(clearLastFmBacklog, &QAction::triggered, this, &PlayerBar::lastFmBacklogClearRequested);
     connect(m_scrobbleOffline, &QAction::toggled, this, &PlayerBar::scrobbleOfflineChanged);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(next, &QToolButton::clicked, this, &PlayerBar::nextRequested);

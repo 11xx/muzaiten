@@ -101,6 +101,7 @@ set(MUZAITEN_SOURCES
     src/ui/FileExplorerKeybindings.cpp
     src/ui/KeybindingsDialog.cpp
     src/ui/LinkRootsDialog.cpp
+    src/ui/ListeningHistoryDialog.cpp
     src/ui/MainWindow.cpp
     src/playlist/PlaylistImport.cpp
     src/playlist/PlaylistImportWorker.cpp
@@ -205,6 +206,7 @@ set(MUZAITEN_HEADERS
     src/ui/FileExplorerKeybindings.h
     src/ui/KeybindingsDialog.h
     src/ui/LinkRootsDialog.h
+    src/ui/ListeningHistoryDialog.h
     src/ui/KeyBindingTypes.h
     src/ui/MainWindow.h
     src/ui/MainPanelKeybindings.h

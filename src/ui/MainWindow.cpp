@@ -29,6 +29,7 @@
 #include "ui/FileExplorerView.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
+#include "ui/ListeningHistoryDialog.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelOrderDialog.h"
 #include "ui/PanelSearchController.h"
@@ -483,13 +484,20 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_artworkCache.get(), &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
 
     // Local listening history collects every completed listen unconditionally;
-    // the scrobblers later drain its unsent backlog per service.
+    // per-service owed flags capture which scrobblers were enabled when each
+    // listen happened, so enabling a service later cannot claim old history.
     m_listenHistory = std::make_unique<ListenHistoryStore>(listenHistoryPath());
     m_listenTracker = new ListenTracker(this);
     connect(m_listenTracker, &ListenTracker::listenReached, this, [this](const Track &track, qint64 startedAtSecs) {
-        m_listenHistory->recordListen(track, startedAtSecs);
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
-        QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
+        const bool oweListenBrainz = m_database->setting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false")) == QStringLiteral("true");
+        const bool oweLastFm = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
+        m_listenHistory->recordListen(track, startedAtSecs, oweLastFm, oweListenBrainz);
+        if (oweListenBrainz) {
+            QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
+        }
+        if (oweLastFm) {
+            QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
+        }
     });
 
     m_listenBrainzThread = new QThread(this);
@@ -498,6 +506,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzScrobbler, &QObject::deleteLater);
     connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
+    });
+    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::backlogProcessed, this, [this](int sent, int skipped, int remaining) {
+        statusBar()->showMessage(QStringLiteral("ListenBrainz processed %1 listens (%2 skipped, %3 pending)")
+                                     .arg(sent)
+                                     .arg(skipped)
+                                     .arg(remaining),
+                                 6000);
     });
     connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::disabledAfterFailures, this, [this](const QString &message) {
         m_database->setSetting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false"));
@@ -518,6 +533,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_lastFmThread, &QThread::finished, m_lastFmScrobbler, &QObject::deleteLater);
     connect(m_lastFmScrobbler, &LastFmScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
+    });
+    connect(m_lastFmScrobbler, &LastFmScrobbler::backlogProcessed, this, [this](int sent, int skipped, int remaining) {
+        statusBar()->showMessage(QStringLiteral("Last.fm processed %1 scrobbles (%2 skipped, %3 pending)")
+                                     .arg(sent)
+                                     .arg(skipped)
+                                     .arg(remaining),
+                                 6000);
     });
     connect(m_lastFmScrobbler, &LastFmScrobbler::disabledAfterFailures, this, [this](const QString &message) {
         m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
@@ -747,6 +769,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
+    connect(m_playerBar, &PlayerBar::listeningHistoryRequested, this, &MainWindow::showListeningHistory);
+    connect(m_playerBar, &PlayerBar::lastFmBacklogClearRequested, this, [this]() {
+        clearScrobbleBacklog(ListenHistoryStore::LastFm);
+    });
+    connect(m_playerBar, &PlayerBar::listenBrainzBacklogClearRequested, this, [this]() {
+        clearScrobbleBacklog(ListenHistoryStore::ListenBrainz);
+    });
     connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
@@ -3540,6 +3569,60 @@ void MainWindow::configureListenBrainz()
                               Q_ARG(QString, token),
                               Q_ARG(QString, listenHistoryPath()),
                               Q_ARG(QString, QDir(AppPaths::stateDir()).filePath(QStringLiteral("listenbrainz-pending.json"))));
+}
+
+void MainWindow::showListeningHistory()
+{
+    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
+        QMessageBox::warning(this, QStringLiteral("Listening history"), QStringLiteral("Listening history is unavailable."));
+        return;
+    }
+
+    ListeningHistoryDialog dialog(m_listenHistory.get(), this);
+    connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
+        if (changedCount > 0) {
+            triggerScrobbleUpload(service);
+        }
+    });
+    connect(&dialog, &ListeningHistoryDialog::statusMessageRequested, this, [this](const QString &message, int timeoutMs) {
+        statusBar()->showMessage(message, timeoutMs);
+    });
+    dialog.exec();
+}
+
+void MainWindow::clearScrobbleBacklog(const QString &service)
+{
+    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
+        statusBar()->showMessage(QStringLiteral("Listening history is unavailable"), 4000);
+        return;
+    }
+    const int pending = m_listenHistory->pendingCount(service);
+    if (pending <= 0) {
+        statusBar()->showMessage(QStringLiteral("No pending %1 scrobbles")
+                                     .arg(service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz")),
+                                 4000);
+        return;
+    }
+    const QString serviceName = service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz");
+    const auto choice = QMessageBox::question(this,
+                                              QStringLiteral("Clear scrobble backlog"),
+                                              QStringLiteral("Clear %1 pending %2 scrobbles? Permanent listening history will stay saved.")
+                                                  .arg(pending)
+                                                  .arg(serviceName));
+    if (choice != QMessageBox::Yes) {
+        return;
+    }
+    const int cleared = m_listenHistory->clearPending(service);
+    statusBar()->showMessage(QStringLiteral("Cleared %1 pending %2 scrobbles").arg(cleared).arg(serviceName), 5000);
+}
+
+void MainWindow::triggerScrobbleUpload(const QString &service)
+{
+    if (service == ListenHistoryStore::LastFm) {
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
+    } else if (service == ListenHistoryStore::ListenBrainz) {
+        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
+    }
 }
 
 bool MainWindow::scrobbleOffline() const

@@ -57,6 +57,9 @@ signals:
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdImportRequested();
+    void listeningHistoryRequested();
+    void lastFmBacklogClearRequested();
+    void listenBrainzBacklogClearRequested();
     void compactMenuChanged(bool compact);
     void listUnsupportedFilesChanged(bool show);
     void trackInfoPaneVisibleChanged(bool visible);

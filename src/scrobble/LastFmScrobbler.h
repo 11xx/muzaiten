@@ -41,6 +41,7 @@ public slots:
 
 signals:
     void submissionFailed(QString message);
+    void backlogProcessed(int sentCount, int skippedCount, int remainingCount);
     void disabledAfterFailures(QString message);
     void authenticationUrlReady(QUrl url);
     void authenticationSucceeded(QString username, QString sessionKey);
