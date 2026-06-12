@@ -73,6 +73,7 @@
 #include <QLineEdit>
 #include <QLoggingCategory>
 #include <QMenu>
+#include <QSystemTrayIcon>
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QProgressBar>
@@ -709,6 +710,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_mpris, &MprisService::relativeSeekRequested, this, &MainWindow::seekRelativeFromMpris);
     connect(m_mpris, &MprisService::volumeRequested, this, &MainWindow::setVolumeFromMpris);
     setupIpcServer();
+    setupTrayIcon();
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
@@ -1074,7 +1076,74 @@ void MainWindow::closeEvent(QCloseEvent *event)
     saveQueueState();
     saveExplorerState();
     saveAllViewSettings();
+    // With a tray icon, closing the window hides to tray and playback keeps
+    // running; only the tray's Quit (or no tray at all) ends the process.
+    if (m_tray != nullptr && !m_quitRequested) {
+        hide();
+        event->ignore();
+        return;
+    }
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::setupTrayIcon()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        return;
+    }
+    QIcon icon = windowIcon();
+    if (icon.isNull()) {
+        icon = QIcon::fromTheme(QStringLiteral("muzaiten"),
+                                QIcon::fromTheme(QStringLiteral("audio-x-generic")));
+    }
+    m_tray = new QSystemTrayIcon(icon, this);
+    m_tray->setToolTip(QStringLiteral("muzaiten"));
+    // The hidden-to-tray window must not end the application.
+    QApplication::setQuitOnLastWindowClosed(false);
+
+    auto *menu = new QMenu(this);
+    menu->addAction(QStringLiteral("Show/Hide"), this, &MainWindow::toggleWindowVisible);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Play/Pause"), this, &MainWindow::togglePlayback);
+    menu->addAction(QStringLiteral("Next"), this, &MainWindow::playNextTrack);
+    menu->addAction(QStringLiteral("Previous"), this, &MainWindow::playPreviousTrack);
+    menu->addAction(QStringLiteral("Stop"), m_playback, &PlaybackBackend::stop);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Quit"), this, [this]() {
+        m_quitRequested = true;
+        close();  // runs the closeEvent state saves
+        QApplication::quit();
+    });
+    m_tray->setContextMenu(menu);
+
+    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger) {
+            toggleWindowVisible();
+        } else if (reason == QSystemTrayIcon::MiddleClick) {
+            togglePlayback();
+        }
+    });
+    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
+        const QString title = track.title.isEmpty() ? track.filename : track.title;
+        m_tray->setToolTip(track.path.isEmpty()
+                               ? QStringLiteral("muzaiten")
+                               : QStringLiteral("%1 - %2").arg(track.artistName, title));
+    });
+    connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
+        m_tray->setToolTip(QStringLiteral("muzaiten"));
+    });
+    m_tray->show();
+}
+
+void MainWindow::toggleWindowVisible()
+{
+    if (isVisible() && !isMinimized()) {
+        hide();
+    } else {
+        show();
+        raise();
+        activateWindow();
+    }
 }
 
 void MainWindow::startScan(const QString &rootPath)

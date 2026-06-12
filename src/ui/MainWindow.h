@@ -35,6 +35,7 @@ class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QSplitter;
+class QSystemTrayIcon;
 class QThread;
 class MpdImportWorker;
 class QueueScreen;
@@ -203,6 +204,8 @@ private:
     void setVolumeFromMpris(double volume0To1);
     void seekRelativeFromMpris(qint64 offsetMs);
     void setupIpcServer();
+    void setupTrayIcon();
+    void toggleWindowVisible();
     QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
     QJsonObject ipcStatus() const;
     void updateMprisCapabilities();
@@ -315,6 +318,8 @@ private:
     MpdImportWorker *m_mpdImportWorker = nullptr;
     MprisService *m_mpris = nullptr;
     IpcServer *m_ipc = nullptr;
+    QSystemTrayIcon *m_tray = nullptr;
+    bool m_quitRequested = false;
     bool m_ratingTagSyncRunning = false;
     bool m_ratingTagSyncPending = false;
     QVector<ScanRoot> m_pendingScanRoots;
