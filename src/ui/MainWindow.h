@@ -19,6 +19,8 @@ class AlbumGrid;
 class ArtistSidebar;
 class FileExplorerView;
 class QCloseEvent;
+class QShowEvent;
+class QHideEvent;
 class QImage;
 class ListenBrainzScrobbler;
 class LastFmScrobbler;
@@ -58,6 +60,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
 
 private:
     void openLibraryFolder();

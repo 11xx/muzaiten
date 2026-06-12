@@ -2,6 +2,7 @@
 
 #include "Version.h"
 #include "core/Track.h"
+#include "ipc/IpcSocket.h"
 #include "scanner/TagReader.h"
 #include "ui/MainWindow.h"
 
@@ -9,6 +10,10 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QIcon>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocalSocket>
 #include <QLoggingCategory>
 #include <QStandardPaths>
 
@@ -56,13 +61,38 @@ MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
         setDesktopFileName(QStringLiteral(MUZAITEN_APP_ID));
     }
 
+    setWindowIcon(QIcon::fromTheme(QStringLiteral(MUZAITEN_APP_ID),
+                                   QIcon(QStringLiteral(":/icons/muzaiten.svg"))));
+
     qRegisterMetaType<Track>("Track");
     qRegisterMetaType<QVector<Track>>("QVector<Track>");
     configureCommandLine();
 }
 
+// Single-instance check, scoped to the resolved state dir: instances with
+// different state roots (dev-state, agent-state, ...) use different sockets
+// and stay fully isolated, but launching a second copy against the same state
+// just raises the running one's window — two processes sharing one set of
+// sqlite stores would corrupt each other's view of the world.
+bool MuzaitenApplication::raiseRunningInstance()
+{
+    QLocalSocket socket;
+    socket.connectToServer(IpcSocket::serverPath());
+    if (!socket.waitForConnected(500)) {
+        return false;  // no live instance (stale sockets refuse the connect)
+    }
+    socket.write(QJsonDocument(QJsonObject{{QStringLiteral("command"), QStringLiteral("raise")}})
+                     .toJson(QJsonDocument::Compact) + '\n');
+    socket.waitForReadyRead(2000);
+    return true;
+}
+
 int MuzaitenApplication::run()
 {
+    if (raiseRunningInstance()) {
+        qInfo("muzaiten is already running against this state root; raised its window instead.");
+        return 0;
+    }
     MainWindow window;
     window.show();
     return exec();

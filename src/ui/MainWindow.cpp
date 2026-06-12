@@ -1086,15 +1086,33 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
+// The tray icon only exists while the window is hidden: it is the handle back
+// to a GUI-less player, not a permanent fixture.
+void MainWindow::showEvent(QShowEvent *event)
+{
+    if (m_tray != nullptr) {
+        m_tray->hide();
+    }
+    QMainWindow::showEvent(event);
+}
+
+void MainWindow::hideEvent(QHideEvent *event)
+{
+    if (m_tray != nullptr && !m_quitRequested) {
+        m_tray->show();
+    }
+    QMainWindow::hideEvent(event);
+}
+
 void MainWindow::setupTrayIcon()
 {
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         return;
     }
-    QIcon icon = windowIcon();
+    // App icon from the theme (installed) with the bundled logo as fallback.
+    QIcon icon = QApplication::windowIcon();
     if (icon.isNull()) {
-        icon = QIcon::fromTheme(QStringLiteral("muzaiten"),
-                                QIcon::fromTheme(QStringLiteral("audio-x-generic")));
+        icon = QIcon(QStringLiteral(":/icons/muzaiten.svg"));
     }
     m_tray = new QSystemTrayIcon(icon, this);
     m_tray->setToolTip(QStringLiteral("muzaiten"));
@@ -1132,7 +1150,7 @@ void MainWindow::setupTrayIcon()
     connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
         m_tray->setToolTip(QStringLiteral("muzaiten"));
     });
-    m_tray->show();
+    // Not shown here: showEvent/hideEvent toggle it with window visibility.
 }
 
 void MainWindow::toggleWindowVisible()
@@ -4116,6 +4134,14 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
 
     if (command == QLatin1String("status")) {
         return ipcStatus();
+    }
+    if (command == QLatin1String("raise")) {
+        // Also the single-instance handshake: a second launch against the same
+        // state root sends this instead of starting up.
+        show();
+        raise();
+        activateWindow();
+        return status();
     }
     if (command == QLatin1String("play")) {
         playFromMpris();

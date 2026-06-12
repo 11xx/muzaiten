@@ -42,6 +42,7 @@ void printUsage()
         "  queue <index> | jump <index>  play the given queue row\n"
         "  search <text> [limit]   substring-search the library\n"
         "  play-file <path>        append a file to the queue and play it\n"
+        "  raise                   show and focus the running instance's window\n"
         "\n"
         "Options:\n"
         "  --json                  print the raw JSON reply\n",

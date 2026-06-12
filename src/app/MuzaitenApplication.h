@@ -11,6 +11,7 @@ public:
     int run();
 
 private:
+    bool raiseRunningInstance();
     void configureCommandLine();
     void configureLogging(bool verbose);
 };

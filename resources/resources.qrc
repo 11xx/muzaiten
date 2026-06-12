@@ -3,4 +3,7 @@
     <file>album-fallback-dark.svg</file>
     <file>album-fallback-light.svg</file>
   </qresource>
+  <qresource prefix="/icons">
+    <file alias="muzaiten.svg">../packaging/org.11xx.muzaiten.svg</file>
+  </qresource>
 </RCC>
