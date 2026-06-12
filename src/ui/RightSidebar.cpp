@@ -756,7 +756,7 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
 QString RightSidebar::viewSettingsJson() const
 {
     QJsonObject root = QJsonDocument::fromJson(m_queueTable->viewSettingsJson().toUtf8()).object();
-    root.insert(QStringLiteral("showTrackInfo"), m_trackInfoPane->isVisible());
+    root.insert(QStringLiteral("showTrackInfo"), !m_trackInfoPane->isHidden());
     root.insert(QStringLiteral("trackInfoFields"), trackInfoSettingsJson());
     root.insert(QStringLiteral("trackInfoMetadata"), m_trackInfoMetadataPattern);
     const QString overflowMode = m_trackInfoTitle->property("muzaitenOverflowMode").toString();

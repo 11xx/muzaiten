@@ -2077,6 +2077,7 @@ void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString 
 
 void MainWindow::loadViewSettings()
 {
+    m_loadingViewSettings = true;
     m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
     const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
     m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
@@ -2161,6 +2162,7 @@ void MainWindow::loadViewSettings()
 
     switchMainView(m_mainView);
     applySharedTableSettings();
+    m_loadingViewSettings = false;
 }
 
 void MainWindow::saveTrackTableViewSettings()
@@ -2181,6 +2183,9 @@ void MainWindow::saveArtistSidebarViewSettings()
 
 void MainWindow::saveRightSidebarViewSettings()
 {
+    if (m_loadingViewSettings) {
+        return;
+    }
     m_state->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
     applySharedTableSettings();
 }
@@ -2198,6 +2203,9 @@ void MainWindow::savePlaylistViewSettings()
 
 void MainWindow::saveMainWindowViewSettings()
 {
+    if (m_loadingViewSettings) {
+        return;
+    }
     auto sizesToJson = [](const QList<int> &sizes) {
         QJsonArray array;
         for (int size : sizes) {
@@ -2205,11 +2213,27 @@ void MainWindow::saveMainWindowViewSettings()
         }
         return array;
     };
+    auto sizesAreMeaningful = [](const QList<int> &sizes, int expectedCount) {
+        if (sizes.size() != expectedCount) {
+            return false;
+        }
+        int total = 0;
+        for (int size : sizes) {
+            total += size;
+        }
+        return total > 50;
+    };
 
-    QJsonObject root;
+    QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
     root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
-    root.insert(QStringLiteral("rootSplitter"), sizesToJson(m_rootSplitter->sizes()));
-    root.insert(QStringLiteral("centerSplitter"), sizesToJson(m_centerSplitter->sizes()));
+    const QList<int> rootSizes = m_rootSplitter->sizes();
+    if (sizesAreMeaningful(rootSizes, m_rootSplitter->count())) {
+        root.insert(QStringLiteral("rootSplitter"), sizesToJson(rootSizes));
+    }
+    const QList<int> centerSizes = m_centerSplitter->sizes();
+    if (sizesAreMeaningful(centerSizes, m_centerSplitter->count())) {
+        root.insert(QStringLiteral("centerSplitter"), sizesToJson(centerSizes));
+    }
     root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
     root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);
     root.insert(QStringLiteral("freeRoamDirectory"), m_freeRoamDirectory);

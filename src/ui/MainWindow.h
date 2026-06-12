@@ -338,4 +338,5 @@ private:
     qint64 m_lastSavedPlaybackPositionMs = -1;
     QString m_lastSavedPlaybackTrackPath;
     QString m_lastSavedPlaybackState;
+    bool m_loadingViewSettings = false;
 };

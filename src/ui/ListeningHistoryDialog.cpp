@@ -8,6 +8,7 @@
 #include <QAbstractItemView>
 #include <QDateTime>
 #include <QDialogButtonBox>
+#include <QEvent>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
@@ -16,6 +17,7 @@
 #include <QSet>
 #include <QTableView>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include <algorithm>
 
@@ -227,8 +229,10 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     m_view->setItemDelegate(new DenseTableDelegate(this));
     m_view->verticalHeader()->setVisible(false);
     m_view->verticalHeader()->setDefaultSectionSize(22);
+    m_view->verticalHeader()->setMinimumSectionSize(18);
     m_view->horizontalHeader()->setSectionsMovable(false);
     m_view->horizontalHeader()->setStretchLastSection(false);
+    m_view->viewport()->installEventFilter(this);
     m_columnLayout = new ResponsiveColumnLayout(m_view, historyResponsiveSpecs(), this);
     auto *resizer = NeighborColumnResizer::install(
         m_view->horizontalHeader(),
@@ -266,6 +270,21 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { updateActions(); });
 
     reload();
+}
+
+bool ListeningHistoryDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
+        auto *wheel = static_cast<QWheelEvent *>(event);
+        if (wheel->modifiers() & Qt::ControlModifier) {
+            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
+            const int rowHeight = std::clamp(m_view->verticalHeader()->defaultSectionSize() + step, 18, 48);
+            m_view->verticalHeader()->setDefaultSectionSize(rowHeight);
+            wheel->accept();
+            return true;
+        }
+    }
+    return QDialog::eventFilter(watched, event);
 }
 
 void ListeningHistoryDialog::reload()

@@ -22,6 +22,9 @@ signals:
     void backlogChanged(QString service, int changedCount);
     void statusMessageRequested(QString message, int timeoutMs);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void reload();
     void queueSelected(const QString &service);
