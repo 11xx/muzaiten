@@ -8,6 +8,8 @@
 #include "ipc/IpcSocket.h"
 
 #include <QCoreApplication>
+#include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
@@ -36,6 +38,10 @@ void printUsage()
         "  rate <stars>            rate the current track: 0-5 (halves allowed)\n"
         "  rate raw <0-100>        rate on the raw 0-100 scale\n"
         "  rate clear              remove the user rating\n"
+        "  queue                   list the queue (current row marked with >)\n"
+        "  queue <index> | jump <index>  play the given queue row\n"
+        "  search <text> [limit]   substring-search the library\n"
+        "  play-file <path>        append a file to the queue and play it\n"
         "\n"
         "Options:\n"
         "  --json                  print the raw JSON reply\n",
@@ -113,6 +119,22 @@ bool parseTime(QString text, double &seconds, bool &relative)
     return ok;
 }
 
+QString trackLine(const QJsonObject &track)
+{
+    const QString artist = track.value(QStringLiteral("artist")).toString();
+    const QString album = track.value(QStringLiteral("album")).toString();
+    QString line = QStringLiteral("%1 - %2").arg(artist.isEmpty() ? QStringLiteral("?") : artist,
+                                                 track.value(QStringLiteral("title")).toString());
+    if (!album.isEmpty()) {
+        line += QStringLiteral(" [%1]").arg(album);
+    }
+    const double durationMs = track.value(QStringLiteral("durationMs")).toDouble();
+    if (durationMs > 0) {
+        line += QStringLiteral("  %1").arg(formatSeconds(durationMs / 1000.0));
+    }
+    return line;
+}
+
 int fail(const QString &message)
 {
     std::fprintf(stderr, "muzaitenctl: %s\n", qPrintable(message));
@@ -143,7 +165,35 @@ int main(int argc, char **argv)
         command = QStringLiteral("prev");
     }
 
-    if (command == QLatin1String("seek")) {
+    if (command == QLatin1String("jump")
+        || (command == QLatin1String("queue") && !arguments.isEmpty())) {
+        bool ok = false;
+        const int index = arguments.first().toInt(&ok);
+        if (!ok || index < 0) {
+            return fail(QStringLiteral("queue jump needs a row index"));
+        }
+        command = QStringLiteral("queue-jump");
+        args.insert(QStringLiteral("index"), index);
+    } else if (command == QLatin1String("search")) {
+        if (arguments.isEmpty()) {
+            return fail(QStringLiteral("search needs a query"));
+        }
+        bool lastIsLimit = false;
+        if (arguments.size() > 1) {
+            const int limit = arguments.last().toInt(&lastIsLimit);
+            if (lastIsLimit) {
+                args.insert(QStringLiteral("limit"), limit);
+            }
+        }
+        const QStringList queryWords = arguments.mid(0, lastIsLimit ? arguments.size() - 1 : arguments.size());
+        args.insert(QStringLiteral("query"), queryWords.join(QLatin1Char(' ')));
+    } else if (command == QLatin1String("play-file")) {
+        if (arguments.isEmpty()) {
+            return fail(QStringLiteral("play-file needs a path"));
+        }
+        // Resolve against the client's cwd; the server has its own.
+        args.insert(QStringLiteral("path"), QFileInfo(arguments.first()).absoluteFilePath());
+    } else if (command == QLatin1String("seek")) {
         double seconds = 0.0;
         bool relative = false;
         if (arguments.isEmpty() || !parseTime(arguments.first(), seconds, relative)) {
@@ -213,6 +263,30 @@ int main(int argc, char **argv)
     }
     if (!response.value(QStringLiteral("ok")).toBool()) {
         return fail(response.value(QStringLiteral("error")).toString(QStringLiteral("unknown error")));
+    }
+    if (command == QLatin1String("queue")) {
+        const QJsonArray tracks = response.value(QStringLiteral("tracks")).toArray();
+        const int current = response.value(QStringLiteral("index")).toInt(-1);
+        for (qsizetype i = 0; i < tracks.size(); ++i) {
+            std::printf("%c %3lld  %s\n", i == current ? '>' : ' ', static_cast<long long>(i),
+                        qPrintable(trackLine(tracks.at(i).toObject())));
+        }
+        if (tracks.isEmpty()) {
+            std::printf("queue is empty\n");
+        }
+        return 0;
+    }
+    if (command == QLatin1String("search")) {
+        const QJsonArray results = response.value(QStringLiteral("results")).toArray();
+        for (const QJsonValue &value : results) {
+            const QJsonObject track = value.toObject();
+            std::printf("%s\n  %s\n", qPrintable(trackLine(track)),
+                        qPrintable(track.value(QStringLiteral("path")).toString()));
+        }
+        if (results.isEmpty()) {
+            std::printf("no matches\n");
+        }
+        return 0;
     }
     // "status" replies put the player state at the top level; command replies
     // nest the post-command state under "status".

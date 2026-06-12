@@ -84,6 +84,9 @@ public:
     bool removeScanRoot(int id);
     bool setScanRootLastScanned(int id, const QString &lastError = {});
     Track trackForPath(const QString &path) const;
+    // Case-insensitive substring search over title/artist/album/filename for
+    // external consumers (IPC); the in-app Search view uses the fzf engine.
+    QVector<Track> searchTracksLike(const QString &text, int limit = 50) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);

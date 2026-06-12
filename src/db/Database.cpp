@@ -889,6 +889,60 @@ Track Database::trackForPath(const QString &path) const
     return track;
 }
 
+QVector<Track> Database::searchTracksLike(const QString &text, int limit) const
+{
+    QVector<Track> tracks;
+    const QString needle = text.trimmed();
+    if (needle.isEmpty() || limit <= 0) {
+        return tracks;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "WHERE t.missing = 0 AND (t.title LIKE ? ESCAPE '\\' OR t.artist_name LIKE ? ESCAPE '\\' "
+        "OR t.album_artist_name LIKE ? ESCAPE '\\' OR t.album_title LIKE ? ESCAPE '\\' OR t.filename LIKE ? ESCAPE '\\') "
+        "ORDER BY lower(t.album_artist_name), lower(t.album_title), t.disc_number, t.track_number, lower(t.title) "
+        "LIMIT ?"));
+    QString escaped = needle;
+    escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+    escaped.replace(QLatin1Char('%'), QLatin1String("\\%"));
+    escaped.replace(QLatin1Char('_'), QLatin1String("\\_"));
+    const QString pattern = QStringLiteral("%%%1%%").arg(escaped);
+    for (int i = 0; i < 5; ++i) {
+        query.addBindValue(pattern);
+    }
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        return tracks;
+    }
+    while (query.next()) {
+        Track track;
+        track.path = query.value(0).toString();
+        track.parentDir = query.value(1).toString();
+        track.filename = query.value(2).toString();
+        track.title = query.value(3).toString();
+        track.artistName = query.value(4).toString();
+        track.albumArtistName = query.value(5).toString();
+        track.albumTitle = query.value(6).toString();
+        track.trackNumber = query.value(7).toInt();
+        track.discNumber = query.value(8).toInt();
+        track.durationMs = query.value(9).toLongLong();
+        track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
+        track.hasUserRating = !query.value(11).isNull();
+        track.effectiveRating0To100 = track.hasUserRating ? query.value(11).toInt() : track.rating0To100;
+        track.date = query.value(12).toString();
+        track.originalDate = query.value(13).toString();
+        track.fileSize = query.value(14).toLongLong();
+        track.fileMtime = query.value(15).toLongLong();
+        tracks.push_back(track);
+    }
+    return tracks;
+}
+
 bool Database::setUserTrackRating(const QString &trackPath, int rating0To100)
 {
     const int normalized = Rating::normalized0To100(rating0To100);

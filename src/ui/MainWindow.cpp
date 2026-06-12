@@ -4163,6 +4163,67 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         setVolumeFromMpris(percent / 100.0);
         return status();
     }
+    const auto trackJson = [](const Track &track, int index = -1) {
+        QJsonObject json{
+            {QStringLiteral("path"), track.path},
+            {QStringLiteral("title"), track.title.isEmpty() ? track.filename : track.title},
+            {QStringLiteral("artist"), track.artistName},
+            {QStringLiteral("album"), track.albumTitle},
+            {QStringLiteral("durationMs"), static_cast<double>(track.durationMs)},
+        };
+        if (index >= 0) {
+            json.insert(QStringLiteral("index"), index);
+        }
+        if (track.effectiveRating0To100 >= 0) {
+            json.insert(QStringLiteral("rating0To100"), track.effectiveRating0To100);
+        }
+        return json;
+    };
+    if (command == QLatin1String("queue")) {
+        QJsonArray tracks;
+        for (int i = 0; i < m_player->queue().size(); ++i) {
+            tracks.append(trackJson(m_player->queue().at(i), i));
+        }
+        return QJsonObject{{QStringLiteral("index"), m_player->queueIndex()},
+                           {QStringLiteral("tracks"), tracks}};
+    }
+    if (command == QLatin1String("queue-jump")) {
+        const int index = args.value(QStringLiteral("index")).toInt(-1);
+        if (index < 0 || index >= m_player->queue().size()) {
+            return error(QStringLiteral("queue-jump needs \"index\" in 0..%1").arg(m_player->queue().size() - 1));
+        }
+        m_player->playAt(index, true, false, /*explicitJump=*/true);
+        return status();
+    }
+    if (command == QLatin1String("search")) {
+        const QString text = args.value(QStringLiteral("query")).toString().trimmed();
+        if (text.isEmpty()) {
+            return error(QStringLiteral("search needs a non-empty \"query\""));
+        }
+        const int limit = std::clamp(args.value(QStringLiteral("limit")).toInt(50), 1, 500);
+        QJsonArray results;
+        for (const Track &track : m_database->searchTracksLike(text, limit)) {
+            results.append(trackJson(track));
+        }
+        return QJsonObject{{QStringLiteral("results"), results}};
+    }
+    if (command == QLatin1String("play-file")) {
+        const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();
+        if (path.isEmpty() || !QFileInfo::exists(path)) {
+            return error(QStringLiteral("play-file needs an existing \"path\""));
+        }
+        Track track = m_database->trackForPath(path);
+        if (track.path.isEmpty()) {
+            // Not in the library — play it like the free-roam explorer does.
+            const QFileInfo info(path);
+            track.path = path;
+            track.parentDir = info.absolutePath();
+            track.filename = info.fileName();
+            track.title = info.completeBaseName();
+        }
+        m_player->appendAndPlay(track);
+        return status();
+    }
     if (command == QLatin1String("rate")) {
         if (m_player->currentTrack().path.isEmpty()) {
             return error(QStringLiteral("no current track to rate"));
