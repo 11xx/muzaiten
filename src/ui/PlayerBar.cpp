@@ -261,6 +261,14 @@ protected:
         }
         QSlider::mousePressEvent(event);
     }
+
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        QSlider::mouseReleaseEvent(event);
+        if (orientation() == Qt::Horizontal && isSliderDown()) {
+            setSliderDown(false);
+        }
+    }
 };
 
 QToolButton *iconButton(QWidget *parent, QStyle::StandardPixmap icon, const QString &tooltip)
@@ -686,6 +694,11 @@ void PlayerBar::setTrackInfo(const QString &title, const QString &subtitle, int 
     m_subtitle->setText(subtitle);
     static_cast<RatingStrip *>(m_rating)->setRating(rating0To100);
     m_progress->setEnabled(m_hasTrack);
+    if (!m_hasTrack) {
+        m_trackStartGuardActive = false;
+        m_lastProgressPositionMs = 0;
+        m_lastProgressDurationMs = -1;
+    }
 }
 
 void PlayerBar::setListenBrainzEnabled(bool enabled)
@@ -839,7 +852,21 @@ void PlayerBar::setVolume(int volume0To100)
 void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
 {
     const qint64 safeDuration = std::max<qint64>(0, durationMs);
-    const qint64 safePosition = std::clamp<qint64>(positionMs, 0, safeDuration);
+    const qint64 rawPosition = std::max<qint64>(0, positionMs);
+    qint64 safePosition = std::clamp<qint64>(rawPosition, 0, safeDuration);
+
+    if (safePosition == 0 && m_hasTrack && safeDuration > 0
+        && (m_lastProgressPositionMs > 1000 || m_lastProgressDurationMs != safeDuration)) {
+        m_trackStartGuardActive = true;
+        m_trackStartGuardTimer.restart();
+        if (m_progress->isSliderDown()) {
+            m_progress->setSliderDown(false);
+        }
+    }
+
+    if (shouldHoldTransitionPosition(rawPosition, safeDuration)) {
+        safePosition = std::clamp<qint64>(m_lastProgressPositionMs, 0, safeDuration);
+    }
 
     m_elapsed->setText(formatTime(safePosition));
     m_duration->setText(formatTime(safeDuration));
@@ -848,6 +875,22 @@ void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
     if (!m_progress->isSliderDown()) {
         m_progress->setValue(static_cast<int>(std::min<qint64>(safePosition, std::numeric_limits<int>::max())));
     }
+    m_lastProgressPositionMs = safePosition;
+    m_lastProgressDurationMs = safeDuration;
+}
+
+bool PlayerBar::shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs)
+{
+    if (!m_trackStartGuardActive) {
+        return false;
+    }
+    constexpr qint64 plausibleStartPositionMs = 2000;
+    constexpr qint64 maxGuardMs = 1500;
+    if (durationMs <= 0 || positionMs <= plausibleStartPositionMs || m_trackStartGuardTimer.elapsed() > maxGuardMs) {
+        m_trackStartGuardActive = false;
+        return false;
+    }
+    return true;
 }
 
 void PlayerBar::changeEvent(QEvent *event)

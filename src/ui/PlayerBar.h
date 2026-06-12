@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QList>
 #include <QWidget>
 
@@ -99,6 +100,7 @@ signals:
 private:
     void restyleMenuBar();
     void updateShuffleIcon();
+    bool shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs);
 
     class QToolButton *m_menuButton = nullptr;
     class QToolButton *m_volumeButton = nullptr;
@@ -123,6 +125,10 @@ private:
     QLabel *m_elapsed = nullptr;
     QLabel *m_duration = nullptr;
     QSlider *m_progress = nullptr;
+    QElapsedTimer m_trackStartGuardTimer;
+    qint64 m_lastProgressPositionMs = 0;
+    qint64 m_lastProgressDurationMs = -1;
+    bool m_trackStartGuardActive = false;
     bool m_hasTrack = false;
     bool m_usingArtFallback = true;
 };
