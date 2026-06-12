@@ -4280,9 +4280,13 @@ void MainWindow::updateMprisCapabilities()
 
 void MainWindow::updatePlaybackPosition()
 {
-    m_playerBar->setPosition(m_playback->position(), m_playback->duration());
-    m_mpris->setPositionMs(m_playback->position());
-    m_mpris->setDurationMs(m_playback->duration());
+    const qint64 positionMs = std::max<qint64>(0, m_playback->position());
+    const qint64 durationMs = m_playback->hasSource()
+        ? std::max<qint64>(m_playback->duration(), m_player->currentTrack().durationMs)
+        : std::max<qint64>(0, m_playback->duration());
+    m_playerBar->setPosition(positionMs, durationMs);
+    m_mpris->setPositionMs(positionMs);
+    m_mpris->setDurationMs(durationMs);
     if (m_playback->state() == PlaybackBackend::State::Playing || m_playback->state() == PlaybackBackend::State::Paused) {
         schedulePlaybackStateSave(false);
     }

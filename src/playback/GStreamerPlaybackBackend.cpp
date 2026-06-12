@@ -127,9 +127,48 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
     // read-ahead (and any other non-output tweak) must not tear down a playing
     // pipeline.  This keeps a settings change seamless for the user.
     const bool rebuild = (m_playbin == nullptr) || outputConfigDiffers(m_profile, profile);
+    QString restoreUri;
+    const qint64 restorePositionMs = m_positionMs;
+    const State restoreState = m_state;
+    {
+        QMutexLocker locker(&m_mutex);
+        restoreUri = m_currentUri;
+    }
     m_profile = profile;
     if (rebuild) {
+        m_softPaused = false;
+        m_pendingSeekMs = -1;
         rebuildPipeline();
+        if (m_playbin != nullptr && m_state != State::Error && !restoreUri.isEmpty()
+            && (restoreState == State::Playing || restoreState == State::Paused)) {
+            {
+                QMutexLocker locker(&m_mutex);
+                m_currentUri = restoreUri;
+                m_preparedUri.clear();
+                m_gaplessAdvancePending = false;
+                g_object_set(G_OBJECT(m_playbin), "uri", restoreUri.toUtf8().constData(), nullptr);
+            }
+            if (restoreState == State::Playing) {
+                if (restorePositionMs > 0) {
+                    m_pendingSeekMs = restorePositionMs;
+                    gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+                    m_pollTimer.start();
+                    updateState(State::Playing);
+                } else {
+                    gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+                    m_pollTimer.start();
+                }
+            } else {
+                gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+                if (restorePositionMs > 0) {
+                    gst_element_seek_simple(m_playbin,
+                                            GST_FORMAT_TIME,
+                                            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+                                            static_cast<gint64>(restorePositionMs) * GST_MSECOND);
+                }
+                m_pollTimer.start();
+            }
+        }
         return;
     }
 
@@ -170,6 +209,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     m_softPaused = false;
     m_pendingSeekMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
+    resetTimeline();
 
     const QString uri = uriForUrl(url);
     {
@@ -177,8 +217,8 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
         m_currentUri = uri;
         m_preparedUri.clear();
         m_gaplessAdvancePending = false;
+        g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     }
-    g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
     // State updates arrive over the bus, which only poll() drains — make sure
     // the timer is live before the first message lands.
@@ -195,6 +235,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     m_softPaused = false;
     m_pendingSeekMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
+    resetTimeline();
 
     const QString uri = uriForUrl(url);
     {
@@ -202,8 +243,8 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
         m_currentUri = uri;
         m_preparedUri.clear();
         m_gaplessAdvancePending = false;
+        g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     }
-    g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     // Transition only to PAUSED: pipeline prerolls (buffering the first frame)
     // but the audio sink never produces output. No blip.
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
@@ -355,11 +396,8 @@ void GStreamerPlaybackBackend::aboutToFinishCallback(GstElement *playbin, void *
         self->m_gaplessAdvancePending = !preparedUri.isEmpty();
         if (!preparedUri.isEmpty()) {
             self->m_currentUri = preparedUri;
+            g_object_set(G_OBJECT(playbin), "uri", preparedUri.toUtf8().constData(), nullptr);
         }
-    }
-
-    if (!preparedUri.isEmpty()) {
-        g_object_set(G_OBJECT(playbin), "uri", preparedUri.toUtf8().constData(), nullptr);
     }
 
     QMetaObject::invokeMethod(self, [self]() {
@@ -548,6 +586,22 @@ void GStreamerPlaybackBackend::updateState(State state)
         m_pollTimer.start();
     }
     emit stateChanged(m_state);
+}
+
+void GStreamerPlaybackBackend::resetTimeline(qint64 positionMs, qint64 durationMs)
+{
+    const qint64 safePosition = std::max<qint64>(0, positionMs);
+    const qint64 safeDuration = std::max<qint64>(0, durationMs);
+    const bool positionUpdated = m_positionMs != safePosition;
+    const bool durationUpdated = m_durationMs != safeDuration;
+    m_positionMs = safePosition;
+    m_durationMs = safeDuration;
+    if (positionUpdated) {
+        emit positionChanged(m_positionMs);
+    }
+    if (durationUpdated) {
+        emit durationChanged(m_durationMs);
+    }
 }
 
 QString GStreamerPlaybackBackend::uriForUrl(const QUrl &url) const

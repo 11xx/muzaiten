@@ -40,6 +40,7 @@ private:
     void pollPosition();
     void handleMessage(GstMessage *message);
     void updateState(State state);
+    void resetTimeline(qint64 positionMs = 0, qint64 durationMs = 0);
     QString uriForUrl(const QUrl &url) const;
     // Whether two profiles differ in any field that requires tearing down and
     // rebuilding the pipeline (sink/device/mode/...).  Read-ahead is not such a
