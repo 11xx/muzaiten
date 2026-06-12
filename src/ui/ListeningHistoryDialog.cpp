@@ -228,7 +228,7 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     m_view->setWordWrap(false);
     m_view->setItemDelegate(new DenseTableDelegate(this));
     m_view->verticalHeader()->setVisible(false);
-    m_view->verticalHeader()->setDefaultSectionSize(22);
+    m_view->verticalHeader()->setDefaultSectionSize(18);
     m_view->verticalHeader()->setMinimumSectionSize(18);
     m_view->horizontalHeader()->setSectionsMovable(false);
     m_view->horizontalHeader()->setStretchLastSection(false);

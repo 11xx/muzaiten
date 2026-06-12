@@ -135,7 +135,7 @@ private:
     bool m_sortDescending = false;
 
     bool m_showCreatedDate = true;
-    int m_playlistRowHeight = 22;
+    int m_playlistRowHeight = 18;
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
     PlaylistItemTableModel *m_itemModel = nullptr;

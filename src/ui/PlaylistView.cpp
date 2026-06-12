@@ -550,7 +550,7 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
     m_sortKey = sortKeyFromString(root.value(QStringLiteral("sortKey")).toString());
     m_sortDescending = root.value(QStringLiteral("sortDescending")).toBool(false);
     m_showCreatedDate = root.value(QStringLiteral("showCreatedDate")).toBool(true);
-    m_playlistRowHeight = std::clamp(root.value(QStringLiteral("playlistRowHeight")).toInt(22), 18, 48);
+    m_playlistRowHeight = std::clamp(root.value(QStringLiteral("playlistRowHeight")).toInt(18), 18, 48);
     m_itemTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
     const QByteArray headerState = QByteArray::fromBase64(root.value(QStringLiteral("headerState")).toString().toLatin1());
@@ -577,7 +577,7 @@ void PlaylistView::resetViewSettings()
     m_sortKey = SortKey::Ordinal;
     m_sortDescending = false;
     m_showCreatedDate = true;
-    m_playlistRowHeight = 22;
+    m_playlistRowHeight = 18;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
     m_columnLayout->resetToDefaults();
