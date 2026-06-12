@@ -3591,8 +3591,7 @@ void MainWindow::configureListenBrainz()
                               Q_ARG(bool, enabled),
                               Q_ARG(bool, !scrobbleOffline()),
                               Q_ARG(QString, token),
-                              Q_ARG(QString, listenHistoryPath()),
-                              Q_ARG(QString, QDir(AppPaths::stateDir()).filePath(QStringLiteral("listenbrainz-pending.json"))));
+                              Q_ARG(QString, listenHistoryPath()));
 }
 
 void MainWindow::showListeningHistory()
@@ -3764,8 +3763,7 @@ void MainWindow::configureLastFm()
                               Q_ARG(QString, lastFmApiKey()),
                               Q_ARG(QString, lastFmSharedSecret()),
                               Q_ARG(QString, sessionKey),
-                              Q_ARG(QString, listenHistoryPath()),
-                              Q_ARG(QString, QDir(AppPaths::stateDir()).filePath(QStringLiteral("lastfm-pending.json"))));
+                              Q_ARG(QString, listenHistoryPath()));
 }
 
 void MainWindow::setLastFmEnabled(bool enabled)

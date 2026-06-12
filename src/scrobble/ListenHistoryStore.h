@@ -52,12 +52,6 @@ public:
     // Returns the row id, or -1 if not inserted.
     qint64 recordListen(const Track &track, qint64 listenedAtSecs, bool oweLastFm, bool oweListenBrainz);
 
-    // Legacy pending-queue migration: inserts a listen that is still owed to
-    // `unsentService` but marked sent for every other service (the old model
-    // kept one queue per service, so other services either got it already or
-    // were never meant to).
-    qint64 importLegacyListen(const Track &track, qint64 listenedAtSecs, const QString &unsentService);
-
     // Oldest-first unsent listens for a service (uploads must be in order).
     QList<Listen> unsent(const QString &service, int limit) const;
     int unsentCount(const QString &service) const;
@@ -69,9 +63,6 @@ public:
     QList<HistoryRow> historyRows(int limit, int offset = 0) const;
 
 private:
-    qint64 insertListen(const Track &track, qint64 listenedAtSecs,
-                        bool owedLastFm, bool sentLastFm,
-                        bool owedListenBrainz, bool sentListenBrainz);
 
     QString m_connectionName;
     QSqlDatabase m_db;

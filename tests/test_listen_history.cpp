@@ -16,7 +16,6 @@ private slots:
     void markSentPerService();
     void clearPendingPreservesHistory();
     void markOwedQueuesOnlyUnsentRows();
-    void legacyImportMarksOtherServiceSent();
     void invalidListensRejected();
 
 private:
@@ -133,16 +132,6 @@ void TestListenHistory::markOwedQueuesOnlyUnsentRows()
 
     QCOMPARE(store.markOwed(ListenHistoryStore::LastFm, {unsentId, sentId}), 1);
     QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 1);
-}
-
-void TestListenHistory::legacyImportMarksOtherServiceSent()
-{
-    QTemporaryDir dir;
-    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
-
-    QVERIFY(store.importLegacyListen(makeTrack(), 1000, ListenHistoryStore::LastFm) > 0);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::ListenBrainz), 0);
 }
 
 void TestListenHistory::invalidListensRejected()

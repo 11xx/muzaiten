@@ -3,7 +3,6 @@
 #include "Version.h"
 
 #include <QDateTime>
-#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLoggingCategory>
@@ -51,32 +50,6 @@ void addArrayIfPresent(QJsonObject &object, const QString &key, const QString &v
     }
 }
 
-// Rebuild a Track from a legacy pending-queue listen object so it can be
-// imported into the shared history store.
-Track trackFromLegacyListen(const QJsonObject &listen)
-{
-    const QJsonObject meta = listen.value(QStringLiteral("track_metadata")).toObject();
-    const QJsonObject info = meta.value(QStringLiteral("additional_info")).toObject();
-    Track track;
-    track.title = meta.value(QStringLiteral("track_name")).toString();
-    track.artistName = meta.value(QStringLiteral("artist_name")).toString();
-    track.albumTitle = meta.value(QStringLiteral("release_name")).toString();
-    track.trackNumber = info.value(QStringLiteral("tracknumber")).toString().toInt();
-    track.durationMs = static_cast<qint64>(info.value(QStringLiteral("duration_ms")).toDouble());
-    track.musicBrainz.releaseId = info.value(QStringLiteral("release_mbid")).toString();
-    track.musicBrainz.recordingId = info.value(QStringLiteral("recording_mbid")).toString();
-    track.musicBrainz.trackId = info.value(QStringLiteral("track_mbid")).toString();
-    const QJsonArray artistMbids = info.value(QStringLiteral("artist_mbids")).toArray();
-    if (!artistMbids.isEmpty()) {
-        track.musicBrainz.artistId = artistMbids.first().toString();
-    }
-    const QJsonArray workMbids = info.value(QStringLiteral("work_mbids")).toArray();
-    if (!workMbids.isEmpty()) {
-        track.musicBrainz.workId = workMbids.first().toString();
-    }
-    return track;
-}
-
 } // namespace
 
 ListenBrainzScrobbler::ListenBrainzScrobbler(QObject *parent)
@@ -93,7 +66,7 @@ ListenBrainzScrobbler::ListenBrainzScrobbler(QObject *parent)
 
 ListenBrainzScrobbler::~ListenBrainzScrobbler() = default;
 
-void ListenBrainzScrobbler::configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath, const QString &legacyCachePath)
+void ListenBrainzScrobbler::configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath)
 {
     m_enabled = enabled;
     m_uploadAllowed = uploadAllowed;
@@ -103,8 +76,6 @@ void ListenBrainzScrobbler::configure(bool enabled, bool uploadAllowed, const QS
         m_historyPath = historyPath;
         m_history = historyPath.isEmpty() ? nullptr : std::make_unique<ListenHistoryStore>(historyPath);
     }
-    migrateLegacyPending(legacyCachePath);
-
     if (!canUpload()) {
         m_retryTimer->stop();
         return;
@@ -112,31 +83,6 @@ void ListenBrainzScrobbler::configure(bool enabled, bool uploadAllowed, const QS
 
     m_retryTimer->start();
     uploadBacklog();
-}
-
-void ListenBrainzScrobbler::migrateLegacyPending(const QString &legacyCachePath)
-{
-    if (legacyCachePath.isEmpty() || m_history == nullptr || !m_history->isOpen()) {
-        return;
-    }
-    QFile file(legacyCachePath);
-    if (!file.exists()) {
-        return;
-    }
-    if (file.open(QIODevice::ReadOnly)) {
-        const QJsonArray listens = QJsonDocument::fromJson(file.readAll()).array();
-        for (const QJsonValue &value : listens) {
-            const QJsonObject listen = value.toObject();
-            const qint64 listenedAt = listen.value(QStringLiteral("listened_at")).toInteger();
-            const Track track = trackFromLegacyListen(listen);
-            if (listenedAt > 0 && !trackTitle(track).isEmpty() && !artistName(track).isEmpty()) {
-                m_history->importLegacyListen(track, listenedAt, ListenHistoryStore::ListenBrainz);
-            }
-        }
-        file.close();
-    }
-    file.remove();
-    qCInfo(listenBrainzLog) << "migrated legacy pending queue into listen history" << legacyCachePath;
 }
 
 void ListenBrainzScrobbler::trackStarted(const Track &track)

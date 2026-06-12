@@ -30,7 +30,7 @@ public slots:
     // uploadAllowed=false is the offline buffer: credentials stay configured
     // and history keeps accumulating, but nothing is sent (no scrobbles, no
     // now-playing) until uploads are re-allowed.
-    void configure(bool enabled, bool uploadAllowed, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &historyPath, const QString &legacyCachePath);
+    void configure(bool enabled, bool uploadAllowed, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &historyPath);
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
     void playbackStateChanged(bool playing);
@@ -60,7 +60,6 @@ private:
     };
 
     bool canUpload() const;
-    void migrateLegacyPending(const QString &legacyCachePath);
     void submitNowPlaying(const Track &track);
     void submitNowPlayingForTrackStart(const Track &track);
     void postParams(LastFmApi::Params params, RequestKind kind, const QList<qint64> &submittedIds = {});

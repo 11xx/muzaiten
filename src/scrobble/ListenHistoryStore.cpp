@@ -179,22 +179,6 @@ bool ListenHistoryStore::isOpen() const
 qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSecs,
                                         bool oweLastFm, bool oweListenBrainz)
 {
-    return insertListen(track, listenedAtSecs, oweLastFm, false, oweListenBrainz, false);
-}
-
-qint64 ListenHistoryStore::importLegacyListen(const Track &track, qint64 listenedAtSecs, const QString &unsentService)
-{
-    return insertListen(track, listenedAtSecs,
-                        unsentService == LastFm,
-                        unsentService != LastFm,
-                        unsentService == ListenBrainz,
-                        unsentService != ListenBrainz);
-}
-
-qint64 ListenHistoryStore::insertListen(const Track &track, qint64 listenedAtSecs,
-                                        bool owedLastFm, bool sentLastFm,
-                                        bool owedListenBrainz, bool sentListenBrainz)
-{
     const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
     const QString artist = track.artistName.trimmed().isEmpty() ? track.albumArtistName.trimmed() : track.artistName.trimmed();
     if (!m_db.isOpen() || listenedAtSecs <= 0 || title.isEmpty()) {
@@ -215,10 +199,10 @@ qint64 ListenHistoryStore::insertListen(const Track &track, qint64 listenedAtSec
     query.addBindValue(track.path);
     query.addBindValue(track.durationMs);
     query.addBindValue(QString::fromUtf8(QJsonDocument(trackToJson(track)).toJson(QJsonDocument::Compact)));
-    query.addBindValue(owedLastFm ? 1 : 0);
-    query.addBindValue(sentLastFm ? 1 : 0);
-    query.addBindValue(owedListenBrainz ? 1 : 0);
-    query.addBindValue(sentListenBrainz ? 1 : 0);
+    query.addBindValue(oweLastFm ? 1 : 0);
+    query.addBindValue(0);
+    query.addBindValue(oweListenBrainz ? 1 : 0);
+    query.addBindValue(0);
     if (!query.exec() || query.numRowsAffected() <= 0) {
         return -1;
     }

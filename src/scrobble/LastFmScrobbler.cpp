@@ -1,8 +1,6 @@
 #include "scrobble/LastFmScrobbler.h"
 
 #include <QDateTime>
-#include <QFile>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
@@ -48,21 +46,6 @@ void addCommonTrackParams(LastFmApi::Params &params, const LastFmApi::Scrobble &
     }
 }
 
-// Rebuild a Track from a legacy pending-queue scrobble object so it can be
-// imported into the shared history store.
-Track trackFromLegacyScrobble(const QJsonObject &object)
-{
-    Track track;
-    track.title = object.value(QStringLiteral("track")).toString().trimmed();
-    track.artistName = object.value(QStringLiteral("artist")).toString().trimmed();
-    track.albumTitle = object.value(QStringLiteral("album")).toString().trimmed();
-    track.albumArtistName = object.value(QStringLiteral("albumArtist")).toString().trimmed();
-    track.trackNumber = object.value(QStringLiteral("trackNumber")).toInt();
-    track.musicBrainz.recordingId = object.value(QStringLiteral("mbid")).toString().trimmed();
-    track.durationMs = static_cast<qint64>(object.value(QStringLiteral("duration")).toInt()) * 1000;
-    return track;
-}
-
 QString responseErrorText(const LastFmApi::Response &response, const QString &transportMessage)
 {
     if (response.parsed && !response.ok) {
@@ -90,7 +73,7 @@ LastFmScrobbler::LastFmScrobbler(QObject *parent)
 
 LastFmScrobbler::~LastFmScrobbler() = default;
 
-void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &historyPath, const QString &legacyCachePath)
+void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &historyPath)
 {
     m_enabled = enabled;
     m_uploadAllowed = uploadAllowed;
@@ -102,8 +85,6 @@ void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString 
         m_historyPath = historyPath;
         m_history = historyPath.isEmpty() ? nullptr : std::make_unique<ListenHistoryStore>(historyPath);
     }
-    migrateLegacyPending(legacyCachePath);
-
     if (!canUpload()) {
         m_retryTimer->stop();
         return;
@@ -111,31 +92,6 @@ void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString 
 
     m_retryTimer->start();
     uploadBacklog();
-}
-
-void LastFmScrobbler::migrateLegacyPending(const QString &legacyCachePath)
-{
-    if (legacyCachePath.isEmpty() || m_history == nullptr || !m_history->isOpen()) {
-        return;
-    }
-    QFile file(legacyCachePath);
-    if (!file.exists()) {
-        return;
-    }
-    if (file.open(QIODevice::ReadOnly)) {
-        const QJsonArray scrobbles = QJsonDocument::fromJson(file.readAll()).array();
-        for (const QJsonValue &value : scrobbles) {
-            const QJsonObject object = value.toObject();
-            const qint64 timestamp = static_cast<qint64>(object.value(QStringLiteral("timestamp")).toDouble());
-            const Track track = trackFromLegacyScrobble(object);
-            if (timestamp > 0 && !track.title.isEmpty() && !track.artistName.isEmpty()) {
-                m_history->importLegacyListen(track, timestamp, ListenHistoryStore::LastFm);
-            }
-        }
-        file.close();
-    }
-    file.remove();
-    qCInfo(lastFmLog) << "migrated legacy pending queue into listen history" << legacyCachePath;
 }
 
 void LastFmScrobbler::trackStarted(const Track &track)

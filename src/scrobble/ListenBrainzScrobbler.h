@@ -28,7 +28,7 @@ public slots:
     // uploadAllowed=false is the offline buffer: credentials stay configured
     // and history keeps accumulating, but nothing is sent (no listens, no
     // playing-now) until uploads are re-allowed.
-    void configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath, const QString &legacyCachePath);
+    void configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath);
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
     void playbackStateChanged(bool playing);
@@ -53,7 +53,6 @@ private:
     };
 
     bool canUpload() const;
-    void migrateLegacyPending(const QString &legacyCachePath);
     void submitPlayingNow(const Track &track);
     void submitPlayingNowForTrackStart(const Track &track);
     void submitPayload(const QJsonObject &payload, SubmissionKind kind, const QList<qint64> &submittedIds = {});
