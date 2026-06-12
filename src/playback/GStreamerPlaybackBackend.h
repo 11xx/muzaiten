@@ -68,6 +68,7 @@ private:
     State m_state = State::Stopped;
     qint64 m_positionMs = 0;
     qint64 m_durationMs = 0;
+    State m_targetState = State::Stopped;
     bool m_gaplessAdvancePending = false;
     double m_volume = 1.0;
 

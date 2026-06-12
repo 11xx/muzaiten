@@ -148,6 +148,7 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
                 m_gaplessAdvancePending = false;
                 g_object_set(G_OBJECT(m_playbin), "uri", restoreUri.toUtf8().constData(), nullptr);
             }
+            m_targetState = restoreState;
             if (restoreState == State::Playing) {
                 if (restorePositionMs > 0) {
                     m_pendingSeekMs = restorePositionMs;
@@ -157,6 +158,7 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
                 } else {
                     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
                     m_pollTimer.start();
+                    updateState(State::Playing);
                 }
             } else {
                 gst_element_set_state(m_playbin, GST_STATE_PAUSED);
@@ -167,6 +169,7 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
                                             static_cast<gint64>(restorePositionMs) * GST_MSECOND);
                 }
                 m_pollTimer.start();
+                updateState(State::Paused);
             }
         }
         return;
@@ -208,6 +211,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
 
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_targetState = State::Playing;
     gst_element_set_state(m_playbin, GST_STATE_READY);
     resetTimeline();
 
@@ -223,6 +227,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     // State updates arrive over the bus, which only poll() drains — make sure
     // the timer is live before the first message lands.
     m_pollTimer.start();
+    updateState(State::Playing);
     startReadAhead(url);
 }
 
@@ -234,6 +239,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
 
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_targetState = State::Paused;
     gst_element_set_state(m_playbin, GST_STATE_READY);
     resetTimeline();
 
@@ -249,6 +255,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     // but the audio sink never produces output. No blip.
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
     m_pollTimer.start();
+    updateState(State::Paused);
     startReadAhead(url);
 }
 
@@ -274,6 +281,7 @@ void GStreamerPlaybackBackend::pause()
 
     const bool release = (m_profile.mode == QStringLiteral("bit-perfect"))
                          || m_profile.releaseSinkOnPause;
+    m_targetState = State::Paused;
 
     if (release) {
         // Capture position before tearing down the pipeline.
@@ -289,6 +297,7 @@ void GStreamerPlaybackBackend::pause()
         updateState(State::Paused);
     } else {
         gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+        updateState(State::Paused);
     }
 }
 
@@ -300,6 +309,7 @@ void GStreamerPlaybackBackend::resume()
 
     if (m_softPaused) {
         m_softPaused = false;
+        m_targetState = State::Playing;
         // Re-preroll asynchronously: READY→PAUSED.  We must NOT block the GUI
         // thread waiting for preroll — a slow/contended device could freeze the
         // UI for seconds.  Remember the resume position; handleMessage() applies
@@ -313,14 +323,17 @@ void GStreamerPlaybackBackend::resume()
         updateState(State::Playing);
         return;
     }
+    m_targetState = State::Playing;
     gst_element_set_state(m_playbin, GST_STATE_PLAYING);
     m_pollTimer.start();
+    updateState(State::Playing);
 }
 
 void GStreamerPlaybackBackend::stop()
 {
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_targetState = State::Stopped;
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
@@ -419,6 +432,7 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         m_playbin = gst_element_factory_make("playbin", "muzaiten-playbin");
     }
     if (m_playbin == nullptr) {
+        m_targetState = State::Error;
         updateState(State::Error);
         emit errorOccurred(QStringLiteral("GStreamer playbin is not available"));
         return;
@@ -442,6 +456,7 @@ bool GStreamerPlaybackBackend::configureSink()
         // rather than letting playbin silently auto-plug its default sink — a
         // bit-perfect/explicit-device profile must not fall through to shared
         // output without the user knowing.
+        m_targetState = State::Error;
         updateState(State::Error);
         emit errorOccurred(QStringLiteral("No usable GStreamer audio sink is available"));
         return false;
@@ -525,11 +540,13 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         if (debug != nullptr) {
             g_free(debug);
         }
+        m_targetState = State::Error;
         updateState(State::Error);
         emit errorOccurred(text);
         break;
     }
     case GST_MESSAGE_EOS:
+        m_targetState = State::Stopped;
         updateState(State::Stopped);
         emit finished();
         break;
@@ -559,13 +576,19 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             gst_message_parse_state_changed(message, &oldState, &newState, &pending);
             Q_UNUSED(oldState)
             Q_UNUSED(pending)
-            // Suppress intermediate state messages when:
-            //  - soft-paused: pipeline is dropping to READY to release the device
-            //    (keep the UI in Paused, don't tell scrobblers/MPRIS we stopped);
-            //  - a resume seek is pending: pipeline briefly sits in PAUSED while
-            //    re-prerolling, but the user already asked to play.
+            // Publish transport intent, not GStreamer's transient hops. Source
+            // swaps and resume preroll move through READY/PAUSED on the way to
+            // PLAYING; forwarding those as user-visible Stopped/Paused drifts
+            // PlayerBar, IPC/MPRIS and scrobbling away from audible playback.
             if (!m_softPaused && m_pendingSeekMs < 0) {
-                updateState(stateFromGst(newState));
+                const State observedState = stateFromGst(newState);
+                if (m_targetState == State::Playing && observedState != State::Playing) {
+                    break;
+                }
+                if (m_targetState == State::Paused && observedState != State::Paused) {
+                    break;
+                }
+                updateState(observedState);
             }
         }
         break;

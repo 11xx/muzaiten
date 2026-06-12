@@ -289,10 +289,14 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    // "status" replies put the player state at the top level; command replies
-    // nest the post-command state under "status".
-    printStatus(response.contains(QStringLiteral("status"))
-                    ? response.value(QStringLiteral("status")).toObject()
-                    : response);
+    // Plain "status" replies carry the player object at response["status"],
+    // while command replies carry the full post-command track JSON there.
+    QJsonObject statusObject = response;
+    const QJsonObject nestedStatus = response.value(QStringLiteral("status")).toObject();
+    if (nestedStatus.value(QStringLiteral("status")).isObject()
+        || nestedStatus.value(QStringLiteral("tags")).isObject()) {
+        statusObject = nestedStatus;
+    }
+    printStatus(statusObject);
     return 0;
 }
