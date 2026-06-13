@@ -333,14 +333,15 @@ void applyDictionary(const QString &base, const QVector<int> &baseSrc,
 
 } // namespace
 
-static FoldResult foldImpl(const QString &src, bool withIndex)
+static FoldResult foldImpl(const QString &src, bool withIndex, bool romanizeCjk)
 {
     QString base;
     QVector<int> baseSrc;
     decomposeFold(src, base, baseSrc);
 
-    // Substitute kanji/word readings before romanizing the resulting kana.
-    {
+    // Substitute kanji/word readings before romanizing the resulting kana. Both
+    // are skipped for the cheap "basic" fold (kana/kanji then pass through).
+    if (romanizeCjk) {
         QString db;
         QVector<int> dbSrc;
         applyDictionary(base, baseSrc, db, dbSrc);
@@ -362,13 +363,13 @@ static FoldResult foldImpl(const QString &src, bool withIndex)
         const int srcIdx = baseSrc.at(j);
 
         // Normalize katakana onto hiragana code points (ア→あ, ヴ→ゔ).
-        if (c >= kKataLow && c <= kKataHigh) {
+        if (romanizeCjk && c >= kKataLow && c <= kKataHigh) {
             c -= 0x60;
-        } else if (c == kProlonged) {
+        } else if (romanizeCjk && c == kProlonged) {
             continue; // long-vowel mark: drop
         }
 
-        const bool isKana = c >= kHiraLow && c <= kHiraHigh;
+        const bool isKana = romanizeCjk && c >= kHiraLow && c <= kHiraHigh;
         if (isKana) {
             if (c == kHiraSokuon) {            // っ — geminate the next syllable
                 pendingGemination = true;
@@ -413,14 +414,14 @@ static FoldResult foldImpl(const QString &src, bool withIndex)
     return {std::move(out.text), std::move(out.srcIndex)};
 }
 
-FoldResult fold(const QString &src)
+FoldResult fold(const QString &src, bool romanizeCjk)
 {
-    return foldImpl(src, /*withIndex=*/true);
+    return foldImpl(src, /*withIndex=*/true, romanizeCjk);
 }
 
-QString foldText(const QString &src)
+QString foldText(const QString &src, bool romanizeCjk)
 {
-    return foldImpl(src, /*withIndex=*/false).text;
+    return foldImpl(src, /*withIndex=*/false, romanizeCjk).text;
 }
 
 } // namespace Search::Fold

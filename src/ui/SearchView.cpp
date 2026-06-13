@@ -140,10 +140,17 @@ void SearchView::setupUi()
     m_cleanupTimer->setSingleShot(true);
     m_cleanupTimer->setInterval(kIndexCleanupMs);
 
+    // Spinner timer — animates the status-label glyph while the index loads.
+    // (Queries against the loaded data are instant, so there is no per-keystroke
+    // spinner; this only runs during the initial/background index load.)
+    m_spinnerTimer = new QTimer(this);
+    m_spinnerTimer->setInterval(90);
+
     // Connections
     connect(m_searchBox, &QLineEdit::textChanged, this, &SearchView::onTextChanged);
     connect(m_debounce,  &QTimer::timeout,         this, &SearchView::onDebounceTimeout);
     connect(m_cleanupTimer, &QTimer::timeout,      this, &SearchView::onCleanupTimeout);
+    connect(m_spinnerTimer, &QTimer::timeout,      this, &SearchView::onSpinnerTick);
 
     connect(m_resultList, &QListView::doubleClicked, this, &SearchView::onDoubleClicked);
     connect(m_resultList, &QListView::customContextMenuRequested, this, &SearchView::showContextMenu);
@@ -332,6 +339,8 @@ void SearchView::ensureIndexLoaded(const QString &dbPath)
     setupWorker(dbPath);
     if (m_indexLoaded || m_buildPending) return;
     m_buildPending = true;
+    m_spinnerTimer->start();
+    updateStatusLabel();
     QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);
 }
 
@@ -340,6 +349,9 @@ void SearchView::invalidateIndex(const QString &dbPath)
     m_dbPath = dbPath;
     if (!m_worker) return;
     m_buildPending = true;
+    m_indexUpgrading = false;
+    m_spinnerTimer->start();
+    updateStatusLabel();
     QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);
 }
 
@@ -377,6 +389,8 @@ void SearchView::setupWorker(const QString &dbPath)
 
     connect(m_worker, &Search::SearchWorker::indexReady,
             this, &SearchView::onIndexReady, Qt::QueuedConnection);
+    connect(m_worker, &Search::SearchWorker::indexUpgraded,
+            this, &SearchView::onIndexUpgraded, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::indexError,
             this, &SearchView::onIndexError, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::resultsReady,
@@ -404,6 +418,8 @@ void SearchView::onCleanupTimeout()
     }
     m_indexLoaded = false;
     m_buildPending = false;
+    m_indexUpgrading = false;
+    m_spinnerTimer->stop();
     m_totalIndexed = 0;
     m_model->clear();
 }
@@ -440,16 +456,37 @@ void SearchView::submitQuery()
 
 void SearchView::onIndexReady(int count)
 {
+    // Basic fold ready: queries work now. The full romaji fold keeps loading in
+    // the background (spinner stays up until onIndexUpgraded).
     m_indexLoaded = true;
     m_buildPending = false;
+    m_indexUpgrading = true;
     m_totalIndexed = count;
     updateStatusLabel();
     submitQuery(); // re-run the current query against the new index
 }
 
+void SearchView::onIndexUpgraded()
+{
+    // Full romaji/sort fold complete — stop the spinner and re-run the current
+    // query so anything that depends on the extended data now matches.
+    m_indexUpgrading = false;
+    m_spinnerTimer->stop();
+    updateStatusLabel();
+    submitQuery();
+}
+
+void SearchView::onSpinnerTick()
+{
+    ++m_spinnerFrame;
+    updateStatusLabel();
+}
+
 void SearchView::onIndexError(const QString &error)
 {
     m_buildPending = false;
+    m_indexUpgrading = false;
+    m_spinnerTimer->stop();
     m_statusLabel->setText(QStringLiteral("Index error: %1").arg(error));
 }
 
@@ -478,20 +515,28 @@ void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> r
 
 void SearchView::updateStatusLabel()
 {
+    // Animated spinner glyph shown only while the index loads (initial build or
+    // the background romaji upgrade) — never per keystroke.
+    static const QString kSpinnerFrames = QString::fromUtf8("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+    const bool loading = m_buildPending || m_indexUpgrading;
+    const QString spin = loading
+        ? kSpinnerFrames.at(m_spinnerFrame % static_cast<int>(kSpinnerFrames.size())) + QStringLiteral("  ")
+        : QString();
+
     if (!m_indexLoaded) {
-        m_statusLabel->setText(QStringLiteral("Loading index…"));
+        m_statusLabel->setText(spin + QStringLiteral("Loading library…"));
         return;
     }
     const QString modeStr = m_fuzzyMode ? QStringLiteral("fuzzy") : QStringLiteral("exact");
     if (m_searchBox->text().isEmpty()) {
-        m_statusLabel->setText(QStringLiteral("%1 tracks  ·  %2").arg(m_totalIndexed).arg(modeStr));
+        m_statusLabel->setText(QStringLiteral("%1%2 tracks  ·  %3").arg(spin).arg(m_totalIndexed).arg(modeStr));
     } else {
         const int shown = m_model->rowCount();
         const QString countStr = (m_matchCount > shown)
             ? QStringLiteral("%1 of %2").arg(shown).arg(m_matchCount)  // capped display
             : QString::number(m_matchCount);
-        m_statusLabel->setText(QStringLiteral("%1 / %2  ·  %3")
-                                    .arg(countStr).arg(m_totalIndexed).arg(modeStr));
+        m_statusLabel->setText(QStringLiteral("%1%2 / %3  ·  %4")
+                                    .arg(spin, countStr).arg(m_totalIndexed).arg(modeStr));
     }
 }
 

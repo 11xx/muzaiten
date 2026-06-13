@@ -107,10 +107,13 @@ public:
     QVector<Album> albumsForArtist(const QString &albumArtist) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QStringList &albumTitleFilters) const;
-    // Lightweight row set for building the search index — all non-missing local tracks.
-    QVector<Search::SearchRecord> allTracksForSearch() const;
+    // Lightweight row set for building the search index — all non-missing local
+    // tracks. `extended` controls norm folding: true does the full fold (CJK
+    // romaji + sort-reading enrichment); false produces the cheap basic fold and
+    // leaves the raw sort names on each record for a later background upgrade.
+    QVector<Search::SearchRecord> allTracksForSearch(bool extended = true) const;
     // Lightweight row set for MPD-imported tracks.
-    QVector<Search::SearchRecord> allMpdTracksForSearch() const;
+    QVector<Search::SearchRecord> allMpdTracksForSearch(bool extended = true) const;
 
 private:
     qint64 upsertArtist(const QString &name, const QString &sortName = {});

@@ -43,6 +43,20 @@ void SearchIndex::build(QVector<SearchRecord> records)
     m_records = std::move(records);
 }
 
+void SearchIndex::upgradeFold(int lo, int hi, QHash<QString, QString> &pool)
+{
+    hi = std::min(hi, static_cast<int>(m_records.size()));
+    for (int i = lo; i < hi; ++i) {
+        SearchRecord &rec = m_records[i];
+        foldRecordNorms(rec, /*extended=*/true, &pool);
+        // The raw sort names have been folded in; free them.
+        rec.titleSort.clear();
+        rec.artistSort.clear();
+        rec.albumArtistSort.clear();
+        rec.albumSort.clear();
+    }
+}
+
 void SearchIndex::clear()
 {
     m_records.clear();

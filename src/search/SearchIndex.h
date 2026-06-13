@@ -52,6 +52,12 @@ public:
     // Replace the index contents. Takes ownership of the supplied records.
     void build(QVector<SearchRecord> records);
 
+    // Upgrade records [lo, hi) from the cheap basic fold to the full extended
+    // fold (CJK romaji + sort-reading enrichment), interning norms through
+    // `pool` and freeing each record's raw sort names. Driven in chunks by the
+    // background loading pass so per-keystroke queries stay responsive.
+    void upgradeFold(int lo, int hi, QHash<QString, QString> &pool);
+
     // Release all indexed records, freeing memory.
     void clear();
 

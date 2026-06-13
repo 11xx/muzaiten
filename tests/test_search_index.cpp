@@ -236,6 +236,25 @@ private slots:
         QVERIFY(unique.size() >= 14);
     }
 
+    void backgroundUpgradeEnablesRomajiMatching()
+    {
+        // A kana/kanji title with a kana sort reading: under the basic fold both
+        // pass through, so a romaji query misses.
+        SearchRecord r = makeRecord(QString::fromUtf8("三線の花"), QStringLiteral("BEGIN"), QStringLiteral("Best"));
+        r.titleSort = QString::fromUtf8("サンシンノハナ");
+        foldRecordNorms(r, /*extended=*/false);
+
+        SearchIndex idx;
+        idx.build({r});
+        QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 0);
+
+        // The background upgrade re-folds to the extended tier (romaji), so the
+        // same query now matches — and the raw sort name is freed.
+        QHash<QString, QString> pool;
+        idx.upgradeFold(0, idx.size(), pool);
+        QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 1);
+    }
+
     void highlightMapsFoldedPositionsToDisplayChars()
     {
         // Accented title, plain query — highlight the original (accented) chars.

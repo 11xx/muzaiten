@@ -75,9 +75,11 @@ private slots:
     void onTextChanged();
     void onDebounceTimeout();
     void onIndexReady(int count);
+    void onIndexUpgraded();
     void onIndexError(const QString &error);
     void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
     void onCleanupTimeout();
+    void onSpinnerTick();
     void showContextMenu(const QPoint &pos);
     void onDoubleClicked(const QModelIndex &index);
 
@@ -110,6 +112,7 @@ private:
     SearchResultDelegate *m_delegate     = nullptr;
     QTimer               *m_debounce     = nullptr;
     QTimer               *m_cleanupTimer = nullptr;
+    QTimer               *m_spinnerTimer = nullptr;
 
     QThread              *m_workerThread = nullptr;
     Search::SearchWorker *m_worker       = nullptr;
@@ -118,8 +121,10 @@ private:
     Search::ResultRanker m_ranker;
 
     QString   m_dbPath;
-    bool      m_indexLoaded  = false;
+    bool      m_indexLoaded  = false;  // basic fold ready — queries enabled
     bool      m_buildPending = false;
+    bool      m_indexUpgrading = false; // extended (romaji) fold loading in background
+    int       m_spinnerFrame = 0;
     bool      m_fuzzyMode    = false;
     quint64   m_queryId      = 0;
     int       m_totalIndexed = 0;

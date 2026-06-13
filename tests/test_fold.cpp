@@ -70,6 +70,19 @@ private slots:
         QCOMPARE(Fold::foldText(QString::fromUtf8("阿")), QString::fromUtf8("阿"));
     }
 
+    void basicFoldSkipsCjkRomanization()
+    {
+        // Diacritics and script transliteration still apply in basic mode...
+        QCOMPARE(Fold::foldText(QString::fromUtf8("Café"), false), QStringLiteral("cafe"));
+        QCOMPARE(Fold::foldText(QString::fromUtf8("Привет"), false), QStringLiteral("privet"));
+        // ...but kana and kanji pass through (deferred to the extended tier).
+        QCOMPARE(Fold::foldText(QString::fromUtf8("さんしん"), false), QString::fromUtf8("さんしん"));
+        QCOMPARE(Fold::foldText(QString::fromUtf8("三線"), false), QString::fromUtf8("三線"));
+        // Extended (the default) romanizes them.
+        QCOMPARE(Fold::foldText(QString::fromUtf8("さんしん")), QStringLiteral("sanshin"));
+        QCOMPARE(Fold::foldText(QString::fromUtf8("三線")), QStringLiteral("sanshin"));
+    }
+
     void idempotentOnFoldedText()
     {
         const QString once = Fold::foldText(QString::fromUtf8("Café SHCHükÖ"));

@@ -157,21 +157,6 @@ QString internString(QHash<QString, QString> &pool, const QString &value)
     return value;
 }
 
-// Fold `text`, and when a sort/reading name is present and folds to something
-// different, append it (space-separated) so a romaji/kana reading matches the
-// original-script field via the orderless substring matcher.
-QString foldWithReading(const QString &text, const QString &reading)
-{
-    QString folded = Search::Fold::foldText(text);
-    if (!reading.isEmpty()) {
-        const QString fr = Search::Fold::foldText(reading);
-        if (!fr.isEmpty() && fr != folded) {
-            folded += QLatin1Char(' ') + fr;
-        }
-    }
-    return folded;
-}
-
 } // namespace
 
 Database::Database(QString connectionName)
@@ -1783,7 +1768,7 @@ QVector<Album> Database::mpdAlbumsForArtist(const QString &albumArtist, const QS
     return albums;
 }
 
-QVector<Search::SearchRecord> Database::allTracksForSearch() const
+QVector<Search::SearchRecord> Database::allTracksForSearch(bool extended) const
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
@@ -1824,24 +1809,21 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         rec.fileMtime         = query.value(15).toLongLong();
         rec.fileSize          = query.value(16).toLongLong();
         rec.bitDepth          = query.value(17).toInt();
+        rec.titleSort         = query.value(18).toString();
+        rec.artistSort        = internString(pool, query.value(19).toString());
+        rec.albumArtistSort   = internString(pool, query.value(20).toString());
+        rec.albumSort         = internString(pool, query.value(21).toString());
         rec.source            = Search::TrackSource::Local;
-        // Pre-compute folded versions (lowercase + ASCII transliteration +
-        // romaji) for diacritic/script-insensitive matching; intern the
-        // repeated ones (path/title/filename are near-unique, left as-is).
-        // Sort/reading names (Picard *sort tags) are folded into the same field
-        // so a romaji/kana reading matches the original-script title/artist.
-        rec.normTitle        = foldWithReading(rec.title, query.value(18).toString());
-        rec.normArtist       = internString(pool, foldWithReading(rec.artistName, query.value(19).toString()));
-        rec.normAlbumArtist  = internString(pool, foldWithReading(rec.albumArtistName, query.value(20).toString()));
-        rec.normAlbum        = internString(pool, foldWithReading(rec.albumTitle, query.value(21).toString()));
-        rec.normFilename     = Search::Fold::foldText(rec.filename);
-        rec.normPath         = Search::Fold::foldText(rec.path);
+        // Fold the display fields (+ sort/reading names) into the norm fields.
+        // `extended=false` yields the cheap basic fold and keeps the raw sort
+        // names on the record for the worker's background upgrade pass.
+        Search::foldRecordNorms(rec, extended, &pool);
         records.push_back(std::move(rec));
     }
     return records;
 }
 
-QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
+QVector<Search::SearchRecord> Database::allMpdTracksForSearch(bool extended) const
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
@@ -1867,12 +1849,8 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
         rec.discNumber      = query.value(8).toInt();
         rec.rating0To100    = -1;
         rec.source          = Search::TrackSource::Mpd;
-        rec.normTitle        = Search::Fold::foldText(rec.title);
-        rec.normArtist       = internString(pool, Search::Fold::foldText(rec.artistName));
-        rec.normAlbumArtist  = internString(pool, Search::Fold::foldText(rec.albumArtistName));
-        rec.normAlbum        = internString(pool, Search::Fold::foldText(rec.albumTitle));
-        rec.normFilename     = Search::Fold::foldText(rec.filename);
-        rec.normPath         = Search::Fold::foldText(rec.path);
+        // MPD tracks carry no sort tags; just fold the display fields.
+        Search::foldRecordNorms(rec, extended, &pool);
         records.push_back(std::move(rec));
     }
     return records;
