@@ -58,11 +58,16 @@ private slots:
         QCOMPARE(Fold::foldText(QString::fromUtf8("ラーメン")), QStringLiteral("ramen"));      // long mark dropped
     }
 
-    void kanjiPassthrough()
+    void kanjiDictionaryReadings()
     {
-        // Word-level kanji readings are a later slice; kanji must pass through
-        // unchanged so typing the original character still matches.
-        QCOMPARE(Fold::foldText(QString::fromUtf8("三線")), QString::fromUtf8("三線"));
+        // Word-level reading from the dictionary.
+        QCOMPARE(Fold::foldText(QString::fromUtf8("三線")), QStringLiteral("sanshin"));
+        // Longest-match word beats single-kanji fallbacks (東京 not 東+京).
+        QCOMPARE(Fold::foldText(QString::fromUtf8("東京")), QStringLiteral("toukyou"));
+        // The headline goal, end to end: 三線(word) + の(kana) + 花(single kanji).
+        QCOMPARE(Fold::foldText(QString::fromUtf8("三線の花")), QStringLiteral("sanshinnohana"));
+        // A kanji with no dictionary entry passes through so typing it still matches.
+        QCOMPARE(Fold::foldText(QString::fromUtf8("阿")), QString::fromUtf8("阿"));
     }
 
     void idempotentOnFoldedText()

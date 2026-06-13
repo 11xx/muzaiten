@@ -3,6 +3,8 @@
 #include <QChar>
 #include <QHash>
 
+#include <algorithm>
+
 namespace Search::Fold {
 
 namespace {
@@ -180,6 +182,55 @@ QString geminate(const QString &romaji)
     return romaji.at(0) + romaji;                                                  // っか→kka
 }
 
+// ---- step 5b: kanji/word reading dictionary --------------------------------
+// Kanji readings are word-level, not derivable per character (三線 reads
+// "sanshin", a fixed word reading), so they need a lookup. This is the bundled,
+// hand-tuned starter table: surface (kanji/mixed) → hiragana reading. The
+// dictionary pass runs *before* kana→romaji, so readings here are written in
+// kana and romanized by the existing stage. Longest surface wins, so multi-kanji
+// words override single-kanji fallbacks (三線 beats 三+線).
+//
+// This is a seed, expected to grow over time. Single-kanji entries pick the most
+// common standalone reading — a heuristic that favors recall; a longer word
+// entry always takes precedence. Per-track reading tags (a later slice) cover
+// what the table misses. To extend: add rows below.
+bool isKanji(char16_t u)
+{
+    return (u >= 0x3400 && u <= 0x9FFF)    // CJK Unified Ideographs (+ Ext A)
+        || (u >= 0xF900 && u <= 0xFAFF);   // CJK Compatibility Ideographs
+}
+
+struct JapaneseDict {
+    QHash<QString, QString> map;
+    int maxKeyLen = 0;
+};
+
+const JapaneseDict &japaneseDict()
+{
+    static const JapaneseDict dict = [] {
+        JapaneseDict d;
+        auto add = [&](const char *surface, const char *reading) {
+            const QString s = QString::fromUtf8(surface);
+            d.map.insert(s, QString::fromUtf8(reading));
+            d.maxKeyLen = std::max(d.maxKeyLen, static_cast<int>(s.size()));
+        };
+        // Multi-character words (checked first via longest-match).
+        add("三線", "さんしん");  add("言葉", "ことば");  add("世界", "せかい");
+        add("未来", "みらい");    add("物語", "ものがたり"); add("東京", "とうきょう");
+        add("京都", "きょうと");  add("音楽", "おんがく");  add("時間", "じかん");
+        add("約束", "やくそく");  add("季節", "きせつ");    add("記憶", "きおく");
+        // Common single kanji — most-common standalone reading.
+        add("花", "はな");  add("名", "な");    add("君", "きみ");  add("海", "うみ");
+        add("空", "そら");  add("心", "こころ"); add("恋", "こい");  add("愛", "あい");
+        add("夢", "ゆめ");  add("道", "みち");  add("風", "かぜ");  add("月", "つき");
+        add("雨", "あめ");  add("桜", "さくら"); add("涙", "なみだ"); add("声", "こえ");
+        add("光", "ひかり"); add("時", "とき");  add("歌", "うた");  add("星", "ほし");
+        add("雪", "ゆき");  add("夜", "よる");  add("朝", "あさ");  add("色", "いろ");
+        return d;
+    }();
+    return dict;
+}
+
 // ---- driver ----------------------------------------------------------------
 
 struct Builder {
@@ -243,6 +294,43 @@ void decomposeFold(const QString &src, QString &base, QVector<int> &baseSrc)
     }
 }
 
+// Stage A.5: replace dictionary surface forms (kanji words) with their kana
+// reading, longest-match-first. Only a kanji start triggers a lookup, so non-CJK
+// text is copied through untouched. Reading characters are spread evenly across
+// the surface's source span so a romaji match highlights the underlying kanji
+// (e.g. matching "sanshin" lights 三線, "san" lights 三).
+void applyDictionary(const QString &base, const QVector<int> &baseSrc,
+                     QString &out, QVector<int> &outSrc)
+{
+    const JapaneseDict &dict = japaneseDict();
+    const int n = static_cast<int>(base.size());
+    out.reserve(n);
+    outSrc.reserve(n);
+    for (int j = 0; j < n;) {
+        if (isKanji(base.at(j).unicode())) {
+            const int maxL = std::min(dict.maxKeyLen, n - j);
+            QString reading;
+            int matchedLen = 0;
+            for (int L = maxL; L >= 1; --L) {
+                const auto it = dict.map.constFind(base.mid(j, L));
+                if (it != dict.map.constEnd()) { reading = it.value(); matchedLen = L; break; }
+            }
+            if (matchedLen > 0) {
+                const int K = static_cast<int>(reading.size());
+                for (int k = 0; k < K; ++k) {
+                    out += reading.at(k);
+                    outSrc.append(baseSrc.at(j + (k * matchedLen) / K));
+                }
+                j += matchedLen;
+                continue;
+            }
+        }
+        out += base.at(j);
+        outSrc.append(baseSrc.at(j));
+        ++j;
+    }
+}
+
 } // namespace
 
 static FoldResult foldImpl(const QString &src, bool withIndex)
@@ -250,6 +338,15 @@ static FoldResult foldImpl(const QString &src, bool withIndex)
     QString base;
     QVector<int> baseSrc;
     decomposeFold(src, base, baseSrc);
+
+    // Substitute kanji/word readings before romanizing the resulting kana.
+    {
+        QString db;
+        QVector<int> dbSrc;
+        applyDictionary(base, baseSrc, db, dbSrc);
+        base = std::move(db);
+        baseSrc = std::move(dbSrc);
+    }
 
     Builder out;
     out.withIndex = withIndex;

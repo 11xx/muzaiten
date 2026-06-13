@@ -256,6 +256,13 @@ private slots:
             Search::HighlightField::Title, false);
         QVERIFY(kana.contains(2)); // し
         QVERIFY(kana.contains(3)); // ん
+
+        // Dictionary word: a romaji query bolds the underlying kanji, spread
+        // across the surface (三 and 線 both lit for "sanshin").
+        const QVector<int> kanji = Search::highlightPositions(
+            QString::fromUtf8("三線"), SearchQuery::parse(QStringLiteral("sanshin")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(kanji, (QVector<int>{0, 1}));
     }
 
     void largeIndex_parallelScanCoversEveryRowOnce()
