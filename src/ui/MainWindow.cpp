@@ -457,6 +457,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playbackStateSaveTimer, &QTimer::timeout, this, [this]() {
         savePlaybackState();
     });
+    m_queueStateSaveTimer = new QTimer(this);
+    m_queueStateSaveTimer->setSingleShot(true);
+    m_queueStateSaveTimer->setInterval(500);
+    connect(m_queueStateSaveTimer, &QTimer::timeout, this, [this]() {
+        saveQueueState();
+    });
 
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
@@ -1926,6 +1932,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
         m_mpris->setTrack(current);
     }
     m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
+    scheduleQueueStateSave();
 
     if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
         schedulePendingRatingTagSync();
@@ -1993,7 +2000,7 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
             m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
                                       m_player->queueIndex() + 1, m_player->playNextInsertIndex());
             refreshPlayNextRange();
-            saveQueueState();
+            scheduleQueueStateSave();
         }
         m_ratingTagSyncRunning = false;
         const bool runPendingAgain = m_ratingTagSyncPending;
@@ -2548,6 +2555,9 @@ void MainWindow::loadQueueState()
 
 void MainWindow::saveQueueState()
 {
+    if (m_queueStateSaveTimer != nullptr) {
+        m_queueStateSaveTimer->stop();
+    }
     if (!m_player->queue().isEmpty()) {
         ensureCurrentQueueIdentity();
     }
@@ -2566,6 +2576,17 @@ void MainWindow::saveQueueState()
     root.insert(QStringLiteral("queueSourceName"), m_queueSourceName);
     m_state->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
     updateMprisCapabilities();
+}
+
+void MainWindow::scheduleQueueStateSave(bool immediate)
+{
+    if (immediate) {
+        saveQueueState();
+        return;
+    }
+    if (m_queueStateSaveTimer != nullptr) {
+        m_queueStateSaveTimer->start();
+    }
 }
 
 QJsonObject MainWindow::queueSnapshotObject(const QString &name) const
@@ -4011,7 +4032,7 @@ void MainWindow::onPlayerIndexChanged(int index, bool userInitiated)
             m_queueScreen->revealCurrentPlaying();
         }
     }
-    saveQueueState();
+    scheduleQueueStateSave();
 }
 
 void MainWindow::notifyScrobblersTrackStarted(const Track &track)
@@ -4091,7 +4112,7 @@ void MainWindow::clearQueue()
 void MainWindow::clearPlayNextPriority()
 {
     m_player->collapsePlayNext();
-    saveQueueState();
+    scheduleQueueStateSave();
 }
 
 void MainWindow::patchQueueTracksFromMetadata(const QVector<Track> &tracks)
@@ -4125,7 +4146,7 @@ void MainWindow::syncQueueState()
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Queue);
     }
-    saveQueueState();
+    scheduleQueueStateSave();
 }
 
 void MainWindow::playAlbumNow(const QString &albumTitle)

@@ -104,6 +104,7 @@ private:
     void refreshLibraryFileExplorer();
     void loadQueueState();
     void saveQueueState();
+    void scheduleQueueStateSave(bool immediate = false);
     QJsonObject queueSnapshotObject(const QString &name) const;
     QVector<Track> tracksFromSnapshotObject(const QJsonObject &snapshot) const;
     QJsonObject loadQueueSnapshotsRoot() const;
@@ -334,6 +335,7 @@ private:
     int m_activeScanRootId = 0;
     QString m_activeScanRootPath;
     QTimer *m_playbackStateSaveTimer = nullptr;
+    QTimer *m_queueStateSaveTimer = nullptr;
     bool m_savePlaybackPositionEnabled = true;
     bool m_restorePlaybackStateEnabled = true;
     qint64 m_lastSavedPlaybackPositionMs = -1;
