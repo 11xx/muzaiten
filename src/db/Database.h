@@ -87,6 +87,9 @@ public:
     // Case-insensitive substring search over title/artist/album/filename for
     // external consumers (IPC); the in-app Search view uses the fzf engine.
     QVector<Track> searchTracksLike(const QString &text, int limit = 50) const;
+    // Up to `count` random non-missing library tracks for library-wide shuffle,
+    // skipping any path in `excludePaths` (typically the current queue).
+    QVector<Track> randomTracks(int count, const QSet<QString> &excludePaths = {}) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);
