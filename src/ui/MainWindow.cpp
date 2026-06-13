@@ -796,7 +796,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
-    connect(m_queueScreen, &QueueScreen::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
     connect(m_mpris, &MprisService::raiseRequested, this, [this]() {
@@ -971,7 +970,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_rightSidebar, &RightSidebar::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
-    connect(m_rightSidebar, &RightSidebar::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
     connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
@@ -1041,7 +1039,6 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_playlistView, &PlaylistView::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_playlistView, &PlaylistView::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
-    connect(m_playlistView, &PlaylistView::mergeSavedQueueRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
     connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
     connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);

@@ -398,7 +398,6 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable, &QueueTable::clearPlayNextPriorityRequested, this, &RightSidebar::clearPlayNextPriorityRequested);
     connect(m_queueTable, &QueueTable::saveQueueAsRequested, this, &RightSidebar::saveQueueAsRequested);
     connect(m_queueTable, &QueueTable::restorePreviousQueueRequested, this, &RightSidebar::restorePreviousQueueRequested);
-    connect(m_queueTable, &QueueTable::mergeSavedQueueRequested, this, &RightSidebar::mergeSavedQueueRequested);
     connect(m_queueTable, &QueueTable::findFileRequested, this, &RightSidebar::findFileRequested);
     connect(m_queueTable, &QueueTable::propertiesRequested, this, &RightSidebar::propertiesRequested);
     connect(m_queueTable, &QueueTable::trackLibraryRequested, this, &RightSidebar::trackLibraryRequested);

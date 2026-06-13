@@ -1221,10 +1221,6 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(restorePrevious, &QAction::triggered, this, [this]() {
         emit restorePreviousQueueRequested();
     });
-    QAction *mergeSaved = menu.addAction(QStringLiteral("Merge saved queue (play next)…"));
-    connect(mergeSaved, &QAction::triggered, this, [this]() {
-        emit mergeSavedQueueRequested();
-    });
 
     menu.exec(m_view->viewport()->mapToGlobal(pos));
 }

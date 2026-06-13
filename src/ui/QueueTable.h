@@ -51,7 +51,6 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
-    void mergeSavedQueueRequested();
     void findFileRequested(const Track &track);
     void trackLibraryRequested(const Track &track);
     void addToPlaylistRequested(const QVector<Track> &tracks);

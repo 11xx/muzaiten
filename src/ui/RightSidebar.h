@@ -53,7 +53,6 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
-    void mergeSavedQueueRequested();
     void artistRequested(const QString &artistName);
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);

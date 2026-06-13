@@ -1084,8 +1084,6 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     connect(saveQueue, &QAction::triggered, this, [this]() { emit saveQueueAsRequested(); });
     QAction *restoreQueue = menu.addAction(QStringLiteral("Restore saved queue..."));
     connect(restoreQueue, &QAction::triggered, this, [this]() { emit restorePreviousQueueRequested(); });
-    QAction *mergeQueue = menu.addAction(QStringLiteral("Merge saved queue (play next)..."));
-    connect(mergeQueue, &QAction::triggered, this, [this]() { emit mergeSavedQueueRequested(); });
 
     menu.exec(m_playlistList->viewport()->mapToGlobal(pos));
 }
@@ -1151,8 +1149,6 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     connect(saveQueue, &QAction::triggered, this, [this]() { emit saveQueueAsRequested(); });
     QAction *restoreQueue = menu.addAction(QStringLiteral("Restore saved queue..."));
     connect(restoreQueue, &QAction::triggered, this, [this]() { emit restorePreviousQueueRequested(); });
-    QAction *mergeQueue = menu.addAction(QStringLiteral("Merge saved queue (play next)..."));
-    connect(mergeQueue, &QAction::triggered, this, [this]() { emit mergeSavedQueueRequested(); });
 
     menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
 }

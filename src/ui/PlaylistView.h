@@ -88,7 +88,6 @@ signals:
     void addToPlaylistRequested(const QStringList &paths);
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
-    void mergeSavedQueueRequested();
     void playSavedQueueRequested(const QString &snapshotId, int startIndex);
     void addSavedQueueToQueueRequested(const QString &snapshotId);
     void playNextSavedQueueRequested(const QString &snapshotId);
