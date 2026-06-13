@@ -180,10 +180,20 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
     }
 
     // Sort/reading names (often romaji/kana for non-Latin titles via MusicBrainz).
-    track.titleSort       = firstProperty(properties, {QStringLiteral("TITLESORT")});
-    track.artistSort      = firstProperty(properties, {QStringLiteral("ARTISTSORT")});
-    track.albumArtistSort = firstProperty(properties, {QStringLiteral("ALBUMARTISTSORT")});
-    track.albumSort       = firstProperty(properties, {QStringLiteral("ALBUMSORT")});
+    // Combine the standard *SORT tag with the Classical Extras "*SORTEN" variant
+    // (a latin/romaji transliteration) when present — both feed search recall.
+    const auto sortName = [&](const QString &key) {
+        const QString primary = firstProperty(properties, {key});
+        const QString latin = firstProperty(properties, {key + QStringLiteral("EN")});
+        if (latin.isEmpty() || latin == primary) {
+            return primary;
+        }
+        return primary.isEmpty() ? latin : primary + QLatin1Char(' ') + latin;
+    };
+    track.titleSort       = sortName(QStringLiteral("TITLESORT"));
+    track.artistSort      = sortName(QStringLiteral("ARTISTSORT"));
+    track.albumArtistSort = sortName(QStringLiteral("ALBUMARTISTSORT"));
+    track.albumSort       = sortName(QStringLiteral("ALBUMSORT"));
 
     const TagRatingReadResult rating = readRating(properties);
     if (rating.rating0To100 >= 0) {

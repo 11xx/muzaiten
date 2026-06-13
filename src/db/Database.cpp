@@ -395,18 +395,25 @@ bool Database::migrate()
             QSqlQuery upd(m_db);
             upd.prepare(QStringLiteral(
                 "UPDATE tracks SET title_sort=?, artist_sort=?, album_artist_sort=?, album_sort=? WHERE id=?"));
-            const auto firstTag = [](const MetadataBlob::FullMetadata &meta, const QString &key) {
-                const QStringList v = meta.tags.value(key);
-                return v.isEmpty() ? QVariant() : QVariant(v.first());
+            // Combine the standard sort tag with the Classical Extras "*SORTEN"
+            // latin variant, matching TagReader's freshly-scanned behavior.
+            const auto sortTag = [](const MetadataBlob::FullMetadata &meta, const QString &key) -> QVariant {
+                const QString primary = meta.tags.value(key).value(0);
+                const QString latin = meta.tags.value(key + QStringLiteral("EN")).value(0);
+                QString combined = primary;
+                if (!latin.isEmpty() && latin != primary) {
+                    combined = primary.isEmpty() ? latin : primary + QLatin1Char(' ') + latin;
+                }
+                return combined.isEmpty() ? QVariant() : QVariant(combined);
             };
             while (bfQuery.next()) {
                 const qint64 trackId = bfQuery.value(0).toLongLong();
                 const qint64 rawSize = bfQuery.value(1).toLongLong();
                 const MetadataBlob::FullMetadata meta = MetadataBlob::decode(bfQuery.value(2).toByteArray(), rawSize);
-                const QVariant ts = firstTag(meta, QStringLiteral("TITLESORT"));
-                const QVariant as = firstTag(meta, QStringLiteral("ARTISTSORT"));
-                const QVariant aas = firstTag(meta, QStringLiteral("ALBUMARTISTSORT"));
-                const QVariant als = firstTag(meta, QStringLiteral("ALBUMSORT"));
+                const QVariant ts = sortTag(meta, QStringLiteral("TITLESORT"));
+                const QVariant as = sortTag(meta, QStringLiteral("ARTISTSORT"));
+                const QVariant aas = sortTag(meta, QStringLiteral("ALBUMARTISTSORT"));
+                const QVariant als = sortTag(meta, QStringLiteral("ALBUMSORT"));
                 if (ts.isValid() || as.isValid() || aas.isValid() || als.isValid()) {
                     upd.addBindValue(ts);
                     upd.addBindValue(as);
