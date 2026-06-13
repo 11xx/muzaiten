@@ -900,9 +900,10 @@ QVector<Track> Database::searchTracksLike(const QString &text, int limit) const
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
-        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime, p.status "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.missing = 0 AND (t.title LIKE ? ESCAPE '\\' OR t.artist_name LIKE ? ESCAPE '\\' "
         "OR t.album_artist_name LIKE ? ESCAPE '\\' OR t.album_title LIKE ? ESCAPE '\\' OR t.filename LIKE ? ESCAPE '\\') "
         "ORDER BY lower(t.album_artist_name), lower(t.album_title), t.disc_number, t.track_number, lower(t.title) "
@@ -933,7 +934,13 @@ QVector<Track> Database::searchTracksLike(const QString &text, int limit) const
         track.durationMs = query.value(9).toLongLong();
         track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
         track.hasUserRating = !query.value(11).isNull();
-        track.effectiveRating0To100 = track.hasUserRating ? query.value(11).toInt() : track.rating0To100;
+        const QString pendingStatus = query.value(16).toString();
+        const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
+            || pendingStatus == QStringLiteral("failed")
+            || pendingStatus == QStringLiteral("blocked_no_writable_path");
+        track.effectiveRating0To100 = pendingDbRating && track.hasUserRating
+            ? query.value(11).toInt()
+            : (track.rating0To100 >= 0 ? track.rating0To100 : (track.hasUserRating ? query.value(11).toInt() : Rating::unset));
         track.date = query.value(12).toString();
         track.originalDate = query.value(13).toString();
         track.fileSize = query.value(14).toLongLong();

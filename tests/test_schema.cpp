@@ -17,6 +17,7 @@ private slots:
     void upsertsTrackAndQueriesArtist();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
+    void searchTracksLikeUsesPendingRatingOverlay();
     void pendingRatingWritesRoundTrip();
     void tracksWithUserRatingsRoundTrip();
     void userAlbumRatingOverridesAverageRating();
@@ -132,6 +133,31 @@ void SchemaTest::pendingUserRatingOverridesScannedRating()
 
     QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
     tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
+    QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::searchTracksLikeUsesPendingRatingOverlay()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-search-pending-rating-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    track.title = QStringLiteral("Searchable Song");
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    QVERIFY2(database.setUserTrackRating(track.path, 30), qPrintable(database.lastError()));
+    QVERIFY2(database.setPendingTrackRatingWrite(track.path, 30, QStringLiteral("failed")), qPrintable(database.lastError()));
+
+    QVector<Track> tracks = database.searchTracksLike(QStringLiteral("Searchable"), 10);
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().rating0To100, 80);
+    QCOMPARE(tracks.first().effectiveRating0To100, 30);
+
+    QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
+    tracks = database.searchTracksLike(QStringLiteral("Searchable"), 10);
+    QCOMPARE(tracks.size(), 1);
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
 }
 
