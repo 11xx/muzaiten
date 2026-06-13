@@ -80,6 +80,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/ListenHistoryStore.cpp
     src/scrobble/ListenTracker.cpp
     src/search/Exclusion.cpp
+    src/search/fold/Fold.cpp
     src/search/FuzzyMatch.cpp
     src/search/RankConfig.cpp
     src/search/ResultRanker.cpp

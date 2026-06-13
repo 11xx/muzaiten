@@ -133,6 +133,7 @@ add_test(NAME test_lastfm_api COMMAND test_lastfm_api)
 add_executable(test_search_query
     test_search_query.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_search_query PRIVATE ../src)
 target_link_libraries(test_search_query PRIVATE Qt6::Core Qt6::Test)
@@ -148,6 +149,15 @@ target_link_libraries(test_fuzzy_match PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_fuzzy_match PRIVATE cxx_std_26)
 add_test(NAME test_fuzzy_match COMMAND test_fuzzy_match)
 
+add_executable(test_fold
+    test_fold.cpp
+    ../src/search/fold/Fold.cpp
+)
+target_include_directories(test_fold PRIVATE ../src)
+target_link_libraries(test_fold PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_fold PRIVATE cxx_std_26)
+add_test(NAME test_fold COMMAND test_fold)
+
 add_executable(test_search_index
     test_search_index.cpp
     ../src/search/Exclusion.cpp
@@ -155,6 +165,7 @@ add_executable(test_search_index
     ../src/search/SearchIndex.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_search_index PRIVATE ../src)
 target_link_libraries(test_search_index PRIVATE Qt6::Core Qt6::Test)
@@ -166,6 +177,7 @@ add_executable(test_search_matcher
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_search_matcher PRIVATE ../src)
 target_link_libraries(test_search_matcher PRIVATE Qt6::Core Qt6::Test)
@@ -190,6 +202,7 @@ add_executable(test_exclusion
     ../src/search/SearchIndex.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_exclusion PRIVATE ../src)
 target_link_libraries(test_exclusion PRIVATE Qt6::Core Qt6::Test)
@@ -205,6 +218,7 @@ add_executable(test_result_ranker
     ../src/search/SearchIndex.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
     ../src/core/MusicSort.cpp
     ../src/core/Rating.cpp
 )
@@ -248,6 +262,7 @@ add_executable(test_queue_table
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_queue_table PRIVATE ../src)
 target_link_libraries(test_queue_table PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
@@ -285,6 +300,7 @@ add_executable(test_playlist_import
     ../src/search/SearchIndex.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_playlist_import PRIVATE ../src)
 target_link_libraries(test_playlist_import PRIVATE Qt6::Core Qt6::Test)
