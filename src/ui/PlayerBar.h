@@ -1,5 +1,7 @@
 #pragma once
 
+#include "player/PlayerCore.h"
+
 #include <QElapsedTimer>
 #include <QList>
 #include <QWidget>
@@ -34,6 +36,14 @@ public:
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
     void setVolume(int volume0To100);
+    // Reflect externally-driven mode state (persisted settings, MPRIS) on the
+    // transport buttons without re-emitting a change request.
+    void setRepeatMode(RepeatMode mode);
+    void setShuffleMode(ShuffleMode mode);
+    // Cycle the modes as a left-click would; lets keyboard shortcuts share the
+    // exact same behaviour as the buttons.
+    void cycleRepeatMode();
+    void cycleShuffleMode();
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -99,10 +109,14 @@ signals:
     void seekRequested(qint64 positionMs);
     void volumeChanged(int volume0To100);
     void currentTrackRatingChanged(int rating0To100);
+    void repeatModeChangeRequested(RepeatMode mode);
+    void shuffleModeChangeRequested(ShuffleMode mode);
+    void libraryShuffleSettingsRequested();
 
 private:
     void restyleMenuBar();
     void updateShuffleIcon();
+    void updateRepeatIcon();
     bool shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs);
 
     class QToolButton *m_menuButton = nullptr;
@@ -111,6 +125,9 @@ private:
     class QMenuBar *m_menuBar = nullptr;
     class QToolButton *m_playPause = nullptr;
     class QToolButton *m_shuffle = nullptr;
+    class QToolButton *m_repeat = nullptr;
+    RepeatMode m_repeatMode = RepeatMode::Off;
+    ShuffleMode m_shuffleMode = ShuffleMode::Off;
     class QAction *m_compactMenu = nullptr;
     class QAction *m_listUnsupportedFiles = nullptr;
     class QAction *m_scanProfileActions[3] = {nullptr, nullptr, nullptr};

@@ -120,6 +120,54 @@ QStringList normalizedAlbumTitles(QStringList albumTitles)
     return albumTitles;
 }
 
+QString repeatModeToString(RepeatMode mode)
+{
+    switch (mode) {
+    case RepeatMode::All:
+        return QStringLiteral("all");
+    case RepeatMode::One:
+        return QStringLiteral("one");
+    case RepeatMode::Off:
+        break;
+    }
+    return QStringLiteral("off");
+}
+
+RepeatMode repeatModeFromString(const QString &value)
+{
+    if (value == QStringLiteral("all")) {
+        return RepeatMode::All;
+    }
+    if (value == QStringLiteral("one")) {
+        return RepeatMode::One;
+    }
+    return RepeatMode::Off;
+}
+
+QString shuffleModeToString(ShuffleMode mode)
+{
+    switch (mode) {
+    case ShuffleMode::Queue:
+        return QStringLiteral("queue");
+    case ShuffleMode::Library:
+        return QStringLiteral("library");
+    case ShuffleMode::Off:
+        break;
+    }
+    return QStringLiteral("off");
+}
+
+ShuffleMode shuffleModeFromString(const QString &value)
+{
+    if (value == QStringLiteral("queue")) {
+        return ShuffleMode::Queue;
+    }
+    if (value == QStringLiteral("library")) {
+        return ShuffleMode::Library;
+    }
+    return ShuffleMode::Off;
+}
+
 QString newQueueIdentity()
 {
     return QStringLiteral("queue:%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -438,6 +486,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
     m_playback = m_player->backend();
     m_player->setPathResolver([this](const Track &track) { return resolvedReadPathForTrack(track); });
+    m_player->setRandomTrackProvider([this](int count, const QSet<QString> &excludePaths) {
+        return m_database ? m_database->randomTracks(count, excludePaths) : QVector<Track>{};
+    });
     connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
     connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
     connect(m_player, &PlayerCore::queueTracksChanged, this, &MainWindow::patchQueueRows);
@@ -447,6 +498,25 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
     connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
     connect(m_player, &PlayerCore::volumeChanged, this, &MainWindow::applyPlayerVolume);
+    // PlayerCore is the source of truth: reflect mode changes on the player bar
+    // and persist them, whatever drove the change (button, keybind, MPRIS).
+    connect(m_player, &PlayerCore::repeatModeChanged, this, [this](RepeatMode mode) {
+        m_playerBar->setRepeatMode(mode);
+        if (m_state) {
+            m_state->setSetting(QStringLiteral("playback.repeatMode"), repeatModeToString(mode));
+        }
+    });
+    connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
+        m_playerBar->setShuffleMode(mode);
+        if (m_state) {
+            m_state->setSetting(QStringLiteral("playback.shuffleMode"), shuffleModeToString(mode));
+        }
+    });
+    connect(m_player, &PlayerCore::libraryShufflePercentChanged, this, [this](int percent) {
+        if (m_state) {
+            m_state->setSetting(QStringLiteral("playback.libraryShufflePercent"), QString::number(percent));
+        }
+    });
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
@@ -855,6 +925,22 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_playerBar, &PlayerBar::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_playerBar, &PlayerBar::nextRequested, this, &MainWindow::playNextTrack);
+    connect(m_playerBar, &PlayerBar::repeatModeChangeRequested, this, [this](RepeatMode mode) {
+        m_player->setRepeatMode(mode);
+    });
+    connect(m_playerBar, &PlayerBar::shuffleModeChangeRequested, this, [this](ShuffleMode mode) {
+        m_player->setShuffleMode(mode);
+    });
+    connect(m_playerBar, &PlayerBar::libraryShuffleSettingsRequested, this, [this]() {
+        bool ok = false;
+        const int percent = QInputDialog::getInt(
+            this, QStringLiteral("Library shuffle"),
+            QStringLiteral("Chance to pull a track from the whole library on each advance (%):"),
+            m_player->libraryShufflePercent(), 0, 100, 5, &ok);
+        if (ok) {
+            m_player->setLibraryShufflePercent(percent);
+        }
+    });
     connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
@@ -1065,11 +1151,28 @@ MainWindow::MainWindow(QWidget *parent)
         jumpToPlayingSong();
     });
 
+    auto *repeatShortcut = new QShortcut(QKeySequence(QStringLiteral("r")), this);
+    connect(repeatShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        m_playerBar->cycleRepeatMode();
+    });
+
+    auto *shuffleShortcut = new QShortcut(QKeySequence(QStringLiteral("s")), this);
+    connect(shuffleShortcut, &QShortcut::activated, this, [this]() {
+        if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
+            return;
+        }
+        m_playerBar->cycleShuffleMode();
+    });
+
     m_albumGrid->setArtworkCache(m_artworkCache.get());
     loadPlaybackProfile();
     loadPlaybackResumeSettings();
     loadViewSettings();
     loadSearchRankingConfig();
+    loadPlaybackModes();
     loadQueueState();
     refreshSavedQueuePlaylistEntries();
     loadExplorerState();
@@ -3232,6 +3335,22 @@ void MainWindow::loadSearchRankingConfig()
 {
     const QString json = m_database->setting(QStringLiteral("search.ranking"));
     m_searchView->setRankConfig(Search::RankConfig::fromJsonString(json));
+}
+
+void MainWindow::loadPlaybackModes()
+{
+    const RepeatMode repeat = repeatModeFromString(m_state->setting(QStringLiteral("playback.repeatMode")));
+    const ShuffleMode shuffle = shuffleModeFromString(m_state->setting(QStringLiteral("playback.shuffleMode")));
+    const int percent = std::clamp(
+        m_state->setting(QStringLiteral("playback.libraryShufflePercent"), QStringLiteral("20")).toInt(), 0, 100);
+    // Percent first so a restored library-shuffle uses the saved chance. The
+    // PlayerCore setters only emit on a change, so push the player bar
+    // explicitly to cover restoring the default (off) modes too.
+    m_player->setLibraryShufflePercent(percent);
+    m_player->setRepeatMode(repeat);
+    m_player->setShuffleMode(shuffle);
+    m_playerBar->setRepeatMode(repeat);
+    m_playerBar->setShuffleMode(shuffle);
 }
 
 void MainWindow::configureSearchRanking()

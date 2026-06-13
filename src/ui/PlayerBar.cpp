@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCursor>
 #include <QFileInfo>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
@@ -305,13 +306,17 @@ QIcon menuHamburgerIcon(const QPalette &palette)
     return QIcon(pixmap);
 }
 
-QIcon shuffleIcon(const QPalette &palette)
+QIcon shuffleIcon(const QPalette &palette, ShuffleMode mode)
 {
     QPixmap pixmap(24, 24);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    QPen pen(palette.color(QPalette::ButtonText), 1.8);
+    // Off reads as a neutral glyph; an active mode is accented.
+    const QColor color = mode == ShuffleMode::Off
+        ? palette.color(QPalette::ButtonText)
+        : palette.color(QPalette::Highlight);
+    QPen pen(color, 1.8);
     painter.setPen(pen);
 
     QPainterPath topPath;
@@ -330,6 +335,54 @@ QIcon shuffleIcon(const QPalette &palette)
     painter.drawLine(QPointF(16, 4), QPointF(20, 7));
     painter.drawLine(QPointF(16, 10), QPointF(20, 7));
 
+    // Library-wide shuffle adds a small "+" badge: the queue plus the library.
+    if (mode == ShuffleMode::Library) {
+        QPen badge(color, 1.6);
+        badge.setCapStyle(Qt::RoundCap);
+        painter.setPen(badge);
+        painter.drawLine(QPointF(21, 1.5), QPointF(21, 6.5));
+        painter.drawLine(QPointF(18.5, 4), QPointF(23.5, 4));
+    }
+    return QIcon(pixmap);
+}
+
+QIcon repeatIcon(const QPalette &palette, RepeatMode mode)
+{
+    QPixmap pixmap(24, 24);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const QColor color = mode == RepeatMode::Off
+        ? palette.color(QPalette::ButtonText)
+        : palette.color(QPalette::Highlight);
+    QPen pen(color, 1.8);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(pen);
+
+    // A rounded-rectangle loop, broken on the right edge with an arrowhead at
+    // the top-right re-entry point — the conventional "repeat" glyph.
+    QPainterPath loop;
+    loop.moveTo(QPointF(15, 5));
+    loop.lineTo(QPointF(8, 5));
+    loop.quadTo(QPointF(4, 5), QPointF(4, 9));
+    loop.lineTo(QPointF(4, 15));
+    loop.quadTo(QPointF(4, 19), QPointF(8, 19));
+    loop.lineTo(QPointF(16, 19));
+    loop.quadTo(QPointF(20, 19), QPointF(20, 15));
+    loop.lineTo(QPointF(20, 12));
+    painter.drawPath(loop);
+    painter.drawLine(QPointF(15, 5), QPointF(11.5, 2.5));
+    painter.drawLine(QPointF(15, 5), QPointF(11.5, 7.5));
+
+    // Repeat-one marks the loop with a "1".
+    if (mode == RepeatMode::One) {
+        QFont font = painter.font();
+        font.setPixelSize(11);
+        font.setBold(true);
+        painter.setFont(font);
+        painter.drawText(QRectF(0, 1, 24, 24), Qt::AlignCenter, QStringLiteral("1"));
+    }
     return QIcon(pixmap);
 }
 
@@ -408,6 +461,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *findCurrentTrack = playbackMenu->addAction(QStringLiteral("Find current track in library"));
     QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
+    QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle..."));
 
     auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
     QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
@@ -615,18 +669,36 @@ PlayerBar::PlayerBar(QWidget *parent)
     controls->addWidget(volume);
     m_volumeButton = volume;
 
-    auto *single = iconButton(this, QStyle::SP_BrowserReload, QStringLiteral("Single mode"));
-    single->setCheckable(true);
-    controls->addWidget(single);
+    m_repeat = new QToolButton(this);
+    m_repeat->setAutoRaise(true);
+    m_repeat->setFixedSize(34, 34);
+    m_repeat->setContextMenuPolicy(Qt::CustomContextMenu);
+    updateRepeatIcon();
+    controls->addWidget(m_repeat);
 
     m_shuffle = new QToolButton(this);
-    m_shuffle->setToolTip(QStringLiteral("Shuffle"));
     m_shuffle->setAutoRaise(true);
     m_shuffle->setFixedSize(34, 34);
-    m_shuffle->setCheckable(true);
+    m_shuffle->setContextMenuPolicy(Qt::CustomContextMenu);
     updateShuffleIcon();
     controls->addWidget(m_shuffle);
     root->addLayout(controls);
+
+    connect(m_repeat, &QToolButton::clicked, this, &PlayerBar::cycleRepeatMode);
+    connect(m_repeat, &QWidget::customContextMenuRequested, this, [this]() {
+        // Right-click resets to the default (off); a no-op when already off.
+        if (m_repeatMode != RepeatMode::Off) {
+            setRepeatMode(RepeatMode::Off);
+            emit repeatModeChangeRequested(RepeatMode::Off);
+        }
+    });
+    connect(m_shuffle, &QToolButton::clicked, this, &PlayerBar::cycleShuffleMode);
+    connect(m_shuffle, &QWidget::customContextMenuRequested, this, [this]() {
+        if (m_shuffleMode != ShuffleMode::Off) {
+            setShuffleMode(ShuffleMode::Off);
+            emit shuffleModeChangeRequested(ShuffleMode::Off);
+        }
+    });
 
     connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
@@ -641,6 +713,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(findCurrentTrack, &QAction::triggered, this, &PlayerBar::currentTrackLibraryRequested);
     connect(playbackOutput, &QAction::triggered, this, &PlayerBar::playbackProfileRequested);
     connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
+    connect(libraryShuffleSettings, &QAction::triggered, this, &PlayerBar::libraryShuffleSettingsRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
@@ -909,6 +982,7 @@ void PlayerBar::changeEvent(QEvent *event)
             m_menuButton->setIcon(menuHamburgerIcon(palette()));
         }
         updateShuffleIcon();
+        updateRepeatIcon();
         if (m_usingArtFallback) {
             setAlbumArt(QString());
         }
@@ -964,7 +1038,68 @@ void PlayerBar::restyleMenuBar()
 
 void PlayerBar::updateShuffleIcon()
 {
-    if (m_shuffle != nullptr) {
-        m_shuffle->setIcon(shuffleIcon(palette()));
+    if (m_shuffle == nullptr) {
+        return;
     }
+    m_shuffle->setIcon(shuffleIcon(palette(), m_shuffleMode));
+    switch (m_shuffleMode) {
+    case ShuffleMode::Off:
+        m_shuffle->setToolTip(QStringLiteral("Shuffle: off"));
+        break;
+    case ShuffleMode::Queue:
+        m_shuffle->setToolTip(QStringLiteral("Shuffle: queue"));
+        break;
+    case ShuffleMode::Library:
+        m_shuffle->setToolTip(QStringLiteral("Shuffle: library-wide"));
+        break;
+    }
+}
+
+void PlayerBar::updateRepeatIcon()
+{
+    if (m_repeat == nullptr) {
+        return;
+    }
+    m_repeat->setIcon(repeatIcon(palette(), m_repeatMode));
+    switch (m_repeatMode) {
+    case RepeatMode::Off:
+        m_repeat->setToolTip(QStringLiteral("Repeat: off"));
+        break;
+    case RepeatMode::All:
+        m_repeat->setToolTip(QStringLiteral("Repeat: queue"));
+        break;
+    case RepeatMode::One:
+        m_repeat->setToolTip(QStringLiteral("Repeat: one"));
+        break;
+    }
+}
+
+void PlayerBar::setRepeatMode(RepeatMode mode)
+{
+    m_repeatMode = mode;
+    updateRepeatIcon();
+}
+
+void PlayerBar::setShuffleMode(ShuffleMode mode)
+{
+    m_shuffleMode = mode;
+    updateShuffleIcon();
+}
+
+void PlayerBar::cycleRepeatMode()
+{
+    const RepeatMode next = m_repeatMode == RepeatMode::Off ? RepeatMode::All
+        : m_repeatMode == RepeatMode::All                  ? RepeatMode::One
+                                                           : RepeatMode::Off;
+    setRepeatMode(next);
+    emit repeatModeChangeRequested(next);
+}
+
+void PlayerBar::cycleShuffleMode()
+{
+    const ShuffleMode next = m_shuffleMode == ShuffleMode::Off ? ShuffleMode::Queue
+        : m_shuffleMode == ShuffleMode::Queue                 ? ShuffleMode::Library
+                                                              : ShuffleMode::Off;
+    setShuffleMode(next);
+    emit shuffleModeChangeRequested(next);
 }

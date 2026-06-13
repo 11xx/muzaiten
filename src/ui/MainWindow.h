@@ -143,6 +143,7 @@ private:
     void configureSearchRanking();
     void configureKeybindings();
     void loadSearchRankingConfig();
+    void loadPlaybackModes();
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
     void configureMpdSource();
