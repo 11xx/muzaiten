@@ -96,6 +96,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <cmath>
 
 Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 
@@ -444,9 +445,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &PlayerCore::currentTrackChanged, this, &MainWindow::presentTrack);
     connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
     connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
-    connect(m_player, &PlayerCore::volumeChanged, this, [this](double volume) {
-        m_mpris->setVolume(volume);
-    });
+    connect(m_player, &PlayerCore::volumeChanged, this, &MainWindow::applyPlayerVolume);
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
@@ -854,7 +853,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
         const int clamped = std::clamp(volume, 0, 100);
         m_player->setVolume(static_cast<double>(clamped) / 100.0);
-        m_state->setSetting(QStringLiteral("volume"), QString::number(clamped));
     });
     connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
         if (!m_player->currentTrack().path.isEmpty()) {
@@ -4230,6 +4228,20 @@ void MainWindow::playFromMpris()
 void MainWindow::setVolumeFromMpris(double volume0To1)
 {
     m_player->setVolume(volume0To1);
+}
+
+void MainWindow::applyPlayerVolume(double volume0To1)
+{
+    const int percent = std::clamp(static_cast<int>(std::lround(volume0To1 * 100.0)), 0, 100);
+    if (m_mpris != nullptr) {
+        m_mpris->setVolume(static_cast<double>(percent) / 100.0);
+    }
+    if (m_playerBar != nullptr) {
+        m_playerBar->setVolume(percent);
+    }
+    if (m_state != nullptr) {
+        m_state->setSetting(QStringLiteral("volume"), QString::number(percent));
+    }
 }
 
 void MainWindow::seekRelativeFromMpris(qint64 offsetMs)

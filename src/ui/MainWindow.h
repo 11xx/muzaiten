@@ -209,6 +209,7 @@ private:
     void togglePlayback();
     void playFromMpris();
     void setVolumeFromMpris(double volume0To1);
+    void applyPlayerVolume(double volume0To1);
     void seekRelativeFromMpris(qint64 offsetMs);
     void setupIpcServer();
     void setupTrayIcon();
