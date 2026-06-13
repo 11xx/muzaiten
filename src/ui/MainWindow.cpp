@@ -1088,7 +1088,6 @@ MainWindow::MainWindow(QWidget *parent)
         openAddToPlaylistDialog(tracksForPaths(paths));
     });
     connect(m_playlistView, &PlaylistView::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
-    connect(m_playlistView, &PlaylistView::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
     connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);
@@ -2707,6 +2706,9 @@ void MainWindow::loadQueueState()
     } else {
         ensureCurrentQueueIdentity();
     }
+    // resetQueue() does not emit queueChanged, so push the source-dependent UI
+    // (playlist-mirror items, merge gating) directly for the restored queue.
+    refreshQueueSourceDependentUi();
     m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
                               m_player->queueIndex() + 1, m_player->playNextInsertIndex());
     m_rightSidebar->setCurrentIndex(m_player->queueIndex(), /*reveal=*/true);
@@ -3084,6 +3086,9 @@ void MainWindow::adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<T
     ensureCurrentQueueIdentity();
     m_player->resetQueue(tracks);
     m_queueStore->setTracks(m_player->queue());
+    // resetQueue() does not emit queueChanged, so syncQueueState() won't run here;
+    // push the source-dependent UI (playlist-mirror items, merge gating) directly.
+    refreshQueueSourceDependentUi();
     const int start = std::clamp(playIndex, 0, static_cast<int>(m_player->queue().size()) - 1);
     playQueueIndex(start);
 }
@@ -3106,6 +3111,9 @@ void MainWindow::replaceQueueWithTracks(const QVector<Track> &tracks, int playIn
     m_queueSourcePlaylistId = m_queueSourceKind == QStringLiteral("playlist") ? sourcePlaylistId : 0;
     m_queueSourceName = sourceName;
     m_queueStore->setTracks(m_player->queue());
+    // resetQueue() does not emit queueChanged, so syncQueueState() won't run here;
+    // push the source-dependent UI (playlist-mirror items, merge gating) directly.
+    refreshQueueSourceDependentUi();
     const int start = std::clamp(playIndex, 0, static_cast<int>(m_player->queue().size()) - 1);
     playQueueIndex(start);
 }
@@ -4394,6 +4402,24 @@ void MainWindow::refreshPlayNextRange()
     }
 }
 
+void MainWindow::refreshQueueSourceDependentUi()
+{
+    // The "(don't save to playlist)" menu items and the playlist-mirror warning
+    // only make sense while a playlist backs the queue; tell every view and gate
+    // the "merge saved queue" action, which is never wanted in playlist mode.
+    // Called from syncQueueState (queue mutations) and from the queue-*replace*
+    // paths (play playlist/album, restore snapshot, startup restore), which use
+    // resetQueue and so never emit queueChanged themselves.
+    const bool playlistSourced = queueIsPlaylistSourced();
+    if (m_trackTable != nullptr) m_trackTable->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_albumGrid != nullptr) m_albumGrid->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_libraryFileExplorer != nullptr) m_libraryFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_freeRoamFileExplorer != nullptr) m_freeRoamFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_searchView != nullptr) m_searchView->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_playlistView != nullptr) m_playlistView->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_playerBar != nullptr) m_playerBar->setMergeSavedQueueEnabled(!playlistSourced);
+}
+
 void MainWindow::syncQueueState()
 {
     // PlayerCore already clamped its indices and re-prepared the gapless
@@ -4413,17 +4439,7 @@ void MainWindow::syncQueueState()
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Queue);
     }
-    // The "(don't save to playlist)" menu items and the playlist-mirror warning
-    // only make sense while a playlist backs the queue; tell every view and gate
-    // the "merge saved queue" action, which is never wanted in playlist mode.
-    const bool playlistSourced = queueIsPlaylistSourced();
-    if (m_trackTable != nullptr) m_trackTable->setQueueIsPlaylistSourced(playlistSourced);
-    if (m_albumGrid != nullptr) m_albumGrid->setQueueIsPlaylistSourced(playlistSourced);
-    if (m_libraryFileExplorer != nullptr) m_libraryFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
-    if (m_freeRoamFileExplorer != nullptr) m_freeRoamFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
-    if (m_searchView != nullptr) m_searchView->setQueueIsPlaylistSourced(playlistSourced);
-    if (m_playlistView != nullptr) m_playlistView->setQueueIsPlaylistSourced(playlistSourced);
-    if (m_playerBar != nullptr) m_playerBar->setMergeSavedQueueEnabled(!playlistSourced);
+    refreshQueueSourceDependentUi();
     scheduleQueueStateSave();
 }
 

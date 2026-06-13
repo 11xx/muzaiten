@@ -200,6 +200,10 @@ private:
     // identity, panel search, saved queue state) from the player's canonical
     // queue triple.
     void syncQueueState();
+    // Pushes queueIsPlaylistSourced() to every view + the PlayerBar merge action.
+    // Called from syncQueueState and from the queue-replace paths (play/restore),
+    // which use resetQueue() and so never emit queueChanged.
+    void refreshQueueSourceDependentUi();
     void playAlbumNow(const QString &albumTitle);
     void playAlbumsNow(const QStringList &albumTitles);
     void playAlbumsReplacingQueue(const QStringList &albumTitles);
