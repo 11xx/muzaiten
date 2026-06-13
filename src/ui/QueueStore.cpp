@@ -41,6 +41,15 @@ void QueueStore::setSnapshot(const QVector<Track> &tracks, int currentIndex, int
     setPlayNextRange(playNextBegin, playNextEnd);
 }
 
+void QueueStore::updateTrack(int row, const Track &track)
+{
+    if (row < 0 || row >= m_tracks.size()) {
+        return;
+    }
+    m_tracks[row] = track;
+    emit trackChanged(row);
+}
+
 void QueueStore::updateTrackRating(const QString &path, int rating0To100, bool hasUserRating)
 {
     // Per-row patch so a rating edit doesn't reset the whole queue model

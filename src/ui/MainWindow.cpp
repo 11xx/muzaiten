@@ -440,6 +440,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_player->setPathResolver([this](const Track &track) { return resolvedReadPathForTrack(track); });
     connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
     connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
+    connect(m_player, &PlayerCore::queueTracksChanged, this, &MainWindow::patchQueueRows);
     connect(m_player, &PlayerCore::currentIndexChanged, this, &MainWindow::onPlayerIndexChanged);
     connect(m_player, &PlayerCore::playNextRangeChanged, this, &MainWindow::refreshPlayNextRange);
     connect(m_player, &PlayerCore::currentTrackChanged, this, &MainWindow::presentTrack);
@@ -4118,6 +4119,22 @@ void MainWindow::clearPlayNextPriority()
 void MainWindow::patchQueueTracksFromMetadata(const QVector<Track> &tracks)
 {
     m_player->patchTracksFromMetadata(tracks);
+}
+
+void MainWindow::patchQueueRows(const QVector<int> &rows)
+{
+    for (int row : rows) {
+        if (row < 0 || row >= m_player->queue().size()) {
+            continue;
+        }
+        m_queueStore->updateTrack(row, m_player->queue().at(row));
+    }
+    if (!rows.isEmpty()) {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->refreshPanel(MainPanelId::Queue);
+        }
+        scheduleQueueStateSave();
+    }
 }
 
 void MainWindow::refreshPlayNextRange()

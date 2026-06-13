@@ -178,6 +178,7 @@ private:
     void clearQueue();
     void clearPlayNextPriority();
     void patchQueueTracksFromMetadata(const QVector<Track> &tracks);
+    void patchQueueRows(const QVector<int> &rows);
     void refreshPlayNextRange();
     // Handler for PlayerCore::queueChanged: re-derives and pushes every piece
     // of queue-dependent UI/persisted state (queue store snapshot, queue

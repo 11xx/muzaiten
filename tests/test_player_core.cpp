@@ -88,6 +88,7 @@ private slots:
     void finishedAtEndOfQueueStops();
     void explicitJumpCollapsesPlayNext();
     void clearKeepingCurrentKeepsOnlyCurrent();
+    void metadataPatchUpdatesRowsWithoutQueueReset();
 
 private:
     FakeBackend *m_backend = nullptr;   // owned by m_core
@@ -96,6 +97,7 @@ private:
 
 void PlayerCoreTest::init()
 {
+    qRegisterMetaType<QVector<int>>("QVector<int>");
     m_backend = new FakeBackend;
     m_core = std::make_unique<PlayerCore>(m_backend);
 }
@@ -236,6 +238,36 @@ void PlayerCoreTest::clearKeepingCurrentKeepsOnlyCurrent()
     QCOMPARE(m_core->queue().first().path, QStringLiteral("/b"));
     QCOMPARE(m_core->queueIndex(), 0);
     QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+}
+
+void PlayerCoreTest::metadataPatchUpdatesRowsWithoutQueueReset()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->playAt(0);
+
+    QSignalSpy queueReset(m_core.get(), &PlayerCore::queueChanged);
+    QSignalSpy rowsChanged(m_core.get(), &PlayerCore::queueTracksChanged);
+    QSignalSpy currentUpdated(m_core.get(), &PlayerCore::currentTrackUpdated);
+
+    Track patched = makeTrack(QStringLiteral("/b"));
+    patched.title = QStringLiteral("patched b");
+    m_core->patchTracksFromMetadata({patched});
+
+    QCOMPARE(queueReset.count(), 0);
+    QCOMPARE(rowsChanged.count(), 1);
+    QCOMPARE(rowsChanged.first().at(0).value<QVector<int>>(), QVector<int>{1});
+    QCOMPARE(currentUpdated.count(), 0);
+    QCOMPARE(m_core->queue().at(1).title, QStringLiteral("patched b"));
+
+    patched = makeTrack(QStringLiteral("/a"));
+    patched.title = QStringLiteral("patched a");
+    m_core->patchTracksFromMetadata({patched});
+
+    QCOMPARE(queueReset.count(), 0);
+    QCOMPARE(rowsChanged.count(), 2);
+    QCOMPARE(rowsChanged.last().at(0).value<QVector<int>>(), QVector<int>{0});
+    QCOMPARE(currentUpdated.count(), 1);
+    QCOMPARE(currentUpdated.last().at(0).value<Track>().title, QStringLiteral("patched a"));
 }
 
 QTEST_GUILESS_MAIN(PlayerCoreTest)

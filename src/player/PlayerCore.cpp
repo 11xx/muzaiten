@@ -390,27 +390,28 @@ void PlayerCore::patchTracksFromMetadata(const QVector<Track> &tracks)
         return;
     }
 
-    bool queueChangedAny = false;
+    QVector<int> changedRows;
     bool currentTrackChangedAny = false;
-    for (Track &queuedTrack : m_queue) {
+    for (int row = 0; row < m_queue.size(); ++row) {
+        Track &queuedTrack = m_queue[row];
         const auto it = byPath.constFind(queuedTrack.path);
         if (it == byPath.cend()) {
             continue;
         }
         queuedTrack = it.value();
-        queueChangedAny = true;
+        changedRows.push_back(row);
         if (m_currentTrack.path == queuedTrack.path) {
             m_currentTrack = queuedTrack;
             currentTrackChangedAny = true;
         }
     }
 
-    if (!queueChangedAny) {
+    if (changedRows.isEmpty()) {
         return;
     }
     // Paths are unchanged, so the prepared gapless "next" stays valid; only the
     // displayed metadata refreshes.
-    emit queueChanged();
+    emit queueTracksChanged(changedRows);
     if (currentTrackChangedAny) {
         emit currentTrackUpdated(m_currentTrack);
     }
