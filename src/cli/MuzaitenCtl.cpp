@@ -40,7 +40,7 @@ void printUsage()
         "  rate clear              remove the user rating\n"
         "  queue                   list the queue (current row marked with >)\n"
         "  queue <index> | jump <index>  play the given queue row\n"
-        "  search <text> [limit]   substring-search the library\n"
+        "  search [--limit N] <text>  substring-search the library\n"
         "  play-file <path>        append a file to the queue and play it\n"
         "  raise                   show and focus the running instance's window\n"
         "\n"
@@ -179,14 +179,28 @@ int main(int argc, char **argv)
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("search needs a query"));
         }
-        bool lastIsLimit = false;
-        if (arguments.size() > 1) {
-            const int limit = arguments.last().toInt(&lastIsLimit);
-            if (lastIsLimit) {
+        QStringList queryWords;
+        for (int i = 0; i < arguments.size(); ++i) {
+            const QString word = arguments.at(i);
+            if (word == QLatin1String("--limit")) {
+                if (i + 1 >= arguments.size()) {
+                    return fail(QStringLiteral("search --limit needs a positive number"));
+                }
+                bool ok = false;
+                const int limit = arguments.at(++i).toInt(&ok);
+                if (!ok || limit <= 0) {
+                    return fail(QStringLiteral("search --limit needs a positive number"));
+                }
                 args.insert(QStringLiteral("limit"), limit);
+            } else if (word.startsWith(QLatin1String("--"))) {
+                return fail(QStringLiteral("unknown search option \"%1\"").arg(word));
+            } else {
+                queryWords.push_back(word);
             }
         }
-        const QStringList queryWords = arguments.mid(0, lastIsLimit ? arguments.size() - 1 : arguments.size());
+        if (queryWords.isEmpty()) {
+            return fail(QStringLiteral("search needs a query"));
+        }
         args.insert(QStringLiteral("query"), queryWords.join(QLatin1Char(' ')));
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
