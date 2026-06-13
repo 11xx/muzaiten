@@ -3,6 +3,7 @@
 #include "playback/PlaybackBackend.h"
 
 #include <QHash>
+#include <QRandomGenerator>
 #include <QUrl>
 
 #include <algorithm>
@@ -59,6 +60,7 @@ void PlayerCore::playCurrent(bool notifyScrobbler, bool startPaused)
     }
 
     m_currentTrack = track;
+    markVisited(m_queueIndex);
     emit currentTrackChanged(m_currentTrack, notifyScrobbler);
     if (startPaused) {
         m_backend->loadPaused(QUrl::fromLocalFile(playbackPath));
@@ -73,12 +75,31 @@ void PlayerCore::next()
     if (m_queue.isEmpty()) {
         return;
     }
+    // Shuffle and repeat-all change what "next" means; a manual skip honours the
+    // same policy as auto-advance (a fresh decision, so library shuffle can still
+    // inject and shuffle re-rolls). Repeat-one is intentionally excluded: an
+    // explicit Next moves on rather than re-looping the current track.
+    if (m_shuffleMode != ShuffleMode::Off || m_repeatMode == RepeatMode::All) {
+        const AutoNext target = decideAutoNext();
+        if (target.index >= 0 || !target.injected.path.isEmpty()) {
+            applyAutoNext(target);
+            return;
+        }
+        // Shuffle cycle exhausted with no repeat: nothing left to advance to.
+        return;
+    }
     playAt(std::min(static_cast<int>(m_queue.size() - 1), m_queueIndex + 1));
 }
 
 void PlayerCore::previous()
 {
     if (m_queue.isEmpty()) {
+        return;
+    }
+    if (m_shuffleMode != ShuffleMode::Off && !m_shuffleHistory.isEmpty()) {
+        int previousIndex = m_shuffleHistory.takeLast();
+        previousIndex = std::clamp(previousIndex, 0, static_cast<int>(m_queue.size()) - 1);
+        playAt(previousIndex);
         return;
     }
     playAt(std::max(0, m_queueIndex - 1));
@@ -189,6 +210,8 @@ void PlayerCore::playTracksNext(const QVector<Track> &tracks)
     }
 
     m_playNextInsertIndex = insertAt + inserted;
+    // Inserting mid-queue shifts later rows, invalidating the shuffle bag/history.
+    resetShuffleState();
     prepareNext();
     emit queueChanged();
 }
@@ -272,6 +295,7 @@ void PlayerCore::moveRows(const QVector<int> &rows, int destinationRow)
     // Manually reordering the upcoming tracks collapses the play-next priority
     // block (its ordinals no longer reflect a single "play next" batch).
     m_playNextInsertIndex = std::clamp(m_queueIndex + 1, 0, static_cast<int>(m_queue.size()));
+    resetShuffleState();
     prepareNext();
     emit queueChanged();
 }
@@ -327,6 +351,7 @@ void PlayerCore::removeRows(const QVector<int> &rows)
     // range; if it lands at/below m_queueIndex+1 the region empties on its own.
     m_playNextInsertIndex = std::clamp(oldPlayNextInsertIndex - removedBeforePlayNextEnd,
                                        m_queueIndex + 1, static_cast<int>(m_queue.size()));
+    resetShuffleState();
     prepareNext();
     emit queueChanged();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
@@ -350,6 +375,7 @@ void PlayerCore::clearKeepingCurrent()
     m_queue.push_back(current);
     m_queueIndex = 0;
     m_playNextInsertIndex = 1;
+    resetShuffleState();
     prepareNext();
     emit queueChanged();
     presentTrack(current);
@@ -361,6 +387,7 @@ void PlayerCore::clearAll()
     m_queueIndex = -1;
     m_playNextInsertIndex = -1;
     m_currentTrack = {};
+    resetShuffleState();
     prepareNext();
     emit queueChanged();
     m_backend->stop();
@@ -465,6 +492,7 @@ void PlayerCore::resetQueue(const QVector<Track> &tracks, int index, int playNex
     m_playNextInsertIndex = m_queue.isEmpty() || m_queueIndex < 0
         ? -1
         : std::clamp(playNextInsertIndex, m_queueIndex + 1, static_cast<int>(m_queue.size()));
+    resetShuffleState();
 }
 
 void PlayerCore::presentTrack(const Track &track)
@@ -475,12 +503,27 @@ void PlayerCore::presentTrack(const Track &track)
 
 void PlayerCore::prepareNext()
 {
-    if (m_queueIndex < 0 || m_queueIndex + 1 >= m_queue.size()) {
+    m_preparedNext = {};
+    if (m_queueIndex < 0 || m_queueIndex >= m_queue.size()) {
         m_backend->prepareNext({});
         return;
     }
-    const Track &nextTrack = m_queue.at(m_queueIndex + 1);
-    const QString nextPath = resolvePath(nextTrack);
+    // Repeat-one loops via onFinished (a re-play), not gapless preloading: a
+    // seamless self-loop is niche and fiddly to drive through the backend.
+    if (m_repeatMode == RepeatMode::One) {
+        m_backend->prepareNext({});
+        return;
+    }
+    m_preparedNext = decideAutoNext();
+    // Only an in-queue follow-up can be gaplessly preloaded; library injections
+    // (and end-of-queue) preload nothing and are handled in onFinished.
+    const bool gapless = m_preparedNext.index >= 0 && m_preparedNext.index < m_queue.size()
+        && m_preparedNext.injected.path.isEmpty();
+    if (!gapless) {
+        m_backend->prepareNext({});
+        return;
+    }
+    const QString nextPath = resolvePath(m_queue.at(m_preparedNext.index));
     m_backend->prepareNext(nextPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(nextPath));
 }
 
@@ -493,29 +536,188 @@ void PlayerCore::collapsePlayNextIfStale()
     }
 }
 
+void PlayerCore::setRepeatMode(RepeatMode mode)
+{
+    if (m_repeatMode == mode) {
+        return;
+    }
+    m_repeatMode = mode;
+    emit repeatModeChanged(m_repeatMode);
+    // Re-derive the gapless preload: e.g. enabling repeat-all on the last track
+    // must now preload the first track for a seamless wrap.
+    prepareNext();
+}
+
+void PlayerCore::setShuffleMode(ShuffleMode mode)
+{
+    if (m_shuffleMode == mode) {
+        return;
+    }
+    m_shuffleMode = mode;
+    if (m_shuffleMode != ShuffleMode::Off) {
+        resetShuffleState();
+    }
+    emit shuffleModeChanged(m_shuffleMode);
+    prepareNext();
+}
+
+void PlayerCore::setLibraryShufflePercent(int percent)
+{
+    percent = std::clamp(percent, 0, 100);
+    if (m_libraryShufflePercent == percent) {
+        return;
+    }
+    m_libraryShufflePercent = percent;
+    emit libraryShufflePercentChanged(m_libraryShufflePercent);
+}
+
+PlayerCore::AutoNext PlayerCore::decideAutoNext()
+{
+    if (m_queue.isEmpty() || m_queueIndex < 0) {
+        return {};
+    }
+    // Library-wide shuffle: with the configured probability, pull a fresh track
+    // from the whole library instead of advancing within the queue.
+    if (m_shuffleMode == ShuffleMode::Library && m_randomTracks && m_libraryShufflePercent > 0) {
+        if (QRandomGenerator::global()->bounded(100) < m_libraryShufflePercent) {
+            QSet<QString> exclude;
+            exclude.reserve(m_queue.size());
+            for (const Track &track : m_queue) {
+                exclude.insert(track.path);
+            }
+            const QVector<Track> picks = m_randomTracks(1, exclude);
+            if (!picks.isEmpty() && !picks.first().path.isEmpty()) {
+                return {-1, picks.first()};
+            }
+        }
+    }
+    if (m_shuffleMode != ShuffleMode::Off) {
+        return {pickShuffleIndex(), {}};
+    }
+    if (m_queueIndex + 1 < m_queue.size()) {
+        return {m_queueIndex + 1, {}};
+    }
+    if (m_repeatMode == RepeatMode::All) {
+        return {0, {}};
+    }
+    return {};
+}
+
+int PlayerCore::pickShuffleIndex()
+{
+    const int size = static_cast<int>(m_queue.size());
+    if (size <= 1) {
+        // A single-track queue can only loop (repeat-all) or stop.
+        return m_repeatMode == RepeatMode::All ? m_queueIndex : -1;
+    }
+
+    QVector<int> candidates;
+    candidates.reserve(size);
+    for (int index = 0; index < size; ++index) {
+        if (index != m_queueIndex && !m_shuffleVisited.contains(index)) {
+            candidates.push_back(index);
+        }
+    }
+    if (candidates.isEmpty()) {
+        // Every other track has played this cycle. Repeat-all reshuffles from a
+        // clean slate; otherwise the shuffle is exhausted.
+        if (m_repeatMode != RepeatMode::All) {
+            return -1;
+        }
+        m_shuffleVisited.clear();
+        m_shuffleVisited.insert(m_queueIndex);
+        for (int index = 0; index < size; ++index) {
+            if (index != m_queueIndex) {
+                candidates.push_back(index);
+            }
+        }
+    }
+    return candidates.at(QRandomGenerator::global()->bounded(static_cast<int>(candidates.size())));
+}
+
+void PlayerCore::applyAutoNext(const AutoNext &next)
+{
+    if (!next.injected.path.isEmpty()) {
+        // Library-wide injection: append the fresh track, then play it. playAt
+        // re-presents, re-prepares and marks it visited.
+        emit aboutToAddTracks(QVector<Track>{next.injected});
+        m_queue.push_back(next.injected);
+        pushHistory(m_queueIndex);
+        emit queueChanged();
+        playAt(static_cast<int>(m_queue.size()) - 1);
+        return;
+    }
+    if (next.index >= 0 && next.index < m_queue.size()) {
+        pushHistory(m_queueIndex);
+        playAt(next.index);
+    }
+}
+
+void PlayerCore::markVisited(int index)
+{
+    if (index >= 0 && index < m_queue.size()) {
+        m_shuffleVisited.insert(index);
+    }
+}
+
+void PlayerCore::pushHistory(int index)
+{
+    if (index >= 0 && index < m_queue.size()) {
+        m_shuffleHistory.push_back(index);
+    }
+}
+
+void PlayerCore::resetShuffleState()
+{
+    m_shuffleHistory.clear();
+    m_shuffleVisited.clear();
+    if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
+        m_shuffleVisited.insert(m_queueIndex);
+    }
+}
+
 void PlayerCore::onPreparedTrackStarted()
 {
-    if (m_queueIndex + 1 >= m_queue.size()) {
+    // The backend started the track we gaplessly preloaded; commit the same row
+    // it prepared (which, under shuffle/repeat-all, is not simply index + 1).
+    int target = (m_preparedNext.index >= 0 && m_preparedNext.injected.path.isEmpty())
+        ? m_preparedNext.index
+        : m_queueIndex + 1;
+    if (target < 0 || target >= m_queue.size()) {
         return;
     }
 
     m_backend->onGaplessTrackAdvanced();
-    ++m_queueIndex;
+    pushHistory(m_queueIndex);
+    m_queueIndex = target;
     collapsePlayNextIfStale();
     emit currentIndexChanged(m_queueIndex, /*userInitiated=*/false);
     emit playNextRangeChanged();
     m_currentTrack = m_queue.at(m_queueIndex);
+    markVisited(m_queueIndex);
     emit currentTrackChanged(m_currentTrack, /*notifyScrobbler=*/true);
     prepareNext();
 }
 
 void PlayerCore::onFinished()
 {
-    if (m_queueIndex + 1 < m_queue.size()) {
-        playAt(m_queueIndex + 1);
-    } else {
-        // End of queue: tear the pipeline down so hasSource() is false and
-        // the output device is freed. A later Play will restart cleanly.
+    if (m_queue.isEmpty() || m_queueIndex < 0) {
         m_backend->stop();
+        return;
     }
+    if (m_repeatMode == RepeatMode::One) {
+        // Re-play the current track from the top.
+        playAt(m_queueIndex);
+        return;
+    }
+    // Decide fresh at finish time: the queue (or shuffle bag) may have changed
+    // since prepareNext, and this path runs only when nothing was preloaded.
+    const AutoNext target = decideAutoNext();
+    if (target.index >= 0 || !target.injected.path.isEmpty()) {
+        applyAutoNext(target);
+        return;
+    }
+    // End of queue: tear the pipeline down so hasSource() is false and
+    // the output device is freed. A later Play will restart cleanly.
+    m_backend->stop();
 }

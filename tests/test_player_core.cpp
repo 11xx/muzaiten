@@ -89,6 +89,12 @@ private slots:
     void explicitJumpCollapsesPlayNext();
     void clearKeepingCurrentKeepsOnlyCurrent();
     void metadataPatchUpdatesRowsWithoutQueueReset();
+    void repeatAllWrapsAtEndOfQueue();
+    void repeatAllGaplesslyPreparesFirstTrack();
+    void repeatOneReplaysCurrentTrack();
+    void shuffleVisitsEveryTrackOnceThenStops();
+    void shufflePreviousRetracesHistory();
+    void libraryShuffleInjectsLibraryTrack();
 
 private:
     FakeBackend *m_backend = nullptr;   // owned by m_core
@@ -268,6 +274,102 @@ void PlayerCoreTest::metadataPatchUpdatesRowsWithoutQueueReset()
     QCOMPARE(rowsChanged.last().at(0).value<QVector<int>>(), QVector<int>{0});
     QCOMPARE(currentUpdated.count(), 1);
     QCOMPARE(currentUpdated.last().at(0).value<Track>().title, QStringLiteral("patched a"));
+}
+
+void PlayerCoreTest::repeatAllWrapsAtEndOfQueue()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setRepeatMode(RepeatMode::All);
+    m_core->playAt(1);
+
+    // Auto-advance past the last track wraps to the first.
+    emit m_backend->finished();
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/a"));
+
+    // A manual Next on the last track wraps too.
+    m_core->playAt(1);
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 0);
+}
+
+void PlayerCoreTest::repeatAllGaplesslyPreparesFirstTrack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setRepeatMode(RepeatMode::All);
+    m_core->playAt(1);
+    // On the last track the gapless buffer points at the wrap target.
+    QCOMPARE(m_backend->preparedUrls.last(), QUrl::fromLocalFile("/a"));
+
+    emit m_backend->preparedTrackStarted();
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/a"));
+}
+
+void PlayerCoreTest::repeatOneReplaysCurrentTrack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setRepeatMode(RepeatMode::One);
+    m_core->playAt(0);
+    // Repeat-one does not gaplessly preload anything.
+    QCOMPARE(m_backend->preparedUrls.last(), QUrl());
+
+    const int playsBefore = m_backend->playedUrls.size();
+    emit m_backend->finished();
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(m_backend->playedUrls.size(), playsBefore + 1);
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/a"));
+
+    // A manual Next still moves on rather than re-looping.
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+}
+
+void PlayerCoreTest::shuffleVisitsEveryTrackOnceThenStops()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setShuffleMode(ShuffleMode::Queue);
+    m_core->playAt(0);
+
+    // Only one unvisited track remains, so the pick is deterministic.
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+
+    // Both tracks have played and repeat is off: Next is a no-op.
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+}
+
+void PlayerCoreTest::shufflePreviousRetracesHistory()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->setShuffleMode(ShuffleMode::Queue);
+    m_core->playAt(0);
+
+    m_core->next();
+    const int second = m_core->queueIndex();
+    QVERIFY(second != 0);
+
+    // Previous walks the shuffle history back to the starting track.
+    m_core->previous();
+    QCOMPARE(m_core->queueIndex(), 0);
+}
+
+void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setRandomTrackProvider([](int, const QSet<QString> &) {
+        return QVector<Track>{makeTrack(QStringLiteral("/lib"))};
+    });
+    m_core->setShuffleMode(ShuffleMode::Library);
+    m_core->setLibraryShufflePercent(100);  // always inject
+    m_core->playAt(0);
+
+    m_core->next();
+    QCOMPARE(m_core->queue().size(), 3);
+    QCOMPARE(m_core->queue().last().path, QStringLiteral("/lib"));
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/lib"));
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/lib"));
 }
 
 QTEST_GUILESS_MAIN(PlayerCoreTest)

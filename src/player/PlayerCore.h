@@ -3,11 +3,27 @@
 #include "core/Track.h"
 
 #include <QObject>
+#include <QSet>
 #include <QVector>
 
 #include <functional>
 
 class PlaybackBackend;
+
+// Auto-advance behaviour when a track ends or the queue runs out.
+enum class RepeatMode {
+    Off,   // stop at end of queue
+    All,   // wrap to the first track at the end of the queue
+    One    // replay the current track
+};
+
+// How the next track is chosen on auto-advance / Next.
+enum class ShuffleMode {
+    Off,      // linear queue order
+    Queue,    // random order within the current queue
+    Library   // queue shuffle, but with a tunable chance to pull a fresh track
+              // from the whole library instead
+};
 
 // Window-free playback/queue state machine: owns the playback backend, the
 // canonical queue triple (tracks, current index, play-next boundary), the
@@ -21,18 +37,31 @@ public:
     // Resolves a track to a readable file path (link roots etc.); an empty
     // result marks the track unplayable.
     using PathResolver = std::function<QString(const Track &)>;
+    // Supplies up to `count` library tracks for library-wide shuffle, excluding
+    // anything already in the queue. Keeps PlayerCore free of any DB dependency.
+    using RandomTrackProvider = std::function<QVector<Track>(int count, const QSet<QString> &excludePaths)>;
 
     // Takes ownership of the (required) backend; tests inject a fake.
     explicit PlayerCore(PlaybackBackend *backend, QObject *parent = nullptr);
 
     PlaybackBackend *backend() const { return m_backend; }
     void setPathResolver(PathResolver resolver) { m_resolvePath = std::move(resolver); }
+    void setRandomTrackProvider(RandomTrackProvider provider) { m_randomTracks = std::move(provider); }
 
     const QVector<Track> &queue() const { return m_queue; }
     int queueIndex() const { return m_queueIndex; }
     int playNextInsertIndex() const { return m_playNextInsertIndex; }
     const Track &currentTrack() const { return m_currentTrack; }
     double volume() const { return m_volume; }
+
+    // -- shuffle / repeat ---------------------------------------------------
+    RepeatMode repeatMode() const { return m_repeatMode; }
+    ShuffleMode shuffleMode() const { return m_shuffleMode; }
+    int libraryShufflePercent() const { return m_libraryShufflePercent; }
+    void setRepeatMode(RepeatMode mode);
+    void setShuffleMode(ShuffleMode mode);
+    // Chance (0..100) that a library-wide-shuffle advance pulls a fresh track.
+    void setLibraryShufflePercent(int percent);
 
     // -- transport ---------------------------------------------------------
     void playAt(int index, bool notifyScrobbler = true, bool startPaused = false, bool explicitJump = false);
@@ -89,8 +118,24 @@ signals:
     void playbackCleared();
     void volumeChanged(double volume0To1);
     void trackUnresolvable(const Track &track);
+    void repeatModeChanged(RepeatMode mode);
+    void shuffleModeChanged(ShuffleMode mode);
+    void libraryShufflePercentChanged(int percent);
 
 private:
+    // A resolved auto-advance target: either an existing queue row (`index`) or
+    // a fresh library track to append and play (`injected`).
+    struct AutoNext {
+        int index = -1;
+        Track injected;
+    };
+    AutoNext decideAutoNext();
+    int pickShuffleIndex();
+    void applyAutoNext(const AutoNext &next);
+    void markVisited(int index);
+    void pushHistory(int index);
+    void resetShuffleState();
+
     void playCurrent(bool notifyScrobbler, bool startPaused);
     void collapsePlayNextIfStale();
     void onPreparedTrackStarted();
@@ -99,9 +144,22 @@ private:
 
     PlaybackBackend *m_backend = nullptr;
     PathResolver m_resolvePath;
+    RandomTrackProvider m_randomTracks;
     QVector<Track> m_queue;
     int m_queueIndex = -1;
     int m_playNextInsertIndex = -1;
     Track m_currentTrack;
     double m_volume = 1.0;
+
+    RepeatMode m_repeatMode = RepeatMode::Off;
+    ShuffleMode m_shuffleMode = ShuffleMode::Off;
+    int m_libraryShufflePercent = 20;
+    // The advance gaplessly prepared for the current track; committed when the
+    // backend reports the prepared track started (so the index lands on the row
+    // actually preloaded, not a freshly re-rolled shuffle pick).
+    AutoNext m_preparedNext;
+    // Queue rows already played in the current shuffle cycle (includes current).
+    QSet<int> m_shuffleVisited;
+    // Previously-current rows, for retracing under shuffle on Previous.
+    QVector<int> m_shuffleHistory;
 };
