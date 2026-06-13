@@ -19,6 +19,7 @@ private slots:
     void wrapsHandlerErrors();
     void rejectsMalformedRequests();
     void handlesMultipleRequestsPerConnection();
+    void secondServerCannotStealLiveSocket();
 
 private:
     QJsonObject roundTrip(const QByteArray &line);
@@ -104,6 +105,17 @@ void IpcServerTest::handlesMultipleRequestsPerConnection()
     const QList<QByteArray> lines = data.split('\n');
     QCOMPARE(QJsonDocument::fromJson(lines[0]).object().value("echoed").toObject().value("n").toInt(), 1);
     QCOMPARE(QJsonDocument::fromJson(lines[1]).object().value("echoed").toObject().value("n").toInt(), 2);
+}
+
+void IpcServerTest::secondServerCannotStealLiveSocket()
+{
+    IpcServer second;
+    QVERIFY(!second.listen(m_path));
+    QVERIFY(!second.lastError().isEmpty());
+
+    const QJsonObject reply = roundTrip(R"({"command":"echo","args":{"still":true}})");
+    QVERIFY(reply.value("ok").toBool());
+    QCOMPARE(reply.value("echoed").toObject().value("still").toBool(), true);
 }
 
 QTEST_GUILESS_MAIN(IpcServerTest)

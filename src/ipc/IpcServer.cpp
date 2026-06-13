@@ -4,6 +4,7 @@
 
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QLockFile>
 #include <QLocalServer>
 #include <QLocalSocket>
 
@@ -38,6 +39,8 @@ IpcServer::IpcServer(QObject *parent)
     connect(m_server, &QLocalServer::newConnection, this, &IpcServer::onNewConnection);
 }
 
+IpcServer::~IpcServer() = default;
+
 void IpcServer::setHandler(Handler handler)
 {
     m_handler = std::move(handler);
@@ -45,16 +48,29 @@ void IpcServer::setHandler(Handler handler)
 
 bool IpcServer::listen(QString path)
 {
+    QString lockPath;
     if (path.isEmpty()) {
         path = IpcSocket::serverPath();
+        lockPath = IpcSocket::lockPath();
+    } else {
+        lockPath = path + QStringLiteral(".lock");
     }
+    auto lock = std::make_unique<QLockFile>(lockPath);
+    if (!lock->tryLock(0)) {
+        m_lastError = QStringLiteral("another muzaiten instance already owns %1").arg(lockPath);
+        return false;
+    }
+
     // A leftover socket file from an unclean shutdown would make listen() fail
-    // forever; QLocalServer's helper removes it only if nothing is bound.
+    // forever. Only unlink it after taking the per-state lock; removeServer()
+    // can unlink a live Unix socket, so it must not race another starter.
     QLocalServer::removeServer(path);
     if (!m_server->listen(path)) {
         m_lastError = m_server->errorString();
+        lock->unlock();
         return false;
     }
+    m_lock = std::move(lock);
     m_path = path;
     return true;
 }

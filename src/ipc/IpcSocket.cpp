@@ -20,4 +20,9 @@ QString serverPath()
     return QDir(base).filePath(QStringLiteral("muzaiten-%1.sock").arg(hash));
 }
 
+QString lockPath()
+{
+    return QDir(AppPaths::stateDir()).filePath(QStringLiteral("muzaiten.lock"));
+}
+
 } // namespace IpcSocket

@@ -6,7 +6,9 @@
 #include <QString>
 
 #include <functional>
+#include <memory>
 
+class QLockFile;
 class QLocalServer;
 class QLocalSocket;
 
@@ -24,12 +26,13 @@ public:
     using Handler = std::function<QJsonObject(const QString &command, const QJsonObject &args)>;
 
     explicit IpcServer(QObject *parent = nullptr);
+    ~IpcServer() override;
 
     void setHandler(Handler handler);
 
-    // Listens at the given path (default: IpcSocket::serverPath()), removing a
-    // stale socket file from a previous crash first. False + lastError() on
-    // failure; never fatal to the app.
+    // Listens at the given path (default: IpcSocket::serverPath()), taking an
+    // atomic per-state lock before removing any stale socket file. False +
+    // lastError() on failure; never fatal to the app.
     bool listen(QString path = {});
     QString serverPath() const;
     QString lastError() const;
@@ -42,6 +45,7 @@ private:
     QLocalServer *m_server = nullptr;
     Handler m_handler;
     QHash<QLocalSocket *, QByteArray> m_buffers;
+    std::unique_ptr<QLockFile> m_lock;
     QString m_path;
     QString m_lastError;
 };

@@ -10,5 +10,6 @@ namespace IpcSocket {
 // different state root (dev-state, agent-state, ...) gets a different socket,
 // so a ctl invocation only ever talks to the instance sharing its environment.
 QString serverPath();
+QString lockPath();
 
 } // namespace IpcSocket
