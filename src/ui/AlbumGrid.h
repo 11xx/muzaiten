@@ -48,6 +48,12 @@ public:
     void unmarkAllAlbums();
     QString currentAlbumTitle() const;
     QStringList albumTitlesForAction() const;
+    // True only when the current narrowing is a keyboard-made multi-album
+    // selection — the one case meant to survive focusing the track list and
+    // returning to the grid. A single album (narrowed via n / click) or a
+    // mouse-made multi-selection counts as a finished interaction, so returning
+    // to the grid restarts fresh and the narrowing is cleared instead.
+    bool narrowingPersistsOnReturn() const;
     QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:

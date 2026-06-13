@@ -744,6 +744,7 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { clearAlbumFilter(); },
         [this]() { return m_albumGrid->searchDocuments(); },
         [this]() { m_albumGrid->addCurrentAlbumToPlaylist(); },
+        [this]() { return m_albumGrid->narrowingPersistsOnReturn(); },
     });
     m_panelSearch->registerTarget({
         MainPanelId::Tracks,

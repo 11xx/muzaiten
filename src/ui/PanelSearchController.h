@@ -34,6 +34,10 @@ struct MainPanelTarget {
     std::function<void()> clearNarrowing;
     std::function<QVector<Search::MatchDocument>()> documents;
     std::function<void()> addCurrentToPlaylist = {};  // optional; null = not supported by this panel
+    // Optional; when set, returns whether the album narrowing should survive a
+    // FocusPrevious (h) back to the grid instead of being cleared. Only the grid
+    // target supplies it.
+    std::function<bool()> narrowingPersistsOnReturn = {};
 };
 
 class PanelSearchController final : public QWidget {

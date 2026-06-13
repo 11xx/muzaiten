@@ -491,6 +491,11 @@ QStringList AlbumGrid::albumTitlesForAction() const
     return titles;
 }
 
+bool AlbumGrid::narrowingPersistsOnReturn() const
+{
+    return m_markedAlbumTitles.size() > 1 && !m_marksFromMouse;
+}
+
 QVector<Search::MatchDocument> AlbumGrid::searchDocuments() const
 {
     QVector<Search::MatchDocument> docs;
