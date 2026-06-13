@@ -502,12 +502,18 @@ MainWindow::MainWindow(QWidget *parent)
     // and persist them, whatever drove the change (button, keybind, MPRIS).
     connect(m_player, &PlayerCore::repeatModeChanged, this, [this](RepeatMode mode) {
         m_playerBar->setRepeatMode(mode);
+        if (m_mpris) {
+            m_mpris->setRepeatMode(mode);
+        }
         if (m_state) {
             m_state->setSetting(QStringLiteral("playback.repeatMode"), repeatModeToString(mode));
         }
     });
     connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
         m_playerBar->setShuffleMode(mode);
+        if (m_mpris) {
+            m_mpris->setShuffleMode(mode);
+        }
         if (m_state) {
             m_state->setSetting(QStringLiteral("playback.shuffleMode"), shuffleModeToString(mode));
         }
@@ -800,6 +806,12 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_mpris, &MprisService::previousRequested, this, &MainWindow::playPreviousTrack);
     connect(m_mpris, &MprisService::nextRequested, this, &MainWindow::playNextTrack);
+    connect(m_mpris, &MprisService::repeatModeRequested, this, [this](RepeatMode mode) {
+        m_player->setRepeatMode(mode);
+    });
+    connect(m_mpris, &MprisService::shuffleModeRequested, this, [this](ShuffleMode mode) {
+        m_player->setShuffleMode(mode);
+    });
     connect(m_mpris, &MprisService::pauseRequested, m_playback, &PlaybackBackend::pause);
     connect(m_mpris, &MprisService::playPauseRequested, this, &MainWindow::togglePlayback);
     connect(m_mpris, &MprisService::stopRequested, m_playback, &PlaybackBackend::stop);

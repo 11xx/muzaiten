@@ -2,6 +2,7 @@
 
 #include "core/Track.h"
 #include "playback/PlaybackBackend.h"
+#include "player/PlayerCore.h"
 
 #include <QObject>
 #include <QVariantMap>
@@ -26,6 +27,9 @@ public:
     bool canPlay() const;
     bool canPause() const;
     bool canSeek() const;
+    // MPRIS LoopStatus: "None" / "Track" / "Playlist".
+    QString loopStatus() const;
+    bool shuffle() const;
 
     void setTrack(const Track &track);
     void setPlaybackState(PlaybackBackend::State state);
@@ -33,9 +37,13 @@ public:
     void setDurationMs(qint64 durationMs);
     void setVolume(double volume0To1);
     void setQueueCapabilities(bool canGoPrevious, bool canGoNext, bool canPlay);
+    void setRepeatMode(RepeatMode mode);
+    void setShuffleMode(ShuffleMode mode);
 
 signals:
     void raiseRequested();
+    void repeatModeRequested(RepeatMode mode);
+    void shuffleModeRequested(ShuffleMode mode);
     void nextRequested();
     void previousRequested();
     void pauseRequested();
@@ -62,4 +70,6 @@ private:
     bool m_canGoPrevious = false;
     bool m_canGoNext = false;
     bool m_canPlay = false;
+    RepeatMode m_repeatMode = RepeatMode::Off;
+    ShuffleMode m_shuffleMode = ShuffleMode::Off;
 };

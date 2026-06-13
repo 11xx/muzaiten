@@ -143,12 +143,21 @@ public:
     }
 
     QString PlaybackStatus() const { return m_service->playbackStatus(); }
-    QString LoopStatus() const { return QStringLiteral("None"); }
-    void SetLoopStatus(const QString &) {}
+    QString LoopStatus() const { return m_service->loopStatus(); }
+    void SetLoopStatus(const QString &status)
+    {
+        if (status == QStringLiteral("Track")) {
+            emit m_service->repeatModeRequested(RepeatMode::One);
+        } else if (status == QStringLiteral("Playlist")) {
+            emit m_service->repeatModeRequested(RepeatMode::All);
+        } else {
+            emit m_service->repeatModeRequested(RepeatMode::Off);
+        }
+    }
     double Rate() const { return 1.0; }
     void SetRate(double) {}
-    bool Shuffle() const { return false; }
-    void SetShuffle(bool) {}
+    bool Shuffle() const { return m_service->shuffle(); }
+    void SetShuffle(bool on) { emit m_service->shuffleModeRequested(on ? ShuffleMode::Queue : ShuffleMode::Off); }
     QVariantMap Metadata() const { return m_service->metadata(); }
     double Volume() const { return m_service->volume(); }
     void SetVolume(double volume) { emit m_service->volumeRequested(std::clamp(volume, 0.0, 1.0)); }
@@ -377,6 +386,45 @@ void MprisService::setQueueCapabilities(bool canGoPrevious, bool canGoNext, bool
                            {QStringLiteral("CanPlay"), m_canPlay}});
     emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
                           {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
+}
+
+QString MprisService::loopStatus() const
+{
+    switch (m_repeatMode) {
+    case RepeatMode::One:
+        return QStringLiteral("Track");
+    case RepeatMode::All:
+        return QStringLiteral("Playlist");
+    case RepeatMode::Off:
+        break;
+    }
+    return QStringLiteral("None");
+}
+
+bool MprisService::shuffle() const
+{
+    return m_shuffleMode != ShuffleMode::Off;
+}
+
+void MprisService::setRepeatMode(RepeatMode mode)
+{
+    if (m_repeatMode == mode) {
+        return;
+    }
+    m_repeatMode = mode;
+    emitPropertiesChanged(QString::fromLatin1(playerInterface),
+                          {{QStringLiteral("LoopStatus"), loopStatus()}});
+}
+
+void MprisService::setShuffleMode(ShuffleMode mode)
+{
+    const bool wasShuffling = m_shuffleMode != ShuffleMode::Off;
+    m_shuffleMode = mode;
+    if (wasShuffling == (m_shuffleMode != ShuffleMode::Off)) {
+        return;
+    }
+    emitPropertiesChanged(QString::fromLatin1(playerInterface),
+                          {{QStringLiteral("Shuffle"), shuffle()}});
 }
 
 void MprisService::emitPropertiesChanged(const QString &interfaceName, const QVariantMap &changedProperties)
