@@ -30,6 +30,7 @@ add_executable(test_schema
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_schema PRIVATE ../src)
 target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
@@ -77,6 +78,7 @@ add_executable(test_scan_pipeline
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_scan_pipeline PRIVATE ../src)
 target_link_libraries(test_scan_pipeline PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD PkgConfig::TAGLIB)
@@ -283,6 +285,7 @@ add_executable(test_responsive_column_layout
     ../src/ui/StarRatingDelegate.cpp
     ../src/core/MusicSort.cpp
     ../src/core/Rating.cpp
+    ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_responsive_column_layout PRIVATE ../src)
 target_link_libraries(test_responsive_column_layout PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
@@ -330,6 +333,7 @@ add_executable(test_album_grid
     ../src/ui/StarRating.cpp
     ../src/core/MusicSort.cpp
     ../src/core/Rating.cpp
+    ../src/search/fold/Fold.cpp
     ArtworkCacheStub.cpp
     ../src/scanner/ArtworkCache.h
     ../resources/resources.qrc

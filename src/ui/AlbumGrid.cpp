@@ -521,11 +521,11 @@ QVector<Search::MatchDocument> AlbumGrid::searchDocuments() const
         docs.push_back({
             row,
             {
-                {Search::MatchFieldRole::Title, title, title.toLower(), 400},
-                {Search::MatchFieldRole::Album, title, title.toLower(), 200},
-                {Search::MatchFieldRole::AlbumArtist, artist, artist.toLower(), 300},
-                {Search::MatchFieldRole::Path, path, path.toLower(), 60},
-                {Search::MatchFieldRole::Free, free, free.toLower(), 100},
+                Search::makeField(Search::MatchFieldRole::Title, title, 400),
+                Search::makeField(Search::MatchFieldRole::Album, title, 200),
+                Search::makeField(Search::MatchFieldRole::AlbumArtist, artist, 300),
+                Search::makeField(Search::MatchFieldRole::Path, path, 60),
+                Search::makeField(Search::MatchFieldRole::Free, free, 100),
             },
             numeric,
         });

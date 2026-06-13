@@ -1,6 +1,7 @@
 #pragma once
 
 #include "search/SearchQuery.h"
+#include "search/fold/Fold.h"
 
 #include <QString>
 #include <QVector>
@@ -26,6 +27,14 @@ struct MatchField {
     QString normText;
     int weight = 100;
 };
+
+// Build a MatchField whose normalized form comes from the shared fold engine, so
+// the in-panel document filter matches by the same diacritic/script/romaji rules
+// as the library index. `text` keeps its original casing for display.
+inline MatchField makeField(MatchFieldRole role, const QString &text, int weight)
+{
+    return {role, text, Fold::foldText(text), weight};
+}
 
 struct MatchNumeric {
     TermKind kind = TermKind::Year;

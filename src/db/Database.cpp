@@ -2,6 +2,7 @@
 
 #include "db/Schema.h"
 #include "search/SearchRecord.h"
+#include "search/fold/Fold.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -1737,14 +1738,15 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         rec.fileSize          = query.value(16).toLongLong();
         rec.bitDepth          = query.value(17).toInt();
         rec.source            = Search::TrackSource::Local;
-        // Pre-compute lowercased versions for case-insensitive matching; intern
-        // the repeated ones (path/title/filename are near-unique, left as-is).
-        rec.normTitle        = rec.title.toLower();
-        rec.normArtist       = internString(pool, rec.artistName.toLower());
-        rec.normAlbumArtist  = internString(pool, rec.albumArtistName.toLower());
-        rec.normAlbum        = internString(pool, rec.albumTitle.toLower());
-        rec.normFilename     = rec.filename.toLower();
-        rec.normPath         = rec.path.toLower();
+        // Pre-compute folded versions (lowercase + ASCII transliteration +
+        // romaji) for diacritic/script-insensitive matching; intern the
+        // repeated ones (path/title/filename are near-unique, left as-is).
+        rec.normTitle        = Search::Fold::foldText(rec.title);
+        rec.normArtist       = internString(pool, Search::Fold::foldText(rec.artistName));
+        rec.normAlbumArtist  = internString(pool, Search::Fold::foldText(rec.albumArtistName));
+        rec.normAlbum        = internString(pool, Search::Fold::foldText(rec.albumTitle));
+        rec.normFilename     = Search::Fold::foldText(rec.filename);
+        rec.normPath         = Search::Fold::foldText(rec.path);
         records.push_back(std::move(rec));
     }
     return records;
@@ -1776,12 +1778,12 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
         rec.discNumber      = query.value(8).toInt();
         rec.rating0To100    = -1;
         rec.source          = Search::TrackSource::Mpd;
-        rec.normTitle        = rec.title.toLower();
-        rec.normArtist       = internString(pool, rec.artistName.toLower());
-        rec.normAlbumArtist  = internString(pool, rec.albumArtistName.toLower());
-        rec.normAlbum        = internString(pool, rec.albumTitle.toLower());
-        rec.normFilename     = rec.filename.toLower();
-        rec.normPath         = rec.path.toLower();
+        rec.normTitle        = Search::Fold::foldText(rec.title);
+        rec.normArtist       = internString(pool, Search::Fold::foldText(rec.artistName));
+        rec.normAlbumArtist  = internString(pool, Search::Fold::foldText(rec.albumArtistName));
+        rec.normAlbum        = internString(pool, Search::Fold::foldText(rec.albumTitle));
+        rec.normFilename     = Search::Fold::foldText(rec.filename);
+        rec.normPath         = Search::Fold::foldText(rec.path);
         records.push_back(std::move(rec));
     }
     return records;

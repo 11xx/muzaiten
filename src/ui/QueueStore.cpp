@@ -119,13 +119,13 @@ QVector<Search::MatchDocument> QueueStore::searchDocuments() const
         docs.push_back({
             row,
             {
-                {Search::MatchFieldRole::Title, title, title.toLower(), 400},
-                {Search::MatchFieldRole::Artist, track.artistName, track.artistName.toLower(), 300},
-                {Search::MatchFieldRole::AlbumArtist, track.albumArtistName, track.albumArtistName.toLower(), 300},
-                {Search::MatchFieldRole::Album, track.albumTitle, track.albumTitle.toLower(), 200},
-                {Search::MatchFieldRole::Filename, track.filename, track.filename.toLower(), 60},
-                {Search::MatchFieldRole::Path, track.path, track.path.toLower(), 60},
-                {Search::MatchFieldRole::Free, free, free.toLower(), 100},
+                Search::makeField(Search::MatchFieldRole::Title, title, 400),
+                Search::makeField(Search::MatchFieldRole::Artist, track.artistName, 300),
+                Search::makeField(Search::MatchFieldRole::AlbumArtist, track.albumArtistName, 300),
+                Search::makeField(Search::MatchFieldRole::Album, track.albumTitle, 200),
+                Search::makeField(Search::MatchFieldRole::Filename, track.filename, 60),
+                Search::makeField(Search::MatchFieldRole::Path, track.path, 60),
+                Search::makeField(Search::MatchFieldRole::Free, free, 100),
             },
             numeric,
         });

@@ -1,5 +1,7 @@
 #include "search/SearchQuery.h"
 
+#include "search/fold/Fold.h"
+
 #include <QRegularExpression>
 #include <QString>
 #include <QStringList>
@@ -94,42 +96,42 @@ Term parseSingleToken(const QString &raw)
 
         if (field == QStringLiteral("artist")) {
             term.kind = TermKind::ArtistText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("albumartist") || field == QStringLiteral("aa")) {
             term.kind = TermKind::AlbumArtistText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("album") || field == QStringLiteral("al")) {
             term.kind = TermKind::AlbumText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("title") || field == QStringLiteral("t")) {
             term.kind = TermKind::TitleText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("path") || field == QStringLiteral("p")) {
             term.kind = TermKind::PathText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("file") || field == QStringLiteral("f")) {
             term.kind = TermKind::FilenameText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("ext") || field == QStringLiteral("extension")) {
             term.kind = TermKind::Extension;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("codec")) {
             term.kind = TermKind::CodecText;
-            term.text = value.toLower();
+            term.text = Fold::foldText(value);
             return term;
         }
         if (field == QStringLiteral("year") || field == QStringLiteral("y")) {
@@ -137,7 +139,7 @@ Term parseSingleToken(const QString &raw)
             if (!parseNumericToken(value, term.op, term.numericValue)) {
                 // Fallback: treat as text match on date field
                 term.kind = TermKind::FreeText;
-                term.text = value.toLower();
+                term.text = Fold::foldText(value);
             }
             return term;
         }
@@ -199,7 +201,7 @@ Term parseSingleToken(const QString &raw)
 
     // Plain free text
     term.kind = TermKind::FreeText;
-    term.text = s.toLower();
+    term.text = Fold::foldText(s);
     return term;
 }
 

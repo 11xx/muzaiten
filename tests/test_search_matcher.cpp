@@ -9,7 +9,7 @@ namespace {
 
 MatchField field(MatchFieldRole role, const QString &text, int weight = 0)
 {
-    return {role, text, text.toLower(), weight};
+    return makeField(role, text, weight);
 }
 
 MatchDocument doc(int row, QVector<MatchField> fields, QVector<MatchNumeric> numeric = {})
@@ -130,6 +130,38 @@ private slots:
         QCOMPARE(matches.size(), 2);
         QCOMPARE(matches.at(0).row, 7);
         QCOMPARE(matches.at(1).row, 2);
+    }
+
+    void foldedDiacriticMatchingBothDirections()
+    {
+        const MatchDocument accented = doc(0, {field(MatchFieldRole::Title, QString::fromUtf8("Café del Mar"))});
+        QVERIFY(matches(accented, QStringLiteral("cafe")));            // plain query → accented title
+        QVERIFY(matches(accented, QString::fromUtf8("café")));         // accented query → accented title
+
+        const MatchDocument plain = doc(1, {field(MatchFieldRole::Title, QStringLiteral("cafe society"))});
+        QVERIFY(matches(plain, QString::fromUtf8("café")));            // accented query → plain title (reverse)
+    }
+
+    void foldedScriptMatching()
+    {
+        const MatchDocument greek = doc(0, {field(MatchFieldRole::Artist, QString::fromUtf8("Μάνος"))});
+        QVERIFY(matches(greek, QStringLiteral("manos")));
+
+        const MatchDocument cyrillic = doc(1, {field(MatchFieldRole::Artist, QString::fromUtf8("Чайковский"))});
+        QVERIFY(matches(cyrillic, QStringLiteral("chaikov")));
+    }
+
+    void romajiMatchesKanaTitle()
+    {
+        // The headline goal: type romaji — whole-word or syllable-by-syllable —
+        // and match a kana title via orderless substring AND.
+        const MatchDocument kana = doc(0, {field(MatchFieldRole::Title, QString::fromUtf8("さんしんのはな"))});
+        QVERIFY(matches(kana, QStringLiteral("sanshin no hana")));
+        QVERIFY(matches(kana, QStringLiteral("san shin no ha na")));
+
+        // Kanji passes through, so typing the original characters still matches.
+        const MatchDocument kanji = doc(1, {field(MatchFieldRole::Title, QString::fromUtf8("三線の花"))});
+        QVERIFY(matches(kanji, QString::fromUtf8("三線")));
     }
 };
 

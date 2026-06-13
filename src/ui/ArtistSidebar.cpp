@@ -317,9 +317,9 @@ QVector<Search::MatchDocument> ArtistSidebar::searchDocuments() const
         docs.push_back({
             row,
             {
-                {Search::MatchFieldRole::Title, name, name.toLower(), 400},
-                {Search::MatchFieldRole::Artist, name, name.toLower(), 300},
-                {Search::MatchFieldRole::Free, name, name.toLower(), 100},
+                Search::makeField(Search::MatchFieldRole::Title, name, 400),
+                Search::makeField(Search::MatchFieldRole::Artist, name, 300),
+                Search::makeField(Search::MatchFieldRole::Free, name, 100),
             },
             {},
         });
