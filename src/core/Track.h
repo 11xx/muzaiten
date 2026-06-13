@@ -17,6 +17,13 @@ struct Track {
     QString artistName;
     QString albumArtistName;
     QString albumTitle;
+    // Sort/reading names (Picard titlesort/artistsort/albumartistsort/albumsort).
+    // For non-Latin titles these often carry a romaji/kana reading; folded into
+    // the search index to improve recall (e.g. "utada" → 宇多田ヒカル).
+    QString titleSort;
+    QString artistSort;
+    QString albumArtistSort;
+    QString albumSort;
     QString date;
     QString originalDate;
     int trackNumber = 0;

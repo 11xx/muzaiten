@@ -1,4 +1,5 @@
 #include "db/Database.h"
+#include "search/SearchRecord.h"
 
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -15,6 +16,7 @@ private slots:
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
     void guessedPlaceholdersFollowVisibilitySetting();
     void upsertsTrackAndQueriesArtist();
+    void sortTagsFoldIntoSearchIndex();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
     void searchTracksLikeUsesPendingRatingOverlay();
@@ -63,7 +65,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 8);
+    QCOMPARE(query.value(0).toInt(), 9);
 }
 
 void SchemaTest::upsertsTrackAndQueriesArtist()
@@ -87,6 +89,28 @@ void SchemaTest::upsertsTrackAndQueriesArtist()
     QCOMPARE(tracks.size(), 1);
     QCOMPARE(tracks.first().rating0To100, 80);
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::sortTagsFoldIntoSearchIndex()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-sort-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    track.title = QString::fromUtf8("花");
+    track.artistName = QString::fromUtf8("宇多田ヒカル");
+    track.artistSort = QStringLiteral("Utada, Hikaru");
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+
+    const QVector<Search::SearchRecord> recs = database.allTracksForSearch();
+    QCOMPARE(recs.size(), 1);
+    // The artist's romaji sort name is folded into the artist field, so "utada"
+    // matches the original-script name; the kanji title romanizes via the dict.
+    QVERIFY(recs.first().normArtist.contains(QStringLiteral("utada")));
+    QVERIFY(recs.first().normTitle.contains(QStringLiteral("hana")));
 }
 
 void SchemaTest::scannedRatingOverridesUserRating()

@@ -179,6 +179,12 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
         track.albumArtistName = track.artistName;
     }
 
+    // Sort/reading names (often romaji/kana for non-Latin titles via MusicBrainz).
+    track.titleSort       = firstProperty(properties, {QStringLiteral("TITLESORT")});
+    track.artistSort      = firstProperty(properties, {QStringLiteral("ARTISTSORT")});
+    track.albumArtistSort = firstProperty(properties, {QStringLiteral("ALBUMARTISTSORT")});
+    track.albumSort       = firstProperty(properties, {QStringLiteral("ALBUMSORT")});
+
     const TagRatingReadResult rating = readRating(properties);
     if (rating.rating0To100 >= 0) {
         track.rating0To100 = rating.rating0To100;

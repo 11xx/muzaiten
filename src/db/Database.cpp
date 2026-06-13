@@ -157,6 +157,21 @@ QString internString(QHash<QString, QString> &pool, const QString &value)
     return value;
 }
 
+// Fold `text`, and when a sort/reading name is present and folds to something
+// different, append it (space-separated) so a romaji/kana reading matches the
+// original-script field via the orderless substring matcher.
+QString foldWithReading(const QString &text, const QString &reading)
+{
+    QString folded = Search::Fold::foldText(text);
+    if (!reading.isEmpty()) {
+        const QString fr = Search::Fold::foldText(reading);
+        if (!fr.isEmpty() && fr != folded) {
+            folded += QLatin1Char(' ') + fr;
+        }
+    }
+    return folded;
+}
+
 } // namespace
 
 Database::Database(QString connectionName)
@@ -353,7 +368,67 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 8;
+    // v9: sort/reading names (Picard *sort tags) on tracks, folded into the
+    // search index for non-Latin recall (romaji/kana sort names).
+    const QVector<QPair<QString, QString>> sortColumns = {
+        {QStringLiteral("title_sort"),        QStringLiteral("title_sort TEXT")},
+        {QStringLiteral("artist_sort"),       QStringLiteral("artist_sort TEXT")},
+        {QStringLiteral("album_artist_sort"), QStringLiteral("album_artist_sort TEXT")},
+        {QStringLiteral("album_sort"),        QStringLiteral("album_sort TEXT")},
+    };
+    for (const auto &column : sortColumns) {
+        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+            return false;
+        }
+    }
+
+    // TRANSIENT backfill: populate the sort columns from the metadata blobs for
+    // existing rows. Safe to delete once the library has been rescanned.
+    {
+        QSqlQuery bfQuery(m_db);
+        bfQuery.prepare(QStringLiteral(
+            "SELECT t.id, m.raw_size, m.data "
+            "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
+            "WHERE t.title_sort IS NULL AND t.artist_sort IS NULL "
+            "AND t.album_artist_sort IS NULL AND t.album_sort IS NULL"));
+        if (bfQuery.exec()) {
+            QSqlQuery upd(m_db);
+            upd.prepare(QStringLiteral(
+                "UPDATE tracks SET title_sort=?, artist_sort=?, album_artist_sort=?, album_sort=? WHERE id=?"));
+            const auto firstTag = [](const MetadataBlob::FullMetadata &meta, const QString &key) {
+                const QStringList v = meta.tags.value(key);
+                return v.isEmpty() ? QVariant() : QVariant(v.first());
+            };
+            while (bfQuery.next()) {
+                const qint64 trackId = bfQuery.value(0).toLongLong();
+                const qint64 rawSize = bfQuery.value(1).toLongLong();
+                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(bfQuery.value(2).toByteArray(), rawSize);
+                const QVariant ts = firstTag(meta, QStringLiteral("TITLESORT"));
+                const QVariant as = firstTag(meta, QStringLiteral("ARTISTSORT"));
+                const QVariant aas = firstTag(meta, QStringLiteral("ALBUMARTISTSORT"));
+                const QVariant als = firstTag(meta, QStringLiteral("ALBUMSORT"));
+                if (ts.isValid() || as.isValid() || aas.isValid() || als.isValid()) {
+                    upd.addBindValue(ts);
+                    upd.addBindValue(as);
+                    upd.addBindValue(aas);
+                    upd.addBindValue(als);
+                    upd.addBindValue(trackId);
+                    upd.exec();
+                }
+            }
+        }
+    }
+
+    const QStringList v9Statements = {
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(9, datetime('now'))"),
+    };
+    for (const QString &statement : v9Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 9;
 }
 
 QString Database::lastError() const
@@ -477,9 +552,9 @@ bool Database::upsertTrack(const Track &track)
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec, bit_depth) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec, bit_depth=excluded.bit_depth, "
+        "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, album_id, track_number, track_total, disc_number, disc_total, duration_ms, rating_0_100, rating_source, play_count, date, original_date, musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id, file_size, file_mtime, scanned_at, scan_error, sample_rate_hz, bitrate_kbps, channels, codec, bit_depth, title_sort, artist_sort, album_artist_sort, album_sort) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET parent_dir=excluded.parent_dir, filename=excluded.filename, title=excluded.title, artist_name=excluded.artist_name, album_artist_name=excluded.album_artist_name, album_title=excluded.album_title, album_id=excluded.album_id, track_number=excluded.track_number, track_total=excluded.track_total, disc_number=excluded.disc_number, disc_total=excluded.disc_total, duration_ms=excluded.duration_ms, rating_0_100=excluded.rating_0_100, rating_source=excluded.rating_source, play_count=excluded.play_count, date=excluded.date, original_date=excluded.original_date, musicbrainz_recording_id=excluded.musicbrainz_recording_id, musicbrainz_track_id=excluded.musicbrainz_track_id, musicbrainz_release_id=excluded.musicbrainz_release_id, file_size=excluded.file_size, file_mtime=excluded.file_mtime, scanned_at=datetime('now'), scan_error=excluded.scan_error, missing=0, missing_since=NULL, sample_rate_hz=excluded.sample_rate_hz, bitrate_kbps=excluded.bitrate_kbps, channels=excluded.channels, codec=excluded.codec, bit_depth=excluded.bit_depth, title_sort=excluded.title_sort, artist_sort=excluded.artist_sort, album_artist_sort=excluded.album_artist_sort, album_sort=excluded.album_sort, "
         "metadata_scanned=1 "
         "RETURNING id"));
     query.addBindValue(track.path);
@@ -511,6 +586,10 @@ bool Database::upsertTrack(const Track &track)
     query.addBindValue(track.channels > 0 ? QVariant(track.channels) : QVariant());
     query.addBindValue(track.codec.isEmpty() ? QVariant() : QVariant(track.codec));
     query.addBindValue(track.bitDepth > 0 ? QVariant(track.bitDepth) : QVariant());
+    query.addBindValue(track.titleSort.isEmpty() ? QVariant() : QVariant(track.titleSort));
+    query.addBindValue(track.artistSort.isEmpty() ? QVariant() : QVariant(track.artistSort));
+    query.addBindValue(track.albumArtistSort.isEmpty() ? QVariant() : QVariant(track.albumArtistSort));
+    query.addBindValue(track.albumSort.isEmpty() ? QVariant() : QVariant(track.albumSort));
 
     if (!query.exec()) {
         m_lastError = query.lastError().text();
@@ -1705,7 +1784,8 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
         "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
         "COALESCE(utr.rating_0_100, t.rating_0_100), "
-        "t.track_number, t.disc_number, t.file_mtime, t.file_size, t.bit_depth "
+        "t.track_number, t.disc_number, t.file_mtime, t.file_size, t.bit_depth, "
+        "t.title_sort, t.artist_sort, t.album_artist_sort, t.album_sort "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1");
@@ -1741,10 +1821,12 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
         // Pre-compute folded versions (lowercase + ASCII transliteration +
         // romaji) for diacritic/script-insensitive matching; intern the
         // repeated ones (path/title/filename are near-unique, left as-is).
-        rec.normTitle        = Search::Fold::foldText(rec.title);
-        rec.normArtist       = internString(pool, Search::Fold::foldText(rec.artistName));
-        rec.normAlbumArtist  = internString(pool, Search::Fold::foldText(rec.albumArtistName));
-        rec.normAlbum        = internString(pool, Search::Fold::foldText(rec.albumTitle));
+        // Sort/reading names (Picard *sort tags) are folded into the same field
+        // so a romaji/kana reading matches the original-script title/artist.
+        rec.normTitle        = foldWithReading(rec.title, query.value(18).toString());
+        rec.normArtist       = internString(pool, foldWithReading(rec.artistName, query.value(19).toString()));
+        rec.normAlbumArtist  = internString(pool, foldWithReading(rec.albumArtistName, query.value(20).toString()));
+        rec.normAlbum        = internString(pool, foldWithReading(rec.albumTitle, query.value(21).toString()));
         rec.normFilename     = Search::Fold::foldText(rec.filename);
         rec.normPath         = Search::Fold::foldText(rec.path);
         records.push_back(std::move(rec));
