@@ -236,6 +236,28 @@ private slots:
         QVERIFY(unique.size() >= 14);
     }
 
+    void highlightMapsFoldedPositionsToDisplayChars()
+    {
+        // Accented title, plain query — highlight the original (accented) chars.
+        const QVector<int> cafe = Search::highlightPositions(
+            QString::fromUtf8("Café"), SearchQuery::parse(QStringLiteral("cafe")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(cafe, (QVector<int>{0, 1, 2, 3}));
+
+        // Expansion (ß→ss): both folded chars map back to the single source char.
+        const QVector<int> strasse = Search::highlightPositions(
+            QString::fromUtf8("Straße"), SearchQuery::parse(QStringLiteral("strasse")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(strasse, (QVector<int>{0, 1, 2, 3, 4, 5}));
+
+        // Romaji query highlights the underlying kana it romanizes.
+        const QVector<int> kana = Search::highlightPositions(
+            QString::fromUtf8("さんしん"), SearchQuery::parse(QStringLiteral("shin")),
+            Search::HighlightField::Title, false);
+        QVERIFY(kana.contains(2)); // し
+        QVERIFY(kana.contains(3)); // ん
+    }
+
     void largeIndex_parallelScanCoversEveryRowOnce()
     {
         // Large indexes are scanned by several threads over contiguous slices.
