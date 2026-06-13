@@ -218,8 +218,11 @@ void decomposeFold(const QString &src, QString &base, QVector<int> &baseSrc)
             continue;
         }
         if (ch.isHighSurrogate() && i + 1 < n && src.at(i + 1).isLowSurrogate()) {
+            // Astral code point (e.g. CJK Ext-B kanji): pass both UTF-16 units
+            // through, each mapped to its own source index so a match flags the
+            // whole surrogate pair — otherwise the delegate bolds half a glyph.
             base += ch;            baseSrc.append(i);
-            base += src.at(i + 1); baseSrc.append(i);
+            base += src.at(i + 1); baseSrc.append(i + 1);
             ++i;
             continue;
         }

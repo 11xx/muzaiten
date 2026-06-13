@@ -92,6 +92,14 @@ private slots:
         const Fold::FoldResult kana = Fold::fold(QString::fromUtf8("さん"));
         QCOMPARE(kana.text, QStringLiteral("san"));
         QCOMPARE(kana.srcIndex, (QVector<int>{0, 0, 1}));
+
+        // Astral (surrogate-pair) kanji passes through as its two UTF-16 units,
+        // each mapped to its own source index so a match highlights the whole
+        // glyph rather than half a pair.
+        const QString astral = QString::fromUcs4(U"\U0002000B"); // 𠀋, 2 QChars
+        const Fold::FoldResult ext = Fold::fold(QStringLiteral("a") + astral + QStringLiteral("b"));
+        QCOMPARE(ext.text.size(), 4);
+        QCOMPARE(ext.srcIndex, (QVector<int>{0, 1, 2, 3}));
     }
 
     void foldTextMatchesFoldText()
