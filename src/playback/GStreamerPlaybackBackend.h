@@ -39,6 +39,11 @@ private:
     void pollBus();
     void pollPosition();
     void handleMessage(GstMessage *message);
+    void loadUri(const QString &uri, State targetState, qint64 positionMs = -1);
+    void beginTargetTransition(State targetState);
+    void finishTargetTransition();
+    void handleTargetTransitionTimeout();
+    void publishObservedState(State observedState);
     void updateState(State state);
     void resetTimeline(qint64 positionMs = 0, qint64 durationMs = 0);
     QString uriForUrl(const QUrl &url) const;
@@ -69,8 +74,10 @@ private:
     qint64 m_positionMs = 0;
     qint64 m_durationMs = 0;
     State m_targetState = State::Stopped;
+    bool m_waitingForTargetState = false;
     bool m_gaplessAdvancePending = false;
     double m_volume = 1.0;
+    QTimer m_transitionTimer;
 
     // Soft-pause: the pipeline is driven to READY (releasing the audio device)
     // while we remember the position for a seamless seek on resume.
