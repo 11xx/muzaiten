@@ -48,10 +48,18 @@ public:
     // in the .cpp — update both together.
     static KeyBindingReferenceList keyBindingReference();
 
+    // When true, the context menu also offers "(don't save to playlist)" queue
+    // adds (the queue is mirroring a playlist).
+    void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
+
 signals:
     void addToQueueRequested(QVector<Track> tracks);
     void addToPlaylistRequested(QVector<Track> tracks);
     void playNextRequested(QVector<Track> tracks);
+    // "(don't save to playlist)" variants: add to the queue only, never mirroring
+    // into the playlist that backs the queue.
+    void addToQueueTemporaryRequested(QVector<Track> tracks);
+    void playNextTemporaryRequested(QVector<Track> tracks);
     void playNowRequested(QVector<Track> tracks);
     void findInLibraryRequested(Track track);
     void findFileRequested(Track track);
@@ -117,4 +125,5 @@ private:
     int       m_totalIndexed = 0;
     int       m_matchCount   = 0;  // total matches for the current query (uncapped)
     int       m_rowHeight    = 0;  // 0 = delegate auto
+    bool      m_queueIsPlaylistSourced = false;
 };

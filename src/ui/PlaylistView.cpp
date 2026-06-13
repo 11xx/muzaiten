@@ -930,28 +930,24 @@ void PlaylistView::playCurrentPlaylist()
 
 void PlaylistView::addCurrentPlaylistToQueue()
 {
-    if (currentSelectionIsSavedQueue()) {
-        emit addSavedQueueToQueueRequested(m_currentQueueSnapshotId);
-        return;
-    }
-    if (m_db == nullptr || m_currentPlaylistId <= 0) {
-        return;
-    }
-    QStringList paths;
-    for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
-        if (!item.trackPath.isEmpty()) {
-            paths << item.trackPath;
-        }
-    }
-    if (!paths.isEmpty()) {
-        emit addPathsToQueueRequested(paths);
-    }
+    enqueueCurrentPlaylist(/*playNext=*/false, /*temporary=*/false);
 }
 
 void PlaylistView::playNextCurrentPlaylist()
 {
+    enqueueCurrentPlaylist(/*playNext=*/true, /*temporary=*/false);
+}
+
+void PlaylistView::enqueueCurrentPlaylist(bool playNext, bool temporary)
+{
     if (currentSelectionIsSavedQueue()) {
-        emit playNextSavedQueueRequested(m_currentQueueSnapshotId);
+        // Saved queues are not the playlist that backs the queue, so there is
+        // nothing to mirror — "temporary" collapses to the normal saved-queue add.
+        if (playNext) {
+            emit playNextSavedQueueRequested(m_currentQueueSnapshotId);
+        } else {
+            emit addSavedQueueToQueueRequested(m_currentQueueSnapshotId);
+        }
         return;
     }
     if (m_db == nullptr || m_currentPlaylistId <= 0) {
@@ -963,8 +959,13 @@ void PlaylistView::playNextCurrentPlaylist()
             paths << item.trackPath;
         }
     }
-    if (!paths.isEmpty()) {
-        emit playNextPathsRequested(paths);
+    if (paths.isEmpty()) {
+        return;
+    }
+    if (playNext) {
+        temporary ? emit playNextPathsTemporaryRequested(paths) : emit playNextPathsRequested(paths);
+    } else {
+        temporary ? emit addPathsToQueueTemporaryRequested(paths) : emit addPathsToQueueRequested(paths);
     }
 }
 
@@ -1011,17 +1012,24 @@ void PlaylistView::playCurrentItem()
 
 void PlaylistView::playNextSelectedItems()
 {
-    const QStringList paths = selectedOnlyItemPaths();
-    if (!paths.isEmpty()) {
-        emit playNextPathsRequested(paths);
-    }
+    enqueueSelectedItems(/*playNext=*/true, /*temporary=*/false);
 }
 
 void PlaylistView::addSelectedItemsToQueue()
 {
+    enqueueSelectedItems(/*playNext=*/false, /*temporary=*/false);
+}
+
+void PlaylistView::enqueueSelectedItems(bool playNext, bool temporary)
+{
     const QStringList paths = selectedOnlyItemPaths();
-    if (!paths.isEmpty()) {
-        emit addPathsToQueueRequested(paths);
+    if (paths.isEmpty()) {
+        return;
+    }
+    if (playNext) {
+        temporary ? emit playNextPathsTemporaryRequested(paths) : emit playNextPathsRequested(paths);
+    } else {
+        temporary ? emit addPathsToQueueTemporaryRequested(paths) : emit addPathsToQueueRequested(paths);
     }
 }
 
@@ -1060,6 +1068,12 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     playNext->setEnabled(hasPlayableCollection);
     connect(playNext, &QAction::triggered, this, &PlaylistView::playNextCurrentPlaylist);
+    if (m_queueIsPlaylistSourced && hasPlayableCollection && !savedQueue) {
+        QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
+        connect(playNextTemp, &QAction::triggered, this, [this]() { enqueueCurrentPlaylist(true, true); });
+        QAction *addToQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
+        connect(addToQueueTemp, &QAction::triggered, this, [this]() { enqueueCurrentPlaylist(false, true); });
+    }
 
     menu.addSeparator();
     QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
@@ -1117,6 +1131,14 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
     addToQueue->setEnabled(hasPlayableSelection);
     connect(addToQueue, &QAction::triggered, this, &PlaylistView::addSelectedItemsToQueue);
+    if (m_queueIsPlaylistSourced) {
+        QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
+        playNextTemp->setEnabled(hasPlayableSelection);
+        connect(playNextTemp, &QAction::triggered, this, [this]() { enqueueSelectedItems(true, true); });
+        QAction *addToQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
+        addToQueueTemp->setEnabled(hasPlayableSelection);
+        connect(addToQueueTemp, &QAction::triggered, this, [this]() { enqueueSelectedItems(false, true); });
+    }
     QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist..."));
     addToPlaylist->setEnabled(hasPlayableSelection);
     connect(addToPlaylist, &QAction::triggered, this, &PlaylistView::addSelectedItemsToPlaylist);

@@ -50,6 +50,11 @@ class SearchView;
 
 enum class LibrarySource { Local, Mpd };
 enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue, Playlist };
+enum class QueueAddMode { Append, PlayNext };
+// Outcome of the warning shown when adding to a queue that is mirroring a
+// playlist: append to both queue and playlist, append to the queue only
+// (temporary, saved nowhere), or do nothing.
+enum class PlaylistMirrorChoice { AddToPlaylist, QueueOnly, Cancel };
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -174,6 +179,15 @@ private:
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
+    // Menu-driven queue adds funnel through here so that, when the queue is
+    // mirroring a playlist, the user is warned that the tracks would also be
+    // saved to the playlist (with an option to add them to the queue only).
+    // temporary=true is the explicit "(don't save to playlist)" path: it skips
+    // the prompt and never mirrors. The raw playNextTracks/addTracksToQueue above
+    // stay mirror-by-default and are reserved for internal, non-menu callers.
+    void enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMode mode, bool temporary);
+    bool queueIsPlaylistSourced() const;
+    PlaylistMirrorChoice promptPlaylistMirror(int trackCount);
     void moveQueueRows(const QVector<int> &rows, int destinationRow);
     void removeQueueRows(const QVector<int> &rows);
     void clearQueue();
@@ -191,6 +205,9 @@ private:
     void playAlbumsReplacingQueue(const QStringList &albumTitles);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
+    void playNextAlbumTemporary(const QString &albumTitle);
+    void addAlbumToQueueTemporary(const QString &albumTitle);
+    QVector<Track> tracksForAlbumTitle(const QString &albumTitle) const;
     // Queue snapshots (stored in state.sqlite, distinct from library playlists).
     // Spontaneous queues keep a stable id and are moved through a short backlog
     // when displaced, so restoring/mutating one does not create duplicate queue
@@ -299,6 +316,14 @@ private:
     QString m_queueSourceKind = QStringLiteral("queue");
     qint64 m_queueSourcePlaylistId = 0;
     QString m_queueSourceName;
+    // Set transiently around a queue add to tell prepareQueueForTrackAddition to
+    // skip mirroring the added tracks into the source playlist (the "(don't save
+    // to playlist)" / "queue only" path).
+    bool m_suppressPlaylistMirror = false;
+    // Playlist id for which the user ticked "don't ask again" in the mirror
+    // warning. Auto-expires when a different playlist (or no playlist) backs the
+    // queue, since it is compared against m_queueSourcePlaylistId.
+    qint64 m_mirrorPromptSuppressedForPlaylist = 0;
     int m_trackSortColumn = 0;
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;

@@ -440,6 +440,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         QAction *playAll = menu.addAction(QStringLiteral("Play all tracks"));
         QAction *playNext = menu.addAction(QStringLiteral("Play next"));
         QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
+        QAction *playNextTemp = m_queueIsPlaylistSourced
+            ? menu.addAction(QStringLiteral("Play next (don't save to playlist)")) : nullptr;
+        QAction *addQueueTemp = m_queueIsPlaylistSourced
+            ? menu.addAction(QStringLiteral("Add to queue (don't save to playlist)")) : nullptr;
         QAction *scan = menu.addAction(QStringLiteral("Scan/Add this directory to library"));
         QAction *setStart = nullptr;
         if (m_mode == FileExplorerMode::FreeRoam) {
@@ -479,6 +483,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
             emit playNextRequested(tracks);
         } else if (selected == addQueue) {
             emit addToQueueRequested(tracks);
+        } else if (playNextTemp != nullptr && selected == playNextTemp) {
+            emit playNextTemporaryRequested(tracks);
+        } else if (addQueueTemp != nullptr && selected == addQueueTemp) {
+            emit addToQueueTemporaryRequested(tracks);
         } else if (selected == scan) {
             emit importDirectoryRequested(path);
         } else if (setStart != nullptr && selected == setStart) {
@@ -494,6 +502,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     QAction *play = menu.addAction(QStringLiteral("Play"));
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
+    QAction *playNextTemp = m_queueIsPlaylistSourced
+        ? menu.addAction(QStringLiteral("Play next (don't save to playlist)")) : nullptr;
+    QAction *addQueueTemp = m_queueIsPlaylistSourced
+        ? menu.addAction(QStringLiteral("Add to queue (don't save to playlist)")) : nullptr;
     QAction *addPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
     QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
     QAction *properties = menu.addAction(QStringLiteral("Properties"));
@@ -530,6 +542,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         emit playNextRequested(tracks);
     } else if (selected == addQueue) {
         emit addToQueueRequested(tracks);
+    } else if (playNextTemp != nullptr && selected == playNextTemp) {
+        emit playNextTemporaryRequested(tracks);
+    } else if (addQueueTemp != nullptr && selected == addQueueTemp) {
+        emit addToQueueTemporaryRequested(tracks);
     } else if (selected == addPlaylist) {
         emit addToPlaylistRequested(tracks);
     } else if (selected == findFile) {

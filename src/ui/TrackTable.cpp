@@ -915,6 +915,16 @@ void TrackTable::showCellMenu(const QPoint &pos)
     connect(addToQueue, &QAction::triggered, this, [this, tracks]() {
         emit addToQueueRequested(tracks);
     });
+    if (m_queueIsPlaylistSourced) {
+        QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
+        connect(playNextTemp, &QAction::triggered, this, [this, tracks]() {
+            emit playNextTemporaryRequested(tracks);
+        });
+        QAction *addToQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
+        connect(addToQueueTemp, &QAction::triggered, this, [this, tracks]() {
+            emit addToQueueTemporaryRequested(tracks);
+        });
+    }
     QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
     connect(addToPlaylist, &QAction::triggered, this, [this, tracks]() {
         emit addToPlaylistRequested(tracks);

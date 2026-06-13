@@ -911,6 +911,16 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
         connect(addToQueue, &QAction::triggered, this, [this, albumTitle]() {
             emit albumAddToQueueRequested(albumTitle);
         });
+        if (m_queueIsPlaylistSourced) {
+            QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
+            connect(playNextTemp, &QAction::triggered, this, [this, albumTitle]() {
+                emit albumPlayNextTemporaryRequested(albumTitle);
+            });
+            QAction *addToQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
+            connect(addToQueueTemp, &QAction::triggered, this, [this, albumTitle]() {
+                emit albumAddToQueueTemporaryRequested(albumTitle);
+            });
+        }
     }
 
     if (index.isValid() && index.data(HasUserRatingRole).toBool()) {

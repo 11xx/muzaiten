@@ -56,6 +56,10 @@ public:
     // in the .cpp — update both together.
     static KeyBindingReferenceList keyBindingReference();
 
+    // When true, the context menus also offer "(don't save to playlist)" queue
+    // adds (the queue is mirroring a playlist).
+    void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
+
 public slots:
     void createPlaylist();
     void renameCurrentPlaylist();
@@ -76,6 +80,10 @@ signals:
     void playPathsRequested(const QStringList &paths, int startIndex);
     void addPathsToQueueRequested(const QStringList &paths);
     void playNextPathsRequested(const QStringList &paths);
+    // "(don't save to playlist)" variants: add to the queue only, never mirroring
+    // into the playlist that backs the queue.
+    void addPathsToQueueTemporaryRequested(const QStringList &paths);
+    void playNextPathsTemporaryRequested(const QStringList &paths);
     void propertiesForPathRequested(const QString &path);
     // Open the add-song modal for the given playlist (RET-driven, task 9).
     void addSongRequested(qint64 playlistId);
@@ -107,6 +115,10 @@ private:
     void playCurrentItem();
     void playNextSelectedItems();
     void addSelectedItemsToQueue();
+    // Shared bodies for the queue-add slots/menu items. temporary=true emits the
+    // "(don't save to playlist)" signals; playNext picks insertion vs append.
+    void enqueueCurrentPlaylist(bool playNext, bool temporary);
+    void enqueueSelectedItems(bool playNext, bool temporary);
     void addSelectedItemsToPlaylist();
     void editCurrentItem();
     void showPlaylistMenu(const QPoint &pos);
@@ -140,4 +152,5 @@ private:
     PlaylistItemTableModel *m_itemModel = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     QLabel *m_header = nullptr;
+    bool m_queueIsPlaylistSourced = false;
 };

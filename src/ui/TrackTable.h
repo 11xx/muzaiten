@@ -47,11 +47,18 @@ public:
     void unmarkCurrentTrack();
     void unmarkAllTracks();
     QVector<Search::MatchDocument> searchDocuments() const;
+    // When true, the context menu also offers "(don't save to playlist)" queue
+    // adds (the queue is mirroring a playlist).
+    void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
 
 signals:
     void trackActivated(const Track &track);
     void playNextRequested(const QVector<Track> &tracks);
     void addToQueueRequested(const QVector<Track> &tracks);
+    // "(don't save to playlist)" variants: add to the queue only, never mirroring
+    // into the playlist that backs the queue.
+    void playNextTemporaryRequested(const QVector<Track> &tracks);
+    void addToQueueTemporaryRequested(const QVector<Track> &tracks);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
@@ -78,4 +85,5 @@ private:
     QSet<QString> m_markedTrackPaths;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     int m_hoveredRow = -1;
+    bool m_queueIsPlaylistSourced = false;
 };

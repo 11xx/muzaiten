@@ -60,6 +60,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileDialog>
+#include <QCheckBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHash>
@@ -652,8 +653,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
     connect(m_artistSidebar, &ArtistSidebar::librarySourceChanged, this, &MainWindow::onLibrarySourceChanged);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
-    connect(m_trackTable, &TrackTable::playNextRequested, this, &MainWindow::playNextTracks);
-    connect(m_trackTable, &TrackTable::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_trackTable, &TrackTable::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_trackTable, &TrackTable::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_trackTable, &TrackTable::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_trackTable, &TrackTable::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
     connect(m_trackTable, &TrackTable::trackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
@@ -663,6 +674,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
     connect(m_albumGrid, &AlbumGrid::albumPlayReplaceRequested, this, &MainWindow::playAlbumsReplacingQueue);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
+    connect(m_albumGrid, &AlbumGrid::albumPlayNextTemporaryRequested, this, &MainWindow::playNextAlbumTemporary);
+    connect(m_albumGrid, &AlbumGrid::albumAddToQueueTemporaryRequested, this, &MainWindow::addAlbumToQueueTemporary);
     connect(m_albumGrid, &AlbumGrid::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
         QVector<Track> tracks;
         for (const QString &title : titles) {
@@ -976,8 +989,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
     connect(m_libraryFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setLibraryExplorerDirectory);
     connect(m_libraryFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
-    connect(m_libraryFileExplorer, &FileExplorerView::playNextRequested, this, &MainWindow::playNextTracks);
-    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_libraryFileExplorer, &FileExplorerView::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
     connect(m_libraryFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
         startScan(path);
     });
@@ -986,8 +1009,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_libraryFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, &MainWindow::playNextTracks);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
     connect(m_freeRoamFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
         startScan(path);
     });
@@ -998,8 +1031,18 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
 
     // Search view
-    connect(m_searchView, &SearchView::addToQueueRequested, this, &MainWindow::addTracksToQueue);
-    connect(m_searchView, &SearchView::playNextRequested, this, &MainWindow::playNextTracks);
+    connect(m_searchView, &SearchView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_searchView, &SearchView::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_searchView, &SearchView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
+    connect(m_searchView, &SearchView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
     connect(m_searchView, &SearchView::playNowRequested, this, [this](const QVector<Track> &tracks) {
         if (tracks.isEmpty()) return;
         addTracksToQueue(tracks);
@@ -1024,10 +1067,16 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     connect(m_playlistView, &PlaylistView::addPathsToQueueRequested, this, [this](const QStringList &paths) {
-        addTracksToQueue(tracksForPaths(paths));
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::Append, false);
     });
     connect(m_playlistView, &PlaylistView::playNextPathsRequested, this, [this](const QStringList &paths) {
-        playNextTracks(tracksForPaths(paths));
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::PlayNext, false);
+    });
+    connect(m_playlistView, &PlaylistView::addPathsToQueueTemporaryRequested, this, [this](const QStringList &paths) {
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::Append, true);
+    });
+    connect(m_playlistView, &PlaylistView::playNextPathsTemporaryRequested, this, [this](const QStringList &paths) {
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::PlayNext, true);
     });
     connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
         showTrackProperties(m_database->trackForPath(path));
@@ -2938,7 +2987,9 @@ void MainWindow::prepareQueueForTrackAddition(const QVector<Track> &tracks)
         return;
     }
     if (m_queueSourceKind == QStringLiteral("playlist")) {
-        appendTracksToCurrentPlaylist(tracks);
+        if (!m_suppressPlaylistMirror) {
+            appendTracksToCurrentPlaylist(tracks);
+        }
         return;
     }
     if (m_queueSourceKind == QStringLiteral("album")) {
@@ -2946,6 +2997,76 @@ void MainWindow::prepareQueueForTrackAddition(const QVector<Track> &tracks)
         return;
     }
     ensureCurrentQueueIdentity();
+}
+
+bool MainWindow::queueIsPlaylistSourced() const
+{
+    return m_queueSourceKind == QStringLiteral("playlist") && m_queueSourcePlaylistId > 0;
+}
+
+PlaylistMirrorChoice MainWindow::promptPlaylistMirror(int trackCount)
+{
+    // "Don't ask again" stays in effect only while the same playlist backs the
+    // queue; once it does, normal adds quietly mirror (the explicit "(don't save
+    // to playlist)" menu items remain the way to add to the queue only).
+    if (m_mirrorPromptSuppressedForPlaylist == m_queueSourcePlaylistId) {
+        return PlaylistMirrorChoice::AddToPlaylist;
+    }
+
+    const QString playlist = m_queueSourceName.isEmpty()
+        ? QStringLiteral("the current playlist")
+        : QStringLiteral("“%1”").arg(m_queueSourceName);
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Add to playlist queue"));
+    box.setText(QStringLiteral("The queue is mirroring %1.").arg(playlist));
+    box.setInformativeText(trackCount == 1
+        ? QStringLiteral("Adding this track to the queue will also save it to the playlist. "
+                         "Add it to the queue only instead?")
+        : QStringLiteral("Adding these %1 tracks to the queue will also save them to the playlist. "
+                         "Add them to the queue only instead?").arg(trackCount));
+    QPushButton *addToPlaylist = box.addButton(QStringLiteral("Add to playlist"), QMessageBox::AcceptRole);
+    QPushButton *queueOnly = box.addButton(QStringLiteral("Queue only (don't save)"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(addToPlaylist);
+    auto *dontAsk = new QCheckBox(QStringLiteral("Don't ask again while this playlist is the queue"), &box);
+    box.setCheckBox(dontAsk);
+    box.exec();
+
+    QAbstractButton *clicked = box.clickedButton();
+    if (clicked == nullptr || (clicked != addToPlaylist && clicked != queueOnly)) {
+        return PlaylistMirrorChoice::Cancel;
+    }
+    if (dontAsk->isChecked()) {
+        m_mirrorPromptSuppressedForPlaylist = m_queueSourcePlaylistId;
+    }
+    return clicked == queueOnly ? PlaylistMirrorChoice::QueueOnly : PlaylistMirrorChoice::AddToPlaylist;
+}
+
+void MainWindow::enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMode mode, bool temporary)
+{
+    if (tracks.isEmpty()) {
+        return;
+    }
+    bool suppressMirror = temporary;
+    if (!temporary && queueIsPlaylistSourced()) {
+        switch (promptPlaylistMirror(static_cast<int>(tracks.size()))) {
+        case PlaylistMirrorChoice::Cancel:
+            return;
+        case PlaylistMirrorChoice::QueueOnly:
+            suppressMirror = true;
+            break;
+        case PlaylistMirrorChoice::AddToPlaylist:
+            break;
+        }
+    }
+    m_suppressPlaylistMirror = suppressMirror;
+    if (mode == QueueAddMode::PlayNext) {
+        playNextTracks(tracks);
+    } else {
+        addTracksToQueue(tracks);
+    }
+    m_suppressPlaylistMirror = false;
 }
 
 void MainWindow::adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<Track> &tracks, int playIndex)
@@ -4292,6 +4413,17 @@ void MainWindow::syncQueueState()
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Queue);
     }
+    // The "(don't save to playlist)" menu items and the playlist-mirror warning
+    // only make sense while a playlist backs the queue; tell every view and gate
+    // the "merge saved queue" action, which is never wanted in playlist mode.
+    const bool playlistSourced = queueIsPlaylistSourced();
+    if (m_trackTable != nullptr) m_trackTable->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_albumGrid != nullptr) m_albumGrid->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_libraryFileExplorer != nullptr) m_libraryFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_freeRoamFileExplorer != nullptr) m_freeRoamFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_searchView != nullptr) m_searchView->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_playlistView != nullptr) m_playlistView->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_playerBar != nullptr) m_playerBar->setMergeSavedQueueEnabled(!playlistSourced);
     scheduleQueueStateSave();
 }
 
@@ -4345,26 +4477,34 @@ void MainWindow::playAlbumsReplacingQueue(const QStringList &albumTitles)
     replaceQueueWithTracks(tracks, 0, QStringLiteral("album"), 0, sourceName);
 }
 
+QVector<Track> MainWindow::tracksForAlbumTitle(const QString &albumTitle) const
+{
+    if (m_currentArtist.isEmpty() || albumTitle.isEmpty()) {
+        return {};
+    }
+    return m_librarySource == LibrarySource::Mpd
+        ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
+        : m_database->tracksForArtist(m_currentArtist, albumTitle);
+}
+
 void MainWindow::playNextAlbum(const QString &albumTitle)
 {
-    if (!m_currentArtist.isEmpty() && !albumTitle.isEmpty()) {
-        if (m_librarySource == LibrarySource::Mpd) {
-            playNextTracks(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle));
-        } else {
-            playNextTracks(m_database->tracksForArtist(m_currentArtist, albumTitle));
-        }
-    }
+    enqueueTracksFromMenu(tracksForAlbumTitle(albumTitle), QueueAddMode::PlayNext, false);
 }
 
 void MainWindow::addAlbumToQueue(const QString &albumTitle)
 {
-    if (!m_currentArtist.isEmpty() && !albumTitle.isEmpty()) {
-        if (m_librarySource == LibrarySource::Mpd) {
-            addTracksToQueue(m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle));
-        } else {
-            addTracksToQueue(m_database->tracksForArtist(m_currentArtist, albumTitle));
-        }
-    }
+    enqueueTracksFromMenu(tracksForAlbumTitle(albumTitle), QueueAddMode::Append, false);
+}
+
+void MainWindow::playNextAlbumTemporary(const QString &albumTitle)
+{
+    enqueueTracksFromMenu(tracksForAlbumTitle(albumTitle), QueueAddMode::PlayNext, true);
+}
+
+void MainWindow::addAlbumToQueueTemporary(const QString &albumTitle)
+{
+    enqueueTracksFromMenu(tracksForAlbumTitle(albumTitle), QueueAddMode::Append, true);
 }
 
 void MainWindow::playQueueIndex(int index, bool notifyScrobbler, bool startPaused, bool explicitJump)

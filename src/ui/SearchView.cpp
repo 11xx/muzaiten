@@ -602,6 +602,14 @@ void SearchView::showContextMenu(const QPoint &pos)
     menu.addAction(QStringLiteral("Play next%1").arg(many), this, [this, targets]() {
         emit playNextRequested(targets);
     });
+    if (m_queueIsPlaylistSourced) {
+        menu.addAction(QStringLiteral("Play next (don't save to playlist)%1").arg(many), this, [this, targets]() {
+            emit playNextTemporaryRequested(targets);
+        });
+        menu.addAction(QStringLiteral("Add to queue (don't save to playlist)%1").arg(many), this, [this, targets]() {
+            emit addToQueueTemporaryRequested(targets);
+        });
+    }
     menu.addSeparator();
     menu.addAction(QStringLiteral("Find in library"), this, [this, single]() {
         emit findInLibraryRequested(single);

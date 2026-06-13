@@ -55,11 +55,19 @@ public:
     // can't be reached). Works for both library and free-roam modes.
     void revealFile(const QString &filePath);
 
+    // When true, the context menu also offers "(don't save to playlist)" queue
+    // adds (the queue is mirroring a playlist).
+    void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
+
 signals:
     void directoryRequested(const QString &path);
     void trackActivated(const Track &track);
     void playNextRequested(const QVector<Track> &tracks);
     void addToQueueRequested(const QVector<Track> &tracks);
+    // "(don't save to playlist)" variants: add to the queue only, never mirroring
+    // into the playlist that backs the queue.
+    void playNextTemporaryRequested(const QVector<Track> &tracks);
+    void addToQueueTemporaryRequested(const QVector<Track> &tracks);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void importDirectoryRequested(const QString &path);
     void findFileRequested(const Track &track);
@@ -125,6 +133,7 @@ private:
     MusicSort::SortField m_sortField = MusicSort::SortField::FileName;
     bool m_sortDescending = false;
     bool m_sortReverseGroups = false;
+    bool m_queueIsPlaylistSourced = false;
 };
 
 

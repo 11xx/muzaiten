@@ -508,6 +508,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as..."));
     QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore saved queue..."));
     QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)..."));
+    m_mergeSavedQueueAction = mergeQueue;
+    queueMenu->setToolTipsVisible(true);
 
     auto *playlistMenu = new QMenu(QStringLiteral("Playlists"), this);
     QAction *showPlaylists = playlistMenu->addAction(QStringLiteral("Show playlists"));
@@ -866,6 +868,18 @@ void PlayerBar::setPlaylistViewActionsActive(bool active)
             action->setEnabled(active);
         }
     }
+}
+
+void PlayerBar::setMergeSavedQueueEnabled(bool enabled)
+{
+    if (m_mergeSavedQueueAction == nullptr) {
+        return;
+    }
+    m_mergeSavedQueueAction->setEnabled(enabled);
+    m_mergeSavedQueueAction->setToolTip(enabled
+        ? QString()
+        : QStringLiteral("Unavailable while the queue is mirroring a playlist. "
+                         "Use the saved queue's “Play next” from the Playlists screen instead."));
 }
 
 void PlayerBar::setAlbumArt(const QString &imagePath)

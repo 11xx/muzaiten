@@ -54,6 +54,9 @@ public:
     // mouse-made multi-selection counts as a finished interaction, so returning
     // to the grid restarts fresh and the narrowing is cleared instead.
     bool narrowingPersistsOnReturn() const;
+    // When true, the context menu also offers "(don't save to playlist)" queue
+    // adds (the queue is mirroring a playlist).
+    void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
     QVector<Search::MatchDocument> searchDocuments() const;
 
 signals:
@@ -68,6 +71,10 @@ signals:
     void albumPlayNextRequested(const QString &albumTitle);
     void albumPlayReplaceRequested(const QStringList &albumTitles);
     void albumAddToQueueRequested(const QString &albumTitle);
+    // "(don't save to playlist)" variants: add to the queue only, never mirroring
+    // into the playlist that backs the queue.
+    void albumPlayNextTemporaryRequested(const QString &albumTitle);
+    void albumAddToQueueTemporaryRequested(const QString &albumTitle);
     void albumRatingChanged(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     void viewSettingsChanged();
 
@@ -120,6 +127,7 @@ private:
     QString m_selectedAlbumTitle;
     QSet<QString> m_markedAlbumTitles;
     bool m_marksFromMouse = false;
+    bool m_queueIsPlaylistSourced = false;
     bool m_rememberedOutlineVisible = false;
     QVector<Album> m_sourceAlbums;  // unsorted source list from last setAlbums call
     QVector<Album> m_pendingAlbums;
