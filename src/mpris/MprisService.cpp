@@ -65,6 +65,49 @@ QString ratingSourceName(Rating::Source source)
     return QStringLiteral("unknown");
 }
 
+QString stateName(PlaybackBackend::State state)
+{
+    switch (state) {
+    case PlaybackBackend::State::Playing:
+        return QStringLiteral("playing");
+    case PlaybackBackend::State::Buffering:
+        return QStringLiteral("buffering");
+    case PlaybackBackend::State::Paused:
+        return QStringLiteral("paused");
+    case PlaybackBackend::State::Stopped:
+        return QStringLiteral("stopped");
+    case PlaybackBackend::State::Error:
+        return QStringLiteral("error");
+    }
+    return QStringLiteral("stopped");
+}
+
+QString repeatModeName(RepeatMode mode)
+{
+    switch (mode) {
+    case RepeatMode::One:
+        return QStringLiteral("one");
+    case RepeatMode::All:
+        return QStringLiteral("all");
+    case RepeatMode::Off:
+        break;
+    }
+    return QStringLiteral("off");
+}
+
+QString shuffleModeName(ShuffleMode mode)
+{
+    switch (mode) {
+    case ShuffleMode::Queue:
+        return QStringLiteral("queue");
+    case ShuffleMode::Library:
+        return QStringLiteral("library");
+    case ShuffleMode::Off:
+        break;
+    }
+    return QStringLiteral("off");
+}
+
 void insertString(QJsonObject &object, const QString &key, const QString &value)
 {
     const QString trimmed = value.trimmed();
@@ -414,17 +457,26 @@ void MprisService::setRepeatMode(RepeatMode mode)
     m_repeatMode = mode;
     emitPropertiesChanged(QString::fromLatin1(playerInterface),
                           {{QStringLiteral("LoopStatus"), loopStatus()}});
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::setShuffleMode(ShuffleMode mode)
 {
-    const bool wasShuffling = m_shuffleMode != ShuffleMode::Off;
-    m_shuffleMode = mode;
-    if (wasShuffling == (m_shuffleMode != ShuffleMode::Off)) {
+    if (m_shuffleMode == mode) {
         return;
     }
-    emitPropertiesChanged(QString::fromLatin1(playerInterface),
-                          {{QStringLiteral("Shuffle"), shuffle()}});
+    const bool wasShuffling = m_shuffleMode != ShuffleMode::Off;
+    m_shuffleMode = mode;
+    // MPRIS exposes only a bool, so its Shuffle signal fires only when the
+    // on/off state flips; the custom JSON distinguishes queue vs library, so it
+    // refreshes on any mode change.
+    if (wasShuffling != (m_shuffleMode != ShuffleMode::Off)) {
+        emitPropertiesChanged(QString::fromLatin1(playerInterface),
+                              {{QStringLiteral("Shuffle"), shuffle()}});
+    }
+    emitPropertiesChanged(QString::fromLatin1(muzaitenPlayerInterface),
+                          {{QStringLiteral("CurrentTrackJson"), currentTrackJson()}});
 }
 
 void MprisService::emitPropertiesChanged(const QString &interfaceName, const QVariantMap &changedProperties)
@@ -484,44 +536,48 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
     const double elapsed = secondsFromMs(elapsedMs);
     const double elapsedPercent = duration > 0.0 ? (elapsed / duration) * 100.0 : 0.0;
 
-    QJsonObject status;
-    status.insert(QStringLiteral("state"), playbackStatus().toLower());
-    status.insert(QStringLiteral("playback"), playbackStatus());
-    status.insert(QStringLiteral("player"), QStringLiteral("muzaiten"));
-    status.insert(QStringLiteral("duration"), duration);
-    status.insert(QStringLiteral("elapsed"), elapsed);
-    status.insert(QStringLiteral("elapsed_percent"), elapsedPercent);
-    status.insert(QStringLiteral("volume"), static_cast<int>(std::lround(m_volume * 100.0)));
-    status.insert(QStringLiteral("can_go_previous"), m_canGoPrevious);
-    status.insert(QStringLiteral("can_go_next"), m_canGoNext);
-    status.insert(QStringLiteral("can_play"), m_canPlay);
-    status.insert(QStringLiteral("can_pause"), canPause());
-    status.insert(QStringLiteral("can_seek"), canSeek());
+    QJsonObject player;
+    player.insert(QStringLiteral("name"), QStringLiteral("muzaiten"));
+    player.insert(QStringLiteral("identity"), QStringLiteral(MUZAITEN_APP_NAME));
+    player.insert(QStringLiteral("source"), QString::fromLatin1(muzaitenPlayerInterface));
 
-    QJsonObject tags;
-    insertString(tags, QStringLiteral("title"), titleForTrack(track));
-    insertString(tags, QStringLiteral("artist"), artistForTrack(track));
-    insertString(tags, QStringLiteral("album_artist"), track.albumArtistName);
-    insertString(tags, QStringLiteral("album"), track.albumTitle);
-    insertString(tags, QStringLiteral("date"), track.date);
-    insertString(tags, QStringLiteral("original_date"), track.originalDate);
-    if (track.trackNumber > 0) {
-        tags.insert(QStringLiteral("track"), QString::number(track.trackNumber));
-        tags.insert(QStringLiteral("track_number"), track.trackNumber);
+    QJsonObject playback;
+    playback.insert(QStringLiteral("state"), stateName(m_state));
+    playback.insert(QStringLiteral("duration"), duration);
+    playback.insert(QStringLiteral("elapsed"), elapsed);
+    playback.insert(QStringLiteral("elapsed_percent"), elapsedPercent);
+    playback.insert(QStringLiteral("volume"), static_cast<int>(std::lround(m_volume * 100.0)));
+    playback.insert(QStringLiteral("repeat"), repeatModeName(m_repeatMode));
+    playback.insert(QStringLiteral("shuffle"), shuffleModeName(m_shuffleMode));
+    playback.insert(QStringLiteral("can_go_next"), m_canGoNext);
+    playback.insert(QStringLiteral("can_go_previous"), m_canGoPrevious);
+    playback.insert(QStringLiteral("can_play"), m_canPlay);
+    playback.insert(QStringLiteral("can_pause"), canPause());
+    playback.insert(QStringLiteral("can_seek"), canSeek());
+
+    QJsonObject musicbrainz;
+    insertString(musicbrainz, QStringLiteral("artist_id"), track.musicBrainz.artistId);
+    insertString(musicbrainz, QStringLiteral("album_artist_id"), track.musicBrainz.albumArtistId);
+    insertString(musicbrainz, QStringLiteral("release_id"), track.musicBrainz.releaseId);
+    insertString(musicbrainz, QStringLiteral("release_group_id"), track.musicBrainz.releaseGroupId);
+    insertString(musicbrainz, QStringLiteral("recording_id"), track.musicBrainz.recordingId);
+    insertString(musicbrainz, QStringLiteral("track_id"), track.musicBrainz.trackId);
+    insertString(musicbrainz, QStringLiteral("work_id"), track.musicBrainz.workId);
+
+    QJsonObject trackObj;
+    insertString(trackObj, QStringLiteral("title"), titleForTrack(track));
+    insertString(trackObj, QStringLiteral("artist"), artistForTrack(track));
+    insertString(trackObj, QStringLiteral("album_artist"), track.albumArtistName);
+    insertString(trackObj, QStringLiteral("album"), track.albumTitle);
+    insertString(trackObj, QStringLiteral("date"), track.date);
+    insertString(trackObj, QStringLiteral("original_date"), track.originalDate);
+    insertPositive(trackObj, QStringLiteral("track_number"), track.trackNumber);
+    insertPositive(trackObj, QStringLiteral("track_total"), track.trackTotal);
+    insertPositive(trackObj, QStringLiteral("disc_number"), track.discNumber);
+    insertPositive(trackObj, QStringLiteral("disc_total"), track.discTotal);
+    if (!musicbrainz.isEmpty()) {
+        trackObj.insert(QStringLiteral("musicbrainz"), musicbrainz);
     }
-    insertPositive(tags, QStringLiteral("track_total"), track.trackTotal);
-    if (track.discNumber > 0) {
-        tags.insert(QStringLiteral("disc"), QString::number(track.discNumber));
-        tags.insert(QStringLiteral("disc_number"), track.discNumber);
-    }
-    insertPositive(tags, QStringLiteral("disc_total"), track.discTotal);
-    insertString(tags, QStringLiteral("musicbrainz_artistid"), track.musicBrainz.artistId);
-    insertString(tags, QStringLiteral("musicbrainz_albumartistid"), track.musicBrainz.albumArtistId);
-    insertString(tags, QStringLiteral("musicbrainz_albumid"), track.musicBrainz.releaseId);
-    insertString(tags, QStringLiteral("musicbrainz_releasegroupid"), track.musicBrainz.releaseGroupId);
-    insertString(tags, QStringLiteral("musicbrainz_trackid"), track.musicBrainz.recordingId);
-    insertString(tags, QStringLiteral("musicbrainz_releasetrackid"), track.musicBrainz.trackId);
-    insertString(tags, QStringLiteral("musicbrainz_workid"), track.musicBrainz.workId);
 
     QJsonObject audio;
     insertString(audio, QStringLiteral("codec"), track.codec);
@@ -532,10 +588,12 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
 
     QJsonObject library;
     if (track.rating0To100 >= 0) {
-        library.insert(QStringLiteral("rating_0_100"), track.rating0To100);
+        library.insert(QStringLiteral("rating"), track.rating0To100);
+        library.insert(QStringLiteral("rating_stars"), track.rating0To100 / 20.0);
     }
     if (track.effectiveRating0To100 >= 0) {
-        library.insert(QStringLiteral("effective_rating_0_100"), track.effectiveRating0To100);
+        library.insert(QStringLiteral("effective_rating"), track.effectiveRating0To100);
+        library.insert(QStringLiteral("effective_rating_stars"), track.effectiveRating0To100 / 20.0);
     }
     library.insert(QStringLiteral("rating_source"), ratingSourceName(track.ratingSource));
     library.insert(QStringLiteral("has_user_rating"), track.hasUserRating);
@@ -545,14 +603,14 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
     insertString(file, QStringLiteral("path"), track.path);
     insertString(file, QStringLiteral("url"), track.path.isEmpty() ? QString() : QUrl::fromLocalFile(track.path).toString());
     insertString(file, QStringLiteral("parent_dir"), track.parentDir);
-    insertString(file, QStringLiteral("filename"), track.filename);
+    insertString(file, QStringLiteral("name"), track.filename);
     insertPositive(file, QStringLiteral("size"), track.fileSize);
     insertPositive(file, QStringLiteral("mtime"), track.fileMtime);
 
     QJsonObject root;
-    insertString(root, QStringLiteral("filename"), track.path);
-    root.insert(QStringLiteral("status"), status);
-    root.insert(QStringLiteral("tags"), tags);
+    root.insert(QStringLiteral("player"), player);
+    root.insert(QStringLiteral("playback"), playback);
+    root.insert(QStringLiteral("track"), trackObj);
     root.insert(QStringLiteral("audio"), audio);
     root.insert(QStringLiteral("library"), library);
     root.insert(QStringLiteral("file"), file);
