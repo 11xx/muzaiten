@@ -759,6 +759,19 @@ int Database::markTracksMissing(const QStringList &paths)
     return marked;
 }
 
+QStringList Database::missingTrackPaths() const
+{
+    QStringList paths;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("SELECT path FROM tracks WHERE missing = 1 ORDER BY path"))) {
+        return paths;
+    }
+    while (query.next()) {
+        paths.push_back(query.value(0).toString());
+    }
+    return paths;
+}
+
 int Database::removeMissingTracks()
 {
     QSqlQuery query(m_db);
@@ -924,7 +937,7 @@ Track Database::trackForPath(const QString &path) const
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
-        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime, p.status "
+        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime, p.status, t.missing "
         "FROM tracks t "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
@@ -958,6 +971,7 @@ Track Database::trackForPath(const QString &path) const
     track.originalDate = query.value(13).toString();
     track.fileSize = query.value(14).toLongLong();
     track.fileMtime = query.value(15).toLongLong();
+    track.missing = query.value(17).toInt() != 0;
     return track;
 }
 

@@ -4,6 +4,7 @@
 
 #include <QObject>
 #include <QSet>
+#include <QStringList>
 #include <QVector>
 
 #include <functional>
@@ -84,6 +85,7 @@ public:
     void clearAll();
     void collapsePlayNext();
     void patchTracksFromMetadata(const QVector<Track> &tracks);
+    void markTracksMissing(const QStringList &paths);
     void updateTrackRating(const QString &path, int rating0To100, bool hasUserRating);
     // After a tag write the file rating equals the user rating; patch all three
     // rating fields. Returns true when the current track was affected.

@@ -23,6 +23,7 @@ private slots:
     void searchTracksLikeUsesPendingRatingOverlay();
     void pendingRatingWritesRoundTrip();
     void tracksWithUserRatingsRoundTrip();
+    void missingTrackCleanupReturnsPaths();
     void userAlbumRatingOverridesAverageRating();
     void pendingTrackRatingAffectsAlbumAverage();
     void appSettingRoundTrips();
@@ -231,6 +232,30 @@ void SchemaTest::tracksWithUserRatingsRoundTrip()
     tracks = database.tracksWithUserRatings();
     QCOMPARE(tracks.first().rating0To100, 90);
     QCOMPARE(tracks.first().effectiveRating0To100, 90);
+}
+
+void SchemaTest::missingTrackCleanupReturnsPaths()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-missing-cleanup-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const Track missing = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    const Track kept = makeTrack(temp, QStringLiteral("02.flac"), 60);
+    QVERIFY2(database.upsertTrack(missing), qPrintable(database.lastError()));
+    QVERIFY2(database.upsertTrack(kept), qPrintable(database.lastError()));
+
+    QCOMPARE(database.markTracksMissing({missing.path}), 1);
+    QCOMPARE(database.missingTrackPaths(), QStringList{missing.path});
+    QCOMPARE(database.missingTrackCount(), 1);
+    QVERIFY(database.trackForPath(missing.path).missing);
+
+    QCOMPARE(database.removeMissingTracks(), 1);
+    QVERIFY(database.missingTrackPaths().isEmpty());
+    QVERIFY(database.trackForPath(missing.path).path.isEmpty());
+    QCOMPARE(database.trackForPath(kept.path).path, kept.path);
 }
 
 void SchemaTest::userAlbumRatingOverridesAverageRating()

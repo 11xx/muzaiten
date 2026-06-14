@@ -47,6 +47,7 @@ signals:
     void trackRatingChanged(const Track &track, int rating0To100);
     void rowsMoveRequested(const QVector<int> &rows, int destinationRow);
     void rowsRemoveRequested(const QVector<int> &rows);
+    void removeAllMissingTracksRequested();
     void clearRequested();
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();

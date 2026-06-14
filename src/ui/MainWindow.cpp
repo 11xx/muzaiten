@@ -342,6 +342,7 @@ QJsonObject trackToJson(const Track &track)
     root.insert(QStringLiteral("effectiveRating0To100"), track.effectiveRating0To100);
     root.insert(QStringLiteral("hasUserRating"), track.hasUserRating);
     root.insert(QStringLiteral("fileSize"), QString::number(track.fileSize));
+    root.insert(QStringLiteral("missing"), track.missing);
     return root;
 }
 
@@ -364,6 +365,7 @@ Track trackFromJson(const QJsonObject &root)
     track.effectiveRating0To100 = root.value(QStringLiteral("effectiveRating0To100")).toInt(track.rating0To100);
     track.hasUserRating = root.value(QStringLiteral("hasUserRating")).toBool();
     track.fileSize = root.value(QStringLiteral("fileSize")).toString().toLongLong();
+    track.missing = root.value(QStringLiteral("missing")).toBool(false);
     return track;
 }
 
@@ -795,6 +797,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
+    connect(m_rightSidebar, &RightSidebar::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_rightSidebar, &RightSidebar::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) {
@@ -803,6 +806,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_queueScreen, &QueueScreen::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_queueScreen, &QueueScreen::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_queueScreen, &QueueScreen::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
+    connect(m_queueScreen, &QueueScreen::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_queueScreen, &QueueScreen::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
@@ -1087,6 +1091,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
     });
+    connect(m_playlistView, &PlaylistView::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_playlistView, &PlaylistView::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
@@ -1768,6 +1773,11 @@ void MainWindow::markScannedTracksMissing(const QStringList &paths)
     const int marked = m_database->markTracksMissing(paths);
     m_database->commitTransaction();
     if (marked > 0) {
+        m_player->markTracksMissing(paths);
+        if (m_playlistDb != nullptr && m_playlistDb->markItemsMissing(paths) > 0 && m_playlistView != nullptr) {
+            m_playlistView->reloadItems();
+            m_playlistView->reloadPlaylists();
+        }
         qCInfo(uiLog) << "marked" << marked << "tracks missing";
     }
 }
@@ -1785,7 +1795,30 @@ void MainWindow::removeMissingTracks()
     if (choice != QMessageBox::Yes) {
         return;
     }
+    const QStringList missingPaths = m_database->missingTrackPaths();
+    QSet<QString> removedPaths;
+    removedPaths.reserve(missingPaths.size());
+    for (const QString &path : missingPaths) {
+        removedPaths.insert(path);
+    }
     const int removed = m_database->removeMissingTracks();
+    if (removed > 0 && m_playlistDb != nullptr && m_playlistDb->markItemsMissing(missingPaths) > 0 && m_playlistView != nullptr) {
+        m_playlistView->reloadItems();
+        m_playlistView->reloadPlaylists();
+    }
+    if (removed > 0 && !removedPaths.isEmpty()) {
+        QVector<int> queueRows;
+        const QVector<Track> &queue = m_player->queue();
+        queueRows.reserve(queue.size());
+        for (int row = 0; row < queue.size(); ++row) {
+            if (removedPaths.contains(queue.at(row).path)) {
+                queueRows.push_back(row);
+            }
+        }
+        if (!queueRows.isEmpty()) {
+            removeQueueRows(queueRows);
+        }
+    }
     refreshArtists();
     refreshLibraryFileExplorer();
     statusBar()->showMessage(QStringLiteral("Removed %1 missing track(s)").arg(removed), 5000);

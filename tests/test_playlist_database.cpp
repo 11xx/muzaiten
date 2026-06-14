@@ -13,6 +13,7 @@ private slots:
     void itemOrderingAndRemoval();
     void reorderItems();
     void updateItemFields();
+    void markItemsMissingKeepsPlaylistRows();
     void candidatesRoundTripAndV1Migration();
 
 private:
@@ -123,6 +124,25 @@ void TestPlaylistDatabase::updateItemFields()
     QCOMPARE(reloaded.comment, QStringLiteral("from youtube"));
     QCOMPARE(reloaded.query, QStringLiteral("new query"));
     QCOMPARE(reloaded.status, PlaylistItemStatus::Pending);
+}
+
+void TestPlaylistDatabase::markItemsMissingKeepsPlaylistRows()
+{
+    QTemporaryDir dir;
+    PlaylistDatabase db(QStringLiteral("pl-test-missing"));
+    QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+    const qint64 id = db.createPlaylist(QStringLiteral("Mix"));
+    QVERIFY(db.addItem(id, makeItem(QStringLiteral("/missing.flac"), QStringLiteral("Missing"))) > 0);
+    QVERIFY(db.addItem(id, makeItem(QStringLiteral("/kept.flac"), QStringLiteral("Kept"))) > 0);
+
+    QCOMPARE(db.markItemsMissing({QStringLiteral("/missing.flac")}), 1);
+
+    const QVector<PlaylistItem> items = db.items(id);
+    QCOMPARE(items.size(), 2);
+    QCOMPARE(items.at(0).trackPath, QStringLiteral("/missing.flac"));
+    QCOMPARE(items.at(0).status, PlaylistItemStatus::Missing);
+    QCOMPARE(items.at(1).trackPath, QStringLiteral("/kept.flac"));
+    QCOMPARE(items.at(1).status, PlaylistItemStatus::Matched);
 }
 
 void TestPlaylistDatabase::candidatesRoundTripAndV1Migration()

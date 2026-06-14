@@ -586,6 +586,9 @@ public:
         if (role == Qt::TextAlignmentRole && (index.column() == 6 || index.column() == 8)) {
             return QVariant::fromValue(Qt::Alignment(Qt::AlignRight | Qt::AlignVCenter));
         }
+        if (role == Qt::ForegroundRole && track.missing) {
+            return QColor(180, 48, 48);
+        }
         if (role != Qt::DisplayRole) {
             return {};
         }
@@ -598,10 +601,13 @@ public:
                     return QStringLiteral("▸%1").arg(ordinal);
                 }
             }
+            if (track.missing) {
+                return QStringLiteral("×");
+            }
             return QString::number(index.row() + 1);
         }
         case 1:
-            return displayTitle(track);
+            return track.missing ? QStringLiteral("× %1").arg(displayTitle(track)) : displayTitle(track);
         case 2:
             return {};
         case 3:
@@ -1181,6 +1187,27 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(properties, &QAction::triggered, this, [this, track]() {
         emit propertiesRequested(track);
     });
+    if (track.missing) {
+        const QVector<int> rows = selectedRowsForAction();
+        QVector<int> missingRows;
+        missingRows.reserve(rows.size());
+        for (int selectedRow : rows) {
+            if (m_store != nullptr && selectedRow >= 0 && selectedRow < m_store->tracks().size()
+                && m_store->tracks().at(selectedRow).missing) {
+                missingRows.push_back(selectedRow);
+            }
+        }
+        menu.addSeparator();
+        QAction *removeMissing = menu.addAction(QStringLiteral("Remove missing track from queue"));
+        removeMissing->setEnabled(!missingRows.isEmpty());
+        connect(removeMissing, &QAction::triggered, this, [this, missingRows]() {
+            emit rowsRemoveRequested(missingRows);
+        });
+        QAction *removeAllMissing = menu.addAction(QStringLiteral("Remove all missing tracks from library"));
+        connect(removeAllMissing, &QAction::triggered, this, [this]() {
+            emit removeAllMissingTracksRequested();
+        });
+    }
     menu.addAction(QStringLiteral("Add to playlist…"), this, [this]() {
         const QVector<int> rows = selectedRowsForAction();
         QVector<Track> tracks;

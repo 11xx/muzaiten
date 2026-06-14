@@ -40,6 +40,7 @@ struct Track {
     qint64 fileSize = 0;
     qint64 fileMtime = 0;
     QString scanError;
+    bool missing = false;
     QByteArray fullMetadataBlob;     // zstd(JSON) of the complete tag set; empty if not captured
     qint64 fullMetadataRawSize = 0;  // uncompressed length of the archive JSON
     // Technical audio properties (promoted from the metadata blob for fast access / search indexing)

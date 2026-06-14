@@ -90,6 +90,7 @@ private slots:
     void explicitJumpCollapsesPlayNext();
     void clearKeepingCurrentKeepsOnlyCurrent();
     void metadataPatchUpdatesRowsWithoutQueueReset();
+    void missingPatchUpdatesRowsWithoutQueueReset();
     void repeatAllWrapsAtEndOfQueue();
     void repeatAllGaplesslyPreparesFirstTrack();
     void repeatOneReplaysCurrentTrack();
@@ -295,6 +296,26 @@ void PlayerCoreTest::metadataPatchUpdatesRowsWithoutQueueReset()
     QCOMPARE(rowsChanged.last().at(0).value<QVector<int>>(), QVector<int>{0});
     QCOMPARE(currentUpdated.count(), 1);
     QCOMPARE(currentUpdated.last().at(0).value<Track>().title, QStringLiteral("patched a"));
+}
+
+void PlayerCoreTest::missingPatchUpdatesRowsWithoutQueueReset()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->playAt(0);
+
+    QSignalSpy queueReset(m_core.get(), &PlayerCore::queueChanged);
+    QSignalSpy rowsChanged(m_core.get(), &PlayerCore::queueTracksChanged);
+    QSignalSpy currentUpdated(m_core.get(), &PlayerCore::currentTrackUpdated);
+
+    m_core->markTracksMissing({QStringLiteral("/a"), QStringLiteral("/b")});
+
+    QCOMPARE(queueReset.count(), 0);
+    QCOMPARE(rowsChanged.count(), 1);
+    QCOMPARE(rowsChanged.first().at(0).value<QVector<int>>(), QVector<int>({0, 1}));
+    QVERIFY(m_core->queue().at(0).missing);
+    QVERIFY(m_core->queue().at(1).missing);
+    QVERIFY(m_core->currentTrack().missing);
+    QCOMPARE(currentUpdated.count(), 1);
 }
 
 void PlayerCoreTest::repeatAllWrapsAtEndOfQueue()

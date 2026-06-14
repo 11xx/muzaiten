@@ -394,6 +394,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable, &QueueTable::trackRatingChanged, this, &RightSidebar::queueTrackRatingChanged);
     connect(m_queueTable, &QueueTable::rowsMoveRequested, this, &RightSidebar::queueRowsMoveRequested);
     connect(m_queueTable, &QueueTable::rowsRemoveRequested, this, &RightSidebar::queueRowsRemoveRequested);
+    connect(m_queueTable, &QueueTable::removeAllMissingTracksRequested, this, &RightSidebar::removeAllMissingTracksRequested);
     connect(m_queueTable, &QueueTable::clearRequested, this, &RightSidebar::queueClearRequested);
     connect(m_queueTable, &QueueTable::clearPlayNextPriorityRequested, this, &RightSidebar::clearPlayNextPriorityRequested);
     connect(m_queueTable, &QueueTable::saveQueueAsRequested, this, &RightSidebar::saveQueueAsRequested);

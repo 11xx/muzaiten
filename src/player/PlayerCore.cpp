@@ -465,6 +465,41 @@ void PlayerCore::patchTracksFromMetadata(const QVector<Track> &tracks)
     }
 }
 
+void PlayerCore::markTracksMissing(const QStringList &paths)
+{
+    if (paths.isEmpty() || m_queue.isEmpty()) {
+        return;
+    }
+
+    QSet<QString> missingPaths;
+    missingPaths.reserve(paths.size());
+    for (const QString &path : paths) {
+        missingPaths.insert(path);
+    }
+    QVector<int> changedRows;
+    bool currentUpdated = false;
+    for (int row = 0; row < m_queue.size(); ++row) {
+        Track &track = m_queue[row];
+        if (!missingPaths.contains(track.path) || track.missing) {
+            continue;
+        }
+        track.missing = true;
+        changedRows.push_back(row);
+        if (m_currentTrack.path == track.path) {
+            m_currentTrack.missing = true;
+            currentUpdated = true;
+        }
+    }
+
+    if (changedRows.isEmpty()) {
+        return;
+    }
+    emit queueTracksChanged(changedRows);
+    if (currentUpdated) {
+        emit currentTrackUpdated(m_currentTrack);
+    }
+}
+
 void PlayerCore::updateTrackRating(const QString &path, int rating0To100, bool hasUserRating)
 {
     for (Track &queuedTrack : m_queue) {

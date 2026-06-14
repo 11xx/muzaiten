@@ -95,6 +95,7 @@ public:
     void setGuessedPlaceholdersVisible(bool visible) { m_showGuessedPlaceholders = visible; }
     // Flags the given track paths as missing (file no longer present).
     int markTracksMissing(const QStringList &paths);
+    QStringList missingTrackPaths() const;
     int removeMissingTracks();
     int missingTrackCount() const;
     MetadataBlob::FullMetadata fullMetadata(const QString &path) const;

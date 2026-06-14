@@ -36,6 +36,7 @@ public:
     qint64 addItem(qint64 playlistId, const PlaylistItem &item);
     bool updateItem(const PlaylistItem &item);
     bool removeItem(qint64 itemId);
+    int markItemsMissing(const QStringList &paths);
     // Reassigns ordinals 0..n-1 to itemIds in the given order (full reorder).
     bool reorderItems(qint64 playlistId, const QVector<qint64> &orderedItemIds);
 

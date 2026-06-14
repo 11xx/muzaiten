@@ -404,6 +404,42 @@ bool PlaylistDatabase::removeItem(qint64 itemId)
     return true;
 }
 
+int PlaylistDatabase::markItemsMissing(const QStringList &paths)
+{
+    if (paths.isEmpty()) {
+        return 0;
+    }
+
+    constexpr int kChunk = 500;
+    int changed = 0;
+    const bool ownTransaction = m_db.transaction();
+    for (qsizetype start = 0; start < paths.size(); start += kChunk) {
+        const qsizetype count = std::min<qsizetype>(kChunk, paths.size() - start);
+        QSqlQuery query(m_db);
+        query.prepare(QStringLiteral(
+            "UPDATE playlist_items "
+            "SET status = 'missing', modified_at = ? "
+            "WHERE track_path IN (%1) AND status = 'matched'")
+            .arg(QStringList(count, QStringLiteral("?")).join(QLatin1Char(','))));
+        query.addBindValue(nowSecs());
+        for (qsizetype i = 0; i < count; ++i) {
+            query.addBindValue(paths.at(start + i));
+        }
+        if (!query.exec()) {
+            m_lastError = query.lastError().text();
+            if (ownTransaction) {
+                m_db.rollback();
+            }
+            return changed;
+        }
+        changed += query.numRowsAffected();
+    }
+    if (ownTransaction) {
+        m_db.commit();
+    }
+    return changed;
+}
+
 bool PlaylistDatabase::reorderItems(qint64 playlistId, const QVector<qint64> &orderedItemIds)
 {
     if (!m_db.transaction()) {
