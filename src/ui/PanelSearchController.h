@@ -29,7 +29,11 @@ struct MainPanelTarget {
     std::function<void()> markAll;
     std::function<void()> unmarkCurrent;
     std::function<void()> unmarkAll;
-    std::function<void()> prepareForFocus;
+    // Called when this panel becomes active. The argument is true only when the
+    // switch came from explicit keyboard panel navigation (h/l/q), so a panel can
+    // open its underlying selection (e.g. the highlighted artist) on l but stay
+    // put on a passive FocusIn from a mouse click.
+    std::function<void(bool explicitNavigation)> prepareForFocus;
     std::function<void(int horizontal, int vertical)> moveCurrentInGrid;
     std::function<void()> clearNarrowing;
     std::function<QVector<Search::MatchDocument>()> documents;

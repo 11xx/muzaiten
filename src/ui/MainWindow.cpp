@@ -914,9 +914,14 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_albumGrid->markAllAlbums(); },
         [this]() { m_albumGrid->unmarkCurrentAlbum(); },
         [this]() { m_albumGrid->unmarkAllAlbums(); },
-        [this]() {
+        [this](bool explicitNavigation) {
             m_albumGrid->setRememberedOutlineVisible(false);
-            m_artistSidebar->activateCurrentArtist();
+            // Open the highlighted artist only when the user navigated here on
+            // purpose (l from the artist list); a passive focus (clicking the
+            // grid) leaves the currently shown artist untouched.
+            if (explicitNavigation) {
+                m_artistSidebar->activateCurrentArtist();
+            }
         },
         [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
         [this]() { clearAlbumFilter(); },
@@ -940,7 +945,13 @@ MainWindow::MainWindow(QWidget *parent)
         [this]() { m_trackTable->markAllTracks(); },
         [this]() { m_trackTable->unmarkCurrentTrack(); },
         [this]() { m_trackTable->unmarkAllTracks(); },
-        [this]() { m_artistSidebar->activateCurrentArtist(); },
+        [this](bool explicitNavigation) {
+            // Same as the album grid: only re-open the highlighted artist when the
+            // user explicitly navigated into the tracklist, never on a stray focus.
+            if (explicitNavigation) {
+                m_artistSidebar->activateCurrentArtist();
+            }
+        },
         {},
         [this]() { clearAlbumFilter(); },
         [this]() { return m_trackTable->searchDocuments(); },

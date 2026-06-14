@@ -129,7 +129,7 @@ void PanelSearchController::setActivePanel(MainPanelId id, bool focus)
     m_hasActivePanel = true;
     if (changed) {
         if (MainPanelTarget *target = targetForId(id); target != nullptr && target->prepareForFocus) {
-            target->prepareForFocus();
+            target->prepareForFocus(focus);
         }
     }
     if (focus) {
