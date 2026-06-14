@@ -98,6 +98,21 @@ LoadResult streamRecords(const std::function<void(const Search::SearchRecord &)>
 {
     LoadResult result;
 
+    // Cache fast-path FIRST: stream straight from the cache without opening the
+    // DB or computing the staleness signature. The picker shows cached data
+    // regardless of staleness (a rebuild is --refresh), and the signature does a
+    // cold full-table scan — doing it up front delayed the first rows by seconds.
+    if (!forceRefresh) {
+        const bool ok = Search::IndexCache::forEachRecord(
+            cachePath(), nullptr, [&sink](Search::SearchRecord rec) { sink(rec); });
+        if (ok) {
+            result.ok = true;
+            result.usedCache = true;
+            return result;
+        }
+    }
+
+    // Miss or forced refresh: now we need the DB to (re)build and rewrite cache.
     const QString dbPath = libraryDbPath();
     if (!QFile::exists(dbPath)) {
         result.error = QStringLiteral("library database not found at %1").arg(dbPath);
@@ -110,20 +125,8 @@ LoadResult streamRecords(const std::function<void(const Search::SearchRecord &)>
     }
     const Search::CacheSignature current = Search::IndexCache::currentSignature(db);
 
-    if (!forceRefresh) {
-        Search::CacheSignature stored;
-        const bool ok = Search::IndexCache::forEachRecord(
-            cachePath(), &stored, [&sink](Search::SearchRecord rec) { sink(rec); });
-        if (ok) {
-            result.ok = true;
-            result.usedCache = true;
-            result.wasStale = !(stored == current);
-            return result;
-        }
-    }
-
-    // No usable cache (or a forced refresh): stream the DB build to the sink as
-    // batches arrive, accumulating so we can write the cache for next time.
+    // Stream the DB build to the sink as batches arrive, accumulating so we can
+    // write the cache for next time.
     QVector<Search::SearchRecord> all;
     if (auto cursor = db.beginTrackSearchStream()) {
         QVector<Search::SearchRecord> batch;
