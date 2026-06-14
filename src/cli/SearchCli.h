@@ -9,8 +9,11 @@
 // picker both build on this.
 
 #include "search/SearchIndex.h"
+#include "search/SearchRecord.h"
 
 #include <QString>
+
+#include <functional>
 
 namespace SearchCli {
 
@@ -38,5 +41,11 @@ struct LoadResult {
 // cache or forceRefresh triggers a full build from the DB, which also rewrites
 // the cache.
 LoadResult loadIndex(Search::SearchIndex &index, bool forceRefresh);
+
+// Like loadIndex, but streams each record to `sink` as it becomes available
+// instead of materializing a SearchIndex — so the fzf picker can show rows
+// immediately. From the cache it streams during deserialization; on a miss /
+// forceRefresh it streams from the DB build and writes the cache afterward.
+LoadResult streamRecords(const std::function<void(const Search::SearchRecord &)> &sink, bool forceRefresh);
 
 } // namespace SearchCli

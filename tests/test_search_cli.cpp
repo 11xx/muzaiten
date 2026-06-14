@@ -114,6 +114,33 @@ private slots:
         QCOMPARE(idx5.size(), 3);
     }
 
+    void streamRecordsYieldsEverything()
+    {
+        // The prior test left 3 tracks + a fresh cache. Streaming must yield them
+        // all (from the cache), and again when forced to rebuild from the DB.
+        int fromCache = 0;
+        bool sawSanshin = false;
+        const SearchCli::LoadResult cached = SearchCli::streamRecords(
+            [&](const Search::SearchRecord &r) {
+                ++fromCache;
+                if (r.normTitle.contains(QStringLiteral("sanshin"))) {
+                    sawSanshin = true;
+                }
+            },
+            /*forceRefresh=*/false);
+        QVERIFY(cached.ok);
+        QVERIFY(cached.usedCache);
+        QCOMPARE(fromCache, 3);
+        QVERIFY(sawSanshin); // folded norm survived the streaming deserialize
+
+        int fromDb = 0;
+        const SearchCli::LoadResult rebuilt = SearchCli::streamRecords(
+            [&](const Search::SearchRecord &) { ++fromDb; }, /*forceRefresh=*/true);
+        QVERIFY(rebuilt.ok);
+        QVERIFY(rebuilt.rebuilt);
+        QCOMPARE(fromDb, 3);
+    }
+
     void clearCacheRemovesFile()
     {
         // The previous test left a cache in place.

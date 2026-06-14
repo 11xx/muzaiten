@@ -217,25 +217,28 @@ QByteArray pickerRecord(const Search::SearchRecord &r)
     const QString title  = oneLine(r.title.isEmpty() ? r.filename : r.title);
     const QString path   = oneLine(r.path);
 
-    QString block = path + QLatin1Char('\n');                                // line 1: hidden, for actions
-    block += QStringLiteral("\033[36m♪ %1\033[0m\n").arg(artist);            // cyan
-    block += QStringLiteral("\033[33m💿 %1\033[0m").arg(album);              // yellow
+    // ♪ and ▸ render one column wide, 💿 and 📁 two — so the narrow ones get an
+    // extra space to align the text column across all rows (cf. ndl's
+    // align_prefixes). The dim reading line is indented to match.
+    QString block = path + QLatin1Char('\n');                                 // line 1: hidden, for actions
+    block += QStringLiteral("\033[36m♪  %1\033[0m\n").arg(artist);            // cyan
+    block += QStringLiteral("\033[33m💿 %1\033[0m").arg(album);               // yellow
     if (!r.date.isEmpty()) {
         block += QStringLiteral(" \033[90m(%1)\033[0m").arg(oneLine(r.date));
     }
     block += QLatin1Char('\n');
-    block += QStringLiteral("\033[32m▸ %1\033[0m").arg(title);               // green
+    block += QStringLiteral("\033[32m▸  %1\033[0m").arg(title);               // green
     if (r.durationMs > 0) {
         block += QStringLiteral(" \033[90m[%1]\033[0m").arg(formatSeconds(static_cast<double>(r.durationMs) / 1000.0));
     }
     block += QLatin1Char('\n');
-    block += QStringLiteral("\033[90m📁 %1\033[0m").arg(path);               // dim path (searchable)
+    block += QStringLiteral("\033[90m📁 %1\033[0m").arg(path);                // dim path (searchable)
 
     if (hasNonAscii(title + artist + album)) {
         const QString norm = oneLine(r.normTitle + QLatin1Char(' ') + r.normArtist + QLatin1Char(' ')
                                      + r.normAlbum);
         if (!norm.trimmed().isEmpty()) {
-            block += QStringLiteral("\n\033[90m%1\033[0m").arg(norm);        // dim romaji reading
+            block += QStringLiteral("\n\033[90m   %1\033[0m").arg(norm);      // dim romaji reading, aligned
         }
     }
 
@@ -247,8 +250,13 @@ QByteArray pickerRecord(const Search::SearchRecord &r)
 // Interactive fzf picker over the whole library. fzf does the fuzzy matching
 // (against our pre-folded field), so romaji finds kanji; Return queues the
 // selection, Alt-Return plays it — both via `muzaitenctl enqueue` over IPC.
-int runPicker(const Search::SearchIndex &index, const QString &fzfPath, bool fuzzy)
+// fzf is launched before the index loads and records are streamed in, so the
+// TUI appears instantly and fills progressively.
+int runPicker(const QString &fzfPath, bool fuzzy, bool refresh)
 {
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
     const QString self = QCoreApplication::applicationFilePath();
     // From the selected NUL records ({+f}), emit each path (line 1) NUL-separated
     // and pipe to `enqueue --stdin0`, so even thousands of marks fit (no ARG_MAX).
@@ -287,12 +295,23 @@ int runPicker(const Search::SearchIndex &index, const QString &fzfPath, bool fuz
     if (!fzf.waitForStarted(3000)) {
         return fail(QStringLiteral("could not start fzf"));
     }
-    // Stream every record; fzf shows them as they arrive (instant launch).
-    for (const Search::SearchRecord &r : index.records()) {
+    // fzf is now visible (empty). Stream records into it as they load so rows
+    // appear progressively instead of after a blocking full read.
+    const auto sink = [&fzf](const Search::SearchRecord &r) {
+        if (fzf.state() == QProcess::NotRunning) {
+            return; // user already quit; stop feeding
+        }
         fzf.write(pickerRecord(r));
         if (fzf.bytesToWrite() > (1 << 20)) {
-            fzf.waitForBytesWritten(-1);
+            fzf.waitForBytesWritten(200); // bounded: don't stall if fzf exited
         }
+    };
+    const SearchCli::LoadResult load = SearchCli::streamRecords(sink, refresh);
+    if (!load.ok) {
+        fzf.closeWriteChannel();
+        fzf.terminate();
+        fzf.waitForFinished(2000);
+        return fail(load.error);
     }
     fzf.closeWriteChannel();
     fzf.waitForFinished(-1);
@@ -338,6 +357,21 @@ int runSearch(QStringList arguments, bool json)
         return 0;
     }
 
+    // No query on a terminal with fzf → interactive picker. It loads (and streams)
+    // its own data, so we dispatch before the blocking loadIndex below.
+    if (queryWords.isEmpty()) {
+        const bool isTty = ::isatty(fileno(stdout)) != 0;
+        const QString fzf = QStandardPaths::findExecutable(QStringLiteral("fzf"));
+        if (isTty && !fzf.isEmpty() && !plain && !json) {
+            return runPicker(fzf, fuzzy, refresh);
+        }
+        if (isTty && fzf.isEmpty()) {
+            return fail(QStringLiteral("no query given and fzf not found; install fzf for the "
+                                       "interactive picker, pass a query, or pipe for a full dump"));
+        }
+        // Piped / --plain / --json with no query → fall through to the full dump.
+    }
+
     Search::SearchIndex index;
     const SearchCli::LoadResult load = SearchCli::loadIndex(index, refresh);
     if (!load.ok) {
@@ -348,21 +382,10 @@ int runSearch(QStringList arguments, bool json)
                              "run 'muzaitenctl search --refresh' to update\n");
     }
 
-    // No query: launch the interactive picker on a terminal with fzf available,
-    // otherwise dump the whole library (useful for piping). Selecting which
-    // records to emit:
+    // Select which records to emit: the matched set, or the whole library (dump).
     QVector<Search::ScoredResult> results; // owns the matched records; outlives the pointers below
     QVector<const Search::SearchRecord *> records;
     if (queryWords.isEmpty()) {
-        const bool isTty = ::isatty(fileno(stdout)) != 0;
-        const QString fzf = QStandardPaths::findExecutable(QStringLiteral("fzf"));
-        if (isTty && !fzf.isEmpty() && !plain && !json) {
-            return runPicker(index, fzf, fuzzy);
-        }
-        if (isTty && fzf.isEmpty()) {
-            return fail(QStringLiteral("no query given and fzf not found; install fzf for the "
-                                       "interactive picker, pass a query, or pipe for a full dump"));
-        }
         for (const Search::SearchRecord &r : index.records()) {
             records.push_back(&r);
         }

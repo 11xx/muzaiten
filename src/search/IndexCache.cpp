@@ -189,12 +189,12 @@ bool write(const QString &path, const CacheSignature &signature, const QVector<S
     return file.commit();
 }
 
-Loaded read(const QString &path)
+bool forEachRecord(const QString &path, CacheSignature *outSignature,
+                   const std::function<void(SearchRecord)> &sink)
 {
-    Loaded result;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        return result;
+        return false;
     }
     QDataStream s(&file);
     s.setVersion(kDataStreamVersion);
@@ -202,7 +202,7 @@ Loaded read(const QString &path)
     quint32 magic = 0;
     s >> magic;
     if (magic != kMagic) {
-        return result;
+        return false;
     }
     CacheSignature signature;
     readSignature(s, signature);
@@ -210,12 +210,12 @@ Loaded read(const QString &path)
     QByteArray compressed;
     s >> rawSize >> compressed;
     if (s.status() != QDataStream::Ok) {
-        return result;
+        return false;
     }
 
     const QByteArray payload = zstdDecompress(compressed, rawSize);
     if (payload.isEmpty() && rawSize != 0) {
-        return result;
+        return false;
     }
 
     QDataStream ps(payload);
@@ -223,18 +223,33 @@ Loaded read(const QString &path)
     quint64 count = 0;
     ps >> count;
     if (count > kMaxDecodedBytes) { // sanity vs a corrupt count
-        return result;
+        return false;
     }
-    QVector<SearchRecord> records;
-    records.reserve(static_cast<int>(count));
     QHash<QString, QString> pool;
     for (quint64 i = 0; i < count; ++i) {
-        records.push_back(readRecord(ps, pool));
+        SearchRecord rec = readRecord(ps, pool);
         if (ps.status() != QDataStream::Ok) {
-            return result; // truncated/corrupt payload
+            return false; // truncated/corrupt payload
         }
+        sink(std::move(rec));
     }
 
+    if (outSignature) {
+        *outSignature = signature;
+    }
+    return true;
+}
+
+Loaded read(const QString &path)
+{
+    Loaded result;
+    QVector<SearchRecord> records;
+    CacheSignature signature;
+    const bool ok = forEachRecord(path, &signature,
+                                  [&records](SearchRecord rec) { records.push_back(std::move(rec)); });
+    if (!ok) {
+        return result;
+    }
     result.ok = true;
     result.signature = signature;
     result.records = std::move(records);

@@ -94,4 +94,52 @@ LoadResult loadIndex(Search::SearchIndex &index, bool forceRefresh)
     return result;
 }
 
+LoadResult streamRecords(const std::function<void(const Search::SearchRecord &)> &sink, bool forceRefresh)
+{
+    LoadResult result;
+
+    const QString dbPath = libraryDbPath();
+    if (!QFile::exists(dbPath)) {
+        result.error = QStringLiteral("library database not found at %1").arg(dbPath);
+        return result;
+    }
+    Database db(QStringLiteral("muzaitenctl-stream-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(dbPath)) {
+        result.error = db.lastError();
+        return result;
+    }
+    const Search::CacheSignature current = Search::IndexCache::currentSignature(db);
+
+    if (!forceRefresh) {
+        Search::CacheSignature stored;
+        const bool ok = Search::IndexCache::forEachRecord(
+            cachePath(), &stored, [&sink](Search::SearchRecord rec) { sink(rec); });
+        if (ok) {
+            result.ok = true;
+            result.usedCache = true;
+            result.wasStale = !(stored == current);
+            return result;
+        }
+    }
+
+    // No usable cache (or a forced refresh): stream the DB build to the sink as
+    // batches arrive, accumulating so we can write the cache for next time.
+    QVector<Search::SearchRecord> all;
+    if (auto cursor = db.beginTrackSearchStream()) {
+        QVector<Search::SearchRecord> batch;
+        while (cursor->nextBatch(4096, batch)) {
+            all.reserve(all.size() + batch.size());
+            for (Search::SearchRecord &rec : batch) {
+                sink(rec);
+                all.push_back(std::move(rec));
+            }
+        }
+    }
+    Search::IndexCache::write(cachePath(), current, all);
+    result.ok = true;
+    result.rebuilt = true;
+    result.trackCount = static_cast<int>(all.size());
+    return result;
+}
+
 } // namespace SearchCli

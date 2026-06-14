@@ -20,6 +20,8 @@
 #include <QVector>
 #include <QtTypes>
 
+#include <functional>
+
 class Database;
 
 namespace Search {
@@ -61,6 +63,14 @@ struct Loaded {
 // Does NOT consult the database — the caller compares loaded.signature against
 // currentSignature(db) to decide freshness.
 Loaded read(const QString &path);
+
+// Streaming read: invokes `sink` for each record as it is deserialized, so a
+// consumer (e.g. the fzf picker) can start using rows immediately instead of
+// waiting for the whole file. Returns false if the file is absent/corrupt
+// (some records may already have been sunk on a mid-stream failure). When
+// `outSignature` is non-null it receives the stored signature.
+bool forEachRecord(const QString &path, CacheSignature *outSignature,
+                   const std::function<void(SearchRecord)> &sink);
 
 } // namespace IndexCache
 } // namespace Search
