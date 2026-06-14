@@ -35,6 +35,8 @@ class PlaylistView final : public QWidget {
 public:
     explicit PlaylistView(QWidget *parent = nullptr);
 
+    enum class SelectorMetadata { None, CreatedAt, UpdatedAt, Comment };
+
     void setDatabase(PlaylistDatabase *db);
     void setSavedQueueEntries(const QVector<SavedQueuePlaylistEntry> &entries);
     void reloadPlaylists();
@@ -49,6 +51,7 @@ public:
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();
     void setHeaderHeight(int height);
+    void configureSelectorMetadata(QWidget *parent = nullptr);
     // Display-only ordering. The canonical ordinal is always preserved in the
     // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
     enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
@@ -102,6 +105,7 @@ signals:
     void playSavedQueueRequested(const QString &snapshotId, int startIndex);
     void addSavedQueueToQueueRequested(const QString &snapshotId);
     void playNextSavedQueueRequested(const QString &snapshotId);
+    void deleteSavedQueueRequested(const QString &snapshotId);
     void viewSettingsChanged();
 
 protected:
@@ -131,6 +135,8 @@ private:
     int currentItemRow() const;
     void moveSelectedItems(int delta);
     void applyPlaylistRowHeights();
+    void updateSavedQueueSpacerHeight();
+    QString selectorMetadataForPlaylist(const Playlist &playlist) const;
     QVector<qint64> displayedItemIds() const;
     void updatePaneFocus();
 
@@ -150,7 +156,7 @@ private:
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;
 
-    bool m_showCreatedDate = true;
+    SelectorMetadata m_selectorMetadata = SelectorMetadata::CreatedAt;
     int m_playlistRowHeight = 18;
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;

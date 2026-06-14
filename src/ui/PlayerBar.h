@@ -78,6 +78,7 @@ signals:
     void trackInfoPaneVisibleChanged(bool visible);
     void trackInfoPaneSettingsRequested();
     void albumArtResolutionRequested();
+    void playlistSelectorMetadataRequested();
     void searchRankingRequested();
     void keybindingsRequested();
     void resetPanelOrderRequested();
@@ -89,6 +90,7 @@ signals:
     void queueSaveAsRequested();
     void queueRestorePreviousRequested();
     void queueMergeSavedRequested();
+    void queueSavedLimitRequested();
     void playlistViewRequested();
     void playlistNewRequested();
     void playlistAddSongRequested();

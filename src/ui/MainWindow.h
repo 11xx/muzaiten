@@ -120,6 +120,8 @@ private:
     void playQueueSnapshotById(const QString &id, int startIndex);
     void addQueueSnapshotByIdToQueue(const QString &id);
     void playNextQueueSnapshotById(const QString &id);
+    void deleteQueueSnapshotById(const QString &id);
+    void configureSavedQueueLimit();
     void ensureCurrentQueueIdentity();
     bool currentQueueBacklogEligible() const;
     void pushCurrentQueueToBacklog(const QString &name);
@@ -145,6 +147,7 @@ private:
     void showTrackProperties(const Track &track);
     void configureTrackInfoPanel();
     void configureAlbumArtResolution();
+    void configurePlaylistSelectorMetadata();
     void configureSearchRanking();
     void configureKeybindings();
     void loadSearchRankingConfig();
@@ -224,6 +227,7 @@ private:
     void restorePreviousQueue();
     void saveCurrentQueueAs();
     void mergeSavedQueueViaPlayNext();
+    int savedQueueLimitSetting() const;
     // explicitJump=true marks a user-activated jump (clicking a queue row). A
     // backward explicit jump turns the skipped-over tracks into the play-next
     // region; forward jumps and sequential prev/next leave it alone.

@@ -1,12 +1,16 @@
+#include "db/PlaylistDatabase.h"
 #include "ui/PlaylistView.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QListWidget>
 #include <QMetaObject>
 #include <QSignalSpy>
 #include <QSplitter>
+#include <QTemporaryDir>
 #include <QTest>
+#include <QUuid>
 
 class PlaylistViewTest : public QObject {
     Q_OBJECT
@@ -57,6 +61,50 @@ private slots:
         QCoreApplication::processEvents();
 
         QVERIFY(spy.count() > 0);
+    }
+
+    void savedQueuesSitBelowFlexibleSpacer()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        QVERIFY(db.createPlaylist(QStringLiteral("Daily")) > 0);
+        QVERIFY(db.createPlaylist(QStringLiteral("Archive")) > 0);
+
+        SavedQueuePlaylistEntry queue;
+        queue.id = QStringLiteral("queue:one");
+        queue.name = QStringLiteral("saved queue 1");
+        queue.meta = QStringLiteral("2026-06-14T18:14:55");
+        queue.savedAt = 1781460895;
+
+        PlaylistView view;
+        view.resize(320, 420);
+        view.setDatabase(&db);
+        view.setSavedQueueEntries({queue});
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QCoreApplication::processEvents();
+
+        auto *list = view.findChild<QListWidget *>();
+        QVERIFY(list != nullptr);
+        QCOMPARE(list->item(0)->text(), QStringLiteral("Archive"));
+        QCOMPARE(list->item(1)->text(), QStringLiteral("Daily"));
+        QCOMPARE(list->item(2)->text(), QString());
+        QVERIFY(list->item(2)->sizeHint().height() > 100);
+        QCOMPARE(list->item(3)->text(), QStringLiteral("Saved queues"));
+        QCOMPARE(list->item(4)->text(), QStringLiteral("saved queue 1"));
+        QCOMPARE(list->item(4)->data(Qt::UserRole + 8).toString(), QStringLiteral("2026-06-14T18:14:55"));
+    }
+
+    void selectorMetadataModePersistsInViewSettings()
+    {
+        PlaylistView view;
+        const QJsonObject root{{QStringLiteral("selectorMetadata"), QStringLiteral("comment")}};
+        view.applyViewSettingsJson(QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+
+        const QJsonObject saved = QJsonDocument::fromJson(view.viewSettingsJson().toUtf8()).object();
+        QCOMPARE(saved.value(QStringLiteral("selectorMetadata")).toString(), QStringLiteral("comment"));
     }
 };
 

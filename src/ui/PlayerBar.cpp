@@ -491,6 +491,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_trackInfoPaneVisible->setChecked(true);
     QAction *trackInfoPaneSettings = viewMenu->addAction(QStringLiteral("Track information panel..."));
     QAction *albumArtResolution = viewMenu->addAction(QStringLiteral("Album art resolution..."));
+    QAction *playlistSelectorMetadata = viewMenu->addAction(QStringLiteral("Playlist selector metadata..."));
     QAction *customizePanelOrder = viewMenu->addAction(QStringLiteral("Panel order..."));
     QAction *resetPanelOrder = viewMenu->addAction(QStringLiteral("Reset panel order to default"));
     viewMenu->addSeparator();
@@ -508,6 +509,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as..."));
     QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore saved queue..."));
     QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)..."));
+    QAction *savedQueueLimit = queueMenu->addAction(QStringLiteral("Saved queue limit..."));
     m_mergeSavedQueueAction = mergeQueue;
     queueMenu->setToolTipsVisible(true);
 
@@ -725,6 +727,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
     connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
+    connect(playlistSelectorMetadata, &QAction::triggered, this, &PlayerBar::playlistSelectorMetadataRequested);
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
     connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
     connect(resetPanelOrder, &QAction::triggered, this, &PlayerBar::resetPanelOrderRequested);
@@ -736,6 +739,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(saveQueue, &QAction::triggered, this, &PlayerBar::queueSaveAsRequested);
     connect(restoreQueue, &QAction::triggered, this, &PlayerBar::queueRestorePreviousRequested);
     connect(mergeQueue, &QAction::triggered, this, &PlayerBar::queueMergeSavedRequested);
+    connect(savedQueueLimit, &QAction::triggered, this, &PlayerBar::queueSavedLimitRequested);
     connect(showPlaylists, &QAction::triggered, this, &PlayerBar::playlistViewRequested);
     connect(newPlaylist, &QAction::triggered, this, &PlayerBar::playlistNewRequested);
     connect(addSong, &QAction::triggered, this, &PlayerBar::playlistAddSongRequested);

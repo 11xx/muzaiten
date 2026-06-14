@@ -80,6 +80,8 @@ constexpr int PlaylistKindRole = Qt::UserRole + 6;
 constexpr int QueueSnapshotIdRole = Qt::UserRole + 7;
 constexpr int PlaylistMetaRole = Qt::UserRole + 8;
 constexpr int PlaylistSeparatorRole = Qt::UserRole + 9;
+constexpr int PlaylistUpdatedAtRole = Qt::UserRole + 10;
+constexpr int PlaylistSpacerRole = Qt::UserRole + 11;
 
 struct PlaylistColumnSpec {
     int index;
@@ -168,6 +170,43 @@ PlaylistView::SortKey sortKeyFromString(const QString &value)
     return PlaylistView::SortKey::Ordinal;
 }
 
+QString selectorMetadataToString(PlaylistView::SelectorMetadata metadata)
+{
+    switch (metadata) {
+    case PlaylistView::SelectorMetadata::CreatedAt:
+        return QStringLiteral("createdAt");
+    case PlaylistView::SelectorMetadata::UpdatedAt:
+        return QStringLiteral("updatedAt");
+    case PlaylistView::SelectorMetadata::Comment:
+        return QStringLiteral("comment");
+    case PlaylistView::SelectorMetadata::None:
+        break;
+    }
+    return QStringLiteral("none");
+}
+
+PlaylistView::SelectorMetadata selectorMetadataFromString(const QString &value)
+{
+    if (value == QStringLiteral("updatedAt")) {
+        return PlaylistView::SelectorMetadata::UpdatedAt;
+    }
+    if (value == QStringLiteral("comment")) {
+        return PlaylistView::SelectorMetadata::Comment;
+    }
+    if (value == QStringLiteral("none")) {
+        return PlaylistView::SelectorMetadata::None;
+    }
+    return PlaylistView::SelectorMetadata::CreatedAt;
+}
+
+QString timestampMetadata(qint64 timestamp)
+{
+    if (timestamp <= 0) {
+        return {};
+    }
+    return QDateTime::fromSecsSinceEpoch(timestamp).toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+}
+
 int nextSelectablePlaylistRow(QListWidget *list, int row, int direction)
 {
     if (list == nullptr || list->count() <= 0) {
@@ -195,6 +234,11 @@ public:
 
     QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &index) const override
     {
+        if (index.data(PlaylistSpacerRole).toBool()) {
+            return index.data(Qt::SizeHintRole).toSize().isValid()
+                ? index.data(Qt::SizeHintRole).toSize()
+                : QSize(160, 0);
+        }
         if (index.data(PlaylistSeparatorRole).toBool()) {
             return QSize(160, 20);
         }
@@ -208,6 +252,10 @@ public:
         QStyleOptionViewItem opt(option);
         initStyleOption(&opt, index);
         opt.text.clear();
+
+        if (index.data(PlaylistSpacerRole).toBool()) {
+            return;
+        }
 
         if (index.data(PlaylistSeparatorRole).toBool()) {
             const QRect lineRect = option.rect.adjusted(8, 0, -8, 0);
@@ -254,9 +302,9 @@ public:
         const QString meta = index.data(PlaylistMetaRole).toString();
         const bool showDate = index.data(PlaylistShowCreatedRole).toBool();
         const qint64 createdAt = index.data(PlaylistCreatedAtRole).toLongLong();
-        const QString detail = !meta.isEmpty()
-            ? meta
-            : (showDate && createdAt > 0 ? QDateTime::fromSecsSinceEpoch(createdAt).toString(QStringLiteral("d MMM yyyy")) : QString());
+        Q_UNUSED(showDate);
+        Q_UNUSED(createdAt);
+        const QString detail = meta;
 
         const QColor primary = selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Text);
         const QColor secondary = selected ? primary : option.palette.color(QPalette::Disabled, QPalette::Text);
@@ -526,7 +574,7 @@ QString PlaylistView::viewSettingsJson() const
     root.insert(QStringLiteral("visibleColumns"), visibleColumns);
     root.insert(QStringLiteral("sortKey"), sortKeyToString(m_sortKey));
     root.insert(QStringLiteral("sortDescending"), m_sortDescending);
-    root.insert(QStringLiteral("showCreatedDate"), m_showCreatedDate);
+    root.insert(QStringLiteral("selectorMetadata"), selectorMetadataToString(m_selectorMetadata));
     root.insert(QStringLiteral("playlistRowHeight"), m_playlistRowHeight);
     root.insert(QStringLiteral("rowHeight"), m_itemTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), m_itemTable->horizontalHeader()->height());
@@ -564,7 +612,13 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
 
     m_sortKey = sortKeyFromString(root.value(QStringLiteral("sortKey")).toString());
     m_sortDescending = root.value(QStringLiteral("sortDescending")).toBool(false);
-    m_showCreatedDate = root.value(QStringLiteral("showCreatedDate")).toBool(true);
+    if (root.contains(QStringLiteral("selectorMetadata"))) {
+        m_selectorMetadata = selectorMetadataFromString(root.value(QStringLiteral("selectorMetadata")).toString());
+    } else {
+        m_selectorMetadata = root.value(QStringLiteral("showCreatedDate")).toBool(true)
+            ? SelectorMetadata::CreatedAt
+            : SelectorMetadata::None;
+    }
     m_playlistRowHeight = std::clamp(root.value(QStringLiteral("playlistRowHeight")).toInt(18), 18, 48);
     m_itemTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
     setHeaderHeight(root.value(QStringLiteral("headerHeight")).toInt(20));
@@ -599,13 +653,48 @@ void PlaylistView::resetViewSettings()
     }
     m_sortKey = SortKey::Ordinal;
     m_sortDescending = false;
-    m_showCreatedDate = true;
+    m_selectorMetadata = SelectorMetadata::CreatedAt;
     m_playlistRowHeight = 18;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
     m_splitter->setSizes({260, 780});
     m_columnLayout->resetToDefaults();
     populateItems();
+    reloadPlaylists();
+    emit viewSettingsChanged();
+}
+
+void PlaylistView::configureSelectorMetadata(QWidget *parent)
+{
+    const QStringList labels = {
+        QStringLiteral("Created timestamp"),
+        QStringLiteral("Modified timestamp"),
+        QStringLiteral("Comment"),
+        QStringLiteral("None"),
+    };
+    const QVector<SelectorMetadata> values = {
+        SelectorMetadata::CreatedAt,
+        SelectorMetadata::UpdatedAt,
+        SelectorMetadata::Comment,
+        SelectorMetadata::None,
+    };
+    const qsizetype current = values.indexOf(m_selectorMetadata);
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(parent == nullptr ? this : parent,
+                                                 QStringLiteral("Playlist selector metadata"),
+                                                 QStringLiteral("Metadata line:"),
+                                                 labels,
+                                                 static_cast<int>(std::max<qsizetype>(0, current)),
+                                                 false,
+                                                 &ok);
+    if (!ok || chosen.isEmpty()) {
+        return;
+    }
+    const qsizetype index = labels.indexOf(chosen);
+    if (index < 0 || index >= values.size()) {
+        return;
+    }
+    m_selectorMetadata = values.at(index);
     reloadPlaylists();
     emit viewSettingsChanged();
 }
@@ -634,14 +723,20 @@ void PlaylistView::reloadPlaylists()
         item->setData(PlaylistNameRole, playlist.name);
         item->setData(PlaylistItemCountRole, playlist.itemCount);
         item->setData(PlaylistCreatedAtRole, playlist.createdAt);
-        item->setData(PlaylistShowCreatedRole, m_showCreatedDate);
-        item->setData(PlaylistMetaRole, QString());
+        item->setData(PlaylistUpdatedAtRole, playlist.updatedAt);
+        item->setData(PlaylistShowCreatedRole, !selectorMetadataForPlaylist(playlist).isEmpty());
+        item->setData(PlaylistMetaRole, selectorMetadataForPlaylist(playlist));
         item->setData(PlaylistListActiveRole, listActive);
         if (!playlist.comment.isEmpty()) {
             item->setToolTip(playlist.comment);
         }
     }
-    if (!playlists.isEmpty() && !m_savedQueueEntries.isEmpty()) {
+    if (!m_savedQueueEntries.isEmpty()) {
+        auto *spacer = new QListWidgetItem(QString(), m_playlistList);
+        spacer->setFlags(Qt::NoItemFlags);
+        spacer->setData(PlaylistKindRole, QStringLiteral("spacer"));
+        spacer->setData(PlaylistSpacerRole, true);
+
         auto *separator = new QListWidgetItem(QStringLiteral("Saved queues"), m_playlistList);
         separator->setFlags(Qt::NoItemFlags);
         separator->setData(PlaylistIdRole, 0);
@@ -650,6 +745,7 @@ void PlaylistView::reloadPlaylists()
         separator->setData(PlaylistNameRole, QStringLiteral("Saved queues"));
         separator->setData(PlaylistItemCountRole, 0);
         separator->setData(PlaylistCreatedAtRole, 0);
+        separator->setData(PlaylistUpdatedAtRole, 0);
         separator->setData(PlaylistShowCreatedRole, false);
         separator->setData(PlaylistMetaRole, QString());
         separator->setData(PlaylistListActiveRole, listActive);
@@ -663,6 +759,7 @@ void PlaylistView::reloadPlaylists()
         item->setData(PlaylistNameRole, queue.name);
         item->setData(PlaylistItemCountRole, queue.items.size());
         item->setData(PlaylistCreatedAtRole, queue.savedAt);
+        item->setData(PlaylistUpdatedAtRole, queue.savedAt);
         item->setData(PlaylistShowCreatedRole, true);
         item->setData(PlaylistMetaRole, queue.meta);
         item->setData(PlaylistListActiveRole, listActive);
@@ -682,7 +779,7 @@ void PlaylistView::reloadPlaylists()
     if (keep > 0) {
         selectPlaylist(keep);
     } else if (m_playlistList->count() > 0) {
-        m_playlistList->setCurrentRow(0);
+        m_playlistList->setCurrentRow(nextSelectablePlaylistRow(m_playlistList, 0, +1));
     } else {
         m_currentPlaylistId = 0;
         reloadItems();
@@ -1116,6 +1213,13 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     QAction *deleteAction = menu.addAction(QStringLiteral("Delete"));
     deleteAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(deleteAction, &QAction::triggered, this, &PlaylistView::deleteCurrentPlaylist);
+    QAction *deleteSavedQueue = menu.addAction(QStringLiteral("Delete saved queue"));
+    deleteSavedQueue->setEnabled(savedQueue);
+    connect(deleteSavedQueue, &QAction::triggered, this, [this]() {
+        if (!m_currentQueueSnapshotId.isEmpty()) {
+            emit deleteSavedQueueRequested(m_currentQueueSnapshotId);
+        }
+    });
 
     menu.exec(m_playlistList->viewport()->mapToGlobal(pos));
 }
@@ -1349,10 +1453,55 @@ void PlaylistView::applyPlaylistRowHeights()
 {
     for (int row = 0; row < m_playlistList->count(); ++row) {
         QListWidgetItem *item = m_playlistList->item(row);
-        const bool showDate = item->data(PlaylistShowCreatedRole).toBool()
-            && item->data(PlaylistCreatedAtRole).toLongLong() > 0;
-        item->setSizeHint(QSize(0, showDate ? m_playlistRowHeight + 18 : m_playlistRowHeight));
+        if (item->data(PlaylistSpacerRole).toBool()) {
+            item->setSizeHint(QSize(0, 0));
+            continue;
+        }
+        if (item->data(PlaylistSeparatorRole).toBool()) {
+            item->setSizeHint(QSize(0, 20));
+            continue;
+        }
+        const bool hasMetadata = !item->data(PlaylistMetaRole).toString().isEmpty();
+        item->setSizeHint(QSize(0, hasMetadata ? m_playlistRowHeight + 18 : m_playlistRowHeight));
     }
+    updateSavedQueueSpacerHeight();
+}
+
+void PlaylistView::updateSavedQueueSpacerHeight()
+{
+    if (m_playlistList == nullptr) {
+        return;
+    }
+    QListWidgetItem *spacer = nullptr;
+    int usedHeight = 0;
+    for (int row = 0; row < m_playlistList->count(); ++row) {
+        QListWidgetItem *item = m_playlistList->item(row);
+        if (item->data(PlaylistSpacerRole).toBool()) {
+            spacer = item;
+            continue;
+        }
+        usedHeight += std::max(0, item->sizeHint().height());
+    }
+    if (spacer == nullptr) {
+        return;
+    }
+    const int extra = std::max(0, m_playlistList->viewport()->height() - usedHeight - 2);
+    spacer->setSizeHint(QSize(0, extra));
+}
+
+QString PlaylistView::selectorMetadataForPlaylist(const Playlist &playlist) const
+{
+    switch (m_selectorMetadata) {
+    case SelectorMetadata::CreatedAt:
+        return timestampMetadata(playlist.createdAt);
+    case SelectorMetadata::UpdatedAt:
+        return timestampMetadata(playlist.updatedAt);
+    case SelectorMetadata::Comment:
+        return playlist.comment;
+    case SelectorMetadata::None:
+        break;
+    }
+    return {};
 }
 
 void PlaylistView::createPlaylist()
@@ -1583,6 +1732,10 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             }
         }
     }
+    if (playlistListWatched && event->type() == QEvent::Resize) {
+        updateSavedQueueSpacerHeight();
+        return QWidget::eventFilter(watched, event);
+    }
     if (event->type() != QEvent::KeyPress) {
         return QWidget::eventFilter(watched, event);
     }
@@ -1627,7 +1780,9 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             createPlaylist();
             return true;
         case Qt::Key_T:
-            m_showCreatedDate = !m_showCreatedDate;
+            m_selectorMetadata = m_selectorMetadata == SelectorMetadata::None
+                ? SelectorMetadata::CreatedAt
+                : SelectorMetadata::None;
             reloadPlaylists();
             emit viewSettingsChanged();
             return true;

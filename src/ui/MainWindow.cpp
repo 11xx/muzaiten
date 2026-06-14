@@ -73,6 +73,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QSystemTrayIcon>
@@ -191,11 +192,26 @@ QString queueSnapshotLabel(const QJsonObject &snapshot, const QString &fallback)
     return fallback;
 }
 
-QString queueLastModifiedName(qint64 timestamp = 0)
+qint64 queueSnapshotSavedAt(const QJsonObject &snapshot)
 {
-    const qint64 effective = timestamp > 0 ? timestamp : QDateTime::currentSecsSinceEpoch();
-    return QStringLiteral("queue last modified %1")
-        .arg(QDateTime::fromSecsSinceEpoch(effective).toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    qint64 savedAt = snapshot.value(QStringLiteral("savedAt")).toVariant().toLongLong();
+    if (savedAt <= 0) {
+        savedAt = static_cast<qint64>(snapshot.value(QStringLiteral("savedAt")).toDouble(0));
+    }
+    return savedAt;
+}
+
+QString queueSnapshotTimestamp(qint64 timestamp)
+{
+    if (timestamp <= 0) {
+        return {};
+    }
+    return QDateTime::fromSecsSinceEpoch(timestamp).toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+}
+
+QString defaultSavedQueueName(int ordinal)
+{
+    return QStringLiteral("saved queue %1").arg(std::max(1, ordinal));
 }
 
 QJsonArray queueBacklogFromRoot(const QJsonObject &root)
@@ -217,6 +233,99 @@ QJsonArray queueBacklogFromRoot(const QJsonObject &root)
         }
     }
     return backlog;
+}
+
+struct QueueSnapshotChoice {
+    QJsonObject snapshot;
+    QString name;
+    QString meta;
+};
+
+QueueSnapshotChoice queueSnapshotChoice(const QJsonObject &snapshot, int ordinal)
+{
+    QueueSnapshotChoice choice;
+    choice.snapshot = snapshot;
+    choice.name = queueSnapshotLabel(snapshot, defaultSavedQueueName(ordinal));
+    choice.meta = queueSnapshotTimestamp(queueSnapshotSavedAt(snapshot));
+    return choice;
+}
+
+QVector<QueueSnapshotChoice> queueSnapshotChoicesFromRoot(const QJsonObject &root)
+{
+    QVector<QueueSnapshotChoice> choices;
+    int ordinal = 1;
+    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
+        const QJsonObject snapshot = value.toObject();
+        if (snapshot.isEmpty()) {
+            continue;
+        }
+        choices.push_back(queueSnapshotChoice(snapshot, ordinal++));
+    }
+    for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
+        const QJsonObject snapshot = value.toObject();
+        if (snapshot.isEmpty()) {
+            continue;
+        }
+        choices.push_back(queueSnapshotChoice(snapshot, ordinal++));
+    }
+    return choices;
+}
+
+QString nextSavedQueueName(const QJsonObject &root)
+{
+    QSet<QString> existing;
+    for (const QueueSnapshotChoice &choice : queueSnapshotChoicesFromRoot(root)) {
+        existing.insert(choice.name);
+    }
+    for (int i = 1; i <= 999; ++i) {
+        const QString candidate = defaultSavedQueueName(i);
+        if (!existing.contains(candidate)) {
+            return candidate;
+        }
+    }
+    return defaultSavedQueueName(static_cast<int>(existing.size()) + 1);
+}
+
+int chooseQueueSnapshot(QWidget *parent,
+                        const QString &title,
+                        const QString &prompt,
+                        const QVector<QueueSnapshotChoice> &choices)
+{
+    QDialog dialog(parent);
+    dialog.setWindowTitle(title);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *label = new QLabel(prompt, &dialog);
+    layout->addWidget(label);
+
+    auto *list = new QListWidget(&dialog);
+    list->setSelectionMode(QAbstractItemView::SingleSelection);
+    list->setWordWrap(true);
+    for (int i = 0; i < choices.size(); ++i) {
+        const QueueSnapshotChoice &choice = choices.at(i);
+        auto *item = new QListWidgetItem(choice.meta.isEmpty()
+                                             ? choice.name
+                                             : QStringLiteral("%1\n%2").arg(choice.name, choice.meta),
+                                         list);
+        item->setData(Qt::UserRole, i);
+        item->setSizeHint(QSize(360, choice.meta.isEmpty() ? 24 : 42));
+    }
+    if (list->count() > 0) {
+        list->setCurrentRow(0);
+    }
+    layout->addWidget(list, 1);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    QObject::connect(list, &QListWidget::itemDoubleClicked, &dialog, &QDialog::accept);
+    dialog.resize(420, 320);
+    if (dialog.exec() != QDialog::Accepted || list->currentItem() == nullptr) {
+        return -1;
+    }
+    bool indexOk = false;
+    const int index = list->currentItem()->data(Qt::UserRole).toInt(&indexOk);
+    return indexOk ? index : -1;
 }
 
 PlaybackProfile playbackProfileFromJson(const QString &json)
@@ -885,6 +994,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
+    connect(m_playerBar, &PlayerBar::playlistSelectorMetadataRequested, this, &MainWindow::configurePlaylistSelectorMetadata);
     connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
     connect(m_playerBar, &PlayerBar::keybindingsRequested, this, &MainWindow::configureKeybindings);
     connect(m_playerBar, &PlayerBar::resetPanelOrderRequested, this, &MainWindow::resetPanelOrder);
@@ -896,6 +1006,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::queueSaveAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_playerBar, &PlayerBar::queueRestorePreviousRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_playerBar, &PlayerBar::queueMergeSavedRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
+    connect(m_playerBar, &PlayerBar::queueSavedLimitRequested, this, &MainWindow::configureSavedQueueLimit);
     connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
     connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {
         switchMainView(MainView::Playlist);
@@ -1095,6 +1206,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
     connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);
+    connect(m_playlistView, &PlaylistView::deleteSavedQueueRequested, this, &MainWindow::deleteQueueSnapshotById);
 
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
@@ -2839,7 +2951,8 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
 {
     QVector<SavedQueuePlaylistEntry> entries;
     const QJsonObject root = loadQueueSnapshotsRoot();
-    const auto appendSnapshot = [this, &entries](const QJsonObject &snapshot) {
+    int ordinal = 1;
+    const auto appendSnapshot = [this, &entries, &ordinal](const QJsonObject &snapshot) {
         const QString id = snapshot.value(QStringLiteral("id")).toString();
         if (id.isEmpty()) {
             return;
@@ -2850,12 +2963,9 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
         }
         SavedQueuePlaylistEntry entry;
         entry.id = id;
-        entry.savedAt = snapshot.value(QStringLiteral("savedAt")).toVariant().toLongLong();
-        if (entry.savedAt <= 0) {
-            entry.savedAt = static_cast<qint64>(snapshot.value(QStringLiteral("savedAt")).toDouble(0));
-        }
-        entry.name = QStringLiteral("Queue: %1").arg(queueSnapshotLabel(snapshot, queueLastModifiedName(entry.savedAt)));
-        entry.meta = QStringLiteral("saved queue");
+        entry.savedAt = queueSnapshotSavedAt(snapshot);
+        entry.name = queueSnapshotLabel(snapshot, defaultSavedQueueName(ordinal++));
+        entry.meta = queueSnapshotTimestamp(entry.savedAt);
         entry.items.reserve(tracks.size());
         for (int i = 0; i < tracks.size(); ++i) {
             PlaylistItem item = playlistItemFromTrack(tracks.at(i), QString());
@@ -2910,7 +3020,7 @@ void MainWindow::playQueueSnapshotById(const QString &id, int startIndex)
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
         return;
     }
-    pushCurrentQueueToBacklog(queueLastModifiedName());
+    pushCurrentQueueToBacklog(QString());
     adoptQueueSnapshot(snapshot, tracks, std::clamp(startIndex, 0, static_cast<int>(tracks.size()) - 1));
 }
 
@@ -2932,6 +3042,81 @@ void MainWindow::playNextQueueSnapshotById(const QString &id)
         return;
     }
     playNextTracks(tracks);
+}
+
+void MainWindow::deleteQueueSnapshotById(const QString &id)
+{
+    if (id.isEmpty()) {
+        return;
+    }
+    QJsonObject root = loadQueueSnapshotsRoot();
+    const QJsonObject snapshot = queueSnapshotById(id);
+    const QString name = queueSnapshotLabel(snapshot, QStringLiteral("saved queue"));
+    const QString meta = queueSnapshotTimestamp(queueSnapshotSavedAt(snapshot));
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Delete saved queue"));
+    box.setText(QStringLiteral("Delete \"%1\"?").arg(name));
+    if (!meta.isEmpty()) {
+        box.setInformativeText(QStringLiteral("Saved at %1. This only removes the saved queue entry; it does not change the current queue.").arg(meta));
+    } else {
+        box.setInformativeText(QStringLiteral("This only removes the saved queue entry; it does not change the current queue."));
+    }
+    QPushButton *deleteButton = box.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != deleteButton) {
+        return;
+    }
+
+    auto removeFromArray = [&id](QJsonArray array) {
+        for (qsizetype i = array.size() - 1; i >= 0; --i) {
+            if (array.at(i).toObject().value(QStringLiteral("id")).toString() == id) {
+                array.removeAt(i);
+            }
+        }
+        return array;
+    };
+    root.insert(QStringLiteral("backlog"), removeFromArray(queueBacklogFromRoot(root)));
+    root.insert(QStringLiteral("saved"), removeFromArray(root.value(QStringLiteral("saved")).toArray()));
+    const QJsonObject previous = root.value(QStringLiteral("previous")).toObject();
+    if (previous.value(QStringLiteral("id")).toString() == id) {
+        root.remove(QStringLiteral("previous"));
+    }
+    saveQueueSnapshotsRoot(root);
+    statusBar()->showMessage(QStringLiteral("Deleted \"%1\"").arg(name), 4000);
+}
+
+int MainWindow::savedQueueLimitSetting() const
+{
+    return std::clamp(m_state->setting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("5")).toInt(), 1, 10);
+}
+
+void MainWindow::configureSavedQueueLimit()
+{
+    bool ok = false;
+    const int limit = QInputDialog::getInt(this,
+                                           QStringLiteral("Saved queue limit"),
+                                           QStringLiteral("Automatic saved queues to keep:"),
+                                           savedQueueLimitSetting(),
+                                           1,
+                                           10,
+                                           1,
+                                           &ok);
+    if (!ok) {
+        return;
+    }
+    m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QString::number(limit));
+    QJsonObject root = loadQueueSnapshotsRoot();
+    QJsonArray backlog = queueBacklogFromRoot(root);
+    while (backlog.size() > limit) {
+        backlog.removeLast();
+    }
+    root.remove(QStringLiteral("previous"));
+    root.insert(QStringLiteral("backlog"), backlog);
+    saveQueueSnapshotsRoot(root);
+    statusBar()->showMessage(QStringLiteral("Automatic saved queue limit set to %1").arg(limit), 4000);
 }
 
 void MainWindow::ensureCurrentQueueIdentity()
@@ -2959,7 +3144,7 @@ void MainWindow::pushCurrentQueueToBacklog(const QString &name)
     QJsonObject root = loadQueueSnapshotsRoot();
     QJsonArray existing = queueBacklogFromRoot(root);
     const QString snapshotId = m_queueId;
-    QJsonObject snapshot = queueSnapshotObject(name.isEmpty() ? queueLastModifiedName() : name);
+    QJsonObject snapshot = queueSnapshotObject(name);
     QJsonArray backlog;
     backlog.append(snapshot);
     for (const QJsonValue &value : existing) {
@@ -2968,7 +3153,7 @@ void MainWindow::pushCurrentQueueToBacklog(const QString &name)
             continue;
         }
         backlog.append(candidate);
-        if (backlog.size() >= 5) {
+        if (backlog.size() >= savedQueueLimitSetting()) {
             break;
         }
     }
@@ -2979,7 +3164,7 @@ void MainWindow::pushCurrentQueueToBacklog(const QString &name)
 
 void MainWindow::snapshotCurrentQueueAsPrevious()
 {
-    pushCurrentQueueToBacklog(queueLastModifiedName());
+    pushCurrentQueueToBacklog(QString());
 }
 
 void MainWindow::markQueueAsSpontaneous(const QString &id)
@@ -3153,40 +3338,20 @@ void MainWindow::replaceQueueWithTracks(const QVector<Track> &tracks, int playIn
 void MainWindow::restorePreviousQueue()
 {
     const QJsonObject root = loadQueueSnapshotsRoot();
-    QVector<QJsonObject> choices;
-    QStringList labels;
-    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
-        const QJsonObject snapshot = value.toObject();
-        if (snapshot.isEmpty()) {
-            continue;
-        }
-        choices.push_back(snapshot);
-        labels << queueSnapshotLabel(snapshot, queueLastModifiedName(snapshot.value(QStringLiteral("savedAt")).toVariant().toLongLong()));
-    }
-    for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
-        const QJsonObject snapshot = value.toObject();
-        if (snapshot.isEmpty()) {
-            continue;
-        }
-        choices.push_back(snapshot);
-        labels << queueSnapshotLabel(snapshot, QStringLiteral("saved queue"));
-    }
+    const QVector<QueueSnapshotChoice> choices = queueSnapshotChoicesFromRoot(root);
     if (choices.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("No saved queues to restore"), 3000);
         return;
     }
-    bool ok = false;
-    const QString chosen = QInputDialog::getItem(this, QStringLiteral("Restore queue"),
-                                                 QStringLiteral("Restore saved queue:"),
-                                                 labels, 0, false, &ok);
-    if (!ok || chosen.isEmpty()) {
-        return;
-    }
-    const qsizetype index = labels.indexOf(chosen);
+    const int index = chooseQueueSnapshot(this,
+                                          QStringLiteral("Restore queue"),
+                                          QStringLiteral("Restore saved queue:"),
+                                          choices);
     if (index < 0) {
         return;
     }
-    const QJsonObject snapshot = choices.at(index);
+    const QueueSnapshotChoice choice = choices.at(index);
+    const QJsonObject snapshot = choice.snapshot;
     const QVector<Track> tracks = tracksFromSnapshotObject(snapshot);
     if (tracks.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
@@ -3194,11 +3359,11 @@ void MainWindow::restorePreviousQueue()
     }
     // The queue being displaced returns to the backlog under its existing id, so
     // restore can toggle without manufacturing duplicate queue identities.
-    pushCurrentQueueToBacklog(queueLastModifiedName());
+    pushCurrentQueueToBacklog(QString());
     const int restoreIndex = std::clamp(snapshot.value(QStringLiteral("index")).toInt(0),
                                         0, static_cast<int>(tracks.size()) - 1);
     adoptQueueSnapshot(snapshot, tracks, restoreIndex);
-    statusBar()->showMessage(QStringLiteral("Restored \"%1\" (%2 tracks)").arg(chosen).arg(tracks.size()), 4000);
+    statusBar()->showMessage(QStringLiteral("Restored \"%1\" (%2 tracks)").arg(choice.name).arg(tracks.size()), 4000);
 }
 
 void MainWindow::saveCurrentQueueAs()
@@ -3207,8 +3372,8 @@ void MainWindow::saveCurrentQueueAs()
         statusBar()->showMessage(QStringLiteral("Queue is empty"), 3000);
         return;
     }
-    const QString defaultName =
-        queueLastModifiedName();
+    QJsonObject root = loadQueueSnapshotsRoot();
+    const QString defaultName = nextSavedQueueName(root);
     bool ok = false;
     const QString name = QInputDialog::getText(this, QStringLiteral("Save queue as"),
                                                QStringLiteral("Queue-playlist name:"),
@@ -3217,7 +3382,6 @@ void MainWindow::saveCurrentQueueAs()
     if (!ok || name.isEmpty()) {
         return;
     }
-    QJsonObject root = loadQueueSnapshotsRoot();
     QJsonArray saved = root.value(QStringLiteral("saved")).toArray();
     // Replace any existing snapshot with the same name, else append.
     ensureCurrentQueueIdentity();
@@ -3241,43 +3405,26 @@ void MainWindow::saveCurrentQueueAs()
 void MainWindow::mergeSavedQueueViaPlayNext()
 {
     const QJsonObject root = loadQueueSnapshotsRoot();
-    QVector<QJsonObject> choices;
-    QStringList labels;
-    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
-        const QJsonObject snapshot = value.toObject();
-        if (snapshot.isEmpty()) {
-            continue;
-        }
-        choices.push_back(snapshot);
-        labels << queueSnapshotLabel(snapshot, queueLastModifiedName(snapshot.value(QStringLiteral("savedAt")).toVariant().toLongLong()));
-    }
-    for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
-        const QJsonObject snapshot = value.toObject();
-        choices.push_back(snapshot);
-        labels << queueSnapshotLabel(snapshot, QStringLiteral("saved queue"));
-    }
+    const QVector<QueueSnapshotChoice> choices = queueSnapshotChoicesFromRoot(root);
     if (choices.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("No saved queues"), 3000);
         return;
     }
-    bool ok = false;
-    const QString chosen = QInputDialog::getItem(this, QStringLiteral("Merge saved queue"),
-                                                 QStringLiteral("Insert via play-next:"),
-                                                 labels, 0, false, &ok);
-    if (!ok || chosen.isEmpty()) {
-        return;
-    }
-    const qsizetype index = labels.indexOf(chosen);
+    const int index = chooseQueueSnapshot(this,
+                                          QStringLiteral("Merge saved queue"),
+                                          QStringLiteral("Insert via play-next:"),
+                                          choices);
     if (index < 0) {
         return;
     }
-    const QVector<Track> tracks = tracksFromSnapshotObject(choices.at(index));
+    const QueueSnapshotChoice choice = choices.at(index);
+    const QVector<Track> tracks = tracksFromSnapshotObject(choice.snapshot);
     if (tracks.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
         return;
     }
     playNextTracks(tracks);
-    statusBar()->showMessage(QStringLiteral("Merged \"%1\" (%2 tracks)").arg(chosen).arg(tracks.size()), 4000);
+    statusBar()->showMessage(QStringLiteral("Merged \"%1\" (%2 tracks)").arg(choice.name).arg(tracks.size()), 4000);
 }
 
 void MainWindow::loadExplorerState()
@@ -3688,6 +3835,15 @@ void MainWindow::configureAlbumArtResolution()
     if (!m_currentArtist.isEmpty()) {
         refreshAlbumGrid(true);
     }
+}
+
+void MainWindow::configurePlaylistSelectorMetadata()
+{
+    if (m_playlistView == nullptr) {
+        return;
+    }
+    m_playlistView->configureSelectorMetadata(this);
+    savePlaylistViewSettings();
 }
 
 void MainWindow::configureKeybindings()
@@ -4385,7 +4541,7 @@ void MainWindow::clearQueue()
 
     const bool keepCurrent = m_player->queueIndex() >= 0
         && !m_player->queue().at(m_player->queueIndex()).path.isEmpty();
-    pushCurrentQueueToBacklog(queueLastModifiedName());
+    pushCurrentQueueToBacklog(QString());
 
     if (keepCurrent) {
         markQueueAsSpontaneous();
