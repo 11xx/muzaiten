@@ -39,6 +39,28 @@ target_link_libraries(test_schema PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig
 target_compile_features(test_schema PRIVATE cxx_std_26)
 add_test(NAME test_schema COMMAND test_schema)
 
+# Standalone CLI search path (build/load/refresh the cache, query the engine).
+add_executable(test_search_cli
+    test_search_cli.cpp
+    ../src/app/AppPaths.cpp
+    ../src/cli/SearchCli.cpp
+    ../src/core/MetadataBlob.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+    ../src/fs/PathResolver.cpp
+    ../src/search/Exclusion.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/IndexCache.cpp
+    ../src/search/SearchIndex.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
+)
+target_include_directories(test_search_cli PRIVATE ../src)
+target_link_libraries(test_search_cli PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
+target_compile_features(test_search_cli PRIVATE cxx_std_26)
+add_test(NAME test_search_cli COMMAND test_search_cli)
+
 add_executable(test_playlist_database
     test_playlist_database.cpp
     ../src/db/PlaylistDatabase.cpp

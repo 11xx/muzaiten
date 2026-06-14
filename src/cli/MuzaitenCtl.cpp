@@ -5,7 +5,11 @@
 // which instance). Designed for scripting and compositor keybinds:
 //   muzaitenctl rate 4 && notify-send "rated $(muzaitenctl status --format artist-title)"
 
+#include "cli/SearchCli.h"
 #include "ipc/IpcSocket.h"
+#include "search/SearchIndex.h"
+#include "search/SearchQuery.h"
+#include "search/SearchRecord.h"
 
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -14,6 +18,7 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QStringList>
+#include <QTextStream>
 
 #include <cmath>
 #include <cstdio>
@@ -40,7 +45,12 @@ void printUsage()
         "  rate clear              remove the user rating\n"
         "  queue                   list the queue (current row marked with >)\n"
         "  queue <index> | jump <index>  play the given queue row\n"
-        "  search [--limit N] <text>  substring-search the library\n"
+        "  search [opts] <text>    fold-aware library search (TSV; works offline)\n"
+        "      --plain               human-readable block instead of TSV\n"
+        "      --limit N             cap the number of results\n"
+        "      --fuzzy               fuzzy match instead of exact substring\n"
+        "      --refresh             rebuild the on-disk cache from the library\n"
+        "      --clear-cache         delete the cache and exit\n"
         "  play-file <path>        append a file to the queue and play it\n"
         "  raise                   show and focus the running instance's window\n"
         "\n"
@@ -142,6 +152,124 @@ int fail(const QString &message)
     return 1;
 }
 
+// Tabs/newlines in a field would corrupt the TSV row layout; flatten them.
+QString tsvField(const QString &value)
+{
+    QString v = value;
+    v.replace(QLatin1Char('\t'), QLatin1Char(' '));
+    v.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    return v;
+}
+
+QString searchHumanLine(const Search::SearchRecord &r)
+{
+    const QString artist = r.artistName.isEmpty() ? QStringLiteral("?") : r.artistName;
+    QString line = QStringLiteral("%1 - %2").arg(artist, r.title);
+    if (!r.albumTitle.isEmpty()) {
+        line += QStringLiteral(" [%1]").arg(r.albumTitle);
+    }
+    if (!r.date.isEmpty()) {
+        line += QStringLiteral(" (%1)").arg(r.date);
+    }
+    if (r.durationMs > 0) {
+        line += QStringLiteral("  %1").arg(formatSeconds(static_cast<double>(r.durationMs) / 1000.0));
+    }
+    return line;
+}
+
+// `muzaitenctl search` — standalone, fold-aware library search. Opens the
+// library DB directly and queries the folded-index cache (no running instance
+// required). Default output is TSV; --plain is a human block; --json an array.
+int runSearch(QStringList arguments, bool json)
+{
+    bool refresh = false, plain = false, fuzzy = false, clearCache = false;
+    int limit = 0;
+    QStringList queryWords;
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString w = arguments.at(i);
+        if (w == QLatin1String("--limit")) {
+            bool ok = false;
+            if (i + 1 >= arguments.size() || (limit = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
+                return fail(QStringLiteral("search --limit needs a positive number"));
+            }
+        } else if (w == QLatin1String("--refresh")) {
+            refresh = true;
+        } else if (w == QLatin1String("--plain")) {
+            plain = true;
+        } else if (w == QLatin1String("--fuzzy")) {
+            fuzzy = true;
+        } else if (w == QLatin1String("--clear-cache")) {
+            clearCache = true;
+        } else if (w.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown search option \"%1\"").arg(w));
+        } else {
+            queryWords.push_back(w);
+        }
+    }
+
+    if (clearCache) {
+        QString path;
+        const bool removed = SearchCli::clearCache(&path);
+        std::fprintf(stderr, removed ? "cleared cache: %s\n" : "no cache to clear: %s\n", qPrintable(path));
+        return 0;
+    }
+
+    Search::SearchIndex index;
+    const SearchCli::LoadResult load = SearchCli::loadIndex(index, refresh);
+    if (!load.ok) {
+        return fail(load.error);
+    }
+    if (load.wasStale) {
+        std::fprintf(stderr, "muzaitenctl: note: search cache is stale; "
+                             "run 'muzaitenctl search --refresh' to update\n");
+    }
+
+    if (queryWords.isEmpty()) {
+        return fail(QStringLiteral("search needs a query"));
+    }
+
+    const Search::SearchQuery query = Search::SearchQuery::parse(queryWords.join(QLatin1Char(' ')));
+    int total = 0;
+    QVector<Search::ScoredResult> results = index.match(query, fuzzy, {}, &total);
+    if (limit > 0 && results.size() > limit) {
+        results.resize(limit);
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+
+    if (json) {
+        QJsonArray array;
+        for (const Search::ScoredResult &sr : results) {
+            const Search::SearchRecord &r = sr.rec;
+            array.append(QJsonObject{
+                {QStringLiteral("path"), r.path},
+                {QStringLiteral("title"), r.title},
+                {QStringLiteral("artist"), r.artistName},
+                {QStringLiteral("album"), r.albumTitle},
+                {QStringLiteral("date"), r.date},
+                {QStringLiteral("durationMs"), static_cast<double>(r.durationMs)},
+                {QStringLiteral("rating"), r.rating0To100},
+            });
+        }
+        out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        return 0;
+    }
+
+    for (const Search::ScoredResult &sr : results) {
+        const Search::SearchRecord &r = sr.rec;
+        if (plain) {
+            out << searchHumanLine(r) << '\n' << "  " << r.path << '\n';
+        } else {
+            const QString rating = r.rating0To100 >= 0 ? QString::number(r.rating0To100) : QString();
+            out << tsvField(r.path) << '\t' << tsvField(r.title) << '\t' << tsvField(r.artistName) << '\t'
+                << tsvField(r.albumTitle) << '\t' << tsvField(r.date) << '\t'
+                << r.durationMs << '\t' << rating << '\n';
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -166,6 +294,12 @@ int main(int argc, char **argv)
         command = QStringLiteral("prev");
     }
 
+    // `search` is handled entirely client-side (opens the library DB directly),
+    // so it works without a running instance and never touches the socket.
+    if (command == QLatin1String("search")) {
+        return runSearch(arguments, json);
+    }
+
     if (command == QLatin1String("jump")
         || (command == QLatin1String("queue") && !arguments.isEmpty())) {
         bool ok = false;
@@ -175,33 +309,6 @@ int main(int argc, char **argv)
         }
         command = QStringLiteral("queue-jump");
         args.insert(QStringLiteral("index"), index);
-    } else if (command == QLatin1String("search")) {
-        if (arguments.isEmpty()) {
-            return fail(QStringLiteral("search needs a query"));
-        }
-        QStringList queryWords;
-        for (int i = 0; i < arguments.size(); ++i) {
-            const QString word = arguments.at(i);
-            if (word == QLatin1String("--limit")) {
-                if (i + 1 >= arguments.size()) {
-                    return fail(QStringLiteral("search --limit needs a positive number"));
-                }
-                bool ok = false;
-                const int limit = arguments.at(++i).toInt(&ok);
-                if (!ok || limit <= 0) {
-                    return fail(QStringLiteral("search --limit needs a positive number"));
-                }
-                args.insert(QStringLiteral("limit"), limit);
-            } else if (word.startsWith(QLatin1String("--"))) {
-                return fail(QStringLiteral("unknown search option \"%1\"").arg(word));
-            } else {
-                queryWords.push_back(word);
-            }
-        }
-        if (queryWords.isEmpty()) {
-            return fail(QStringLiteral("search needs a query"));
-        }
-        args.insert(QStringLiteral("query"), queryWords.join(QLatin1Char(' ')));
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
@@ -288,18 +395,6 @@ int main(int argc, char **argv)
         }
         if (tracks.isEmpty()) {
             std::printf("queue is empty\n");
-        }
-        return 0;
-    }
-    if (command == QLatin1String("search")) {
-        const QJsonArray results = response.value(QStringLiteral("results")).toArray();
-        for (const QJsonValue &value : results) {
-            const QJsonObject track = value.toObject();
-            std::printf("%s\n  %s\n", qPrintable(trackLine(track)),
-                        qPrintable(track.value(QStringLiteral("path")).toString()));
-        }
-        if (results.isEmpty()) {
-            std::printf("no matches\n");
         }
         return 0;
     }

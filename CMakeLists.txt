@@ -266,16 +266,29 @@ target_compile_options(muzaiten PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
-# Command-line client for the IPC socket. QtCore/Network only — shares the
-# state-path resolution (AppPaths) so it always finds the instance matching its
-# environment.
+# Command-line client. Shares the state-path resolution (AppPaths) so it always
+# finds the instance matching its environment. `search` runs standalone — it
+# opens the library DB and the folded-index cache directly (no running instance
+# needed), so the binary links the DB + search engine alongside the IPC socket.
 add_executable(muzaitenctl
     src/cli/MuzaitenCtl.cpp
+    src/cli/SearchCli.cpp
     src/app/AppPaths.cpp
     src/ipc/IpcSocket.cpp
+    src/db/Database.cpp
+    src/core/MetadataBlob.cpp
+    src/core/Rating.cpp
+    src/fs/PathResolver.cpp
+    src/search/Exclusion.cpp
+    src/search/FuzzyMatch.cpp
+    src/search/IndexCache.cpp
+    src/search/SearchIndex.cpp
+    src/search/SearchMatcher.cpp
+    src/search/SearchQuery.cpp
+    src/search/fold/Fold.cpp
 )
 target_include_directories(muzaitenctl PRIVATE src)
-target_link_libraries(muzaitenctl PRIVATE Qt6::Core Qt6::Network)
+target_link_libraries(muzaitenctl PRIVATE Qt6::Core Qt6::Network Qt6::Sql PkgConfig::ZSTD)
 target_compile_options(muzaitenctl PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
