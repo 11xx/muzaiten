@@ -46,6 +46,13 @@ double secondsFromMs(qint64 value)
     return static_cast<double>(std::max<qint64>(0, value)) / 1000.0;
 }
 
+// Trim emitted doubles to 2 decimals — nothing in the status JSON (seconds,
+// percent, star ratings) is meaningful beyond centisecond / 0.01 precision.
+double round2(double value)
+{
+    return std::round(value * 100.0) / 100.0;
+}
+
 QString ratingSourceName(Rating::Source source)
 {
     switch (source) {
@@ -532,9 +539,9 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
 {
     const qint64 durationMs = track.durationMs > 0 ? track.durationMs : m_durationMs;
     const qint64 elapsedMs = std::clamp(m_positionMs, qint64{0}, std::max<qint64>(0, durationMs));
-    const double duration = secondsFromMs(durationMs);
-    const double elapsed = secondsFromMs(elapsedMs);
-    const double elapsedPercent = duration > 0.0 ? (elapsed / duration) * 100.0 : 0.0;
+    const double duration = round2(secondsFromMs(durationMs));
+    const double elapsed = round2(secondsFromMs(elapsedMs));
+    const double elapsedPercent = round2(duration > 0.0 ? (elapsed / duration) * 100.0 : 0.0);
 
     QJsonObject player;
     player.insert(QStringLiteral("name"), QStringLiteral("muzaiten"));
@@ -589,11 +596,11 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
     QJsonObject library;
     if (track.rating0To100 >= 0) {
         library.insert(QStringLiteral("rating"), track.rating0To100);
-        library.insert(QStringLiteral("rating_stars"), track.rating0To100 / 20.0);
+        library.insert(QStringLiteral("rating_stars"), round2(track.rating0To100 / 20.0));
     }
     if (track.effectiveRating0To100 >= 0) {
         library.insert(QStringLiteral("effective_rating"), track.effectiveRating0To100);
-        library.insert(QStringLiteral("effective_rating_stars"), track.effectiveRating0To100 / 20.0);
+        library.insert(QStringLiteral("effective_rating_stars"), round2(track.effectiveRating0To100 / 20.0));
     }
     library.insert(QStringLiteral("rating_source"), ratingSourceName(track.ratingSource));
     library.insert(QStringLiteral("has_user_rating"), track.hasUserRating);
