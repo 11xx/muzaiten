@@ -262,10 +262,28 @@ void PanelSearchController::escapeSearch()
     focusActivePanel();
 }
 
+void PanelSearchController::confirmSearch()
+{
+    // ncmpcpp-style confirm: with matches, keep the query and current match so
+    // M-n / M-p keep cycling after the bar closes; with no matches, drop the
+    // query entirely so the panel closes free of any constraint.
+    PanelState &state = m_state[m_activePanel];
+    if (state.matches.isEmpty()) {
+        state.query.clear();
+        state.currentMatch = -1;
+    }
+    setVisible(false);
+    focusActivePanel();
+    updateSearchUi();
+}
+
 void PanelSearchController::setQueryForActivePanel(const QString &query)
 {
+    // Keep the raw text (don't trim) so spaces survive while typing — the parser
+    // skips empty whitespace tokens, and trimming here would let updateSearchUi
+    // resync the edit and swallow a trailing space on every keystroke.
     PanelState &state = m_state[m_activePanel];
-    state.query = query.trimmed();
+    state.query = query;
     rebuildMatches(m_activePanel, true, false);
     updateSearchUi();
 }
@@ -281,7 +299,7 @@ void PanelSearchController::rebuildMatches(MainPanelId id, bool jumpToFirst, boo
     state.matches.clear();
     state.currentMatch = -1;
 
-    if (state.query.isEmpty()) {
+    if (state.query.trimmed().isEmpty()) {
         updateSearchUi();
         return;
     }
@@ -322,7 +340,7 @@ void PanelSearchController::updateSearchUi()
     const int rows = target != nullptr ? target->rowCount() : 0;
     if (rows == 0) {
         m_status->setText(QStringLiteral("No rows · %1").arg(mode));
-    } else if (state.query.isEmpty()) {
+    } else if (state.query.trimmed().isEmpty()) {
         m_status->setText(QStringLiteral("%1 rows · %2").arg(rows).arg(mode));
     } else if (state.matches.isEmpty()) {
         m_status->setText(QStringLiteral("No matches · %1").arg(mode));
@@ -601,6 +619,11 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
 
 bool PanelSearchController::handleSearchKey(QKeyEvent *event)
 {
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+        && (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0) {
+        confirmSearch();
+        return true;
+    }
     const QString action = m_keyBindings.value(keySequenceForEvent(event));
     if (action == QString::fromLatin1(MainPanelAction::Escape)) {
         escapeSearch();

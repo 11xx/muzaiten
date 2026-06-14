@@ -85,6 +85,7 @@ private:
     void focusActivePanel();
     void openSearch();
     void escapeSearch();
+    void confirmSearch();
     void setQueryForActivePanel(const QString &query);
     void rebuildMatches(MainPanelId id, bool jumpToFirst, bool showNoMatchNotice);
     void updateSearchUi();
