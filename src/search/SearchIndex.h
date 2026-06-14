@@ -71,6 +71,9 @@ public:
     int size() const { return static_cast<int>(m_records.size()); }
     bool isEmpty() const { return m_records.isEmpty(); }
 
+    // The indexed records, for persisting to the on-disk cache.
+    const QVector<SearchRecord> &records() const { return m_records; }
+
 private:
     QVector<SearchRecord> m_records;
 };

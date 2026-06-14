@@ -76,6 +76,8 @@ private slots:
     void onDebounceTimeout();
     void onIndexGrew(int count);
     void onIndexLoaded(int count);
+    void onIndexRefreshing();
+    void onIndexRefreshed(int count);
     void onIndexError(const QString &error);
     void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
     void onCleanupTimeout();
@@ -114,6 +116,7 @@ private:
     QTimer               *m_cleanupTimer = nullptr;
     QTimer               *m_spinnerTimer = nullptr;
     QTimer               *m_streamRerunTimer = nullptr;
+    QTimer               *m_cacheMsgTimer = nullptr;
 
     QThread              *m_workerThread = nullptr;
     Search::SearchWorker *m_worker       = nullptr;
@@ -123,7 +126,9 @@ private:
 
     QString   m_dbPath;
     bool      m_indexLoaded  = false;  // first batch arrived (or load done) — queries enabled
-    bool      m_indexStreaming = false; // a streaming build is in progress (spinner on)
+    bool      m_indexStreaming = false; // a cold streaming build is in progress (main spinner)
+    bool      m_indexRefreshing = false; // a background cache-refresh is in progress (secondary spinner)
+    bool      m_cacheUpdatedRecently = false; // flash "cache updated" after a refresh
     int       m_spinnerFrame = 0;
     bool      m_fuzzyMode    = false;
     quint64   m_queryId      = 0;

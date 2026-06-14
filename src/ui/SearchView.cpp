@@ -154,12 +154,22 @@ void SearchView::setupUi()
     m_streamRerunTimer->setSingleShot(true);
     m_streamRerunTimer->setInterval(80);
 
+    // Transient "cache updated" note shown for a few seconds after a background
+    // refresh completes, then cleared.
+    m_cacheMsgTimer = new QTimer(this);
+    m_cacheMsgTimer->setSingleShot(true);
+    m_cacheMsgTimer->setInterval(4000);
+
     // Connections
     connect(m_searchBox, &QLineEdit::textChanged, this, &SearchView::onTextChanged);
     connect(m_debounce,  &QTimer::timeout,         this, &SearchView::onDebounceTimeout);
     connect(m_cleanupTimer, &QTimer::timeout,      this, &SearchView::onCleanupTimeout);
     connect(m_spinnerTimer, &QTimer::timeout,      this, &SearchView::onSpinnerTick);
     connect(m_streamRerunTimer, &QTimer::timeout,  this, &SearchView::submitQuery);
+    connect(m_cacheMsgTimer, &QTimer::timeout,     this, [this] {
+        m_cacheUpdatedRecently = false;
+        updateStatusLabel();
+    });
 
     connect(m_resultList, &QListView::doubleClicked, this, &SearchView::onDoubleClicked);
     connect(m_resultList, &QListView::customContextMenuRequested, this, &SearchView::showContextMenu);
@@ -402,6 +412,10 @@ void SearchView::setupWorker(const QString &dbPath)
             this, &SearchView::onIndexGrew, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::indexLoaded,
             this, &SearchView::onIndexLoaded, Qt::QueuedConnection);
+    connect(m_worker, &Search::SearchWorker::indexRefreshing,
+            this, &SearchView::onIndexRefreshing, Qt::QueuedConnection);
+    connect(m_worker, &Search::SearchWorker::indexRefreshed,
+            this, &SearchView::onIndexRefreshed, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::indexError,
             this, &SearchView::onIndexError, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::resultsReady,
@@ -429,8 +443,11 @@ void SearchView::onCleanupTimeout()
     }
     m_indexLoaded = false;
     m_indexStreaming = false;
+    m_indexRefreshing = false;
+    m_cacheUpdatedRecently = false;
     m_spinnerTimer->stop();
     m_streamRerunTimer->stop();
+    m_cacheMsgTimer->stop();
     m_totalIndexed = 0;
     m_model->clear();
 }
@@ -483,13 +500,43 @@ void SearchView::onIndexGrew(int count)
 
 void SearchView::onIndexLoaded(int count)
 {
-    // Stream fully drained — stop the spinner and run one final authoritative
-    // query against the complete index.
+    // Index queryable: a cold build finished, or a (possibly stale) cache loaded
+    // instantly. If a background refresh is still running, leave its spinner up.
     m_indexLoaded = true;
     m_indexStreaming = false;
     m_totalIndexed = count;
     m_streamRerunTimer->stop();
-    m_spinnerTimer->stop();
+    if (!m_indexRefreshing) {
+        m_spinnerTimer->stop();
+    }
+    updateStatusLabel();
+    submitQuery();
+}
+
+void SearchView::onIndexRefreshing()
+{
+    // The cached index is being rebuilt quietly in the background while it keeps
+    // serving queries; show a small secondary spinner, not the main one.
+    m_indexRefreshing = true;
+    m_cacheUpdatedRecently = false;
+    m_cacheMsgTimer->stop();
+    if (!m_spinnerTimer->isActive()) {
+        m_spinnerTimer->start();
+    }
+    updateStatusLabel();
+}
+
+void SearchView::onIndexRefreshed(int count)
+{
+    // Fresh index swapped in. Stop the secondary spinner, flash "cache updated"
+    // for a few seconds, and re-run the query so just-added tracks show up.
+    m_indexRefreshing = false;
+    m_totalIndexed = count;
+    if (!m_indexStreaming) {
+        m_spinnerTimer->stop();
+    }
+    m_cacheUpdatedRecently = true;
+    m_cacheMsgTimer->start();
     updateStatusLabel();
     submitQuery();
 }
@@ -503,6 +550,7 @@ void SearchView::onSpinnerTick()
 void SearchView::onIndexError(const QString &error)
 {
     m_indexStreaming = false;
+    m_indexRefreshing = false;
     m_spinnerTimer->stop();
     m_streamRerunTimer->stop();
     m_statusLabel->setText(QStringLiteral("Index error: %1").arg(error));
@@ -533,13 +581,16 @@ void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> r
 
 void SearchView::updateStatusLabel()
 {
-    // Animated spinner glyph shown only while the index streams in — never per
-    // keystroke (queries on loaded data are instant).
+    // Animated spinner glyph, shown while the index streams in (cold start) or a
+    // background cache-refresh runs — never per keystroke (queries are instant).
     static const QString kSpinnerFrames = QString::fromUtf8("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
-    const bool loading = m_indexStreaming;
-    const QString spin = loading
-        ? kSpinnerFrames.at(m_spinnerFrame % static_cast<int>(kSpinnerFrames.size())) + QStringLiteral("  ")
-        : QString();
+    const QString glyph = kSpinnerFrames.at(m_spinnerFrame % static_cast<int>(kSpinnerFrames.size()));
+    const QString spin = m_indexStreaming ? glyph + QStringLiteral("  ") : QString();
+
+    // Secondary segment: quiet background-refresh indicator, then a brief note.
+    const QString aside = m_indexRefreshing
+        ? QStringLiteral("  ·  %1 updating index").arg(glyph)
+        : (m_cacheUpdatedRecently ? QStringLiteral("  ·  cache updated") : QString());
 
     if (!m_indexLoaded) {
         m_statusLabel->setText(spin + QStringLiteral("Loading library…"));
@@ -547,14 +598,14 @@ void SearchView::updateStatusLabel()
     }
     const QString modeStr = m_fuzzyMode ? QStringLiteral("fuzzy") : QStringLiteral("exact");
     if (m_searchBox->text().isEmpty()) {
-        m_statusLabel->setText(QStringLiteral("%1%2 tracks  ·  %3").arg(spin).arg(m_totalIndexed).arg(modeStr));
+        m_statusLabel->setText(QStringLiteral("%1%2 tracks  ·  %3%4").arg(spin).arg(m_totalIndexed).arg(modeStr, aside));
     } else {
         const int shown = m_model->rowCount();
         const QString countStr = (m_matchCount > shown)
             ? QStringLiteral("%1 of %2").arg(shown).arg(m_matchCount)  // capped display
             : QString::number(m_matchCount);
-        m_statusLabel->setText(QStringLiteral("%1%2 / %3  ·  %4")
-                                    .arg(spin, countStr).arg(m_totalIndexed).arg(modeStr));
+        m_statusLabel->setText(QStringLiteral("%1%2 / %3  ·  %4%5")
+                                    .arg(spin, countStr).arg(m_totalIndexed).arg(modeStr, aside));
     }
 }
 
