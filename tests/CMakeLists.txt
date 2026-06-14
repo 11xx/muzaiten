@@ -26,10 +26,12 @@ add_test(NAME test_metadata_blob COMMAND test_metadata_blob)
 
 add_executable(test_schema
     test_schema.cpp
+    ../src/app/AppPaths.cpp
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
+    ../src/search/IndexCache.cpp
     ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_schema PRIVATE ../src)

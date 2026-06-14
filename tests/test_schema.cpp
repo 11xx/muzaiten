@@ -1,4 +1,5 @@
 #include "db/Database.h"
+#include "search/IndexCache.h"
 #include "search/SearchRecord.h"
 
 #include <QSqlDatabase>
@@ -29,6 +30,8 @@ private slots:
     void sourceRootRoundTrips();
     void sourceRootVisibilityFiltersLocalLibrary();
     void mpdTracksRoundTrip();
+    void searchCacheRoundTrips();
+    void searchCacheSignatureDetectsChange();
 };
 
 namespace {
@@ -544,6 +547,60 @@ void SchemaTest::guessedPlaceholdersFollowVisibilitySetting()
     // Back off: hidden again.
     database.setGuessedPlaceholdersVisible(false);
     QVERIFY(database.albumArtists().isEmpty());
+}
+
+void SchemaTest::searchCacheRoundTrips()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    Database database(QStringLiteral("schema-cache-rt-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    track.title = QString::fromUtf8("三線の花");
+    track.titleSort = QStringLiteral("Sanshin no Hana");
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+
+    const QVector<Search::SearchRecord> records = database.allTracksForSearch();
+    QCOMPARE(records.size(), 1);
+    const Search::CacheSignature sig = Search::IndexCache::currentSignature(database);
+
+    const QString path = temp.filePath(QStringLiteral("idx.cache"));
+    QVERIFY(Search::IndexCache::write(path, sig, records));
+
+    const Search::IndexCache::Loaded loaded = Search::IndexCache::read(path);
+    QVERIFY(loaded.ok);
+    QVERIFY(loaded.signature == sig);
+    QCOMPARE(loaded.records.size(), 1);
+    // Folded norms survive the round-trip (so the romaji match still works).
+    QCOMPARE(loaded.records.first().path, records.first().path);
+    QCOMPARE(loaded.records.first().title, records.first().title);
+    QCOMPARE(loaded.records.first().normTitle, records.first().normTitle);
+    QVERIFY(loaded.records.first().normTitle.contains(QStringLiteral("sanshin")));
+}
+
+void SchemaTest::searchCacheSignatureDetectsChange()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    Database database(QStringLiteral("schema-cache-sig-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    QVERIFY2(database.upsertTrack(makeTrack(temp, QStringLiteral("01.flac"), 80)), qPrintable(database.lastError()));
+    const Search::CacheSignature before = Search::IndexCache::currentSignature(database);
+
+    // Adding a track must change the signature (count moves), so a stale cache
+    // is detected and rebuilt.
+    QVERIFY2(database.upsertTrack(makeTrack(temp, QStringLiteral("02.flac"), 60)), qPrintable(database.lastError()));
+    const Search::CacheSignature after = Search::IndexCache::currentSignature(database);
+    QVERIFY(!(before == after));
+
+    // A read whose stored signature no longer matches the current one is stale.
+    const QString path = temp.filePath(QStringLiteral("idx.cache"));
+    QVERIFY(Search::IndexCache::write(path, before, database.allTracksForSearch()));
+    const Search::IndexCache::Loaded loaded = Search::IndexCache::read(path);
+    QVERIFY(loaded.ok);
+    QVERIFY(!(loaded.signature == after)); // detected as stale vs current
 }
 
 QTEST_MAIN(SchemaTest)

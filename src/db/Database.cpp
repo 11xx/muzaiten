@@ -1873,6 +1873,39 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
     return records;
 }
 
+Database::SearchRowSummary Database::searchRowSummary() const
+{
+    SearchRowSummary summary;
+    {
+        QString sql = QStringLiteral(
+            "SELECT COUNT(*), COALESCE(MAX(file_mtime), 0) FROM tracks t "
+            "WHERE t.missing = 0 AND t.metadata_scanned = 1");
+        if (hasScanRoots(m_db)) {
+            sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+        }
+        QSqlQuery query(m_db);
+        if (query.exec(sql) && query.next()) {
+            summary.localCount    = query.value(0).toLongLong();
+            summary.localMaxMtime = query.value(1).toLongLong();
+        }
+    }
+    {
+        QSqlQuery query(m_db);
+        if (query.exec(QStringLiteral("SELECT COUNT(*) FROM mpd_tracks")) && query.next()) {
+            summary.mpdCount = query.value(0).toLongLong();
+        }
+    }
+    // Enabled roots change which local tracks the predicate admits, so fold them
+    // into the signature. Sort first so the hash is order-independent.
+    QStringList rootPaths;
+    for (const ScanRoot &root : enabledLibraryRoots()) {
+        rootPaths.append(root.path);
+    }
+    rootPaths.sort();
+    summary.rootsHash = static_cast<quint64>(qHash(rootPaths.join(QLatin1Char('\n'))));
+    return summary;
+}
+
 std::unique_ptr<TrackSearchCursor> Database::beginTrackSearchStream() const
 {
     QString localSql = QString::fromLatin1(kLocalSearchSelect);

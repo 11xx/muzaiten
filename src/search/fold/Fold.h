@@ -29,8 +29,15 @@
 
 #include <QString>
 #include <QVector>
+#include <QtTypes>
 
 namespace Search::Fold {
+
+// Bumped whenever the fold pipeline or its tables (transliteration, kanji dict,
+// kana romaji) change in a way that alters output. The on-disk search cache
+// stores folded norms, so a mismatch here must invalidate it even when the
+// library itself is unchanged.
+inline constexpr quint32 kVersion = 1;
 
 // Folded text plus a map from each folded character back to the index of the
 // source character it derived from.  Used by highlighting to project match

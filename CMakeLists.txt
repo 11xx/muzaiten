@@ -82,6 +82,7 @@ set(MUZAITEN_SOURCES
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
     src/search/FuzzyMatch.cpp
+    src/search/IndexCache.cpp
     src/search/RankConfig.cpp
     src/search/ResultRanker.cpp
     src/search/SearchIndex.cpp
@@ -186,6 +187,7 @@ set(MUZAITEN_HEADERS
     src/scrobble/ListenTracker.h
     src/search/Exclusion.h
     src/search/FuzzyMatch.h
+    src/search/IndexCache.h
     src/search/RankConfig.h
     src/search/ResultRanker.h
     src/search/SearchIndex.h
