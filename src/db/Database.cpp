@@ -367,49 +367,9 @@ bool Database::migrate()
         }
     }
 
-    // TRANSIENT backfill: populate the sort columns from the metadata blobs for
-    // existing rows. Safe to delete once the library has been rescanned.
-    {
-        QSqlQuery bfQuery(m_db);
-        bfQuery.prepare(QStringLiteral(
-            "SELECT t.id, m.raw_size, m.data "
-            "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
-            "WHERE t.title_sort IS NULL AND t.artist_sort IS NULL "
-            "AND t.album_artist_sort IS NULL AND t.album_sort IS NULL"));
-        if (bfQuery.exec()) {
-            QSqlQuery upd(m_db);
-            upd.prepare(QStringLiteral(
-                "UPDATE tracks SET title_sort=?, artist_sort=?, album_artist_sort=?, album_sort=? WHERE id=?"));
-            // Combine the standard sort tag with the Classical Extras "*SORTEN"
-            // latin variant, matching TagReader's freshly-scanned behavior.
-            const auto sortTag = [](const MetadataBlob::FullMetadata &meta, const QString &key) -> QVariant {
-                const QString primary = meta.tags.value(key).value(0);
-                const QString latin = meta.tags.value(key + QStringLiteral("EN")).value(0);
-                QString combined = primary;
-                if (!latin.isEmpty() && latin != primary) {
-                    combined = primary.isEmpty() ? latin : primary + QLatin1Char(' ') + latin;
-                }
-                return combined.isEmpty() ? QVariant() : QVariant(combined);
-            };
-            while (bfQuery.next()) {
-                const qint64 trackId = bfQuery.value(0).toLongLong();
-                const qint64 rawSize = bfQuery.value(1).toLongLong();
-                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(bfQuery.value(2).toByteArray(), rawSize);
-                const QVariant ts = sortTag(meta, QStringLiteral("TITLESORT"));
-                const QVariant as = sortTag(meta, QStringLiteral("ARTISTSORT"));
-                const QVariant aas = sortTag(meta, QStringLiteral("ALBUMARTISTSORT"));
-                const QVariant als = sortTag(meta, QStringLiteral("ALBUMSORT"));
-                if (ts.isValid() || as.isValid() || aas.isValid() || als.isValid()) {
-                    upd.addBindValue(ts);
-                    upd.addBindValue(as);
-                    upd.addBindValue(aas);
-                    upd.addBindValue(als);
-                    upd.addBindValue(trackId);
-                    upd.exec();
-                }
-            }
-        }
-    }
+    // (A transient backfill that populated these columns from existing metadata
+    // blobs lived here; removed now that the library has been rescanned. New/
+    // updated rows get the sort columns from TagReader on scan.)
 
     const QStringList v9Statements = {
         QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(9, datetime('now'))"),
