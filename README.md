@@ -10,6 +10,7 @@ The project is in early development. It currently uses C++26, Qt 6 Widgets, SQLi
 ## Features
 
 - Local library scanner with source-directory management, incremental rescans, and missing-file marking.
+- Fast library search that matches by sound/shape across scripts — diacritics (`cafe`↔`Café`), Greek/Cyrillic/Turkish, and Japanese romaji↔kana/kanji (`sanshin no hana`→`三線の花`) — backed by an on-disk cache, in-app and via the `muzaitenctl` CLI (with an fzf picker).
 - Album artist sidebar, album grid, artist track table, and queue sidebar.
 - Library file explorer and free-roam file explorer, with keyboard-oriented navigation profiles.
 - Cached album artwork from folder images and embedded artwork.
@@ -25,7 +26,7 @@ muzaiten indexes and plays local files without moving, renaming, deleting, or wr
 
 Rating edits are stored in the application database immediately. For local files, muzaiten can also write those ratings back to tags through `File > Rating tags` or the automatic pending-write path after a rating change. Tag writes are narrow in scope: they update the rating field, verify the result by re-reading the file, and keep failed or unwritable writes pending for retry.
 
-Scans do not traverse symlinks. Missing files are marked missing rather than deleted from the database until you explicitly choose `File > Remove missing tracks`.
+Scans do not traverse symlinks. Missing files are marked missing rather than deleted from the database until you explicitly choose `File > Remove missing tracks`. Tracks that go missing are shown with a red `×` wherever they appear in the queue and in playlists; `File > Remove missing tracks` drops them from the library and the queue but keeps (and marks) playlist entries, so a playlist still remembers them. Right-clicking a missing row offers both a scoped "Remove missing track(s)" (from the queue/playlist you're in) and the global "Remove all missing tracks from library".
 
 ## Build
 
@@ -87,8 +88,8 @@ sudo make install PREFIX=/usr      # system-wide instead
 make uninstall                     # reverse it (mirrors the PREFIX you used)
 ```
 
-Installing drops the `muzaiten` binary plus a desktop entry, scalable icon, and
-AppStream metadata into the prefix. `make uninstall` removes exactly those files
+Installing drops the `muzaiten` binary and the `muzaitenctl` CLI plus a desktop
+entry, scalable icon, and AppStream metadata into the prefix. `make uninstall` removes exactly those files
 (it reads `install_manifest.txt`, so it cleans whichever prefix you installed
 into; use `sudo` for a system prefix). (`make` here is only a thin alias for the
 fixed CMake commands — use `cmake`/`cmake --install` directly if you need finer
@@ -154,6 +155,8 @@ MUZAITEN_VERBOSE=1 ./build/muzaiten
 
 Press `3` to open the search view. Type to filter interactively; all terms AND together in any order.
 
+Matching is by **sound/shape, not encoding**: both the query and the library are folded to a lowercase ASCII-leaning form before matching, so accents and scripts don't get in the way. `cafe` finds `Café`, `bjork` finds `Björk`, Greek/Cyrillic/Turkish transliterate (`σωκρατης`↔`sokrates`), and Japanese matches by romaji — kana and common kanji romanize (`sanshin no hana` or `san shin no ha na` → `三線の花`), with Picard/MusicBrainz `*sort` reading tags filling in proper-noun readings (`utada` → 宇多田ヒカル). Typing the original script still matches too.
+
 **Search keybindings:**
 
 | Key | Action |
@@ -177,8 +180,11 @@ Press `3` to open the search view. Type to filter interactively; all terms AND t
 The result list always keeps a highlighted cursor you move with the arrow or
 `Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style. `Esc`/`Ctrl+G`
 first clears the query, then (when already empty) releases the text box so `1`
-and `2` switch views; `/` jumps back into the box. The library index is loaded
-into memory on first use and kept resident, so re-opening search is instant.
+and `2` switch views; `/` jumps back into the box. The folded index is cached on
+disk, so opening search is near-instant on a warm cache; a cold or stale cache
+streams results in as it builds (and refreshes quietly in the background, shown
+by a small "updating index" note). Deleting the cache file is harmless — it
+rebuilds on next open.
 
 **Query syntax:**
 
@@ -224,6 +230,41 @@ ordered and what is filtered out:
   `*/Podcasts/*` (Path), `*.m4b` (Path), `*live*` (Any field).
 
 Ranking and exclusion changes apply live and persist across restarts.
+
+## Command-line client (`muzaitenctl`)
+
+`muzaitenctl` is a companion CLI installed alongside the app. Transport and
+queue commands talk to a running instance over its IPC socket (resolved from the
+same `MUZAITEN_*` environment as the app, so they target the matching instance):
+
+```sh
+muzaitenctl status            # current track + player state (--json for raw JSON)
+muzaitenctl play | pause | play-pause | next | prev | stop
+muzaitenctl seek +30          # relative seconds, or absolute mm:ss
+muzaitenctl volume 70         # absolute 0-100, or +/-N
+muzaitenctl rate 4            # 0-5 stars (rate raw <0-100>, rate clear)
+muzaitenctl queue             # list the queue; `queue <n>` jumps to a row
+muzaitenctl enqueue [--play|--next] <path...>   # add files to the queue
+muzaitenctl play-file <path>  # append a file and play it
+```
+
+`search` is different: it runs **entirely client-side**, opening the library
+database and the shared folded-index cache directly, so it works whether or not
+the app is running:
+
+```sh
+muzaitenctl search sanshin            # TSV: path  title  artist  album  date  ms  rating
+muzaitenctl search --plain utada      # human-readable blocks
+muzaitenctl search --limit 5 --json jazz
+muzaitenctl search --fuzzy nhuage     # fuzzy instead of exact substring
+muzaitenctl search --refresh          # rebuild the cache; --clear-cache to drop it
+```
+
+With no query in a terminal (and `fzf` installed) `search` launches an **fzf
+picker** over the whole library — multi-line rows, romaji matches kanji, `Enter`
+queues the selection and `Alt+Enter` plays it (via `enqueue`). Piped or without
+fzf, a bare `search` dumps the whole library as TSV. First run builds the cache
+(a few seconds); later runs are instant.
 
 ## File Explorer Notes
 

@@ -21,7 +21,8 @@
       <li>GStreamer playback with PipeWire/PulseAudio/ALSA sinks and an exclusive bit-perfect mode</li>
       <li>User ratings with optional MusicBee-compatible rating-tag writeback</li>
       <li>ListenBrainz and Last.fm scrobbling</li>
-      <li>fzf-style library search and an optional MPD bridge</li>
+      <li>fzf-style library search that matches across scripts (accents, Greek/Cyrillic, Japanese romaji), in-app and via a command-line client</li>
+      <li>Optional MPD bridge for browsing MPD libraries alongside local sources</li>
     </ul>
   </description>
 
@@ -62,7 +63,7 @@
   </keywords>
 
   <releases>
-    <release version="continuous" type="development" date="2026-06-02">
+    <release version="continuous" type="development" date="2026-06-14">
       <description>
         <p>Rolling release built from the latest source. See the repository for changes.</p>
       </description>

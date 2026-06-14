@@ -14,7 +14,10 @@ HEAD. There is no separate semantic version.
 - Queue-based playback (ncmpcpp-influenced) through a GStreamer backend, with
   configurable output: PipeWire / PulseAudio / ALSA sinks and an exclusive
   bit-perfect ALSA mode, plus resume behavior.
-- fzf-style library search across the whole library, including MPD tracks.
+- fzf-style library search across the whole library (including MPD tracks) that
+  matches by sound/shape — diacritics, Greek/Cyrillic/Turkish, and Japanese
+  romaji↔kana/kanji (with MusicBrainz reading tags) — backed by an on-disk folded
+  cache, exposed in-app and through the `muzaitenctl` CLI (with an fzf picker).
 - Scrobbling to both ListenBrainz and Last.fm (now-playing + completed listens).
 - Optional MPD bridge for browsing MPD libraries alongside local sources.
 - MPRIS service and persistent UI state.
@@ -24,3 +27,7 @@ HEAD. There is no separate semantic version.
 - MusicBrainz network lookup (IDs are already read from tags when present).
 - Bit-depth-aware audio-quality scoring in search ranking.
 - Broader playlist import/export.
+- More search-fold scripts (Korean Hangul, Chinese pinyin, Arabic, Hebrew, Indic),
+  sourced from CLDR/Unihan rather than hand-authored.
+- Shared persisted settings with a `muzaitenctl config` command (e.g. a default
+  fuzzy/exact mode for the CLI picker).

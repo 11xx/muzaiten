@@ -108,8 +108,8 @@ MUZAITEN_LASTFM_API_KEY=... MUZAITEN_LASTFM_SHARED_SECRET=... ./packaging/build-
 
 This produces, under `dist/`:
 
-- `muzaiten-<version>-<arch>.tar.zst` — a prefixed tree (`usr/bin/muzaiten`
-  plus the desktop entry, icon, metainfo, and license), and
+- `muzaiten-<version>-<arch>.tar.zst` — a prefixed tree (`usr/bin/muzaiten` and
+  the `muzaitenctl` CLI, plus the desktop entry, icon, metainfo, and license), and
 - `muzaiten-<version>-<arch>.tar.zst.sha256`.
 
 `<version>` is the date-based `YYYY.MM.DD.HHMMSS.g<sha>` derived from `HEAD`.
