@@ -400,10 +400,10 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_header->setContentsMargins(8, 4, 8, 4);
     layout->addWidget(m_header);
 
-    auto *splitter = new QSplitter(Qt::Horizontal, this);
-    layout->addWidget(splitter, 1);
+    m_splitter = new QSplitter(Qt::Horizontal, this);
+    layout->addWidget(m_splitter, 1);
 
-    m_playlistList = new QListWidget(splitter);
+    m_playlistList = new QListWidget(m_splitter);
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setItemDelegate(new PlaylistListDelegate(this));
@@ -413,7 +413,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_playlistList->viewport()->installEventFilter(this);
 
     m_itemModel = new PlaylistItemTableModel(this);
-    m_itemTable = new NavigableTableView(splitter);
+    m_itemTable = new NavigableTableView(m_splitter);
     m_itemTable->setModel(m_itemModel);
     m_itemTable->setItemDelegate(new DenseTableDelegate(this));
     m_itemTable->verticalHeader()->setVisible(false);
@@ -434,8 +434,9 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable->viewport()->installEventFilter(this);
     OverlayScrollBar::install(m_itemTable);
 
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 3);
+    m_splitter->setStretchFactor(0, 1);
+    m_splitter->setStretchFactor(1, 3);
+    m_splitter->setSizes({260, 780});
 
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
         m_currentPlaylistId = currentPlaylistId();
@@ -462,6 +463,9 @@ PlaylistView::PlaylistView(QWidget *parent)
     connect(m_itemTable->horizontalHeader(), &QHeaderView::customContextMenuRequested,
             this, &PlaylistView::showHeaderMenu);
     connect(m_itemTable->horizontalHeader(), &QHeaderView::sectionMoved, this, [this]() {
+        emit viewSettingsChanged();
+    });
+    connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
         emit viewSettingsChanged();
     });
     connect(m_playlistList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) {
@@ -527,6 +531,11 @@ QString PlaylistView::viewSettingsJson() const
     root.insert(QStringLiteral("rowHeight"), m_itemTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), m_itemTable->horizontalHeader()->height());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_itemTable->horizontalHeader()->saveState().toBase64()));
+    QJsonArray splitterSizes;
+    for (int size : m_splitter->sizes()) {
+        splitterSizes.append(size);
+    }
+    root.insert(QStringLiteral("splitter"), splitterSizes);
     m_columnLayout->writeSavedWidthsJson(&root);
     m_columnLayout->writePrioritiesJson(&root);
     m_columnLayout->writeMinimumWidthsJson(&root);
@@ -563,6 +572,14 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
     if (!headerState.isEmpty()) {
         m_itemTable->horizontalHeader()->restoreState(headerState);
     }
+    const QJsonArray splitter = root.value(QStringLiteral("splitter")).toArray();
+    QList<int> sizes;
+    for (const QJsonValue &value : splitter) {
+        sizes.push_back(value.toInt());
+    }
+    if (sizes.size() == m_splitter->count()) {
+        m_splitter->setSizes(sizes);
+    }
     m_itemTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     m_columnLayout->applyPrioritiesJson(root);
     m_columnLayout->applyMinimumWidthsJson(root);
@@ -586,6 +603,7 @@ void PlaylistView::resetViewSettings()
     m_playlistRowHeight = 18;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
+    m_splitter->setSizes({260, 780});
     m_columnLayout->resetToDefaults();
     populateItems();
     reloadPlaylists();

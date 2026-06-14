@@ -14,6 +14,7 @@ class QListWidget;
 class QLabel;
 class QEvent;
 class QPoint;
+class QSplitter;
 class PlaylistItemTableModel;
 
 struct SavedQueuePlaylistEntry {
@@ -153,6 +154,7 @@ private:
     int m_playlistRowHeight = 18;
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
+    QSplitter *m_splitter = nullptr;
     PlaylistItemTableModel *m_itemModel = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     QLabel *m_header = nullptr;

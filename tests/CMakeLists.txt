@@ -296,6 +296,23 @@ target_compile_features(test_queue_table PRIVATE cxx_std_26)
 add_test(NAME test_queue_table COMMAND test_queue_table)
 set_tests_properties(test_queue_table PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_playlist_view
+    test_playlist_view.cpp
+    ../src/db/PlaylistDatabase.cpp
+    ../src/ui/PlaylistView.cpp
+    ../src/ui/DenseTableDelegate.cpp
+    ../src/ui/NavigableTableView.cpp
+    ../src/ui/NeighborColumnResizer.cpp
+    ../src/ui/ResponsiveColumnLayout.cpp
+    ../src/ui/ResponsiveColumnOptionsDialog.cpp
+    ../src/ui/OverlayScrollBar.cpp
+)
+target_include_directories(test_playlist_view PRIVATE ../src)
+target_link_libraries(test_playlist_view PRIVATE Qt6::Core Qt6::Sql Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_playlist_view PRIVATE cxx_std_26)
+add_test(NAME test_playlist_view COMMAND test_playlist_view)
+set_tests_properties(test_playlist_view PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_responsive_column_layout
     test_responsive_column_layout.cpp
     ../src/ui/ResponsiveColumnLayout.cpp
