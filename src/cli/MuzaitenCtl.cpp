@@ -12,16 +12,21 @@
 #include "search/SearchRecord.h"
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QTextStream>
 
 #include <cmath>
 #include <cstdio>
+
+#include <unistd.h>
 
 namespace {
 
@@ -45,7 +50,8 @@ void printUsage()
         "  rate clear              remove the user rating\n"
         "  queue                   list the queue (current row marked with >)\n"
         "  queue <index> | jump <index>  play the given queue row\n"
-        "  search [opts] <text>    fold-aware library search (TSV; works offline)\n"
+        "  search [opts] [text]    fold-aware library search (TSV; works offline)\n"
+        "                            with no text on a terminal: fzf picker; piped: full dump\n"
         "      --plain               human-readable block instead of TSV\n"
         "      --limit N             cap the number of results\n"
         "      --fuzzy               fuzzy match instead of exact substring\n"
@@ -178,9 +184,126 @@ QString searchHumanLine(const Search::SearchRecord &r)
     return line;
 }
 
+QString oneLine(const QString &value)
+{
+    QString v = value;
+    v.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    v.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    return v;
+}
+
+bool hasNonAscii(const QString &s)
+{
+    for (const QChar c : s) {
+        if (c.unicode() > 127) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// One NUL-terminated fzf record. Newline-separated lines:
+//   1: clean path — hidden (--with-nth=2..), extracted by the queue/play actions
+//   2..: pretty, colored display lines (artist/album/title/path)
+//   last (only when the row has non-ASCII text): the folded romaji norm, dimmed
+// fzf searches everything it displays, so the romaji line is what lets a romaji
+// query match a kanji/accented row; for pure-ASCII rows the visible text already
+// matches, so we omit it to keep them clean. Colors use the standard 16-color
+// palette so they respect the terminal theme.
+QByteArray pickerRecord(const Search::SearchRecord &r)
+{
+    const QString artist = oneLine(r.artistName.isEmpty() ? QStringLiteral("Unknown Artist") : r.artistName);
+    const QString album  = oneLine(r.albumTitle.isEmpty() ? QStringLiteral("Unknown Album") : r.albumTitle);
+    const QString title  = oneLine(r.title.isEmpty() ? r.filename : r.title);
+    const QString path   = oneLine(r.path);
+
+    QString block = path + QLatin1Char('\n');                                // line 1: hidden, for actions
+    block += QStringLiteral("\033[36m♪ %1\033[0m\n").arg(artist);            // cyan
+    block += QStringLiteral("\033[33m💿 %1\033[0m").arg(album);              // yellow
+    if (!r.date.isEmpty()) {
+        block += QStringLiteral(" \033[90m(%1)\033[0m").arg(oneLine(r.date));
+    }
+    block += QLatin1Char('\n');
+    block += QStringLiteral("\033[32m▸ %1\033[0m").arg(title);               // green
+    if (r.durationMs > 0) {
+        block += QStringLiteral(" \033[90m[%1]\033[0m").arg(formatSeconds(static_cast<double>(r.durationMs) / 1000.0));
+    }
+    block += QLatin1Char('\n');
+    block += QStringLiteral("\033[90m📁 %1\033[0m").arg(path);               // dim path (searchable)
+
+    if (hasNonAscii(title + artist + album)) {
+        const QString norm = oneLine(r.normTitle + QLatin1Char(' ') + r.normArtist + QLatin1Char(' ')
+                                     + r.normAlbum);
+        if (!norm.trimmed().isEmpty()) {
+            block += QStringLiteral("\n\033[90m%1\033[0m").arg(norm);        // dim romaji reading
+        }
+    }
+
+    QByteArray bytes = block.toUtf8();
+    bytes.append('\0');
+    return bytes;
+}
+
+// Interactive fzf picker over the whole library. fzf does the fuzzy matching
+// (against our pre-folded field), so romaji finds kanji; Return queues the
+// selection, Alt-Return plays it — both via `muzaitenctl enqueue` over IPC.
+int runPicker(const Search::SearchIndex &index, const QString &fzfPath, bool fuzzy)
+{
+    const QString self = QCoreApplication::applicationFilePath();
+    // From the selected NUL records ({+f}), emit each path (line 1) NUL-separated
+    // and pipe to `enqueue --stdin0`, so even thousands of marks fit (no ARG_MAX).
+    const QString extract = QStringLiteral(
+        "awk 'BEGIN{RS=\"\\0\"} NF{split($0,a,\"\\n\"); printf \"%s\\0\", a[1]}' {+f}");
+    const QString queueAction = QStringLiteral("execute-silent(%1 | %2 enqueue --stdin0)+clear-selection")
+                                    .arg(extract, self);
+    const QString playAction = QStringLiteral("execute-silent(%1 | %2 enqueue --stdin0 --play)+clear-selection")
+                                   .arg(extract, self);
+
+    QStringList args{
+        QStringLiteral("--read0"), QStringLiteral("--ansi"), QStringLiteral("--multi"),
+        QStringLiteral("--height=100%"), QStringLiteral("--cycle"), QStringLiteral("--gap=1"),
+        QStringLiteral("--highlight-line"), QStringLiteral("--delimiter=\n"),
+        QStringLiteral("--with-nth=2.."),
+        QStringLiteral("--prompt=♪ "), QStringLiteral("--marker-multi-line=╻┃╹"),
+        QStringLiteral("--preview=printf '%s\\n' {} | tail -n +2"),
+        QStringLiteral("--preview-window=down:4:wrap:hidden"),
+        QStringLiteral("--bind=return:") + queueAction,
+        QStringLiteral("--bind=alt-return:") + playAction,
+        QStringLiteral("--bind=tab:toggle+down"),
+        QStringLiteral("--bind=ctrl-space:toggle"),
+        QStringLiteral("--bind=ctrl-a:select-all"),
+        QStringLiteral("--bind=ctrl-/:toggle-preview"),
+        QStringLiteral("--bind=esc:cancel"),
+    };
+    if (!fuzzy) {
+        args.prepend(QStringLiteral("--exact"));
+    }
+
+    QProcess fzf;
+    fzf.setProgram(fzfPath);
+    fzf.setArguments(args);
+    fzf.setProcessChannelMode(QProcess::ForwardedChannels); // fzf draws on the controlling tty
+    fzf.start();
+    if (!fzf.waitForStarted(3000)) {
+        return fail(QStringLiteral("could not start fzf"));
+    }
+    // Stream every record; fzf shows them as they arrive (instant launch).
+    for (const Search::SearchRecord &r : index.records()) {
+        fzf.write(pickerRecord(r));
+        if (fzf.bytesToWrite() > (1 << 20)) {
+            fzf.waitForBytesWritten(-1);
+        }
+    }
+    fzf.closeWriteChannel();
+    fzf.waitForFinished(-1);
+    return 0;
+}
+
 // `muzaitenctl search` — standalone, fold-aware library search. Opens the
 // library DB directly and queries the folded-index cache (no running instance
-// required). Default output is TSV; --plain is a human block; --json an array.
+// required). With no query in a terminal it launches an fzf picker; piped, it
+// dumps the whole library. Default output is TSV; --plain a human block; --json
+// an array.
 int runSearch(QStringList arguments, bool json)
 {
     bool refresh = false, plain = false, fuzzy = false, clearCache = false;
@@ -225,15 +348,35 @@ int runSearch(QStringList arguments, bool json)
                              "run 'muzaitenctl search --refresh' to update\n");
     }
 
+    // No query: launch the interactive picker on a terminal with fzf available,
+    // otherwise dump the whole library (useful for piping). Selecting which
+    // records to emit:
+    QVector<Search::ScoredResult> results; // owns the matched records; outlives the pointers below
+    QVector<const Search::SearchRecord *> records;
     if (queryWords.isEmpty()) {
-        return fail(QStringLiteral("search needs a query"));
+        const bool isTty = ::isatty(fileno(stdout)) != 0;
+        const QString fzf = QStandardPaths::findExecutable(QStringLiteral("fzf"));
+        if (isTty && !fzf.isEmpty() && !plain && !json) {
+            return runPicker(index, fzf, fuzzy);
+        }
+        if (isTty && fzf.isEmpty()) {
+            return fail(QStringLiteral("no query given and fzf not found; install fzf for the "
+                                       "interactive picker, pass a query, or pipe for a full dump"));
+        }
+        for (const Search::SearchRecord &r : index.records()) {
+            records.push_back(&r);
+        }
+    } else {
+        const Search::SearchQuery query = Search::SearchQuery::parse(queryWords.join(QLatin1Char(' ')));
+        int total = 0;
+        results = index.match(query, fuzzy, {}, &total);
+        records.reserve(results.size());
+        for (const Search::ScoredResult &sr : results) {
+            records.push_back(&sr.rec);
+        }
     }
-
-    const Search::SearchQuery query = Search::SearchQuery::parse(queryWords.join(QLatin1Char(' ')));
-    int total = 0;
-    QVector<Search::ScoredResult> results = index.match(query, fuzzy, {}, &total);
-    if (limit > 0 && results.size() > limit) {
-        results.resize(limit);
+    if (limit > 0 && records.size() > limit) {
+        records.resize(limit);
     }
 
     QTextStream out(stdout);
@@ -241,31 +384,29 @@ int runSearch(QStringList arguments, bool json)
 
     if (json) {
         QJsonArray array;
-        for (const Search::ScoredResult &sr : results) {
-            const Search::SearchRecord &r = sr.rec;
+        for (const Search::SearchRecord *r : records) {
             array.append(QJsonObject{
-                {QStringLiteral("path"), r.path},
-                {QStringLiteral("title"), r.title},
-                {QStringLiteral("artist"), r.artistName},
-                {QStringLiteral("album"), r.albumTitle},
-                {QStringLiteral("date"), r.date},
-                {QStringLiteral("durationMs"), static_cast<double>(r.durationMs)},
-                {QStringLiteral("rating"), r.rating0To100},
+                {QStringLiteral("path"), r->path},
+                {QStringLiteral("title"), r->title},
+                {QStringLiteral("artist"), r->artistName},
+                {QStringLiteral("album"), r->albumTitle},
+                {QStringLiteral("date"), r->date},
+                {QStringLiteral("durationMs"), static_cast<double>(r->durationMs)},
+                {QStringLiteral("rating"), r->rating0To100},
             });
         }
         out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
         return 0;
     }
 
-    for (const Search::ScoredResult &sr : results) {
-        const Search::SearchRecord &r = sr.rec;
+    for (const Search::SearchRecord *r : records) {
         if (plain) {
-            out << searchHumanLine(r) << '\n' << "  " << r.path << '\n';
+            out << searchHumanLine(*r) << '\n' << "  " << r->path << '\n';
         } else {
-            const QString rating = r.rating0To100 >= 0 ? QString::number(r.rating0To100) : QString();
-            out << tsvField(r.path) << '\t' << tsvField(r.title) << '\t' << tsvField(r.artistName) << '\t'
-                << tsvField(r.albumTitle) << '\t' << tsvField(r.date) << '\t'
-                << r.durationMs << '\t' << rating << '\n';
+            const QString rating = r->rating0To100 >= 0 ? QString::number(r->rating0To100) : QString();
+            out << tsvField(r->path) << '\t' << tsvField(r->title) << '\t' << tsvField(r->artistName) << '\t'
+                << tsvField(r->albumTitle) << '\t' << tsvField(r->date) << '\t'
+                << r->durationMs << '\t' << rating << '\n';
         }
     }
     return 0;
@@ -314,16 +455,30 @@ int main(int argc, char **argv)
         QJsonArray paths;
         bool play = false;
         bool next = false;
+        bool stdin0 = false;
         for (const QString &word : arguments) {
             if (word == QLatin1String("--play")) {
                 play = true;
             } else if (word == QLatin1String("--next")) {
                 next = true;
+            } else if (word == QLatin1String("--stdin0")) {
+                stdin0 = true; // read NUL-separated paths from stdin (used by the picker)
             } else if (word.startsWith(QLatin1String("--"))) {
                 return fail(QStringLiteral("unknown enqueue option \"%1\"").arg(word));
             } else {
                 // Resolve against the client's cwd; the server has its own.
                 paths.append(QFileInfo(word).absoluteFilePath());
+            }
+        }
+        if (stdin0) {
+            QFile in;
+            if (in.open(stdin, QIODevice::ReadOnly)) {
+                const QList<QByteArray> chunks = in.readAll().split('\0');
+                for (const QByteArray &chunk : chunks) {
+                    if (!chunk.isEmpty()) {
+                        paths.append(QString::fromUtf8(chunk));
+                    }
+                }
             }
         }
         if (paths.isEmpty()) {
