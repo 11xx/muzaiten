@@ -1768,57 +1768,95 @@ QVector<Album> Database::mpdAlbumsForArtist(const QString &albumArtist, const QS
     return albums;
 }
 
+namespace {
+
+// SELECT column order is shared by the bulk readers and the streaming cursor;
+// the row->record mappers below index into it positionally, so keep them in
+// lockstep.
+constexpr char kLocalSearchSelect[] =
+    "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
+    "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
+    "COALESCE(utr.rating_0_100, t.rating_0_100), "
+    "t.track_number, t.disc_number, t.file_mtime, t.file_size, t.bit_depth, "
+    "t.title_sort, t.artist_sort, t.album_artist_sort, t.album_sort "
+    "FROM tracks t "
+    "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+    "WHERE t.missing = 0 AND t.metadata_scanned = 1";
+
+constexpr char kMpdSearchSelect[] =
+    "SELECT uri, title, artist_name, album_artist_name, album_title, date, duration_ms, "
+    "track_number, disc_number "
+    "FROM mpd_tracks";
+
+// `extended` enables the full romaji + sort-reading fold; false gives the cheap
+// basic fold and leaves the raw sort names on the record. `pool` dedups the
+// high-repetition fields (one buffer per distinct value).
+Search::SearchRecord localRowToRecord(QSqlQuery &query, QHash<QString, QString> &pool, bool extended)
+{
+    Search::SearchRecord rec;
+    rec.path              = query.value(0).toString();
+    rec.filename          = query.value(1).toString();
+    rec.title             = query.value(2).toString();
+    rec.artistName        = internString(pool, query.value(3).toString());
+    rec.albumArtistName   = internString(pool, query.value(4).toString());
+    rec.albumTitle        = internString(pool, query.value(5).toString());
+    rec.date              = internString(pool, query.value(6).toString());
+    rec.durationMs        = query.value(7).toLongLong();
+    rec.sampleRateHz      = query.value(8).toInt();
+    rec.bitrateKbps       = query.value(9).toInt();
+    rec.channels          = query.value(10).toInt();
+    rec.codec             = internString(pool, query.value(11).toString());
+    rec.rating0To100      = query.value(12).isNull() ? -1 : query.value(12).toInt();
+    rec.trackNumber       = query.value(13).toInt();
+    rec.discNumber        = query.value(14).toInt();
+    rec.fileMtime         = query.value(15).toLongLong();
+    rec.fileSize          = query.value(16).toLongLong();
+    rec.bitDepth          = query.value(17).toInt();
+    rec.titleSort         = query.value(18).toString();
+    rec.artistSort        = internString(pool, query.value(19).toString());
+    rec.albumArtistSort   = internString(pool, query.value(20).toString());
+    rec.albumSort         = internString(pool, query.value(21).toString());
+    rec.source            = Search::TrackSource::Local;
+    Search::foldRecordNorms(rec, extended, &pool);
+    return rec;
+}
+
+Search::SearchRecord mpdRowToRecord(QSqlQuery &query, QHash<QString, QString> &pool, bool extended)
+{
+    Search::SearchRecord rec;
+    rec.path            = query.value(0).toString();
+    rec.filename        = rec.path.section(QLatin1Char('/'), -1);
+    rec.title           = query.value(1).toString();
+    rec.artistName      = internString(pool, query.value(2).toString());
+    rec.albumArtistName = internString(pool, query.value(3).toString());
+    rec.albumTitle      = internString(pool, query.value(4).toString());
+    rec.date            = internString(pool, query.value(5).toString());
+    rec.durationMs      = query.value(6).toLongLong();
+    rec.trackNumber     = query.value(7).toInt();
+    rec.discNumber      = query.value(8).toInt();
+    rec.rating0To100    = -1;
+    rec.source          = Search::TrackSource::Mpd;
+    // MPD tracks carry no sort tags; just fold the display fields.
+    Search::foldRecordNorms(rec, extended, &pool);
+    return rec;
+}
+
+} // namespace
+
 QVector<Search::SearchRecord> Database::allTracksForSearch(bool extended) const
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
-    QString sql = QStringLiteral(
-        "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
-        "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
-        "COALESCE(utr.rating_0_100, t.rating_0_100), "
-        "t.track_number, t.disc_number, t.file_mtime, t.file_size, t.bit_depth, "
-        "t.title_sort, t.artist_sort, t.album_artist_sort, t.album_sort "
-        "FROM tracks t "
-        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
-        "WHERE t.missing = 0 AND t.metadata_scanned = 1");
+    QString sql = QString::fromLatin1(kLocalSearchSelect);
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     if (!query.exec(sql)) {
         return records;
     }
-    // Dedup pool for the high-repetition fields (one buffer per distinct value).
     QHash<QString, QString> pool;
     while (query.next()) {
-        Search::SearchRecord rec;
-        rec.path              = query.value(0).toString();
-        rec.filename          = query.value(1).toString();
-        rec.title             = query.value(2).toString();
-        rec.artistName        = internString(pool, query.value(3).toString());
-        rec.albumArtistName   = internString(pool, query.value(4).toString());
-        rec.albumTitle        = internString(pool, query.value(5).toString());
-        rec.date              = internString(pool, query.value(6).toString());
-        rec.durationMs        = query.value(7).toLongLong();
-        rec.sampleRateHz      = query.value(8).toInt();
-        rec.bitrateKbps       = query.value(9).toInt();
-        rec.channels          = query.value(10).toInt();
-        rec.codec             = internString(pool, query.value(11).toString());
-        rec.rating0To100      = query.value(12).isNull() ? -1 : query.value(12).toInt();
-        rec.trackNumber       = query.value(13).toInt();
-        rec.discNumber        = query.value(14).toInt();
-        rec.fileMtime         = query.value(15).toLongLong();
-        rec.fileSize          = query.value(16).toLongLong();
-        rec.bitDepth          = query.value(17).toInt();
-        rec.titleSort         = query.value(18).toString();
-        rec.artistSort        = internString(pool, query.value(19).toString());
-        rec.albumArtistSort   = internString(pool, query.value(20).toString());
-        rec.albumSort         = internString(pool, query.value(21).toString());
-        rec.source            = Search::TrackSource::Local;
-        // Fold the display fields (+ sort/reading names) into the norm fields.
-        // `extended=false` yields the cheap basic fold and keeps the raw sort
-        // names on the record for the worker's background upgrade pass.
-        Search::foldRecordNorms(rec, extended, &pool);
-        records.push_back(std::move(rec));
+        records.push_back(localRowToRecord(query, pool, extended));
     }
     return records;
 }
@@ -1827,33 +1865,67 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch(bool extended) con
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
-    const QString sql = QStringLiteral(
-        "SELECT uri, title, artist_name, album_artist_name, album_title, date, duration_ms, "
-        "track_number, disc_number "
-        "FROM mpd_tracks");
-    if (!query.exec(sql)) {
+    if (!query.exec(QString::fromLatin1(kMpdSearchSelect))) {
         return records;
     }
     QHash<QString, QString> pool;
     while (query.next()) {
-        Search::SearchRecord rec;
-        rec.path            = query.value(0).toString();
-        rec.filename        = rec.path.section(QLatin1Char('/'), -1);
-        rec.title           = query.value(1).toString();
-        rec.artistName      = internString(pool, query.value(2).toString());
-        rec.albumArtistName = internString(pool, query.value(3).toString());
-        rec.albumTitle      = internString(pool, query.value(4).toString());
-        rec.date            = internString(pool, query.value(5).toString());
-        rec.durationMs      = query.value(6).toLongLong();
-        rec.trackNumber     = query.value(7).toInt();
-        rec.discNumber      = query.value(8).toInt();
-        rec.rating0To100    = -1;
-        rec.source          = Search::TrackSource::Mpd;
-        // MPD tracks carry no sort tags; just fold the display fields.
-        Search::foldRecordNorms(rec, extended, &pool);
-        records.push_back(std::move(rec));
+        records.push_back(mpdRowToRecord(query, pool, extended));
     }
     return records;
+}
+
+std::unique_ptr<TrackSearchCursor> Database::beginTrackSearchStream() const
+{
+    QString localSql = QString::fromLatin1(kLocalSearchSelect);
+    if (hasScanRoots(m_db)) {
+        localSql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    return std::unique_ptr<TrackSearchCursor>(
+        new TrackSearchCursor(m_db, std::move(localSql), QString::fromLatin1(kMpdSearchSelect)));
+}
+
+TrackSearchCursor::TrackSearchCursor(const QSqlDatabase &db, QString localSql, QString mpdSql)
+    : m_query(db)
+    , m_localSql(std::move(localSql))
+    , m_mpdSql(std::move(mpdSql))
+{
+    m_query.setForwardOnly(true); // stream rows; don't buffer the whole result
+}
+
+void TrackSearchCursor::advancePhase()
+{
+    m_query.finish();
+    m_execed = false;
+    m_phase = (m_phase == Phase::Local) ? Phase::Mpd : Phase::Done;
+}
+
+bool TrackSearchCursor::nextBatch(int maxRows, QVector<Search::SearchRecord> &out)
+{
+    out.clear();
+    if (maxRows < 1) {
+        maxRows = 1;
+    }
+    out.reserve(maxRows);
+    while (out.size() < maxRows && m_phase != Phase::Done) {
+        if (!m_execed) {
+            const QString &sql = (m_phase == Phase::Local) ? m_localSql : m_mpdSql;
+            if (sql.isEmpty() || !m_query.exec(sql)) {
+                advancePhase();
+                continue;
+            }
+            m_execed = true;
+        }
+        if (m_query.next()) {
+            out.push_back(m_phase == Phase::Local
+                              ? localRowToRecord(m_query, m_pool, /*extended=*/true)
+                              : mpdRowToRecord(m_query, m_pool, /*extended=*/true));
+        } else {
+            advancePhase(); // this phase drained; fall through to the next one
+        }
+    }
+    // More may remain unless we've fully drained both phases and produced nothing.
+    return m_phase != Phase::Done || !out.isEmpty();
 }
 
 QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QString &musicDirectory, const QString &albumTitleFilter) const

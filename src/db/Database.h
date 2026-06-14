@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QString>
 #include <QVector>
 
@@ -8,6 +9,8 @@
 #include <QPair>
 #include <QSet>
 #include <QStringList>
+
+#include <memory>
 
 #include "core/Album.h"
 #include "core/Artist.h"
@@ -18,6 +21,39 @@
 #include "fs/LinkRoot.h"
 #include "mpd/MpdTrack.h"
 #include "search/SearchRecord.h"
+
+class Database;
+
+// Streaming cursor over the search row set: local tracks first, then MPD
+// tracks, folded into their norm fields as they are pulled. Lets the search
+// worker build the in-memory index incrementally (fzf-from-a-pipe style)
+// instead of blocking on a full read of the library before the first query can
+// run. Obtain one from Database::beginTrackSearchStream() and pump nextBatch()
+// until it returns false.
+class TrackSearchCursor final {
+public:
+    TrackSearchCursor(const TrackSearchCursor &) = delete;
+    TrackSearchCursor &operator=(const TrackSearchCursor &) = delete;
+
+    // Pull up to `maxRows` more folded records into `out` (cleared first).
+    // Returns false once the stream is fully drained (with `out` then empty).
+    bool nextBatch(int maxRows, QVector<Search::SearchRecord> &out);
+
+private:
+    friend class Database;
+    TrackSearchCursor(const QSqlDatabase &db, QString localSql, QString mpdSql);
+    void advancePhase();
+
+    enum class Phase { Local, Mpd, Done };
+    QSqlQuery m_query;
+    QString   m_localSql;
+    QString   m_mpdSql;
+    Phase     m_phase = Phase::Local;
+    bool      m_execed = false;
+    // Intern pool for the high-repetition fields, shared across both phases so
+    // dedup spans the whole library.
+    QHash<QString, QString> m_pool;
+};
 
 class Database final {
 public:
@@ -114,6 +150,10 @@ public:
     QVector<Search::SearchRecord> allTracksForSearch(bool extended = true) const;
     // Lightweight row set for MPD-imported tracks.
     QVector<Search::SearchRecord> allMpdTracksForSearch(bool extended = true) const;
+    // Streaming alternative to the two functions above: returns a cursor that
+    // yields the same records (local then MPD) in batches, so the search index
+    // can be filled incrementally instead of in one blocking read.
+    std::unique_ptr<TrackSearchCursor> beginTrackSearchStream() const;
 
 private:
     qint64 upsertArtist(const QString &name, const QString &sortName = {});
