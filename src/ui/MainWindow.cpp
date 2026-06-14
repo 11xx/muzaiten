@@ -214,6 +214,14 @@ QString defaultSavedQueueName(int ordinal)
     return QStringLiteral("saved queue %1").arg(std::max(1, ordinal));
 }
 
+QString queueSnapshotKey(const QJsonObject &snapshot)
+{
+    return QStringLiteral("%1|%2|%3")
+        .arg(snapshot.value(QStringLiteral("id")).toString(),
+             QString::number(queueSnapshotSavedAt(snapshot)),
+             snapshot.value(QStringLiteral("name")).toString());
+}
+
 QJsonArray queueBacklogFromRoot(const QJsonObject &root)
 {
     QJsonArray backlog = root.value(QStringLiteral("backlog")).toArray();
@@ -237,6 +245,7 @@ QJsonArray queueBacklogFromRoot(const QJsonObject &root)
 
 struct QueueSnapshotChoice {
     QJsonObject snapshot;
+    QString key;
     QString name;
     QString meta;
 };
@@ -245,9 +254,49 @@ QueueSnapshotChoice queueSnapshotChoice(const QJsonObject &snapshot, int ordinal
 {
     QueueSnapshotChoice choice;
     choice.snapshot = snapshot;
+    choice.key = queueSnapshotKey(snapshot);
     choice.name = queueSnapshotLabel(snapshot, defaultSavedQueueName(ordinal));
     choice.meta = queueSnapshotTimestamp(queueSnapshotSavedAt(snapshot));
     return choice;
+}
+
+bool removeQueueSnapshotFromArray(QJsonArray *array, const QString &keyOrId)
+{
+    if (array == nullptr || keyOrId.isEmpty()) {
+        return false;
+    }
+    for (qsizetype i = 0; i < array->size(); ++i) {
+        const QJsonObject snapshot = array->at(i).toObject();
+        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
+            array->removeAt(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool removeQueueSnapshotFromRoot(QJsonObject *root, const QString &keyOrId)
+{
+    if (root == nullptr || keyOrId.isEmpty()) {
+        return false;
+    }
+    QJsonArray backlog = queueBacklogFromRoot(*root);
+    if (removeQueueSnapshotFromArray(&backlog, keyOrId)) {
+        root->remove(QStringLiteral("previous"));
+        root->insert(QStringLiteral("backlog"), backlog);
+        return true;
+    }
+    QJsonArray saved = root->value(QStringLiteral("saved")).toArray();
+    if (removeQueueSnapshotFromArray(&saved, keyOrId)) {
+        root->insert(QStringLiteral("saved"), saved);
+        return true;
+    }
+    const QJsonObject previous = root->value(QStringLiteral("previous")).toObject();
+    if (queueSnapshotKey(previous) == keyOrId || previous.value(QStringLiteral("id")).toString() == keyOrId) {
+        root->remove(QStringLiteral("previous"));
+        return true;
+    }
+    return false;
 }
 
 QVector<QueueSnapshotChoice> queueSnapshotChoicesFromRoot(const QJsonObject &root)
@@ -663,6 +712,9 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("Playlists"), m_playlistDb->lastError());
     }
     m_playlistView->setDatabase(m_playlistDb.get());
+    m_playlistView->setTrackResolver([this](const QString &path) {
+        return m_database != nullptr ? m_database->trackForPath(path) : Track();
+    });
 
     // UI/view prefs and session state live in a separate store under XDG_STATE_HOME
     // so they persist independently of the per-build library database.
@@ -994,7 +1046,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
-    connect(m_playerBar, &PlayerBar::playlistSelectorMetadataRequested, this, &MainWindow::configurePlaylistSelectorMetadata);
+    connect(m_playerBar, &PlayerBar::playlistMetadataDisplayRequested, this, &MainWindow::configurePlaylistMetadataDisplay);
     connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
     connect(m_playerBar, &PlayerBar::keybindingsRequested, this, &MainWindow::configureKeybindings);
     connect(m_playerBar, &PlayerBar::resetPanelOrderRequested, this, &MainWindow::resetPanelOrder);
@@ -1207,6 +1259,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
     connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::deleteSavedQueueRequested, this, &MainWindow::deleteQueueSnapshotById);
+    connect(m_playlistView, &PlaylistView::trackRatingChanged, this, [this](const QString &path, int rating) {
+        Track track = m_database != nullptr ? m_database->trackForPath(path) : Track();
+        if (track.path.isEmpty()) {
+            track.path = path;
+        }
+        applyTrackRating(track, rating);
+    });
 
     const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
     m_libraryFileExplorer->setTrackResolver(trackResolver);
@@ -2238,6 +2297,9 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
         m_mpris->setTrack(current);
     }
     m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
+    if (m_playlistView != nullptr) {
+        m_playlistView->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100);
+    }
     scheduleQueueStateSave();
 
     if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
@@ -2289,6 +2351,9 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
             const int effective = update.effectiveRating0To100;
             const bool hasUserRating = effective >= 0;
             m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
+            if (m_playlistView != nullptr) {
+                m_playlistView->updateTrackRating(update.path, effective);
+            }
             currentTrackChanged = m_player->applyRatingSync(update.path, effective) || currentTrackChanged;
         }
         if (currentTrackChanged) {
@@ -2963,6 +3028,7 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
         }
         SavedQueuePlaylistEntry entry;
         entry.id = id;
+        entry.snapshotKey = queueSnapshotKey(snapshot);
         entry.savedAt = queueSnapshotSavedAt(snapshot);
         entry.name = queueSnapshotLabel(snapshot, defaultSavedQueueName(ordinal++));
         entry.meta = queueSnapshotTimestamp(entry.savedAt);
@@ -2984,21 +3050,21 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
     return entries;
 }
 
-QJsonObject MainWindow::queueSnapshotById(const QString &id) const
+QJsonObject MainWindow::queueSnapshotByKey(const QString &keyOrId) const
 {
-    if (id.isEmpty()) {
+    if (keyOrId.isEmpty()) {
         return {};
     }
     const QJsonObject root = loadQueueSnapshotsRoot();
     for (const QJsonValue &value : queueBacklogFromRoot(root)) {
         const QJsonObject snapshot = value.toObject();
-        if (snapshot.value(QStringLiteral("id")).toString() == id) {
+        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
             return snapshot;
         }
     }
     for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
         const QJsonObject snapshot = value.toObject();
-        if (snapshot.value(QStringLiteral("id")).toString() == id) {
+        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
             return snapshot;
         }
     }
@@ -3014,19 +3080,22 @@ void MainWindow::refreshSavedQueuePlaylistEntries()
 
 void MainWindow::playQueueSnapshotById(const QString &id, int startIndex)
 {
-    const QJsonObject snapshot = queueSnapshotById(id);
+    const QJsonObject snapshot = queueSnapshotByKey(id);
     const QVector<Track> tracks = tracksFromSnapshotObject(snapshot);
     if (tracks.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
         return;
     }
     pushCurrentQueueToBacklog(QString());
+    QJsonObject root = loadQueueSnapshotsRoot();
+    removeQueueSnapshotFromRoot(&root, queueSnapshotKey(snapshot));
+    saveQueueSnapshotsRoot(root);
     adoptQueueSnapshot(snapshot, tracks, std::clamp(startIndex, 0, static_cast<int>(tracks.size()) - 1));
 }
 
 void MainWindow::addQueueSnapshotByIdToQueue(const QString &id)
 {
-    const QVector<Track> tracks = tracksFromSnapshotObject(queueSnapshotById(id));
+    const QVector<Track> tracks = tracksFromSnapshotObject(queueSnapshotByKey(id));
     if (tracks.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
         return;
@@ -3036,7 +3105,7 @@ void MainWindow::addQueueSnapshotByIdToQueue(const QString &id)
 
 void MainWindow::playNextQueueSnapshotById(const QString &id)
 {
-    const QVector<Track> tracks = tracksFromSnapshotObject(queueSnapshotById(id));
+    const QVector<Track> tracks = tracksFromSnapshotObject(queueSnapshotByKey(id));
     if (tracks.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
         return;
@@ -3050,7 +3119,7 @@ void MainWindow::deleteQueueSnapshotById(const QString &id)
         return;
     }
     QJsonObject root = loadQueueSnapshotsRoot();
-    const QJsonObject snapshot = queueSnapshotById(id);
+    const QJsonObject snapshot = queueSnapshotByKey(id);
     const QString name = queueSnapshotLabel(snapshot, QStringLiteral("saved queue"));
     const QString meta = queueSnapshotTimestamp(queueSnapshotSavedAt(snapshot));
     QMessageBox box(this);
@@ -3070,20 +3139,7 @@ void MainWindow::deleteQueueSnapshotById(const QString &id)
         return;
     }
 
-    auto removeFromArray = [&id](QJsonArray array) {
-        for (qsizetype i = array.size() - 1; i >= 0; --i) {
-            if (array.at(i).toObject().value(QStringLiteral("id")).toString() == id) {
-                array.removeAt(i);
-            }
-        }
-        return array;
-    };
-    root.insert(QStringLiteral("backlog"), removeFromArray(queueBacklogFromRoot(root)));
-    root.insert(QStringLiteral("saved"), removeFromArray(root.value(QStringLiteral("saved")).toArray()));
-    const QJsonObject previous = root.value(QStringLiteral("previous")).toObject();
-    if (previous.value(QStringLiteral("id")).toString() == id) {
-        root.remove(QStringLiteral("previous"));
-    }
+    removeQueueSnapshotFromRoot(&root, id);
     saveQueueSnapshotsRoot(root);
     statusBar()->showMessage(QStringLiteral("Deleted \"%1\"").arg(name), 4000);
 }
@@ -3360,6 +3416,9 @@ void MainWindow::restorePreviousQueue()
     // The queue being displaced returns to the backlog under its existing id, so
     // restore can toggle without manufacturing duplicate queue identities.
     pushCurrentQueueToBacklog(QString());
+    QJsonObject updatedRoot = loadQueueSnapshotsRoot();
+    removeQueueSnapshotFromRoot(&updatedRoot, choice.key);
+    saveQueueSnapshotsRoot(updatedRoot);
     const int restoreIndex = std::clamp(snapshot.value(QStringLiteral("index")).toInt(0),
                                         0, static_cast<int>(tracks.size()) - 1);
     adoptQueueSnapshot(snapshot, tracks, restoreIndex);
@@ -3386,6 +3445,7 @@ void MainWindow::saveCurrentQueueAs()
     // Replace any existing snapshot with the same name, else append.
     ensureCurrentQueueIdentity();
     QJsonObject snapshot = queueSnapshotObject(name);
+    snapshot.insert(QStringLiteral("id"), newQueueIdentity());
     bool replaced = false;
     for (qsizetype i = 0; i < saved.size(); ++i) {
         if (saved.at(i).toObject().value(QStringLiteral("name")).toString() == name) {
@@ -3837,12 +3897,12 @@ void MainWindow::configureAlbumArtResolution()
     }
 }
 
-void MainWindow::configurePlaylistSelectorMetadata()
+void MainWindow::configurePlaylistMetadataDisplay()
 {
     if (m_playlistView == nullptr) {
         return;
     }
-    m_playlistView->configureSelectorMetadata(this);
+    m_playlistView->configureMetadataDisplay(this);
     savePlaylistViewSettings();
 }
 
@@ -5056,6 +5116,7 @@ static PlaylistItem playlistItemFromTrack(const Track &track, const QString &que
     item.durationMs = track.durationMs;
     item.query = query;
     item.status = PlaylistItemStatus::Matched;
+    item.effectiveRating0To100 = track.effectiveRating0To100;
     return item;
 }
 

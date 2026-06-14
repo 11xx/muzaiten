@@ -306,6 +306,9 @@ add_executable(test_playlist_view
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
     ../src/ui/OverlayScrollBar.cpp
+    ../src/ui/StarRating.cpp
+    ../src/ui/StarRatingDelegate.cpp
+    ../src/core/Rating.cpp
 )
 target_include_directories(test_playlist_view PRIVATE ../src)
 target_link_libraries(test_playlist_view PRIVATE Qt6::Core Qt6::Sql Qt6::Gui Qt6::Widgets Qt6::Test)

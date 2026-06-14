@@ -491,7 +491,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_trackInfoPaneVisible->setChecked(true);
     QAction *trackInfoPaneSettings = viewMenu->addAction(QStringLiteral("Track information panel..."));
     QAction *albumArtResolution = viewMenu->addAction(QStringLiteral("Album art resolution..."));
-    QAction *playlistSelectorMetadata = viewMenu->addAction(QStringLiteral("Playlist selector metadata..."));
+    QAction *playlistMetadataDisplay = viewMenu->addAction(QStringLiteral("Playlist metadata display..."));
     QAction *customizePanelOrder = viewMenu->addAction(QStringLiteral("Panel order..."));
     QAction *resetPanelOrder = viewMenu->addAction(QStringLiteral("Reset panel order to default"));
     viewMenu->addSeparator();
@@ -727,7 +727,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
     connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
-    connect(playlistSelectorMetadata, &QAction::triggered, this, &PlayerBar::playlistSelectorMetadataRequested);
+    connect(playlistMetadataDisplay, &QAction::triggered, this, &PlayerBar::playlistMetadataDisplayRequested);
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
     connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
     connect(resetPanelOrder, &QAction::triggered, this, &PlayerBar::resetPanelOrderRequested);

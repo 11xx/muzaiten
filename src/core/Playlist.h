@@ -6,6 +6,8 @@
 #include <QVector>
 #include <QtTypes>
 
+#include "core/Rating.h"
+
 // Rich, self-contained playlist model backed by playlists.sqlite (separate from
 // the scanned library). Items reference library tracks by path AND carry a
 // metadata snapshot plus the search query that produced the match, so a playlist
@@ -34,6 +36,7 @@ struct PlaylistItem {
     PlaylistItemStatus status = PlaylistItemStatus::Matched;
     QStringList candidatePaths; // MultiMatch: the import's close candidates,
                                 // shown by the edit modal for a quick pick
+    int effectiveRating0To100 = Rating::unset; // transient live/library rating for UI display
 };
 
 struct Playlist {

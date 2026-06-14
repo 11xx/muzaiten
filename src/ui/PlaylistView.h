@@ -1,8 +1,11 @@
 #pragma once
 
 #include "core/Playlist.h"
+#include "core/Track.h"
 #include "ui/KeyBindingTypes.h"
 
+#include <functional>
+#include <QModelIndex>
 #include <QStringList>
 #include <QVector>
 #include <QWidget>
@@ -19,6 +22,7 @@ class PlaylistItemTableModel;
 
 struct SavedQueuePlaylistEntry {
     QString id;
+    QString snapshotKey;
     QString name;
     QString meta;
     qint64 savedAt = 0;
@@ -38,6 +42,7 @@ public:
     enum class SelectorMetadata { None, CreatedAt, UpdatedAt, Comment };
 
     void setDatabase(PlaylistDatabase *db);
+    void setTrackResolver(std::function<Track(const QString &)> resolver);
     void setSavedQueueEntries(const QVector<SavedQueuePlaylistEntry> &entries);
     void reloadPlaylists();
     void reloadItems();
@@ -51,10 +56,11 @@ public:
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();
     void setHeaderHeight(int height);
-    void configureSelectorMetadata(QWidget *parent = nullptr);
+    void configureMetadataDisplay(QWidget *parent = nullptr);
+    void updateTrackRating(const QString &path, int effectiveRating0To100);
     // Display-only ordering. The canonical ordinal is always preserved in the
     // DB and shown in the "#" column; sorting only reshuffles how rows are shown.
-    enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration };
+    enum class SortKey { Ordinal, AddedAt, Title, Artist, Album, Duration, Rating };
 
     // Key/action reference for the Keybinds dialog. Kept next to eventFilter()
     // in the .cpp — update both together.
@@ -106,6 +112,7 @@ signals:
     void addSavedQueueToQueueRequested(const QString &snapshotId);
     void playNextSavedQueueRequested(const QString &snapshotId);
     void deleteSavedQueueRequested(const QString &snapshotId);
+    void trackRatingChanged(const QString &path, int rating0To100);
     void viewSettingsChanged();
 
 protected:
@@ -115,6 +122,7 @@ private:
     void cycleAddedSort();
     void sortByColumn(int column);
     void populateItems();
+    void refreshItemRatings();
     QVector<PlaylistItem> displayItems() const;
     void updateHeader();
     bool currentSelectionIsSavedQueue() const;
@@ -133,10 +141,12 @@ private:
     void showHeaderMenu(const QPoint &pos);
     void setCurrentItemRow(int row, int direction = 0);
     int currentItemRow() const;
+    void setHoveredItemRow(int row);
     void moveSelectedItems(int delta);
     void applyPlaylistRowHeights();
     void updateSavedQueueSpacerHeight();
     QString selectorMetadataForPlaylist(const Playlist &playlist) const;
+    QString selectorMetadataForSavedQueue(const SavedQueuePlaylistEntry &queue) const;
     QVector<qint64> displayedItemIds() const;
     void updatePaneFocus();
 
@@ -149,6 +159,7 @@ private:
     void removeSelectedItemsImpl(bool missingOnly);
 
     PlaylistDatabase *m_db = nullptr;
+    std::function<Track(const QString &)> m_trackResolver;
     qint64 m_currentPlaylistId = 0;
     QString m_currentQueueSnapshotId;
     QVector<SavedQueuePlaylistEntry> m_savedQueueEntries;
@@ -156,13 +167,17 @@ private:
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;
 
-    SelectorMetadata m_selectorMetadata = SelectorMetadata::CreatedAt;
+    SelectorMetadata m_selectorMetadata = SelectorMetadata::UpdatedAt;
+    QString m_selectorDateFormat = QStringLiteral("yyyy-MM-dd'T'HH:mm:ss");
     int m_playlistRowHeight = 18;
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
     QSplitter *m_splitter = nullptr;
     PlaylistItemTableModel *m_itemModel = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
+    class StarRatingDelegate *m_ratingDelegate = nullptr;
     QLabel *m_header = nullptr;
     bool m_queueIsPlaylistSourced = false;
+    int m_itemHoveredRow = -1;
+    QModelIndex m_hoverRatingIndex;
 };

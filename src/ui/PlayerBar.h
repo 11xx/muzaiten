@@ -78,7 +78,7 @@ signals:
     void trackInfoPaneVisibleChanged(bool visible);
     void trackInfoPaneSettingsRequested();
     void albumArtResolutionRequested();
-    void playlistSelectorMetadataRequested();
+    void playlistMetadataDisplayRequested();
     void searchRankingRequested();
     void keybindingsRequested();
     void resetPanelOrderRequested();

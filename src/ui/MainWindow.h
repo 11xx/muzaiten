@@ -115,7 +115,7 @@ private:
     QJsonObject loadQueueSnapshotsRoot() const;
     void saveQueueSnapshotsRoot(const QJsonObject &root);
     QVector<SavedQueuePlaylistEntry> savedQueuePlaylistEntries() const;
-    QJsonObject queueSnapshotById(const QString &id) const;
+    QJsonObject queueSnapshotByKey(const QString &keyOrId) const;
     void refreshSavedQueuePlaylistEntries();
     void playQueueSnapshotById(const QString &id, int startIndex);
     void addQueueSnapshotByIdToQueue(const QString &id);
@@ -147,7 +147,7 @@ private:
     void showTrackProperties(const Track &track);
     void configureTrackInfoPanel();
     void configureAlbumArtResolution();
-    void configurePlaylistSelectorMetadata();
+    void configurePlaylistMetadataDisplay();
     void configureSearchRanking();
     void configureKeybindings();
     void loadSearchRankingConfig();

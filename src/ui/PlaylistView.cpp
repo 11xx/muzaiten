@@ -8,12 +8,17 @@
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/SelectionColors.h"
+#include "ui/StarRating.h"
+#include "ui/StarRatingDelegate.h"
 
 #include <QAbstractTableModel>
 #include <QActionGroup>
+#include <QComboBox>
 #include <QDateTime>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -27,6 +32,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QSignalBlocker>
 #include <QSplitter>
@@ -36,6 +42,7 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 
@@ -67,6 +74,7 @@ enum PlaylistItemColumn {
     ArtistColumn,
     AlbumColumn,
     LengthColumn,
+    RatingColumn,
     PlaylistItemColumnCount,
 };
 
@@ -82,6 +90,11 @@ constexpr int PlaylistMetaRole = Qt::UserRole + 8;
 constexpr int PlaylistSeparatorRole = Qt::UserRole + 9;
 constexpr int PlaylistUpdatedAtRole = Qt::UserRole + 10;
 constexpr int PlaylistSpacerRole = Qt::UserRole + 11;
+
+enum PlaylistItemRoles {
+    ItemIdRole = Qt::UserRole,
+    HoverRatingRole = Qt::UserRole + 2,
+};
 
 struct PlaylistColumnSpec {
     int index;
@@ -99,6 +112,7 @@ constexpr PlaylistColumnSpec playlistColumns[] = {
     {ArtistColumn,  "artist", "Artist", 190, 100, ResponsiveColumnPriority::Normal},
     {AlbumColumn,   "album",  "Album", 220, 100, ResponsiveColumnPriority::Normal},
     {LengthColumn,  "length", "Length",  76,  64, ResponsiveColumnPriority::HideEarly},
+    {RatingColumn,  "rating", "Rating",  96,  56, ResponsiveColumnPriority::Normal},
 };
 
 int minWidthForPlaylistItemColumn(int column)
@@ -156,6 +170,7 @@ QString sortKeyToString(PlaylistView::SortKey key)
     case PlaylistView::SortKey::Artist: return QStringLiteral("artist");
     case PlaylistView::SortKey::Album: return QStringLiteral("album");
     case PlaylistView::SortKey::Duration: return QStringLiteral("duration");
+    case PlaylistView::SortKey::Rating: return QStringLiteral("rating");
     }
     return QStringLiteral("ordinal");
 }
@@ -167,6 +182,7 @@ PlaylistView::SortKey sortKeyFromString(const QString &value)
     if (value == QStringLiteral("artist")) return PlaylistView::SortKey::Artist;
     if (value == QStringLiteral("album")) return PlaylistView::SortKey::Album;
     if (value == QStringLiteral("duration")) return PlaylistView::SortKey::Duration;
+    if (value == QStringLiteral("rating")) return PlaylistView::SortKey::Rating;
     return PlaylistView::SortKey::Ordinal;
 }
 
@@ -199,12 +215,18 @@ PlaylistView::SelectorMetadata selectorMetadataFromString(const QString &value)
     return PlaylistView::SelectorMetadata::CreatedAt;
 }
 
-QString timestampMetadata(qint64 timestamp)
+QString defaultTimestampFormat()
+{
+    return QStringLiteral("yyyy-MM-dd'T'HH:mm:ss");
+}
+
+QString timestampMetadata(qint64 timestamp, const QString &format)
 {
     if (timestamp <= 0) {
         return {};
     }
-    return QDateTime::fromSecsSinceEpoch(timestamp).toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+    const QString effectiveFormat = format.trimmed().isEmpty() ? defaultTimestampFormat() : format.trimmed();
+    return QDateTime::fromSecsSinceEpoch(timestamp).toString(effectiveFormat);
 }
 
 int nextSelectablePlaylistRow(QListWidget *list, int row, int direction)
@@ -358,8 +380,17 @@ public:
         }
 
         const PlaylistItem &item = m_rows.at(index.row());
-        if (role == Qt::UserRole) {
+        if (role == ItemIdRole) {
+            if (index.column() == RatingColumn) {
+                return item.effectiveRating0To100;
+            }
             return item.id;
+        }
+        if (role == HoverRatingRole && index.column() == RatingColumn) {
+            return m_hoverRatings.value(index.row(), StarRating::unset);
+        }
+        if (role == Qt::EditRole && index.column() == RatingColumn) {
+            return item.effectiveRating0To100;
         }
         if (role == Qt::FontRole && item.status != PlaylistItemStatus::Matched) {
             QFont font;
@@ -399,9 +430,29 @@ public:
             return item.albumSnapshot;
         case LengthColumn:
             return durationText(item.durationMs);
+        case RatingColumn:
+            return item.effectiveRating0To100;
         default:
             return {};
         }
+    }
+
+    bool setData(const QModelIndex &index, const QVariant &value, int role) override
+    {
+        if (!index.isValid() || index.column() != RatingColumn || index.row() < 0 || index.row() >= m_rows.size()) {
+            return false;
+        }
+        if (role == HoverRatingRole) {
+            m_hoverRatings[index.row()] = value.toInt();
+            emit dataChanged(index, index, {HoverRatingRole});
+            return true;
+        }
+        if (role == Qt::EditRole) {
+            m_rows[index.row()].effectiveRating0To100 = value.toInt();
+            emit dataChanged(index, index, {Qt::DisplayRole, ItemIdRole, Qt::EditRole});
+            return true;
+        }
+        return false;
     }
 
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
@@ -415,6 +466,7 @@ public:
         case ArtistColumn: return QStringLiteral("Artist");
         case AlbumColumn: return QStringLiteral("Album");
         case LengthColumn: return QStringLiteral("Length");
+        case RatingColumn: return QStringLiteral("Rating");
         default: return {};
         }
     }
@@ -423,7 +475,23 @@ public:
     {
         beginResetModel();
         m_rows = rows;
+        m_hoverRatings.fill(StarRating::unset, m_rows.size());
         endResetModel();
+    }
+
+    void updateRatingForPath(const QString &path, int effectiveRating0To100)
+    {
+        if (path.isEmpty()) {
+            return;
+        }
+        for (int row = 0; row < m_rows.size(); ++row) {
+            if (m_rows.at(row).trackPath != path) {
+                continue;
+            }
+            m_rows[row].effectiveRating0To100 = effectiveRating0To100;
+            const QModelIndex rating = index(row, RatingColumn);
+            emit dataChanged(rating, rating, {Qt::DisplayRole, ItemIdRole, Qt::EditRole});
+        }
     }
 
     const PlaylistItem *itemAt(int row) const
@@ -436,6 +504,7 @@ public:
 
 private:
     QVector<PlaylistItem> m_rows;
+    QVector<int> m_hoverRatings;
 };
 
 PlaylistView::PlaylistView(QWidget *parent)
@@ -464,6 +533,8 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable = new NavigableTableView(m_splitter);
     m_itemTable->setModel(m_itemModel);
     m_itemTable->setItemDelegate(new DenseTableDelegate(this));
+    m_ratingDelegate = new StarRatingDelegate(this);
+    m_itemTable->setItemDelegateForColumn(RatingColumn, m_ratingDelegate);
     m_itemTable->verticalHeader()->setVisible(false);
     m_itemTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_itemTable->setAlternatingRowColors(true);
@@ -478,7 +549,9 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
     m_itemTable->verticalHeader()->setMinimumSectionSize(20);
     m_itemTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_itemTable->setMouseTracking(true);
     m_itemTable->installEventFilter(this);
+    m_itemTable->viewport()->setMouseTracking(true);
     m_itemTable->viewport()->installEventFilter(this);
     OverlayScrollBar::install(m_itemTable);
 
@@ -499,7 +572,8 @@ PlaylistView::PlaylistView(QWidget *parent)
                                            QStringLiteral("title"),
                                            QStringLiteral("artist"),
                                            QStringLiteral("album"),
-                                           QStringLiteral("length")});
+                                           QStringLiteral("length"),
+                                           QStringLiteral("rating")});
     auto *columnResizer = NeighborColumnResizer::install(
         m_itemTable->horizontalHeader(), [](int column) { return minWidthForPlaylistItemColumn(column); });
     connect(columnResizer, qOverload<int, int>(&NeighborColumnResizer::columnResized), this, [this](int leftLogical, int rightLogical) {
@@ -515,6 +589,13 @@ PlaylistView::PlaylistView(QWidget *parent)
     });
     connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
         emit viewSettingsChanged();
+    });
+    connect(m_ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
+        const PlaylistItem *item = itemForDisplayRow(index.row());
+        if (item != nullptr && !item->trackPath.isEmpty()) {
+            m_itemModel->setData(m_itemModel->index(index.row(), RatingColumn), rating, Qt::EditRole);
+            emit trackRatingChanged(item->trackPath, rating);
+        }
     });
     connect(m_playlistList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) {
         playCurrentPlaylist();
@@ -533,6 +614,13 @@ void PlaylistView::setDatabase(PlaylistDatabase *db)
 {
     m_db = db;
     reloadPlaylists();
+}
+
+void PlaylistView::setTrackResolver(std::function<Track(const QString &)> resolver)
+{
+    m_trackResolver = std::move(resolver);
+    refreshItemRatings();
+    populateItems();
 }
 
 void PlaylistView::setSavedQueueEntries(const QVector<SavedQueuePlaylistEntry> &entries)
@@ -575,6 +663,7 @@ QString PlaylistView::viewSettingsJson() const
     root.insert(QStringLiteral("sortKey"), sortKeyToString(m_sortKey));
     root.insert(QStringLiteral("sortDescending"), m_sortDescending);
     root.insert(QStringLiteral("selectorMetadata"), selectorMetadataToString(m_selectorMetadata));
+    root.insert(QStringLiteral("selectorDateFormat"), m_selectorDateFormat);
     root.insert(QStringLiteral("playlistRowHeight"), m_playlistRowHeight);
     root.insert(QStringLiteral("rowHeight"), m_itemTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), m_itemTable->horizontalHeader()->height());
@@ -614,10 +703,16 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
     m_sortDescending = root.value(QStringLiteral("sortDescending")).toBool(false);
     if (root.contains(QStringLiteral("selectorMetadata"))) {
         m_selectorMetadata = selectorMetadataFromString(root.value(QStringLiteral("selectorMetadata")).toString());
-    } else {
+    } else if (root.contains(QStringLiteral("showCreatedDate"))) {
         m_selectorMetadata = root.value(QStringLiteral("showCreatedDate")).toBool(true)
             ? SelectorMetadata::CreatedAt
             : SelectorMetadata::None;
+    } else {
+        m_selectorMetadata = SelectorMetadata::UpdatedAt;
+    }
+    m_selectorDateFormat = root.value(QStringLiteral("selectorDateFormat")).toString(defaultTimestampFormat()).trimmed();
+    if (m_selectorDateFormat.isEmpty()) {
+        m_selectorDateFormat = defaultTimestampFormat();
     }
     m_playlistRowHeight = std::clamp(root.value(QStringLiteral("playlistRowHeight")).toInt(18), 18, 48);
     m_itemTable->verticalHeader()->setDefaultSectionSize(std::clamp(root.value(QStringLiteral("rowHeight")).toInt(20), 20, 48));
@@ -653,7 +748,8 @@ void PlaylistView::resetViewSettings()
     }
     m_sortKey = SortKey::Ordinal;
     m_sortDescending = false;
-    m_selectorMetadata = SelectorMetadata::CreatedAt;
+    m_selectorMetadata = SelectorMetadata::UpdatedAt;
+    m_selectorDateFormat = defaultTimestampFormat();
     m_playlistRowHeight = 18;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
@@ -664,37 +760,52 @@ void PlaylistView::resetViewSettings()
     emit viewSettingsChanged();
 }
 
-void PlaylistView::configureSelectorMetadata(QWidget *parent)
+void PlaylistView::configureMetadataDisplay(QWidget *parent)
 {
+    QDialog dialog(parent == nullptr ? this : parent);
+    dialog.setWindowTitle(QStringLiteral("Playlist metadata display"));
+    auto *layout = new QFormLayout(&dialog);
+
+    auto *metadata = new QComboBox(&dialog);
     const QStringList labels = {
-        QStringLiteral("Created timestamp"),
         QStringLiteral("Modified timestamp"),
+        QStringLiteral("Created timestamp"),
         QStringLiteral("Comment"),
         QStringLiteral("None"),
     };
     const QVector<SelectorMetadata> values = {
-        SelectorMetadata::CreatedAt,
         SelectorMetadata::UpdatedAt,
+        SelectorMetadata::CreatedAt,
         SelectorMetadata::Comment,
         SelectorMetadata::None,
     };
-    const qsizetype current = values.indexOf(m_selectorMetadata);
-    bool ok = false;
-    const QString chosen = QInputDialog::getItem(parent == nullptr ? this : parent,
-                                                 QStringLiteral("Playlist selector metadata"),
-                                                 QStringLiteral("Metadata line:"),
-                                                 labels,
-                                                 static_cast<int>(std::max<qsizetype>(0, current)),
-                                                 false,
-                                                 &ok);
-    if (!ok || chosen.isEmpty()) {
+    for (const QString &label : labels) {
+        metadata->addItem(label);
+    }
+    metadata->setCurrentIndex(static_cast<int>(std::max<qsizetype>(0, values.indexOf(m_selectorMetadata))));
+    layout->addRow(QStringLiteral("Metadata line:"), metadata);
+
+    auto *dateFormat = new QLineEdit(m_selectorDateFormat, &dialog);
+    dateFormat->setPlaceholderText(defaultTimestampFormat());
+    layout->addRow(QStringLiteral("Date format:"), dateFormat);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
         return;
     }
-    const qsizetype index = labels.indexOf(chosen);
+    const int index = metadata->currentIndex();
     if (index < 0 || index >= values.size()) {
         return;
     }
     m_selectorMetadata = values.at(index);
+    m_selectorDateFormat = dateFormat->text().trimmed();
+    if (m_selectorDateFormat.isEmpty()) {
+        m_selectorDateFormat = defaultTimestampFormat();
+    }
     reloadPlaylists();
     emit viewSettingsChanged();
 }
@@ -754,14 +865,14 @@ void PlaylistView::reloadPlaylists()
     for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
         auto *item = new QListWidgetItem(queue.name, m_playlistList);
         item->setData(PlaylistIdRole, 0);
-        item->setData(QueueSnapshotIdRole, queue.id);
+        item->setData(QueueSnapshotIdRole, queue.snapshotKey.isEmpty() ? queue.id : queue.snapshotKey);
         item->setData(PlaylistKindRole, QStringLiteral("queue"));
         item->setData(PlaylistNameRole, queue.name);
         item->setData(PlaylistItemCountRole, queue.items.size());
         item->setData(PlaylistCreatedAtRole, queue.savedAt);
         item->setData(PlaylistUpdatedAtRole, queue.savedAt);
-        item->setData(PlaylistShowCreatedRole, true);
-        item->setData(PlaylistMetaRole, queue.meta);
+        item->setData(PlaylistShowCreatedRole, !selectorMetadataForSavedQueue(queue).isEmpty());
+        item->setData(PlaylistMetaRole, selectorMetadataForSavedQueue(queue));
         item->setData(PlaylistListActiveRole, listActive);
         item->setData(PlaylistSeparatorRole, false);
     }
@@ -803,7 +914,8 @@ void PlaylistView::reloadItems()
     m_items.clear();
     if (!m_currentQueueSnapshotId.isEmpty()) {
         for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
-            if (queue.id == m_currentQueueSnapshotId) {
+            const QString key = queue.snapshotKey.isEmpty() ? queue.id : queue.snapshotKey;
+            if (key == m_currentQueueSnapshotId || queue.id == m_currentQueueSnapshotId) {
                 m_items = queue.items;
                 break;
             }
@@ -811,8 +923,40 @@ void PlaylistView::reloadItems()
     } else if (m_db != nullptr && m_currentPlaylistId > 0) {
         m_items = m_db->items(m_currentPlaylistId);
     }
+    refreshItemRatings();
     populateItems();
     emit viewSettingsChanged();
+}
+
+void PlaylistView::refreshItemRatings()
+{
+    if (!m_trackResolver) {
+        return;
+    }
+    for (PlaylistItem &item : m_items) {
+        if (item.trackPath.isEmpty()) {
+            continue;
+        }
+        const Track track = m_trackResolver(item.trackPath);
+        if (!track.path.isEmpty()) {
+            item.effectiveRating0To100 = track.effectiveRating0To100;
+        }
+    }
+}
+
+void PlaylistView::updateTrackRating(const QString &path, int effectiveRating0To100)
+{
+    if (path.isEmpty()) {
+        return;
+    }
+    for (PlaylistItem &item : m_items) {
+        if (item.trackPath == path) {
+            item.effectiveRating0To100 = effectiveRating0To100;
+        }
+    }
+    if (m_itemModel != nullptr) {
+        m_itemModel->updateRatingForPath(path, effectiveRating0To100);
+    }
 }
 
 QVector<PlaylistItem> PlaylistView::displayItems() const
@@ -842,6 +986,9 @@ QVector<PlaylistItem> PlaylistView::displayItems() const
             break;
         case SortKey::Duration:
             c = a.durationMs < b.durationMs ? -1 : (a.durationMs > b.durationMs ? 1 : 0);
+            break;
+        case SortKey::Rating:
+            c = a.effectiveRating0To100 < b.effectiveRating0To100 ? -1 : (a.effectiveRating0To100 > b.effectiveRating0To100 ? 1 : 0);
             break;
         case SortKey::Ordinal:
             break;
@@ -889,6 +1036,7 @@ void PlaylistView::sortByColumn(int column)
         case 2: return SortKey::Artist;
         case 3: return SortKey::Album;
         case 4: return SortKey::Duration;
+        case 5: return SortKey::Rating;
         default: return SortKey::Ordinal;  // "#" column restores canonical order
         }
     }();
@@ -939,7 +1087,8 @@ QStringList PlaylistView::pathsForSavedQueue(const QString &snapshotId, int *sta
     }
     const int current = currentItemRow();
     for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
-        if (queue.id != snapshotId) {
+        const QString key = queue.snapshotKey.isEmpty() ? queue.id : queue.snapshotKey;
+        if (key != snapshotId && queue.id != snapshotId) {
             continue;
         }
         for (int row = 0; row < queue.items.size(); ++row) {
@@ -1365,6 +1514,29 @@ int PlaylistView::currentItemRow() const
     return m_itemTable->currentNavigationRow();
 }
 
+void PlaylistView::setHoveredItemRow(int row)
+{
+    if (m_itemHoveredRow == row) {
+        return;
+    }
+    const int previous = m_itemHoveredRow;
+    m_itemHoveredRow = row;
+    if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(m_itemTable->itemDelegate())) {
+        denseDelegate->setHoveredRow(row);
+    }
+    if (m_ratingDelegate != nullptr) {
+        m_ratingDelegate->setHoveredRow(row);
+    }
+    if (previous >= 0) {
+        const QRect rect = m_itemTable->visualRect(m_itemModel->index(previous, 0));
+        m_itemTable->viewport()->update(QRect(0, rect.top(), m_itemTable->viewport()->width(), rect.height()));
+    }
+    if (row >= 0) {
+        const QRect rect = m_itemTable->visualRect(m_itemModel->index(row, 0));
+        m_itemTable->viewport()->update(QRect(0, rect.top(), m_itemTable->viewport()->width(), rect.height()));
+    }
+}
+
 QVector<qint64> PlaylistView::displayedItemIds() const
 {
     QVector<qint64> ids;
@@ -1493,11 +1665,24 @@ QString PlaylistView::selectorMetadataForPlaylist(const Playlist &playlist) cons
 {
     switch (m_selectorMetadata) {
     case SelectorMetadata::CreatedAt:
-        return timestampMetadata(playlist.createdAt);
+        return timestampMetadata(playlist.createdAt, m_selectorDateFormat);
     case SelectorMetadata::UpdatedAt:
-        return timestampMetadata(playlist.updatedAt);
+        return timestampMetadata(playlist.updatedAt, m_selectorDateFormat);
     case SelectorMetadata::Comment:
         return playlist.comment;
+    case SelectorMetadata::None:
+        break;
+    }
+    return {};
+}
+
+QString PlaylistView::selectorMetadataForSavedQueue(const SavedQueuePlaylistEntry &queue) const
+{
+    switch (m_selectorMetadata) {
+    case SelectorMetadata::CreatedAt:
+    case SelectorMetadata::UpdatedAt:
+        return timestampMetadata(queue.savedAt, m_selectorDateFormat);
+    case SelectorMetadata::Comment:
     case SelectorMetadata::None:
         break;
     }
@@ -1710,6 +1895,25 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     }
     if ((watched == m_playlistList || watched == m_itemTable) && event->type() == QEvent::FocusOut) {
         updatePaneFocus();
+        return QWidget::eventFilter(watched, event);
+    }
+    if (itemTableWatched && event->type() == QEvent::MouseMove) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        const QModelIndex index = m_itemTable->indexAt(mouse->pos());
+        setHoveredItemRow(index.isValid() ? index.row() : -1);
+        const QModelIndex ratingIndex = index.isValid() && index.column() == RatingColumn ? index : QModelIndex();
+        if (m_hoverRatingIndex.isValid() && m_hoverRatingIndex != ratingIndex) {
+            m_itemModel->setData(m_hoverRatingIndex, StarRating::unset, HoverRatingRole);
+        }
+        m_hoverRatingIndex = ratingIndex;
+        return QWidget::eventFilter(watched, event);
+    }
+    if (itemTableWatched && event->type() == QEvent::Leave) {
+        setHoveredItemRow(-1);
+        if (m_hoverRatingIndex.isValid()) {
+            m_itemModel->setData(m_hoverRatingIndex, StarRating::unset, HoverRatingRole);
+            m_hoverRatingIndex = QModelIndex();
+        }
         return QWidget::eventFilter(watched, event);
     }
     if (event->type() == QEvent::Wheel) {

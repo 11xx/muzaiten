@@ -1,6 +1,7 @@
 #include "db/PlaylistDatabase.h"
 #include "ui/PlaylistView.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -8,6 +9,8 @@
 #include <QMetaObject>
 #include <QSignalSpy>
 #include <QSplitter>
+#include <QTableView>
+#include <QHeaderView>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
@@ -75,8 +78,9 @@ private slots:
         SavedQueuePlaylistEntry queue;
         queue.id = QStringLiteral("queue:one");
         queue.name = QStringLiteral("saved queue 1");
-        queue.meta = QStringLiteral("2026-06-14T18:14:55");
         queue.savedAt = 1781460895;
+        const QString expectedMeta = QDateTime::fromSecsSinceEpoch(queue.savedAt)
+                                         .toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
 
         PlaylistView view;
         view.resize(320, 420);
@@ -94,7 +98,7 @@ private slots:
         QVERIFY(list->item(2)->sizeHint().height() > 100);
         QCOMPARE(list->item(3)->text(), QStringLiteral("Saved queues"));
         QCOMPARE(list->item(4)->text(), QStringLiteral("saved queue 1"));
-        QCOMPARE(list->item(4)->data(Qt::UserRole + 8).toString(), QStringLiteral("2026-06-14T18:14:55"));
+        QCOMPARE(list->item(4)->data(Qt::UserRole + 8).toString(), expectedMeta);
     }
 
     void selectorMetadataModePersistsInViewSettings()
@@ -105,6 +109,29 @@ private slots:
 
         const QJsonObject saved = QJsonDocument::fromJson(view.viewSettingsJson().toUtf8()).object();
         QCOMPARE(saved.value(QStringLiteral("selectorMetadata")).toString(), QStringLiteral("comment"));
+    }
+
+    void selectorDateFormatPersistsInViewSettings()
+    {
+        PlaylistView view;
+        const QJsonObject root{{QStringLiteral("selectorDateFormat"), QStringLiteral("yyyy/MM/dd HH:mm")}};
+        view.applyViewSettingsJson(QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+
+        const QJsonObject saved = QJsonDocument::fromJson(view.viewSettingsJson().toUtf8()).object();
+        QCOMPARE(saved.value(QStringLiteral("selectorDateFormat")).toString(), QStringLiteral("yyyy/MM/dd HH:mm"));
+    }
+
+    void ratingColumnIsVisibleAndRightmostByDefault()
+    {
+        PlaylistView view;
+        auto *table = view.findChild<QTableView *>();
+        QVERIFY(table != nullptr);
+        auto *header = table->horizontalHeader();
+        QVERIFY(header != nullptr);
+
+        QCOMPARE(table->model()->headerData(5, Qt::Horizontal, Qt::DisplayRole).toString(), QStringLiteral("Rating"));
+        QVERIFY(!header->isSectionHidden(5));
+        QCOMPARE(header->visualIndex(5), header->count() - 1);
     }
 };
 
