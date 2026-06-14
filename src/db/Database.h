@@ -121,6 +121,9 @@ public:
     bool removeScanRoot(int id);
     bool setScanRootLastScanned(int id, const QString &lastError = {});
     Track trackForPath(const QString &path) const;
+    // Fill the rich scanned columns (audio props, totals, sort names, rating
+    // source, track-level MusicBrainz ids) that the lighter loaders omit.
+    void enrichTrackForStatus(Track &track) const;
     // Case-insensitive substring search over title/artist/album/filename for
     // external consumers (IPC); the in-app Search view uses the fzf engine.
     QVector<Track> searchTracksLike(const QString &text, int limit = 50) const;

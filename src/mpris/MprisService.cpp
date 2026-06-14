@@ -1,6 +1,7 @@
 #include "mpris/MprisService.h"
 
 #include "Version.h"
+#include "db/Database.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -128,6 +129,49 @@ void insertPositive(QJsonObject &object, const QString &key, qint64 value)
     if (value > 0) {
         object.insert(key, value);
     }
+}
+
+// First non-empty value of a blob tag (TagLib PropertyMap uppercase key).
+QString metaFirst(const MetadataBlob::FullMetadata &meta, const QString &key)
+{
+    const auto it = meta.tags.constFind(key);
+    if (it == meta.tags.constEnd()) {
+        return {};
+    }
+    for (const QString &value : *it) {
+        if (!value.trimmed().isEmpty()) {
+            return value.trimmed();
+        }
+    }
+    return {};
+}
+
+// All values of a multi-valued blob tag (e.g. GENRE, COMPOSER), joined.
+QString metaJoined(const MetadataBlob::FullMetadata &meta, const QString &key)
+{
+    const auto it = meta.tags.constFind(key);
+    if (it == meta.tags.constEnd()) {
+        return {};
+    }
+    QStringList parts;
+    for (const QString &value : *it) {
+        if (!value.trimmed().isEmpty()) {
+            parts.append(value.trimmed());
+        }
+    }
+    return parts.join(QStringLiteral(", "));
+}
+
+// Combine the standard *SORT reading with the Classical Extras *SORTEN latin
+// transliteration, mirroring TagReader's column logic for non-Latin scripts.
+QString metaSort(const MetadataBlob::FullMetadata &meta, const QString &key)
+{
+    const QString primary = metaFirst(meta, key);
+    const QString latin = metaFirst(meta, key + QStringLiteral("EN"));
+    if (latin.isEmpty() || latin == primary) {
+        return primary;
+    }
+    return primary.isEmpty() ? latin : primary + QLatin1Char(' ') + latin;
 }
 
 class MprisRootAdaptor final : public QDBusAbstractAdaptor {
@@ -290,6 +334,11 @@ MprisService::MprisService(QObject *parent)
     m_registered = bus.isConnected() && serviceRegistered && objectRegistered;
 }
 
+void MprisService::setDatabase(const Database *database)
+{
+    m_database = database;
+}
+
 bool MprisService::isRegistered() const
 {
     return m_registered;
@@ -368,6 +417,28 @@ bool MprisService::canSeek() const
 void MprisService::setTrack(const Track &track)
 {
     m_track = track;
+    m_currentMeta = {};
+    if (m_database != nullptr && !m_track.path.isEmpty()) {
+        // The queue/album loaders build a light Track; pull the full scanned
+        // record so the rich sections (audio, MusicBrainz, sort names, blob
+        // tags) are actually populated for the now-playing track.
+        m_database->enrichTrackForStatus(m_track);
+        m_currentMeta = m_database->fullMetadata(m_track.path);
+        // recording/track/release ids come from columns; the rest of the MB set
+        // lives only in the scanned blob.
+        if (m_track.musicBrainz.artistId.isEmpty()) {
+            m_track.musicBrainz.artistId = metaFirst(m_currentMeta, QStringLiteral("MUSICBRAINZ_ARTISTID"));
+        }
+        if (m_track.musicBrainz.albumArtistId.isEmpty()) {
+            m_track.musicBrainz.albumArtistId = metaFirst(m_currentMeta, QStringLiteral("MUSICBRAINZ_ALBUMARTISTID"));
+        }
+        if (m_track.musicBrainz.releaseGroupId.isEmpty()) {
+            m_track.musicBrainz.releaseGroupId = metaFirst(m_currentMeta, QStringLiteral("MUSICBRAINZ_RELEASEGROUPID"));
+        }
+        if (m_track.musicBrainz.workId.isEmpty()) {
+            m_track.musicBrainz.workId = metaFirst(m_currentMeta, QStringLiteral("MUSICBRAINZ_WORKID"));
+        }
+    }
     // Reset unconditionally: when the track is cleared ({} on queue-clear /
     // end-of-queue) or switched to one whose duration is not yet known, keeping
     // the previous value left a stale mpris:length and CanSeek=true exposed to
@@ -582,6 +653,32 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
     insertPositive(trackObj, QStringLiteral("track_total"), track.trackTotal);
     insertPositive(trackObj, QStringLiteral("disc_number"), track.discNumber);
     insertPositive(trackObj, QStringLiteral("disc_total"), track.discTotal);
+    // Rich scanned tags from the metadata blob (muzaiten-only; absent over plain MPRIS).
+    insertString(trackObj, QStringLiteral("genre"), metaJoined(m_currentMeta, QStringLiteral("GENRE")));
+    insertString(trackObj, QStringLiteral("composer"), metaJoined(m_currentMeta, QStringLiteral("COMPOSER")));
+    insertString(trackObj, QStringLiteral("conductor"), metaJoined(m_currentMeta, QStringLiteral("CONDUCTOR")));
+    insertString(trackObj, QStringLiteral("label"), metaFirst(m_currentMeta, QStringLiteral("LABEL")));
+    insertString(trackObj, QStringLiteral("catalog_number"), metaFirst(m_currentMeta, QStringLiteral("CATALOGNUMBER")));
+    insertString(trackObj, QStringLiteral("isrc"), metaFirst(m_currentMeta, QStringLiteral("ISRC")));
+    insertString(trackObj, QStringLiteral("work"), metaFirst(m_currentMeta, QStringLiteral("WORK")));
+    insertString(trackObj, QStringLiteral("movement"), metaFirst(m_currentMeta, QStringLiteral("MOVEMENTNAME")));
+    bool bpmOk = false;
+    const int bpm = metaFirst(m_currentMeta, QStringLiteral("BPM")).toInt(&bpmOk);
+    if (bpmOk) {
+        insertPositive(trackObj, QStringLiteral("bpm"), bpm);
+    }
+    // Sort/reading names — Latin transliterations (incl. Classical Extras *SORTEN)
+    // for non-Latin scripts. The four primaries come from the (already-combined)
+    // columns; composer sort from the blob.
+    QJsonObject sort;
+    insertString(sort, QStringLiteral("title"), track.titleSort);
+    insertString(sort, QStringLiteral("artist"), track.artistSort);
+    insertString(sort, QStringLiteral("album_artist"), track.albumArtistSort);
+    insertString(sort, QStringLiteral("album"), track.albumSort);
+    insertString(sort, QStringLiteral("composer"), metaSort(m_currentMeta, QStringLiteral("COMPOSERSORT")));
+    if (!sort.isEmpty()) {
+        trackObj.insert(QStringLiteral("sort"), sort);
+    }
     if (!musicbrainz.isEmpty()) {
         trackObj.insert(QStringLiteral("musicbrainz"), musicbrainz);
     }
@@ -592,6 +689,14 @@ QString MprisService::buildCurrentTrackJson(const Track &track) const
     insertPositive(audio, QStringLiteral("bitrate_kbps"), track.bitrateKbps);
     insertPositive(audio, QStringLiteral("channels"), track.channels);
     insertPositive(audio, QStringLiteral("bit_depth"), track.bitDepth);
+    QJsonObject replaygain;
+    insertString(replaygain, QStringLiteral("track_gain"), metaFirst(m_currentMeta, QStringLiteral("REPLAYGAIN_TRACK_GAIN")));
+    insertString(replaygain, QStringLiteral("track_peak"), metaFirst(m_currentMeta, QStringLiteral("REPLAYGAIN_TRACK_PEAK")));
+    insertString(replaygain, QStringLiteral("album_gain"), metaFirst(m_currentMeta, QStringLiteral("REPLAYGAIN_ALBUM_GAIN")));
+    insertString(replaygain, QStringLiteral("album_peak"), metaFirst(m_currentMeta, QStringLiteral("REPLAYGAIN_ALBUM_PEAK")));
+    if (!replaygain.isEmpty()) {
+        audio.insert(QStringLiteral("replaygain"), replaygain);
+    }
 
     QJsonObject library;
     if (track.rating0To100 >= 0) {

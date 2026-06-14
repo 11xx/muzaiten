@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/MetadataBlob.h"
 #include "core/Track.h"
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
@@ -7,11 +8,18 @@
 #include <QObject>
 #include <QVariantMap>
 
+class Database;
+
 class MprisService final : public QObject {
     Q_OBJECT
 
 public:
     explicit MprisService(QObject *parent = nullptr);
+
+    // Optional: lets the service enrich the current track with the full scanned
+    // record (audio props, MusicBrainz, sort/reading names, blob tags) for the
+    // custom CurrentTrackJson. Read-only; not owned.
+    void setDatabase(const Database *database);
 
     bool isRegistered() const;
     QString serviceName() const;
@@ -60,9 +68,11 @@ private:
     QString buildCurrentTrackJson(const Track &track) const;
     QString trackObjectPath(const Track &track) const;
 
+    const Database *m_database = nullptr;
     QString m_serviceName;
     bool m_registered = false;
     Track m_track;
+    MetadataBlob::FullMetadata m_currentMeta;  // decoded blob for m_track (rich tags)
     PlaybackBackend::State m_state = PlaybackBackend::State::Stopped;
     qint64 m_positionMs = 0;
     qint64 m_durationMs = 0;

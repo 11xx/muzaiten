@@ -35,6 +35,26 @@ QString sourceName(Rating::Source source)
     return QStringLiteral("unknown");
 }
 
+Rating::Source sourceFromName(const QString &name)
+{
+    if (name == QStringLiteral("musicbee-compatible")) {
+        return Rating::Source::MusicBeeCompatible;
+    }
+    if (name == QStringLiteral("vorbis-rating")) {
+        return Rating::Source::VorbisRating;
+    }
+    if (name == QStringLiteral("id3-popm")) {
+        return Rating::Source::Id3Popularimeter;
+    }
+    if (name == QStringLiteral("mp4-rate")) {
+        return Rating::Source::Mp4Rate;
+    }
+    if (name == QStringLiteral("unknown")) {
+        return Rating::Source::Unknown;
+    }
+    return Rating::Source::None;
+}
+
 bool execSql(QSqlQuery &query, const QString &sql, QString *error)
 {
     if (!query.exec(sql)) {
@@ -933,6 +953,42 @@ Track Database::trackForPath(const QString &path) const
     track.fileMtime = query.value(15).toLongLong();
     track.missing = query.value(17).toInt() != 0;
     return track;
+}
+
+void Database::enrichTrackForStatus(Track &track) const
+{
+    // Fill the rich scanned columns that the queue/album loaders skip for speed,
+    // so the status JSON can expose audio props, totals, sort/reading names, the
+    // rating source, and the track-level MusicBrainz ids. Leaves already-set
+    // fields (title/artist/ratings/…) untouched.
+    if (track.path.isEmpty()) {
+        return;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT track_total, disc_total, rating_source, sample_rate_hz, bitrate_kbps, channels, codec, bit_depth, "
+        "title_sort, artist_sort, album_artist_sort, album_sort, "
+        "musicbrainz_recording_id, musicbrainz_track_id, musicbrainz_release_id "
+        "FROM tracks WHERE path = ?"));
+    query.addBindValue(track.path);
+    if (!query.exec() || !query.next()) {
+        return;
+    }
+    track.trackTotal = query.value(0).toInt();
+    track.discTotal = query.value(1).toInt();
+    track.ratingSource = sourceFromName(query.value(2).toString());
+    track.sampleRateHz = query.value(3).toInt();
+    track.bitrateKbps = query.value(4).toInt();
+    track.channels = query.value(5).toInt();
+    track.codec = query.value(6).toString();
+    track.bitDepth = query.value(7).toInt();
+    track.titleSort = query.value(8).toString();
+    track.artistSort = query.value(9).toString();
+    track.albumArtistSort = query.value(10).toString();
+    track.albumSort = query.value(11).toString();
+    track.musicBrainz.recordingId = query.value(12).toString();
+    track.musicBrainz.trackId = query.value(13).toString();
+    track.musicBrainz.releaseId = query.value(14).toString();
 }
 
 QVector<Track> Database::searchTracksLike(const QString &text, int limit) const

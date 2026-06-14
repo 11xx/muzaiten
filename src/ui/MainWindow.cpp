@@ -706,6 +706,8 @@ MainWindow::MainWindow(QWidget *parent)
     if (!m_database->open(databasePath())) {
         QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
     }
+    // Let MPRIS enrich the now-playing track with the full scanned record.
+    m_mpris->setDatabase(m_database.get());
 
     m_playlistDb = std::make_unique<PlaylistDatabase>(QStringLiteral("playlists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_playlistDb->open(playlistDatabasePath())) {
