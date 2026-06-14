@@ -1092,7 +1092,6 @@ MainWindow::MainWindow(QWidget *parent)
         openAddToPlaylistDialog(tracksForPaths(paths));
     });
     connect(m_playlistView, &PlaylistView::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
-    connect(m_playlistView, &PlaylistView::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
     connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);

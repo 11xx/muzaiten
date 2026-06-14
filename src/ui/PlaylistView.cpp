@@ -1099,10 +1099,6 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     deleteAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(deleteAction, &QAction::triggered, this, &PlaylistView::deleteCurrentPlaylist);
 
-    menu.addSeparator();
-    QAction *saveQueue = menu.addAction(QStringLiteral("Save current queue as..."));
-    connect(saveQueue, &QAction::triggered, this, [this]() { emit saveQueueAsRequested(); });
-
     menu.exec(m_playlistList->viewport()->mapToGlobal(pos));
 }
 
@@ -1178,10 +1174,6 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     QAction *moveDown = menu.addAction(QStringLiteral("Move down"));
     moveDown->setEnabled(item != nullptr && !currentSelectionIsSavedQueue() && m_itemModel->rowCount() > 1);
     connect(moveDown, &QAction::triggered, this, [this]() { moveSelectedItems(+1); });
-
-    menu.addSeparator();
-    QAction *saveQueue = menu.addAction(QStringLiteral("Save current queue as..."));
-    connect(saveQueue, &QAction::triggered, this, [this]() { emit saveQueueAsRequested(); });
 
     menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
 }

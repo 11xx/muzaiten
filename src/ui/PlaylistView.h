@@ -98,7 +98,6 @@ signals:
     // Open the "choose playlist" dialog for these item paths (e.g. copy to another list).
     void addToPlaylistRequested(const QStringList &paths);
     void removeAllMissingTracksRequested();
-    void saveQueueAsRequested();
     void playSavedQueueRequested(const QString &snapshotId, int startIndex);
     void addSavedQueueToQueueRequested(const QString &snapshotId);
     void playNextSavedQueueRequested(const QString &snapshotId);
