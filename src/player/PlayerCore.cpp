@@ -306,6 +306,12 @@ void PlayerCore::removeRows(const QVector<int> &rows)
         return;
     }
 
+    // Capture playback state before mutating: if the current track is among the
+    // removed rows we advance the backend onto its successor instead of leaving
+    // the (now-removed) audio playing.
+    const bool wasPlaying = m_backend->state() == PlaybackBackend::State::Playing;
+    const bool hadSource = m_backend->hasSource();
+
     QVector<int> sortedRows = rows;
     std::sort(sortedRows.begin(), sortedRows.end());
     sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
@@ -355,7 +361,22 @@ void PlayerCore::removeRows(const QVector<int> &rows)
     prepareNext();
     emit queueChanged();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
-        presentTrack(m_queue.at(m_queueIndex));
+        if (removedCurrent) {
+            // The track playing/loaded was removed; m_queueIndex now points at the
+            // one that shifted into its slot — the next in queue order (even under
+            // shuffle, since this is a direct advance, not an auto-next decision).
+            // Match the prior transport state: keep playing, or stay paused on the
+            // new track so the backend's source doesn't lag behind the queue.
+            if (wasPlaying) {
+                playCurrent(/*notifyScrobbler=*/true, /*startPaused=*/false);
+            } else if (hadSource) {
+                playCurrent(/*notifyScrobbler=*/false, /*startPaused=*/true);
+            } else {
+                presentTrack(m_queue.at(m_queueIndex));
+            }
+        } else {
+            presentTrack(m_queue.at(m_queueIndex));
+        }
     } else {
         m_currentTrack = {};
         m_backend->stop();

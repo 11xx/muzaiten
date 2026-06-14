@@ -82,7 +82,8 @@ private slots:
     void playAtStartsTrackAndPreparesNext();
     void appendAndPlayJumpsToExistingEntry();
     void playTracksNextInsertsAfterCurrent();
-    void removingCurrentPresentsReplacement();
+    void removingCurrentAdvancesPlayback();
+    void removingCurrentWhilePausedStaysPausedOnNext();
     void removingLastTrackClearsPlayback();
     void gaplessAdvanceMovesIndexWithoutReveal();
     void finishedAtEndOfQueueStops();
@@ -159,18 +160,38 @@ void PlayerCoreTest::playTracksNextInsertsAfterCurrent()
     QCOMPARE(m_backend->preparedUrls.last(), QUrl::fromLocalFile("/x"));
 }
 
-void PlayerCoreTest::removingCurrentPresentsReplacement()
+void PlayerCoreTest::removingCurrentAdvancesPlayback()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->playAt(1);  // playing /b
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/b"));
+
+    QSignalSpy changed(m_core.get(), &PlayerCore::currentTrackChanged);
+    m_core->removeRows({1});  // remove the track that's playing
+
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(m_core->queueIndex(), 1);
+    // It advances onto and plays the successor (/c) rather than leaving the
+    // removed /b audio playing.
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/c"));
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/c"));
+    QCOMPARE(changed.last().at(0).value<Track>().path, QStringLiteral("/c"));
+    QCOMPARE(changed.last().at(1).toBool(), true);  // new track playing → scrobbler notified
+}
+
+void PlayerCoreTest::removingCurrentWhilePausedStaysPausedOnNext()
 {
     m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
     m_core->playAt(1);
+    m_core->togglePlayPause();  // pause on /b
+    QCOMPARE(m_backend->state(), PlaybackBackend::State::Paused);
 
-    QSignalSpy presented(m_core.get(), &PlayerCore::currentTrackChanged);
     m_core->removeRows({1});
-    QCOMPARE(m_core->queue().size(), 2);
     QCOMPARE(m_core->queueIndex(), 1);
-    QCOMPARE(presented.count(), 1);
-    QCOMPARE(presented.last().at(0).value<Track>().path, QStringLiteral("/c"));
-    QCOMPARE(presented.last().at(1).toBool(), false);  // no scrobble on re-present
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/c"));
+    // Stay paused, but on the new current so the backend source matches the queue.
+    QCOMPARE(m_backend->loadedPausedUrls.last(), QUrl::fromLocalFile("/c"));
+    QCOMPARE(m_backend->state(), PlaybackBackend::State::Paused);
 }
 
 void PlayerCoreTest::removingLastTrackClearsPlayback()
