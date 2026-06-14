@@ -4884,12 +4884,17 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         return status();
     }
     if (command == QLatin1String("seek")) {
-        if (args.contains(QStringLiteral("offsetMs"))) {
-            seekRelativeFromMpris(static_cast<qint64>(args.value(QStringLiteral("offsetMs")).toDouble()));
+        // Accept the canonical offset_ms; tolerate the legacy offsetMs so an
+        // older muzaitenctl still talks to a freshly built server.
+        if (args.contains(QStringLiteral("offset_ms")) || args.contains(QStringLiteral("offsetMs"))) {
+            const QJsonValue offset = args.contains(QStringLiteral("offset_ms"))
+                ? args.value(QStringLiteral("offset_ms"))
+                : args.value(QStringLiteral("offsetMs"));
+            seekRelativeFromMpris(static_cast<qint64>(offset.toDouble()));
         } else if (args.contains(QStringLiteral("ms"))) {
             m_playback->seek(std::max<qint64>(0, static_cast<qint64>(args.value(QStringLiteral("ms")).toDouble())));
         } else {
-            return error(QStringLiteral("seek needs \"ms\" or \"offsetMs\""));
+            return error(QStringLiteral("seek needs \"ms\" or \"offset_ms\""));
         }
         return status();
     }
@@ -4897,10 +4902,13 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         double percent = 0.0;
         if (args.contains(QStringLiteral("percent"))) {
             percent = args.value(QStringLiteral("percent")).toDouble();
-        } else if (args.contains(QStringLiteral("deltaPercent"))) {
-            percent = m_player->volume() * 100.0 + args.value(QStringLiteral("deltaPercent")).toDouble();
+        } else if (args.contains(QStringLiteral("delta_percent")) || args.contains(QStringLiteral("deltaPercent"))) {
+            const QJsonValue delta = args.contains(QStringLiteral("delta_percent"))
+                ? args.value(QStringLiteral("delta_percent"))
+                : args.value(QStringLiteral("deltaPercent"));
+            percent = m_player->volume() * 100.0 + delta.toDouble();
         } else {
-            return error(QStringLiteral("volume needs \"percent\" or \"deltaPercent\""));
+            return error(QStringLiteral("volume needs \"percent\" or \"delta_percent\""));
         }
         setVolumeFromMpris(percent / 100.0);
         return status();
@@ -4911,13 +4919,13 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
             {QStringLiteral("title"), track.title.isEmpty() ? track.filename : track.title},
             {QStringLiteral("artist"), track.artistName},
             {QStringLiteral("album"), track.albumTitle},
-            {QStringLiteral("durationMs"), static_cast<double>(track.durationMs)},
+            {QStringLiteral("duration"), static_cast<double>(track.durationMs) / 1000.0},
         };
         if (index >= 0) {
             json.insert(QStringLiteral("index"), index);
         }
         if (track.effectiveRating0To100 >= 0) {
-            json.insert(QStringLiteral("rating0To100"), track.effectiveRating0To100);
+            json.insert(QStringLiteral("rating"), track.effectiveRating0To100);
         }
         return json;
     };
@@ -5016,9 +5024,13 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         }
         int rating = -1;
         if (!args.value(QStringLiteral("clear")).toBool()) {
-            rating = args.value(QStringLiteral("rating0To100")).toInt(-1);
+            // Canonical "rating"; fall back to legacy "rating0To100" for an
+            // older client paired with a freshly built server.
+            rating = args.contains(QStringLiteral("rating"))
+                ? args.value(QStringLiteral("rating")).toInt(-1)
+                : args.value(QStringLiteral("rating0To100")).toInt(-1);
             if (rating < 0 || rating > 100) {
-                return error(QStringLiteral("rate needs \"rating0To100\" in 0..100 or \"clear\": true"));
+                return error(QStringLiteral("rate needs \"rating\" in 0..100 or \"clear\": true"));
             }
         }
         const Track rated = m_player->currentTrack();

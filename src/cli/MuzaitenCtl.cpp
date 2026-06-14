@@ -88,29 +88,29 @@ QString starsText(int rating0To100)
 
 void printStatus(const QJsonObject &status)
 {
-    // The track JSON nests the player state under "status"; tags/library/audio
-    // sit at the top level next to it.
-    const QJsonObject player = status.value(QStringLiteral("status")).toObject();
-    const QJsonObject tags = status.value(QStringLiteral("tags")).toObject();
+    // Canonical track JSON: the player state lives under "playback", the tags
+    // under "track", and ratings under "library".
+    const QJsonObject playback = status.value(QStringLiteral("playback")).toObject();
+    const QJsonObject track = status.value(QStringLiteral("track")).toObject();
     const QJsonObject library = status.value(QStringLiteral("library")).toObject();
-    const QString title = tags.value(QStringLiteral("title")).toString();
-    const QString artist = tags.value(QStringLiteral("artist")).toString();
-    const QString album = tags.value(QStringLiteral("album")).toString();
+    const QString title = track.value(QStringLiteral("title")).toString();
+    const QString artist = track.value(QStringLiteral("artist")).toString();
+    const QString album = track.value(QStringLiteral("album")).toString();
 
     if (title.isEmpty() && artist.isEmpty()) {
-        std::printf("%s\n", qPrintable(player.value(QStringLiteral("playback")).toString(QStringLiteral("Stopped"))));
+        std::printf("%s\n", qPrintable(playback.value(QStringLiteral("state")).toString(QStringLiteral("stopped"))));
         return;
     }
     std::printf("%s: %s - %s%s\n",
-                qPrintable(player.value(QStringLiteral("playback")).toString()),
+                qPrintable(playback.value(QStringLiteral("state")).toString()),
                 qPrintable(artist.isEmpty() ? QStringLiteral("?") : artist),
                 qPrintable(title),
                 qPrintable(album.isEmpty() ? QString() : QStringLiteral(" [%1]").arg(album)));
     std::printf("%s/%s  vol %d%%  rating %s\n",
-                qPrintable(formatSeconds(player.value(QStringLiteral("elapsed")).toDouble())),
-                qPrintable(formatSeconds(player.value(QStringLiteral("duration")).toDouble())),
-                static_cast<int>(player.value(QStringLiteral("volume")).toDouble()),
-                qPrintable(starsText(library.value(QStringLiteral("effective_rating_0_100")).toInt(-1))));
+                qPrintable(formatSeconds(playback.value(QStringLiteral("elapsed")).toDouble())),
+                qPrintable(formatSeconds(playback.value(QStringLiteral("duration")).toDouble())),
+                static_cast<int>(playback.value(QStringLiteral("volume")).toDouble()),
+                qPrintable(starsText(library.value(QStringLiteral("effective_rating")).toInt(-1))));
 }
 
 // Returns -1 on parse failure. Accepts "90", "1:30"; a leading +/- marks the
@@ -146,9 +146,9 @@ QString trackLine(const QJsonObject &track)
     if (!album.isEmpty()) {
         line += QStringLiteral(" [%1]").arg(album);
     }
-    const double durationMs = track.value(QStringLiteral("durationMs")).toDouble();
-    if (durationMs > 0) {
-        line += QStringLiteral("  %1").arg(formatSeconds(durationMs / 1000.0));
+    const double duration = track.value(QStringLiteral("duration")).toDouble();
+    if (duration > 0) {
+        line += QStringLiteral("  %1").arg(formatSeconds(duration));
     }
     return line;
 }
@@ -414,7 +414,7 @@ int runSearch(QStringList arguments, bool json)
                 {QStringLiteral("artist"), r->artistName},
                 {QStringLiteral("album"), r->albumTitle},
                 {QStringLiteral("date"), r->date},
-                {QStringLiteral("durationMs"), static_cast<double>(r->durationMs)},
+                {QStringLiteral("duration"), static_cast<double>(r->durationMs) / 1000.0},
                 {QStringLiteral("rating"), r->rating0To100},
             });
         }
@@ -526,7 +526,7 @@ int main(int argc, char **argv)
         if (arguments.isEmpty() || !parseTime(arguments.first(), seconds, relative)) {
             return fail(QStringLiteral("seek needs a position: seconds, mm:ss, or +/-seconds"));
         }
-        args.insert(relative ? QStringLiteral("offsetMs") : QStringLiteral("ms"), seconds * 1000.0);
+        args.insert(relative ? QStringLiteral("offset_ms") : QStringLiteral("ms"), seconds * 1000.0);
     } else if (command == QLatin1String("volume")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("volume needs a value: 0-100 or +/-N"));
@@ -538,7 +538,7 @@ int main(int argc, char **argv)
             return fail(QStringLiteral("volume value \"%1\" is not a number").arg(value));
         }
         const bool relative = value.startsWith(QLatin1Char('+')) || value.startsWith(QLatin1Char('-'));
-        args.insert(relative ? QStringLiteral("deltaPercent") : QStringLiteral("percent"), percent);
+        args.insert(relative ? QStringLiteral("delta_percent") : QStringLiteral("percent"), percent);
     } else if (command == QLatin1String("rate")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("rate needs a value: 0-5 stars, \"raw <0-100>\", or \"clear\""));
@@ -561,7 +561,7 @@ int main(int argc, char **argv)
             if (!ok || number < 0.0 || number > max) {
                 return fail(QStringLiteral("rate value \"%1\" must be 0-%2").arg(value).arg(max));
             }
-            args.insert(QStringLiteral("rating0To100"),
+            args.insert(QStringLiteral("rating"),
                         static_cast<int>(std::lround(raw ? number : number * 20.0)));
         }
     }
@@ -603,12 +603,12 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    // Plain "status" replies carry the player object at response["status"],
-    // while command replies carry the full post-command track JSON there.
+    // Plain "status" replies carry the canonical track JSON at the top level,
+    // while command replies wrap it under response["status"].
     QJsonObject statusObject = response;
     const QJsonObject nestedStatus = response.value(QStringLiteral("status")).toObject();
-    if (nestedStatus.value(QStringLiteral("status")).isObject()
-        || nestedStatus.value(QStringLiteral("tags")).isObject()) {
+    if (nestedStatus.value(QStringLiteral("playback")).isObject()
+        || nestedStatus.value(QStringLiteral("track")).isObject()) {
         statusObject = nestedStatus;
     }
     printStatus(statusObject);
