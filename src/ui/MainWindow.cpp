@@ -4718,6 +4718,47 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
         m_player->appendAndPlay(track);
         return status();
     }
+    if (command == QLatin1String("enqueue")) {
+        const QJsonArray pathsJson = args.value(QStringLiteral("paths")).toArray();
+        if (pathsJson.isEmpty()) {
+            return error(QStringLiteral("enqueue needs a non-empty \"paths\" array"));
+        }
+        QVector<Track> tracks;
+        tracks.reserve(static_cast<int>(pathsJson.size()));
+        for (const QJsonValue &value : pathsJson) {
+            const QString path = QFileInfo(value.toString()).absoluteFilePath();
+            if (path.isEmpty() || !QFileInfo::exists(path)) {
+                continue; // skip vanished paths rather than failing the whole batch
+            }
+            Track track = m_database->trackForPath(path);
+            if (track.path.isEmpty()) {
+                // Not in the library — accept it like play-file / the free-roam explorer.
+                const QFileInfo info(path);
+                track.path = path;
+                track.parentDir = info.absolutePath();
+                track.filename = info.fileName();
+                track.title = info.completeBaseName();
+            }
+            tracks.push_back(track);
+        }
+        if (tracks.isEmpty()) {
+            return error(QStringLiteral("enqueue: none of the given paths exist"));
+        }
+        const bool play = args.value(QStringLiteral("play")).toBool();
+        const bool next = args.value(QStringLiteral("next")).toBool();
+        const int startIndex = next ? m_player->queueIndex() + 1 : static_cast<int>(m_player->queue().size());
+        if (next) {
+            m_player->playTracksNext(tracks);
+        } else {
+            m_player->appendTracks(tracks);
+        }
+        if (play) {
+            m_player->playAt(startIndex, true, false, /*explicitJump=*/true);
+        }
+        QJsonObject reply = status();
+        reply.insert(QStringLiteral("enqueued"), static_cast<int>(tracks.size()));
+        return reply;
+    }
     if (command == QLatin1String("rate")) {
         if (m_player->currentTrack().path.isEmpty()) {
             return error(QStringLiteral("no current track to rate"));

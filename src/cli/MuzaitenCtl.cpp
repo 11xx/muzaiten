@@ -52,6 +52,7 @@ void printUsage()
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
         "  play-file <path>        append a file to the queue and play it\n"
+        "  enqueue [--play|--next] <path...>  add files to the queue\n"
         "  raise                   show and focus the running instance's window\n"
         "\n"
         "Options:\n"
@@ -309,6 +310,32 @@ int main(int argc, char **argv)
         }
         command = QStringLiteral("queue-jump");
         args.insert(QStringLiteral("index"), index);
+    } else if (command == QLatin1String("enqueue")) {
+        QJsonArray paths;
+        bool play = false;
+        bool next = false;
+        for (const QString &word : arguments) {
+            if (word == QLatin1String("--play")) {
+                play = true;
+            } else if (word == QLatin1String("--next")) {
+                next = true;
+            } else if (word.startsWith(QLatin1String("--"))) {
+                return fail(QStringLiteral("unknown enqueue option \"%1\"").arg(word));
+            } else {
+                // Resolve against the client's cwd; the server has its own.
+                paths.append(QFileInfo(word).absoluteFilePath());
+            }
+        }
+        if (paths.isEmpty()) {
+            return fail(QStringLiteral("enqueue needs at least one path"));
+        }
+        args.insert(QStringLiteral("paths"), paths);
+        if (play) {
+            args.insert(QStringLiteral("play"), true);
+        }
+        if (next) {
+            args.insert(QStringLiteral("next"), true);
+        }
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
