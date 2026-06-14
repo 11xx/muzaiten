@@ -195,6 +195,23 @@ void ScanPipelineTest::turboFillReadsEveryFile()
     const ScanRun run = runPipeline(fill, database, /*ingestPlaceholders=*/false);
     QCOMPARE(run.batchTrackCount, kFiles);
     QCOMPARE(database.allTracksForSearch().size(), kFiles);
+
+    // The streaming cursor must yield the same rows, honoring the batch cap and
+    // actually chunking (not one big read).
+    auto cursor = database.beginTrackSearchStream();
+    QVERIFY(cursor != nullptr);
+    QVector<Search::SearchRecord> batch;
+    int streamed = 0;
+    int batches = 0;
+    while (cursor->nextBatch(7, batch)) {
+        QVERIFY(!batch.isEmpty());
+        QVERIFY(batch.size() <= 7);
+        streamed += static_cast<int>(batch.size());
+        ++batches;
+    }
+    QVERIFY(batch.isEmpty()); // drained
+    QCOMPARE(streamed, kFiles);
+    QVERIFY(batches > 1);
 }
 
 QTEST_MAIN(ScanPipelineTest)

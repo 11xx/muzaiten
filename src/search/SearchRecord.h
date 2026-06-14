@@ -28,8 +28,7 @@ struct SearchRecord {
 
     // ---- sort/reading names (raw; folded into the norms below) -----------
     // Often romaji/kana for non-Latin titles (Picard *sort / *sorten tags).
-    // Held so the background pass can upgrade the norms to full romaji; cleared
-    // once folded to reclaim memory.
+    // Transient: folded into the norms then cleared to reclaim memory.
     QString titleSort;
     QString artistSort;
     QString albumArtistSort;
@@ -62,11 +61,11 @@ struct SearchRecord {
 };
 
 // Compute a record's folded norm fields from its display fields and sort/reading
-// names. `extended` enables the CJK romanization + sort-reading enrichment (the
-// background tier); when false, only diacritics/scripts fold (the fast basic
-// tier — kana/kanji pass through). When `pool` is given, the high-repetition
-// norms (artist/album-artist/album) are interned through it to save memory.
-inline void foldRecordNorms(SearchRecord &rec, bool extended, QHash<QString, QString> *pool = nullptr)
+// names (full fold: diacritics/scripts + CJK romanization + sort-reading
+// enrichment). When `pool` is given, the high-repetition norms (artist/
+// album-artist/album) are interned through it to save memory. The raw sort
+// names are folded in and then cleared to reclaim memory.
+inline void foldRecordNorms(SearchRecord &rec, QHash<QString, QString> *pool = nullptr)
 {
     const auto intern = [pool](const QString &v) {
         if (!pool || v.isEmpty()) {
@@ -80,9 +79,9 @@ inline void foldRecordNorms(SearchRecord &rec, bool extended, QHash<QString, QSt
         return v;
     };
     const auto foldField = [&](const QString &text, const QString &reading) {
-        QString f = Fold::foldText(text, extended);
-        if (extended && !reading.isEmpty()) {
-            const QString fr = Fold::foldText(reading, /*romanizeCjk=*/true);
+        QString f = Fold::foldText(text);
+        if (!reading.isEmpty()) {
+            const QString fr = Fold::foldText(reading);
             if (!fr.isEmpty() && fr != f) {
                 f += QLatin1Char(' ') + fr;
             }
@@ -93,8 +92,12 @@ inline void foldRecordNorms(SearchRecord &rec, bool extended, QHash<QString, QSt
     rec.normArtist      = intern(foldField(rec.artistName, rec.artistSort));
     rec.normAlbumArtist = intern(foldField(rec.albumArtistName, rec.albumArtistSort));
     rec.normAlbum       = intern(foldField(rec.albumTitle, rec.albumSort));
-    rec.normFilename    = Fold::foldText(rec.filename, extended);
-    rec.normPath        = Fold::foldText(rec.path, extended);
+    rec.normFilename    = Fold::foldText(rec.filename);
+    rec.normPath        = Fold::foldText(rec.path);
+    rec.titleSort.clear();
+    rec.artistSort.clear();
+    rec.albumArtistSort.clear();
+    rec.albumSort.clear();
 }
 
 } // namespace Search

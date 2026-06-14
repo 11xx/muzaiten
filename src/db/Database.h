@@ -144,12 +144,10 @@ public:
     QVector<Track> tracksForArtist(const QString &albumArtist, const QString &albumTitleFilter = {}) const;
     QVector<Track> tracksForArtist(const QString &albumArtist, const QStringList &albumTitleFilters) const;
     // Lightweight row set for building the search index — all non-missing local
-    // tracks. `extended` controls norm folding: true does the full fold (CJK
-    // romaji + sort-reading enrichment); false produces the cheap basic fold and
-    // leaves the raw sort names on each record for a later background upgrade.
-    QVector<Search::SearchRecord> allTracksForSearch(bool extended = true) const;
+    // tracks, folded (CJK romaji + sort-reading enrichment) for matching.
+    QVector<Search::SearchRecord> allTracksForSearch() const;
     // Lightweight row set for MPD-imported tracks.
-    QVector<Search::SearchRecord> allMpdTracksForSearch(bool extended = true) const;
+    QVector<Search::SearchRecord> allMpdTracksForSearch() const;
     // Streaming alternative to the two functions above: returns a cursor that
     // yields the same records (local then MPD) in batches, so the search index
     // can be filled incrementally instead of in one blocking read.

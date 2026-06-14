@@ -6,8 +6,6 @@
 
 #include <QUuid>
 
-#include <algorithm>
-
 namespace Search {
 
 SearchWorker::SearchWorker(const QString &dbPath, QObject *parent)
@@ -37,50 +35,39 @@ void SearchWorker::buildIndex()
         }
     }
 
-    // Basic tier: cheap fold (diacritics/scripts only) so the index is queryable
-    // almost immediately. The raw sort names ride along for the upgrade pass.
-    QVector<SearchRecord> records = m_db->allTracksForSearch(/*extended=*/false);
-    const QVector<SearchRecord> mpdRecords = m_db->allMpdTracksForSearch(/*extended=*/false);
-    records.reserve(records.size() + mpdRecords.size());
-    for (const auto &r : mpdRecords) {
-        records.append(r);
-    }
-
-    m_index.build(std::move(records));
+    // Stream the index in from a cursor: each readChunk() appends a batch and
+    // lets queued queries interleave, so results start showing against a partial
+    // index almost immediately rather than after a full library read.
+    m_index.clear();
+    m_cursor = m_db->beginTrackSearchStream();
     const quint64 generation = ++m_buildGeneration;
-    emit indexReady(m_index.size());
-
-    // Extended tier: upgrade to the full romaji fold in the background, chunked
-    // so queued queries interleave and stay responsive during the load.
-    m_upgradeCursor = 0;
-    m_upgradePool.clear();
-    QMetaObject::invokeMethod(this, "upgradeChunk", Qt::QueuedConnection, Q_ARG(quint64, generation));
+    QMetaObject::invokeMethod(this, "readChunk", Qt::QueuedConnection, Q_ARG(quint64, generation));
 }
 
-void SearchWorker::upgradeChunk(quint64 generation)
+void SearchWorker::readChunk(quint64 generation)
 {
-    if (generation != m_buildGeneration) {
+    if (generation != m_buildGeneration || !m_cursor) {
         return; // superseded by a newer build/clear
     }
-    constexpr int kChunk = 3000; // ~tens of ms per chunk; bounds query latency
-    const int total = m_index.size();
-    const int lo = m_upgradeCursor;
-    const int hi = std::min(lo + kChunk, total);
-    m_index.upgradeFold(lo, hi, m_upgradePool);
-    m_upgradeCursor = hi;
-
-    if (hi < total) {
-        QMetaObject::invokeMethod(this, "upgradeChunk", Qt::QueuedConnection, Q_ARG(quint64, generation));
+    constexpr int kChunk = 3000; // bounds per-batch work so queries stay snappy
+    QVector<SearchRecord> batch;
+    const bool more = m_cursor->nextBatch(kChunk, batch);
+    if (!batch.isEmpty()) {
+        m_index.append(std::move(batch));
+        emit indexGrew(m_index.size());
+    }
+    if (more) {
+        QMetaObject::invokeMethod(this, "readChunk", Qt::QueuedConnection, Q_ARG(quint64, generation));
     } else {
-        m_upgradePool.clear();
-        emit indexUpgraded();
+        m_cursor.reset();
+        emit indexLoaded(m_index.size());
     }
 }
 
 void SearchWorker::clearIndex()
 {
-    ++m_buildGeneration; // abort any in-flight upgrade
-    m_upgradePool.clear();
+    ++m_buildGeneration; // abort any in-flight stream
+    m_cursor.reset();
     m_index.clear();
 }
 

@@ -107,7 +107,9 @@ PlaylistAddDialog::PlaylistAddDialog(const QString &dbPath, const QString &playl
     m_workerThread = new QThread(this);
     m_worker = new Search::SearchWorker(dbPath);
     m_worker->moveToThread(m_workerThread);
-    connect(m_worker, &Search::SearchWorker::indexReady, this, &PlaylistAddDialog::onIndexReady, Qt::QueuedConnection);
+    // The index streams in; re-query as it grows and once more when complete.
+    connect(m_worker, &Search::SearchWorker::indexGrew, this, &PlaylistAddDialog::onIndexReady, Qt::QueuedConnection);
+    connect(m_worker, &Search::SearchWorker::indexLoaded, this, &PlaylistAddDialog::onIndexReady, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::indexError, this, &PlaylistAddDialog::onIndexError, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::resultsReady, this, &PlaylistAddDialog::onResultsReady, Qt::QueuedConnection);
     connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);

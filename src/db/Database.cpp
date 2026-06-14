@@ -1788,10 +1788,8 @@ constexpr char kMpdSearchSelect[] =
     "track_number, disc_number "
     "FROM mpd_tracks";
 
-// `extended` enables the full romaji + sort-reading fold; false gives the cheap
-// basic fold and leaves the raw sort names on the record. `pool` dedups the
-// high-repetition fields (one buffer per distinct value).
-Search::SearchRecord localRowToRecord(QSqlQuery &query, QHash<QString, QString> &pool, bool extended)
+// `pool` dedups the high-repetition fields (one buffer per distinct value).
+Search::SearchRecord localRowToRecord(QSqlQuery &query, QHash<QString, QString> &pool)
 {
     Search::SearchRecord rec;
     rec.path              = query.value(0).toString();
@@ -1817,11 +1815,11 @@ Search::SearchRecord localRowToRecord(QSqlQuery &query, QHash<QString, QString> 
     rec.albumArtistSort   = internString(pool, query.value(20).toString());
     rec.albumSort         = internString(pool, query.value(21).toString());
     rec.source            = Search::TrackSource::Local;
-    Search::foldRecordNorms(rec, extended, &pool);
+    Search::foldRecordNorms(rec, &pool);
     return rec;
 }
 
-Search::SearchRecord mpdRowToRecord(QSqlQuery &query, QHash<QString, QString> &pool, bool extended)
+Search::SearchRecord mpdRowToRecord(QSqlQuery &query, QHash<QString, QString> &pool)
 {
     Search::SearchRecord rec;
     rec.path            = query.value(0).toString();
@@ -1837,13 +1835,13 @@ Search::SearchRecord mpdRowToRecord(QSqlQuery &query, QHash<QString, QString> &p
     rec.rating0To100    = -1;
     rec.source          = Search::TrackSource::Mpd;
     // MPD tracks carry no sort tags; just fold the display fields.
-    Search::foldRecordNorms(rec, extended, &pool);
+    Search::foldRecordNorms(rec, &pool);
     return rec;
 }
 
 } // namespace
 
-QVector<Search::SearchRecord> Database::allTracksForSearch(bool extended) const
+QVector<Search::SearchRecord> Database::allTracksForSearch() const
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
@@ -1856,12 +1854,12 @@ QVector<Search::SearchRecord> Database::allTracksForSearch(bool extended) const
     }
     QHash<QString, QString> pool;
     while (query.next()) {
-        records.push_back(localRowToRecord(query, pool, extended));
+        records.push_back(localRowToRecord(query, pool));
     }
     return records;
 }
 
-QVector<Search::SearchRecord> Database::allMpdTracksForSearch(bool extended) const
+QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
@@ -1870,7 +1868,7 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch(bool extended) con
     }
     QHash<QString, QString> pool;
     while (query.next()) {
-        records.push_back(mpdRowToRecord(query, pool, extended));
+        records.push_back(mpdRowToRecord(query, pool));
     }
     return records;
 }
@@ -1918,8 +1916,8 @@ bool TrackSearchCursor::nextBatch(int maxRows, QVector<Search::SearchRecord> &ou
         }
         if (m_query.next()) {
             out.push_back(m_phase == Phase::Local
-                              ? localRowToRecord(m_query, m_pool, /*extended=*/true)
-                              : mpdRowToRecord(m_query, m_pool, /*extended=*/true));
+                              ? localRowToRecord(m_query, m_pool)
+                              : mpdRowToRecord(m_query, m_pool));
         } else {
             advancePhase(); // this phase drained; fall through to the next one
         }

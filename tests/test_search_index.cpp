@@ -236,23 +236,35 @@ private slots:
         QVERIFY(unique.size() >= 14);
     }
 
-    void backgroundUpgradeEnablesRomajiMatching()
+    void extendedFoldEnablesRomajiMatching()
     {
-        // A kana/kanji title with a kana sort reading: under the basic fold both
-        // pass through, so a romaji query misses.
+        // A kana/kanji title with a kana sort reading: the unified fold romanizes
+        // both the title and the sort reading, so a romaji query matches — and
+        // the raw sort name is folded in then freed.
         SearchRecord r = makeRecord(QString::fromUtf8("三線の花"), QStringLiteral("BEGIN"), QStringLiteral("Best"));
         r.titleSort = QString::fromUtf8("サンシンノハナ");
-        foldRecordNorms(r, /*extended=*/false);
+        foldRecordNorms(r);
+        QVERIFY(r.titleSort.isEmpty()); // folded in and reclaimed
 
         SearchIndex idx;
         idx.build({r});
-        QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 0);
-
-        // The background upgrade re-folds to the extended tier (romaji), so the
-        // same query now matches — and the raw sort name is freed.
-        QHash<QString, QString> pool;
-        idx.upgradeFold(0, idx.size(), pool);
         QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 1);
+    }
+
+    void appendGrowsIndexIncrementally()
+    {
+        // Streaming build: append() must extend the index without disturbing the
+        // records already in it, and queries must see the appended ones.
+        SearchIndex idx;
+        idx.append({makeRecord(QStringLiteral("Alpha"), QStringLiteral("A"), QStringLiteral("X"))});
+        QCOMPARE(idx.size(), 1);
+        QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("alpha")), false).size(), 1);
+
+        idx.append({makeRecord(QStringLiteral("Beta"), QStringLiteral("B"), QStringLiteral("Y")),
+                    makeRecord(QStringLiteral("Gamma"), QStringLiteral("G"), QStringLiteral("Z"))});
+        QCOMPARE(idx.size(), 3);
+        QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("alpha")), false).size(), 1); // still there
+        QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("gamma")), false).size(), 1); // newly visible
     }
 
     void highlightMapsFoldedPositionsToDisplayChars()

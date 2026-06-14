@@ -10,13 +10,14 @@
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 
-#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QVector>
 #include <atomic>
+#include <memory>
 
 class Database;
+class TrackSearchCursor;
 
 namespace Search {
 
@@ -27,15 +28,17 @@ public:
     ~SearchWorker() override;
 
 public slots:
-    // Rebuild the index from the database. Builds the cheap "basic" fold first
-    // and emits indexReady() so queries work immediately, then upgrades records
-    // to the full romaji fold in the background (emitting indexUpgraded()).
+    // Rebuild the index from the database. Opens a streaming cursor and pumps
+    // it in chunks (see readChunk), so the index fills incrementally and queries
+    // can run against a partial index as records arrive — fzf-from-a-pipe style.
     void buildIndex();
 
-    // Internal: fold one chunk of records to the extended tier, then re-post
-    // itself until the index is fully upgraded. `generation` guards against a
-    // rebuild/clear superseding an in-flight upgrade.
-    void upgradeChunk(quint64 generation);
+    // Internal: pull one batch from the streaming cursor, append it to the
+    // index, emit indexGrew(), then re-post itself until the cursor is drained
+    // (emitting indexLoaded()). Re-posting via the event loop lets queued
+    // queries interleave between batches. `generation` guards against a
+    // rebuild/clear superseding an in-flight stream.
+    void readChunk(quint64 generation);
 
     // Run a query against the current index.  Emits resultsReady() with the
     // results if queryId matches the latest submitted query (stale results from
@@ -50,8 +53,8 @@ public slots:
     void setExclusions(QVector<Search::ExcludeRule> rules);
 
 signals:
-    void indexReady(int trackCount);          // basic fold ready — queries enabled
-    void indexUpgraded();                      // full romaji fold complete
+    void indexGrew(int trackCount);   // a batch landed — queries can run on the partial index
+    void indexLoaded(int trackCount); // the stream is fully drained
     void indexError(const QString &error);
     void resultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
 
@@ -62,11 +65,10 @@ private:
     std::atomic<quint64> m_latestQueryId{0};
     Database *m_db = nullptr;  // opened on the worker thread in buildIndex()
 
-    // Background upgrade (basic → extended fold) state. m_buildGeneration bumps
-    // on every build/clear so stale chunk events abort.
+    // Streaming build state. m_buildGeneration bumps on every build/clear so
+    // stale chunk events from a superseded stream abort.
     quint64 m_buildGeneration = 0;
-    int m_upgradeCursor = 0;
-    QHash<QString, QString> m_upgradePool;
+    std::unique_ptr<TrackSearchCursor> m_cursor;
 };
 
 } // namespace Search
