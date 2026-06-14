@@ -72,6 +72,18 @@ QString formatSeconds(double seconds)
     return QStringLiteral("%1:%2").arg(total / 60).arg(total % 60, 2, 10, QLatin1Char('0'));
 }
 
+QString formatSampleRate(int hz)
+{
+    if (hz <= 0) {
+        return {};
+    }
+    QString khz = QString::number(hz / 1000.0, 'f', 1);
+    if (khz.endsWith(QStringLiteral(".0"))) {
+        khz.chop(2);
+    }
+    return khz + QStringLiteral("kHz");
+}
+
 QString starsText(int rating0To100)
 {
     // Mirror the in-app convention: 20 points per star, halves shown as ½.
@@ -111,6 +123,30 @@ void printStatus(const QJsonObject &status)
                 qPrintable(formatSeconds(playback.value(QStringLiteral("duration")).toDouble())),
                 static_cast<int>(playback.value(QStringLiteral("volume")).toDouble()),
                 qPrintable(starsText(library.value(QStringLiteral("effective_rating")).toInt(-1))));
+
+    // Tech/quality line, when the scanned audio props are available (muzaiten
+    // populates them; plain MPRIS sources leave them out).
+    const QJsonObject audio = status.value(QStringLiteral("audio")).toObject();
+    const QString codec = audio.value(QStringLiteral("codec")).toString();
+    const int bitDepth = audio.value(QStringLiteral("bit_depth")).toInt();
+    const int bitrate = audio.value(QStringLiteral("bitrate_kbps")).toInt();
+    QStringList quality;
+    if (!codec.isEmpty()) {
+        quality << codec;
+    }
+    QString rateDepth = formatSampleRate(audio.value(QStringLiteral("sample_rate_hz")).toInt());
+    if (bitDepth > 0) {
+        rateDepth += (rateDepth.isEmpty() ? QString() : QStringLiteral("/")) + QStringLiteral("%1bit").arg(bitDepth);
+    }
+    if (!rateDepth.isEmpty()) {
+        quality << rateDepth;
+    }
+    if (bitrate > 0) {
+        quality << QStringLiteral("~%1kbps").arg(bitrate);
+    }
+    if (!quality.isEmpty()) {
+        std::printf("%s\n", qPrintable(quality.join(QStringLiteral("  "))));
+    }
 }
 
 // Returns -1 on parse failure. Accepts "90", "1:30"; a leading +/- marks the
