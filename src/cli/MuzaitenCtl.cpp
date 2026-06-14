@@ -414,7 +414,7 @@ int runSearch(QStringList arguments, bool json)
                 {QStringLiteral("artist"), r->artistName},
                 {QStringLiteral("album"), r->albumTitle},
                 {QStringLiteral("date"), r->date},
-                {QStringLiteral("duration"), static_cast<double>(r->durationMs) / 1000.0},
+                {QStringLiteral("duration"), std::round(static_cast<double>(r->durationMs) / 10.0) / 100.0},
                 {QStringLiteral("rating"), r->rating0To100},
             });
         }

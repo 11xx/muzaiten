@@ -4919,7 +4919,7 @@ QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObje
             {QStringLiteral("title"), track.title.isEmpty() ? track.filename : track.title},
             {QStringLiteral("artist"), track.artistName},
             {QStringLiteral("album"), track.albumTitle},
-            {QStringLiteral("duration"), static_cast<double>(track.durationMs) / 1000.0},
+            {QStringLiteral("duration"), std::round(static_cast<double>(track.durationMs) / 10.0) / 100.0},
         };
         if (index >= 0) {
             json.insert(QStringLiteral("index"), index);
