@@ -1160,8 +1160,8 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     });
     if (item != nullptr && item->status == PlaylistItemStatus::Missing && !currentSelectionIsSavedQueue()) {
         menu.addSeparator();
-        QAction *removeMissing = menu.addAction(QStringLiteral("Remove missing track from playlist"));
-        connect(removeMissing, &QAction::triggered, this, &PlaylistView::removeSelectedItems);
+        QAction *removeMissing = menu.addAction(QStringLiteral("Remove missing tracks from playlist"));
+        connect(removeMissing, &QAction::triggered, this, &PlaylistView::removeSelectedMissingItems);
         QAction *removeAllMissing = menu.addAction(QStringLiteral("Remove all missing tracks from library"));
         connect(removeAllMissing, &QAction::triggered, this, [this]() {
             emit removeAllMissingTracksRequested();
@@ -1492,6 +1492,16 @@ void PlaylistView::exportCurrentPlaylist()
 
 void PlaylistView::removeSelectedItems()
 {
+    removeSelectedItemsImpl(/*missingOnly=*/false);
+}
+
+void PlaylistView::removeSelectedMissingItems()
+{
+    removeSelectedItemsImpl(/*missingOnly=*/true);
+}
+
+void PlaylistView::removeSelectedItemsImpl(bool missingOnly)
+{
     if (m_db == nullptr || m_currentPlaylistId <= 0 || m_itemTable->selectionModel() == nullptr) {
         return;
     }
@@ -1504,11 +1514,19 @@ void PlaylistView::removeSelectedItems()
     }
     // Resolve to item ids up front (display rows may be sorted), then delete by
     // descending ordinal so the per-removal ordinal compaction stays valid.
+    // When missingOnly, keep just the broken rows so a rough range-select drops
+    // only the missing entries and leaves the playable ones in place.
     QVector<PlaylistItem> targets;
     for (int row : rows) {
         if (const PlaylistItem *item = itemForDisplayRow(row)) {
+            if (missingOnly && item->status != PlaylistItemStatus::Missing) {
+                continue;
+            }
             targets.push_back(*item);
         }
+    }
+    if (targets.isEmpty()) {
+        return;
     }
     std::sort(targets.begin(), targets.end(),
               [](const PlaylistItem &a, const PlaylistItem &b) { return a.ordinal > b.ordinal; });

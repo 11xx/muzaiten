@@ -67,6 +67,9 @@ public slots:
     void editCurrentItemComment();
     void deleteCurrentPlaylist();
     void removeSelectedItems();
+    // Remove only the missing rows within the current selection — lets the user
+    // rough-select a range and drop just the broken entries.
+    void removeSelectedMissingItems();
     void exportCurrentPlaylist();
     void addSongToCurrentPlaylist();
     void importIntoCurrentPlaylist();
@@ -136,6 +139,8 @@ private:
     // Maps a (possibly sorted) display row to its backing item via the id stored
     // in the cell's UserRole. Returns nullptr if the row has no live item.
     const PlaylistItem *itemForDisplayRow(int row) const;
+    // Shared removal: all selected rows, or only the missing ones when filtered.
+    void removeSelectedItemsImpl(bool missingOnly);
 
     PlaylistDatabase *m_db = nullptr;
     qint64 m_currentPlaylistId = 0;
