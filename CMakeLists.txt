@@ -137,6 +137,7 @@ set(MUZAITEN_SOURCES
     src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
     src/ui/ViewKeyReferences.cpp
+    src/ui/trackinfo/TrackInfoPanel.cpp
     src/ui/trackinfo/TrackInfoSettings.cpp
     resources/resources.qrc
 )
@@ -243,6 +244,7 @@ set(MUZAITEN_HEADERS
     src/ui/StarRatingDelegate.h
     src/ui/TrackPropertiesDialog.h
     src/ui/TrackTable.h
+    src/ui/trackinfo/TrackInfoPanel.h
     src/ui/trackinfo/TrackInfoSettings.h
 )
 

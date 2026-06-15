@@ -13,7 +13,7 @@ class QImage;
 class QLabel;
 class QueueStore;
 class QSplitter;
-class QTableWidget;
+class TrackInfoPanel;
 class QWidget;
 
 class RightSidebar final : public QWidget {
@@ -62,45 +62,16 @@ signals:
     void trackLibraryRequested(const Track &track);
     void viewSettingsChanged();
 
-private:
-    void showTrackInfoLabelMenu(const QPoint &pos);
-    void applyTrackInfoSettingsJson(const QJsonObject &root);
-    QJsonArray trackInfoSettingsJson() const;
-    QJsonArray trackInfoMetadataSettingsJson() const;
-    void updateTrackInfoLabels();
-    void restyleTrackInfoLabels();
-    void applyTrackInfoLayoutSpacing();
-    QWidget *trackInfoLabelFromSender() const;
-
 protected:
     void changeEvent(QEvent *event) override;
-    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     QueueTable *m_queueTable = nullptr;
     QueueStore *m_queueStore = nullptr;
     QLabel *m_albumArt = nullptr;
-    QWidget *m_trackInfoPane = nullptr;
-    QWidget *m_trackInfoTitle = nullptr;
-    QWidget *m_trackInfoArtist = nullptr;
-    QWidget *m_trackInfoAlbum = nullptr;
-    QWidget *m_trackInfoYear = nullptr;
-    QWidget *m_trackInfoFile = nullptr;
-    QWidget *m_trackInfoProperties = nullptr;
-    QWidget *m_trackInfoTopSpacer = nullptr;
-    QWidget *m_trackInfoBottomSpacer = nullptr;
-    QLabel *m_noTrackLabel = nullptr;
+    TrackInfoPanel *m_trackInfoPanel = nullptr;
     QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
-    Track m_currentTrack;
-    QJsonArray m_trackInfoMetadataItems;
-    QJsonObject m_trackInfoDialogState;
-    QString m_trackInfoMetadataSeparator = QString::fromUtf8("\xc2\xb7");
-    int m_trackInfoMetadataSpacing = 1;
-    QString m_trackInfoAlignment = QStringLiteral("left");
-    QString m_trackInfoLineSpacingMode = QStringLiteral("justify");
-    int m_trackInfoLineSpacing = 1;
-    QString m_trackInfoVerticalAlignment = QStringLiteral("top");
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
     int m_currentQueueIndex = -1;
