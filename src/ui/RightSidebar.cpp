@@ -4,6 +4,7 @@
 #include "ui/AlbumArtView.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/QueueStore.h"
+#include "ui/ReorderableTableWidget.h"
 #include "ui/trackinfo/TrackInfoSettings.h"
 
 #include <QAction>
@@ -321,130 +322,6 @@ TrackInfoLabel *valueLabel(QWidget *parent)
     auto *label = new TrackInfoLabel(parent);
     return label;
 }
-
-// A QTableWidget whose rows can be reordered by dragging, showing a single
-// insertion line between rows (the same above/below cue the queue uses) instead
-// of Qt's default cell-move drag. The actual reordering is delegated to `reorder`
-// so the owner can rebuild the rows from data (rather than juggling cell-widget
-// pointers, which removeCellWidget would delete out from under us).
-class ReorderableTableWidget final : public QTableWidget {
-public:
-    ReorderableTableWidget(int rows, int columns, QWidget *parent)
-        : QTableWidget(rows, columns, parent)
-    {
-        m_dropLine = new QWidget(viewport());
-        m_dropLine->setFixedHeight(2);
-        m_dropLine->setAutoFillBackground(true);
-        QPalette pal = m_dropLine->palette();
-        pal.setColor(QPalette::Window, palette().color(QPalette::Highlight));
-        m_dropLine->setPalette(pal);
-        m_dropLine->hide();
-    }
-
-    std::function<void(int from, int to)> reorder;
-
-    // The column that absorbs leftover width so the columns always span the
-    // viewport, letting the user-resizable columns trade against it.
-    void setFillColumn(int column) { m_fillColumn = column; }
-
-protected:
-    void resizeEvent(QResizeEvent *event) override
-    {
-        QTableWidget::resizeEvent(event);
-        fitFillColumn();
-    }
-
-    void fitFillColumn()
-    {
-        if (m_fillColumn < 0 || m_fillColumn >= columnCount()) {
-            return;
-        }
-        int other = 0;
-        for (int column = 0; column < columnCount(); ++column) {
-            if (column != m_fillColumn) {
-                other += columnWidth(column);
-            }
-        }
-        const int available = viewport()->width() - other;
-        if (available > 60) {
-            setColumnWidth(m_fillColumn, available);
-        }
-    }
-    void mousePressEvent(QMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton) {
-            m_pressRow = rowAt(event->position().toPoint().y());
-            m_pressY = event->position().toPoint().y();
-            m_dragging = false;
-        }
-        QTableWidget::mousePressEvent(event);
-    }
-
-    void mouseMoveEvent(QMouseEvent *event) override
-    {
-        if ((event->buttons() & Qt::LeftButton) && m_pressRow >= 0) {
-            const int y = event->position().toPoint().y();
-            if (!m_dragging && std::abs(y - m_pressY) >= QApplication::startDragDistance()) {
-                m_dragging = true;
-            }
-            if (m_dragging) {
-                showDropLine(dropRowAt(y));
-                return;
-            }
-        }
-        QTableWidget::mouseMoveEvent(event);
-    }
-
-    void mouseReleaseEvent(QMouseEvent *event) override
-    {
-        if (m_dragging) {
-            const int target = dropRowAt(event->position().toPoint().y());
-            const int source = m_pressRow;
-            m_dropLine->hide();
-            m_dragging = false;
-            m_pressRow = -1;
-            if (reorder && source >= 0 && target != source && target != source + 1) {
-                reorder(source, target);
-            }
-            return;
-        }
-        m_pressRow = -1;
-        QTableWidget::mouseReleaseEvent(event);
-    }
-
-private:
-    int dropRowAt(int y) const
-    {
-        if (rowCount() == 0) {
-            return 0;
-        }
-        const int row = rowAt(y);
-        if (row < 0) {
-            return y < 0 ? 0 : rowCount();
-        }
-        const int top = rowViewportPosition(row);
-        return y < top + rowHeight(row) / 2 ? row : row + 1;
-    }
-
-    void showDropLine(int row)
-    {
-        int y = 0;
-        if (rowCount() > 0) {
-            const int lastRow = rowCount() - 1;
-            y = row > lastRow ? rowViewportPosition(lastRow) + rowHeight(lastRow)
-                              : rowViewportPosition(row);
-        }
-        m_dropLine->setGeometry(0, y - 1, viewport()->width(), 2);
-        m_dropLine->raise();
-        m_dropLine->show();
-    }
-
-    QWidget *m_dropLine = nullptr;
-    int m_pressRow = -1;
-    int m_pressY = 0;
-    int m_fillColumn = -1;
-    bool m_dragging = false;
-};
 
 } // namespace
 

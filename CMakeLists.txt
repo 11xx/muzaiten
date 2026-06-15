@@ -126,6 +126,7 @@ set(MUZAITEN_SOURCES
     src/ui/QueueStore.cpp
     src/ui/QueueTable.cpp
     src/ui/RankingDialog.cpp
+    src/ui/ReorderableTableWidget.cpp
     src/ui/RightSidebar.cpp
     src/ui/SearchResultDelegate.cpp
     src/ui/SearchResultsModel.cpp
@@ -232,6 +233,7 @@ set(MUZAITEN_HEADERS
     src/ui/QueueStore.h
     src/ui/QueueTable.h
     src/ui/RankingDialog.h
+    src/ui/ReorderableTableWidget.h
     src/ui/RightSidebar.h
     src/ui/SearchResultDelegate.h
     src/ui/SearchResultsModel.h
