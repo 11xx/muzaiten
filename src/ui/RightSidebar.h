@@ -94,6 +94,7 @@ private:
     QVector<Track> m_tracks;
     Track m_currentTrack;
     QJsonArray m_trackInfoMetadataItems;
+    QJsonObject m_trackInfoDialogState;
     QString m_trackInfoMetadataSeparator = QString::fromUtf8("\xc2\xb7");
     int m_trackInfoMetadataSpacing = 1;
     QString m_trackInfoAlignment = QStringLiteral("left");

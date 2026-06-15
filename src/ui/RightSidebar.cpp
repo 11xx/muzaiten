@@ -2,9 +2,11 @@
 
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumArtView.h"
+#include "ui/NeighborColumnResizer.h"
 #include "ui/QueueStore.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QColor>
@@ -28,6 +30,8 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QPalette>
+#include <QSignalBlocker>
 #include <QImage>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -59,6 +63,10 @@ struct TrackInfoMetadataSpec {
     QString label;
     bool defaultVisible = true;
     QString defaultMode;
+    // Threshold above which the value counts as "notable" (mode == "notable"),
+    // expressed in the unit shown to the user: kHz, bits, or channel count. Zero
+    // means the item has no configurable notable threshold.
+    int defaultNotableMin = 0;
 };
 
 enum class TrackInfoOverflowMode {
@@ -84,9 +92,9 @@ QVector<TrackInfoMetadataSpec> availableTrackInfoMetadataItems()
         {QStringLiteral("format"), QStringLiteral("Format"), true, QStringLiteral("always")},
         {QStringLiteral("duration"), QStringLiteral("Duration"), true, QStringLiteral("always")},
         {QStringLiteral("size"), QStringLiteral("File size"), true, QStringLiteral("always")},
-        {QStringLiteral("sampleRate"), QStringLiteral("Sample rate"), true, QStringLiteral("notable")},
-        {QStringLiteral("bitDepth"), QStringLiteral("Bit depth"), true, QStringLiteral("notable")},
-        {QStringLiteral("channels"), QStringLiteral("Channels"), true, QStringLiteral("notable")},
+        {QStringLiteral("sampleRate"), QStringLiteral("Sample rate"), true, QStringLiteral("notable"), 48},
+        {QStringLiteral("bitDepth"), QStringLiteral("Bit depth"), true, QStringLiteral("notable"), 16},
+        {QStringLiteral("channels"), QStringLiteral("Channels"), true, QStringLiteral("notable"), 2},
         {QStringLiteral("bitrate"), QStringLiteral("Bitrate"), true, QStringLiteral("lossy")},
         {QStringLiteral("codec"), QStringLiteral("Codec"), false, QStringLiteral("always")},
     };
@@ -112,6 +120,25 @@ QString metadataDefaultMode(const QString &key)
     return QStringLiteral("always");
 }
 
+// Items whose "Only if notable" rule compares a measured value against a
+// user-editable threshold. Other items have a fixed notable rule (or none).
+bool metadataNotableConfigurable(const QString &key)
+{
+    return key == QStringLiteral("sampleRate")
+        || key == QStringLiteral("bitDepth")
+        || key == QStringLiteral("channels");
+}
+
+int metadataDefaultNotableMin(const QString &key)
+{
+    for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
+        if (spec.key == key) {
+            return spec.defaultNotableMin;
+        }
+    }
+    return 0;
+}
+
 bool isKnownMetadataItem(const QString &key)
 {
     for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
@@ -130,6 +157,7 @@ QJsonArray defaultTrackInfoMetadataItems()
         item.insert(QStringLiteral("key"), spec.key);
         item.insert(QStringLiteral("visible"), spec.defaultVisible);
         item.insert(QStringLiteral("mode"), spec.defaultMode);
+        item.insert(QStringLiteral("notableMin"), spec.defaultNotableMin);
         items.append(item);
     }
     return items;
@@ -150,6 +178,8 @@ QJsonArray normalizedMetadataItems(const QJsonArray &source)
         item.insert(QStringLiteral("visible"), object.value(QStringLiteral("visible")).toBool(true));
         const QString mode = object.value(QStringLiteral("mode")).toString(metadataDefaultMode(key));
         item.insert(QStringLiteral("mode"), mode.isEmpty() ? metadataDefaultMode(key) : mode);
+        item.insert(QStringLiteral("notableMin"),
+                    object.value(QStringLiteral("notableMin")).toInt(metadataDefaultNotableMin(key)));
         items.append(item);
         seen.push_back(key);
     }
@@ -161,6 +191,7 @@ QJsonArray normalizedMetadataItems(const QJsonArray &source)
         item.insert(QStringLiteral("key"), spec.key);
         item.insert(QStringLiteral("visible"), spec.defaultVisible);
         item.insert(QStringLiteral("mode"), spec.defaultMode);
+        item.insert(QStringLiteral("notableMin"), spec.defaultNotableMin);
         items.append(item);
     }
     return items;
@@ -507,17 +538,17 @@ QString metadataValueText(const Track &track, const QString &key)
     return {};
 }
 
-bool metadataItemPassesMode(const Track &track, const QString &key, const QString &mode)
+bool metadataItemPassesMode(const Track &track, const QString &key, const QString &mode, int notableMin)
 {
     if (mode == QStringLiteral("notable")) {
         if (key == QStringLiteral("sampleRate")) {
-            return track.sampleRateHz > 48000;
+            return track.sampleRateHz > notableMin * 1000;
         }
         if (key == QStringLiteral("bitDepth")) {
-            return track.bitDepth > 16;
+            return track.bitDepth > notableMin;
         }
         if (key == QStringLiteral("channels")) {
-            return track.channels > 2;
+            return track.channels > notableMin;
         }
     }
     if (mode == QStringLiteral("lossy")) {
@@ -545,7 +576,8 @@ QString metadataText(const Track &track,
         }
         const QString key = item.value(QStringLiteral("key")).toString();
         const QString mode = item.value(QStringLiteral("mode")).toString(metadataDefaultMode(key));
-        if (!metadataItemPassesMode(track, key, mode)) {
+        const int notableMin = item.value(QStringLiteral("notableMin")).toInt(metadataDefaultNotableMin(key));
+        if (!metadataItemPassesMode(track, key, mode, notableMin)) {
             continue;
         }
         const QString text = metadataValueText(track, key).trimmed();
@@ -572,20 +604,149 @@ QString separatorPresetLabel(const QString &separator)
     if (separator.isEmpty()) {
         return QStringLiteral("None");
     }
-    if (separator == QStringLiteral("|")) {
-        return QStringLiteral("Pipe");
-    }
     if (separator == QString::fromUtf8("\xc2\xb7")) {
         return QStringLiteral("Middle dot");
     }
-    if (separator == QStringLiteral("/")) {
-        return QStringLiteral("Slash");
-    }
-    if (separator == QStringLiteral("-")) {
-        return QStringLiteral("Dash");
-    }
     return QStringLiteral("Custom");
 }
+
+// Swap two whole rows of a QTableWidget, carrying both plain items and embedded
+// cell widgets (checkboxes/combos/spinboxes) with them — cell widgets are bound
+// to a (row, column) slot and do not follow a logical row reorder on their own.
+void swapTableRows(QTableWidget *table, int a, int b)
+{
+    for (int column = 0; column < table->columnCount(); ++column) {
+        if (QWidget *first = table->cellWidget(a, column)) {
+            table->removeCellWidget(a, column);
+            QWidget *second = table->cellWidget(b, column);
+            table->removeCellWidget(b, column);
+            table->setCellWidget(a, column, second);
+            table->setCellWidget(b, column, first);
+        } else {
+            QTableWidgetItem *firstItem = table->takeItem(a, column);
+            QTableWidgetItem *secondItem = table->takeItem(b, column);
+            table->setItem(a, column, secondItem);
+            table->setItem(b, column, firstItem);
+        }
+    }
+}
+
+// Move row `from` so it lands at insertion index `to` (0..rowCount, measured
+// before removal), via adjacent swaps so cell widgets travel correctly. Leaves
+// the moved row selected.
+void moveTableRow(QTableWidget *table, int from, int to)
+{
+    if (from < 0 || from >= table->rowCount()) {
+        return;
+    }
+    int dest = to > from ? to - 1 : to;
+    dest = std::clamp(dest, 0, table->rowCount() - 1);
+    while (from < dest) {
+        swapTableRows(table, from, from + 1);
+        ++from;
+    }
+    while (from > dest) {
+        swapTableRows(table, from, from - 1);
+        --from;
+    }
+    table->selectRow(dest);
+}
+
+// A QTableWidget whose rows can be reordered by dragging, showing a single
+// insertion line between rows (the same above/below cue the queue uses) instead
+// of Qt's default cell-move drag. The actual reordering is delegated to `reorder`
+// so the owner can keep companion state in sync.
+class ReorderableTableWidget final : public QTableWidget {
+public:
+    ReorderableTableWidget(int rows, int columns, QWidget *parent)
+        : QTableWidget(rows, columns, parent)
+    {
+        m_dropLine = new QWidget(viewport());
+        m_dropLine->setFixedHeight(2);
+        m_dropLine->setAutoFillBackground(true);
+        QPalette pal = m_dropLine->palette();
+        pal.setColor(QPalette::Window, palette().color(QPalette::Highlight));
+        m_dropLine->setPalette(pal);
+        m_dropLine->hide();
+    }
+
+    std::function<void(int from, int to)> reorder;
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton) {
+            m_pressRow = rowAt(event->position().toPoint().y());
+            m_pressY = event->position().toPoint().y();
+            m_dragging = false;
+        }
+        QTableWidget::mousePressEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if ((event->buttons() & Qt::LeftButton) && m_pressRow >= 0) {
+            const int y = event->position().toPoint().y();
+            if (!m_dragging && std::abs(y - m_pressY) >= QApplication::startDragDistance()) {
+                m_dragging = true;
+            }
+            if (m_dragging) {
+                showDropLine(dropRowAt(y));
+                return;
+            }
+        }
+        QTableWidget::mouseMoveEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        if (m_dragging) {
+            const int target = dropRowAt(event->position().toPoint().y());
+            const int source = m_pressRow;
+            m_dropLine->hide();
+            m_dragging = false;
+            m_pressRow = -1;
+            if (reorder && source >= 0 && target != source && target != source + 1) {
+                reorder(source, target);
+            }
+            return;
+        }
+        m_pressRow = -1;
+        QTableWidget::mouseReleaseEvent(event);
+    }
+
+private:
+    int dropRowAt(int y) const
+    {
+        if (rowCount() == 0) {
+            return 0;
+        }
+        const int row = rowAt(y);
+        if (row < 0) {
+            return y < 0 ? 0 : rowCount();
+        }
+        const int top = rowViewportPosition(row);
+        return y < top + rowHeight(row) / 2 ? row : row + 1;
+    }
+
+    void showDropLine(int row)
+    {
+        int y = 0;
+        if (rowCount() > 0) {
+            const int lastRow = rowCount() - 1;
+            y = row > lastRow ? rowViewportPosition(lastRow) + rowHeight(lastRow)
+                              : rowViewportPosition(row);
+        }
+        m_dropLine->setGeometry(0, y - 1, viewport()->width(), 2);
+        m_dropLine->raise();
+        m_dropLine->show();
+    }
+
+    QWidget *m_dropLine = nullptr;
+    int m_pressRow = -1;
+    int m_pressY = 0;
+    bool m_dragging = false;
+};
 
 } // namespace
 
@@ -846,20 +1007,72 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
 {
     QDialog dialog(parent);
     dialog.setWindowTitle(QStringLiteral("Track Information"));
-    dialog.resize(640, 420);
+    dialog.resize(m_trackInfoDialogState.value(QStringLiteral("width")).toInt(680),
+                  m_trackInfoDialogState.value(QStringLiteral("height")).toInt(480));
     auto *layout = new QVBoxLayout(&dialog);
 
-    auto *table = new QTableWidget(0, 4, &dialog);
+    auto applyColumnWidths = [](QTableWidget *target, const QList<int> &defaults, const QJsonArray &saved) {
+        for (int column = 0; column < target->columnCount(); ++column) {
+            const int fallback = defaults.value(column, 80);
+            const int width = column < saved.size() ? saved.at(column).toInt(fallback) : fallback;
+            target->setColumnWidth(column, std::max(40, width));
+        }
+    };
+
+    // Panel-wide controls first: alignment, line spacing and overflow govern the
+    // whole information panel rather than any single field, so they sit above the
+    // per-field and per-metadata tables.
+    auto *panelOptionRow = new QHBoxLayout;
+    panelOptionRow->addWidget(new QLabel(QStringLiteral("Alignment"), &dialog));
+    auto *alignment = new QComboBox(&dialog);
+    alignment->addItem(QStringLiteral("Left"), QStringLiteral("left"));
+    alignment->addItem(QStringLiteral("Center"), QStringLiteral("center"));
+    alignment->addItem(QStringLiteral("Right"), QStringLiteral("right"));
+    alignment->setCurrentIndex(std::max(0, alignment->findData(m_trackInfoAlignment)));
+    panelOptionRow->addWidget(alignment);
+    panelOptionRow->addWidget(new QLabel(QStringLiteral("Line spacing"), &dialog));
+    auto *lineSpacingMode = new QComboBox(&dialog);
+    lineSpacingMode->addItem(QStringLiteral("Justify"), QStringLiteral("justify"));
+    lineSpacingMode->addItem(QStringLiteral("Fixed"), QStringLiteral("fixed"));
+    lineSpacingMode->setCurrentIndex(std::max(0, lineSpacingMode->findData(m_trackInfoLineSpacingMode)));
+    panelOptionRow->addWidget(lineSpacingMode);
+    auto *lineSpacing = new QSpinBox(&dialog);
+    lineSpacing->setRange(0, 16);
+    lineSpacing->setValue(m_trackInfoLineSpacing);
+    lineSpacing->setSuffix(QStringLiteral(" px"));
+    lineSpacing->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
+    panelOptionRow->addWidget(lineSpacing);
+    panelOptionRow->addWidget(new QLabel(QStringLiteral("Vertical"), &dialog));
+    auto *verticalAlignment = new QComboBox(&dialog);
+    verticalAlignment->addItem(QStringLiteral("Top"), QStringLiteral("top"));
+    verticalAlignment->addItem(QStringLiteral("Center"), QStringLiteral("center"));
+    verticalAlignment->addItem(QStringLiteral("Bottom"), QStringLiteral("bottom"));
+    verticalAlignment->setCurrentIndex(std::max(0, verticalAlignment->findData(m_trackInfoVerticalAlignment)));
+    verticalAlignment->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
+    panelOptionRow->addWidget(verticalAlignment);
+    panelOptionRow->addWidget(new QLabel(QStringLiteral("Overflow"), &dialog));
+    auto *overflowMode = new QComboBox(&dialog);
+    overflowMode->addItem(QStringLiteral("Scroll"));
+    overflowMode->addItem(QStringLiteral("Truncate"));
+    overflowMode->setCurrentIndex(m_trackInfoTitle->property("muzaitenOverflowMode").toString() == QStringLiteral("truncate") ? 1 : 0);
+    panelOptionRow->addWidget(overflowMode);
+    panelOptionRow->addStretch(1);
+    layout->addLayout(panelOptionRow);
+
+    auto *table = new ReorderableTableWidget(0, 4, &dialog);
     table->setHorizontalHeaderLabels({
         QStringLiteral("Show"),
         QStringLiteral("Field"),
         QStringLiteral("Opacity"),
         QStringLiteral("Size"),
     });
-    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    table->horizontalHeader()->setStretchLastSection(false);
     table->verticalHeader()->setVisible(false);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    NeighborColumnResizer::install(table->horizontalHeader(), [](int) { return 40; });
     layout->addWidget(table);
 
     const QMap<QString, QString> labels = {
@@ -895,26 +1108,129 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         size->setValue(field.value(QStringLiteral("sizeDelta")).toInt(0));
         table->setCellWidget(row, 3, size);
     }
+    applyColumnWidths(table, {54, 240, 96, 76},
+                      m_trackInfoDialogState.value(QStringLiteral("fieldCols")).toArray());
 
     auto *buttonRow = new QHBoxLayout;
     auto *up = new QPushButton(QStringLiteral("Up"), &dialog);
     auto *down = new QPushButton(QStringLiteral("Down"), &dialog);
     buttonRow->addWidget(up);
     buttonRow->addWidget(down);
+    auto *fieldDragHint = new QLabel(QStringLiteral("or drag rows to reorder"), &dialog);
+    fieldDragHint->setEnabled(false);
+    buttonRow->addWidget(fieldDragHint);
     buttonRow->addStretch(1);
     layout->addLayout(buttonRow);
+    table->reorder = [table](int from, int to) { moveTableRow(table, from, to); };
 
-    auto *metadataTable = new QTableWidget(0, 3, &dialog);
+    auto *metadataTable = new ReorderableTableWidget(0, 3, &dialog);
     metadataTable->setHorizontalHeaderLabels({
         QStringLiteral("Show"),
         QStringLiteral("Metadata"),
         QStringLiteral("When"),
     });
-    metadataTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    metadataTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    metadataTable->horizontalHeader()->setStretchLastSection(false);
     metadataTable->verticalHeader()->setVisible(false);
     metadataTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    metadataTable->setSelectionMode(QAbstractItemView::SingleSelection);
     metadataTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    NeighborColumnResizer::install(metadataTable->horizontalHeader(), [](int) { return 40; });
     layout->addWidget(metadataTable);
+
+    auto *metadataButtonRow = new QHBoxLayout;
+    auto *metadataUp = new QPushButton(QStringLiteral("Up"), &dialog);
+    auto *metadataDown = new QPushButton(QStringLiteral("Down"), &dialog);
+    metadataButtonRow->addWidget(metadataUp);
+    metadataButtonRow->addWidget(metadataDown);
+    auto *metadataDragHint = new QLabel(QStringLiteral("or drag rows to reorder"), &dialog);
+    metadataDragHint->setEnabled(false);
+    metadataButtonRow->addWidget(metadataDragHint);
+    metadataButtonRow->addStretch(1);
+    layout->addLayout(metadataButtonRow);
+
+    // Contextual "Only if notable" customization, kept next to the separator row.
+    // It edits the threshold of the currently selected metadata row and greys out
+    // unless that row both supports a threshold and is set to "Only if notable".
+    auto *notableRow = new QHBoxLayout;
+    auto *notableLabel = new QLabel(&dialog);
+    auto *notableSpin = new QSpinBox(&dialog);
+    notableSpin->setMaximumWidth(110);
+    notableRow->addWidget(notableLabel);
+    notableRow->addWidget(notableSpin);
+    notableRow->addStretch(1);
+    layout->addLayout(notableRow);
+
+    // Separator controls share one setting, so pack them tightly and left-aligned
+    // rather than spreading evenly across the row.
+    auto *metadataOptionRow = new QHBoxLayout;
+    metadataOptionRow->addWidget(new QLabel(QStringLiteral("Separator"), &dialog));
+    auto *separatorPreset = new QComboBox(&dialog);
+    separatorPreset->addItem(QStringLiteral("None"), QString());
+    separatorPreset->addItem(QStringLiteral("Middle dot"), QString::fromUtf8("\xc2\xb7"));
+    separatorPreset->addItem(QStringLiteral("Custom"), QString());
+    separatorPreset->setCurrentText(separatorPresetLabel(m_trackInfoMetadataSeparator));
+    auto *separatorCustom = new QLineEdit(&dialog);
+    separatorCustom->setMaximumWidth(80);
+    separatorCustom->setText(m_trackInfoMetadataSeparator);
+    separatorCustom->setEnabled(separatorPreset->currentText() == QStringLiteral("Custom"));
+    metadataOptionRow->addWidget(separatorPreset);
+    metadataOptionRow->addWidget(separatorCustom);
+    metadataOptionRow->addSpacing(12);
+    metadataOptionRow->addWidget(new QLabel(QStringLiteral("Item spacing"), &dialog));
+    auto *metadataSpacing = new QSpinBox(&dialog);
+    metadataSpacing->setRange(0, 6);
+    metadataSpacing->setValue(m_trackInfoMetadataSpacing);
+    metadataOptionRow->addWidget(metadataSpacing);
+    metadataOptionRow->addStretch(1);
+    layout->addLayout(metadataOptionRow);
+
+    auto configureNotableSpin = [](QSpinBox *spin, const QString &key) {
+        if (key == QStringLiteral("sampleRate")) {
+            spin->setRange(1, 768);
+            spin->setSuffix(QStringLiteral(" kHz"));
+        } else if (key == QStringLiteral("bitDepth")) {
+            spin->setRange(1, 64);
+            spin->setSuffix(QStringLiteral("-bit"));
+        } else if (key == QStringLiteral("channels")) {
+            spin->setRange(1, 32);
+            spin->setSuffix(QStringLiteral(" ch"));
+        }
+    };
+    auto notablePrompt = [](const QString &key) -> QString {
+        if (key == QStringLiteral("sampleRate")) {
+            return QStringLiteral("Notable when sample rate is above");
+        }
+        if (key == QStringLiteral("bitDepth")) {
+            return QStringLiteral("Notable when bit depth is above");
+        }
+        if (key == QStringLiteral("channels")) {
+            return QStringLiteral("Notable when channels exceed");
+        }
+        return QString();
+    };
+    auto refreshNotable = [=]() {
+        const int row = metadataTable->currentRow();
+        bool active = false;
+        QString key;
+        if (row >= 0 && metadataTable->item(row, 1) != nullptr) {
+            key = metadataTable->item(row, 1)->data(Qt::UserRole).toString();
+            auto *modeBox = qobject_cast<QComboBox *>(metadataTable->cellWidget(row, 2));
+            const QString mode = modeBox == nullptr ? QString() : modeBox->currentData().toString();
+            active = metadataNotableConfigurable(key) && mode == QStringLiteral("notable");
+        }
+        if (active) {
+            notableLabel->setText(notablePrompt(key));
+            const QSignalBlocker blocker(notableSpin);
+            configureNotableSpin(notableSpin, key);
+            notableSpin->setValue(metadataTable->item(row, 1)->data(Qt::UserRole + 1).toInt());
+        } else {
+            notableLabel->setText(QStringLiteral(
+                "Only if notable: select a sample rate, bit depth or channels row"));
+        }
+        notableLabel->setEnabled(active);
+        notableSpin->setEnabled(active);
+    };
 
     for (const QJsonValue &value : trackInfoMetadataSettingsJson()) {
         const QJsonObject item = value.toObject();
@@ -931,6 +1247,8 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         const QString key = item.value(QStringLiteral("key")).toString();
         auto *itemCell = new QTableWidgetItem(metadataLabel(key));
         itemCell->setData(Qt::UserRole, key);
+        itemCell->setData(Qt::UserRole + 1,
+                          item.value(QStringLiteral("notableMin")).toInt(metadataDefaultNotableMin(key)));
         metadataTable->setItem(row, 1, itemCell);
 
         auto *mode = new QComboBox(metadataTable);
@@ -939,134 +1257,48 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         mode->addItem(QStringLiteral("Lossy bitrate"), QStringLiteral("lossy"));
         mode->setCurrentIndex(std::max(0, mode->findData(item.value(QStringLiteral("mode")).toString(metadataDefaultMode(key)))));
         metadataTable->setCellWidget(row, 2, mode);
+        connect(mode, &QComboBox::currentIndexChanged, &dialog, [refreshNotable]() { refreshNotable(); });
     }
+    applyColumnWidths(metadataTable, {54, 220, 190},
+                      m_trackInfoDialogState.value(QStringLiteral("metaCols")).toArray());
 
-    auto *metadataButtonRow = new QHBoxLayout;
-    auto *metadataUp = new QPushButton(QStringLiteral("Up"), &dialog);
-    auto *metadataDown = new QPushButton(QStringLiteral("Down"), &dialog);
-    metadataButtonRow->addWidget(metadataUp);
-    metadataButtonRow->addWidget(metadataDown);
-    metadataButtonRow->addStretch(1);
-    layout->addLayout(metadataButtonRow);
-
-    auto *metadataOptionRow = new QHBoxLayout;
-    metadataOptionRow->addWidget(new QLabel(QStringLiteral("Separator"), &dialog));
-    auto *separatorPreset = new QComboBox(&dialog);
-    separatorPreset->addItem(QStringLiteral("None"), QString());
-    separatorPreset->addItem(QStringLiteral("Middle dot"), QString::fromUtf8("\xc2\xb7"));
-    separatorPreset->addItem(QStringLiteral("Pipe"), QStringLiteral("|"));
-    separatorPreset->addItem(QStringLiteral("Slash"), QStringLiteral("/"));
-    separatorPreset->addItem(QStringLiteral("Dash"), QStringLiteral("-"));
-    separatorPreset->addItem(QStringLiteral("Custom"), QString());
-    separatorPreset->setCurrentText(separatorPresetLabel(m_trackInfoMetadataSeparator));
-    auto *separatorCustom = new QLineEdit(&dialog);
-    separatorCustom->setMaximumWidth(80);
-    separatorCustom->setText(m_trackInfoMetadataSeparator);
-    separatorCustom->setEnabled(separatorPreset->currentText() == QStringLiteral("Custom"));
-    metadataOptionRow->addWidget(separatorPreset);
-    metadataOptionRow->addWidget(separatorCustom);
-    metadataOptionRow->addWidget(new QLabel(QStringLiteral("Item spacing"), &dialog));
-    auto *metadataSpacing = new QSpinBox(&dialog);
-    metadataSpacing->setRange(0, 6);
-    metadataSpacing->setValue(m_trackInfoMetadataSpacing);
-    metadataOptionRow->addWidget(metadataSpacing);
-    layout->addLayout(metadataOptionRow);
-
-    auto *layoutOptionRow = new QHBoxLayout;
-    layoutOptionRow->addWidget(new QLabel(QStringLiteral("Alignment"), &dialog));
-    auto *alignment = new QComboBox(&dialog);
-    alignment->addItem(QStringLiteral("Left"), QStringLiteral("left"));
-    alignment->addItem(QStringLiteral("Center"), QStringLiteral("center"));
-    alignment->addItem(QStringLiteral("Right"), QStringLiteral("right"));
-    alignment->setCurrentIndex(std::max(0, alignment->findData(m_trackInfoAlignment)));
-    layoutOptionRow->addWidget(alignment);
-    layoutOptionRow->addWidget(new QLabel(QStringLiteral("Line spacing"), &dialog));
-    auto *lineSpacingMode = new QComboBox(&dialog);
-    lineSpacingMode->addItem(QStringLiteral("Justify"), QStringLiteral("justify"));
-    lineSpacingMode->addItem(QStringLiteral("Fixed"), QStringLiteral("fixed"));
-    lineSpacingMode->setCurrentIndex(std::max(0, lineSpacingMode->findData(m_trackInfoLineSpacingMode)));
-    auto *lineSpacing = new QSpinBox(&dialog);
-    lineSpacing->setRange(0, 16);
-    lineSpacing->setValue(m_trackInfoLineSpacing);
-    lineSpacing->setSuffix(QStringLiteral(" px"));
-    lineSpacing->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
-    layoutOptionRow->addWidget(lineSpacingMode);
-    layoutOptionRow->addWidget(lineSpacing);
-    layoutOptionRow->addWidget(new QLabel(QStringLiteral("Vertical"), &dialog));
-    auto *verticalAlignment = new QComboBox(&dialog);
-    verticalAlignment->addItem(QStringLiteral("Top"), QStringLiteral("top"));
-    verticalAlignment->addItem(QStringLiteral("Center"), QStringLiteral("center"));
-    verticalAlignment->addItem(QStringLiteral("Bottom"), QStringLiteral("bottom"));
-    verticalAlignment->setCurrentIndex(std::max(0, verticalAlignment->findData(m_trackInfoVerticalAlignment)));
-    verticalAlignment->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
-    layoutOptionRow->addWidget(verticalAlignment);
-    layout->addLayout(layoutOptionRow);
-
-    auto *overflowRow = new QHBoxLayout;
-    overflowRow->addWidget(new QLabel(QStringLiteral("Overflow"), &dialog));
-    auto *overflowMode = new QComboBox(&dialog);
-    overflowMode->addItem(QStringLiteral("Scroll"));
-    overflowMode->addItem(QStringLiteral("Truncate"));
-    overflowMode->setCurrentIndex(m_trackInfoTitle->property("muzaitenOverflowMode").toString() == QStringLiteral("truncate") ? 1 : 0);
-    overflowRow->addWidget(overflowMode, 1);
-    layout->addLayout(overflowRow);
-
-    auto moveSelected = [table](int direction) {
-        const int row = table->currentRow();
-        const int target = row + direction;
-        if (row < 0 || target < 0 || target >= table->rowCount()) {
-            return;
-        }
-        for (int column = 0; column < table->columnCount(); ++column) {
-            if (QWidget *first = table->cellWidget(row, column)) {
-                table->removeCellWidget(row, column);
-                QWidget *second = table->cellWidget(target, column);
-                table->removeCellWidget(target, column);
-                table->setCellWidget(row, column, second);
-                table->setCellWidget(target, column, first);
-            } else {
-                QTableWidgetItem *firstItem = table->takeItem(row, column);
-                QTableWidgetItem *secondItem = table->takeItem(target, column);
-                table->setItem(row, column, secondItem);
-                table->setItem(target, column, firstItem);
-            }
-        }
-        table->selectRow(target);
-    };
-    connect(up, &QPushButton::clicked, &dialog, [moveSelected]() {
-        moveSelected(-1);
-    });
-    connect(down, &QPushButton::clicked, &dialog, [moveSelected]() {
-        moveSelected(1);
-    });
-    auto moveSelectedMetadata = [metadataTable](int direction) {
+    connect(metadataTable, &QTableWidget::itemSelectionChanged, &dialog, [refreshNotable]() { refreshNotable(); });
+    connect(notableSpin, &QSpinBox::valueChanged, &dialog, [metadataTable](int value) {
         const int row = metadataTable->currentRow();
-        const int target = row + direction;
-        if (row < 0 || target < 0 || target >= metadataTable->rowCount()) {
+        if (row < 0 || metadataTable->item(row, 1) == nullptr) {
             return;
         }
-        for (int column = 0; column < metadataTable->columnCount(); ++column) {
-            if (QWidget *first = metadataTable->cellWidget(row, column)) {
-                metadataTable->removeCellWidget(row, column);
-                QWidget *second = metadataTable->cellWidget(target, column);
-                metadataTable->removeCellWidget(target, column);
-                metadataTable->setCellWidget(row, column, second);
-                metadataTable->setCellWidget(target, column, first);
-            } else {
-                QTableWidgetItem *firstItem = metadataTable->takeItem(row, column);
-                QTableWidgetItem *secondItem = metadataTable->takeItem(target, column);
-                metadataTable->setItem(row, column, secondItem);
-                metadataTable->setItem(target, column, firstItem);
-            }
+        const QString key = metadataTable->item(row, 1)->data(Qt::UserRole).toString();
+        if (metadataNotableConfigurable(key)) {
+            metadataTable->item(row, 1)->setData(Qt::UserRole + 1, value);
         }
-        metadataTable->selectRow(target);
+    });
+    refreshNotable();
+
+    auto reorderFieldsRow = [table](int direction) {
+        const int row = table->currentRow();
+        if (row < 0) {
+            return;
+        }
+        moveTableRow(table, row, row + (direction > 0 ? 2 : -1));
     };
-    connect(metadataUp, &QPushButton::clicked, &dialog, [moveSelectedMetadata]() {
-        moveSelectedMetadata(-1);
-    });
-    connect(metadataDown, &QPushButton::clicked, &dialog, [moveSelectedMetadata]() {
-        moveSelectedMetadata(1);
-    });
+    connect(up, &QPushButton::clicked, &dialog, [reorderFieldsRow]() { reorderFieldsRow(-1); });
+    connect(down, &QPushButton::clicked, &dialog, [reorderFieldsRow]() { reorderFieldsRow(1); });
+
+    auto reorderMetadataRow = [metadataTable](int direction) {
+        const int row = metadataTable->currentRow();
+        if (row < 0) {
+            return;
+        }
+        moveTableRow(metadataTable, row, row + (direction > 0 ? 2 : -1));
+    };
+    connect(metadataUp, &QPushButton::clicked, &dialog, [reorderMetadataRow]() { reorderMetadataRow(-1); });
+    connect(metadataDown, &QPushButton::clicked, &dialog, [reorderMetadataRow]() { reorderMetadataRow(1); });
+    metadataTable->reorder = [metadataTable, refreshNotable](int from, int to) {
+        moveTableRow(metadataTable, from, to);
+        refreshNotable();
+    };
+
     connect(separatorPreset, &QComboBox::currentTextChanged, &dialog, [separatorPreset, separatorCustom]() {
         const bool custom = separatorPreset->currentText() == QStringLiteral("Custom");
         separatorCustom->setEnabled(custom);
@@ -1085,7 +1317,26 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
-    if (dialog.exec() != QDialog::Accepted) {
+    const int result = dialog.exec();
+
+    // Remember the dialog's own UI state (size, column widths) regardless of the
+    // outcome, so reopening keeps the layout the user arranged.
+    auto columnWidthsOf = [](QTableWidget *target) {
+        QJsonArray widths;
+        for (int column = 0; column < target->columnCount(); ++column) {
+            widths.append(target->columnWidth(column));
+        }
+        return widths;
+    };
+    QJsonObject dialogState;
+    dialogState.insert(QStringLiteral("width"), dialog.width());
+    dialogState.insert(QStringLiteral("height"), dialog.height());
+    dialogState.insert(QStringLiteral("fieldCols"), columnWidthsOf(table));
+    dialogState.insert(QStringLiteral("metaCols"), columnWidthsOf(metadataTable));
+    m_trackInfoDialogState = dialogState;
+
+    if (result != QDialog::Accepted) {
+        emit viewSettingsChanged();
         return;
     }
 
@@ -1113,6 +1364,7 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         auto *mode = qobject_cast<QComboBox *>(metadataTable->cellWidget(row, 2));
         item.insert(QStringLiteral("visible"), show == nullptr || show->isChecked());
         item.insert(QStringLiteral("mode"), mode == nullptr ? QStringLiteral("always") : mode->currentData().toString());
+        item.insert(QStringLiteral("notableMin"), metadataTable->item(row, 1)->data(Qt::UserRole + 1).toInt());
         metadataItems.append(item);
     }
     root.insert(QStringLiteral("trackInfoMetadataItems"), metadataItems);
@@ -1141,6 +1393,9 @@ QString RightSidebar::viewSettingsJson() const
     root.insert(QStringLiteral("trackInfoVerticalAlignment"), m_trackInfoVerticalAlignment);
     const QString overflowMode = m_trackInfoTitle->property("muzaitenOverflowMode").toString();
     root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode.isEmpty() ? QStringLiteral("scroll") : overflowMode);
+    if (!m_trackInfoDialogState.isEmpty()) {
+        root.insert(QStringLiteral("trackInfoDialog"), m_trackInfoDialogState);
+    }
     QJsonArray splitterSizes;
     for (int size : m_splitter->sizes()) {
         splitterSizes.append(size);
@@ -1168,6 +1423,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
         m_splitter->setSizes(sizes);
     }
     setTrackInfoVisible(root.value(QStringLiteral("showTrackInfo")).toBool(true));
+    m_trackInfoDialogState = root.value(QStringLiteral("trackInfoDialog")).toObject();
     applyTrackInfoSettingsJson(root);
 }
 
@@ -1177,6 +1433,7 @@ void RightSidebar::resetViewSettings()
     m_splitter->setSizes({420, 150, 240});
     setTrackInfoVisible(true);
     m_trackInfoMetadataItems = defaultTrackInfoMetadataItems();
+    m_trackInfoDialogState = QJsonObject();
     m_trackInfoMetadataSeparator = QString::fromUtf8("\xc2\xb7");
     m_trackInfoMetadataSpacing = 1;
     m_trackInfoAlignment = QStringLiteral("left");
