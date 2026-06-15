@@ -610,52 +610,11 @@ QString separatorPresetLabel(const QString &separator)
     return QStringLiteral("Custom");
 }
 
-// Swap two whole rows of a QTableWidget, carrying both plain items and embedded
-// cell widgets (checkboxes/combos/spinboxes) with them — cell widgets are bound
-// to a (row, column) slot and do not follow a logical row reorder on their own.
-void swapTableRows(QTableWidget *table, int a, int b)
-{
-    for (int column = 0; column < table->columnCount(); ++column) {
-        if (QWidget *first = table->cellWidget(a, column)) {
-            table->removeCellWidget(a, column);
-            QWidget *second = table->cellWidget(b, column);
-            table->removeCellWidget(b, column);
-            table->setCellWidget(a, column, second);
-            table->setCellWidget(b, column, first);
-        } else {
-            QTableWidgetItem *firstItem = table->takeItem(a, column);
-            QTableWidgetItem *secondItem = table->takeItem(b, column);
-            table->setItem(a, column, secondItem);
-            table->setItem(b, column, firstItem);
-        }
-    }
-}
-
-// Move row `from` so it lands at insertion index `to` (0..rowCount, measured
-// before removal), via adjacent swaps so cell widgets travel correctly. Leaves
-// the moved row selected.
-void moveTableRow(QTableWidget *table, int from, int to)
-{
-    if (from < 0 || from >= table->rowCount()) {
-        return;
-    }
-    int dest = to > from ? to - 1 : to;
-    dest = std::clamp(dest, 0, table->rowCount() - 1);
-    while (from < dest) {
-        swapTableRows(table, from, from + 1);
-        ++from;
-    }
-    while (from > dest) {
-        swapTableRows(table, from, from - 1);
-        --from;
-    }
-    table->selectRow(dest);
-}
-
 // A QTableWidget whose rows can be reordered by dragging, showing a single
 // insertion line between rows (the same above/below cue the queue uses) instead
 // of Qt's default cell-move drag. The actual reordering is delegated to `reorder`
-// so the owner can keep companion state in sync.
+// so the owner can rebuild the rows from data (rather than juggling cell-widget
+// pointers, which removeCellWidget would delete out from under us).
 class ReorderableTableWidget final : public QTableWidget {
 public:
     ReorderableTableWidget(int rows, int columns, QWidget *parent)
@@ -672,7 +631,33 @@ public:
 
     std::function<void(int from, int to)> reorder;
 
+    // The column that absorbs leftover width so the columns always span the
+    // viewport, letting the user-resizable columns trade against it.
+    void setFillColumn(int column) { m_fillColumn = column; }
+
 protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QTableWidget::resizeEvent(event);
+        fitFillColumn();
+    }
+
+    void fitFillColumn()
+    {
+        if (m_fillColumn < 0 || m_fillColumn >= columnCount()) {
+            return;
+        }
+        int other = 0;
+        for (int column = 0; column < columnCount(); ++column) {
+            if (column != m_fillColumn) {
+                other += columnWidth(column);
+            }
+        }
+        const int available = viewport()->width() - other;
+        if (available > 60) {
+            setColumnWidth(m_fillColumn, available);
+        }
+    }
     void mousePressEvent(QMouseEvent *event) override
     {
         if (event->button() == Qt::LeftButton) {
@@ -745,6 +730,7 @@ private:
     QWidget *m_dropLine = nullptr;
     int m_pressRow = -1;
     int m_pressY = 0;
+    int m_fillColumn = -1;
     bool m_dragging = false;
 };
 
@@ -979,22 +965,31 @@ void RightSidebar::updateTrackInfoLabels()
     const bool hasTrack = !m_currentTrack.path.isEmpty();
     m_noTrackLabel->setVisible(!hasTrack);
     applyTrackInfoLayoutSpacing();
-    for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
-        label->setVisible(hasTrack && !label->property("muzaitenHidden").toBool());
-    }
     if (!hasTrack) {
+        for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
+            label->setVisible(false);
+        }
         return;
     }
 
-    static_cast<TrackInfoLabel *>(m_trackInfoTitle)->setFullText(m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title);
-    static_cast<TrackInfoLabel *>(m_trackInfoArtist)->setFullText(m_currentTrack.artistName);
-    static_cast<TrackInfoLabel *>(m_trackInfoAlbum)->setFullText(m_currentTrack.albumTitle);
-    static_cast<TrackInfoLabel *>(m_trackInfoYear)->setFullText(displayDate(m_currentTrack));
-    static_cast<TrackInfoLabel *>(m_trackInfoProperties)->setFullText(metadataText(m_currentTrack,
-                                                                                  m_trackInfoMetadataItems,
-                                                                                  m_trackInfoMetadataSeparator,
-                                                                                  m_trackInfoMetadataSpacing));
-    static_cast<TrackInfoLabel *>(m_trackInfoFile)->setFullText(m_currentTrack.path);
+    const QString metadata = metadataText(m_currentTrack,
+                                          m_trackInfoMetadataItems,
+                                          m_trackInfoMetadataSeparator,
+                                          m_trackInfoMetadataSpacing);
+    const QVector<QPair<QWidget *, QString>> values = {
+        {m_trackInfoTitle, m_currentTrack.title.isEmpty() ? m_currentTrack.filename : m_currentTrack.title},
+        {m_trackInfoArtist, m_currentTrack.artistName},
+        {m_trackInfoAlbum, m_currentTrack.albumTitle},
+        {m_trackInfoYear, displayDate(m_currentTrack)},
+        {m_trackInfoProperties, metadata},
+        {m_trackInfoFile, m_currentTrack.path},
+    };
+    for (const auto &[label, text] : values) {
+        static_cast<TrackInfoLabel *>(label)->setFullText(text);
+        // A field configured to show but with no value for this track would leave
+        // a blank line in the panel, so collapse it instead of rendering empty.
+        label->setVisible(!label->property("muzaitenHidden").toBool() && !text.trimmed().isEmpty());
+    }
     m_trackInfoFile->setToolTip(m_currentTrack.path);
 }
 
@@ -1072,22 +1067,27 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setFillColumn(1);
     NeighborColumnResizer::install(table->horizontalHeader(), [](int) { return 40; });
     layout->addWidget(table);
 
     const QMap<QString, QString> labels = {
-        {QStringLiteral("title"), QStringLiteral("<Title>")},
-        {QStringLiteral("artist"), QStringLiteral("<Artist>")},
-        {QStringLiteral("album"), QStringLiteral("<Album>")},
-        {QStringLiteral("date"), QStringLiteral("<Date>")},
-        {QStringLiteral("metadata"), QStringLiteral("<Metadata>")},
-        {QStringLiteral("file"), QStringLiteral("<File full path>")},
+        {QStringLiteral("title"), QStringLiteral("Title")},
+        {QStringLiteral("artist"), QStringLiteral("Artist")},
+        {QStringLiteral("album"), QStringLiteral("Album")},
+        {QStringLiteral("date"), QStringLiteral("Date")},
+        {QStringLiteral("metadata"), QStringLiteral("Metadata")},
+        {QStringLiteral("file"), QStringLiteral("File full path")},
     };
 
-    for (const QJsonValue &value : trackInfoSettingsJson()) {
-        const QJsonObject field = value.toObject();
+    // Rows are rebuilt from their data on every reorder rather than swapping
+    // cell-widget pointers: QTableWidget::removeCellWidget deletes the widget, so
+    // shuffling pointers blanks cells and dangles. read/append/rebuild keep the
+    // editable state intact.
+    auto appendFieldRow = [table, labels](const QJsonObject &field) {
         const int row = table->rowCount();
         table->insertRow(row);
+        const QString key = field.value(QStringLiteral("key")).toString();
         auto *show = new QCheckBox(table);
         show->setChecked(field.value(QStringLiteral("visible")).toBool(true));
         auto *showCell = new QWidget(table);
@@ -1095,8 +1095,8 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         showLayout->setContentsMargins(0, 0, 0, 0);
         showLayout->addWidget(show, 0, Qt::AlignCenter);
         table->setCellWidget(row, 0, showCell);
-        auto *fieldItem = new QTableWidgetItem(labels.value(field.value(QStringLiteral("key")).toString()));
-        fieldItem->setData(Qt::UserRole, field.value(QStringLiteral("key")).toString());
+        auto *fieldItem = new QTableWidgetItem(labels.value(key));
+        fieldItem->setData(Qt::UserRole, key);
         table->setItem(row, 1, fieldItem);
         auto *opacity = new QSpinBox(table);
         opacity->setRange(10, 100);
@@ -1107,6 +1107,40 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         size->setRange(-4, 6);
         size->setValue(field.value(QStringLiteral("sizeDelta")).toInt(0));
         table->setCellWidget(row, 3, size);
+    };
+    auto readFieldRow = [table](int row) {
+        QJsonObject field;
+        field.insert(QStringLiteral("key"), table->item(row, 1)->data(Qt::UserRole).toString());
+        auto *showCell = table->cellWidget(row, 0);
+        auto *show = showCell == nullptr ? nullptr : showCell->findChild<QCheckBox *>();
+        auto *opacity = qobject_cast<QSpinBox *>(table->cellWidget(row, 2));
+        auto *size = qobject_cast<QSpinBox *>(table->cellWidget(row, 3));
+        field.insert(QStringLiteral("visible"), show == nullptr || show->isChecked());
+        field.insert(QStringLiteral("opacity"), opacity == nullptr ? 50 : opacity->value());
+        field.insert(QStringLiteral("sizeDelta"), size == nullptr ? 0 : size->value());
+        return field;
+    };
+    auto reorderFields = [table, appendFieldRow, readFieldRow](int from, int to) {
+        QJsonArray rows;
+        for (int row = 0; row < table->rowCount(); ++row) {
+            rows.append(readFieldRow(row));
+        }
+        if (from < 0 || from >= rows.size()) {
+            return;
+        }
+        const QJsonValue moved = rows.at(from);
+        rows.removeAt(from);
+        const int dest = std::clamp(to > from ? to - 1 : to, 0, static_cast<int>(rows.size()));
+        rows.insert(dest, moved);
+        table->setRowCount(0);
+        for (const QJsonValue &value : rows) {
+            appendFieldRow(value.toObject());
+        }
+        table->selectRow(dest);
+    };
+
+    for (const QJsonValue &value : trackInfoSettingsJson()) {
+        appendFieldRow(value.toObject());
     }
     applyColumnWidths(table, {54, 240, 96, 76},
                       m_trackInfoDialogState.value(QStringLiteral("fieldCols")).toArray());
@@ -1116,12 +1150,23 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     auto *down = new QPushButton(QStringLiteral("Down"), &dialog);
     buttonRow->addWidget(up);
     buttonRow->addWidget(down);
-    auto *fieldDragHint = new QLabel(QStringLiteral("or drag rows to reorder"), &dialog);
-    fieldDragHint->setEnabled(false);
-    buttonRow->addWidget(fieldDragHint);
     buttonRow->addStretch(1);
     layout->addLayout(buttonRow);
-    table->reorder = [table](int from, int to) { moveTableRow(table, from, to); };
+    table->reorder = reorderFields;
+    connect(up, &QPushButton::clicked, &dialog, [table, reorderFields]() {
+        const int row = table->currentRow();
+        if (row >= 0) {
+            reorderFields(row, row - 1);
+        }
+    });
+    connect(down, &QPushButton::clicked, &dialog, [table, reorderFields]() {
+        const int row = table->currentRow();
+        if (row >= 0) {
+            reorderFields(row, row + 2);
+        }
+    });
+
+    layout->addSpacing(24);
 
     auto *metadataTable = new ReorderableTableWidget(0, 3, &dialog);
     metadataTable->setHorizontalHeaderLabels({
@@ -1135,6 +1180,7 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     metadataTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     metadataTable->setSelectionMode(QAbstractItemView::SingleSelection);
     metadataTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    metadataTable->setFillColumn(1);
     NeighborColumnResizer::install(metadataTable->horizontalHeader(), [](int) { return 40; });
     layout->addWidget(metadataTable);
 
@@ -1143,9 +1189,6 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     auto *metadataDown = new QPushButton(QStringLiteral("Down"), &dialog);
     metadataButtonRow->addWidget(metadataUp);
     metadataButtonRow->addWidget(metadataDown);
-    auto *metadataDragHint = new QLabel(QStringLiteral("or drag rows to reorder"), &dialog);
-    metadataDragHint->setEnabled(false);
-    metadataButtonRow->addWidget(metadataDragHint);
     metadataButtonRow->addStretch(1);
     layout->addLayout(metadataButtonRow);
 
@@ -1199,13 +1242,13 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     };
     auto notablePrompt = [](const QString &key) -> QString {
         if (key == QStringLiteral("sampleRate")) {
-            return QStringLiteral("Notable when sample rate is above");
+            return QStringLiteral("Sample rate above");
         }
         if (key == QStringLiteral("bitDepth")) {
-            return QStringLiteral("Notable when bit depth is above");
+            return QStringLiteral("Bit depth above");
         }
         if (key == QStringLiteral("channels")) {
-            return QStringLiteral("Notable when channels exceed");
+            return QStringLiteral("Channels above");
         }
         return QString();
     };
@@ -1219,21 +1262,18 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
             const QString mode = modeBox == nullptr ? QString() : modeBox->currentData().toString();
             active = metadataNotableConfigurable(key) && mode == QStringLiteral("notable");
         }
+        notableLabel->setText(active ? notablePrompt(key) : QStringLiteral("Notable threshold"));
         if (active) {
-            notableLabel->setText(notablePrompt(key));
             const QSignalBlocker blocker(notableSpin);
             configureNotableSpin(notableSpin, key);
             notableSpin->setValue(metadataTable->item(row, 1)->data(Qt::UserRole + 1).toInt());
-        } else {
-            notableLabel->setText(QStringLiteral(
-                "Only if notable: select a sample rate, bit depth or channels row"));
         }
         notableLabel->setEnabled(active);
         notableSpin->setEnabled(active);
     };
 
-    for (const QJsonValue &value : trackInfoMetadataSettingsJson()) {
-        const QJsonObject item = value.toObject();
+    auto *dialogPtr = &dialog;
+    auto appendMetadataRow = [metadataTable, refreshNotable, dialogPtr](const QJsonObject &item) {
         const int row = metadataTable->rowCount();
         metadataTable->insertRow(row);
         auto *show = new QCheckBox(metadataTable);
@@ -1257,7 +1297,42 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         mode->addItem(QStringLiteral("Lossy bitrate"), QStringLiteral("lossy"));
         mode->setCurrentIndex(std::max(0, mode->findData(item.value(QStringLiteral("mode")).toString(metadataDefaultMode(key)))));
         metadataTable->setCellWidget(row, 2, mode);
-        connect(mode, &QComboBox::currentIndexChanged, &dialog, [refreshNotable]() { refreshNotable(); });
+        QObject::connect(mode, &QComboBox::currentIndexChanged, dialogPtr, [refreshNotable]() { refreshNotable(); });
+    };
+    auto readMetadataRow = [metadataTable](int row) {
+        QJsonObject item;
+        const QTableWidgetItem *cell = metadataTable->item(row, 1);
+        item.insert(QStringLiteral("key"), cell->data(Qt::UserRole).toString());
+        auto *showCell = metadataTable->cellWidget(row, 0);
+        auto *show = showCell == nullptr ? nullptr : showCell->findChild<QCheckBox *>();
+        auto *mode = qobject_cast<QComboBox *>(metadataTable->cellWidget(row, 2));
+        item.insert(QStringLiteral("visible"), show == nullptr || show->isChecked());
+        item.insert(QStringLiteral("mode"), mode == nullptr ? QStringLiteral("always") : mode->currentData().toString());
+        item.insert(QStringLiteral("notableMin"), cell->data(Qt::UserRole + 1).toInt());
+        return item;
+    };
+    auto reorderMetadata = [metadataTable, appendMetadataRow, readMetadataRow, refreshNotable](int from, int to) {
+        QJsonArray rows;
+        for (int row = 0; row < metadataTable->rowCount(); ++row) {
+            rows.append(readMetadataRow(row));
+        }
+        if (from < 0 || from >= rows.size()) {
+            return;
+        }
+        const QJsonValue moved = rows.at(from);
+        rows.removeAt(from);
+        const int dest = std::clamp(to > from ? to - 1 : to, 0, static_cast<int>(rows.size()));
+        rows.insert(dest, moved);
+        metadataTable->setRowCount(0);
+        for (const QJsonValue &value : rows) {
+            appendMetadataRow(value.toObject());
+        }
+        metadataTable->selectRow(dest);
+        refreshNotable();
+    };
+
+    for (const QJsonValue &value : trackInfoMetadataSettingsJson()) {
+        appendMetadataRow(value.toObject());
     }
     applyColumnWidths(metadataTable, {54, 220, 190},
                       m_trackInfoDialogState.value(QStringLiteral("metaCols")).toArray());
@@ -1275,29 +1350,19 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     });
     refreshNotable();
 
-    auto reorderFieldsRow = [table](int direction) {
-        const int row = table->currentRow();
-        if (row < 0) {
-            return;
-        }
-        moveTableRow(table, row, row + (direction > 0 ? 2 : -1));
-    };
-    connect(up, &QPushButton::clicked, &dialog, [reorderFieldsRow]() { reorderFieldsRow(-1); });
-    connect(down, &QPushButton::clicked, &dialog, [reorderFieldsRow]() { reorderFieldsRow(1); });
-
-    auto reorderMetadataRow = [metadataTable](int direction) {
+    metadataTable->reorder = reorderMetadata;
+    connect(metadataUp, &QPushButton::clicked, &dialog, [metadataTable, reorderMetadata]() {
         const int row = metadataTable->currentRow();
-        if (row < 0) {
-            return;
+        if (row >= 0) {
+            reorderMetadata(row, row - 1);
         }
-        moveTableRow(metadataTable, row, row + (direction > 0 ? 2 : -1));
-    };
-    connect(metadataUp, &QPushButton::clicked, &dialog, [reorderMetadataRow]() { reorderMetadataRow(-1); });
-    connect(metadataDown, &QPushButton::clicked, &dialog, [reorderMetadataRow]() { reorderMetadataRow(1); });
-    metadataTable->reorder = [metadataTable, refreshNotable](int from, int to) {
-        moveTableRow(metadataTable, from, to);
-        refreshNotable();
-    };
+    });
+    connect(metadataDown, &QPushButton::clicked, &dialog, [metadataTable, reorderMetadata]() {
+        const int row = metadataTable->currentRow();
+        if (row >= 0) {
+            reorderMetadata(row, row + 2);
+        }
+    });
 
     connect(separatorPreset, &QComboBox::currentTextChanged, &dialog, [separatorPreset, separatorCustom]() {
         const bool custom = separatorPreset->currentText() == QStringLiteral("Custom");
