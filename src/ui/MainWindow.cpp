@@ -3735,16 +3735,21 @@ void MainWindow::restoreSavedPlaybackState()
         return;
     }
 
-    // For a paused restore, load the source directly into PAUSED state so the
+    resumePlaybackAt(queueIndex, positionMs, /*playing=*/state == QStringLiteral("playing"),
+                     /*settleDelayMs=*/250);
+}
+
+void MainWindow::resumePlaybackAt(int queueIndex, qint64 positionMs, bool playing, int settleDelayMs)
+{
+    // For a paused resume, load the source directly into PAUSED state so the
     // audio device is never opened and no audio blip occurs. For a playing
-    // restore, start normally; the backend will be in Playing state by the
-    // time the settle timer fires.
+    // resume, start normally; the backend will be in Playing state by the time
+    // the settle timer fires.
     // Either way, skip scrobbler notification here — the backend transiently
     // reports states while starting up. Notify only when the session is
     // genuinely playing (checked in the settle timer below).
-    const bool restoringPaused = (state == QStringLiteral("paused"));
-    playQueueIndex(queueIndex, /*notifyScrobbler=*/false, /*startPaused=*/restoringPaused);
-    QTimer::singleShot(250, this, [this, positionMs, state]() {
+    playQueueIndex(queueIndex, /*notifyScrobbler=*/false, /*startPaused=*/!playing);
+    QTimer::singleShot(settleDelayMs, this, [this, positionMs, playing]() {
         if (positionMs > 0) {
             m_playback->seek(positionMs);
             m_playerBar->setPosition(positionMs, std::max<qint64>(m_playback->duration(), m_player->currentTrack().durationMs));
@@ -3753,13 +3758,13 @@ void MainWindow::restoreSavedPlaybackState()
         // Resume the scrobble session at the restored position rather than
         // starting a fresh one (which would lose already-elapsed time and
         // re-scrobble tracks that crossed the threshold before the restart).
-        // For a paused restore, set up the session now so that when the user
+        // For a paused resume, set up the session now so that when the user
         // later hits play, playbackStateChanged() continues the session
         // (including sending a rate-limited "now playing") without waiting
         // for the next track.
-        const bool playing = state != QStringLiteral("paused")
+        const bool actuallyPlaying = playing
             && m_playback->state() == PlaybackBackend::State::Playing;
-        resumeScrobblers(m_player->currentTrack(), std::max<qint64>(0, positionMs), playing);
+        resumeScrobblers(m_player->currentTrack(), std::max<qint64>(0, positionMs), actuallyPlaying);
         savePlaybackState(true);
     });
 }
@@ -3803,9 +3808,16 @@ void MainWindow::attemptDeviceTakeover()
     // drives the pipeline through READY, which resets it out of the error state
     // and reopens the now-free device.
     const int index = m_player->queueIndex();
-    QTimer::singleShot(400, this, [this, index]() {
+    // Resume where playback was interrupted instead of restarting from 0, as a
+    // convenience. The healthy snapshot survives the Error state the busy device
+    // put us in; only trust the position if it belongs to the track we are about
+    // to replay (a different track means a fresh start at 0).
+    const bool sameTrack = index >= 0 && index < m_player->queue().size()
+        && m_player->queue().at(index).path == m_lastHealthyTrackPath;
+    const qint64 resumePositionMs = sameTrack ? m_lastHealthyPositionMs : 0;
+    QTimer::singleShot(400, this, [this, index, resumePositionMs]() {
         if (index >= 0 && index < m_player->queue().size())
-            playQueueIndex(index, /*notifyScrobbler=*/false);
+            resumePlaybackAt(index, resumePositionMs, /*playing=*/true, /*settleDelayMs=*/250);
     });
 }
 
@@ -5185,6 +5197,11 @@ void MainWindow::updatePlaybackPosition()
     m_mpris->setDurationMs(durationMs);
     if (m_playback->state() == PlaybackBackend::State::Playing || m_playback->state() == PlaybackBackend::State::Paused) {
         schedulePlaybackStateSave(false);
+        // Remember the last healthy playback point so a bit-perfect device
+        // takeover (which leaves the pipeline in Error) can resume here instead
+        // of restarting the track from 0.
+        m_lastHealthyTrackPath = m_player->currentTrack().path;
+        m_lastHealthyPositionMs = positionMs;
     }
 }
 

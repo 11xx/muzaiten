@@ -139,6 +139,10 @@ private:
     void schedulePlaybackStateSave(bool immediate = false);
     void savePlaybackState(bool force = false);
     void restoreSavedPlaybackState();
+    // Reopen the current queue entry and seek to positionMs without telling the
+    // scrobblers a new track started (the listen session resumes at the restored
+    // position). settleDelayMs waits for the backend to preroll before seeking.
+    void resumePlaybackAt(int queueIndex, qint64 positionMs, bool playing, int settleDelayMs);
     void configurePlaybackProfile();
     void configurePlaybackResume();
     void configureLinkRoots();
@@ -381,5 +385,9 @@ private:
     qint64 m_lastSavedPlaybackPositionMs = -1;
     QString m_lastSavedPlaybackTrackPath;
     QString m_lastSavedPlaybackState;
+    // Last position/track seen while playback was healthy (Playing/Paused), used
+    // to resume after a bit-perfect takeover that left the pipeline in Error.
+    QString m_lastHealthyTrackPath;
+    qint64 m_lastHealthyPositionMs = 0;
     bool m_loadingViewSettings = false;
 };
