@@ -624,6 +624,10 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_noTrackLabel = new QLabel(QStringLiteral("No track playing"), m_trackInfoPane);
     m_noTrackLabel->setAlignment(Qt::AlignCenter);
     infoLayout->addWidget(m_noTrackLabel, 1);
+    m_trackInfoTopSpacer = new QWidget(m_trackInfoPane);
+    m_trackInfoTopSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_trackInfoTopSpacer->hide();
+    infoLayout->addWidget(m_trackInfoTopSpacer);
     m_trackInfoTitle = valueLabel(m_trackInfoPane);
     m_trackInfoArtist = valueLabel(m_trackInfoPane);
     m_trackInfoAlbum = valueLabel(m_trackInfoPane);
@@ -636,6 +640,10 @@ RightSidebar::RightSidebar(QWidget *parent)
         connect(label, &QWidget::customContextMenuRequested, this, &RightSidebar::showTrackInfoLabelMenu);
         infoLayout->addWidget(label);
     }
+    m_trackInfoBottomSpacer = new QWidget(m_trackInfoPane);
+    m_trackInfoBottomSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_trackInfoBottomSpacer->hide();
+    infoLayout->addWidget(m_trackInfoBottomSpacer);
     static_cast<TrackInfoLabel *>(m_trackInfoArtist)->setClickable(true);
     static_cast<TrackInfoLabel *>(m_trackInfoAlbum)->setClickable(true);
     static_cast<TrackInfoLabel *>(m_trackInfoFile)->setClickable(true);
@@ -809,6 +817,7 @@ void RightSidebar::updateTrackInfoLabels()
 {
     const bool hasTrack = !m_currentTrack.path.isEmpty();
     m_noTrackLabel->setVisible(!hasTrack);
+    applyTrackInfoLayoutSpacing();
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
         label->setVisible(hasTrack && !label->property("muzaitenHidden").toBool());
     }
@@ -983,6 +992,14 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     lineSpacing->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
     layoutOptionRow->addWidget(lineSpacingMode);
     layoutOptionRow->addWidget(lineSpacing);
+    layoutOptionRow->addWidget(new QLabel(QStringLiteral("Vertical"), &dialog));
+    auto *verticalAlignment = new QComboBox(&dialog);
+    verticalAlignment->addItem(QStringLiteral("Top"), QStringLiteral("top"));
+    verticalAlignment->addItem(QStringLiteral("Center"), QStringLiteral("center"));
+    verticalAlignment->addItem(QStringLiteral("Bottom"), QStringLiteral("bottom"));
+    verticalAlignment->setCurrentIndex(std::max(0, verticalAlignment->findData(m_trackInfoVerticalAlignment)));
+    verticalAlignment->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
+    layoutOptionRow->addWidget(verticalAlignment);
     layout->addLayout(layoutOptionRow);
 
     auto *overflowRow = new QHBoxLayout;
@@ -1057,8 +1074,10 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
             separatorCustom->setText(separatorPreset->currentData().toString());
         }
     });
-    connect(lineSpacingMode, &QComboBox::currentIndexChanged, &dialog, [lineSpacingMode, lineSpacing]() {
-        lineSpacing->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
+    connect(lineSpacingMode, &QComboBox::currentIndexChanged, &dialog, [lineSpacingMode, lineSpacing, verticalAlignment]() {
+        const bool fixed = lineSpacingMode->currentData().toString() == QStringLiteral("fixed");
+        lineSpacing->setEnabled(fixed);
+        verticalAlignment->setEnabled(fixed);
     });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -1102,6 +1121,7 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     root.insert(QStringLiteral("trackInfoAlignment"), alignment->currentData().toString());
     root.insert(QStringLiteral("trackInfoLineSpacingMode"), lineSpacingMode->currentData().toString());
     root.insert(QStringLiteral("trackInfoLineSpacing"), lineSpacing->value());
+    root.insert(QStringLiteral("trackInfoVerticalAlignment"), verticalAlignment->currentData().toString());
     root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode->currentIndex() == 1 ? QStringLiteral("truncate") : QStringLiteral("scroll"));
     applyTrackInfoSettingsJson(root);
     emit viewSettingsChanged();
@@ -1118,6 +1138,7 @@ QString RightSidebar::viewSettingsJson() const
     root.insert(QStringLiteral("trackInfoAlignment"), m_trackInfoAlignment);
     root.insert(QStringLiteral("trackInfoLineSpacingMode"), m_trackInfoLineSpacingMode);
     root.insert(QStringLiteral("trackInfoLineSpacing"), m_trackInfoLineSpacing);
+    root.insert(QStringLiteral("trackInfoVerticalAlignment"), m_trackInfoVerticalAlignment);
     const QString overflowMode = m_trackInfoTitle->property("muzaitenOverflowMode").toString();
     root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode.isEmpty() ? QStringLiteral("scroll") : overflowMode);
     QJsonArray splitterSizes;
@@ -1161,6 +1182,7 @@ void RightSidebar::resetViewSettings()
     m_trackInfoAlignment = QStringLiteral("left");
     m_trackInfoLineSpacingMode = QStringLiteral("justify");
     m_trackInfoLineSpacing = 1;
+    m_trackInfoVerticalAlignment = QStringLiteral("top");
     const QMap<QString, QWidget *> labels = {
         {QStringLiteral("title"), m_trackInfoTitle},
         {QStringLiteral("artist"), m_trackInfoArtist},
@@ -1170,6 +1192,9 @@ void RightSidebar::resetViewSettings()
         {QStringLiteral("file"), m_trackInfoFile},
     };
     auto *layout = qobject_cast<QVBoxLayout *>(m_trackInfoPane->layout());
+    if (layout != nullptr && m_trackInfoBottomSpacer != nullptr) {
+        layout->removeWidget(m_trackInfoBottomSpacer);
+    }
     for (const TrackInfoField &field : defaultTrackInfoFields()) {
         QWidget *label = labels.value(field.key);
         if (label == nullptr) {
@@ -1185,6 +1210,9 @@ void RightSidebar::resetViewSettings()
             layout->removeWidget(label);
             layout->addWidget(label);
         }
+    }
+    if (layout != nullptr && m_trackInfoBottomSpacer != nullptr) {
+        layout->addWidget(m_trackInfoBottomSpacer);
     }
     restyleTrackInfoLabels();
     applyTrackInfoLayoutSpacing();
@@ -1204,6 +1232,9 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
         {QStringLiteral("file"), m_trackInfoFile},
     };
     auto *layout = qobject_cast<QVBoxLayout *>(m_trackInfoPane->layout());
+    if (layout != nullptr && m_trackInfoBottomSpacer != nullptr) {
+        layout->removeWidget(m_trackInfoBottomSpacer);
+    }
     for (const QJsonValue &value : fields) {
         const QJsonObject field = value.toObject();
         QWidget *label = labels.value(field.value(QStringLiteral("key")).toString());
@@ -1218,6 +1249,9 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
             layout->addWidget(label);
         }
     }
+    if (layout != nullptr && m_trackInfoBottomSpacer != nullptr) {
+        layout->addWidget(m_trackInfoBottomSpacer);
+    }
     if (root.contains(QStringLiteral("trackInfoMetadataItems"))) {
         m_trackInfoMetadataItems = normalizedMetadataItems(root.value(QStringLiteral("trackInfoMetadataItems")).toArray());
     } else if (m_trackInfoMetadataItems.isEmpty()) {
@@ -1228,6 +1262,7 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
     m_trackInfoAlignment = root.value(QStringLiteral("trackInfoAlignment")).toString(m_trackInfoAlignment);
     m_trackInfoLineSpacingMode = root.value(QStringLiteral("trackInfoLineSpacingMode")).toString(m_trackInfoLineSpacingMode);
     m_trackInfoLineSpacing = std::clamp(root.value(QStringLiteral("trackInfoLineSpacing")).toInt(m_trackInfoLineSpacing), 0, 16);
+    m_trackInfoVerticalAlignment = root.value(QStringLiteral("trackInfoVerticalAlignment")).toString(m_trackInfoVerticalAlignment);
     const QString overflow = root.value(QStringLiteral("trackInfoOverflowMode")).toString(QStringLiteral("scroll"));
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
         label->setProperty("muzaitenOverflowMode", overflow);
@@ -1283,6 +1318,18 @@ void RightSidebar::applyTrackInfoLayoutSpacing()
     const bool fixed = m_trackInfoLineSpacingMode == QStringLiteral("fixed");
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
         label->setSizePolicy(QSizePolicy::Expanding, fixed ? QSizePolicy::Fixed : QSizePolicy::Expanding);
+    }
+    const bool hasTrack = !m_currentTrack.path.isEmpty();
+    const bool showSpacers = fixed && hasTrack;
+    if (m_trackInfoTopSpacer != nullptr) {
+        m_trackInfoTopSpacer->setVisible(showSpacers
+                                         && (m_trackInfoVerticalAlignment == QStringLiteral("center")
+                                             || m_trackInfoVerticalAlignment == QStringLiteral("bottom")));
+    }
+    if (m_trackInfoBottomSpacer != nullptr) {
+        m_trackInfoBottomSpacer->setVisible(showSpacers
+                                            && (m_trackInfoVerticalAlignment == QStringLiteral("top")
+                                                || m_trackInfoVerticalAlignment == QStringLiteral("center")));
     }
     if (m_trackInfoLineSpacingMode == QStringLiteral("fixed")) {
         layout->setSpacing(m_trackInfoLineSpacing);

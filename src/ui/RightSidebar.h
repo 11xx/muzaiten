@@ -87,6 +87,8 @@ private:
     QWidget *m_trackInfoYear = nullptr;
     QWidget *m_trackInfoFile = nullptr;
     QWidget *m_trackInfoProperties = nullptr;
+    QWidget *m_trackInfoTopSpacer = nullptr;
+    QWidget *m_trackInfoBottomSpacer = nullptr;
     QLabel *m_noTrackLabel = nullptr;
     QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
@@ -97,6 +99,7 @@ private:
     QString m_trackInfoAlignment = QStringLiteral("left");
     QString m_trackInfoLineSpacingMode = QStringLiteral("justify");
     int m_trackInfoLineSpacing = 1;
+    QString m_trackInfoVerticalAlignment = QStringLiteral("top");
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
     int m_currentQueueIndex = -1;
