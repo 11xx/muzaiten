@@ -128,6 +128,7 @@ set(MUZAITEN_SOURCES
     src/ui/RankingDialog.cpp
     src/ui/ReorderableTableWidget.cpp
     src/ui/RightSidebar.cpp
+    src/ui/SettingsDialogSupport.cpp
     src/ui/SearchResultDelegate.cpp
     src/ui/SearchResultsModel.cpp
     src/ui/SearchView.cpp
@@ -139,6 +140,7 @@ set(MUZAITEN_SOURCES
     src/ui/ViewKeyReferences.cpp
     src/ui/trackinfo/TrackInfoPanel.cpp
     src/ui/trackinfo/TrackInfoSettings.cpp
+    src/ui/trackinfo/TrackInfoSettingsDialog.cpp
     resources/resources.qrc
 )
 
@@ -236,6 +238,7 @@ set(MUZAITEN_HEADERS
     src/ui/RankingDialog.h
     src/ui/ReorderableTableWidget.h
     src/ui/RightSidebar.h
+    src/ui/SettingsDialogSupport.h
     src/ui/SearchResultDelegate.h
     src/ui/SearchResultsModel.h
     src/ui/SearchView.h
@@ -246,6 +249,7 @@ set(MUZAITEN_HEADERS
     src/ui/TrackTable.h
     src/ui/trackinfo/TrackInfoPanel.h
     src/ui/trackinfo/TrackInfoSettings.h
+    src/ui/trackinfo/TrackInfoSettingsDialog.h
 )
 
 add_executable(muzaiten ${MUZAITEN_SOURCES} ${MUZAITEN_HEADERS})
