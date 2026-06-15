@@ -49,6 +49,7 @@ set(MUZAITEN_SOURCES
     src/app/main.cpp
     src/app/AppPaths.cpp
     src/app/MuzaitenApplication.cpp
+    src/core/HumanQuantity.cpp
     src/core/MetadataBlob.cpp
     src/core/MusicSort.cpp
     src/core/Rating.cpp
@@ -135,6 +136,7 @@ set(MUZAITEN_SOURCES
     src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
     src/ui/ViewKeyReferences.cpp
+    src/ui/trackinfo/TrackInfoSettings.cpp
     resources/resources.qrc
 )
 
@@ -143,6 +145,7 @@ set(MUZAITEN_HEADERS
     src/app/MuzaitenApplication.h
     src/core/Album.h
     src/core/Artist.h
+    src/core/HumanQuantity.h
     src/core/MetadataBlob.h
     src/core/MusicBrainzIds.h
     src/core/MusicSort.h
@@ -238,6 +241,7 @@ set(MUZAITEN_HEADERS
     src/ui/StarRatingDelegate.h
     src/ui/TrackPropertiesDialog.h
     src/ui/TrackTable.h
+    src/ui/trackinfo/TrackInfoSettings.h
 )
 
 add_executable(muzaiten ${MUZAITEN_SOURCES} ${MUZAITEN_HEADERS})

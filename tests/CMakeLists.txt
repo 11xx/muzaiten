@@ -15,6 +15,18 @@ endfunction()
 add_muzaiten_test(test_rating test_rating.cpp)
 set_tests_properties(test_rating PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_track_info_settings
+    test_track_info_settings.cpp
+    ../src/core/HumanQuantity.cpp
+    ../src/core/Rating.cpp
+    ../src/ui/trackinfo/TrackInfoSettings.cpp
+)
+target_include_directories(test_track_info_settings PRIVATE ../src)
+target_link_libraries(test_track_info_settings PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_compile_features(test_track_info_settings PRIVATE cxx_std_26)
+add_test(NAME test_track_info_settings COMMAND test_track_info_settings)
+set_tests_properties(test_track_info_settings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_metadata_blob
     test_metadata_blob.cpp
     ../src/core/MetadataBlob.cpp
