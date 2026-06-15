@@ -7,7 +7,9 @@
 class QCheckBox;
 class QComboBox;
 class QFormLayout;
+class QLabel;
 class QLineEdit;
+class QPushButton;
 class QSpinBox;
 
 class PlaybackProfileDialog final : public QDialog {
@@ -21,11 +23,20 @@ public:
 
 private:
     void updateModeVisibility();
+    // Repopulate the device combo, colouring cards PipeWire is currently
+    // holding so a busy device is visible at a glance.
+    void populateDevices();
+    // Refresh the takeover status line/button for the selected device.
+    void refreshDeviceStatus();
+    // Take over (free) or release the selected card via AudioDeviceControl.
+    void toggleSelectedDeviceTakeover();
 
     QFormLayout *m_form = nullptr;
     QComboBox *m_mode = nullptr;
     QComboBox *m_sink = nullptr;
     QComboBox *m_deviceCombo = nullptr;
+    QLabel *m_deviceStatus = nullptr;
+    QPushButton *m_deviceAction = nullptr;
     QCheckBox *m_softwareVolume = nullptr;
     QCheckBox *m_allowResample = nullptr;
     QCheckBox *m_releaseSinkOnPause = nullptr;

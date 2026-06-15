@@ -8,6 +8,7 @@
 #include "db/PlaylistDatabase.h"
 #include "db/SettingsStore.h"
 #include "fs/LinkRoot.h"
+#include "playback/AudioDeviceControl.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "playback/PlaybackBackend.h"
@@ -377,6 +378,27 @@ int chooseQueueSnapshot(QWidget *parent,
     return indexOk ? index : -1;
 }
 
+// Heuristic: does a GStreamer error string read like "the output device is
+// busy / can't be opened"? Those are the failures a takeover can fix; other
+// errors (decode, file-not-found) must not flash a takeover button.
+bool deviceErrorLooksLikeBusy(const QString &error)
+{
+    static const char *const kBusyMarkers[] = {
+        "internal data stream",
+        "could not open audio device",
+        "device is being used",
+        "resource busy",
+        "device or resource busy",
+        "failed to open",
+    };
+    const QString lower = error.toLower();
+    for (const char *marker : kBusyMarkers) {
+        if (lower.contains(QLatin1String(marker)))
+            return true;
+    }
+    return false;
+}
+
 PlaybackProfile playbackProfileFromJson(const QString &json)
 {
     PlaybackProfile profile;
@@ -643,6 +665,13 @@ MainWindow::MainWindow(QWidget *parent)
     m_stopScanButton->setVisible(false);
     m_stopScanButton->setToolTip(QStringLiteral("Cancel the current library scan"));
     statusBar()->addPermanentWidget(m_stopScanButton);
+
+    m_takeOverDeviceButton = new QPushButton(QStringLiteral("Take over device"), this);
+    m_takeOverDeviceButton->setVisible(false);
+    m_takeOverDeviceButton->setToolTip(
+        QStringLiteral("Free the audio device from PipeWire and retry bit-perfect playback"));
+    statusBar()->addPermanentWidget(m_takeOverDeviceButton);
+    connect(m_takeOverDeviceButton, &QPushButton::clicked, this, &MainWindow::attemptDeviceTakeover);
 
     m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
     m_playback = m_player->backend();
@@ -1334,11 +1363,27 @@ MainWindow::MainWindow(QWidget *parent)
         QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
         updateMprisCapabilities();
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
+        // Playback got going (or stopped cleanly): the takeover offer is moot.
+        if (state != PlaybackBackend::State::Error)
+            m_takeOverDeviceButton->setVisible(false);
     });
     connect(m_playback, &PlaybackBackend::errorOccurred, this, [this](const QString &errorString) {
-        if (!errorString.isEmpty()) {
-            statusBar()->showMessage(QStringLiteral("Playback error: %1").arg(errorString), 10000);
+        if (errorString.isEmpty())
+            return;
+        statusBar()->showMessage(QStringLiteral("Playback error: %1").arg(errorString), 10000);
+
+        // A bit-perfect stream that can't open its card is almost always a busy
+        // device PipeWire is still holding. Offer an in-place takeover when the
+        // target really is held, instead of making the user hunt for a script.
+        bool offerTakeover = false;
+        if (m_playbackProfile.mode == QStringLiteral("bit-perfect")
+            && !m_playbackProfile.device.isEmpty()
+            && deviceErrorLooksLikeBusy(errorString)) {
+            if (const auto dev = AudioDeviceControl::findByHwPath(m_playbackProfile.device))
+                offerTakeover = dev->heldByPipeWire();
         }
+        m_takeOverDeviceButton->setVisible(offerTakeover);
+        m_takeOverDeviceButton->setEnabled(offerTakeover);
     });
 
     auto *queueShortcut = new QShortcut(QKeySequence(QStringLiteral("1")), this);
@@ -3704,6 +3749,37 @@ void MainWindow::configurePlaybackProfile()
     savePlaybackProfile();
     m_playback->setProfile(m_playbackProfile);
     statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
+}
+
+void MainWindow::attemptDeviceTakeover()
+{
+    const auto dev = AudioDeviceControl::findByHwPath(m_playbackProfile.device);
+    if (!dev) {
+        statusBar()->showMessage(QStringLiteral("That device is no longer available"), 5000);
+        m_takeOverDeviceButton->setVisible(false);
+        return;
+    }
+
+    m_takeOverDeviceButton->setEnabled(false);
+    QString error;
+    if (!AudioDeviceControl::takeOver(*dev, &error)) {
+        statusBar()->showMessage(QStringLiteral("Takeover failed: %1").arg(error), 8000);
+        m_takeOverDeviceButton->setEnabled(true);
+        return;
+    }
+    statusBar()->showMessage(
+        QStringLiteral("Took over %1 — retrying playback").arg(dev->description), 4000);
+    m_takeOverDeviceButton->setVisible(false);
+
+    // PipeWire needs a moment to drop the card after switching it to Off, so
+    // replay the current track shortly after rather than synchronously. play()
+    // drives the pipeline through READY, which resets it out of the error state
+    // and reopens the now-free device.
+    const int index = m_player->queueIndex();
+    QTimer::singleShot(400, this, [this, index]() {
+        if (index >= 0 && index < m_player->queue().size())
+            playQueueIndex(index, /*notifyScrobbler=*/false);
+    });
 }
 
 void MainWindow::configurePlaybackResume()

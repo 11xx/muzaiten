@@ -253,6 +253,8 @@ private:
     void scanSourceRoots(const QVector<ScanRoot> &roots);
     void startNextQueuedSourceScan();
     void cancelScan();
+    // Free the bit-perfect target device from PipeWire and retry playback.
+    void attemptDeviceTakeover();
     void ingestScanBatch(const QVector<Track> &tracks);
     void ingestEnumeratedPlaceholders(const QVector<Track> &tracks);
     // Lazy background metadata fill of placeholder rows.
@@ -305,6 +307,9 @@ private:
     PanelSearchController *m_panelSearch = nullptr;
     QProgressBar *m_scanProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
+    // Offered in the status bar only when bit-perfect playback fails because
+    // PipeWire is holding the target device; click frees it and retries.
+    QPushButton *m_takeOverDeviceButton = nullptr;
     PlayerCore *m_player = nullptr;
     PlaybackBackend *m_playback = nullptr;  // m_player->backend(), kept for read/connect convenience
     std::unique_ptr<Database> m_database;
