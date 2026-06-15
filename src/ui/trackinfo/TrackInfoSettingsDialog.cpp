@@ -22,6 +22,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -371,10 +372,91 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
         verticalAlignment->setEnabled(fixed);
     });
 
+    // Build the settings blob from the current control state — used both to
+    // return on accept and to tell whether anything differs from the defaults.
+    auto collectSettings = [=]() {
+        QJsonObject root;
+        QJsonArray fields;
+        for (int row = 0; row < table->rowCount(); ++row) {
+            fields.append(readFieldRow(row));
+        }
+        root.insert(QStringLiteral("trackInfoFields"), fields);
+        QJsonArray metadataItems;
+        for (int row = 0; row < metadataTable->rowCount(); ++row) {
+            metadataItems.append(readMetadataRow(row));
+        }
+        root.insert(QStringLiteral("trackInfoMetadataItems"), metadataItems);
+        root.insert(QStringLiteral("trackInfoMetadataSeparator"), separatorCustom->text());
+        root.insert(QStringLiteral("trackInfoMetadataSpacing"), metadataSpacing->value());
+        root.insert(QStringLiteral("trackInfoAlignment"), alignment->currentData().toString());
+        root.insert(QStringLiteral("trackInfoLineSpacingMode"), lineSpacingMode->currentData().toString());
+        root.insert(QStringLiteral("trackInfoLineSpacing"), lineSpacing->value());
+        root.insert(QStringLiteral("trackInfoVerticalAlignment"), verticalAlignment->currentData().toString());
+        root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode->currentIndex() == 1 ? QStringLiteral("truncate") : QStringLiteral("scroll"));
+        return root;
+    };
+
+    QJsonObject defaultSettings;
+    {
+        QJsonArray fields;
+        for (const TrackInfoField &field : defaultTrackInfoFields()) {
+            QJsonObject object;
+            object.insert(QStringLiteral("key"), field.key);
+            object.insert(QStringLiteral("visible"), field.visible);
+            object.insert(QStringLiteral("opacity"), field.opacity);
+            object.insert(QStringLiteral("sizeDelta"), field.sizeDelta);
+            fields.append(object);
+        }
+        defaultSettings.insert(QStringLiteral("trackInfoFields"), fields);
+        defaultSettings.insert(QStringLiteral("trackInfoMetadataItems"), defaultTrackInfoMetadataItems());
+        defaultSettings.insert(QStringLiteral("trackInfoMetadataSeparator"), QString::fromUtf8("\xc2\xb7"));
+        defaultSettings.insert(QStringLiteral("trackInfoMetadataSpacing"), 1);
+        defaultSettings.insert(QStringLiteral("trackInfoAlignment"), QStringLiteral("left"));
+        defaultSettings.insert(QStringLiteral("trackInfoLineSpacingMode"), QStringLiteral("justify"));
+        defaultSettings.insert(QStringLiteral("trackInfoLineSpacing"), 1);
+        defaultSettings.insert(QStringLiteral("trackInfoVerticalAlignment"), QStringLiteral("top"));
+        defaultSettings.insert(QStringLiteral("trackInfoOverflowMode"), QStringLiteral("scroll"));
+    }
+
+    // Reset re-seeds the controls in place; nothing is applied until OK, so Cancel
+    // still reverts.
+    auto applyDefaults = [=]() {
+        alignment->setCurrentIndex(std::max(0, alignment->findData(QStringLiteral("left"))));
+        lineSpacingMode->setCurrentIndex(std::max(0, lineSpacingMode->findData(QStringLiteral("justify"))));
+        lineSpacing->setValue(1);
+        verticalAlignment->setCurrentIndex(std::max(0, verticalAlignment->findData(QStringLiteral("top"))));
+        overflowMode->setCurrentIndex(0);
+        separatorPreset->setCurrentText(separatorPresetLabel(QString::fromUtf8("\xc2\xb7")));
+        separatorCustom->setText(QString::fromUtf8("\xc2\xb7"));
+        metadataSpacing->setValue(1);
+        table->setRowCount(0);
+        for (const QJsonValue &value : defaultSettings.value(QStringLiteral("trackInfoFields")).toArray()) {
+            appendFieldRow(value.toObject());
+        }
+        metadataTable->setRowCount(0);
+        for (const QJsonValue &value : defaultSettings.value(QStringLiteral("trackInfoMetadataItems")).toArray()) {
+            appendMetadataRow(value.toObject());
+        }
+        refreshCondition();
+    };
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    auto *reset = buttons->addButton(QDialogButtonBox::Reset);  // bottom-left, opposite Ok/Cancel
     layout->addWidget(buttons);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    QObject::connect(reset, &QPushButton::clicked, &dialog, [applyDefaults]() { applyDefaults(); });
+
+    // Reset is only meaningful when something differs from the defaults; poll so
+    // it reflects every control and cell-widget edit without per-widget wiring.
+    auto syncResetEnabled = [reset, collectSettings, defaultSettings]() {
+        reset->setEnabled(collectSettings() != defaultSettings);
+    };
+    auto *resetPoll = new QTimer(&dialog);
+    resetPoll->setInterval(250);
+    QObject::connect(resetPoll, &QTimer::timeout, &dialog, syncResetEnabled);
+    resetPoll->start();
+    syncResetEnabled();
 
     TrackInfoDialogResult result;
     result.accepted = dialog.exec() == QDialog::Accepted;
@@ -386,29 +468,9 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
     result.dialogState.insert(QStringLiteral("fieldCols"), settingsdialog::columnWidths(table));
     result.dialogState.insert(QStringLiteral("metaCols"), settingsdialog::columnWidths(metadataTable));
 
-    if (!result.accepted) {
-        return result;
+    if (result.accepted) {
+        result.settings = collectSettings();
     }
-
-    QJsonObject root;
-    QJsonArray fields;
-    for (int row = 0; row < table->rowCount(); ++row) {
-        fields.append(readFieldRow(row));
-    }
-    root.insert(QStringLiteral("trackInfoFields"), fields);
-    QJsonArray metadataItems;
-    for (int row = 0; row < metadataTable->rowCount(); ++row) {
-        metadataItems.append(readMetadataRow(row));
-    }
-    root.insert(QStringLiteral("trackInfoMetadataItems"), metadataItems);
-    root.insert(QStringLiteral("trackInfoMetadataSeparator"), separatorCustom->text());
-    root.insert(QStringLiteral("trackInfoMetadataSpacing"), metadataSpacing->value());
-    root.insert(QStringLiteral("trackInfoAlignment"), alignment->currentData().toString());
-    root.insert(QStringLiteral("trackInfoLineSpacingMode"), lineSpacingMode->currentData().toString());
-    root.insert(QStringLiteral("trackInfoLineSpacing"), lineSpacing->value());
-    root.insert(QStringLiteral("trackInfoVerticalAlignment"), verticalAlignment->currentData().toString());
-    root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode->currentIndex() == 1 ? QStringLiteral("truncate") : QStringLiteral("scroll"));
-    result.settings = root;
     return result;
 }
 
