@@ -54,6 +54,13 @@ struct TrackInfoField {
     int sizeDelta = 0;
 };
 
+struct TrackInfoMetadataSpec {
+    QString key;
+    QString label;
+    bool defaultVisible = true;
+    QString defaultMode;
+};
+
 enum class TrackInfoOverflowMode {
     Scroll,
     Truncate,
@@ -69,6 +76,94 @@ QVector<TrackInfoField> defaultTrackInfoFields()
         {QStringLiteral("metadata"), QStringLiteral("Metadata"), true, 40, 0},
         {QStringLiteral("file"), QStringLiteral("File full path"), true, 35, -1},
     };
+}
+
+QVector<TrackInfoMetadataSpec> availableTrackInfoMetadataItems()
+{
+    return {
+        {QStringLiteral("format"), QStringLiteral("Format"), true, QStringLiteral("always")},
+        {QStringLiteral("duration"), QStringLiteral("Duration"), true, QStringLiteral("always")},
+        {QStringLiteral("size"), QStringLiteral("File size"), true, QStringLiteral("always")},
+        {QStringLiteral("sampleRate"), QStringLiteral("Sample rate"), true, QStringLiteral("notable")},
+        {QStringLiteral("bitDepth"), QStringLiteral("Bit depth"), true, QStringLiteral("notable")},
+        {QStringLiteral("channels"), QStringLiteral("Channels"), true, QStringLiteral("notable")},
+        {QStringLiteral("bitrate"), QStringLiteral("Bitrate"), true, QStringLiteral("lossy")},
+        {QStringLiteral("codec"), QStringLiteral("Codec"), false, QStringLiteral("always")},
+    };
+}
+
+QString metadataLabel(const QString &key)
+{
+    for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
+        if (spec.key == key) {
+            return spec.label;
+        }
+    }
+    return key;
+}
+
+QString metadataDefaultMode(const QString &key)
+{
+    for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
+        if (spec.key == key) {
+            return spec.defaultMode;
+        }
+    }
+    return QStringLiteral("always");
+}
+
+bool isKnownMetadataItem(const QString &key)
+{
+    for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
+        if (spec.key == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QJsonArray defaultTrackInfoMetadataItems()
+{
+    QJsonArray items;
+    for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
+        QJsonObject item;
+        item.insert(QStringLiteral("key"), spec.key);
+        item.insert(QStringLiteral("visible"), spec.defaultVisible);
+        item.insert(QStringLiteral("mode"), spec.defaultMode);
+        items.append(item);
+    }
+    return items;
+}
+
+QJsonArray normalizedMetadataItems(const QJsonArray &source)
+{
+    QJsonArray items;
+    QStringList seen;
+    for (const QJsonValue &value : source) {
+        const QJsonObject object = value.toObject();
+        const QString key = object.value(QStringLiteral("key")).toString();
+        if (!isKnownMetadataItem(key) || seen.contains(key)) {
+            continue;
+        }
+        QJsonObject item;
+        item.insert(QStringLiteral("key"), key);
+        item.insert(QStringLiteral("visible"), object.value(QStringLiteral("visible")).toBool(true));
+        const QString mode = object.value(QStringLiteral("mode")).toString(metadataDefaultMode(key));
+        item.insert(QStringLiteral("mode"), mode.isEmpty() ? metadataDefaultMode(key) : mode);
+        items.append(item);
+        seen.push_back(key);
+    }
+    for (const TrackInfoMetadataSpec &spec : availableTrackInfoMetadataItems()) {
+        if (seen.contains(spec.key)) {
+            continue;
+        }
+        QJsonObject item;
+        item.insert(QStringLiteral("key"), spec.key);
+        item.insert(QStringLiteral("visible"), spec.defaultVisible);
+        item.insert(QStringLiteral("mode"), spec.defaultMode);
+        items.append(item);
+    }
+    return items;
 }
 
 class TrackInfoLabel final : public QLabel {
@@ -110,6 +205,16 @@ public:
             return;
         }
         m_overflowMode = mode;
+        resetScrollState();
+        update();
+    }
+
+    void setTextAlignment(Qt::Alignment alignment)
+    {
+        if (m_textAlignment == alignment) {
+            return;
+        }
+        m_textAlignment = alignment;
         resetScrollState();
         update();
     }
@@ -189,7 +294,7 @@ protected:
         const bool overflowing = textWidth > area.width();
         if (!overflowing || m_overflowMode == TrackInfoOverflowMode::Truncate) {
             const QString text = overflowing ? compactDisplayText(fm, area.width()) : m_fullText;
-            painter.drawText(area.left(), baseline, text);
+            painter.drawText(alignedTextX(fm.horizontalAdvance(text)), baseline, text);
             return;
         }
 
@@ -209,7 +314,7 @@ private:
             ? std::min(fm.horizontalAdvance(m_fullText), area.width())
             : fm.horizontalAdvance(compactDisplayText(fm, area.width()));
         const int textHeight = fm.height();
-        return QRect(area.left(),
+        return QRect(alignedTextX(visibleWidth),
                      area.top() + ((area.height() - textHeight) / 2),
                      std::max(0, visibleWidth),
                      textHeight);
@@ -254,6 +359,18 @@ private:
             }
         }
         return fm.elidedText(candidates.isEmpty() ? cleaned : candidates.constFirst(), Qt::ElideMiddle, width);
+    }
+
+    int alignedTextX(int textWidth) const
+    {
+        const QRect area = contentsRect();
+        if (m_textAlignment & Qt::AlignRight) {
+            return area.right() - textWidth + 1;
+        }
+        if (m_textAlignment & Qt::AlignHCenter) {
+            return area.left() + std::max(0, (area.width() - textWidth) / 2);
+        }
+        return area.left();
     }
 
     void resetScrollState()
@@ -303,6 +420,7 @@ private:
     bool m_clickable = false;
     bool m_hovered = false;
     TrackInfoOverflowMode m_overflowMode = TrackInfoOverflowMode::Scroll;
+    Qt::Alignment m_textAlignment = Qt::AlignLeft;
     QTimer m_scrollTimer;
     int m_scrollOffset = 0;
     int m_pauseTicksRemaining = 0;
@@ -341,6 +459,17 @@ QString formatDuration(qint64 durationMs)
     return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
+QString formatSampleRate(int sampleRateHz)
+{
+    if (sampleRateHz <= 0) {
+        return {};
+    }
+    if (sampleRateHz % 1000 == 0) {
+        return QStringLiteral("%1 kHz").arg(sampleRateHz / 1000);
+    }
+    return QStringLiteral("%1 kHz").arg(QString::number(sampleRateHz / 1000.0, 'f', 1));
+}
+
 QString displayDate(const Track &track)
 {
     if (!track.originalDate.isEmpty()) {
@@ -349,29 +478,113 @@ QString displayDate(const Track &track)
     return track.date;
 }
 
-QString metadataText(const Track &track, const QString &pattern)
+QString metadataValueText(const Track &track, const QString &key)
+{
+    if (key == QStringLiteral("format")) {
+        return QFileInfo(track.path).suffix().toUpper();
+    }
+    if (key == QStringLiteral("duration")) {
+        return formatDuration(track.durationMs);
+    }
+    if (key == QStringLiteral("size")) {
+        return formatSize(track.fileSize);
+    }
+    if (key == QStringLiteral("sampleRate")) {
+        return formatSampleRate(track.sampleRateHz);
+    }
+    if (key == QStringLiteral("bitDepth") && track.bitDepth > 0) {
+        return QStringLiteral("%1-bit").arg(track.bitDepth);
+    }
+    if (key == QStringLiteral("channels") && track.channels > 0) {
+        return QStringLiteral("%1 ch").arg(track.channels);
+    }
+    if (key == QStringLiteral("bitrate") && track.bitrateKbps > 0) {
+        return QStringLiteral("%1 kbps").arg(track.bitrateKbps);
+    }
+    if (key == QStringLiteral("codec")) {
+        return track.codec.toUpper();
+    }
+    return {};
+}
+
+bool metadataItemPassesMode(const Track &track, const QString &key, const QString &mode)
+{
+    if (mode == QStringLiteral("notable")) {
+        if (key == QStringLiteral("sampleRate")) {
+            return track.sampleRateHz > 48000;
+        }
+        if (key == QStringLiteral("bitDepth")) {
+            return track.bitDepth > 16;
+        }
+        if (key == QStringLiteral("channels")) {
+            return track.channels > 2;
+        }
+    }
+    if (mode == QStringLiteral("lossy")) {
+        return track.bitrateKbps > 0 && track.bitDepth <= 0;
+    }
+    return true;
+}
+
+QString metadataJoiner(const QString &separator, int spacing)
+{
+    const QString spaces(std::clamp(spacing, 0, 6), QLatin1Char(' '));
+    return separator.isEmpty() ? spaces : spaces + separator + spaces;
+}
+
+QString metadataText(const Track &track,
+                     const QJsonArray &items,
+                     const QString &separator,
+                     int spacing)
 {
     QStringList parts;
-    const QString suffix = QFileInfo(track.path).suffix().toUpper();
-    if (!suffix.isEmpty()) {
-        parts.push_back(suffix);
+    for (const QJsonValue &value : items) {
+        const QJsonObject item = value.toObject();
+        if (!item.value(QStringLiteral("visible")).toBool(true)) {
+            continue;
+        }
+        const QString key = item.value(QStringLiteral("key")).toString();
+        const QString mode = item.value(QStringLiteral("mode")).toString(metadataDefaultMode(key));
+        if (!metadataItemPassesMode(track, key, mode)) {
+            continue;
+        }
+        const QString text = metadataValueText(track, key).trimmed();
+        if (!text.isEmpty()) {
+            parts.push_back(text);
+        }
     }
-    const QString duration = formatDuration(track.durationMs);
-    if (!duration.isEmpty()) {
-        parts.push_back(duration);
+    return parts.join(metadataJoiner(separator, spacing));
+}
+
+Qt::Alignment trackInfoAlignment(const QString &alignment)
+{
+    if (alignment == QStringLiteral("center")) {
+        return Qt::AlignHCenter;
     }
-    const QString size = formatSize(track.fileSize);
-    if (!size.isEmpty()) {
-        parts.push_back(size);
+    if (alignment == QStringLiteral("right")) {
+        return Qt::AlignRight;
     }
-    if (pattern.trimmed().isEmpty()) {
-        return parts.join(QStringLiteral(", "));
+    return Qt::AlignLeft;
+}
+
+QString separatorPresetLabel(const QString &separator)
+{
+    if (separator.isEmpty()) {
+        return QStringLiteral("None");
     }
-    QString text = pattern;
-    text.replace(QStringLiteral("{format}"), suffix);
-    text.replace(QStringLiteral("{duration}"), duration);
-    text.replace(QStringLiteral("{size}"), size);
-    return text.simplified();
+    if (separator == QStringLiteral("|")) {
+        return QStringLiteral("Pipe");
+    }
+    if (separator == QString::fromUtf8("\xc2\xb7")) {
+        return QStringLiteral("Middle dot");
+    }
+    if (separator == QStringLiteral("/")) {
+        return QStringLiteral("Slash");
+    }
+    if (separator == QStringLiteral("-")) {
+        return QStringLiteral("Dash");
+    }
+    return QStringLiteral("Custom");
 }
 
 } // namespace
@@ -417,6 +630,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_trackInfoYear = valueLabel(m_trackInfoPane);
     m_trackInfoProperties = valueLabel(m_trackInfoPane);
     m_trackInfoFile = valueLabel(m_trackInfoPane);
+    m_trackInfoMetadataItems = defaultTrackInfoMetadataItems();
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
         label->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(label, &QWidget::customContextMenuRequested, this, &RightSidebar::showTrackInfoLabelMenu);
@@ -435,6 +649,7 @@ RightSidebar::RightSidebar(QWidget *parent)
         emit findFileRequested(m_currentTrack);
     };
     restyleTrackInfoLabels();
+    applyTrackInfoLayoutSpacing();
     m_trackInfoPane->setMinimumHeight(96);
     m_splitter->addWidget(m_trackInfoPane);
 
@@ -605,7 +820,10 @@ void RightSidebar::updateTrackInfoLabels()
     static_cast<TrackInfoLabel *>(m_trackInfoArtist)->setFullText(m_currentTrack.artistName);
     static_cast<TrackInfoLabel *>(m_trackInfoAlbum)->setFullText(m_currentTrack.albumTitle);
     static_cast<TrackInfoLabel *>(m_trackInfoYear)->setFullText(displayDate(m_currentTrack));
-    static_cast<TrackInfoLabel *>(m_trackInfoProperties)->setFullText(metadataText(m_currentTrack, m_trackInfoMetadataPattern));
+    static_cast<TrackInfoLabel *>(m_trackInfoProperties)->setFullText(metadataText(m_currentTrack,
+                                                                                  m_trackInfoMetadataItems,
+                                                                                  m_trackInfoMetadataSeparator,
+                                                                                  m_trackInfoMetadataSpacing));
     static_cast<TrackInfoLabel *>(m_trackInfoFile)->setFullText(m_currentTrack.path);
     m_trackInfoFile->setToolTip(m_currentTrack.path);
 }
@@ -677,13 +895,95 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     buttonRow->addStretch(1);
     layout->addLayout(buttonRow);
 
-    auto *metadataRow = new QHBoxLayout;
-    metadataRow->addWidget(new QLabel(QStringLiteral("Metadata format"), &dialog));
-    auto *metadataPattern = new QLineEdit(&dialog);
-    metadataPattern->setPlaceholderText(QStringLiteral("{format}, {duration}, {size}"));
-    metadataPattern->setText(m_trackInfoMetadataPattern);
-    metadataRow->addWidget(metadataPattern, 1);
-    layout->addLayout(metadataRow);
+    auto *metadataTable = new QTableWidget(0, 3, &dialog);
+    metadataTable->setHorizontalHeaderLabels({
+        QStringLiteral("Show"),
+        QStringLiteral("Metadata"),
+        QStringLiteral("When"),
+    });
+    metadataTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    metadataTable->verticalHeader()->setVisible(false);
+    metadataTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    metadataTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    layout->addWidget(metadataTable);
+
+    for (const QJsonValue &value : trackInfoMetadataSettingsJson()) {
+        const QJsonObject item = value.toObject();
+        const int row = metadataTable->rowCount();
+        metadataTable->insertRow(row);
+        auto *show = new QCheckBox(metadataTable);
+        show->setChecked(item.value(QStringLiteral("visible")).toBool(true));
+        auto *showCell = new QWidget(metadataTable);
+        auto *showLayout = new QHBoxLayout(showCell);
+        showLayout->setContentsMargins(0, 0, 0, 0);
+        showLayout->addWidget(show, 0, Qt::AlignCenter);
+        metadataTable->setCellWidget(row, 0, showCell);
+
+        const QString key = item.value(QStringLiteral("key")).toString();
+        auto *itemCell = new QTableWidgetItem(metadataLabel(key));
+        itemCell->setData(Qt::UserRole, key);
+        metadataTable->setItem(row, 1, itemCell);
+
+        auto *mode = new QComboBox(metadataTable);
+        mode->addItem(QStringLiteral("Always"), QStringLiteral("always"));
+        mode->addItem(QStringLiteral("Only if notable"), QStringLiteral("notable"));
+        mode->addItem(QStringLiteral("Lossy bitrate"), QStringLiteral("lossy"));
+        mode->setCurrentIndex(std::max(0, mode->findData(item.value(QStringLiteral("mode")).toString(metadataDefaultMode(key)))));
+        metadataTable->setCellWidget(row, 2, mode);
+    }
+
+    auto *metadataButtonRow = new QHBoxLayout;
+    auto *metadataUp = new QPushButton(QStringLiteral("Up"), &dialog);
+    auto *metadataDown = new QPushButton(QStringLiteral("Down"), &dialog);
+    metadataButtonRow->addWidget(metadataUp);
+    metadataButtonRow->addWidget(metadataDown);
+    metadataButtonRow->addStretch(1);
+    layout->addLayout(metadataButtonRow);
+
+    auto *metadataOptionRow = new QHBoxLayout;
+    metadataOptionRow->addWidget(new QLabel(QStringLiteral("Separator"), &dialog));
+    auto *separatorPreset = new QComboBox(&dialog);
+    separatorPreset->addItem(QStringLiteral("None"), QString());
+    separatorPreset->addItem(QStringLiteral("Middle dot"), QString::fromUtf8("\xc2\xb7"));
+    separatorPreset->addItem(QStringLiteral("Pipe"), QStringLiteral("|"));
+    separatorPreset->addItem(QStringLiteral("Slash"), QStringLiteral("/"));
+    separatorPreset->addItem(QStringLiteral("Dash"), QStringLiteral("-"));
+    separatorPreset->addItem(QStringLiteral("Custom"), QString());
+    separatorPreset->setCurrentText(separatorPresetLabel(m_trackInfoMetadataSeparator));
+    auto *separatorCustom = new QLineEdit(&dialog);
+    separatorCustom->setMaximumWidth(80);
+    separatorCustom->setText(m_trackInfoMetadataSeparator);
+    separatorCustom->setEnabled(separatorPreset->currentText() == QStringLiteral("Custom"));
+    metadataOptionRow->addWidget(separatorPreset);
+    metadataOptionRow->addWidget(separatorCustom);
+    metadataOptionRow->addWidget(new QLabel(QStringLiteral("Item spacing"), &dialog));
+    auto *metadataSpacing = new QSpinBox(&dialog);
+    metadataSpacing->setRange(0, 6);
+    metadataSpacing->setValue(m_trackInfoMetadataSpacing);
+    metadataOptionRow->addWidget(metadataSpacing);
+    layout->addLayout(metadataOptionRow);
+
+    auto *layoutOptionRow = new QHBoxLayout;
+    layoutOptionRow->addWidget(new QLabel(QStringLiteral("Alignment"), &dialog));
+    auto *alignment = new QComboBox(&dialog);
+    alignment->addItem(QStringLiteral("Left"), QStringLiteral("left"));
+    alignment->addItem(QStringLiteral("Center"), QStringLiteral("center"));
+    alignment->addItem(QStringLiteral("Right"), QStringLiteral("right"));
+    alignment->setCurrentIndex(std::max(0, alignment->findData(m_trackInfoAlignment)));
+    layoutOptionRow->addWidget(alignment);
+    layoutOptionRow->addWidget(new QLabel(QStringLiteral("Line spacing"), &dialog));
+    auto *lineSpacingMode = new QComboBox(&dialog);
+    lineSpacingMode->addItem(QStringLiteral("Justify"), QStringLiteral("justify"));
+    lineSpacingMode->addItem(QStringLiteral("Fixed"), QStringLiteral("fixed"));
+    lineSpacingMode->setCurrentIndex(std::max(0, lineSpacingMode->findData(m_trackInfoLineSpacingMode)));
+    auto *lineSpacing = new QSpinBox(&dialog);
+    lineSpacing->setRange(0, 16);
+    lineSpacing->setValue(m_trackInfoLineSpacing);
+    lineSpacing->setSuffix(QStringLiteral(" px"));
+    lineSpacing->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
+    layoutOptionRow->addWidget(lineSpacingMode);
+    layoutOptionRow->addWidget(lineSpacing);
+    layout->addLayout(layoutOptionRow);
 
     auto *overflowRow = new QHBoxLayout;
     overflowRow->addWidget(new QLabel(QStringLiteral("Overflow"), &dialog));
@@ -722,6 +1022,44 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
     connect(down, &QPushButton::clicked, &dialog, [moveSelected]() {
         moveSelected(1);
     });
+    auto moveSelectedMetadata = [metadataTable](int direction) {
+        const int row = metadataTable->currentRow();
+        const int target = row + direction;
+        if (row < 0 || target < 0 || target >= metadataTable->rowCount()) {
+            return;
+        }
+        for (int column = 0; column < metadataTable->columnCount(); ++column) {
+            if (QWidget *first = metadataTable->cellWidget(row, column)) {
+                metadataTable->removeCellWidget(row, column);
+                QWidget *second = metadataTable->cellWidget(target, column);
+                metadataTable->removeCellWidget(target, column);
+                metadataTable->setCellWidget(row, column, second);
+                metadataTable->setCellWidget(target, column, first);
+            } else {
+                QTableWidgetItem *firstItem = metadataTable->takeItem(row, column);
+                QTableWidgetItem *secondItem = metadataTable->takeItem(target, column);
+                metadataTable->setItem(row, column, secondItem);
+                metadataTable->setItem(target, column, firstItem);
+            }
+        }
+        metadataTable->selectRow(target);
+    };
+    connect(metadataUp, &QPushButton::clicked, &dialog, [moveSelectedMetadata]() {
+        moveSelectedMetadata(-1);
+    });
+    connect(metadataDown, &QPushButton::clicked, &dialog, [moveSelectedMetadata]() {
+        moveSelectedMetadata(1);
+    });
+    connect(separatorPreset, &QComboBox::currentTextChanged, &dialog, [separatorPreset, separatorCustom]() {
+        const bool custom = separatorPreset->currentText() == QStringLiteral("Custom");
+        separatorCustom->setEnabled(custom);
+        if (!custom) {
+            separatorCustom->setText(separatorPreset->currentData().toString());
+        }
+    });
+    connect(lineSpacingMode, &QComboBox::currentIndexChanged, &dialog, [lineSpacingMode, lineSpacing]() {
+        lineSpacing->setEnabled(lineSpacingMode->currentData().toString() == QStringLiteral("fixed"));
+    });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
@@ -747,7 +1085,23 @@ void RightSidebar::configureTrackInfoPanel(QWidget *parent)
         fields.append(field);
     }
     root.insert(QStringLiteral("trackInfoFields"), fields);
-    root.insert(QStringLiteral("trackInfoMetadata"), metadataPattern->text());
+    QJsonArray metadataItems;
+    for (int row = 0; row < metadataTable->rowCount(); ++row) {
+        QJsonObject item;
+        item.insert(QStringLiteral("key"), metadataTable->item(row, 1)->data(Qt::UserRole).toString());
+        auto *showCell = metadataTable->cellWidget(row, 0);
+        auto *show = showCell == nullptr ? nullptr : showCell->findChild<QCheckBox *>();
+        auto *mode = qobject_cast<QComboBox *>(metadataTable->cellWidget(row, 2));
+        item.insert(QStringLiteral("visible"), show == nullptr || show->isChecked());
+        item.insert(QStringLiteral("mode"), mode == nullptr ? QStringLiteral("always") : mode->currentData().toString());
+        metadataItems.append(item);
+    }
+    root.insert(QStringLiteral("trackInfoMetadataItems"), metadataItems);
+    root.insert(QStringLiteral("trackInfoMetadataSeparator"), separatorCustom->text());
+    root.insert(QStringLiteral("trackInfoMetadataSpacing"), metadataSpacing->value());
+    root.insert(QStringLiteral("trackInfoAlignment"), alignment->currentData().toString());
+    root.insert(QStringLiteral("trackInfoLineSpacingMode"), lineSpacingMode->currentData().toString());
+    root.insert(QStringLiteral("trackInfoLineSpacing"), lineSpacing->value());
     root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode->currentIndex() == 1 ? QStringLiteral("truncate") : QStringLiteral("scroll"));
     applyTrackInfoSettingsJson(root);
     emit viewSettingsChanged();
@@ -758,7 +1112,12 @@ QString RightSidebar::viewSettingsJson() const
     QJsonObject root = QJsonDocument::fromJson(m_queueTable->viewSettingsJson().toUtf8()).object();
     root.insert(QStringLiteral("showTrackInfo"), !m_trackInfoPane->isHidden());
     root.insert(QStringLiteral("trackInfoFields"), trackInfoSettingsJson());
-    root.insert(QStringLiteral("trackInfoMetadata"), m_trackInfoMetadataPattern);
+    root.insert(QStringLiteral("trackInfoMetadataItems"), trackInfoMetadataSettingsJson());
+    root.insert(QStringLiteral("trackInfoMetadataSeparator"), m_trackInfoMetadataSeparator);
+    root.insert(QStringLiteral("trackInfoMetadataSpacing"), m_trackInfoMetadataSpacing);
+    root.insert(QStringLiteral("trackInfoAlignment"), m_trackInfoAlignment);
+    root.insert(QStringLiteral("trackInfoLineSpacingMode"), m_trackInfoLineSpacingMode);
+    root.insert(QStringLiteral("trackInfoLineSpacing"), m_trackInfoLineSpacing);
     const QString overflowMode = m_trackInfoTitle->property("muzaitenOverflowMode").toString();
     root.insert(QStringLiteral("trackInfoOverflowMode"), overflowMode.isEmpty() ? QStringLiteral("scroll") : overflowMode);
     QJsonArray splitterSizes;
@@ -796,7 +1155,12 @@ void RightSidebar::resetViewSettings()
     m_queueTable->resetViewSettings();
     m_splitter->setSizes({420, 150, 240});
     setTrackInfoVisible(true);
-    m_trackInfoMetadataPattern.clear();
+    m_trackInfoMetadataItems = defaultTrackInfoMetadataItems();
+    m_trackInfoMetadataSeparator = QString::fromUtf8("\xc2\xb7");
+    m_trackInfoMetadataSpacing = 1;
+    m_trackInfoAlignment = QStringLiteral("left");
+    m_trackInfoLineSpacingMode = QStringLiteral("justify");
+    m_trackInfoLineSpacing = 1;
     const QMap<QString, QWidget *> labels = {
         {QStringLiteral("title"), m_trackInfoTitle},
         {QStringLiteral("artist"), m_trackInfoArtist},
@@ -816,12 +1180,14 @@ void RightSidebar::resetViewSettings()
         label->setProperty("muzaitenSizeDelta", field.sizeDelta);
         label->setProperty("muzaitenOverflowMode", QStringLiteral("scroll"));
         static_cast<TrackInfoLabel *>(label)->setOverflowMode(TrackInfoOverflowMode::Scroll);
+        static_cast<TrackInfoLabel *>(label)->setTextAlignment(Qt::AlignLeft);
         if (layout != nullptr) {
             layout->removeWidget(label);
             layout->addWidget(label);
         }
     }
     restyleTrackInfoLabels();
+    applyTrackInfoLayoutSpacing();
     updateTrackInfoLabels();
     emit viewSettingsChanged();
 }
@@ -829,12 +1195,6 @@ void RightSidebar::resetViewSettings()
 void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
 {
     const QJsonArray fields = root.value(QStringLiteral("trackInfoFields")).toArray();
-    if (fields.isEmpty()) {
-        restyleTrackInfoLabels();
-        updateTrackInfoLabels();
-        return;
-    }
-
     const QMap<QString, QWidget *> labels = {
         {QStringLiteral("title"), m_trackInfoTitle},
         {QStringLiteral("artist"), m_trackInfoArtist},
@@ -858,15 +1218,26 @@ void RightSidebar::applyTrackInfoSettingsJson(const QJsonObject &root)
             layout->addWidget(label);
         }
     }
-    m_trackInfoMetadataPattern = root.value(QStringLiteral("trackInfoMetadata")).toString();
+    if (root.contains(QStringLiteral("trackInfoMetadataItems"))) {
+        m_trackInfoMetadataItems = normalizedMetadataItems(root.value(QStringLiteral("trackInfoMetadataItems")).toArray());
+    } else if (m_trackInfoMetadataItems.isEmpty()) {
+        m_trackInfoMetadataItems = defaultTrackInfoMetadataItems();
+    }
+    m_trackInfoMetadataSeparator = root.value(QStringLiteral("trackInfoMetadataSeparator")).toString(m_trackInfoMetadataSeparator);
+    m_trackInfoMetadataSpacing = std::clamp(root.value(QStringLiteral("trackInfoMetadataSpacing")).toInt(m_trackInfoMetadataSpacing), 0, 6);
+    m_trackInfoAlignment = root.value(QStringLiteral("trackInfoAlignment")).toString(m_trackInfoAlignment);
+    m_trackInfoLineSpacingMode = root.value(QStringLiteral("trackInfoLineSpacingMode")).toString(m_trackInfoLineSpacingMode);
+    m_trackInfoLineSpacing = std::clamp(root.value(QStringLiteral("trackInfoLineSpacing")).toInt(m_trackInfoLineSpacing), 0, 16);
     const QString overflow = root.value(QStringLiteral("trackInfoOverflowMode")).toString(QStringLiteral("scroll"));
     for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
         label->setProperty("muzaitenOverflowMode", overflow);
         static_cast<TrackInfoLabel *>(label)->setOverflowMode(overflow == QStringLiteral("truncate")
                                                                   ? TrackInfoOverflowMode::Truncate
                                                                   : TrackInfoOverflowMode::Scroll);
+        static_cast<TrackInfoLabel *>(label)->setTextAlignment(trackInfoAlignment(m_trackInfoAlignment));
     }
     restyleTrackInfoLabels();
+    applyTrackInfoLayoutSpacing();
     updateTrackInfoLabels();
 }
 
@@ -896,6 +1267,28 @@ QJsonArray RightSidebar::trackInfoSettingsJson() const
         fields.append(field);
     }
     return fields;
+}
+
+QJsonArray RightSidebar::trackInfoMetadataSettingsJson() const
+{
+    return normalizedMetadataItems(m_trackInfoMetadataItems);
+}
+
+void RightSidebar::applyTrackInfoLayoutSpacing()
+{
+    auto *layout = qobject_cast<QVBoxLayout *>(m_trackInfoPane->layout());
+    if (layout == nullptr) {
+        return;
+    }
+    const bool fixed = m_trackInfoLineSpacingMode == QStringLiteral("fixed");
+    for (auto *label : {m_trackInfoTitle, m_trackInfoArtist, m_trackInfoAlbum, m_trackInfoYear, m_trackInfoProperties, m_trackInfoFile}) {
+        label->setSizePolicy(QSizePolicy::Expanding, fixed ? QSizePolicy::Fixed : QSizePolicy::Expanding);
+    }
+    if (m_trackInfoLineSpacingMode == QStringLiteral("fixed")) {
+        layout->setSpacing(m_trackInfoLineSpacing);
+        return;
+    }
+    layout->setSpacing(1);
 }
 
 void RightSidebar::restyleTrackInfoLabels()

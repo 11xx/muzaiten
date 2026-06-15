@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QString>
 
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
@@ -65,8 +66,10 @@ private:
     void showTrackInfoLabelMenu(const QPoint &pos);
     void applyTrackInfoSettingsJson(const QJsonObject &root);
     QJsonArray trackInfoSettingsJson() const;
+    QJsonArray trackInfoMetadataSettingsJson() const;
     void updateTrackInfoLabels();
     void restyleTrackInfoLabels();
+    void applyTrackInfoLayoutSpacing();
     QWidget *trackInfoLabelFromSender() const;
 
 protected:
@@ -88,7 +91,12 @@ private:
     QSplitter *m_splitter = nullptr;
     QVector<Track> m_tracks;
     Track m_currentTrack;
-    QString m_trackInfoMetadataPattern;
+    QJsonArray m_trackInfoMetadataItems;
+    QString m_trackInfoMetadataSeparator = QString::fromUtf8("\xc2\xb7");
+    int m_trackInfoMetadataSpacing = 1;
+    QString m_trackInfoAlignment = QStringLiteral("left");
+    QString m_trackInfoLineSpacingMode = QStringLiteral("justify");
+    int m_trackInfoLineSpacing = 1;
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
     int m_currentQueueIndex = -1;
