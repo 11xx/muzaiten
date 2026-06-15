@@ -121,12 +121,20 @@ void LastFmScrobbler::playbackStateChanged(bool playing)
 
     m_playing = playing;
     if (m_playing) {
-        // Re-send "now playing" on resume, but rate-limit to avoid flooding
-        // Last.fm when the user rapidly toggles play/pause.
-        const qint64 now = QDateTime::currentSecsSinceEpoch();
-        if (now - m_lastNowPlayingSecs >= kNowPlayingResubmitMinSecs) {
-            submitNowPlaying(m_currentTrack);
-        }
+        resendNowPlaying();
+    }
+}
+
+void LastFmScrobbler::resendNowPlaying()
+{
+    if (!m_hasCurrentTrack || !m_playing) {
+        return;
+    }
+    // Rate-limit to avoid flooding Last.fm when the user rapidly toggles
+    // play/pause or the offline switch.
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    if (now - m_lastNowPlayingSecs >= kNowPlayingResubmitMinSecs) {
+        submitNowPlaying(m_currentTrack);
     }
 }
 

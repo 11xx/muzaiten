@@ -4308,6 +4308,17 @@ void MainWindow::setScrobbleOffline(bool offline)
     // Reconfigure both services; leaving offline mode flushes the backlog.
     configureListenBrainz();
     configureLastFm();
+    // Leaving offline mode: eagerly push a "now playing" for the current track,
+    // the same way play/pause does, so the services reflect what is playing now
+    // instead of waiting for the next track. The scrobbler-side rate limiter
+    // keeps a rapid offline/online toggle from spamming the services. Queued so
+    // the configure() above (also queued) applies credentials/uploadAllowed
+    // first.
+    if (!offline && !m_player->currentTrack().path.isEmpty()
+        && m_playback->state() == PlaybackBackend::State::Playing) {
+        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resendNowPlaying", Qt::QueuedConnection);
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "resendNowPlaying", Qt::QueuedConnection);
+    }
     statusBar()->showMessage(offline ? QStringLiteral("Scrobble uploads paused — listens are buffered locally")
                                      : QStringLiteral("Scrobble uploads resumed — sending buffered listens"),
                              5000);

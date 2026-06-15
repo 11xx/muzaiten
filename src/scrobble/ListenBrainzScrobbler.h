@@ -32,6 +32,10 @@ public slots:
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
     void playbackStateChanged(bool playing);
+    // Re-send a rate-limited "playing now" for the current track if it is still
+    // playing. Used when uploads are re-enabled (leaving offline mode) so the
+    // service reflects what is playing now without waiting for the next track.
+    void resendNowPlaying();
     // Drain unsent history listens in batches, respecting service limits.
     void uploadBacklog();
     // Check a user token against /1/validate-token and report the username.

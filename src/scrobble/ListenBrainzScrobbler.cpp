@@ -112,12 +112,20 @@ void ListenBrainzScrobbler::playbackStateChanged(bool playing)
 
     m_playing = playing;
     if (m_playing) {
-        // Re-send "playing now" on resume, but rate-limit to avoid flooding
-        // ListenBrainz when the user rapidly toggles play/pause.
-        const qint64 now = QDateTime::currentSecsSinceEpoch();
-        if (now - m_lastPlayingNowSecs >= kPlayingNowResubmitMinSecs) {
-            submitPlayingNow(m_currentTrack);
-        }
+        resendNowPlaying();
+    }
+}
+
+void ListenBrainzScrobbler::resendNowPlaying()
+{
+    if (!m_hasCurrentTrack || !m_playing) {
+        return;
+    }
+    // Rate-limit to avoid flooding ListenBrainz when the user rapidly toggles
+    // play/pause or the offline switch.
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    if (now - m_lastPlayingNowSecs >= kPlayingNowResubmitMinSecs) {
+        submitPlayingNow(m_currentTrack);
     }
 }
 
