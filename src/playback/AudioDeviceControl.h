@@ -23,7 +23,8 @@ namespace AudioDeviceControl {
 struct DeviceState {
     int pwId = -1;                  // PipeWire global object id (for `wpctl set-profile`)
     int cardIndex = -1;             // ALSA card number (the N in hw:N)
-    QString hwPath;                 // "hw:N"
+    QString hwPath;                 // "hw:N" — volatile, drifts across reboots
+    QString stableId;              // PipeWire `device.name`, stable across reboots
     QString description;            // human label, e.g. "FiiO K5 Pro"
     int currentProfileIndex = -1;
     QString currentProfileName;     // "off" once released
@@ -48,6 +49,10 @@ QVector<DeviceState> enumerate();
 // Look up the card backing a "hw:N" device string (as stored in a bit-perfect
 // PlaybackProfile). Returns nullopt if no PipeWire card maps to it.
 std::optional<DeviceState> findByHwPath(const QString &hwPath);
+
+// Look up a card by its stable id (PipeWire `device.name`). Used to recover the
+// current hw:N for a remembered device after the index has drifted.
+std::optional<DeviceState> findByStableId(const QString &stableId);
 
 // Release `dev` from PipeWire (switch to the Off profile) so a direct ALSA
 // stream can open it. `error` is filled on failure.

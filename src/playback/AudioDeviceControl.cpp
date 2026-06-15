@@ -79,6 +79,7 @@ std::optional<DeviceState> parseDevice(const QJsonObject &obj)
     dev.pwId        = propToInt(obj.value(QStringLiteral("id")));
     dev.cardIndex   = propToInt(props.value(QStringLiteral("api.alsa.card")));
     dev.hwPath      = hwPath;
+    dev.stableId    = props.value(QStringLiteral("device.name")).toString();
     dev.description = props.value(QStringLiteral("device.description")).toString();
     if (dev.description.isEmpty())
         dev.description = props.value(QStringLiteral("device.nick")).toString();
@@ -166,6 +167,17 @@ std::optional<DeviceState> findByHwPath(const QString &hwPath)
         return std::nullopt;
     for (const DeviceState &dev : enumerate()) {
         if (dev.hwPath == hwPath)
+            return dev;
+    }
+    return std::nullopt;
+}
+
+std::optional<DeviceState> findByStableId(const QString &stableId)
+{
+    if (stableId.isEmpty())
+        return std::nullopt;
+    for (const DeviceState &dev : enumerate()) {
+        if (dev.stableId == stableId)
             return dev;
     }
     return std::nullopt;

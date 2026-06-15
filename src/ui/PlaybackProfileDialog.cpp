@@ -175,16 +175,15 @@ void PlaybackProfileDialog::updateModeVisibility()
     m_form->setRowVisible(m_deviceCombo,    bitPerfect);
     m_form->setRowVisible(m_softwareVolume, !bitPerfect);
     m_form->setRowVisible(m_allowResample,  !bitPerfect);
-    // The takeover status line only makes sense for a direct device.
+    // Release-on-pause is a shared-mode choice: bit-perfect always releases the
+    // device (exclusive ALSA access would block other apps while merely paused),
+    // so hide the row there and keep the widget holding the remembered shared
+    // value. The takeover status line only makes sense for a direct device.
+    m_form->setRowVisible(m_releaseSinkOnPause, !bitPerfect);
     m_deviceStatus->setVisible(bitPerfect);
     m_deviceAction->setVisible(bitPerfect);
-    // In bit-perfect mode the device is always released on pause (exclusive ALSA
-    // access blocks other apps otherwise); lock the checkbox to reflect that.
-    m_releaseSinkOnPause->setEnabled(!bitPerfect);
-    if (bitPerfect) {
-        m_releaseSinkOnPause->setChecked(true);
+    if (bitPerfect)
         refreshDeviceStatus();
-    }
 }
 
 void PlaybackProfileDialog::populateDevices()
@@ -301,22 +300,34 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     const int modeIndex = m_mode->findData(profile.mode);
     m_mode->setCurrentIndex(modeIndex >= 0 ? modeIndex : 0);
 
-    const int sinkIndex = m_sink->findData(profile.sink);
+    // Seed the shared sub-form from the remembered shared selections so they are
+    // restored even when the active mode is bit-perfect (where they were pinned).
+    // Empty remembered sink defaults to "Auto", never "ALSA".
+    const QString sharedSink = profile.sharedSink.isEmpty()
+        ? QStringLiteral("auto") : profile.sharedSink;
+    const int sinkIndex = m_sink->findData(sharedSink);
     m_sink->setCurrentIndex(sinkIndex >= 0 ? sinkIndex : 0);
+    m_softwareVolume->setChecked(profile.sharedSoftwareVolume);
+    m_allowResample->setChecked(profile.sharedAllowResample);
+    m_releaseSinkOnPause->setChecked(profile.sharedReleaseSinkOnPause);
 
-    // Populate device combo: try to match by data (hw:N), fall back to typed text.
-    if (!profile.device.isEmpty()) {
-        const int devIndex = m_deviceCombo->findData(profile.device);
-        if (devIndex >= 0) {
-            m_deviceCombo->setCurrentIndex(devIndex);
-        } else {
-            m_deviceCombo->setCurrentText(profile.device);
+    // Bit-perfect device: prefer the live hw:N for the remembered stable id (the
+    // stored index may have drifted), falling back to the stored hw:N / text.
+    QString device = profile.device;
+    if (!profile.deviceId.isEmpty()) {
+        if (const auto dev = AudioDeviceControl::findByStableId(profile.deviceId);
+            dev && !dev->hwPath.isEmpty()) {
+            device = dev->hwPath;
         }
     }
+    if (!device.isEmpty()) {
+        const int devIndex = m_deviceCombo->findData(device);
+        if (devIndex >= 0)
+            m_deviceCombo->setCurrentIndex(devIndex);
+        else
+            m_deviceCombo->setCurrentText(device);
+    }
 
-    m_softwareVolume->setChecked(profile.softwareVolume);
-    m_allowResample->setChecked(profile.allowResample);
-    m_releaseSinkOnPause->setChecked(profile.releaseSinkOnPause);
     m_readAheadMb->setValue(std::clamp(profile.readAheadMb, 0, 1024));
 
     updateModeVisibility();
@@ -329,20 +340,38 @@ PlaybackProfile PlaybackProfileDialog::profile() const
     p.mode    = m_mode->currentData().toString();
     p.replayGain = false;
 
+    // Capture both sub-forms unconditionally so each mode's selection survives
+    // while the other is active. The hidden widgets keep the values seeded in
+    // setProfile, so reading them here is correct in either mode.
+    p.sharedSink                = m_sink->currentData().toString();
+    p.sharedSoftwareVolume      = m_softwareVolume->isChecked();
+    p.sharedAllowResample       = m_allowResample->isChecked();
+    p.sharedReleaseSinkOnPause  = m_releaseSinkOnPause->isChecked();
+
+    // Prefer the item data (hw:N); fall back to the edited text for manual entries.
+    const QString devData = m_deviceCombo->currentData().toString();
+    const QString device = devData.isEmpty() ? m_deviceCombo->currentText().trimmed() : devData;
+    // Persist the device's stable id (independent of the volatile hw:N) so it can
+    // be re-resolved later regardless of which mode is active now.
+    if (!device.isEmpty()) {
+        if (const auto dev = AudioDeviceControl::findByHwPath(device);
+            dev && !dev->stableId.isEmpty()) {
+            p.deviceId = dev->stableId;
+        }
+    }
+
     if (p.mode == QStringLiteral("bit-perfect")) {
         p.sink   = QStringLiteral("alsa");
-        // Prefer the item data (hw:N); fall back to the edited text for manual entries.
-        const QString devData = m_deviceCombo->currentData().toString();
-        p.device = devData.isEmpty() ? m_deviceCombo->currentText().trimmed() : devData;
+        p.device = device;
         p.softwareVolume = false;
         p.allowResample  = false;
         p.releaseSinkOnPause = true; // mandatory in bit-perfect
     } else {
-        p.sink           = m_sink->currentData().toString();
+        p.sink           = p.sharedSink;
         p.device.clear();
-        p.softwareVolume     = m_softwareVolume->isChecked();
-        p.allowResample      = m_allowResample->isChecked();
-        p.releaseSinkOnPause = m_releaseSinkOnPause->isChecked();
+        p.softwareVolume     = p.sharedSoftwareVolume;
+        p.allowResample      = p.sharedAllowResample;
+        p.releaseSinkOnPause = p.sharedReleaseSinkOnPause;
     }
     p.readAheadMb = m_readAheadMb->value();
 

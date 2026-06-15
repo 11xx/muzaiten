@@ -427,6 +427,19 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
         const int legacyPreload = root.value(QStringLiteral("preloadPercent")).toInt(0);
         profile.readAheadMb = legacyPreload > 0 ? 32 : 0;
     }
+
+    // Cross-mode memory. Fall back to the active fields so profiles saved before
+    // these were introduced still seed sensible per-mode defaults.
+    const bool sharedActive = profile.mode != QStringLiteral("bit-perfect");
+    profile.sharedSink = root.value(QStringLiteral("sharedSink"))
+        .toString(sharedActive ? profile.sink : QString());
+    profile.sharedSoftwareVolume = root.value(QStringLiteral("sharedSoftwareVolume"))
+        .toBool(sharedActive ? profile.softwareVolume : true);
+    profile.sharedAllowResample = root.value(QStringLiteral("sharedAllowResample"))
+        .toBool(sharedActive ? profile.allowResample : false);
+    profile.sharedReleaseSinkOnPause = root.value(QStringLiteral("sharedReleaseSinkOnPause"))
+        .toBool(sharedActive ? profile.releaseSinkOnPause : true);
+    profile.deviceId = root.value(QStringLiteral("deviceId")).toString(profile.deviceId);
     return profile;
 }
 
@@ -444,6 +457,11 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("allowResample"), profile.allowResample);
     root.insert(QStringLiteral("releaseSinkOnPause"), profile.releaseSinkOnPause);
     root.insert(QStringLiteral("readAheadMb"), profile.readAheadMb);
+    root.insert(QStringLiteral("sharedSink"), profile.sharedSink);
+    root.insert(QStringLiteral("sharedSoftwareVolume"), profile.sharedSoftwareVolume);
+    root.insert(QStringLiteral("sharedAllowResample"), profile.sharedAllowResample);
+    root.insert(QStringLiteral("sharedReleaseSinkOnPause"), profile.sharedReleaseSinkOnPause);
+    root.insert(QStringLiteral("deviceId"), profile.deviceId);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -3625,6 +3643,15 @@ void MainWindow::restoreCurrentSourceSelection()
 void MainWindow::loadPlaybackProfile()
 {
     m_playbackProfile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+    // The persisted hw:N can drift across reboots / device launch order; recover
+    // the current index from the stable device id when we have one.
+    if (m_playbackProfile.mode == QStringLiteral("bit-perfect")
+        && !m_playbackProfile.deviceId.isEmpty()) {
+        if (const auto dev = AudioDeviceControl::findByStableId(m_playbackProfile.deviceId);
+            dev && !dev->hwPath.isEmpty()) {
+            m_playbackProfile.device = dev->hwPath;
+        }
+    }
     m_playback->setProfile(m_playbackProfile);
 }
 
