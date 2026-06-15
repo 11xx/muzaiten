@@ -1,5 +1,6 @@
 #include "ui/trackinfo/TrackInfoSettingsDialog.h"
 
+#include "ui/ConditionEditor.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/ReorderableTableWidget.h"
 #include "ui/SettingsDialogSupport.h"
@@ -216,17 +217,11 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
     metadataButtonRow->addStretch(1);
     layout->addLayout(metadataButtonRow);
 
-    // Contextual "Only if notable" customization, kept next to the separator row.
-    // It edits the threshold of the currently selected metadata row and greys out
-    // unless that row both supports a threshold and is set to "Only if notable".
-    auto *notableRow = new QHBoxLayout;
-    auto *notableLabel = new QLabel(&dialog);
-    auto *notableSpin = new QSpinBox(&dialog);
-    notableSpin->setMaximumWidth(110);
-    notableRow->addWidget(notableLabel);
-    notableRow->addWidget(notableSpin);
-    notableRow->addStretch(1);
-    layout->addLayout(notableRow);
+    // Contextual "Only if ..." customization, kept next to the separator row. It
+    // edits the threshold of the currently selected metadata row and greys out
+    // unless that row's mode actually carries an editable value.
+    auto *conditionEditor = new ConditionEditor(&dialog);
+    layout->addWidget(conditionEditor);
 
     // Separator controls share one setting, so pack them tightly and left-aligned
     // rather than spreading evenly across the row.
@@ -253,52 +248,27 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
     metadataOptionRow->addStretch(1);
     layout->addLayout(metadataOptionRow);
 
-    auto configureNotableSpin = [](QSpinBox *spin, const QString &key) {
-        if (key == QStringLiteral("sampleRate")) {
-            spin->setRange(1, 768);
-            spin->setSuffix(QStringLiteral(" kHz"));
-        } else if (key == QStringLiteral("bitDepth")) {
-            spin->setRange(1, 64);
-            spin->setSuffix(QStringLiteral("-bit"));
-        } else if (key == QStringLiteral("channels")) {
-            spin->setRange(1, 32);
-            spin->setSuffix(QStringLiteral(" ch"));
-        }
-    };
-    auto notablePrompt = [](const QString &key) -> QString {
-        if (key == QStringLiteral("sampleRate")) {
-            return QStringLiteral("Sample rate above");
-        }
-        if (key == QStringLiteral("bitDepth")) {
-            return QStringLiteral("Bit depth above");
-        }
-        if (key == QStringLiteral("channels")) {
-            return QStringLiteral("Channels above");
-        }
-        return QString();
-    };
-    auto refreshNotable = [=]() {
+    auto refreshCondition = [=]() {
         const int row = metadataTable->currentRow();
-        bool active = false;
         QString key;
+        QString mode;
         if (row >= 0 && metadataTable->item(row, 1) != nullptr) {
             key = metadataTable->item(row, 1)->data(Qt::UserRole).toString();
             auto *modeBox = qobject_cast<QComboBox *>(metadataTable->cellWidget(row, 2));
-            const QString mode = modeBox == nullptr ? QString() : modeBox->currentData().toString();
-            active = metadataNotableConfigurable(key) && mode == QStringLiteral("notable");
+            mode = modeBox == nullptr ? QString() : modeBox->currentData().toString();
         }
-        notableLabel->setText(active ? notablePrompt(key) : QStringLiteral("Notable threshold"));
+        const MetadataCondition cond = metadataCondition(key);
+        const bool active = !key.isEmpty() && cond.editor != ConditionEditorKind::None && mode == cond.valueMode;
         if (active) {
-            const QSignalBlocker blocker(notableSpin);
-            configureNotableSpin(notableSpin, key);
-            notableSpin->setValue(metadataTable->item(row, 1)->data(Qt::UserRole + 1).toInt());
+            conditionEditor->setCondition(cond.editor, cond.prompt, cond.minValue, cond.maxValue, cond.suffix);
+            conditionEditor->setValue(metadataTable->item(row, 1)->data(Qt::UserRole + 1).toInt());
+        } else {
+            conditionEditor->setCondition(ConditionEditorKind::None, QString(), 0, 0, QString());
         }
-        notableLabel->setEnabled(active);
-        notableSpin->setEnabled(active);
     };
 
     auto *dialogPtr = &dialog;
-    auto appendMetadataRow = [metadataTable, refreshNotable, dialogPtr](const QJsonObject &item) {
+    auto appendMetadataRow = [metadataTable, refreshCondition, dialogPtr](const QJsonObject &item) {
         const int row = metadataTable->rowCount();
         metadataTable->insertRow(row);
         auto *show = new QCheckBox(metadataTable);
@@ -312,17 +282,16 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
         const QString key = item.value(QStringLiteral("key")).toString();
         auto *itemCell = new QTableWidgetItem(metadataLabel(key));
         itemCell->setData(Qt::UserRole, key);
-        itemCell->setData(Qt::UserRole + 1,
-                          item.value(QStringLiteral("notableMin")).toInt(metadataDefaultNotableMin(key)));
+        itemCell->setData(Qt::UserRole + 1, item.value(QStringLiteral("condValue")).toInt(metadataDefaultCondValue(key)));
         metadataTable->setItem(row, 1, itemCell);
 
         auto *mode = new QComboBox(metadataTable);
-        mode->addItem(QStringLiteral("Always"), QStringLiteral("always"));
-        mode->addItem(QStringLiteral("Only if notable"), QStringLiteral("notable"));
-        mode->addItem(QStringLiteral("Lossy bitrate"), QStringLiteral("lossy"));
+        for (const MetadataModeOption &option : metadataModeOptions(key)) {
+            mode->addItem(option.label, option.token);
+        }
         mode->setCurrentIndex(std::max(0, mode->findData(item.value(QStringLiteral("mode")).toString(metadataDefaultMode(key)))));
         metadataTable->setCellWidget(row, 2, mode);
-        QObject::connect(mode, &QComboBox::currentIndexChanged, dialogPtr, [refreshNotable]() { refreshNotable(); });
+        QObject::connect(mode, &QComboBox::currentIndexChanged, dialogPtr, [refreshCondition]() { refreshCondition(); });
     };
     auto readMetadataRow = [metadataTable](int row) {
         QJsonObject item;
@@ -333,10 +302,10 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
         auto *mode = qobject_cast<QComboBox *>(metadataTable->cellWidget(row, 2));
         item.insert(QStringLiteral("visible"), show == nullptr || show->isChecked());
         item.insert(QStringLiteral("mode"), mode == nullptr ? QStringLiteral("always") : mode->currentData().toString());
-        item.insert(QStringLiteral("notableMin"), cell->data(Qt::UserRole + 1).toInt());
+        item.insert(QStringLiteral("condValue"), cell->data(Qt::UserRole + 1).toInt());
         return item;
     };
-    auto reorderMetadata = [metadataTable, appendMetadataRow, readMetadataRow, refreshNotable](int from, int to) {
+    auto reorderMetadata = [metadataTable, appendMetadataRow, readMetadataRow, refreshCondition](int from, int to) {
         QJsonArray rows;
         for (int row = 0; row < metadataTable->rowCount(); ++row) {
             rows.append(readMetadataRow(row));
@@ -353,7 +322,7 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
             appendMetadataRow(value.toObject());
         }
         metadataTable->selectRow(dest);
-        refreshNotable();
+        refreshCondition();
     };
 
     for (const QJsonValue &value : normalizedMetadataItems(current.value(QStringLiteral("trackInfoMetadataItems")).toArray())) {
@@ -362,18 +331,18 @@ TrackInfoDialogResult runTrackInfoSettingsDialog(QWidget *parent, const QJsonObj
     settingsdialog::applyColumnWidths(metadataTable, {54, 220, 190},
                                       savedDialogState.value(QStringLiteral("metaCols")).toArray());
 
-    QObject::connect(metadataTable, &QTableWidget::itemSelectionChanged, &dialog, [refreshNotable]() { refreshNotable(); });
-    QObject::connect(notableSpin, &QSpinBox::valueChanged, &dialog, [metadataTable](int value) {
+    QObject::connect(metadataTable, &QTableWidget::itemSelectionChanged, &dialog, [refreshCondition]() { refreshCondition(); });
+    QObject::connect(conditionEditor, &ConditionEditor::valueChanged, &dialog, [conditionEditor, metadataTable]() {
         const int row = metadataTable->currentRow();
         if (row < 0 || metadataTable->item(row, 1) == nullptr) {
             return;
         }
         const QString key = metadataTable->item(row, 1)->data(Qt::UserRole).toString();
-        if (metadataNotableConfigurable(key)) {
-            metadataTable->item(row, 1)->setData(Qt::UserRole + 1, value);
+        if (metadataCondition(key).editor != ConditionEditorKind::None) {
+            metadataTable->item(row, 1)->setData(Qt::UserRole + 1, conditionEditor->value());
         }
     });
-    refreshNotable();
+    refreshCondition();
 
     metadataTable->reorder = reorderMetadata;
     QObject::connect(metadataUp, &QPushButton::clicked, &dialog, [metadataTable, reorderMetadata]() {

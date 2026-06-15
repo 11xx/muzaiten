@@ -11,14 +11,14 @@ using namespace trackinfo;
 
 namespace {
 
-QJsonObject metaItem(const QString &key, const QString &mode = QStringLiteral("always"), int notableMin = 0,
+QJsonObject metaItem(const QString &key, const QString &mode = QStringLiteral("always"), int condValue = 0,
                      bool visible = true)
 {
     QJsonObject item;
     item.insert(QStringLiteral("key"), key);
     item.insert(QStringLiteral("visible"), visible);
     item.insert(QStringLiteral("mode"), mode);
-    item.insert(QStringLiteral("notableMin"), notableMin);
+    item.insert(QStringLiteral("condValue"), condValue);
     return item;
 }
 
@@ -74,6 +74,67 @@ private slots:
         QVERIFY(metadataItemPassesMode(cd, QStringLiteral("sampleRate"), QStringLiteral("notable"), 40));
         // "always" never filters.
         QVERIFY(metadataItemPassesMode(cd, QStringLiteral("sampleRate"), QStringLiteral("always"), 48));
+    }
+
+    void durationAndSizeConditions()
+    {
+        Track shortSmall;
+        shortSmall.durationMs = 120000;     // 2:00
+        shortSmall.fileSize = 3 * 1000000;  // 3 MB
+        Track longBig;
+        longBig.durationMs = 600000;        // 10:00
+        longBig.fileSize = 80 * 1000000;    // 80 MB
+
+        QVERIFY(metadataItemPassesMode(longBig, QStringLiteral("duration"), QStringLiteral("durationOver"), 300000));
+        QVERIFY(!metadataItemPassesMode(shortSmall, QStringLiteral("duration"), QStringLiteral("durationOver"), 300000));
+        QVERIFY(metadataItemPassesMode(longBig, QStringLiteral("size"), QStringLiteral("sizeOver"), 50));
+        QVERIFY(!metadataItemPassesMode(shortSmall, QStringLiteral("size"), QStringLiteral("sizeOver"), 50));
+    }
+
+    void formatClassConditions()
+    {
+        Track flac;
+        flac.path = QStringLiteral("/m/a.flac");
+        Track mp3;
+        mp3.path = QStringLiteral("/m/a.mp3");
+        Track alacInM4a;
+        alacInM4a.path = QStringLiteral("/m/a.m4a");
+        alacInM4a.bitDepth = 24;  // lossless payload in an ambiguous container
+
+        QVERIFY(isLosslessFormat(flac));
+        QVERIFY(!isLosslessFormat(mp3));
+        QVERIFY(isLosslessFormat(alacInM4a));
+
+        QVERIFY(metadataItemPassesMode(flac, QStringLiteral("format"), QStringLiteral("formatLossless"), 0));
+        QVERIFY(!metadataItemPassesMode(flac, QStringLiteral("format"), QStringLiteral("formatLossy"), 0));
+        QVERIFY(metadataItemPassesMode(mp3, QStringLiteral("format"), QStringLiteral("formatLossy"), 0));
+    }
+
+    void contextualModeOptions()
+    {
+        // Codec offers only "Always"; format offers lossy/lossless variants.
+        QCOMPARE(metadataModeOptions(QStringLiteral("codec")).size(), 1);
+        const auto formatModes = metadataModeOptions(QStringLiteral("format"));
+        QStringList tokens;
+        for (const auto &option : formatModes) {
+            tokens.push_back(option.token);
+        }
+        QVERIFY(tokens.contains(QStringLiteral("formatLossy")));
+        QVERIFY(tokens.contains(QStringLiteral("formatLossless")));
+
+        QCOMPARE(metadataCondition(QStringLiteral("duration")).editor, ConditionEditorKind::Duration);
+        QCOMPARE(metadataCondition(QStringLiteral("sampleRate")).editor, ConditionEditorKind::IntSpin);
+        QCOMPARE(metadataCondition(QStringLiteral("codec")).editor, ConditionEditorKind::None);
+    }
+
+    void legacyNotableMinIsRead()
+    {
+        QJsonObject item;
+        item.insert(QStringLiteral("key"), QStringLiteral("sampleRate"));
+        item.insert(QStringLiteral("mode"), QStringLiteral("notable"));
+        item.insert(QStringLiteral("notableMin"), 96);  // old key
+        const QJsonArray normalized = normalizedMetadataItems(QJsonArray{item});
+        QCOMPARE(normalized.at(0).toObject().value(QStringLiteral("condValue")).toInt(), 96);
     }
 
     void lossyMode()
@@ -147,7 +208,7 @@ private slots:
             const QJsonObject item = value.toObject();
             const QString key = item.value(QStringLiteral("key")).toString();
             QCOMPARE(item.value(QStringLiteral("mode")).toString(), metadataDefaultMode(key));
-            QCOMPARE(item.value(QStringLiteral("notableMin")).toInt(), metadataDefaultNotableMin(key));
+            QCOMPARE(item.value(QStringLiteral("condValue")).toInt(), metadataDefaultCondValue(key));
         }
     }
 

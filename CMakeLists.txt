@@ -93,6 +93,7 @@ set(MUZAITEN_SOURCES
     src/search/SearchWorker.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumArtView.cpp
+    src/ui/ConditionEditor.cpp
     src/ui/NeighborColumnResizer.cpp
     src/ui/ResponsiveColumnLayout.cpp
     src/ui/ResponsiveColumnOptionsDialog.cpp
@@ -207,6 +208,7 @@ set(MUZAITEN_HEADERS
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
     src/ui/AlbumArtView.h
+    src/ui/ConditionEditor.h
     src/ui/NeighborColumnResizer.h
     src/ui/ResponsiveColumnLayout.h
     src/ui/ResponsiveColumnOptionsDialog.h
