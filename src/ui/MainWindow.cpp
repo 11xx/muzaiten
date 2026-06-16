@@ -1593,7 +1593,7 @@ void MainWindow::setupTrayIcon()
     QApplication::setQuitOnLastWindowClosed(false);
 
     auto *menu = new QMenu(this);
-    menu->addAction(QStringLiteral("Show/Hide"), this, &MainWindow::toggleWindowVisible);
+    menu->addAction(QStringLiteral("Unhide"), this, &MainWindow::toggleWindowVisible);
     menu->addSeparator();
     menu->addAction(QStringLiteral("Play/Pause"), this, &MainWindow::togglePlayback);
     menu->addAction(QStringLiteral("Next"), this, &MainWindow::playNextTrack);
