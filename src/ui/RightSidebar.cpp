@@ -1,5 +1,6 @@
 #include "ui/RightSidebar.h"
 
+#include "db/Database.h"
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumArtView.h"
 #include "ui/QueueStore.h"
@@ -201,6 +202,15 @@ void RightSidebar::setAlbumArt(const QImage &image)
 
 void RightSidebar::setTrackInfo(const Track &track)
 {
+    // Queue loaders skip the rich audio columns (sampleRateHz, bitDepth, channels,
+    // bitrateKbps, codec) for speed.  Fill them now so the metadata row can show
+    // these values; it's one indexed SQL read per track change — negligible cost.
+    if (m_database != nullptr && !track.path.isEmpty()) {
+        Track rich = track;
+        m_database->enrichTrackForStatus(rich);
+        m_trackInfoPanel->setTrack(rich);
+        return;
+    }
     m_trackInfoPanel->setTrack(track);
 }
 

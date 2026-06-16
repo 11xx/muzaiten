@@ -9,6 +9,7 @@
 #include "search/SearchMatcher.h"
 #include "ui/QueueTable.h"
 
+class Database;
 class QImage;
 class QLabel;
 class QueueStore;
@@ -22,6 +23,7 @@ class RightSidebar final : public QWidget {
 public:
     explicit RightSidebar(QWidget *parent = nullptr);
 
+    void setDatabase(const Database *db) { m_database = db; }
     void setQueueStore(QueueStore *store);
     void setQueue(const QVector<Track> &tracks);
     void setPlayNextRange(int begin, int end);
@@ -66,6 +68,7 @@ protected:
     void changeEvent(QEvent *event) override;
 
 private:
+    const Database *m_database = nullptr;
     QueueTable *m_queueTable = nullptr;
     QueueStore *m_queueStore = nullptr;
     QLabel *m_albumArt = nullptr;
