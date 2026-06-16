@@ -107,6 +107,7 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setTextElideMode(Qt::ElideRight);
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
@@ -826,9 +827,10 @@ QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
 
 int AlbumGrid::gridColumnCount() const
 {
-    const int cellWidth = gridSize().width() > 0 ? gridSize().width() : m_effectiveCellWidth;
-    const int stride = std::max(1, cellWidth + spacing());
-    return std::max(1, (viewport()->width() + spacing()) / stride);
+    // IconMode's horizontal stride is exactly the grid cell width (setSpacing is
+    // ignored once a grid size is set), so the column count is floor(vpW / stride).
+    const int stride = gridSize().width() > 0 ? gridSize().width() : m_effectiveCellWidth;
+    return std::max(1, viewport()->width() / std::max(1, stride));
 }
 
 void AlbumGrid::showContextMenu(const QPoint &pos)
@@ -949,14 +951,20 @@ void AlbumGrid::recomputeEffectiveSizes()
         return;
     }
 
-    // Number of base-width columns that fit in the viewport.
-    const int cols = std::max(1, (vpW + m_spacing) / (m_cellWidth + m_spacing));
-    // Only stretch cells to fill the viewport when items actually wrap; if they
-    // all fit on one row, keep them at the configured base size.  When stretching,
-    // use (cols-1) inter-item gaps so the last item's trailing gap lands off-screen
-    // and the row fills the viewport with no right-edge slack.
+    // QListView's IconMode lays items on a fixed grid whose horizontal stride is
+    // exactly gridSize().width() — setSpacing() is ignored between cells once a
+    // grid size is set, and overshooting the viewport re-wraps to one fewer column
+    // (it never scrolls). So the stride is the bare cell width, and the column
+    // count Qt will honour is floor(vpW / cellWidth).
+    const int cols = std::max(1, vpW / m_cellWidth);
+    // Only stretch cells to fill the viewport when items actually wrap; if they all
+    // fit on one row, keep them at the configured base size. When stretching, divide
+    // the full width across the columns (floor, never ceil — ceil would overshoot
+    // and drop a column, opening a full-cell gap). The only slack left is the forced
+    // integer remainder vpW % cols (< cols px), which is absorbed by the cards' own
+    // internal padding, so the row reads as flush.
     const int effCellW = m_displayItemCount > cols
-        ? std::max(m_cellWidth, (vpW - m_spacing * (cols - 1)) / cols)
+        ? std::max(m_cellWidth, vpW / cols)
         : m_cellWidth;
 
     const int artHPad = m_cellWidth - m_artSize;   // horizontal padding around art
