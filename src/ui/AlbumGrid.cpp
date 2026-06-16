@@ -828,9 +828,11 @@ QRect AlbumGrid::ratingRectForIndex(const QModelIndex &index) const
 int AlbumGrid::gridColumnCount() const
 {
     // IconMode's horizontal stride is exactly the grid cell width (setSpacing is
-    // ignored once a grid size is set), so the column count is floor(vpW / stride).
+    // ignored once a grid size is set), and the view fits the largest n with
+    // n*stride strictly below the viewport, so the column count is
+    // floor((vpW - 1) / stride) — matching what recomputeEffectiveSizes lays out.
     const int stride = gridSize().width() > 0 ? gridSize().width() : m_effectiveCellWidth;
-    return std::max(1, viewport()->width() / std::max(1, stride));
+    return std::max(1, (viewport()->width() - 1) / std::max(1, stride));
 }
 
 void AlbumGrid::showContextMenu(const QPoint &pos)
@@ -952,19 +954,20 @@ void AlbumGrid::recomputeEffectiveSizes()
     }
 
     // QListView's IconMode lays items on a fixed grid whose horizontal stride is
-    // exactly gridSize().width() — setSpacing() is ignored between cells once a
-    // grid size is set, and overshooting the viewport re-wraps to one fewer column
-    // (it never scrolls). So the stride is the bare cell width, and the column
-    // count Qt will honour is floor(vpW / cellWidth).
+    // exactly gridSize().width(): setSpacing() is ignored between cells once a grid
+    // size is set, and the view fits the largest n with n*stride STRICTLY less than
+    // the viewport — an exact fill (n*stride == vpW) wraps to n-1, and overshooting
+    // re-wraps too (it never scrolls). So the honoured column count is
+    // floor((vpW - 1) / stride); the base-width column count is:
     const int cols = std::max(1, vpW / m_cellWidth);
-    // Only stretch cells to fill the viewport when items actually wrap; if they all
-    // fit on one row, keep them at the configured base size. When stretching, divide
-    // the full width across the columns (floor, never ceil — ceil would overshoot
-    // and drop a column, opening a full-cell gap). The only slack left is the forced
-    // integer remainder vpW % cols (< cols px), which is absorbed by the cards' own
-    // internal padding, so the row reads as flush.
+    // Only stretch to fill when items actually wrap; if they all fit on one row keep
+    // the configured base size. When stretching, spread (vpW - 1) across the columns
+    // (not vpW) so cols*effCellW stays strictly below the viewport and Qt keeps all
+    // cols columns instead of wrapping the last one a pixel early. Floor, never ceil:
+    // ceil would overshoot and drop a whole column. The only slack left is the forced
+    // remainder (< cols px), absorbed by the cards' own padding, so the row is flush.
     const int effCellW = m_displayItemCount > cols
-        ? std::max(m_cellWidth, vpW / cols)
+        ? std::max(1, (vpW - 1) / cols)
         : m_cellWidth;
 
     const int artHPad = m_cellWidth - m_artSize;   // horizontal padding around art
@@ -980,10 +983,19 @@ void AlbumGrid::resizeEvent(QResizeEvent *event)
     const int previousArt = m_effectiveArtSize;
     const int previousW = m_effectiveCellWidth;
     recomputeEffectiveSizes();
-    if (m_effectiveArtSize != previousArt || m_effectiveCellWidth != previousW) {
-        applySettingsToView();
-        applySettingsToItems();
+    if (m_effectiveArtSize == previousArt && m_effectiveCellWidth == previousW) {
+        return;
     }
+    // applySettingsToView() (setGridSize/setIconSize) and applySettingsToItems()
+    // (per-item ArtSizeRole) each schedule their own relayout + repaint; running
+    // both unbatched on every resize frame makes the grid flicker as it stretches.
+    // Suppress viewport painting across the pair so the burst collapses into a
+    // single repaint once the new geometry is settled.
+    const bool wasEnabled = viewport()->updatesEnabled();
+    viewport()->setUpdatesEnabled(false);
+    applySettingsToView();
+    applySettingsToItems();
+    viewport()->setUpdatesEnabled(wasEnabled);
 }
 
 void AlbumGrid::applySettingsToView()
