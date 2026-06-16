@@ -191,6 +191,11 @@ void AlbumGrid::setAlbums(const QVector<Album> &albums, bool freshLoad)
         itemModel->removeRow(itemModel->rowCount() - 1);
     }
 
+    // Recompute cell sizes for the new album count before populating so every
+    // item (including batch-loaded ones) gets the correct SizeHintRole from the start.
+    m_displayItemCount = target;
+    applySettingsToView();
+
     const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
     for (int i = 0; i < itemModel->rowCount(); ++i) {
         QStandardItem *item = itemModel->item(i);
@@ -944,10 +949,15 @@ void AlbumGrid::recomputeEffectiveSizes()
         return;
     }
 
-    // Number of columns that fit at the configured base width, then stretch each
-    // cell so that many columns exactly fill the width (no right-edge slack).
+    // Number of base-width columns that fit in the viewport.
     const int cols = std::max(1, (vpW + m_spacing) / (m_cellWidth + m_spacing));
-    const int effCellW = std::max(m_cellWidth, (vpW - m_spacing * (cols + 1)) / cols);
+    // Only stretch cells to fill the viewport when items actually wrap; if they
+    // all fit on one row, keep them at the configured base size.  When stretching,
+    // use (cols-1) inter-item gaps so the last item's trailing gap lands off-screen
+    // and the row fills the viewport with no right-edge slack.
+    const int effCellW = m_displayItemCount > cols
+        ? std::max(m_cellWidth, (vpW - m_spacing * (cols - 1)) / cols)
+        : m_cellWidth;
 
     const int artHPad = m_cellWidth - m_artSize;   // horizontal padding around art
     const int artVExtra = m_cellHeight - m_artSize; // text/rating area below art

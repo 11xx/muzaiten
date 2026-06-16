@@ -148,6 +148,7 @@ private:
     bool m_showLoading = false;
     int m_loadingCount = 0;
     int m_loadingAngle = 0;
+    int m_displayItemCount = 0;  // expected final row count; drives wrap-before-stretch check
     qsizetype m_nextAlbumRow = 0;
     int m_nextArtworkRow = 0;
     int m_artworkGeneration = 0;
