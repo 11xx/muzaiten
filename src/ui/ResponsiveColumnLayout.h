@@ -59,6 +59,7 @@ public:
 
     void resetToDefaults();
     void relayout();
+    void scheduleDeferredRelayout();
 
 signals:
     void layoutSettingsChanged();
@@ -93,4 +94,5 @@ private:
     QHash<QString, ResponsiveColumnPriority> m_priorities;
     QStringList m_dropOrderKeys;
     bool m_applyingLayout = false;
+    bool m_deferredRelayoutPending = false;
 };

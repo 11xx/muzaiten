@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QSignalBlocker>
 #include <QTableView>
+#include <QTimer>
 #include <QWidget>
 
 #include <algorithm>
@@ -324,11 +325,32 @@ void ResponsiveColumnLayout::relayout()
     m_applyingLayout = false;
 }
 
+void ResponsiveColumnLayout::scheduleDeferredRelayout()
+{
+    if (m_deferredRelayoutPending) {
+        return;
+    }
+    m_deferredRelayoutPending = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_deferredRelayoutPending = false;
+        relayout();
+    });
+}
+
 bool ResponsiveColumnLayout::eventFilter(QObject *watched, QEvent *event)
 {
     if (m_view != nullptr && watched == m_view->viewport()
         && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
         relayout();
+        if (event->type() == QEvent::Show) {
+            // On the viewport's Show (first show, or re-show when its QStackedWidget
+            // page becomes current again) the final width may not be applied yet, so
+            // the relayout above falls back to the baseline-sum width — leaving the
+            // columns bunched at the left with empty space on the right and only the
+            // absorber's edge near the viewport border. Re-run once the event loop
+            // has flushed the real geometry so the absorber fills the viewport.
+            scheduleDeferredRelayout();
+        }
     }
     return QObject::eventFilter(watched, event);
 }

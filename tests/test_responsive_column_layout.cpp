@@ -103,6 +103,44 @@ private slots:
         QCOMPARE(view.columnWidth(3), 60);
     }
 
+    void deferredRelayoutRefillsViewportAfterShow()
+    {
+        QTableView view;
+        QStandardItemModel model;
+        prepareView(&view, &model);
+        ResponsiveColumnLayout layout(&view, basicSpecs());
+        layout.setUserVisibleColumns(allBasicKeys());
+        QTest::qWait(0); // let the platform settle the real viewport width
+        layout.relayout();
+
+        const auto visibleSum = [&]() {
+            int sum = 0;
+            for (int c = 0; c < model.columnCount(); ++c) {
+                if (!view.isColumnHidden(c)) {
+                    sum += view.columnWidth(c);
+                }
+            }
+            return sum;
+        };
+
+        const int filled = view.columnWidth(0);
+        QCOMPARE(visibleSum(), view.viewport()->width()); // fills, no blank space
+
+        // Reproduce the startup race: relayout() ran while the table was still
+        // hidden during loadViewSettings(), so it laid columns out against the
+        // baseline-sum width and left the absorber short — columns bunched at the
+        // left with empty space on the right.
+        view.setColumnWidth(0, filled - 100);
+        QVERIFY(visibleSum() < view.viewport()->width()); // empty space on the right
+
+        // The deferred relayout scheduled on the viewport's Show event must
+        // recompute against the real width once the event loop runs, refilling it.
+        layout.scheduleDeferredRelayout();
+        QTest::qWait(0);
+        QCOMPARE(view.columnWidth(0), filled);
+        QCOMPARE(visibleSum(), view.viewport()->width());
+    }
+
     void priorityPersists()
     {
         QTableView view;
