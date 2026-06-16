@@ -50,6 +50,11 @@ void ConditionEditor::setCondition(ConditionEditorKind kind,
     m_time->setVisible(kind == ConditionEditorKind::Duration);
     m_time->setEnabled(active);
     if (kind == ConditionEditorKind::IntSpin) {
+        // Block valueChanged while reconfiguring the range: QSpinBox clamps its
+        // current value into the new range and emits valueChanged for any change,
+        // which would fire the dialog's "store condValue" slot before setValue()
+        // is called, corrupting Qt::UserRole+1 with the clamped value.
+        const QSignalBlocker blocker(m_spin);
         m_spin->setRange(minValue, maxValue);
         m_spin->setSuffix(suffix);
     }
@@ -58,7 +63,10 @@ void ConditionEditor::setCondition(ConditionEditorKind kind,
 int ConditionEditor::value() const
 {
     if (m_kind == ConditionEditorKind::Duration) {
-        return static_cast<int>(humanquantity::parseDuration(m_time->text()));
+        // text() strips mask separators (colons) from a masked QLineEdit, returning
+        // e.g. "00500" for "0:05:00". Use displayText() which preserves them so
+        // parseDuration can split on ':' and parse correctly.
+        return static_cast<int>(humanquantity::parseDuration(m_time->displayText()));
     }
     return m_spin->value();
 }
