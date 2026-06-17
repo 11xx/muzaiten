@@ -334,6 +334,7 @@ void AppCore::setupTrayIcon()
     menu->addSeparator();
     menu->addAction(QStringLiteral("Quit"), this, &AppCore::quit);
     m_tray->setContextMenu(menu);
+    m_tray->show();
 
     connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger) {
