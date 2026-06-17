@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QJsonObject>
 #include <QObject>
 #include <memory>
 
@@ -17,6 +18,7 @@ class PlayerCore;
 class PlaylistDatabase;
 class QThread;
 class SettingsStore;
+struct Track;
 
 class AppCore final : public QObject {
     Q_OBJECT
@@ -41,7 +43,6 @@ public:
     QThread               *listenBrainzThread() const;
     QThread               *lastFmThread() const;
 
-    // Helpers moved from MainWindow
     QString databasePath() const;
     QString playlistDatabasePath() const;
     QString listenHistoryPath() const;
@@ -52,7 +53,19 @@ public slots:
     void releaseWindow();
     void quit();
 
+    // Called by MainWindow's resumePlaybackAt to resume scrobble state
+    // after restoring a saved playback position.
+    void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
+
 private:
+    void setupMprisWiring();
+    void setupScrobbleWiring();
+    void setupIpcHandler();
+    void updateMprisCapabilities();
+    void notifyScrobblersTrackStarted(const Track &track);
+    QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
+    QJsonObject ipcStatus() const;
+
     std::unique_ptr<Database>          m_database;
     std::unique_ptr<PlaylistDatabase>  m_playlistDb;
     std::unique_ptr<SettingsStore>     m_state;

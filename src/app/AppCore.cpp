@@ -19,10 +19,62 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QThread>
 #include <QUuid>
 
 #include <algorithm>
+#include <cmath>
+
+namespace {
+
+QString repeatModeToString(RepeatMode mode)
+{
+    switch (mode) {
+    case RepeatMode::All:
+        return QStringLiteral("all");
+    case RepeatMode::One:
+        return QStringLiteral("one");
+    case RepeatMode::Off:
+        break;
+    }
+    return QStringLiteral("off");
+}
+
+QString shuffleModeToString(ShuffleMode mode)
+{
+    switch (mode) {
+    case ShuffleMode::Queue:
+        return QStringLiteral("queue");
+    case ShuffleMode::Library:
+        return QStringLiteral("library");
+    case ShuffleMode::Off:
+        break;
+    }
+    return QStringLiteral("off");
+}
+
+QJsonObject trackJson(const Track &track, int index = -1)
+{
+    QJsonObject json{
+        {QStringLiteral("path"), track.path},
+        {QStringLiteral("title"), track.title.isEmpty() ? track.filename : track.title},
+        {QStringLiteral("artist"), track.artistName},
+        {QStringLiteral("album"), track.albumTitle},
+        {QStringLiteral("duration"), std::round(static_cast<double>(track.durationMs) / 10.0) / 100.0},
+    };
+    if (index >= 0) {
+        json.insert(QStringLiteral("index"), index);
+    }
+    if (track.effectiveRating0To100 >= 0) {
+        json.insert(QStringLiteral("rating"), track.effectiveRating0To100);
+    }
+    return json;
+}
+
+} // namespace
 
 AppCore::AppCore(QObject *parent)
     : QObject(parent)
@@ -88,6 +140,10 @@ AppCore::AppCore(QObject *parent)
     m_lastFmThread->start();
 
     m_ipc = new IpcServer(this);
+
+    setupMprisWiring();
+    setupScrobbleWiring();
+    setupIpcHandler();
 }
 
 AppCore::~AppCore()
@@ -161,4 +217,286 @@ void AppCore::quit()
         m_window = nullptr;
     }
     QApplication::quit();
+}
+
+void AppCore::setupMprisWiring()
+{
+    connect(m_mpris, &MprisService::raiseRequested, this, &AppCore::showWindow);
+    connect(m_mpris, &MprisService::previousRequested, m_player, &PlayerCore::previous);
+    connect(m_mpris, &MprisService::nextRequested, m_player, &PlayerCore::next);
+    connect(m_mpris, &MprisService::repeatModeRequested, m_player, &PlayerCore::setRepeatMode);
+    connect(m_mpris, &MprisService::shuffleModeRequested, m_player, &PlayerCore::setShuffleMode);
+    connect(m_mpris, &MprisService::pauseRequested, m_playback, &PlaybackBackend::pause);
+    connect(m_mpris, &MprisService::playPauseRequested, m_player, &PlayerCore::togglePlayPause);
+    connect(m_mpris, &MprisService::stopRequested, m_playback, &PlaybackBackend::stop);
+    connect(m_mpris, &MprisService::playRequested, m_player, &PlayerCore::play);
+    connect(m_mpris, &MprisService::seekRequested, m_playback, &PlaybackBackend::seek);
+    connect(m_mpris, &MprisService::relativeSeekRequested, m_player, &PlayerCore::seekRelative);
+    connect(m_mpris, &MprisService::volumeRequested, m_player, &PlayerCore::setVolume);
+
+    connect(m_player, &PlayerCore::repeatModeChanged, this, [this](RepeatMode mode) {
+        m_mpris->setRepeatMode(mode);
+        m_state->setSetting(QStringLiteral("playback.repeatMode"), repeatModeToString(mode));
+    });
+    connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
+        m_mpris->setShuffleMode(mode);
+        m_state->setSetting(QStringLiteral("playback.shuffleMode"), shuffleModeToString(mode));
+    });
+    connect(m_player, &PlayerCore::libraryShufflePercentChanged, this, [this](int percent) {
+        m_state->setSetting(QStringLiteral("playback.libraryShufflePercent"), QString::number(percent));
+    });
+    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
+        m_mpris->setTrack(track);
+        m_mpris->setDurationMs(track.durationMs);
+        m_mpris->setPositionMs(0);
+        updateMprisCapabilities();
+    });
+    connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
+        m_mpris->setTrack({});
+    });
+    connect(m_player, &PlayerCore::volumeChanged, this, [this](double volume0To1) {
+        const int percent = std::clamp(static_cast<int>(std::lround(volume0To1 * 100.0)), 0, 100);
+        m_mpris->setVolume(static_cast<double>(percent) / 100.0);
+        m_state->setSetting(QStringLiteral("volume"), QString::number(percent));
+    });
+    connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
+        const bool playing = state == PlaybackBackend::State::Playing;
+        m_mpris->setPlaybackState(state);
+        m_listenTracker->playbackStateChanged(playing);
+        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        updateMprisCapabilities();
+    });
+    connect(m_playback, &PlaybackBackend::positionChanged, this, [this]() {
+        m_mpris->setPositionMs(std::max<qint64>(0, m_playback->position()));
+    });
+    connect(m_playback, &PlaybackBackend::durationChanged, this, [this]() {
+        m_mpris->setDurationMs(m_playback->duration());
+    });
+}
+
+void AppCore::setupScrobbleWiring()
+{
+    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool notifyScrobbler) {
+        if (notifyScrobbler) {
+            notifyScrobblersTrackStarted(track);
+        }
+    });
+}
+
+void AppCore::setupIpcHandler()
+{
+    m_ipc->setHandler([this](const QString &command, const QJsonObject &args) {
+        return handleIpcCommand(command, args);
+    });
+    if (!m_ipc->listen()) {
+        qWarning("muzaiten: IPC socket unavailable: %s", qPrintable(m_ipc->lastError()));
+    }
+}
+
+void AppCore::updateMprisCapabilities()
+{
+    m_mpris->setQueueCapabilities(m_player->queueIndex() > 0,
+                                  m_player->queueIndex() >= 0 && m_player->queueIndex() + 1 < m_player->queue().size(),
+                                  m_playback->hasSource() || !m_player->queue().isEmpty());
+}
+
+void AppCore::notifyScrobblersTrackStarted(const Track &track)
+{
+    m_listenTracker->trackStarted(track);
+    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+    QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+}
+
+void AppCore::resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing)
+{
+    m_listenTracker->resumeTrack(track, elapsedMs, playing);
+    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
+                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+    QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
+                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+}
+
+QJsonObject AppCore::ipcStatus() const
+{
+    return QJsonDocument::fromJson(m_mpris->currentTrackJson().toUtf8()).object();
+}
+
+QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject &args)
+{
+    const auto error = [](const QString &message) {
+        return QJsonObject{{QStringLiteral("error"), message}};
+    };
+    const auto status = [this] {
+        return QJsonObject{{QStringLiteral("status"), ipcStatus()}};
+    };
+
+    if (command == QLatin1String("status")) {
+        return ipcStatus();
+    }
+    if (command == QLatin1String("raise")) {
+        showWindow();
+        return status();
+    }
+    if (command == QLatin1String("play")) {
+        m_player->play();
+        return status();
+    }
+    if (command == QLatin1String("pause")) {
+        m_playback->pause();
+        return status();
+    }
+    if (command == QLatin1String("play-pause")) {
+        m_player->togglePlayPause();
+        return status();
+    }
+    if (command == QLatin1String("stop")) {
+        m_playback->stop();
+        return status();
+    }
+    if (command == QLatin1String("next")) {
+        m_player->next();
+        return status();
+    }
+    if (command == QLatin1String("prev")) {
+        m_player->previous();
+        return status();
+    }
+    if (command == QLatin1String("seek")) {
+        if (args.contains(QStringLiteral("offset_ms")) || args.contains(QStringLiteral("offsetMs"))) {
+            const QJsonValue offset = args.contains(QStringLiteral("offset_ms"))
+                ? args.value(QStringLiteral("offset_ms"))
+                : args.value(QStringLiteral("offsetMs"));
+            m_player->seekRelative(static_cast<qint64>(offset.toDouble()));
+        } else if (args.contains(QStringLiteral("ms"))) {
+            m_playback->seek(std::max<qint64>(0, static_cast<qint64>(args.value(QStringLiteral("ms")).toDouble())));
+        } else {
+            return error(QStringLiteral("seek needs \"ms\" or \"offset_ms\""));
+        }
+        return status();
+    }
+    if (command == QLatin1String("volume")) {
+        double percent = 0.0;
+        if (args.contains(QStringLiteral("percent"))) {
+            percent = args.value(QStringLiteral("percent")).toDouble();
+        } else if (args.contains(QStringLiteral("delta_percent")) || args.contains(QStringLiteral("deltaPercent"))) {
+            const QJsonValue delta = args.contains(QStringLiteral("delta_percent"))
+                ? args.value(QStringLiteral("delta_percent"))
+                : args.value(QStringLiteral("deltaPercent"));
+            percent = m_player->volume() * 100.0 + delta.toDouble();
+        } else {
+            return error(QStringLiteral("volume needs \"percent\" or \"delta_percent\""));
+        }
+        m_player->setVolume(percent / 100.0);
+        return status();
+    }
+    if (command == QLatin1String("queue")) {
+        QJsonArray tracks;
+        for (int i = 0; i < m_player->queue().size(); ++i) {
+            tracks.append(trackJson(m_player->queue().at(i), i));
+        }
+        return QJsonObject{{QStringLiteral("index"), m_player->queueIndex()},
+                           {QStringLiteral("tracks"), tracks}};
+    }
+    if (command == QLatin1String("queue-jump")) {
+        const int index = args.value(QStringLiteral("index")).toInt(-1);
+        if (index < 0 || index >= m_player->queue().size()) {
+            return error(QStringLiteral("queue-jump needs \"index\" in 0..%1").arg(m_player->queue().size() - 1));
+        }
+        m_player->playAt(index, true, false, /*explicitJump=*/true);
+        return status();
+    }
+    if (command == QLatin1String("search")) {
+        const QString text = args.value(QStringLiteral("query")).toString().trimmed();
+        if (text.isEmpty()) {
+            return error(QStringLiteral("search needs a non-empty \"query\""));
+        }
+        const int limit = std::clamp(args.value(QStringLiteral("limit")).toInt(50), 1, 500);
+        QJsonArray results;
+        for (const Track &track : m_database->searchTracksLike(text, limit)) {
+            results.append(trackJson(track));
+        }
+        return QJsonObject{{QStringLiteral("results"), results}};
+    }
+    if (command == QLatin1String("play-file")) {
+        const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();
+        if (path.isEmpty() || !QFileInfo::exists(path)) {
+            return error(QStringLiteral("play-file needs an existing \"path\""));
+        }
+        Track track = m_database->trackForPath(path);
+        if (track.path.isEmpty()) {
+            const QFileInfo info(path);
+            track.path = path;
+            track.parentDir = info.absolutePath();
+            track.filename = info.fileName();
+            track.title = info.completeBaseName();
+        }
+        m_player->appendAndPlay(track);
+        return status();
+    }
+    if (command == QLatin1String("enqueue")) {
+        const QJsonArray pathsJson = args.value(QStringLiteral("paths")).toArray();
+        if (pathsJson.isEmpty()) {
+            return error(QStringLiteral("enqueue needs a non-empty \"paths\" array"));
+        }
+        QVector<Track> tracks;
+        tracks.reserve(static_cast<int>(pathsJson.size()));
+        for (const QJsonValue &value : pathsJson) {
+            const QString path = QFileInfo(value.toString()).absoluteFilePath();
+            if (path.isEmpty() || !QFileInfo::exists(path)) {
+                continue;
+            }
+            Track track = m_database->trackForPath(path);
+            if (track.path.isEmpty()) {
+                const QFileInfo info(path);
+                track.path = path;
+                track.parentDir = info.absolutePath();
+                track.filename = info.fileName();
+                track.title = info.completeBaseName();
+            }
+            tracks.push_back(track);
+        }
+        if (tracks.isEmpty()) {
+            return error(QStringLiteral("enqueue: none of the given paths exist"));
+        }
+        const bool play = args.value(QStringLiteral("play")).toBool();
+        const bool next = args.value(QStringLiteral("next")).toBool();
+        const int startIndex = next ? m_player->queueIndex() + 1 : static_cast<int>(m_player->queue().size());
+        if (next) {
+            m_player->playTracksNext(tracks);
+        } else {
+            m_player->appendTracks(tracks);
+        }
+        if (play) {
+            m_player->playAt(startIndex, true, false, /*explicitJump=*/true);
+        }
+        QJsonObject reply = status();
+        reply.insert(QStringLiteral("enqueued"), static_cast<int>(tracks.size()));
+        return reply;
+    }
+    if (command == QLatin1String("rate")) {
+        if (m_player->currentTrack().path.isEmpty()) {
+            return error(QStringLiteral("no current track to rate"));
+        }
+        int rating = -1;
+        if (!args.value(QStringLiteral("clear")).toBool()) {
+            rating = args.contains(QStringLiteral("rating"))
+                ? args.value(QStringLiteral("rating")).toInt(-1)
+                : args.value(QStringLiteral("rating0To100")).toInt(-1);
+            if (rating < 0 || rating > 100) {
+                return error(QStringLiteral("rate needs \"rating\" in 0..100 or \"clear\": true"));
+            }
+        }
+        const Track rated = m_player->currentTrack();
+        if (rating >= 0) {
+            m_database->setUserTrackRating(rated.path, rating);
+            m_database->setPendingTrackRatingWrite(rated.path, rating, QStringLiteral("pending"));
+        } else {
+            m_database->clearUserTrackRating(rated.path);
+            m_database->clearPendingTrackRatingWrite(rated.path);
+        }
+        m_player->updateTrackRating(rated.path, rating >= 0 ? rating : rated.rating0To100, rating >= 0);
+        return status();
+    }
+    return error(QStringLiteral("unknown command \"%1\"").arg(command));
 }

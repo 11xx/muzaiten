@@ -182,8 +182,6 @@ private:
     void presentCurrentTrackUpdate(const Track &track);
     void clearPresentedTrack();
     void onPlayerIndexChanged(int index, bool userInitiated);
-    void notifyScrobblersTrackStarted(const Track &track);
-    void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
@@ -244,12 +242,8 @@ private:
     void setVolumeFromMpris(double volume0To1);
     void applyPlayerVolume(double volume0To1);
     void seekRelativeFromMpris(qint64 offsetMs);
-    void setupIpcServer();
     void setupTrayIcon();
     void toggleWindowVisible();
-    QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
-    QJsonObject ipcStatus() const;
-    void updateMprisCapabilities();
     void updatePlaybackPosition();
     void startScan(const QString &rootPath);
     void startScan(const QString &rootPath, int scanRootId);
