@@ -1443,6 +1443,14 @@ void MainWindow::closeEvent(QCloseEvent *event)
     saveExplorerState();
     saveAllViewSettings();
     if (!m_core->isQuitting()) {
+        // Keep the window alive while a scan, fill, or MPD import is in
+        // flight — those pipelines live in MainWindow and report into
+        // window widgets.  Fall back to plain hide() so playback continues.
+        if (m_scanThread != nullptr || m_fillThread != nullptr || m_mpdImportThread != nullptr) {
+            hide();
+            event->ignore();
+            return;
+        }
         event->ignore();
         QMetaObject::invokeMethod(m_core, &AppCore::releaseWindow, Qt::QueuedConnection);
         return;
