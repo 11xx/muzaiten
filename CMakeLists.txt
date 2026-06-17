@@ -47,6 +47,7 @@ configure_file(
 
 set(MUZAITEN_SOURCES
     src/app/main.cpp
+    src/app/AppCore.cpp
     src/app/AppPaths.cpp
     src/app/MuzaitenApplication.cpp
     src/core/HumanQuantity.cpp
@@ -146,6 +147,7 @@ set(MUZAITEN_SOURCES
 )
 
 set(MUZAITEN_HEADERS
+    src/app/AppCore.h
     src/app/AppPaths.h
     src/app/MuzaitenApplication.h
     src/core/Album.h
