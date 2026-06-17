@@ -1008,6 +1008,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         clearScrobbleBacklog(ListenHistoryStore::ListenBrainz);
     });
     connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
+    connect(m_playerBar, &PlayerBar::alwaysShowTrayChanged, this, [this](bool enabled) {
+        m_core->setTrayAlwaysVisible(enabled);
+    });
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
@@ -2364,6 +2367,7 @@ void MainWindow::loadViewSettings()
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
     const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
     m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
+    m_playerBar->setAlwaysShowTray(m_state->setting(QStringLiteral("tray.alwaysVisible"), QStringLiteral("false")) == QStringLiteral("true"));
 
     const int volume = std::clamp(m_state->setting(QStringLiteral("volume"), QStringLiteral("100")).toInt(), 0, 100);
     m_player->setVolume(static_cast<double>(volume) / 100.0);
