@@ -25,6 +25,7 @@
 #include <QMenu>
 #include <QSystemTrayIcon>
 #include <QThread>
+#include <QTimer>
 #include <QUuid>
 
 #include <algorithm>
@@ -147,6 +148,7 @@ AppCore::AppCore(QObject *parent)
     setupScrobbleWiring();
     setupIpcHandler();
     setupTrayIcon();
+    restoreSavedPlayback();
 }
 
 AppCore::~AppCore()
@@ -219,6 +221,7 @@ void AppCore::showWindow()
 void AppCore::releaseWindow()
 {
     if (!m_window) return;
+    m_window->persistViewState();
     m_window->deleteLater();
     m_window = nullptr;
 }
@@ -348,6 +351,34 @@ void AppCore::setupTrayIcon()
     connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
         m_tray->setToolTip(QStringLiteral("muzaiten"));
     });
+}
+
+void AppCore::restoreSavedPlayback()
+{
+    if (m_resumeDone) return;
+    m_resumeDone = true;
+
+    const bool enabled = m_state->setting(QStringLiteral("playback.restoreStateEnabled"), QStringLiteral("true")) == QStringLiteral("true");
+    if (!enabled) return;
+
+    const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playback.state")).toUtf8()).object();
+    const int queueIndex = root.value(QStringLiteral("queueIndex")).toInt(-1);
+    const QString trackPath = root.value(QStringLiteral("trackPath")).toString();
+    const qint64 positionMs = root.value(QStringLiteral("positionMs")).toString().toLongLong();
+    const QString state = root.value(QStringLiteral("state")).toString(QStringLiteral("stopped"));
+    if (queueIndex < 0 || queueIndex >= m_player->queue().size() || trackPath.isEmpty()
+        || m_player->queue().at(queueIndex).path != trackPath) {
+        return;
+    }
+    if (state != QStringLiteral("playing") && state != QStringLiteral("paused")) {
+        return;
+    }
+    m_player->playAt(queueIndex, false, state != QStringLiteral("playing"), false);
+    if (positionMs > 0) {
+        QTimer::singleShot(250, this, [this, positionMs]() {
+            m_playback->seek(positionMs);
+        });
+    }
 }
 
 void AppCore::updateMprisCapabilities()

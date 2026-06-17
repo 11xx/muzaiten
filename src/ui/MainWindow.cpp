@@ -1389,7 +1389,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     configureListenBrainz();
     configureLastFm();
     loadExistingLibrary();
-    restoreSavedPlaybackState();
+    // Playback resume is handled once at AppCore startup; do not re-run it on
+    // window rebuild — it would restart/seek live audio.
     // Resume the lazy fill if a previous run left placeholder rows (e.g. closed
     // mid-fill or after a canceled scan). Deferred so the window shows first.
     QTimer::singleShot(0, this, [this]() { pumpMetadataFill(); });
@@ -1441,12 +1442,17 @@ void MainWindow::closeEvent(QCloseEvent *event)
     saveQueueState();
     saveExplorerState();
     saveAllViewSettings();
-    if (m_core->trayAvailable() && !m_core->isQuitting()) {
-        hide();
+    if (!m_core->isQuitting()) {
         event->ignore();
+        QMetaObject::invokeMethod(m_core, &AppCore::releaseWindow, Qt::QueuedConnection);
         return;
     }
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::persistViewState()
+{
+    rememberTrackTableViewState();
 }
 
 void MainWindow::startScan(const QString &rootPath)
