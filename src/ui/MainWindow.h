@@ -61,6 +61,10 @@ public:
     explicit MainWindow(AppCore *core, QWidget *parent = nullptr);
     ~MainWindow() override;
 
+    // Called by AppCore::releaseWindow() to snapshot ephemeral view state
+    // before the widget tree is destroyed.
+    void persistViewState();
+
 protected:
     void closeEvent(QCloseEvent *event) override;
 

@@ -65,6 +65,7 @@ private:
     void setupScrobbleWiring();
     void setupIpcHandler();
     void setupTrayIcon();
+    void restoreSavedPlayback();
     void updateMprisCapabilities();
     void notifyScrobblersTrackStarted(const Track &track);
     QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
@@ -87,4 +88,5 @@ private:
     QSystemTrayIcon  *m_tray = nullptr;
     MainWindow       *m_window = nullptr;
     bool              m_quitting = false;
+    bool              m_resumeDone = false;
 };
