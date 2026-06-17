@@ -36,6 +36,7 @@ public:
     void setAlbumArt(const QString &imagePath);
     void setAlbumArt(const QImage &image);
     void setCompactMenu(bool compact);
+    void setAlwaysShowTray(bool enabled);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
     void setVolume(int volume0To100);
@@ -74,6 +75,7 @@ signals:
     void lastFmBacklogClearRequested();
     void listenBrainzBacklogClearRequested();
     void compactMenuChanged(bool compact);
+    void alwaysShowTrayChanged(bool enabled);
     void listUnsupportedFilesChanged(bool show);
     void trackInfoPaneVisibleChanged(bool visible);
     void trackInfoPaneSettingsRequested();
@@ -134,6 +136,7 @@ private:
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
     class QAction *m_compactMenu = nullptr;
+    class QAction *m_alwaysShowTray = nullptr;
     class QAction *m_listUnsupportedFiles = nullptr;
     class QAction *m_scanProfileActions[3] = {nullptr, nullptr, nullptr};
     class QAction *m_showGuessedPlaceholders = nullptr;

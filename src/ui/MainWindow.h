@@ -9,6 +9,7 @@
 
 #include <memory>
 
+class AppCore;
 class QJsonObject;
 struct SavedQueuePlaylistEntry;
 class Database;
@@ -19,8 +20,6 @@ class AlbumGrid;
 class ArtistSidebar;
 class FileExplorerView;
 class QCloseEvent;
-class QShowEvent;
-class QHideEvent;
 class QImage;
 class ListenBrainzScrobbler;
 class LastFmScrobbler;
@@ -37,7 +36,6 @@ class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QSplitter;
-class QSystemTrayIcon;
 class QThread;
 class MpdImportWorker;
 class QueueScreen;
@@ -60,13 +58,15 @@ class MainWindow final : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(AppCore *core, QWidget *parent = nullptr);
     ~MainWindow() override;
+
+    // Called by AppCore::releaseWindow() to snapshot ephemeral view state
+    // before the widget tree is destroyed.
+    void persistViewState();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
-    void showEvent(QShowEvent *event) override;
-    void hideEvent(QHideEvent *event) override;
 
 private:
     void openLibraryFolder();
@@ -181,8 +181,6 @@ private:
     void presentCurrentTrackUpdate(const Track &track);
     void clearPresentedTrack();
     void onPlayerIndexChanged(int index, bool userInitiated);
-    void notifyScrobblersTrackStarted(const Track &track);
-    void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
@@ -243,12 +241,6 @@ private:
     void setVolumeFromMpris(double volume0To1);
     void applyPlayerVolume(double volume0To1);
     void seekRelativeFromMpris(qint64 offsetMs);
-    void setupIpcServer();
-    void setupTrayIcon();
-    void toggleWindowVisible();
-    QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
-    QJsonObject ipcStatus() const;
-    void updateMprisCapabilities();
     void updatePlaybackPosition();
     void startScan(const QString &rootPath);
     void startScan(const QString &rootPath, int scanRootId);
@@ -314,11 +306,13 @@ private:
     // Offered in the status bar only when bit-perfect playback fails because
     // PipeWire is holding the target device; click frees it and retries.
     QPushButton *m_takeOverDeviceButton = nullptr;
-    PlayerCore *m_player = nullptr;
+    // Core engine pointers — borrowed from AppCore (non-owning)
+    AppCore        *m_core = nullptr;
+    PlayerCore     *m_player = nullptr;
     PlaybackBackend *m_playback = nullptr;  // m_player->backend(), kept for read/connect convenience
-    std::unique_ptr<Database> m_database;
-    std::unique_ptr<PlaylistDatabase> m_playlistDb;
-    std::unique_ptr<SettingsStore> m_state;
+    Database       *m_database = nullptr;
+    PlaylistDatabase *m_playlistDb = nullptr;
+    SettingsStore  *m_state = nullptr;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
     QStringList m_selectedAlbumTitles;
@@ -359,20 +353,16 @@ private:
     bool m_ingestSessionActive = false;  // spans scan + fill for the artist/album id cache
     QTimer *m_incrementalRefreshTimer = nullptr;  // throttles browse/explorer refresh during ingest
     bool m_incrementalRefreshDirty = false;
-    std::unique_ptr<ArtworkCache> m_artworkCache;
+    ArtworkCache  *m_artworkCache = nullptr;
     quint64 m_currentArtGeneration = 0;
-    std::unique_ptr<ListenHistoryStore> m_listenHistory;
+    ListenHistoryStore *m_listenHistory = nullptr;
     ListenTracker *m_listenTracker = nullptr;
-    QThread *m_listenBrainzThread = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
-    QThread *m_lastFmThread = nullptr;
     LastFmScrobbler *m_lastFmScrobbler = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     MprisService *m_mpris = nullptr;
     IpcServer *m_ipc = nullptr;
-    QSystemTrayIcon *m_tray = nullptr;
-    bool m_quitRequested = false;
     bool m_ratingTagSyncRunning = false;
     bool m_ratingTagSyncPending = false;
     QVector<ScanRoot> m_pendingScanRoots;

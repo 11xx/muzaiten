@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "Version.h"
+#include "app/AppCore.h"
 #include "app/AppPaths.h"
 #include "core/MusicSort.h"
 #include "core/Rating.h"
@@ -9,7 +10,6 @@
 #include "db/SettingsStore.h"
 #include "fs/LinkRoot.h"
 #include "playback/AudioDeviceControl.h"
-#include "playback/GStreamerPlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "playback/PlaybackBackend.h"
 #include "mpd/MpdConfig.h"
@@ -77,7 +77,6 @@
 #include <QListWidget>
 #include <QLoggingCategory>
 #include <QMenu>
-#include <QSystemTrayIcon>
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QProgressBar>
@@ -123,19 +122,6 @@ QStringList normalizedAlbumTitles(QStringList albumTitles)
     return albumTitles;
 }
 
-QString repeatModeToString(RepeatMode mode)
-{
-    switch (mode) {
-    case RepeatMode::All:
-        return QStringLiteral("all");
-    case RepeatMode::One:
-        return QStringLiteral("one");
-    case RepeatMode::Off:
-        break;
-    }
-    return QStringLiteral("off");
-}
-
 RepeatMode repeatModeFromString(const QString &value)
 {
     if (value == QStringLiteral("all")) {
@@ -145,19 +131,6 @@ RepeatMode repeatModeFromString(const QString &value)
         return RepeatMode::One;
     }
     return RepeatMode::Off;
-}
-
-QString shuffleModeToString(ShuffleMode mode)
-{
-    switch (mode) {
-    case ShuffleMode::Queue:
-        return QStringLiteral("queue");
-    case ShuffleMode::Library:
-        return QStringLiteral("library");
-    case ShuffleMode::Off:
-        break;
-    }
-    return QStringLiteral("off");
 }
 
 ShuffleMode shuffleModeFromString(const QString &value)
@@ -612,9 +585,22 @@ QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
 
 static PlaylistItem playlistItemFromTrack(const Track &track, const QString &query);
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(AppCore *core, QWidget *parent)
     : QMainWindow(parent)
+    , m_core(core)
 {
+    m_player    = m_core->player();
+    m_playback  = m_core->backend();
+    m_database  = m_core->database();
+    m_playlistDb= m_core->playlistDatabase();
+    m_state     = m_core->settings();
+    m_artworkCache = m_core->artworkCache();
+    m_listenHistory= m_core->listenHistory();
+    m_listenTracker= m_core->listenTracker();
+    m_mpris     = m_core->mpris();
+    m_ipc       = m_core->ipc();
+    m_listenBrainzScrobbler = m_core->listenBrainzScrobbler();
+    m_lastFmScrobbler       = m_core->lastFmScrobbler();
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -691,12 +677,9 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(m_takeOverDeviceButton);
     connect(m_takeOverDeviceButton, &QPushButton::clicked, this, &MainWindow::attemptDeviceTakeover);
 
-    m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
-    m_playback = m_player->backend();
-    m_player->setPathResolver([this](const Track &track) { return resolvedReadPathForTrack(track); });
-    m_player->setRandomTrackProvider([this](int count, const QSet<QString> &excludePaths) {
-        return m_database ? m_database->randomTracks(count, excludePaths) : QVector<Track>{};
-    });
+    // PlayerCore, MprisService, and data stores are now owned by AppCore.
+    // m_player, m_playback, m_mpris, m_database, etc. are all borrowed pointers
+    // assigned from AppCore at the top of this constructor.
     connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
     connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
     connect(m_player, &PlayerCore::queueTracksChanged, this, &MainWindow::patchQueueRows);
@@ -706,36 +689,19 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
     connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
     connect(m_player, &PlayerCore::volumeChanged, this, &MainWindow::applyPlayerVolume);
-    // PlayerCore is the source of truth: reflect mode changes on the player bar
-    // and persist them, whatever drove the change (button, keybind, MPRIS).
+    // PlayerCore is the source of truth: reflect mode changes on the player bar.
+    // AppCore handles MPRIS mirroring and state persistence independently.
     connect(m_player, &PlayerCore::repeatModeChanged, this, [this](RepeatMode mode) {
         m_playerBar->setRepeatMode(mode);
-        if (m_mpris) {
-            m_mpris->setRepeatMode(mode);
-        }
-        if (m_state) {
-            m_state->setSetting(QStringLiteral("playback.repeatMode"), repeatModeToString(mode));
-        }
     });
     connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
         m_playerBar->setShuffleMode(mode);
-        if (m_mpris) {
-            m_mpris->setShuffleMode(mode);
-        }
-        if (m_state) {
-            m_state->setSetting(QStringLiteral("playback.shuffleMode"), shuffleModeToString(mode));
-        }
     });
-    connect(m_player, &PlayerCore::libraryShufflePercentChanged, this, [this](int percent) {
-        if (m_state) {
-            m_state->setSetting(QStringLiteral("playback.libraryShufflePercent"), QString::number(percent));
-        }
-    });
+    // libraryShufflePercentChanged is handled by AppCore (state + MPRIS).
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
     });
-    m_mpris = new MprisService(this);
     m_playbackStateSaveTimer = new QTimer(this);
     m_playbackStateSaveTimer->setSingleShot(true);
     m_playbackStateSaveTimer->setInterval(2000);
@@ -749,58 +715,22 @@ MainWindow::MainWindow(QWidget *parent)
         saveQueueState();
     });
 
-    m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!m_database->open(databasePath())) {
-        QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
+    // m_mpris->setDatabase(...) was moved to AppCore constructor.
+    // m_rightSidebar still needs the database for track enrichment:
+    if (m_rightSidebar) {
+        m_rightSidebar->setDatabase(m_database);
     }
-    // Let MPRIS and the right-sidebar track-info panel enrich now-playing tracks
-    // with the full scanned record (queue loaders skip rich columns for speed).
-    m_mpris->setDatabase(m_database.get());
-    m_rightSidebar->setDatabase(m_database.get());
 
-    m_playlistDb = std::make_unique<PlaylistDatabase>(QStringLiteral("playlists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!m_playlistDb->open(playlistDatabasePath())) {
-        QMessageBox::warning(this, QStringLiteral("Playlists"), m_playlistDb->lastError());
-    }
-    m_playlistView->setDatabase(m_playlistDb.get());
+    m_playlistView->setDatabase(m_playlistDb);
     m_playlistView->setTrackResolver([this](const QString &path) {
         return m_database != nullptr ? m_database->trackForPath(path) : Track();
     });
 
-    // UI/view prefs and session state live in a separate store under XDG_STATE_HOME
-    // so they persist independently of the per-build library database.
-    m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
+    connect(m_artworkCache, &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
+    connect(m_artworkCache, &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
 
-    // Create a commented config-file template on first run; its [paths] section
-    // feeds AppPaths (below CLI/env/--state-root, above the XDG default).
-    AppPaths::writeDefaultConfigIfMissing();
-
-    const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
-    m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
-    connect(m_artworkCache.get(), &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
-    connect(m_artworkCache.get(), &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
-
-    // Local listening history collects every completed listen unconditionally;
-    // per-service owed flags capture which scrobblers were enabled when each
-    // listen happened, so enabling a service later cannot claim old history.
-    m_listenHistory = std::make_unique<ListenHistoryStore>(listenHistoryPath());
-    m_listenTracker = new ListenTracker(this);
-    connect(m_listenTracker, &ListenTracker::listenReached, this, [this](const Track &track, qint64 startedAtSecs) {
-        const bool oweListenBrainz = m_database->setting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-        const bool oweLastFm = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-        m_listenHistory->recordListen(track, startedAtSecs, oweLastFm, oweListenBrainz);
-        if (oweListenBrainz) {
-            QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
-        }
-        if (oweLastFm) {
-            QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
-        }
-    });
-
-    m_listenBrainzThread = new QThread(this);
-    m_listenBrainzScrobbler = new ListenBrainzScrobbler;
-    m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
-    connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzScrobbler, &QObject::deleteLater);
+    // scrobbler signal connections TO the UI (statusBar, QMessageBox).
+    // The workers and threads themselves are owned by AppCore.
     connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
     });
@@ -822,12 +752,7 @@ MainWindow::MainWindow(QWidget *parent)
                                        : QStringLiteral("ListenBrainz token is invalid."),
                                  8000);
     });
-    m_listenBrainzThread->start();
 
-    m_lastFmThread = new QThread(this);
-    m_lastFmScrobbler = new LastFmScrobbler;
-    m_lastFmScrobbler->moveToThread(m_lastFmThread);
-    connect(m_lastFmThread, &QThread::finished, m_lastFmScrobbler, &QObject::deleteLater);
     connect(m_lastFmScrobbler, &LastFmScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
     });
@@ -861,7 +786,6 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage(message, 10000);
         QMessageBox::warning(this, QStringLiteral("Last.fm"), message);
     });
-    m_lastFmThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
@@ -1039,28 +963,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
-    connect(m_mpris, &MprisService::raiseRequested, this, [this]() {
-        show();
-        raise();
-        activateWindow();
-    });
-    connect(m_mpris, &MprisService::previousRequested, this, &MainWindow::playPreviousTrack);
-    connect(m_mpris, &MprisService::nextRequested, this, &MainWindow::playNextTrack);
-    connect(m_mpris, &MprisService::repeatModeRequested, this, [this](RepeatMode mode) {
-        m_player->setRepeatMode(mode);
-    });
-    connect(m_mpris, &MprisService::shuffleModeRequested, this, [this](ShuffleMode mode) {
-        m_player->setShuffleMode(mode);
-    });
-    connect(m_mpris, &MprisService::pauseRequested, m_playback, &PlaybackBackend::pause);
-    connect(m_mpris, &MprisService::playPauseRequested, this, &MainWindow::togglePlayback);
-    connect(m_mpris, &MprisService::stopRequested, m_playback, &PlaybackBackend::stop);
-    connect(m_mpris, &MprisService::playRequested, this, &MainWindow::playFromMpris);
-    connect(m_mpris, &MprisService::seekRequested, m_playback, &PlaybackBackend::seek);
-    connect(m_mpris, &MprisService::relativeSeekRequested, this, &MainWindow::seekRelativeFromMpris);
-    connect(m_mpris, &MprisService::volumeRequested, this, &MainWindow::setVolumeFromMpris);
-    setupIpcServer();
-    setupTrayIcon();
+    // MPRIS transport, IPC, and tray are handled by AppCore.
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
@@ -1105,6 +1008,9 @@ MainWindow::MainWindow(QWidget *parent)
         clearScrobbleBacklog(ListenHistoryStore::ListenBrainz);
     });
     connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
+    connect(m_playerBar, &PlayerBar::alwaysShowTrayChanged, this, [this](bool enabled) {
+        m_core->setTrayAlwaysVisible(enabled);
+    });
     connect(m_playerBar, &PlayerBar::trackInfoPaneVisibleChanged, this, &MainWindow::applyTrackInfoPaneVisible);
     connect(m_playerBar, &PlayerBar::trackInfoPaneSettingsRequested, this, &MainWindow::configureTrackInfoPanel);
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
@@ -1377,13 +1283,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
         const bool playing = state == PlaybackBackend::State::Playing;
         m_playerBar->setPlaying(playing);
-        m_mpris->setPlaybackState(state);
-        m_listenTracker->playbackStateChanged(playing);
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
-        QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
-        updateMprisCapabilities();
+        // AppCore handles MPRIS, listen-tracker, and scrobbler state mirroring.
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
-        // Playback got going (or stopped cleanly): the takeover offer is moot.
         if (state != PlaybackBackend::State::Error)
             m_takeOverDeviceButton->setVisible(false);
     });
@@ -1478,7 +1379,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_playerBar->cycleShuffleMode();
     });
 
-    m_albumGrid->setArtworkCache(m_artworkCache.get());
+    m_albumGrid->setArtworkCache(m_artworkCache);
     loadPlaybackProfile();
     loadPlaybackResumeSettings();
     loadViewSettings();
@@ -1491,7 +1392,8 @@ MainWindow::MainWindow(QWidget *parent)
     configureListenBrainz();
     configureLastFm();
     loadExistingLibrary();
-    restoreSavedPlaybackState();
+    // Playback resume is handled once at AppCore startup; do not re-run it on
+    // window rebuild — it would restart/seek live audio.
     // Resume the lazy fill if a previous run left placeholder rows (e.g. closed
     // mid-fill or after a canceled scan). Deferred so the window shows first.
     QTimer::singleShot(0, this, [this]() { pumpMetadataFill(); });
@@ -1512,14 +1414,6 @@ MainWindow::~MainWindow()
     if (m_fillThread != nullptr) {
         m_fillThread->quit();
         m_fillThread->wait(3000);
-    }
-    if (m_listenBrainzThread != nullptr) {
-        m_listenBrainzThread->quit();
-        m_listenBrainzThread->wait(3000);
-    }
-    if (m_lastFmThread != nullptr) {
-        m_lastFmThread->quit();
-        m_lastFmThread->wait(3000);
     }
     if (m_mpdImportThread != nullptr) {
         // run() can be blocked on network I/O; cancel() (atomic) makes it and the
@@ -1551,92 +1445,25 @@ void MainWindow::closeEvent(QCloseEvent *event)
     saveQueueState();
     saveExplorerState();
     saveAllViewSettings();
-    // With a tray icon, closing the window hides to tray and playback keeps
-    // running; only the tray's Quit (or no tray at all) ends the process.
-    if (m_tray != nullptr && !m_quitRequested) {
-        hide();
+    if (!m_core->isQuitting()) {
+        // Keep the window alive while a scan, fill, or MPD import is in
+        // flight — those pipelines live in MainWindow and report into
+        // window widgets.  Fall back to plain hide() so playback continues.
+        if (m_scanThread != nullptr || m_fillThread != nullptr || m_mpdImportThread != nullptr) {
+            hide();
+            event->ignore();
+            return;
+        }
         event->ignore();
+        QMetaObject::invokeMethod(m_core, &AppCore::releaseWindow, Qt::QueuedConnection);
         return;
     }
     QMainWindow::closeEvent(event);
 }
 
-// The tray icon only exists while the window is hidden: it is the handle back
-// to a GUI-less player, not a permanent fixture.
-void MainWindow::showEvent(QShowEvent *event)
+void MainWindow::persistViewState()
 {
-    if (m_tray != nullptr) {
-        m_tray->hide();
-    }
-    QMainWindow::showEvent(event);
-}
-
-void MainWindow::hideEvent(QHideEvent *event)
-{
-    if (m_tray != nullptr && !m_quitRequested) {
-        m_tray->show();
-    }
-    QMainWindow::hideEvent(event);
-}
-
-void MainWindow::setupTrayIcon()
-{
-    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
-        return;
-    }
-    // App icon from the theme (installed) with the bundled logo as fallback.
-    QIcon icon = QApplication::windowIcon();
-    if (icon.isNull()) {
-        icon = QIcon(QStringLiteral(":/icons/muzaiten.svg"));
-    }
-    m_tray = new QSystemTrayIcon(icon, this);
-    m_tray->setToolTip(QStringLiteral("muzaiten"));
-    // The hidden-to-tray window must not end the application.
-    QApplication::setQuitOnLastWindowClosed(false);
-
-    auto *menu = new QMenu(this);
-    menu->addAction(QStringLiteral("Unhide"), this, &MainWindow::toggleWindowVisible);
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("Play/Pause"), this, &MainWindow::togglePlayback);
-    menu->addAction(QStringLiteral("Next"), this, &MainWindow::playNextTrack);
-    menu->addAction(QStringLiteral("Previous"), this, &MainWindow::playPreviousTrack);
-    menu->addAction(QStringLiteral("Stop"), m_playback, &PlaybackBackend::stop);
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("Quit"), this, [this]() {
-        m_quitRequested = true;
-        close();  // runs the closeEvent state saves
-        QApplication::quit();
-    });
-    m_tray->setContextMenu(menu);
-
-    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger) {
-            toggleWindowVisible();
-        } else if (reason == QSystemTrayIcon::MiddleClick) {
-            togglePlayback();
-        }
-    });
-    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
-        const QString title = track.title.isEmpty() ? track.filename : track.title;
-        m_tray->setToolTip(track.path.isEmpty()
-                               ? QStringLiteral("muzaiten")
-                               : QStringLiteral("%1 - %2").arg(track.artistName, title));
-    });
-    connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
-        m_tray->setToolTip(QStringLiteral("muzaiten"));
-    });
-    // Not shown here: showEvent/hideEvent toggle it with window visibility.
-}
-
-void MainWindow::toggleWindowVisible()
-{
-    if (isVisible() && !isMinimized()) {
-        hide();
-    } else {
-        show();
-        raise();
-        activateWindow();
-    }
+    rememberTrackTableViewState();
 }
 
 void MainWindow::startScan(const QString &rootPath)
@@ -2540,6 +2367,7 @@ void MainWindow::loadViewSettings()
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
     const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
     m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
+    m_playerBar->setAlwaysShowTray(m_state->setting(QStringLiteral("tray.alwaysVisible"), QStringLiteral("false")) == QStringLiteral("true"));
 
     const int volume = std::clamp(m_state->setting(QStringLiteral("volume"), QStringLiteral("100")).toInt(), 0, 100);
     m_player->setVolume(static_cast<double>(volume) / 100.0);
@@ -3027,7 +2855,6 @@ void MainWindow::saveQueueState()
     root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
     root.insert(QStringLiteral("queueSourceName"), m_queueSourceName);
     m_state->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-    updateMprisCapabilities();
 }
 
 void MainWindow::scheduleQueueStateSave(bool immediate)
@@ -3766,7 +3593,7 @@ void MainWindow::resumePlaybackAt(int queueIndex, qint64 positionMs, bool playin
         // for the next track.
         const bool actuallyPlaying = playing
             && m_playback->state() == PlaybackBackend::State::Playing;
-        resumeScrobblers(m_player->currentTrack(), std::max<qint64>(0, positionMs), actuallyPlaying);
+        m_core->resumeScrobblers(m_player->currentTrack(), std::max<qint64>(0, positionMs), actuallyPlaying);
         savePlaybackState(true);
     });
 }
@@ -4257,7 +4084,7 @@ void MainWindow::showListeningHistory()
         return;
     }
 
-    ListeningHistoryDialog dialog(m_listenHistory.get(), this);
+    ListeningHistoryDialog dialog(m_listenHistory, this);
     connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
         if (changedCount > 0) {
             triggerScrobbleUpload(service);
@@ -4635,12 +4462,8 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
     m_playerBar->setPosition(0, track.durationMs);
-    m_mpris->setTrack(track);
-    m_mpris->setDurationMs(track.durationMs);
-    m_mpris->setPositionMs(0);
-    updateMprisCapabilities();
+    // AppCore handles MPRIS mirroring and scrobble notification.
     if (notifyScrobbler) {
-        notifyScrobblersTrackStarted(track);
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
     }
 }
@@ -4657,9 +4480,7 @@ void MainWindow::presentCurrentTrackUpdate(const Track &track)
     }
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
-    m_mpris->setTrack(track);
-    m_mpris->setDurationMs(track.durationMs);
-    updateMprisCapabilities();
+    // AppCore handles MPRIS mirroring.
 }
 
 void MainWindow::clearPresentedTrack()
@@ -4667,7 +4488,7 @@ void MainWindow::clearPresentedTrack()
     m_playerBar->setTrackText({});
     m_playerBar->setAlbumArt(QString());
     m_rightSidebar->setTrackInfo({});
-    m_mpris->setTrack({});
+    // AppCore handles MPRIS clearing.
     savePlaybackState(true);
 }
 
@@ -4681,22 +4502,6 @@ void MainWindow::onPlayerIndexChanged(int index, bool userInitiated)
         }
     }
     scheduleQueueStateSave();
-}
-
-void MainWindow::notifyScrobblersTrackStarted(const Track &track)
-{
-    m_listenTracker->trackStarted(track);
-    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
-    QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
-}
-
-void MainWindow::resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing)
-{
-    m_listenTracker->resumeTrack(track, elapsedMs, playing);
-    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
-                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
-    QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
-                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
 }
 
 void MainWindow::appendAndPlayTrack(const Track &track)
@@ -4945,247 +4750,15 @@ void MainWindow::setVolumeFromMpris(double volume0To1)
 void MainWindow::applyPlayerVolume(double volume0To1)
 {
     const int percent = std::clamp(static_cast<int>(std::lround(volume0To1 * 100.0)), 0, 100);
-    if (m_mpris != nullptr) {
-        m_mpris->setVolume(static_cast<double>(percent) / 100.0);
-    }
     if (m_playerBar != nullptr) {
         m_playerBar->setVolume(percent);
     }
-    if (m_state != nullptr) {
-        m_state->setSetting(QStringLiteral("volume"), QString::number(percent));
-    }
+    // AppCore handles MPRIS volume mirroring and state persistence.
 }
 
 void MainWindow::seekRelativeFromMpris(qint64 offsetMs)
 {
     m_player->seekRelative(offsetMs);
-}
-
-void MainWindow::setupIpcServer()
-{
-    m_ipc = new IpcServer(this);
-    m_ipc->setHandler([this](const QString &command, const QJsonObject &args) {
-        return handleIpcCommand(command, args);
-    });
-    if (!m_ipc->listen()) {
-        qWarning("muzaiten: IPC socket unavailable: %s", qPrintable(m_ipc->lastError()));
-    }
-}
-
-QJsonObject MainWindow::ipcStatus() const
-{
-    // The MPRIS service already mirrors the full player state as JSON (track
-    // tags, audio props, ratings, elapsed/volume/capabilities) — reuse it as
-    // the single source of truth for external consumers.
-    return QJsonDocument::fromJson(m_mpris->currentTrackJson().toUtf8()).object();
-}
-
-QJsonObject MainWindow::handleIpcCommand(const QString &command, const QJsonObject &args)
-{
-    const auto error = [](const QString &message) {
-        return QJsonObject{{QStringLiteral("error"), message}};
-    };
-    const auto status = [this] {
-        return QJsonObject{{QStringLiteral("status"), ipcStatus()}};
-    };
-
-    if (command == QLatin1String("status")) {
-        return ipcStatus();
-    }
-    if (command == QLatin1String("raise")) {
-        // Also the single-instance handshake: a second launch against the same
-        // state root sends this instead of starting up.
-        show();
-        raise();
-        activateWindow();
-        return status();
-    }
-    if (command == QLatin1String("play")) {
-        playFromMpris();
-        return status();
-    }
-    if (command == QLatin1String("pause")) {
-        m_playback->pause();
-        return status();
-    }
-    if (command == QLatin1String("play-pause")) {
-        togglePlayback();
-        return status();
-    }
-    if (command == QLatin1String("stop")) {
-        m_playback->stop();
-        return status();
-    }
-    if (command == QLatin1String("next")) {
-        playNextTrack();
-        return status();
-    }
-    if (command == QLatin1String("prev")) {
-        playPreviousTrack();
-        return status();
-    }
-    if (command == QLatin1String("seek")) {
-        // Accept the canonical offset_ms; tolerate the legacy offsetMs so an
-        // older muzaitenctl still talks to a freshly built server.
-        if (args.contains(QStringLiteral("offset_ms")) || args.contains(QStringLiteral("offsetMs"))) {
-            const QJsonValue offset = args.contains(QStringLiteral("offset_ms"))
-                ? args.value(QStringLiteral("offset_ms"))
-                : args.value(QStringLiteral("offsetMs"));
-            seekRelativeFromMpris(static_cast<qint64>(offset.toDouble()));
-        } else if (args.contains(QStringLiteral("ms"))) {
-            m_playback->seek(std::max<qint64>(0, static_cast<qint64>(args.value(QStringLiteral("ms")).toDouble())));
-        } else {
-            return error(QStringLiteral("seek needs \"ms\" or \"offset_ms\""));
-        }
-        return status();
-    }
-    if (command == QLatin1String("volume")) {
-        double percent = 0.0;
-        if (args.contains(QStringLiteral("percent"))) {
-            percent = args.value(QStringLiteral("percent")).toDouble();
-        } else if (args.contains(QStringLiteral("delta_percent")) || args.contains(QStringLiteral("deltaPercent"))) {
-            const QJsonValue delta = args.contains(QStringLiteral("delta_percent"))
-                ? args.value(QStringLiteral("delta_percent"))
-                : args.value(QStringLiteral("deltaPercent"));
-            percent = m_player->volume() * 100.0 + delta.toDouble();
-        } else {
-            return error(QStringLiteral("volume needs \"percent\" or \"delta_percent\""));
-        }
-        setVolumeFromMpris(percent / 100.0);
-        return status();
-    }
-    const auto trackJson = [](const Track &track, int index = -1) {
-        QJsonObject json{
-            {QStringLiteral("path"), track.path},
-            {QStringLiteral("title"), track.title.isEmpty() ? track.filename : track.title},
-            {QStringLiteral("artist"), track.artistName},
-            {QStringLiteral("album"), track.albumTitle},
-            {QStringLiteral("duration"), std::round(static_cast<double>(track.durationMs) / 10.0) / 100.0},
-        };
-        if (index >= 0) {
-            json.insert(QStringLiteral("index"), index);
-        }
-        if (track.effectiveRating0To100 >= 0) {
-            json.insert(QStringLiteral("rating"), track.effectiveRating0To100);
-        }
-        return json;
-    };
-    if (command == QLatin1String("queue")) {
-        QJsonArray tracks;
-        for (int i = 0; i < m_player->queue().size(); ++i) {
-            tracks.append(trackJson(m_player->queue().at(i), i));
-        }
-        return QJsonObject{{QStringLiteral("index"), m_player->queueIndex()},
-                           {QStringLiteral("tracks"), tracks}};
-    }
-    if (command == QLatin1String("queue-jump")) {
-        const int index = args.value(QStringLiteral("index")).toInt(-1);
-        if (index < 0 || index >= m_player->queue().size()) {
-            return error(QStringLiteral("queue-jump needs \"index\" in 0..%1").arg(m_player->queue().size() - 1));
-        }
-        m_player->playAt(index, true, false, /*explicitJump=*/true);
-        return status();
-    }
-    if (command == QLatin1String("search")) {
-        const QString text = args.value(QStringLiteral("query")).toString().trimmed();
-        if (text.isEmpty()) {
-            return error(QStringLiteral("search needs a non-empty \"query\""));
-        }
-        const int limit = std::clamp(args.value(QStringLiteral("limit")).toInt(50), 1, 500);
-        QJsonArray results;
-        for (const Track &track : m_database->searchTracksLike(text, limit)) {
-            results.append(trackJson(track));
-        }
-        return QJsonObject{{QStringLiteral("results"), results}};
-    }
-    if (command == QLatin1String("play-file")) {
-        const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();
-        if (path.isEmpty() || !QFileInfo::exists(path)) {
-            return error(QStringLiteral("play-file needs an existing \"path\""));
-        }
-        Track track = m_database->trackForPath(path);
-        if (track.path.isEmpty()) {
-            // Not in the library — play it like the free-roam explorer does.
-            const QFileInfo info(path);
-            track.path = path;
-            track.parentDir = info.absolutePath();
-            track.filename = info.fileName();
-            track.title = info.completeBaseName();
-        }
-        m_player->appendAndPlay(track);
-        return status();
-    }
-    if (command == QLatin1String("enqueue")) {
-        const QJsonArray pathsJson = args.value(QStringLiteral("paths")).toArray();
-        if (pathsJson.isEmpty()) {
-            return error(QStringLiteral("enqueue needs a non-empty \"paths\" array"));
-        }
-        QVector<Track> tracks;
-        tracks.reserve(static_cast<int>(pathsJson.size()));
-        for (const QJsonValue &value : pathsJson) {
-            const QString path = QFileInfo(value.toString()).absoluteFilePath();
-            if (path.isEmpty() || !QFileInfo::exists(path)) {
-                continue; // skip vanished paths rather than failing the whole batch
-            }
-            Track track = m_database->trackForPath(path);
-            if (track.path.isEmpty()) {
-                // Not in the library — accept it like play-file / the free-roam explorer.
-                const QFileInfo info(path);
-                track.path = path;
-                track.parentDir = info.absolutePath();
-                track.filename = info.fileName();
-                track.title = info.completeBaseName();
-            }
-            tracks.push_back(track);
-        }
-        if (tracks.isEmpty()) {
-            return error(QStringLiteral("enqueue: none of the given paths exist"));
-        }
-        const bool play = args.value(QStringLiteral("play")).toBool();
-        const bool next = args.value(QStringLiteral("next")).toBool();
-        const int startIndex = next ? m_player->queueIndex() + 1 : static_cast<int>(m_player->queue().size());
-        if (next) {
-            m_player->playTracksNext(tracks);
-        } else {
-            m_player->appendTracks(tracks);
-        }
-        if (play) {
-            m_player->playAt(startIndex, true, false, /*explicitJump=*/true);
-        }
-        QJsonObject reply = status();
-        reply.insert(QStringLiteral("enqueued"), static_cast<int>(tracks.size()));
-        return reply;
-    }
-    if (command == QLatin1String("rate")) {
-        if (m_player->currentTrack().path.isEmpty()) {
-            return error(QStringLiteral("no current track to rate"));
-        }
-        if (m_librarySource != LibrarySource::Local) {
-            return error(QStringLiteral("rating is only available for the local library"));
-        }
-        int rating = -1;
-        if (!args.value(QStringLiteral("clear")).toBool()) {
-            // Canonical "rating"; fall back to legacy "rating0To100" for an
-            // older client paired with a freshly built server.
-            rating = args.contains(QStringLiteral("rating"))
-                ? args.value(QStringLiteral("rating")).toInt(-1)
-                : args.value(QStringLiteral("rating0To100")).toInt(-1);
-            if (rating < 0 || rating > 100) {
-                return error(QStringLiteral("rate needs \"rating\" in 0..100 or \"clear\": true"));
-            }
-        }
-        const Track rated = m_player->currentTrack();
-        applyTrackRating(rated, rating);
-        return status();
-    }
-    return error(QStringLiteral("unknown command \"%1\"").arg(command));
-}
-
-void MainWindow::updateMprisCapabilities()
-{
-    m_mpris->setQueueCapabilities(m_player->queueIndex() > 0,
-                                  m_player->queueIndex() >= 0 && m_player->queueIndex() + 1 < m_player->queue().size(),
-                                  m_playback->hasSource() || !m_player->queue().isEmpty());
 }
 
 void MainWindow::updatePlaybackPosition()
@@ -5195,13 +4768,9 @@ void MainWindow::updatePlaybackPosition()
         ? std::max<qint64>(m_playback->duration(), m_player->currentTrack().durationMs)
         : std::max<qint64>(0, m_playback->duration());
     m_playerBar->setPosition(positionMs, durationMs);
-    m_mpris->setPositionMs(positionMs);
-    m_mpris->setDurationMs(durationMs);
+    // AppCore handles MPRIS position/duration mirroring.
     if (m_playback->state() == PlaybackBackend::State::Playing || m_playback->state() == PlaybackBackend::State::Paused) {
         schedulePlaybackStateSave(false);
-        // Remember the last healthy playback point so a bit-perfect device
-        // takeover (which leaves the pipeline in Error) can resume here instead
-        // of restarting the track from 0.
         m_lastHealthyTrackPath = m_player->currentTrack().path;
         m_lastHealthyPositionMs = positionMs;
     }

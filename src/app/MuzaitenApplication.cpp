@@ -1,10 +1,10 @@
 #include "app/MuzaitenApplication.h"
 
 #include "Version.h"
+#include "app/AppCore.h"
 #include "core/Track.h"
 #include "ipc/IpcSocket.h"
 #include "scanner/TagReader.h"
-#include "ui/MainWindow.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -93,8 +93,8 @@ int MuzaitenApplication::run()
         qInfo("muzaiten is already running against this state root; raised its window instead.");
         return 0;
     }
-    MainWindow window;
-    window.show();
+    AppCore core;
+    core.showWindow();
     return exec();
 }
 
