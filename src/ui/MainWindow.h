@@ -9,6 +9,7 @@
 
 #include <memory>
 
+class AppCore;
 class QJsonObject;
 struct SavedQueuePlaylistEntry;
 class Database;
@@ -60,7 +61,7 @@ class MainWindow final : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(AppCore *core, QWidget *parent = nullptr);
     ~MainWindow() override;
 
 protected:
@@ -314,11 +315,13 @@ private:
     // Offered in the status bar only when bit-perfect playback fails because
     // PipeWire is holding the target device; click frees it and retries.
     QPushButton *m_takeOverDeviceButton = nullptr;
-    PlayerCore *m_player = nullptr;
+    // Core engine pointers — borrowed from AppCore (non-owning)
+    AppCore        *m_core = nullptr;
+    PlayerCore     *m_player = nullptr;
     PlaybackBackend *m_playback = nullptr;  // m_player->backend(), kept for read/connect convenience
-    std::unique_ptr<Database> m_database;
-    std::unique_ptr<PlaylistDatabase> m_playlistDb;
-    std::unique_ptr<SettingsStore> m_state;
+    Database       *m_database = nullptr;
+    PlaylistDatabase *m_playlistDb = nullptr;
+    SettingsStore  *m_state = nullptr;
     QString m_currentArtist;
     QString m_selectedAlbumTitle;
     QStringList m_selectedAlbumTitles;
@@ -359,13 +362,11 @@ private:
     bool m_ingestSessionActive = false;  // spans scan + fill for the artist/album id cache
     QTimer *m_incrementalRefreshTimer = nullptr;  // throttles browse/explorer refresh during ingest
     bool m_incrementalRefreshDirty = false;
-    std::unique_ptr<ArtworkCache> m_artworkCache;
+    ArtworkCache  *m_artworkCache = nullptr;
     quint64 m_currentArtGeneration = 0;
-    std::unique_ptr<ListenHistoryStore> m_listenHistory;
+    ListenHistoryStore *m_listenHistory = nullptr;
     ListenTracker *m_listenTracker = nullptr;
-    QThread *m_listenBrainzThread = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
-    QThread *m_lastFmThread = nullptr;
     LastFmScrobbler *m_lastFmScrobbler = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
