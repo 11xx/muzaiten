@@ -77,7 +77,6 @@
 #include <QListWidget>
 #include <QLoggingCategory>
 #include <QMenu>
-#include <QSystemTrayIcon>
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QProgressBar>
@@ -964,9 +963,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
-    // MPRIS transport and IPC are handled by AppCore; the window only cares
-    // about UI-level PlayerBar/control wiring.
-    setupTrayIcon();
+    // MPRIS transport, IPC, and tray are handled by AppCore.
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
     connect(m_playerBar, &PlayerBar::scanEnabledSourcesRequested, this, &MainWindow::scanEnabledSourceDirectories);
@@ -1444,92 +1441,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
     saveQueueState();
     saveExplorerState();
     saveAllViewSettings();
-    // With a tray icon, closing the window hides to tray and playback keeps
-    // running; only the tray's Quit (or no tray at all) ends the process.
-    if (m_tray != nullptr && !m_quitRequested) {
+    if (m_core->trayAvailable() && !m_core->isQuitting()) {
         hide();
         event->ignore();
         return;
     }
     QMainWindow::closeEvent(event);
-}
-
-// The tray icon only exists while the window is hidden: it is the handle back
-// to a GUI-less player, not a permanent fixture.
-void MainWindow::showEvent(QShowEvent *event)
-{
-    if (m_tray != nullptr) {
-        m_tray->hide();
-    }
-    QMainWindow::showEvent(event);
-}
-
-void MainWindow::hideEvent(QHideEvent *event)
-{
-    if (m_tray != nullptr && !m_quitRequested) {
-        m_tray->show();
-    }
-    QMainWindow::hideEvent(event);
-}
-
-void MainWindow::setupTrayIcon()
-{
-    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
-        return;
-    }
-    // App icon from the theme (installed) with the bundled logo as fallback.
-    QIcon icon = QApplication::windowIcon();
-    if (icon.isNull()) {
-        icon = QIcon(QStringLiteral(":/icons/muzaiten.svg"));
-    }
-    m_tray = new QSystemTrayIcon(icon, this);
-    m_tray->setToolTip(QStringLiteral("muzaiten"));
-    // The hidden-to-tray window must not end the application.
-    QApplication::setQuitOnLastWindowClosed(false);
-
-    auto *menu = new QMenu(this);
-    menu->addAction(QStringLiteral("Unhide"), this, &MainWindow::toggleWindowVisible);
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("Play/Pause"), this, &MainWindow::togglePlayback);
-    menu->addAction(QStringLiteral("Next"), this, &MainWindow::playNextTrack);
-    menu->addAction(QStringLiteral("Previous"), this, &MainWindow::playPreviousTrack);
-    menu->addAction(QStringLiteral("Stop"), m_playback, &PlaybackBackend::stop);
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("Quit"), this, [this]() {
-        m_quitRequested = true;
-        close();  // runs the closeEvent state saves
-        QApplication::quit();
-    });
-    m_tray->setContextMenu(menu);
-
-    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger) {
-            toggleWindowVisible();
-        } else if (reason == QSystemTrayIcon::MiddleClick) {
-            togglePlayback();
-        }
-    });
-    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
-        const QString title = track.title.isEmpty() ? track.filename : track.title;
-        m_tray->setToolTip(track.path.isEmpty()
-                               ? QStringLiteral("muzaiten")
-                               : QStringLiteral("%1 - %2").arg(track.artistName, title));
-    });
-    connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
-        m_tray->setToolTip(QStringLiteral("muzaiten"));
-    });
-    // Not shown here: showEvent/hideEvent toggle it with window visibility.
-}
-
-void MainWindow::toggleWindowVisible()
-{
-    if (isVisible() && !isMinimized()) {
-        hide();
-    } else {
-        show();
-        raise();
-        activateWindow();
-    }
 }
 
 void MainWindow::startScan(const QString &rootPath)

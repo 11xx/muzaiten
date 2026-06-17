@@ -16,6 +16,7 @@ class MprisService;
 class PlaybackBackend;
 class PlayerCore;
 class PlaylistDatabase;
+class QSystemTrayIcon;
 class QThread;
 class SettingsStore;
 struct Track;
@@ -47,6 +48,8 @@ public:
     QString playlistDatabasePath() const;
     QString listenHistoryPath() const;
     bool scrobbleOffline() const;
+    bool trayAvailable() const;
+    bool isQuitting() const;
 
 public slots:
     void showWindow();
@@ -61,6 +64,7 @@ private:
     void setupMprisWiring();
     void setupScrobbleWiring();
     void setupIpcHandler();
+    void setupTrayIcon();
     void updateMprisCapabilities();
     void notifyScrobblersTrackStarted(const Track &track);
     QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
@@ -80,5 +84,7 @@ private:
     LastFmScrobbler  *m_lastFmScrobbler = nullptr;
     MprisService     *m_mpris = nullptr;
     IpcServer        *m_ipc = nullptr;
+    QSystemTrayIcon  *m_tray = nullptr;
     MainWindow       *m_window = nullptr;
+    bool              m_quitting = false;
 };
