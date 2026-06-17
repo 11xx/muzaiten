@@ -148,7 +148,9 @@ AppCore::AppCore(QObject *parent)
     setupScrobbleWiring();
     setupIpcHandler();
     setupTrayIcon();
-    restoreSavedPlayback();
+    // Playback resume is deferred to the first showWindow(): the saved queue is
+    // loaded by MainWindow's constructor (loadQueueState), so the player's queue
+    // is empty here. restoreSavedPlayback() is guarded to run once per process.
 }
 
 AppCore::~AppCore()
@@ -221,6 +223,9 @@ void AppCore::showWindow()
 {
     if (!m_window) {
         m_window = new MainWindow(this);
+        // First window of the process: its constructor loaded the saved queue,
+        // so the player now has tracks to resume into. Guarded to run once.
+        restoreSavedPlayback();
     }
     m_window->show();
     m_window->raise();
@@ -244,9 +249,12 @@ void AppCore::releaseWindow()
 void AppCore::quit()
 {
     m_quitting = true;
+    // close() runs MainWindow::closeEvent, which force-saves playback, queue,
+    // explorer and view state. With m_quitting set, closeEvent accepts instead
+    // of hiding/releasing. (If the window was already released to tray, its
+    // state was saved when it closed, so there is nothing to do here.)
     if (m_window) {
-        m_window->deleteLater();
-        m_window = nullptr;
+        m_window->close();
     }
     QApplication::quit();
 }
