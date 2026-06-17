@@ -51,6 +51,8 @@ public:
     bool trayAvailable() const;
     bool isQuitting() const;
 
+    void setTrayAlwaysVisible(bool visible);
+
 public slots:
     void showWindow();
     void releaseWindow();
@@ -89,4 +91,5 @@ private:
     MainWindow       *m_window = nullptr;
     bool              m_quitting = false;
     bool              m_resumeDone = false;
+    bool              m_trayAlwaysVisible = false;
 };

@@ -547,6 +547,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
+    m_alwaysShowTray = settingsMenu->addAction(QStringLiteral("Always show system tray icon"));
+    m_alwaysShowTray->setCheckable(true);
 
     const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, mpdMenu, historyMenu, scrobblersMenu, settingsMenu};
     for (QMenu *menu : styledMenus) {
@@ -723,6 +725,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
     connect(listeningHistory, &QAction::triggered, this, &PlayerBar::listeningHistoryRequested);
     connect(m_compactMenu, &QAction::toggled, this, &PlayerBar::compactMenuChanged);
+    connect(m_alwaysShowTray, &QAction::toggled, this, &PlayerBar::alwaysShowTrayChanged);
     connect(m_listUnsupportedFiles, &QAction::toggled, this, &PlayerBar::listUnsupportedFilesChanged);
     connect(m_trackInfoPaneVisible, &QAction::toggled, this, &PlayerBar::trackInfoPaneVisibleChanged);
     connect(trackInfoPaneSettings, &QAction::triggered, this, &PlayerBar::trackInfoPaneSettingsRequested);
@@ -932,6 +935,14 @@ void PlayerBar::setCompactMenu(bool compact)
     }
     setMinimumHeight(82);
     updateGeometry();
+}
+
+void PlayerBar::setAlwaysShowTray(bool enabled)
+{
+    if (m_alwaysShowTray != nullptr) {
+        const QSignalBlocker blocker(m_alwaysShowTray);
+        m_alwaysShowTray->setChecked(enabled);
+    }
 }
 
 void PlayerBar::setPlaying(bool playing)

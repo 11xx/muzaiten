@@ -208,6 +208,15 @@ bool AppCore::isQuitting() const
     return m_quitting;
 }
 
+void AppCore::setTrayAlwaysVisible(bool visible)
+{
+    m_trayAlwaysVisible = visible;
+    m_state->setSetting(QStringLiteral("tray.alwaysVisible"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+    if (m_tray) {
+        m_tray->setVisible(visible || m_window == nullptr);
+    }
+}
+
 void AppCore::showWindow()
 {
     if (!m_window) {
@@ -216,6 +225,9 @@ void AppCore::showWindow()
     m_window->show();
     m_window->raise();
     m_window->activateWindow();
+    if (m_tray && !m_trayAlwaysVisible) {
+        m_tray->hide();
+    }
 }
 
 void AppCore::releaseWindow()
@@ -224,6 +236,9 @@ void AppCore::releaseWindow()
     m_window->persistViewState();
     m_window->deleteLater();
     m_window = nullptr;
+    if (m_tray && !m_trayAlwaysVisible) {
+        m_tray->show();
+    }
 }
 
 void AppCore::quit()
@@ -334,7 +349,10 @@ void AppCore::setupTrayIcon()
     menu->addSeparator();
     menu->addAction(QStringLiteral("Quit"), this, &AppCore::quit);
     m_tray->setContextMenu(menu);
-    m_tray->show();
+    m_trayAlwaysVisible = m_state->setting(QStringLiteral("tray.alwaysVisible"), QStringLiteral("false")) == QStringLiteral("true");
+    // Default: tray visible only while the window is hidden.  The window is
+    // shown on startup, so start hidden unless the user prefers always-visible.
+    m_tray->setVisible(m_trayAlwaysVisible);
 
     connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger) {
