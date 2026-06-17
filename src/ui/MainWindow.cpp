@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 
 #include "Version.h"
+#include "app/AppCore.h"
 #include "app/AppPaths.h"
 #include "core/MusicSort.h"
 #include "core/Rating.h"
@@ -9,7 +10,6 @@
 #include "db/SettingsStore.h"
 #include "fs/LinkRoot.h"
 #include "playback/AudioDeviceControl.h"
-#include "playback/GStreamerPlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "playback/PlaybackBackend.h"
 #include "mpd/MpdConfig.h"
@@ -612,9 +612,22 @@ QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
 
 static PlaylistItem playlistItemFromTrack(const Track &track, const QString &query);
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(AppCore *core, QWidget *parent)
     : QMainWindow(parent)
+    , m_core(core)
 {
+    m_player    = m_core->player();
+    m_playback  = m_core->backend();
+    m_database  = m_core->database();
+    m_playlistDb= m_core->playlistDatabase();
+    m_state     = m_core->settings();
+    m_artworkCache = m_core->artworkCache();
+    m_listenHistory= m_core->listenHistory();
+    m_listenTracker= m_core->listenTracker();
+    m_mpris     = m_core->mpris();
+    m_ipc       = m_core->ipc();
+    m_listenBrainzScrobbler = m_core->listenBrainzScrobbler();
+    m_lastFmScrobbler       = m_core->lastFmScrobbler();
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -691,12 +704,9 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(m_takeOverDeviceButton);
     connect(m_takeOverDeviceButton, &QPushButton::clicked, this, &MainWindow::attemptDeviceTakeover);
 
-    m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
-    m_playback = m_player->backend();
-    m_player->setPathResolver([this](const Track &track) { return resolvedReadPathForTrack(track); });
-    m_player->setRandomTrackProvider([this](int count, const QSet<QString> &excludePaths) {
-        return m_database ? m_database->randomTracks(count, excludePaths) : QVector<Track>{};
-    });
+    // PlayerCore, MprisService, and data stores are now owned by AppCore.
+    // m_player, m_playback, m_mpris, m_database, etc. are all borrowed pointers
+    // assigned from AppCore at the top of this constructor.
     connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
     connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
     connect(m_player, &PlayerCore::queueTracksChanged, this, &MainWindow::patchQueueRows);
@@ -735,7 +745,6 @@ MainWindow::MainWindow(QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
     });
-    m_mpris = new MprisService(this);
     m_playbackStateSaveTimer = new QTimer(this);
     m_playbackStateSaveTimer->setSingleShot(true);
     m_playbackStateSaveTimer->setInterval(2000);
@@ -749,58 +758,22 @@ MainWindow::MainWindow(QWidget *parent)
         saveQueueState();
     });
 
-    m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!m_database->open(databasePath())) {
-        QMessageBox::warning(this, QStringLiteral("Database"), m_database->lastError());
+    // m_mpris->setDatabase(...) was moved to AppCore constructor.
+    // m_rightSidebar still needs the database for track enrichment:
+    if (m_rightSidebar) {
+        m_rightSidebar->setDatabase(m_database);
     }
-    // Let MPRIS and the right-sidebar track-info panel enrich now-playing tracks
-    // with the full scanned record (queue loaders skip rich columns for speed).
-    m_mpris->setDatabase(m_database.get());
-    m_rightSidebar->setDatabase(m_database.get());
 
-    m_playlistDb = std::make_unique<PlaylistDatabase>(QStringLiteral("playlists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!m_playlistDb->open(playlistDatabasePath())) {
-        QMessageBox::warning(this, QStringLiteral("Playlists"), m_playlistDb->lastError());
-    }
-    m_playlistView->setDatabase(m_playlistDb.get());
+    m_playlistView->setDatabase(m_playlistDb);
     m_playlistView->setTrackResolver([this](const QString &path) {
         return m_database != nullptr ? m_database->trackForPath(path) : Track();
     });
 
-    // UI/view prefs and session state live in a separate store under XDG_STATE_HOME
-    // so they persist independently of the per-build library database.
-    m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
+    connect(m_artworkCache, &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
+    connect(m_artworkCache, &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
 
-    // Create a commented config-file template on first run; its [paths] section
-    // feeds AppPaths (below CLI/env/--state-root, above the XDG default).
-    AppPaths::writeDefaultConfigIfMissing();
-
-    const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
-    m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
-    connect(m_artworkCache.get(), &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
-    connect(m_artworkCache.get(), &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
-
-    // Local listening history collects every completed listen unconditionally;
-    // per-service owed flags capture which scrobblers were enabled when each
-    // listen happened, so enabling a service later cannot claim old history.
-    m_listenHistory = std::make_unique<ListenHistoryStore>(listenHistoryPath());
-    m_listenTracker = new ListenTracker(this);
-    connect(m_listenTracker, &ListenTracker::listenReached, this, [this](const Track &track, qint64 startedAtSecs) {
-        const bool oweListenBrainz = m_database->setting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-        const bool oweLastFm = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-        m_listenHistory->recordListen(track, startedAtSecs, oweLastFm, oweListenBrainz);
-        if (oweListenBrainz) {
-            QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
-        }
-        if (oweLastFm) {
-            QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
-        }
-    });
-
-    m_listenBrainzThread = new QThread(this);
-    m_listenBrainzScrobbler = new ListenBrainzScrobbler;
-    m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
-    connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzScrobbler, &QObject::deleteLater);
+    // scrobbler signal connections TO the UI (statusBar, QMessageBox).
+    // The workers and threads themselves are owned by AppCore.
     connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
     });
@@ -822,12 +795,7 @@ MainWindow::MainWindow(QWidget *parent)
                                        : QStringLiteral("ListenBrainz token is invalid."),
                                  8000);
     });
-    m_listenBrainzThread->start();
 
-    m_lastFmThread = new QThread(this);
-    m_lastFmScrobbler = new LastFmScrobbler;
-    m_lastFmScrobbler->moveToThread(m_lastFmThread);
-    connect(m_lastFmThread, &QThread::finished, m_lastFmScrobbler, &QObject::deleteLater);
     connect(m_lastFmScrobbler, &LastFmScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
     });
@@ -861,7 +829,6 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage(message, 10000);
         QMessageBox::warning(this, QStringLiteral("Last.fm"), message);
     });
-    m_lastFmThread->start();
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
@@ -1478,7 +1445,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_playerBar->cycleShuffleMode();
     });
 
-    m_albumGrid->setArtworkCache(m_artworkCache.get());
+    m_albumGrid->setArtworkCache(m_artworkCache);
     loadPlaybackProfile();
     loadPlaybackResumeSettings();
     loadViewSettings();
@@ -1512,14 +1479,6 @@ MainWindow::~MainWindow()
     if (m_fillThread != nullptr) {
         m_fillThread->quit();
         m_fillThread->wait(3000);
-    }
-    if (m_listenBrainzThread != nullptr) {
-        m_listenBrainzThread->quit();
-        m_listenBrainzThread->wait(3000);
-    }
-    if (m_lastFmThread != nullptr) {
-        m_lastFmThread->quit();
-        m_lastFmThread->wait(3000);
     }
     if (m_mpdImportThread != nullptr) {
         // run() can be blocked on network I/O; cancel() (atomic) makes it and the
@@ -4257,7 +4216,7 @@ void MainWindow::showListeningHistory()
         return;
     }
 
-    ListeningHistoryDialog dialog(m_listenHistory.get(), this);
+    ListeningHistoryDialog dialog(m_listenHistory, this);
     connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
         if (changedCount > 0) {
             triggerScrobbleUpload(service);
