@@ -22,6 +22,8 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMenu>
+#include <QSystemTrayIcon>
 #include <QThread>
 #include <QUuid>
 
@@ -144,6 +146,7 @@ AppCore::AppCore(QObject *parent)
     setupMprisWiring();
     setupScrobbleWiring();
     setupIpcHandler();
+    setupTrayIcon();
 }
 
 AppCore::~AppCore()
@@ -193,6 +196,16 @@ bool AppCore::scrobbleOffline() const
     return m_database->setting(QStringLiteral("scrobble.offline"), QStringLiteral("false")) == QStringLiteral("true");
 }
 
+bool AppCore::trayAvailable() const
+{
+    return m_tray != nullptr;
+}
+
+bool AppCore::isQuitting() const
+{
+    return m_quitting;
+}
+
 void AppCore::showWindow()
 {
     if (!m_window) {
@@ -212,6 +225,7 @@ void AppCore::releaseWindow()
 
 void AppCore::quit()
 {
+    m_quitting = true;
     if (m_window) {
         m_window->deleteLater();
         m_window = nullptr;
@@ -292,6 +306,48 @@ void AppCore::setupIpcHandler()
     if (!m_ipc->listen()) {
         qWarning("muzaiten: IPC socket unavailable: %s", qPrintable(m_ipc->lastError()));
     }
+}
+
+void AppCore::setupTrayIcon()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        return;
+    }
+    QIcon icon = QApplication::windowIcon();
+    if (icon.isNull()) {
+        icon = QIcon(QStringLiteral(":/icons/muzaiten.svg"));
+    }
+    m_tray = new QSystemTrayIcon(icon, this);
+    m_tray->setToolTip(QStringLiteral("muzaiten"));
+    QApplication::setQuitOnLastWindowClosed(false);
+
+    auto *menu = new QMenu;
+    menu->addAction(QStringLiteral("Unhide"), this, &AppCore::showWindow);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Play/Pause"), m_player, &PlayerCore::togglePlayPause);
+    menu->addAction(QStringLiteral("Next"), m_player, &PlayerCore::next);
+    menu->addAction(QStringLiteral("Previous"), m_player, &PlayerCore::previous);
+    menu->addAction(QStringLiteral("Stop"), m_playback, &PlaybackBackend::stop);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Quit"), this, &AppCore::quit);
+    m_tray->setContextMenu(menu);
+
+    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger) {
+            showWindow();
+        } else if (reason == QSystemTrayIcon::MiddleClick) {
+            m_player->togglePlayPause();
+        }
+    });
+    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
+        const QString title = track.title.isEmpty() ? track.filename : track.title;
+        m_tray->setToolTip(track.path.isEmpty()
+                               ? QStringLiteral("muzaiten")
+                               : QStringLiteral("%1 - %2").arg(track.artistName, title));
+    });
+    connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
+        m_tray->setToolTip(QStringLiteral("muzaiten"));
+    });
 }
 
 void AppCore::updateMprisCapabilities()
