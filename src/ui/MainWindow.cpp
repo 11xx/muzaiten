@@ -32,6 +32,7 @@
 #include "ui/LinkRootsDialog.h"
 #include "ui/ListeningHistoryDialog.h"
 #include "ui/PlayerBar.h"
+#include "ui/PanelBorderStyle.h"
 #include "ui/PanelOrderDialog.h"
 #include "ui/PanelSearchController.h"
 #include "ui/PlaybackProfileDialog.h"
@@ -672,12 +673,16 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rootSplitter = new QSplitter(Qt::Horizontal, m_mainStack);
     m_rootSplitter->setChildrenCollapsible(false);
     m_artistSidebar = new ArtistSidebar(m_rootSplitter);
+    m_artistSidebar->setObjectName(QStringLiteral("MainArtistSidebar"));
+    m_artistSidebar->setStyleSheet(panelBorderStyleSheet(QStringLiteral("ArtistSidebar#MainArtistSidebar"), panelTopBorder(), m_artistSidebar));
     m_artistSidebar->setMinimumWidth(kArtistSidebarMinimumWidth);
 
     m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
     m_centerSplitter->setChildrenCollapsible(false);
     m_centerSplitter->setMinimumWidth(kCenterPaneMinimumWidth);
     m_albumGrid = new AlbumGrid(m_centerSplitter);
+    m_albumGrid->setObjectName(QStringLiteral("MainAlbumGrid"));
+    m_albumGrid->setStyleSheet(panelBorderStyleSheet(QStringLiteral("AlbumGrid#MainAlbumGrid"), panelTopBorder(), m_albumGrid));
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
@@ -686,6 +691,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_centerSplitter->setSizes({540, 430});
 
     m_rightSidebar = new RightSidebar(m_rootSplitter);
+    m_rightSidebar->setObjectName(QStringLiteral("MainRightSidebar"));
+    m_rightSidebar->setStyleSheet(panelBorderStyleSheet(QStringLiteral("RightSidebar#MainRightSidebar"), panelTopBorder(), m_rightSidebar));
     m_rightSidebar->setMinimumWidth(kRightSidebarMinimumWidth);
     m_rightSidebar->setQueueStore(m_queueStore);
 

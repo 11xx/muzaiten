@@ -2,6 +2,7 @@
 
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumArtView.h"
+#include "ui/PanelBorderStyle.h"
 #include "ui/StarRating.h"
 
 #include <QAction>
@@ -424,11 +425,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 {
     setObjectName(QStringLiteral("PlayerBar"));
     setMinimumHeight(82);
-    setStyleSheet(QStringLiteral(
-        "QWidget#PlayerBar {"
-        "  background: palette(window);"
-        "  border-bottom: 1px solid palette(light);"
-        "}"));
+    restyleFrame();
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -1011,6 +1008,7 @@ void PlayerBar::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
+        restyleFrame();
         restyleMenuBar();
         if (m_menuButton != nullptr) {
             m_menuButton->setIcon(menuHamburgerIcon(palette()));
@@ -1028,6 +1026,12 @@ void PlayerBar::resizeEvent(QResizeEvent *event)
     QWidget::resizeEvent(event);
 }
 
+void PlayerBar::restyleFrame()
+{
+    setStyleSheet(panelBorderStyleSheet(
+        QStringLiteral("QWidget#PlayerBar"), panelBottomBorder(), this, QStringLiteral(" background: palette(window);")));
+}
+
 void PlayerBar::restyleMenuBar()
 {
     if (m_menuBar == nullptr) {
@@ -1038,7 +1042,7 @@ void PlayerBar::restyleMenuBar()
         "  margin: 0;"
         "  padding: 0;"
         "  background: palette(window);"
-        "  border-top: 1px solid palette(light);"
+        "  border-top: 1px solid %1;"
         "  border-bottom: 0;"
         "}"
         "QMenuBar::item {"
@@ -1067,7 +1071,7 @@ void PlayerBar::restyleMenuBar()
         "}"
         "QToolButton:pressed {"
         "  background: palette(highlight);"
-        "}"));
+        "}").arg(panelSeparatorColorCss(m_menuBar)));
 }
 
 void PlayerBar::updateShuffleIcon()

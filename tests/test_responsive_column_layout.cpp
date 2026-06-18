@@ -342,7 +342,7 @@ private slots:
         const QVariant brushValue = table.model()->headerData(2, Qt::Horizontal, Qt::ForegroundRole);
         QVERIFY(brushValue.isValid());
         QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
-        QCOMPARE(table.horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle));
+        QCOMPARE(table.horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle, table.horizontalHeader()));
     }
 };
 

@@ -2,6 +2,7 @@
 
 #include "core/Artist.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/PanelBorderStyle.h"
 #include "ui/SelectionColors.h"
 
 #include <QAction>
@@ -94,7 +95,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_tabBar->setVisible(false);
     m_tabBar->setStyleSheet(QStringLiteral(
         "QTabBar::tab {"
-        "  border: 1px solid palette(light);"
+        "  border: 1px solid %1;"
         "  border-bottom: 0;"
         "  border-top-left-radius: 3px;"
         "  border-top-right-radius: 3px;"
@@ -112,7 +113,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
         "}"
         "QTabBar::tab:disabled {"
         "  color: palette(disabled, window-text);"
-        "}"));
+        "}").arg(panelSeparatorColorCss(m_tabBar)));
     layout->addWidget(m_tabBar);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &ArtistSidebar::librarySourceChanged);
@@ -121,9 +122,11 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_model->appendRow(new QStandardItem(QStringLiteral("Pick a library folder")));
 
     m_view = new QListView(this);
+    m_view->setObjectName(QStringLiteral("ArtistList"));
     m_view->setModel(m_model);
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
     m_view->setFrameShape(QFrame::NoFrame);
+    m_view->setStyleSheet(panelBorderStyleSheet(QStringLiteral("QListView#ArtistList"), panelAllBorders(), m_view));
     m_view->setUniformItemSizes(true);
     m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);

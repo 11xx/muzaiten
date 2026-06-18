@@ -121,6 +121,7 @@ signals:
     void libraryShuffleSettingsRequested();
 
 private:
+    void restyleFrame();
     void restyleMenuBar();
     void updateShuffleIcon();
     void updateRepeatIcon();
