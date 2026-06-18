@@ -1028,8 +1028,19 @@ void PlayerBar::resizeEvent(QResizeEvent *event)
 
 void PlayerBar::restyleFrame()
 {
-    setStyleSheet(panelBorderStyleSheet(
-        QStringLiteral("QWidget#PlayerBar"), panelBottomBorder(), this, QStringLiteral(" background: palette(window);")));
+    if (m_restylingFrame) {
+        return;
+    }
+
+    const QString style = panelBorderStyleSheet(
+        QStringLiteral("QWidget#PlayerBar"), panelBottomBorder(), this, QStringLiteral(" background: palette(window);"));
+    if (styleSheet() == style) {
+        return;
+    }
+
+    m_restylingFrame = true;
+    setStyleSheet(style);
+    m_restylingFrame = false;
 }
 
 void PlayerBar::restyleMenuBar()
@@ -1037,7 +1048,11 @@ void PlayerBar::restyleMenuBar()
     if (m_menuBar == nullptr) {
         return;
     }
-    m_menuBar->setStyleSheet(QStringLiteral(
+    if (m_restylingMenuBar) {
+        return;
+    }
+
+    const QString style = QStringLiteral(
         "QMenuBar {"
         "  margin: 0;"
         "  padding: 0;"
@@ -1071,7 +1086,14 @@ void PlayerBar::restyleMenuBar()
         "}"
         "QToolButton:pressed {"
         "  background: palette(highlight);"
-        "}").arg(panelSeparatorColorCss(m_menuBar)));
+        "}").arg(panelSeparatorColorCss(m_menuBar));
+    if (m_menuBar->styleSheet() == style) {
+        return;
+    }
+
+    m_restylingMenuBar = true;
+    m_menuBar->setStyleSheet(style);
+    m_restylingMenuBar = false;
 }
 
 void PlayerBar::updateShuffleIcon()
