@@ -175,6 +175,9 @@ private:
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
     QSplitter *m_splitter = nullptr;
+    // Sizes persisted to settings — only updated by a real splitterMoved
+    // (user drag), never by programmatic setSizes(). See SplitterPersistence.h.
+    QList<int> m_userSplitterSizes;
     PlaylistItemTableModel *m_itemModel = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     class StarRatingDelegate *m_ratingDelegate = nullptr;
