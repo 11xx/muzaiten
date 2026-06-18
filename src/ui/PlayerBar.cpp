@@ -424,6 +424,11 @@ PlayerBar::PlayerBar(QWidget *parent)
 {
     setObjectName(QStringLiteral("PlayerBar"));
     setMinimumHeight(82);
+    setStyleSheet(QStringLiteral(
+        "QWidget#PlayerBar {"
+        "  background: palette(window);"
+        "  border-bottom: 1px solid palette(light);"
+        "}"));
 
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -1033,8 +1038,8 @@ void PlayerBar::restyleMenuBar()
         "  margin: 0;"
         "  padding: 0;"
         "  background: palette(window);"
-        "  border-top: 1px solid palette(mid);"
-        "  border-bottom: 1px solid palette(mid);"
+        "  border-top: 1px solid palette(light);"
+        "  border-bottom: 0;"
         "}"
         "QMenuBar::item {"
         "  margin: 0;"
