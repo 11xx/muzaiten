@@ -82,7 +82,7 @@ inline QString headerViewStyleSheet(const HeaderViewStyle &style)
 
     return QStringLiteral(
         "QHeaderView { border: 0px; }"
-        "QHeaderView::section { border-bottom: 0px; }");
+        "QHeaderView::section { border: none; }");
 }
 
 inline void applyHeaderViewStyle(QHeaderView *header, const HeaderViewStyle &style)
