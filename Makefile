@@ -23,9 +23,11 @@ QT_QPA_PLATFORM            ?= offscreen
 MUZAITEN_LASTFM_API_KEY    ?=
 MUZAITEN_LASTFM_SHARED_SECRET ?=
 APP := $(BUILD_DIR)/muzaiten
-DEMO_STATE_ROOT            ?= $(CURDIR)/agent-state
 DEMO_SCREEN_DIR            ?= $(CURDIR)/demo-screens
 DEMO_SEARCH                ?=
+DEMO_SEARCH_VIDEO          ?= 1
+DEMO_SEARCH_DELAY_MS       ?= 120
+DEMO_ARTIST                ?=
 
 help:
 	@printf '%s\n' \
@@ -36,7 +38,7 @@ help:
 		'  make smoke      Run the existing build offscreen as a startup smoke test' \
 		'  make run        Launch the existing build with --verbose (XDG dirs)' \
 		'  make dev        Build and launch with isolated ./dev-state (MUZAITEN_DEV_STATE)' \
-		'  make demo-screens Capture publishing screenshots from copied data in agent-state/' \
+		'  make demo-screens Capture publishing screenshots/video from a temp XDG data copy' \
 		'  make install    Install the existing build (user-space ~/.local by default)' \
 		'  make uninstall  Remove a prior install (reads $(BUILD_DIR)/install_manifest.txt)' \
 		'  make clean      Remove build outputs from $(BUILD_DIR)' \
@@ -47,9 +49,11 @@ help:
 		'  CMAKE_GENERATOR=Ninja' \
 		'  CMAKE_BUILD_TYPE=Release' \
 		'  PREFIX=/usr            (install prefix; default ~/.local, no sudo)' \
-		'  DEMO_STATE_ROOT=agent-state' \
 		'  DEMO_SCREEN_DIR=demo-screens' \
 		'  DEMO_SEARCH="artist:example"' \
+		'  DEMO_SEARCH_VIDEO=1' \
+		'  DEMO_SEARCH_DELAY_MS=120' \
+		'  DEMO_ARTIST="Rainbow"' \
 		'  MUZAITEN_LASTFM_API_KEY=...' \
 		'  MUZAITEN_LASTFM_SHARED_SECRET=...'
 
@@ -92,19 +96,36 @@ dev: build
 	MUZAITEN_DEV_STATE=1 ./$(APP) --verbose
 
 demo-screens: build
-	@if [ ! -f "$(DEMO_STATE_ROOT)/data/library.sqlite" ]; then \
+	@set -eu; \
+	data_home="$${XDG_DATA_HOME:-$$HOME/.local/share}"; \
+	state_home="$${XDG_STATE_HOME:-$$HOME/.local/state}"; \
+	cache_home="$${XDG_CACHE_HOME:-$$HOME/.cache}"; \
+	library="$$data_home/muzaiten/library.sqlite"; \
+	if [ ! -f "$$library" ]; then \
 		printf '%s\n' \
-			"Missing copied demo library: $(DEMO_STATE_ROOT)/data/library.sqlite" \
-			"Create an isolated demo state first, for example:" \
-			"  mkdir -p '$(DEMO_STATE_ROOT)/data' '$(DEMO_STATE_ROOT)/state' '$(DEMO_STATE_ROOT)/cache'" \
-			"  cp ~/.local/share/muzaiten/library.sqlite '$(DEMO_STATE_ROOT)/data/'" \
-			"  cp ~/.local/share/muzaiten/playlists.sqlite '$(DEMO_STATE_ROOT)/data/' 2>/dev/null || true" \
-			"  cp ~/.local/state/muzaiten/state.sqlite '$(DEMO_STATE_ROOT)/state/' 2>/dev/null || cp ~/.local/share/muzaiten/state.sqlite '$(DEMO_STATE_ROOT)/state/' 2>/dev/null || true" \
-			"  cp ~/.cache/muzaiten/artwork.sqlite '$(DEMO_STATE_ROOT)/cache/' 2>/dev/null || cp ~/.local/share/muzaiten/artwork.sqlite '$(DEMO_STATE_ROOT)/cache/' 2>/dev/null || true"; \
+			"Could not find $$library" \
+			"make demo-screens only auto-copies from XDG data/state/cache homes." \
+			"Run the demo manually with an explicit isolated state root instead:" \
+			"  mkdir -p /tmp/muzdir/data /tmp/muzdir/state /tmp/muzdir/cache" \
+			"  cp /path/to/library.sqlite /tmp/muzdir/data/" \
+			"  env QT_QPA_PLATFORM=offscreen MUZAITEN_STATE_ROOT=/tmp/muzdir ./$(APP) --demo-screens '$(DEMO_SCREEN_DIR)'"; \
 		exit 1; \
-	fi
-	env QT_QPA_PLATFORM=$(QT_QPA_PLATFORM) MUZAITEN_STATE_ROOT="$(DEMO_STATE_ROOT)" \
-		./$(APP) --demo-screens "$(DEMO_SCREEN_DIR)" $(if $(DEMO_SEARCH),--demo-search "$(DEMO_SEARCH)")
+	fi; \
+	tmp_state=$$(mktemp -d "$${TMPDIR:-/tmp}/muzaiten-demo-state.XXXXXX"); \
+	trap 'rm -rf "$$tmp_state"' EXIT INT TERM; \
+	mkdir -p "$$tmp_state/data" "$$tmp_state/state" "$$tmp_state/cache"; \
+	cp "$$library" "$$tmp_state/data/"; \
+	if [ -f "$$data_home/muzaiten/playlists.sqlite" ]; then cp "$$data_home/muzaiten/playlists.sqlite" "$$tmp_state/data/"; fi; \
+	if [ -f "$$data_home/muzaiten/history.sqlite" ]; then cp "$$data_home/muzaiten/history.sqlite" "$$tmp_state/data/"; fi; \
+	if [ -f "$$state_home/muzaiten/state.sqlite" ]; then cp "$$state_home/muzaiten/state.sqlite" "$$tmp_state/state/"; fi; \
+	if [ -f "$$cache_home/muzaiten/artwork.sqlite" ]; then cp "$$cache_home/muzaiten/artwork.sqlite" "$$tmp_state/cache/"; fi; \
+	mkdir -p "$(DEMO_SCREEN_DIR)"; \
+	env "QT_QPA_PLATFORM=offscreen" "MUZAITEN_STATE_ROOT=$$tmp_state" \
+		./$(APP) --demo-screens "$(DEMO_SCREEN_DIR)" \
+		$(if $(DEMO_SEARCH),--demo-search "$(DEMO_SEARCH)") \
+		$(if $(filter-out 0 false no,$(DEMO_SEARCH_VIDEO)),--demo-search-video) \
+		--demo-search-delay-ms "$(DEMO_SEARCH_DELAY_MS)" \
+		$(if $(DEMO_ARTIST),--demo-artist "$(DEMO_ARTIST)")
 
 # Installs the existing build. Run `make build` (optionally with
 # CMAKE_BUILD_TYPE=Release) first. Defaults to the user-space ~/.local prefix

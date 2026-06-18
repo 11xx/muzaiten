@@ -2747,6 +2747,19 @@ void MainWindow::switchMainView(MainView view)
     saveMainWindowViewSettings();
 }
 
+bool MainWindow::showDemoArtist(const QString &artistName)
+{
+    if (artistName.trimmed().isEmpty()) {
+        return false;
+    }
+    switchMainView(MainView::LibraryPanels);
+    if (!m_artistSidebar->selectArtist(artistName)) {
+        return false;
+    }
+    showArtist(artistName, /*forceReload=*/true, /*clearAlbumSelectionOnArtistChange=*/true);
+    return true;
+}
+
 void MainWindow::toggleFileExplorerView()
 {
     if (m_mainView == MainView::LibraryFileExplorer) {

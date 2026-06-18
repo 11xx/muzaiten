@@ -106,14 +106,21 @@ int MuzaitenApplication::run()
         core.showWindow();
         QTimer::singleShot(0, this, [this, &core, demoScreensDir]() {
             QString error;
-            const QString query = property("muzaiten.demoSearch").toString();
-            const bool ok = DemoScreens::capture(core, demoScreensDir, query, &error);
+            DemoScreens::Options options;
+            options.outputDir = demoScreensDir;
+            options.searchQuery = property("muzaiten.demoSearch").toString();
+            options.artistName = property("muzaiten.demoArtist").toString();
+            options.searchVideo = property("muzaiten.demoSearchVideo").toBool();
+            options.searchKeyDelayMs = property("muzaiten.demoSearchDelayMs").toInt();
+            const bool ok = DemoScreens::capture(core, options, &error);
             if (!ok) {
                 qCritical().noquote() << error;
             }
-            exit(ok ? 0 : 1);
+            setProperty("muzaiten.demoExitCode", ok ? 0 : 1);
+            core.quit();
         });
-        return exec();
+        exec();
+        return property("muzaiten.demoExitCode").toInt();
     }
 
     if (raiseRunningInstance()) {
@@ -148,6 +155,12 @@ void MuzaitenApplication::configureCommandLine()
     demoScreensOption.setFlags(QCommandLineOption::HiddenFromHelp);
     QCommandLineOption demoSearchOption(QStringLiteral("demo-search"), QStringLiteral("Hidden: query to type before the search screenshot."), QStringLiteral("query"));
     demoSearchOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoSearchVideoOption(QStringLiteral("demo-search-video"), QStringLiteral("Hidden: record typed search frames to 02-search.mp4."));
+    demoSearchVideoOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoSearchDelayOption(QStringLiteral("demo-search-delay-ms"), QStringLiteral("Hidden: per-key search video delay in milliseconds."), QStringLiteral("ms"));
+    demoSearchDelayOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoArtistOption(QStringLiteral("demo-artist"), QStringLiteral("Hidden: select an album artist before the library screenshot."), QStringLiteral("name"));
+    demoArtistOption.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(verboseOption);
     parser.addOption(stateRootOption);
     parser.addOption(devStateOption);
@@ -157,6 +170,9 @@ void MuzaitenApplication::configureCommandLine()
     parser.addOption(configDirOption);
     parser.addOption(demoScreensOption);
     parser.addOption(demoSearchOption);
+    parser.addOption(demoSearchVideoOption);
+    parser.addOption(demoSearchDelayOption);
+    parser.addOption(demoArtistOption);
     parser.process(*this);
 
     const bool verbose = parser.isSet(verboseOption) || qEnvironmentVariableIsSet("MUZAITEN_VERBOSE");
@@ -188,6 +204,14 @@ void MuzaitenApplication::configureCommandLine()
     const QString demoSearch = parser.value(demoSearchOption).trimmed();
     if (!demoSearch.isEmpty()) {
         setProperty("muzaiten.demoSearch", demoSearch);
+    }
+    setProperty("muzaiten.demoSearchVideo", parser.isSet(demoSearchVideoOption));
+    bool delayOk = false;
+    const int searchDelay = parser.value(demoSearchDelayOption).toInt(&delayOk);
+    setProperty("muzaiten.demoSearchDelayMs", delayOk ? searchDelay : 120);
+    const QString demoArtist = parser.value(demoArtistOption).trimmed();
+    if (!demoArtist.isEmpty()) {
+        setProperty("muzaiten.demoArtist", demoArtist);
     }
 }
 

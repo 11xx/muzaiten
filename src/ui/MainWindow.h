@@ -65,6 +65,7 @@ public:
     // Called by AppCore::releaseWindow() to snapshot ephemeral view state
     // before the widget tree is destroyed.
     void persistViewState();
+    bool showDemoArtist(const QString &artistName);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
