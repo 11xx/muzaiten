@@ -1,6 +1,8 @@
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/TrackTable.h"
 
+#include <QApplication>
+#include <QBrush>
 #include <QFrame>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -289,6 +291,19 @@ private slots:
         layout->setColumnPriority(QStringLiteral("year"), ResponsiveColumnPriority::Normal);
         table.resetViewSettings();
         QCOMPARE(layout->columnPriority(QStringLiteral("year")), ResponsiveColumnPriority::HideEarly);
+    }
+
+    void trackHeaderLabelsUseMutedThemeRoles()
+    {
+        TrackTable table;
+
+        const QVariant fontValue = table.model()->headerData(2, Qt::Horizontal, Qt::FontRole);
+        QVERIFY(fontValue.isValid());
+        QCOMPARE(fontValue.value<QFont>().weight(), QFont::Normal);
+
+        const QVariant brushValue = table.model()->headerData(2, Qt::Horizontal, Qt::ForegroundRole);
+        QVERIFY(brushValue.isValid());
+        QCOMPARE(brushValue.value<QBrush>().color(), QApplication::palette().color(QPalette::Disabled, QPalette::Text));
     }
 };
 

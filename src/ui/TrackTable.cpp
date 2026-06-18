@@ -3,9 +3,9 @@
 #include "core/MusicSort.h"
 #include "core/Track.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/HeaderLabelStyle.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
-#include "ui/QuietHeaderView.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/StarRating.h"
@@ -90,7 +90,14 @@ public:
 
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
     {
-        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+        if (orientation != Qt::Horizontal) {
+            return {};
+        }
+        static constexpr HeaderLabelStyle kHeaderStyle{QFont::Normal, true, HeaderLabelTone::Muted};
+        if (const QVariant styleData = headerLabelStyleData(role, kHeaderStyle); styleData.isValid()) {
+            return styleData;
+        }
+        if (role != Qt::DisplayRole) {
             return {};
         }
         for (const ColumnSpec &spec : columns) {
@@ -402,7 +409,6 @@ void applyDefaultTrackColumnOrder(QHeaderView *header)
 TrackTable::TrackTable(QWidget *parent)
     : NavigableTableView(parent)
 {
-    setHorizontalHeader(new QuietHeaderView(Qt::Horizontal, this));
     setModel(new TrackTableModel(this));
     auto *denseDelegate = new DenseTableDelegate(this);
     setItemDelegate(denseDelegate);
