@@ -47,6 +47,7 @@
 #include "ui/PlaylistView.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
+#include "ui/SplitterPersistence.h"
 #include "ui/MainPanelKeybindings.h"
 #include "ui/TableNavigationScroll.h"
 #include "search/RankConfig.h"
@@ -615,52 +616,6 @@ QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
         }
     }
     return deduped;
-}
-
-QList<int> splitterSizesFromJson(const QJsonArray &array)
-{
-    QList<int> sizes;
-    for (const QJsonValue &value : array) {
-        sizes.push_back(value.toInt());
-    }
-    return sizes;
-}
-
-QJsonArray splitterSizesToJson(const QList<int> &sizes)
-{
-    QJsonArray array;
-    for (int size : sizes) {
-        array.append(size);
-    }
-    return array;
-}
-
-bool splitterSizesAreStable(const QList<int> &sizes, const QList<int> &minimums, int minimumTotal)
-{
-    if (sizes.size() != minimums.size()) {
-        return false;
-    }
-
-    int total = 0;
-    for (int i = 0; i < sizes.size(); ++i) {
-        const int size = sizes.at(i);
-        if (size < minimums.at(i)) {
-            return false;
-        }
-        total += size;
-    }
-    return total >= minimumTotal;
-}
-
-void restoreSplitterIfStable(QSplitter *splitter, const QJsonArray &array, const QList<int> &minimums, int minimumTotal)
-{
-    if (splitter == nullptr) {
-        return;
-    }
-    const QList<int> sizes = splitterSizesFromJson(array);
-    if (splitterSizesAreStable(sizes, minimums, minimumTotal)) {
-        splitter->setSizes(sizes);
-    }
 }
 
 } // namespace
@@ -2498,11 +2453,11 @@ void MainWindow::loadViewSettings()
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
     }
-    restoreSplitterIfStable(m_rootSplitter,
+    SplitterPersistence::restoreSplitterIfStable(m_rootSplitter,
                             mainWindow.value(QStringLiteral("rootSplitter")).toArray(),
                             {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
                             kRootSplitterMinimumTotal);
-    restoreSplitterIfStable(m_centerSplitter,
+    SplitterPersistence::restoreSplitterIfStable(m_centerSplitter,
                             mainWindow.value(QStringLiteral("centerSplitter")).toArray(),
                             {kPanelMinimumHeight, kPanelMinimumHeight},
                             kCenterSplitterMinimumTotal);
@@ -2609,16 +2564,16 @@ void MainWindow::saveMainWindowViewSettings(bool captureSplitterSizes)
     root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
     if (captureSplitterSizes) {
         const QList<int> rootSizes = m_rootSplitter->sizes();
-        if (splitterSizesAreStable(rootSizes,
+        if (SplitterPersistence::splitterSizesAreStable(rootSizes,
                                    {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
                                    kRootSplitterMinimumTotal)) {
-            root.insert(QStringLiteral("rootSplitter"), splitterSizesToJson(rootSizes));
+            root.insert(QStringLiteral("rootSplitter"), SplitterPersistence::splitterSizesToJson(rootSizes));
         }
         const QList<int> centerSizes = m_centerSplitter->sizes();
-        if (splitterSizesAreStable(centerSizes,
+        if (SplitterPersistence::splitterSizesAreStable(centerSizes,
                                    {kPanelMinimumHeight, kPanelMinimumHeight},
                                    kCenterSplitterMinimumTotal)) {
-            root.insert(QStringLiteral("centerSplitter"), splitterSizesToJson(centerSizes));
+            root.insert(QStringLiteral("centerSplitter"), SplitterPersistence::splitterSizesToJson(centerSizes));
         }
     }
     root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));

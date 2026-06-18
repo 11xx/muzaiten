@@ -31,12 +31,23 @@ private slots:
 
         auto *firstSplitter = first.findChild<QSplitter *>();
         QVERIFY(firstSplitter != nullptr);
+        // Simulate a real user drag: splitterMoved is the only path that updates
+        // the persisted sizes. A bare setSizes() must NOT persist (that's how
+        // programmatic redistributions stay out of settings).
         firstSplitter->setSizes({210, 690});
+        QVERIFY(QMetaObject::invokeMethod(firstSplitter, "splitterMoved",
+                                          Q_ARG(int, 210),
+                                          Q_ARG(int, 1)));
         QCoreApplication::processEvents();
+        const QList<int> draggedSizes = firstSplitter->sizes();
+        QVERIFY(draggedSizes.size() == 2);
+        QVERIFY(draggedSizes.at(0) >= 180);
 
         const QJsonObject saved = QJsonDocument::fromJson(first.viewSettingsJson().toUtf8()).object();
         const QJsonArray savedSizes = saved.value(QStringLiteral("splitter")).toArray();
         QCOMPARE(savedSizes.size(), 2);
+        QCOMPARE(savedSizes.at(0).toInt(), draggedSizes.at(0));
+        QCOMPARE(savedSizes.at(1).toInt(), draggedSizes.at(1));
 
         PlaylistView second;
         second.resize(900, 420);
@@ -47,7 +58,56 @@ private slots:
 
         auto *secondSplitter = second.findChild<QSplitter *>();
         QVERIFY(secondSplitter != nullptr);
-        QCOMPARE(secondSplitter->sizes(), firstSplitter->sizes());
+        QCOMPARE(secondSplitter->sizes(), draggedSizes);
+    }
+
+    void programmaticSetSizesDoesNotPersist()
+    {
+        PlaylistView view;
+        view.resize(900, 420);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+        auto *splitter = view.findChild<QSplitter *>();
+        QVERIFY(splitter != nullptr);
+
+        // A bare setSizes() (no splitterMoved) must leave the persisted sizes
+        // untouched — only a real user drag updates them. The persisted value
+        // stays at the constructor default (269 / remainder).
+        splitter->setSizes({500, 400});
+        QCoreApplication::processEvents();
+
+        const QJsonObject saved = QJsonDocument::fromJson(view.viewSettingsJson().toUtf8()).object();
+        const QJsonArray savedSizes = saved.value(QStringLiteral("splitter")).toArray();
+        QCOMPARE(savedSizes.size(), 2);
+        QCOMPARE(savedSizes.at(0).toInt(), 269);
+    }
+
+    void unstableSplitterSizesAreIgnoredOnRestore()
+    {
+        // A degenerate stored distribution (one pane below its minimum) must
+        // never be restored — it would shrink the playlist list to a sliver.
+        const QJsonObject root{{QStringLiteral("splitter"),
+                                QJsonArray{10, 2000}}};
+        PlaylistView view;
+        view.resize(900, 420);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.applyViewSettingsJson(QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+        QCoreApplication::processEvents();
+
+        auto *splitter = view.findChild<QSplitter *>();
+        QVERIFY(splitter != nullptr);
+        QVERIFY(splitter->sizes().at(0) >= 180);
+    }
+
+    void defaultPlaylistListWidthIs269Pixels()
+    {
+        PlaylistView view;
+        const QJsonObject saved = QJsonDocument::fromJson(view.viewSettingsJson().toUtf8()).object();
+        const QJsonArray savedSizes = saved.value(QStringLiteral("splitter")).toArray();
+        QCOMPARE(savedSizes.size(), 2);
+        QCOMPARE(savedSizes.at(0).toInt(), 269);
     }
 
     void movingSplitterEmitsViewSettingsChanged()

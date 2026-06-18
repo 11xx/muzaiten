@@ -249,6 +249,7 @@ set(MUZAITEN_HEADERS
     src/ui/SearchResultsModel.h
     src/ui/SearchView.h
     src/ui/SourceDirectoriesDialog.h
+    src/ui/SplitterPersistence.h
     src/ui/StarRating.h
     src/ui/StarRatingDelegate.h
     src/ui/TrackPropertiesDialog.h

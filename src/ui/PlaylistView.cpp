@@ -12,6 +12,7 @@
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
+#include "ui/SplitterPersistence.h"
 
 #include <QAbstractTableModel>
 #include <QActionGroup>
@@ -261,6 +262,18 @@ int nextSelectablePlaylistRow(QListWidget *list, int row, int direction)
     }
     return std::clamp(row, 0, list->count() - 1);
 }
+
+// Splitter layout policy for the playlist list vs. item table. The default
+// left-pane width (269px) is tuned to fit a typical playlist name plus its
+// item-count badge without wasting half the view, which is what Qt hands out
+// by default to a stretch-1 vs stretch-3 splitter. Stability minimums mirror
+// the main-view splitters: only sane distributions are persisted or restored,
+// so a tiny window or a pre-layout setSizes() can never corrupt the saved
+// layout. The right pane just needs to keep the table columns legible.
+constexpr int kPlaylistListDefaultWidth = 269;
+constexpr int kPlaylistListMinimumWidth = 180;
+constexpr int kPlaylistItemTableMinimumWidth = 360;
+constexpr int kPlaylistSplitterMinimumTotal = 600;
 
 } // namespace
 
@@ -583,9 +596,20 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable->viewport()->installEventFilter(this);
     OverlayScrollBar::install(m_itemTable);
 
-    m_splitter->setStretchFactor(0, 1);
-    m_splitter->setStretchFactor(1, 3);
-    m_splitter->setSizes({207, 1618});
+    // Stretch policy mirrors the main-view root splitter: the playlist list
+    // (pane 0) has stretch 0 so it keeps a fixed width and never absorbs a
+    // window resize or a post-restoreGeometry redistribution, while the item
+    // table (pane 1) has stretch 1 and takes all extra space — its Title column
+    // is the responsive absorber, so resizes land there, not on the sidebar.
+    // A proportional stretch (e.g. 1:3) is what made the sidebar creep wider on
+    // every tray hide/show and grow percentage-style past a viewport width.
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 1);
+    m_splitter->setChildrenCollapsible(false);
+    m_playlistList->setMinimumWidth(kPlaylistListMinimumWidth);
+    m_itemTable->setMinimumWidth(kPlaylistItemTableMinimumWidth);
+    m_splitter->setSizes({kPlaylistListDefaultWidth, kPlaylistSplitterMinimumTotal - kPlaylistListDefaultWidth});
+    m_userSplitterSizes = {kPlaylistListDefaultWidth, kPlaylistSplitterMinimumTotal - kPlaylistListDefaultWidth};
     restylePanelBorders();
 
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
@@ -612,6 +636,15 @@ PlaylistView::PlaylistView(QWidget *parent)
         emit viewSettingsChanged();
     });
     connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
+        // Only a real user drag updates the persisted sizes. Programmatic
+        // setSizes() (defaults, resetViewSettings, redistributions on resize)
+        // emits no splitterMoved, so it can never clobber a user-tuned layout.
+        const QList<int> live = m_splitter->sizes();
+        if (SplitterPersistence::splitterSizesAreStable(live,
+                                   {kPlaylistListMinimumWidth, kPlaylistItemTableMinimumWidth},
+                                   kPlaylistSplitterMinimumTotal)) {
+            m_userSplitterSizes = live;
+        }
         emit viewSettingsChanged();
     });
     connect(m_ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
@@ -692,11 +725,9 @@ QString PlaylistView::viewSettingsJson() const
     root.insert(QStringLiteral("rowHeight"), m_itemTable->verticalHeader()->defaultSectionSize());
     root.insert(QStringLiteral("headerHeight"), m_itemTable->horizontalHeader()->height());
     root.insert(QStringLiteral("headerState"), QString::fromLatin1(m_itemTable->horizontalHeader()->saveState().toBase64()));
-    QJsonArray splitterSizes;
-    for (int size : m_splitter->sizes()) {
-        splitterSizes.append(size);
-    }
-    root.insert(QStringLiteral("splitter"), splitterSizes);
+    // Persist the user-tuned sizes, not the live splitter sizes: programmatic
+    // setSizes() must never leak into settings (see splitterMoved handler).
+    root.insert(QStringLiteral("splitter"), SplitterPersistence::splitterSizesToJson(m_userSplitterSizes));
     m_columnLayout->writeSavedWidthsJson(&root);
     m_columnLayout->writePrioritiesJson(&root);
     m_columnLayout->writeMinimumWidthsJson(&root);
@@ -745,13 +776,17 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
     if (!headerState.isEmpty()) {
         m_itemTable->horizontalHeader()->restoreState(headerState);
     }
-    const QJsonArray splitter = root.value(QStringLiteral("splitter")).toArray();
-    QList<int> sizes;
-    for (const QJsonValue &value : splitter) {
-        sizes.push_back(value.toInt());
-    }
-    if (sizes.size() == m_splitter->count()) {
-        m_splitter->setSizes(sizes);
+    // Restore splitter sizes only if they pass the stability check, so a
+    // degenerate distribution (legacy setting, hand-edit, or a snapshot taken
+    // in a tiny window) can never shrink the playlist list to a sliver or
+    // stretch it across the whole view. Stable sizes also become the new
+    // user-tuned baseline; unstable ones leave the constructor defaults in
+    // place.
+    if (SplitterPersistence::restoreSplitterIfStable(m_splitter,
+            root.value(QStringLiteral("splitter")).toArray(),
+            {kPlaylistListMinimumWidth, kPlaylistItemTableMinimumWidth},
+            kPlaylistSplitterMinimumTotal)) {
+        m_userSplitterSizes = m_splitter->sizes();
     }
     m_itemTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     m_columnLayout->applyPrioritiesJson(root);
@@ -777,7 +812,8 @@ void PlaylistView::resetViewSettings()
     m_playlistRowHeight = 18;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
-    m_splitter->setSizes({207, 1618});
+    m_splitter->setSizes({kPlaylistListDefaultWidth, kPlaylistSplitterMinimumTotal - kPlaylistListDefaultWidth});
+    m_userSplitterSizes = {kPlaylistListDefaultWidth, kPlaylistSplitterMinimumTotal - kPlaylistListDefaultWidth};
     m_columnLayout->resetToDefaults();
     m_columnLayout->setUserVisibleColumns(defaultPlaylistVisibleColumns());
     populateItems();
