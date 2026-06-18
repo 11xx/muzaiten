@@ -608,12 +608,12 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_albumArt->setVisible(false);
     controls->addWidget(m_albumArt, 0, Qt::AlignVCenter);
 
-    auto *previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
-    controls->addWidget(previous);
+    m_previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
+    controls->addWidget(m_previous);
     m_playPause = iconButton(this, QStyle::SP_MediaPlay, QStringLiteral("Play"));
     controls->addWidget(m_playPause);
-    auto *next = iconButton(this, QStyle::SP_MediaSkipForward, QStringLiteral("Next"));
-    controls->addWidget(next);
+    m_next = iconButton(this, QStyle::SP_MediaSkipForward, QStringLiteral("Next"));
+    controls->addWidget(m_next);
 
     auto *progressLayout = new QVBoxLayout;
     progressLayout->setContentsMargins(4, 0, 4, 0);
@@ -708,7 +708,7 @@ PlayerBar::PlayerBar(QWidget *parent)
         }
     });
 
-    connect(previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
+    connect(m_previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
     connect(sourceDirectories, &QAction::triggered, this, &PlayerBar::sourceDirectoriesRequested);
     connect(scanEnabledSources, &QAction::triggered, this, &PlayerBar::scanEnabledSourcesRequested);
@@ -764,7 +764,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(clearLastFmBacklog, &QAction::triggered, this, &PlayerBar::lastFmBacklogClearRequested);
     connect(m_scrobbleOffline, &QAction::toggled, this, &PlayerBar::scrobbleOfflineChanged);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
-    connect(next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
+    connect(m_next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
         emit seekRequested(value);
     });
@@ -949,8 +949,8 @@ void PlayerBar::setAlwaysShowTray(bool enabled)
 
 void PlayerBar::setPlaying(bool playing)
 {
-    m_playPause->setIcon(style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
-    m_playPause->setToolTip(playing ? QStringLiteral("Pause") : QStringLiteral("Play"));
+    m_isPlaying = playing;
+    updateTransportIcons();
 }
 
 void PlayerBar::setVolume(int volume0To100)
@@ -1010,6 +1010,7 @@ void PlayerBar::changeEvent(QEvent *event)
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
         restyleFrame();
         restyleMenuBar();
+        updateTransportIcons();
         if (m_menuButton != nullptr) {
             m_menuButton->setIcon(menuHamburgerIcon(palette()));
         }
@@ -1094,6 +1095,23 @@ void PlayerBar::restyleMenuBar()
     m_restylingMenuBar = true;
     m_menuBar->setStyleSheet(style);
     m_restylingMenuBar = false;
+}
+
+void PlayerBar::updateTransportIcons()
+{
+    if (m_previous != nullptr) {
+        m_previous->setIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward));
+    }
+    if (m_playPause != nullptr) {
+        m_playPause->setIcon(style()->standardIcon(m_isPlaying ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+        m_playPause->setToolTip(m_isPlaying ? QStringLiteral("Pause") : QStringLiteral("Play"));
+    }
+    if (m_next != nullptr) {
+        m_next->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));
+    }
+    if (m_volumeButton != nullptr) {
+        m_volumeButton->setIcon(style()->standardIcon(QStyle::SP_MediaVolume));
+    }
 }
 
 void PlayerBar::updateShuffleIcon()

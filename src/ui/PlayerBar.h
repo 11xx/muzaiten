@@ -123,6 +123,7 @@ signals:
 private:
     void restyleFrame();
     void restyleMenuBar();
+    void updateTransportIcons();
     void updateShuffleIcon();
     void updateRepeatIcon();
     bool shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs);
@@ -131,7 +132,9 @@ private:
     class QToolButton *m_volumeButton = nullptr;
     QWidget *m_menuStrip = nullptr;
     class QMenuBar *m_menuBar = nullptr;
+    class QToolButton *m_previous = nullptr;
     class QToolButton *m_playPause = nullptr;
+    class QToolButton *m_next = nullptr;
     class QToolButton *m_shuffle = nullptr;
     class QToolButton *m_repeat = nullptr;
     RepeatMode m_repeatMode = RepeatMode::Off;
@@ -160,6 +163,7 @@ private:
     qint64 m_lastProgressDurationMs = -1;
     bool m_trackStartGuardActive = false;
     bool m_hasTrack = false;
+    bool m_isPlaying = false;
     bool m_usingArtFallback = true;
     bool m_restylingFrame = false;
     bool m_restylingMenuBar = false;

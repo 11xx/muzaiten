@@ -20,6 +20,7 @@ class AlbumGrid;
 class ArtistSidebar;
 class FileExplorerView;
 class QCloseEvent;
+class QEvent;
 class QImage;
 class ListenBrainzScrobbler;
 class LastFmScrobbler;
@@ -67,6 +68,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
     void openLibraryFolder();
@@ -99,6 +101,7 @@ private:
     void saveAllViewSettings();
     void resetViewPreferences();
     void resetPanelOrder();
+    void restylePanelBorders();
     void openPanelOrderDialog();
     void switchMainView(MainView view);
     void toggleFileExplorerView();

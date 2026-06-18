@@ -50,8 +50,10 @@ private:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
+    void restyleChrome();
     QTabBar *m_tabBar = nullptr;
     QListView *m_view = nullptr;
     QStandardItemModel *m_model = nullptr;

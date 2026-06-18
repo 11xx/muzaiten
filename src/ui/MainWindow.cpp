@@ -61,6 +61,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEvent>
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QCheckBox>
@@ -117,6 +118,27 @@ constexpr int kArtistSidebarMinimumWidth = 180;
 constexpr int kCenterPaneMinimumWidth = 500;
 constexpr int kRightSidebarMinimumWidth = 220;
 constexpr int kPanelMinimumHeight = 140;
+
+QString mainArtistSidebarStyleSheet(const QWidget *widget)
+{
+    return panelBorderStyleSheet(QStringLiteral("ArtistSidebar#MainArtistSidebar"), panelTopBorder(), widget);
+}
+
+QString mainAlbumGridStyleSheet(const QWidget *widget)
+{
+    return panelBorderStyleSheet(
+        QStringLiteral("AlbumGrid#MainAlbumGrid"),
+        panelTopBorder(),
+        widget,
+        QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius));
+}
+
+void setStyleSheetIfChanged(QWidget *widget, const QString &style)
+{
+    if (widget != nullptr && widget->styleSheet() != style) {
+        widget->setStyleSheet(style);
+    }
+}
 
 QString albumFilterKey(const QStringList &albumTitles)
 {
@@ -675,7 +697,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rootSplitter->setChildrenCollapsible(false);
     m_artistSidebar = new ArtistSidebar(m_rootSplitter);
     m_artistSidebar->setObjectName(QStringLiteral("MainArtistSidebar"));
-    m_artistSidebar->setStyleSheet(panelBorderStyleSheet(QStringLiteral("ArtistSidebar#MainArtistSidebar"), panelTopBorder(), m_artistSidebar));
     m_artistSidebar->setMinimumWidth(kArtistSidebarMinimumWidth);
 
     m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
@@ -683,11 +704,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_centerSplitter->setMinimumWidth(kCenterPaneMinimumWidth);
     m_albumGrid = new AlbumGrid(m_centerSplitter);
     m_albumGrid->setObjectName(QStringLiteral("MainAlbumGrid"));
-    m_albumGrid->setStyleSheet(panelBorderStyleSheet(
-        QStringLiteral("AlbumGrid#MainAlbumGrid"),
-        panelTopBorder(),
-        m_albumGrid,
-        QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius)));
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
@@ -707,6 +723,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rootSplitter->setStretchFactor(1, 1);
     m_rootSplitter->setStretchFactor(2, 0);
     m_rootSplitter->setSizes({197, 1296, 298});
+    restylePanelBorders();
 
     m_libraryFileExplorer = new FileExplorerView(m_mainStack);
     m_libraryFileExplorer->setMode(FileExplorerMode::Library);
@@ -1536,9 +1553,25 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange
+        || event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::StyleChange) {
+        restylePanelBorders();
+    }
+}
+
 void MainWindow::persistViewState()
 {
     rememberTrackTableViewState();
+}
+
+void MainWindow::restylePanelBorders()
+{
+    setStyleSheetIfChanged(m_artistSidebar, mainArtistSidebarStyleSheet(m_artistSidebar));
+    setStyleSheetIfChanged(m_albumGrid, mainAlbumGridStyleSheet(m_albumGrid));
 }
 
 void MainWindow::startScan(const QString &rootPath)

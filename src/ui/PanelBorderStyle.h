@@ -58,6 +58,7 @@ inline QColor panelSeparatorColor(const QWidget *widget)
     separator.setFrameShape(QFrame::HLine);
     separator.setLineWidth(1);
     separator.setMidLineWidth(0);
+    separator.setPalette(palette);
     separator.resize(64, 4);
     separator.setAttribute(Qt::WA_DontShowOnScreen);
     separator.show();
