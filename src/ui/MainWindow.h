@@ -95,7 +95,7 @@ private:
     void saveRightSidebarViewSettings();
     void saveQueueScreenViewSettings();
     void savePlaylistViewSettings();
-    void saveMainWindowViewSettings();
+    void saveMainWindowViewSettings(bool captureSplitterSizes = false);
     void saveAllViewSettings();
     void resetViewPreferences();
     void resetPanelOrder();

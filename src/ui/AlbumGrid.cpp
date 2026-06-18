@@ -991,11 +991,18 @@ void AlbumGrid::resizeEvent(QResizeEvent *event)
     // both unbatched on every resize frame makes the grid flicker as it stretches.
     // Suppress viewport painting across the pair so the burst collapses into a
     // single repaint once the new geometry is settled.
-    const bool wasEnabled = viewport()->updatesEnabled();
-    viewport()->setUpdatesEnabled(false);
+    const bool suppressUpdates = viewport()->updatesEnabled();
+    if (suppressUpdates) {
+        viewport()->setUpdatesEnabled(false);
+    }
     applySettingsToView();
     applySettingsToItems();
-    viewport()->setUpdatesEnabled(wasEnabled);
+    if (suppressUpdates) {
+        viewport()->setUpdatesEnabled(true);
+    } else if (isVisible()) {
+        viewport()->setUpdatesEnabled(true);
+        viewport()->update();
+    }
 }
 
 void AlbumGrid::applySettingsToView()
