@@ -4,6 +4,7 @@
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QTableView>
 #include <QTimer>
@@ -19,8 +20,11 @@ ResponsiveColumnLayout::ResponsiveColumnLayout(QTableView *view,
     , m_specs(std::move(specs))
 {
     resetToDefaults();
-    if (m_view != nullptr && m_view->viewport() != nullptr) {
-        m_view->viewport()->installEventFilter(this);
+    if (m_view != nullptr) {
+        m_view->installEventFilter(this);
+        if (m_view->viewport() != nullptr) {
+            m_view->viewport()->installEventFilter(this);
+        }
     }
 }
 
@@ -312,7 +316,8 @@ void ResponsiveColumnLayout::relayout()
     for (int specIndex : visible) {
         visibleMinTotal += minForSpec(m_specs.at(specIndex));
     }
-    m_view->setHorizontalScrollBarPolicy(visibleMinTotal > availableWidth ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
+    const bool needsHorizontalScroll = visibleMinTotal > availableWidth;
+    m_view->setHorizontalScrollBarPolicy(needsHorizontalScroll ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
 
     for (int specIndex = 0; specIndex < m_specs.size(); ++specIndex) {
         const ResponsiveColumnSpec &spec = m_specs.at(specIndex);
@@ -321,6 +326,9 @@ void ResponsiveColumnLayout::relayout()
         if (shouldShow) {
             m_view->setColumnWidth(spec.logicalIndex, widthBySpecIndex.value(specIndex, minForSpec(spec)));
         }
+    }
+    if (!needsHorizontalScroll && m_view->horizontalScrollBar() != nullptr) {
+        m_view->horizontalScrollBar()->setValue(0);
     }
     m_applyingLayout = false;
 }
@@ -339,10 +347,13 @@ void ResponsiveColumnLayout::scheduleDeferredRelayout()
 
 bool ResponsiveColumnLayout::eventFilter(QObject *watched, QEvent *event)
 {
-    if (m_view != nullptr && watched == m_view->viewport()
-        && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+    const bool viewportGeometryEvent = m_view != nullptr && watched == m_view->viewport()
+        && (event->type() == QEvent::Resize || event->type() == QEvent::Show);
+    const bool viewGeometryEvent = m_view != nullptr && watched == m_view
+        && (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest);
+    if (viewportGeometryEvent || viewGeometryEvent) {
         relayout();
-        if (event->type() == QEvent::Show) {
+        if (event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest) {
             // On the viewport's Show (first show, or re-show when its QStackedWidget
             // page becomes current again) the final width may not be applied yet, so
             // the relayout above falls back to the baseline-sum width — leaving the

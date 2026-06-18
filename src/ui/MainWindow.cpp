@@ -109,6 +109,12 @@ namespace {
 // occur in a real tag value, so a title that itself contains a newline still
 // round-trips to a single filter entry instead of several bogus ones.
 constexpr char16_t kAlbumFilterSeparator = u'\x1F';
+constexpr int kRootSplitterMinimumTotal = 800;
+constexpr int kCenterSplitterMinimumTotal = 300;
+constexpr int kArtistSidebarMinimumWidth = 180;
+constexpr int kCenterPaneMinimumWidth = 500;
+constexpr int kRightSidebarMinimumWidth = 220;
+constexpr int kPanelMinimumHeight = 140;
 
 QString albumFilterKey(const QStringList &albumTitles)
 {
@@ -581,6 +587,52 @@ QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
     return deduped;
 }
 
+QList<int> splitterSizesFromJson(const QJsonArray &array)
+{
+    QList<int> sizes;
+    for (const QJsonValue &value : array) {
+        sizes.push_back(value.toInt());
+    }
+    return sizes;
+}
+
+QJsonArray splitterSizesToJson(const QList<int> &sizes)
+{
+    QJsonArray array;
+    for (int size : sizes) {
+        array.append(size);
+    }
+    return array;
+}
+
+bool splitterSizesAreStable(const QList<int> &sizes, const QList<int> &minimums, int minimumTotal)
+{
+    if (sizes.size() != minimums.size()) {
+        return false;
+    }
+
+    int total = 0;
+    for (int i = 0; i < sizes.size(); ++i) {
+        const int size = sizes.at(i);
+        if (size < minimums.at(i)) {
+            return false;
+        }
+        total += size;
+    }
+    return total >= minimumTotal;
+}
+
+void restoreSplitterIfStable(QSplitter *splitter, const QJsonArray &array, const QList<int> &minimums, int minimumTotal)
+{
+    if (splitter == nullptr) {
+        return;
+    }
+    const QList<int> sizes = splitterSizesFromJson(array);
+    if (splitterSizesAreStable(sizes, minimums, minimumTotal)) {
+        splitter->setSizes(sizes);
+    }
+}
+
 } // namespace
 
 static PlaylistItem playlistItemFromTrack(const Track &track, const QString &query);
@@ -618,15 +670,22 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_queueStore = new QueueStore(this);
 
     m_rootSplitter = new QSplitter(Qt::Horizontal, m_mainStack);
+    m_rootSplitter->setChildrenCollapsible(false);
     m_artistSidebar = new ArtistSidebar(m_rootSplitter);
+    m_artistSidebar->setMinimumWidth(kArtistSidebarMinimumWidth);
 
     m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
+    m_centerSplitter->setChildrenCollapsible(false);
+    m_centerSplitter->setMinimumWidth(kCenterPaneMinimumWidth);
     m_albumGrid = new AlbumGrid(m_centerSplitter);
+    m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
+    m_trackTable->setMinimumHeight(kPanelMinimumHeight);
     m_centerSplitter->setStretchFactor(0, 55);
     m_centerSplitter->setStretchFactor(1, 45);
 
     m_rightSidebar = new RightSidebar(m_rootSplitter);
+    m_rightSidebar->setMinimumWidth(kRightSidebarMinimumWidth);
     m_rightSidebar->setQueueStore(m_queueStore);
 
     m_rootSplitter->addWidget(m_artistSidebar);
@@ -936,8 +995,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_panelSearch, &PanelSearchController::activePanelChanged, this, [this](MainPanelId) {
         saveMainWindowViewSettings();
     });
-    connect(m_rootSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
-    connect(m_centerSplitter, &QSplitter::splitterMoved, this, &MainWindow::saveMainWindowViewSettings);
+    connect(m_rootSplitter, &QSplitter::splitterMoved, this, [this]() {
+        saveMainWindowViewSettings(/*captureSplitterSizes=*/true);
+    });
+    connect(m_centerSplitter, &QSplitter::splitterMoved, this, [this]() {
+        saveMainWindowViewSettings(/*captureSplitterSizes=*/true);
+    });
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, [this](int index) {
         playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
     });
@@ -2379,17 +2442,14 @@ void MainWindow::loadViewSettings()
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
     }
-    auto restoreSplitter = [](QSplitter *splitter, const QJsonArray &array) {
-        QList<int> sizes;
-        for (const QJsonValue &value : array) {
-            sizes.push_back(value.toInt());
-        }
-        if (sizes.size() == splitter->count()) {
-            splitter->setSizes(sizes);
-        }
-    };
-    restoreSplitter(m_rootSplitter, mainWindow.value(QStringLiteral("rootSplitter")).toArray());
-    restoreSplitter(m_centerSplitter, mainWindow.value(QStringLiteral("centerSplitter")).toArray());
+    restoreSplitterIfStable(m_rootSplitter,
+                            mainWindow.value(QStringLiteral("rootSplitter")).toArray(),
+                            {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
+                            kRootSplitterMinimumTotal);
+    restoreSplitterIfStable(m_centerSplitter,
+                            mainWindow.value(QStringLiteral("centerSplitter")).toArray(),
+                            {kPanelMinimumHeight, kPanelMinimumHeight},
+                            kCenterSplitterMinimumTotal);
     m_mainView = mainViewFromName(mainWindow.value(QStringLiteral("mainView")).toString());
     m_libraryExplorerDirectory = mainWindow.value(QStringLiteral("libraryExplorerDirectory")).toString();
     m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
@@ -2483,38 +2543,27 @@ void MainWindow::savePlaylistViewSettings()
     applySharedTableSettings();
 }
 
-void MainWindow::saveMainWindowViewSettings()
+void MainWindow::saveMainWindowViewSettings(bool captureSplitterSizes)
 {
     if (m_loadingViewSettings) {
         return;
     }
-    auto sizesToJson = [](const QList<int> &sizes) {
-        QJsonArray array;
-        for (int size : sizes) {
-            array.append(size);
-        }
-        return array;
-    };
-    auto sizesAreMeaningful = [](const QList<int> &sizes, int expectedCount) {
-        if (sizes.size() != expectedCount) {
-            return false;
-        }
-        int total = 0;
-        for (int size : sizes) {
-            total += size;
-        }
-        return total > 50;
-    };
 
     QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
     root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
-    const QList<int> rootSizes = m_rootSplitter->sizes();
-    if (sizesAreMeaningful(rootSizes, m_rootSplitter->count())) {
-        root.insert(QStringLiteral("rootSplitter"), sizesToJson(rootSizes));
-    }
-    const QList<int> centerSizes = m_centerSplitter->sizes();
-    if (sizesAreMeaningful(centerSizes, m_centerSplitter->count())) {
-        root.insert(QStringLiteral("centerSplitter"), sizesToJson(centerSizes));
+    if (captureSplitterSizes) {
+        const QList<int> rootSizes = m_rootSplitter->sizes();
+        if (splitterSizesAreStable(rootSizes,
+                                   {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
+                                   kRootSplitterMinimumTotal)) {
+            root.insert(QStringLiteral("rootSplitter"), splitterSizesToJson(rootSizes));
+        }
+        const QList<int> centerSizes = m_centerSplitter->sizes();
+        if (splitterSizesAreStable(centerSizes,
+                                   {kPanelMinimumHeight, kPanelMinimumHeight},
+                                   kCenterSplitterMinimumTotal)) {
+            root.insert(QStringLiteral("centerSplitter"), splitterSizesToJson(centerSizes));
+        }
     }
     root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
     root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);

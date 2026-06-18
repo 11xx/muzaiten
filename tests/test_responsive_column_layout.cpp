@@ -5,6 +5,7 @@
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScrollBar>
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QTest>
@@ -225,6 +226,29 @@ private slots:
         layout.relayout();
         QVERIFY(!view.isColumnHidden(0));
         QCOMPARE(view.horizontalScrollBarPolicy(), Qt::ScrollBarAsNeeded);
+    }
+
+    void restoreFromScrolledSqueezeClearsHiddenHorizontalOffset()
+    {
+        QTableView view;
+        QStandardItemModel model;
+        prepareView(&view, &model);
+        ResponsiveColumnLayout layout(&view, basicSpecs());
+        layout.setUserVisibleColumns(allBasicKeys());
+
+        view.resize(20, 120);
+        layout.relayout();
+        QTest::qWait(0);
+        QCOMPARE(view.horizontalScrollBarPolicy(), Qt::ScrollBarAsNeeded);
+        QVERIFY(view.horizontalScrollBar()->maximum() > 0);
+        view.horizontalScrollBar()->setValue(view.horizontalScrollBar()->maximum());
+        QVERIFY(view.horizontalScrollBar()->value() > 0);
+
+        view.resize(600, 120);
+        layout.relayout();
+
+        QCOMPARE(view.horizontalScrollBarPolicy(), Qt::ScrollBarAlwaysOff);
+        QCOMPARE(view.horizontalScrollBar()->value(), 0);
     }
 
     void baselineUpdateSurvivesSqueezeRestore()
