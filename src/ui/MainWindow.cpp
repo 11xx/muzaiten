@@ -682,7 +682,11 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_centerSplitter->setMinimumWidth(kCenterPaneMinimumWidth);
     m_albumGrid = new AlbumGrid(m_centerSplitter);
     m_albumGrid->setObjectName(QStringLiteral("MainAlbumGrid"));
-    m_albumGrid->setStyleSheet(panelBorderStyleSheet(QStringLiteral("AlbumGrid#MainAlbumGrid"), panelTopBorder(), m_albumGrid));
+    m_albumGrid->setStyleSheet(panelBorderStyleSheet(
+        QStringLiteral("AlbumGrid#MainAlbumGrid"),
+        panelTopBorder(),
+        m_albumGrid,
+        QStringLiteral(" border-top-left-radius: 3px; border-top-right-radius: 3px;")));
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
@@ -692,7 +696,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
 
     m_rightSidebar = new RightSidebar(m_rootSplitter);
     m_rightSidebar->setObjectName(QStringLiteral("MainRightSidebar"));
-    m_rightSidebar->setStyleSheet(panelBorderStyleSheet(QStringLiteral("RightSidebar#MainRightSidebar"), panelTopBorder(), m_rightSidebar));
     m_rightSidebar->setMinimumWidth(kRightSidebarMinimumWidth);
     m_rightSidebar->setQueueStore(m_queueStore);
 

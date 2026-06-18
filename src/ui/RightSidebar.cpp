@@ -23,7 +23,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     : QWidget(parent)
 {
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     m_splitter = new QSplitter(Qt::Vertical, this);
@@ -31,6 +31,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     layout->addWidget(m_splitter, 1);
 
     m_queueTable = new QueueTable(QueueTablePreset::Sidebar, m_splitter);
+    m_queueTable->setTableTopBorderVisible(true);
     m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QueueTable::trackActivated, this, &RightSidebar::queueTrackActivated);
