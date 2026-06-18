@@ -145,6 +145,39 @@ private slots:
         QCOMPARE(visibleSum(), view.viewport()->width());
     }
 
+    void deferredRelayoutRefillsViewportAfterAbruptResize()
+    {
+        QTableView view;
+        QStandardItemModel model;
+        prepareView(&view, &model);
+        ResponsiveColumnLayout layout(&view, basicSpecs());
+        layout.setUserVisibleColumns(allBasicKeys());
+        QTest::qWait(0);
+        layout.relayout();
+
+        const auto visibleSum = [&]() {
+            int sum = 0;
+            for (int c = 0; c < model.columnCount(); ++c) {
+                if (!view.isColumnHidden(c)) {
+                    sum += view.columnWidth(c);
+                }
+            }
+            return sum;
+        };
+
+        view.resize(260, 120);
+        QTest::qWait(0);
+        layout.relayout();
+        QVERIFY(view.columnWidth(0) < 300);
+
+        view.resize(900, 120);
+        view.setColumnWidth(0, 180);
+        QVERIFY(visibleSum() < view.viewport()->width());
+
+        QTest::qWait(0);
+        QCOMPARE(visibleSum(), view.viewport()->width());
+    }
+
     void priorityPersists()
     {
         QTableView view;

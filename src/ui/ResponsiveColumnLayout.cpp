@@ -353,13 +353,11 @@ bool ResponsiveColumnLayout::eventFilter(QObject *watched, QEvent *event)
         && (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest);
     if (viewportGeometryEvent || viewGeometryEvent) {
         relayout();
-        if (event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest) {
-            // On the viewport's Show (first show, or re-show when its QStackedWidget
-            // page becomes current again) the final width may not be applied yet, so
-            // the relayout above falls back to the baseline-sum width — leaving the
-            // columns bunched at the left with empty space on the right and only the
-            // absorber's edge near the viewport border. Re-run once the event loop
-            // has flushed the real geometry so the absorber fills the viewport.
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Show || event->type() == QEvent::LayoutRequest) {
+            // On abrupt window-manager resizes and stacked-page shows, the table's
+            // outer widget can report the new size before its viewport/header
+            // geometry has fully settled. Re-run once the event loop has flushed
+            // that geometry so the absorber fills the final viewport width.
             scheduleDeferredRelayout();
         }
     }
