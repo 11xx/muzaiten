@@ -81,7 +81,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     : QWidget(parent)
 {
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setContentsMargins(6, 0, 6, 6);
     layout->setSpacing(5);
 
     m_tabBar = new QTabBar(this);
@@ -126,7 +126,8 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view->setModel(m_model);
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
     m_view->setFrameShape(QFrame::NoFrame);
-    m_view->setStyleSheet(panelBorderStyleSheet(QStringLiteral("QListView#ArtistList"), panelAllBorders(), m_view));
+    m_view->setStyleSheet(panelBorderStyleSheet(
+        QStringLiteral("QListView#ArtistList"), panelAllBorders(), m_view, QStringLiteral(" border-radius: 3px;")));
     m_view->setUniformItemSizes(true);
     m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);

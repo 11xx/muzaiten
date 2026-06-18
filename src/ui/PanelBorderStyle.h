@@ -39,7 +39,7 @@ inline QColor panelSeparatorColor(const QWidget *widget)
 {
     const QPalette palette = widget != nullptr ? widget->palette() : QApplication::palette();
     const QColor background = palette.color(QPalette::Window);
-    QImage image(9, 9, QImage::Format_ARGB32_Premultiplied);
+    QImage image(32, 32, QImage::Format_ARGB32_Premultiplied);
     image.fill(background);
 
     QStyleOptionFrame option;
