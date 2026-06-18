@@ -41,6 +41,7 @@ public:
     void setNavigationScrollPadding(int rows);
     void setKeyBindingProfileName(const QString &name);
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }
+    void setTableTopBorderVisible(bool visible);
 
 signals:
     void trackActivated(int index);
@@ -68,6 +69,7 @@ private:
     void setHoveredRow(int row);
     void updateHoverFromCursor();
     void applyPresetDefaults();
+    void applyTableFrameStyle();
     void setHeaderHeight(int height);
     bool handleKeyPress(QKeyEvent *event);
     // Incremental find (FullScreen preset only): jumps the cursor to matching
@@ -98,6 +100,7 @@ private:
     int m_pendingRestoreRow = -1;
     bool m_showPlayNextBadge = true;
     bool m_showPlayNextTitleAccent = false;
+    bool m_tableTopBorderVisible = false;
     bool m_restoreScrollPending = false;
     bool m_restoreScrollScheduled = false;
 

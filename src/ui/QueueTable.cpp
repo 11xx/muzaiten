@@ -4,6 +4,7 @@
 #include "ui/NeighborColumnResizer.h"
 #include "ui/NavigableTableView.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/PanelBorderStyle.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueStore.h"
 #include "ui/ResponsiveColumnLayout.h"
@@ -855,6 +856,16 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     OverlayScrollBar::install(m_view);
 }
 
+void QueueTable::setTableTopBorderVisible(bool visible)
+{
+    if (m_tableTopBorderVisible == visible) {
+        return;
+    }
+
+    m_tableTopBorderVisible = visible;
+    applyTableFrameStyle();
+}
+
 void QueueTable::setQueueStore(QueueStore *store)
 {
     if (m_store == store) {
@@ -1084,11 +1095,33 @@ void QueueTable::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
     if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) {
+        applyHeaderViewStyle(m_view->horizontalHeader(), kTableHeaderStyle);
+        applyTableFrameStyle();
         if (auto *view = qobject_cast<NavigableTableView *>(m_view)) {
             view->refreshTheme();
         }
         m_view->viewport()->update();
         m_view->horizontalHeader()->viewport()->update();
+    }
+}
+
+void QueueTable::applyTableFrameStyle()
+{
+    if (m_view == nullptr) {
+        return;
+    }
+
+    if (!m_tableTopBorderVisible) {
+        if (!m_view->styleSheet().isEmpty()) {
+            m_view->setStyleSheet({});
+        }
+        return;
+    }
+
+    m_view->setObjectName(QStringLiteral("QueueTableViewWithTopBorder"));
+    const QString style = panelBorderStyleSheet(QStringLiteral("QTableView#QueueTableViewWithTopBorder"), panelTopBorder(), m_view);
+    if (m_view->styleSheet() != style) {
+        m_view->setStyleSheet(style);
     }
 }
 

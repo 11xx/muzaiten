@@ -106,5 +106,8 @@ inline void applyHeaderViewStyle(QHeaderView *header, const HeaderViewStyle &sty
         return;
     }
 
-    header->setStyleSheet(headerViewStyleSheet(style, header));
+    const QString styleSheet = headerViewStyleSheet(style, header);
+    if (header->styleSheet() != styleSheet) {
+        header->setStyleSheet(styleSheet);
+    }
 }

@@ -11,6 +11,8 @@
 #include <QStyleOptionFrame>
 #include <QWidget>
 
+#include <algorithm>
+
 struct PanelBorderEdges {
     bool top = false;
     bool right = false;
@@ -43,8 +45,8 @@ inline QColor panelSeparatorColor(const QWidget *widget)
     QStyleOptionFrame option;
     option.rect = image.rect();
     option.palette = palette;
-    option.state = QStyle::State_Enabled;
-    option.lineWidth = QApplication::style()->pixelMetric(QStyle::PM_DefaultFrameWidth, &option, widget);
+    option.state = QStyle::State_Enabled | QStyle::State_Sunken;
+    option.lineWidth = std::max(1, QApplication::style()->pixelMetric(QStyle::PM_DefaultFrameWidth, &option, widget));
     option.midLineWidth = 0;
     option.frameShape = QFrame::StyledPanel;
 
