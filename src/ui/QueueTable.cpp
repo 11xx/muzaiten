@@ -3,6 +3,7 @@
 #include "ui/NeighborColumnResizer.h"
 #include "ui/NavigableTableView.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/QuietHeaderView.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueStore.h"
 #include "ui/ResponsiveColumnLayout.h"
@@ -18,7 +19,6 @@
 #include <QActionGroup>
 #include <QDataStream>
 #include <QFileInfo>
-#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -162,22 +162,6 @@ QSet<QString> defaultVisibleKeysForPreset(QueueTablePreset preset)
         keys.insert(columnKey(column));
     }
     return keys;
-}
-
-void applyQuietHeaderLabelStyle(QHeaderView *header)
-{
-    if (header == nullptr) {
-        return;
-    }
-
-    QFont font = header->font();
-    font.setWeight(QFont::Normal);
-    header->setFont(font);
-    header->setStyleSheet(QStringLiteral(
-        "QHeaderView::section {"
-        "  font-weight: normal;"
-        "  color: palette(disabled, window-text);"
-        "}"));
 }
 
 QString priorityLabel(ResponsiveColumnPriority priority)
@@ -759,6 +743,7 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_model = queueModel;
     m_view = queueView;
     queueView->setPreset(preset);
+    queueView->setHorizontalHeader(new QuietHeaderView(Qt::Horizontal, queueView));
     m_view->setModel(m_model);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_view->setDragEnabled(true);
@@ -789,7 +774,6 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_view->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->horizontalHeader()->setStretchLastSection(false);
     m_view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    applyQuietHeaderLabelStyle(m_view->horizontalHeader());
     m_view->setAlternatingRowColors(true);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->installEventFilter(this);
