@@ -5,6 +5,7 @@
 #include "ui/DenseTableDelegate.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/QuietHeaderView.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/StarRating.h"
@@ -13,7 +14,6 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QAbstractTableModel>
-#include <QFont>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -384,22 +384,6 @@ QVector<ResponsiveColumnOption> responsiveColumnOptions()
     return options;
 }
 
-void applyQuietHeaderLabelStyle(QHeaderView *header)
-{
-    if (header == nullptr) {
-        return;
-    }
-
-    QFont font = header->font();
-    font.setWeight(QFont::Normal);
-    header->setFont(font);
-    header->setStyleSheet(QStringLiteral(
-        "QHeaderView::section {"
-        "  font-weight: normal;"
-        "  color: palette(disabled, window-text);"
-        "}"));
-}
-
 void applyDefaultTrackColumnOrder(QHeaderView *header)
 {
     if (header == nullptr) {
@@ -418,6 +402,7 @@ void applyDefaultTrackColumnOrder(QHeaderView *header)
 TrackTable::TrackTable(QWidget *parent)
     : NavigableTableView(parent)
 {
+    setHorizontalHeader(new QuietHeaderView(Qt::Horizontal, this));
     setModel(new TrackTableModel(this));
     auto *denseDelegate = new DenseTableDelegate(this);
     setItemDelegate(denseDelegate);
@@ -438,7 +423,6 @@ TrackTable::TrackTable(QWidget *parent)
     horizontalHeader()->setFixedHeight(20);
     horizontalHeader()->setMinimumSectionSize(8);
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
-    applyQuietHeaderLabelStyle(horizontalHeader());
     applyDefaultTrackColumnOrder(horizontalHeader());
     verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);
