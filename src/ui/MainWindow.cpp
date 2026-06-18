@@ -124,13 +124,20 @@ QString mainArtistSidebarStyleSheet(const QWidget *widget)
     return panelBorderStyleSheet(QStringLiteral("ArtistSidebar#MainArtistSidebar"), panelTopBorder(), widget);
 }
 
+QString mainCenterFrameStyleSheet(const QWidget *widget)
+{
+    return panelBorderStyleSheet(QStringLiteral("QSplitter#MainCenterFrame"),
+                                 panelAllBorders(),
+                                 widget,
+                                 QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius));
+}
+
 QString mainAlbumGridStyleSheet(const QWidget *widget)
 {
     return panelBorderStyleSheet(
         QStringLiteral("AlbumGrid#MainAlbumGrid"),
-        panelHorizontalBorders(),
-        widget,
-        QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius));
+        panelBottomBorder(),
+        widget);
 }
 
 void setStyleSheetIfChanged(QWidget *widget, const QString &style)
@@ -700,13 +707,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_artistSidebar->setMinimumWidth(kArtistSidebarMinimumWidth);
 
     m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
+    m_centerSplitter->setObjectName(QStringLiteral("MainCenterFrame"));
     m_centerSplitter->setChildrenCollapsible(false);
     m_centerSplitter->setMinimumWidth(kCenterPaneMinimumWidth);
     m_albumGrid = new AlbumGrid(m_centerSplitter);
     m_albumGrid->setObjectName(QStringLiteral("MainAlbumGrid"));
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
-    m_trackTable->setPanelBorders(panelBorders(1, 2, 2, 2));
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
     m_centerSplitter->setStretchFactor(0, 55);
     m_centerSplitter->setStretchFactor(1, 45);
@@ -1575,6 +1582,7 @@ void MainWindow::persistViewState()
 void MainWindow::restylePanelBorders()
 {
     setStyleSheetIfChanged(m_artistSidebar, mainArtistSidebarStyleSheet(m_artistSidebar));
+    setStyleSheetIfChanged(m_centerSplitter, mainCenterFrameStyleSheet(m_centerSplitter));
     setStyleSheetIfChanged(m_albumGrid, mainAlbumGridStyleSheet(m_albumGrid));
 }
 

@@ -44,6 +44,16 @@ inline constexpr PanelBorderEdges panelBottomBorder(int width = 1)
     return PanelBorderEdges{0, 0, width, 0};
 }
 
+inline constexpr PanelBorderEdges panelRightBorder(int width = 1)
+{
+    return PanelBorderEdges{0, width, 0, 0};
+}
+
+inline constexpr PanelBorderEdges panelLeftBorder(int width = 1)
+{
+    return PanelBorderEdges{0, 0, 0, width};
+}
+
 inline constexpr PanelBorderEdges panelHorizontalBorders(int width = 1)
 {
     return PanelBorderEdges{width, 0, width, 0};
@@ -128,4 +138,25 @@ inline QString panelBorderStyleSheet(const QString &selector,
              QString::number(std::max(0, edges.right)),
              QString::number(std::max(0, edges.bottom)),
              QString::number(std::max(0, edges.left)));
+}
+
+inline bool applyPanelBorderStyleSheet(QWidget *widget,
+                                       const QString &selector,
+                                       PanelBorderEdges edges,
+                                       const QString &extraDeclarations = {},
+                                       bool force = false)
+{
+    if (widget == nullptr) {
+        return false;
+    }
+
+    const QString style = panelBorderStyleSheet(selector, edges, widget, extraDeclarations);
+    if (force && widget->styleSheet() == style) {
+        widget->setStyleSheet(QString());
+    }
+    if (widget->styleSheet() == style) {
+        return false;
+    }
+    widget->setStyleSheet(style);
+    return true;
 }

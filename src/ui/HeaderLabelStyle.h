@@ -89,9 +89,12 @@ inline QString headerViewStyleSheet(const HeaderViewStyle &style, const QWidget 
         "QHeaderView::section {"
         "  background: palette(button);"
         "  border-style: solid;"
-        "  border-width: 0 1px 0 1px;"
+        "  border-width: 0 1px 0 0;"
         "  border-color: %1;"
         "  padding: 0 4px;"
+        "}"
+        "QHeaderView::section:last {"
+        "  border-right-width: 0;"
         "}").arg(panelSeparatorColorCss(header));
 }
 

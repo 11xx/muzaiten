@@ -5,6 +5,7 @@
 #include <QAbstractItemModel>
 #include <QApplication>
 #include <QEvent>
+#include <QFrame>
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QScrollBar>
@@ -23,6 +24,7 @@ NavigableTableView::NavigableTableView(QWidget *parent)
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
+    setFrameShape(QFrame::NoFrame);
 }
 
 NavigableTableView::~NavigableTableView()
@@ -255,13 +257,7 @@ void NavigableTableView::applyPanelBorderStyle(bool force)
         return;
     }
 
-    const QString style = panelBorderStyleSheet(QStringLiteral("QTableView"), m_panelBorders, this);
-    if (force && styleSheet() == style) {
-        setStyleSheet(QString());
-    }
-    if (styleSheet() != style) {
-        setStyleSheet(style);
-    }
+    applyPanelBorderStyleSheet(this, QStringLiteral("QTableView"), m_panelBorders, {}, force);
     m_panelBorderStyleApplied = true;
     m_restylingPanelBorders = false;
 }

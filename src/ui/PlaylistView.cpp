@@ -22,6 +22,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QFont>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -540,10 +541,12 @@ PlaylistView::PlaylistView(QWidget *parent)
     layout->addWidget(m_header);
 
     m_splitter = new QSplitter(Qt::Horizontal, this);
+    m_splitter->setObjectName(QStringLiteral("PlaylistFrame"));
     layout->addWidget(m_splitter, 1);
 
     m_playlistList = new QListWidget(m_splitter);
     m_playlistList->setObjectName(QStringLiteral("PlaylistList"));
+    m_playlistList->setFrameShape(QFrame::NoFrame);
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setItemDelegate(new PlaylistListDelegate(this));
@@ -2129,15 +2132,20 @@ void PlaylistView::changeEvent(QEvent *event)
 
 void PlaylistView::restylePanelBorders()
 {
+    if (m_splitter != nullptr) {
+        applyPanelBorderStyleSheet(m_splitter,
+                                   QStringLiteral("QSplitter#PlaylistFrame"),
+                                   panelAllBorders());
+    }
     if (m_playlistList != nullptr) {
         const QString style = panelBorderStyleSheet(QStringLiteral("QListWidget#PlaylistList"),
-                                                    panelBorders(2, 1, 2, 2),
+                                                    panelRightBorder(),
                                                     m_playlistList);
         if (m_playlistList->styleSheet() != style) {
             m_playlistList->setStyleSheet(style);
         }
     }
     if (m_itemTable != nullptr) {
-        m_itemTable->setPanelBorders(panelBorders(2, 2, 2, 1));
+        m_itemTable->setPanelBorders(panelNoBorders());
     }
 }

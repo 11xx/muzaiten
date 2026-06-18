@@ -31,7 +31,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     layout->addWidget(m_splitter, 1);
 
     m_queueTable = new QueueTable(QueueTablePreset::Sidebar, m_splitter);
-    m_queueTable->setTableBorders(panelBorders(1, 2, 2, 2));
+    m_queueTable->setTableBorders(panelAllBorders());
     m_splitter->addWidget(m_queueTable);
 
     connect(m_queueTable, &QueueTable::trackActivated, this, &RightSidebar::queueTrackActivated);
