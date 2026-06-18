@@ -12,6 +12,8 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 struct PanelBorderEdges {
     bool top = false;
@@ -35,37 +37,57 @@ inline constexpr PanelBorderEdges panelAllBorders()
     return PanelBorderEdges{true, true, true, true};
 }
 
+// Sample the native separator color the same way a real QFrame::HLine renders
+// it. Breeze (and most styles) paint a 2-pixel bevel for HLine/VLine separators
+// — a light line and a dark line — whose colors are NOT exposed by any palette
+// role and are NOT reproduced by QStyle::PE_Frame (which renders a generic
+// panel frame, not a separator line). Sampling PE_Frame therefore returns the
+// wrong color (#5D5D5D instead of #5E5E5D under Breeze+KvGnomeDark) — exactly
+// the one-step-off mismatch that plagued the earlier implementation.
+//
+// To get the true separator color we realize a QFrame::HLine offscreen
+// (WA_DontShowOnScreen keeps it invisible, even on Wayland), grab its pixels,
+// and return the bevel color with the greatest contrast against the window
+// background — i.e. the line the eye actually reads as "the separator".
 inline QColor panelSeparatorColor(const QWidget *widget)
 {
     const QPalette palette = widget != nullptr ? widget->palette() : QApplication::palette();
     const QColor background = palette.color(QPalette::Window);
-    QImage image(32, 32, QImage::Format_ARGB32_Premultiplied);
-    image.fill(background);
 
-    QStyleOptionFrame option;
-    option.rect = image.rect();
-    option.palette = palette;
-    option.state = QStyle::State_Enabled | QStyle::State_Sunken;
-    option.lineWidth = std::max(1, QApplication::style()->pixelMetric(QStyle::PM_DefaultFrameWidth, &option, widget));
-    option.midLineWidth = 0;
-    option.frameShape = QFrame::StyledPanel;
+    QFrame separator;
+    separator.setFrameShape(QFrame::HLine);
+    separator.setLineWidth(1);
+    separator.setMidLineWidth(0);
+    separator.resize(64, 4);
+    separator.setAttribute(Qt::WA_DontShowOnScreen);
+    separator.show();
+    QApplication::processEvents();
+    const QImage image = separator.grab().toImage();
+    separator.hide();
 
-    QPainter painter(&image);
-    QApplication::style()->drawPrimitive(QStyle::PE_Frame, &option, &painter, widget);
-    painter.end();
-
-    const QPoint samples[] = {
-        QPoint(image.width() / 2, 0),
-        QPoint(0, image.height() / 2),
-        QPoint(image.width() - 1, image.height() / 2),
-        QPoint(image.width() / 2, image.height() - 1),
+    const auto distance = [&background](QRgb c) {
+        const QColor cc = QColor::fromRgba(c);
+        const int dr = int(cc.red()) - background.red();
+        const int dg = int(cc.green()) - background.green();
+        const int db = int(cc.blue()) - background.blue();
+        return dr * dr + dg * dg + db * db;
     };
-    for (const QPoint &sample : samples) {
-        const QColor color = QColor::fromRgba(image.pixel(sample));
-        if (color.isValid() && color != background) {
-            return color;
+
+    const QRgb bg = background.rgba();
+    QColor best;
+    int bestDist = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb c = image.pixel(x, y);
+            if (c == bg) continue;
+            const int d = distance(c);
+            if (d > bestDist) {
+                bestDist = d;
+                best = QColor::fromRgba(c);
+            }
         }
     }
+    if (best.isValid()) return best;
 
     return palette.color(QPalette::Light);
 }
