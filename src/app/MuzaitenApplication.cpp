@@ -2,6 +2,7 @@
 
 #include "Version.h"
 #include "app/AppCore.h"
+#include "app/DemoScreens.h"
 #include "core/Track.h"
 #include "ipc/IpcSocket.h"
 #include "scanner/TagReader.h"
@@ -16,6 +17,7 @@
 #include <QLocalSocket>
 #include <QLoggingCategory>
 #include <QStandardPaths>
+#include <QTimer>
 
 #include <taglib/tdebuglistener.h>
 
@@ -89,6 +91,31 @@ bool MuzaitenApplication::raiseRunningInstance()
 
 int MuzaitenApplication::run()
 {
+    const QString demoScreensDir = property("muzaiten.demoScreensDir").toString().trimmed();
+    if (!demoScreensDir.isEmpty()) {
+        const bool isolatedState = !property("muzaiten.stateRoot").toString().trimmed().isEmpty()
+            || property("muzaiten.devState").toBool()
+            || qEnvironmentVariableIsSet("MUZAITEN_STATE_ROOT")
+            || qEnvironmentVariableIsSet("MUZAITEN_DEV_STATE");
+        if (!isolatedState) {
+            qCritical("refusing --demo-screens without --state-root, --dev-state, MUZAITEN_STATE_ROOT, or MUZAITEN_DEV_STATE");
+            return 2;
+        }
+
+        AppCore core;
+        core.showWindow();
+        QTimer::singleShot(0, this, [this, &core, demoScreensDir]() {
+            QString error;
+            const QString query = property("muzaiten.demoSearch").toString();
+            const bool ok = DemoScreens::capture(core, demoScreensDir, query, &error);
+            if (!ok) {
+                qCritical().noquote() << error;
+            }
+            exit(ok ? 0 : 1);
+        });
+        return exec();
+    }
+
     if (raiseRunningInstance()) {
         qInfo("muzaiten is already running against this state root; raised its window instead.");
         return 0;
@@ -117,6 +144,10 @@ void MuzaitenApplication::configureCommandLine()
     const QCommandLineOption stateDirOption(QStringLiteral("state-dir"), QStringLiteral("Override the state directory (UI prefs, session, pending scrobbles)."), QStringLiteral("path"));
     const QCommandLineOption cacheDirOption(QStringLiteral("cache-dir"), QStringLiteral("Override the cache directory (artwork)."), QStringLiteral("path"));
     const QCommandLineOption configDirOption(QStringLiteral("config-dir"), QStringLiteral("Override the config directory (holds muzaiten.conf)."), QStringLiteral("path"));
+    QCommandLineOption demoScreensOption(QStringLiteral("demo-screens"), QStringLiteral("Hidden: capture publishing screenshots into <dir> and exit."), QStringLiteral("dir"));
+    demoScreensOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoSearchOption(QStringLiteral("demo-search"), QStringLiteral("Hidden: query to type before the search screenshot."), QStringLiteral("query"));
+    demoSearchOption.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(verboseOption);
     parser.addOption(stateRootOption);
     parser.addOption(devStateOption);
@@ -124,6 +155,8 @@ void MuzaitenApplication::configureCommandLine()
     parser.addOption(stateDirOption);
     parser.addOption(cacheDirOption);
     parser.addOption(configDirOption);
+    parser.addOption(demoScreensOption);
+    parser.addOption(demoSearchOption);
     parser.process(*this);
 
     const bool verbose = parser.isSet(verboseOption) || qEnvironmentVariableIsSet("MUZAITEN_VERBOSE");
@@ -147,6 +180,15 @@ void MuzaitenApplication::configureCommandLine()
     setDirProperty(stateDirOption, "muzaiten.stateDir");
     setDirProperty(cacheDirOption, "muzaiten.cacheDir");
     setDirProperty(configDirOption, "muzaiten.configDir");
+
+    const QString demoScreensDir = parser.value(demoScreensOption).trimmed();
+    if (!demoScreensDir.isEmpty()) {
+        setProperty("muzaiten.demoScreensDir", QDir(demoScreensDir).absolutePath());
+    }
+    const QString demoSearch = parser.value(demoSearchOption).trimmed();
+    if (!demoSearch.isEmpty()) {
+        setProperty("muzaiten.demoSearch", demoSearch);
+    }
 }
 
 void MuzaitenApplication::configureLogging(bool verbose)

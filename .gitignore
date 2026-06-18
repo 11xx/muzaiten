@@ -14,3 +14,4 @@ dev-notes.md
 handoff-*.md
 .env
 build-new1/
+agent-state/

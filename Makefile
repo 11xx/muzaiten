@@ -2,7 +2,7 @@
 
 -include .env
 
-.PHONY: help configure build rebuild test smoke run dev install uninstall clean distclean
+.PHONY: help configure build rebuild test smoke run dev demo-screens install uninstall clean distclean
 
 BUILD_DIR                  ?= build
 CMAKE                      ?= cmake
@@ -23,6 +23,9 @@ QT_QPA_PLATFORM            ?= offscreen
 MUZAITEN_LASTFM_API_KEY    ?=
 MUZAITEN_LASTFM_SHARED_SECRET ?=
 APP := $(BUILD_DIR)/muzaiten
+DEMO_STATE_ROOT            ?= $(CURDIR)/agent-state
+DEMO_SCREEN_DIR            ?= $(CURDIR)/demo-screens
+DEMO_SEARCH                ?=
 
 help:
 	@printf '%s\n' \
@@ -33,6 +36,7 @@ help:
 		'  make smoke      Run the existing build offscreen as a startup smoke test' \
 		'  make run        Launch the existing build with --verbose (XDG dirs)' \
 		'  make dev        Build and launch with isolated ./dev-state (MUZAITEN_DEV_STATE)' \
+		'  make demo-screens Capture publishing screenshots from copied data in agent-state/' \
 		'  make install    Install the existing build (user-space ~/.local by default)' \
 		'  make uninstall  Remove a prior install (reads $(BUILD_DIR)/install_manifest.txt)' \
 		'  make clean      Remove build outputs from $(BUILD_DIR)' \
@@ -43,6 +47,9 @@ help:
 		'  CMAKE_GENERATOR=Ninja' \
 		'  CMAKE_BUILD_TYPE=Release' \
 		'  PREFIX=/usr            (install prefix; default ~/.local, no sudo)' \
+		'  DEMO_STATE_ROOT=agent-state' \
+		'  DEMO_SCREEN_DIR=demo-screens' \
+		'  DEMO_SEARCH="artist:example"' \
 		'  MUZAITEN_LASTFM_API_KEY=...' \
 		'  MUZAITEN_LASTFM_SHARED_SECRET=...'
 
@@ -83,6 +90,21 @@ run:
 # so data/state/cache are isolated in the repo and shared across every build dir.
 dev: build
 	MUZAITEN_DEV_STATE=1 ./$(APP) --verbose
+
+demo-screens: build
+	@if [ ! -f "$(DEMO_STATE_ROOT)/data/library.sqlite" ]; then \
+		printf '%s\n' \
+			"Missing copied demo library: $(DEMO_STATE_ROOT)/data/library.sqlite" \
+			"Create an isolated demo state first, for example:" \
+			"  mkdir -p '$(DEMO_STATE_ROOT)/data' '$(DEMO_STATE_ROOT)/state' '$(DEMO_STATE_ROOT)/cache'" \
+			"  cp ~/.local/share/muzaiten/library.sqlite '$(DEMO_STATE_ROOT)/data/'" \
+			"  cp ~/.local/share/muzaiten/playlists.sqlite '$(DEMO_STATE_ROOT)/data/' 2>/dev/null || true" \
+			"  cp ~/.local/state/muzaiten/state.sqlite '$(DEMO_STATE_ROOT)/state/' 2>/dev/null || cp ~/.local/share/muzaiten/state.sqlite '$(DEMO_STATE_ROOT)/state/' 2>/dev/null || true" \
+			"  cp ~/.cache/muzaiten/artwork.sqlite '$(DEMO_STATE_ROOT)/cache/' 2>/dev/null || cp ~/.local/share/muzaiten/artwork.sqlite '$(DEMO_STATE_ROOT)/cache/' 2>/dev/null || true"; \
+		exit 1; \
+	fi
+	env QT_QPA_PLATFORM=$(QT_QPA_PLATFORM) MUZAITEN_STATE_ROOT="$(DEMO_STATE_ROOT)" \
+		./$(APP) --demo-screens "$(DEMO_SCREEN_DIR)" $(if $(DEMO_SEARCH),--demo-search "$(DEMO_SEARCH)")
 
 # Installs the existing build. Run `make build` (optionally with
 # CMAKE_BUILD_TYPE=Release) first. Defaults to the user-space ~/.local prefix
