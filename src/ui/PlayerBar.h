@@ -161,4 +161,6 @@ private:
     bool m_trackStartGuardActive = false;
     bool m_hasTrack = false;
     bool m_usingArtFallback = true;
+    bool m_restylingFrame = false;
+    bool m_restylingMenuBar = false;
 };
