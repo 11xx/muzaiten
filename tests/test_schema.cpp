@@ -33,6 +33,7 @@ private slots:
     void mpdTracksRoundTrip();
     void searchCacheRoundTrips();
     void searchCacheSignatureDetectsChange();
+    void databaseCacheMemoryCanBeReleasedAndRestored();
 };
 
 namespace {
@@ -70,6 +71,31 @@ void SchemaTest::migratesFreshDatabase()
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toInt(), 9);
+}
+
+void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    const QString connectionName = QStringLiteral("schema-cache-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    QSqlQuery query(QSqlDatabase::database(connectionName));
+    QVERIFY(query.exec(QStringLiteral("PRAGMA cache_size")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), -65536);
+
+    database.releaseCacheMemory();
+    QVERIFY(query.exec(QStringLiteral("PRAGMA cache_size")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), -2000);
+
+    database.restoreCacheMemory();
+    QVERIFY(query.exec(QStringLiteral("PRAGMA cache_size")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), -65536);
 }
 
 void SchemaTest::upsertsTrackAndQueriesArtist()

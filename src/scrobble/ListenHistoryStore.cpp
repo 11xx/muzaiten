@@ -176,6 +176,16 @@ bool ListenHistoryStore::isOpen() const
     return m_db.isOpen();
 }
 
+void ListenHistoryStore::releaseCacheMemory()
+{
+    if (!m_db.isOpen()) {
+        return;
+    }
+
+    QSqlQuery pragma(m_db);
+    pragma.exec(QStringLiteral("PRAGMA shrink_memory"));
+}
+
 qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSecs,
                                         bool oweLastFm, bool oweListenBrainz)
 {

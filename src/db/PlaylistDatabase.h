@@ -21,6 +21,7 @@ public:
 
     bool open(const QString &path);
     QString lastError() const { return m_lastError; }
+    void releaseCacheMemory();
 
     // Playlists. createPlaylist returns the new row id (0 on failure).
     QVector<Playlist> playlists() const;

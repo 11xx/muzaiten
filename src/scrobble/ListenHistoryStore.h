@@ -44,6 +44,7 @@ public:
     ListenHistoryStore &operator=(const ListenHistoryStore &) = delete;
 
     bool isOpen() const;
+    void releaseCacheMemory();
 
     // Records a completed listen. Duplicate (timestamp, artist, title) rows are
     // ignored so replays of the same event (e.g. session restore) collapse.

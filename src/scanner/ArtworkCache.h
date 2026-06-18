@@ -40,6 +40,7 @@ signals:
 private slots:
     void initialize();
     void shutdown();
+    void releaseCacheMemory();
     void handleRequest(const QString &token, const QString &directory, const QString &filePath, quint64 generation);
 
 private:

@@ -66,6 +66,8 @@ public:
     bool open(const QString &path);
     bool migrate();
     QString lastError() const;
+    void releaseCacheMemory();
+    void restoreCacheMemory();
 
     bool beginTransaction();
     bool commitTransaction();
