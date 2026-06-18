@@ -809,6 +809,7 @@ void TrackTable::changeEvent(QEvent *event)
     if (event->type() == QEvent::PaletteChange
         || event->type() == QEvent::ApplicationPaletteChange
         || event->type() == QEvent::StyleChange) {
+        applyHeaderViewStyle(horizontalHeader(), kTableHeaderStyle);
         viewport()->update();
         horizontalHeader()->viewport()->update();
     }

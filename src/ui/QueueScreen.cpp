@@ -1,6 +1,5 @@
 #include "ui/QueueScreen.h"
 
-#include "ui/PanelBorderStyle.h"
 #include "ui/QueueTable.h"
 
 #include <QVBoxLayout>
@@ -13,8 +12,7 @@ QueueScreen::QueueScreen(QWidget *parent)
     layout->setSpacing(0);
 
     m_table = new QueueTable(QueueTablePreset::FullScreen, this);
-    m_table->setObjectName(QStringLiteral("QueueScreenTable"));
-    m_table->setStyleSheet(panelBorderStyleSheet(QStringLiteral("QueueTable#QueueScreenTable"), panelTopBorder(), m_table));
+    m_table->setTableTopBorderVisible(true);
     layout->addWidget(m_table, 1);
 
     connect(m_table, &QueueTable::trackActivated, this, &QueueScreen::queueTrackActivated);
