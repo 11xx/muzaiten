@@ -331,6 +331,13 @@ void ResponsiveColumnLayout::relayout()
         m_view->horizontalScrollBar()->setValue(0);
     }
     m_applyingLayout = false;
+
+    if (m_view->viewport() != nullptr) {
+        m_view->viewport()->update();
+    }
+    if (m_view->horizontalHeader()->viewport() != nullptr) {
+        m_view->horizontalHeader()->viewport()->update();
+    }
 }
 
 void ResponsiveColumnLayout::scheduleDeferredRelayout()
