@@ -48,6 +48,7 @@ public:
     // exact same behaviour as the buttons.
     void cycleRepeatMode();
     void cycleShuffleMode();
+    void scheduleThemeRefresh();
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -121,8 +122,9 @@ signals:
     void libraryShuffleSettingsRequested();
 
 private:
-    void restyleFrame();
-    void restyleMenuBar();
+    void refreshTheme();
+    void restyleFrame(bool force = false);
+    void restyleMenuBar(bool force = false);
     void updateTransportIcons();
     void updateShuffleIcon();
     void updateRepeatIcon();
@@ -165,6 +167,7 @@ private:
     bool m_hasTrack = false;
     bool m_isPlaying = false;
     bool m_usingArtFallback = true;
+    bool m_themeRefreshPending = false;
     bool m_restylingFrame = false;
     bool m_restylingMenuBar = false;
 };

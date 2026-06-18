@@ -1560,6 +1560,9 @@ void MainWindow::changeEvent(QEvent *event)
         || event->type() == QEvent::ApplicationPaletteChange
         || event->type() == QEvent::StyleChange) {
         restylePanelBorders();
+        if (m_playerBar != nullptr) {
+            m_playerBar->scheduleThemeRefresh();
+        }
     }
 }
 
