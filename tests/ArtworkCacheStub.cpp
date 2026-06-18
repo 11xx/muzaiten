@@ -28,6 +28,10 @@ void ArtworkCache::shutdown()
 {
 }
 
+void ArtworkCache::releaseCacheMemory()
+{
+}
+
 void ArtworkCache::handleRequest(const QString &, const QString &, const QString &, quint64)
 {
 }

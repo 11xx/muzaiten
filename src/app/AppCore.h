@@ -69,6 +69,8 @@ private:
     void setupTrayIcon();
     void restoreSavedPlayback();
     void updateMprisCapabilities();
+    void releaseIdleMemory();
+    void restoreInteractiveMemory();
     void notifyScrobblersTrackStarted(const Track &track);
     QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
     QJsonObject ipcStatus() const;

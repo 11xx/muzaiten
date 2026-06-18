@@ -52,6 +52,16 @@ bool SettingsStore::isOpen() const
     return m_db.isOpen();
 }
 
+void SettingsStore::releaseCacheMemory()
+{
+    if (!m_db.isOpen()) {
+        return;
+    }
+
+    QSqlQuery pragma(m_db);
+    pragma.exec(QStringLiteral("PRAGMA shrink_memory"));
+}
+
 QString SettingsStore::setting(const QString &key, const QString &fallback) const
 {
     if (!m_db.isOpen()) {

@@ -101,6 +101,16 @@ bool PlaylistDatabase::open(const QString &path)
     return migrate();
 }
 
+void PlaylistDatabase::releaseCacheMemory()
+{
+    if (!m_db.isOpen()) {
+        return;
+    }
+
+    QSqlQuery pragma(m_db);
+    pragma.exec(QStringLiteral("PRAGMA shrink_memory"));
+}
+
 bool PlaylistDatabase::migrate()
 {
     QSqlQuery query(m_db);

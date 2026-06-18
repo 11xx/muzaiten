@@ -31,6 +31,10 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 namespace {
 
 QString repeatModeToString(RepeatMode mode)
@@ -222,6 +226,7 @@ void AppCore::setTrayAlwaysVisible(bool visible)
 void AppCore::showWindow()
 {
     if (!m_window) {
+        restoreInteractiveMemory();
         m_window = new MainWindow(this);
         // First window of the process: its constructor loaded the saved queue,
         // so the player now has tracks to resume into. Guarded to run once.
@@ -239,10 +244,45 @@ void AppCore::releaseWindow()
 {
     if (!m_window) return;
     m_window->persistViewState();
+    connect(m_window, &QObject::destroyed, this, [this]() {
+        if (m_window == nullptr) {
+            releaseIdleMemory();
+        }
+    }, Qt::SingleShotConnection);
     m_window->deleteLater();
     m_window = nullptr;
     if (m_tray && !m_trayAlwaysVisible) {
         m_tray->show();
+    }
+}
+
+void AppCore::releaseIdleMemory()
+{
+    if (m_database) {
+        m_database->releaseCacheMemory();
+    }
+    if (m_playlistDb) {
+        m_playlistDb->releaseCacheMemory();
+    }
+    if (m_state) {
+        m_state->releaseCacheMemory();
+    }
+    if (m_listenHistory) {
+        m_listenHistory->releaseCacheMemory();
+    }
+    if (m_artworkCache) {
+        QMetaObject::invokeMethod(m_artworkCache.get(), "releaseCacheMemory", Qt::QueuedConnection);
+    }
+
+#if defined(__GLIBC__)
+    malloc_trim(0);
+#endif
+}
+
+void AppCore::restoreInteractiveMemory()
+{
+    if (m_database) {
+        m_database->restoreCacheMemory();
     }
 }
 

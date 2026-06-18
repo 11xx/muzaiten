@@ -300,6 +300,16 @@ void ArtworkCache::initialize()
         "width INTEGER, height INTEGER, format INTEGER NOT NULL DEFAULT 0, data BLOB NOT NULL, updated_at TEXT NOT NULL)"));
 }
 
+void ArtworkCache::releaseCacheMemory()
+{
+    if (!m_db.isOpen()) {
+        return;
+    }
+
+    QSqlQuery query(m_db);
+    query.exec(QStringLiteral("PRAGMA shrink_memory"));
+}
+
 void ArtworkCache::requestArtwork(const QString &token, const QString &directory, const QString &filePath, quint64 generation)
 {
     QMetaObject::invokeMethod(this, "handleRequest", Qt::QueuedConnection,
