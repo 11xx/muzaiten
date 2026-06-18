@@ -1,3 +1,4 @@
+#include "ui/HeaderLabelStyle.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/TrackTable.h"
 
@@ -296,6 +297,10 @@ private slots:
     void trackHeaderLabelsUseMutedThemeRoles()
     {
         TrackTable table;
+        static constexpr HeaderViewStyle kHeaderStyle{
+            HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
+            false,
+        };
 
         const QVariant fontValue = table.model()->headerData(2, Qt::Horizontal, Qt::FontRole);
         QVERIFY(fontValue.isValid());
@@ -303,7 +308,8 @@ private slots:
 
         const QVariant brushValue = table.model()->headerData(2, Qt::Horizontal, Qt::ForegroundRole);
         QVERIFY(brushValue.isValid());
-        QCOMPARE(brushValue.value<QBrush>().color(), QApplication::palette().color(QPalette::Disabled, QPalette::Text));
+        QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
+        QCOMPARE(table.horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle));
     }
 };
 

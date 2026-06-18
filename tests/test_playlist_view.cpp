@@ -1,6 +1,9 @@
 #include "db/PlaylistDatabase.h"
+#include "ui/HeaderLabelStyle.h"
 #include "ui/PlaylistView.h"
 
+#include <QApplication>
+#include <QBrush>
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -132,6 +135,28 @@ private slots:
         QCOMPARE(table->model()->headerData(5, Qt::Horizontal, Qt::DisplayRole).toString(), QStringLiteral("Rating"));
         QVERIFY(header->isSectionHidden(5));
         QCOMPARE(header->visualIndex(5), header->count() - 1);
+    }
+
+    void tracklistHeaderUsesMutedFlatStyle()
+    {
+        PlaylistView view;
+        auto *table = view.findChild<QTableView *>();
+        QVERIFY(table != nullptr);
+        auto *header = table->horizontalHeader();
+        QVERIFY(header != nullptr);
+        static constexpr HeaderViewStyle kHeaderStyle{
+            HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
+            false,
+        };
+
+        const QVariant fontValue = table->model()->headerData(1, Qt::Horizontal, Qt::FontRole);
+        QVERIFY(fontValue.isValid());
+        QCOMPARE(fontValue.value<QFont>().weight(), QFont::Normal);
+
+        const QVariant brushValue = table->model()->headerData(1, Qt::Horizontal, Qt::ForegroundRole);
+        QVERIFY(brushValue.isValid());
+        QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
+        QCOMPARE(header->styleSheet(), headerViewStyleSheet(kHeaderStyle));
     }
 };
 

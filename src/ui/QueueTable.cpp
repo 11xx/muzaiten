@@ -45,6 +45,11 @@
 
 namespace {
 
+constexpr HeaderViewStyle kTableHeaderStyle{
+    HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
+    false,
+};
+
 struct ColumnSpec {
     const char *key;
     const char *label;
@@ -559,8 +564,7 @@ public:
         if (orientation != Qt::Horizontal) {
             return {};
         }
-        static constexpr HeaderLabelStyle kHeaderStyle{QFont::Normal, true, HeaderLabelTone::Muted};
-        if (const QVariant styleData = headerLabelStyleData(role, kHeaderStyle); styleData.isValid()) {
+        if (const QVariant styleData = headerLabelStyleData(role, kTableHeaderStyle.labels); styleData.isValid()) {
             return styleData;
         }
         if (role != Qt::DisplayRole) {
@@ -780,6 +784,7 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_view->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->horizontalHeader()->setStretchLastSection(false);
     m_view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    applyHeaderViewStyle(m_view->horizontalHeader(), kTableHeaderStyle);
     m_view->setAlternatingRowColors(true);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->installEventFilter(this);

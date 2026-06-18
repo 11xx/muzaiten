@@ -1,3 +1,4 @@
+#include "ui/HeaderLabelStyle.h"
 #include "ui/QueueStore.h"
 #include "ui/QueueTable.h"
 #include "ui/QueueKeybindings.h"
@@ -64,6 +65,10 @@ private slots:
         QueueTable table(QueueTablePreset::FullScreen);
         auto *view = table.findChild<QTableView *>();
         QVERIFY(view != nullptr);
+        static constexpr HeaderViewStyle kHeaderStyle{
+            HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
+            false,
+        };
 
         const QVariant fontValue = view->model()->headerData(1, Qt::Horizontal, Qt::FontRole);
         QVERIFY(fontValue.isValid());
@@ -71,7 +76,8 @@ private slots:
 
         const QVariant brushValue = view->model()->headerData(1, Qt::Horizontal, Qt::ForegroundRole);
         QVERIFY(brushValue.isValid());
-        QCOMPARE(brushValue.value<QBrush>().color(), QApplication::palette().color(QPalette::Disabled, QPalette::Text));
+        QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
+        QCOMPARE(view->horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle));
     }
 
     void displayDataUsesQueueColumnSemantics()

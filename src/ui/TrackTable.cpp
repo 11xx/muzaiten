@@ -32,6 +32,11 @@
 
 namespace {
 
+constexpr HeaderViewStyle kTableHeaderStyle{
+    HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
+    false,
+};
+
 struct ColumnSpec {
     const char *key;
     const char *label;
@@ -93,8 +98,7 @@ public:
         if (orientation != Qt::Horizontal) {
             return {};
         }
-        static constexpr HeaderLabelStyle kHeaderStyle{QFont::Normal, true, HeaderLabelTone::Muted};
-        if (const QVariant styleData = headerLabelStyleData(role, kHeaderStyle); styleData.isValid()) {
+        if (const QVariant styleData = headerLabelStyleData(role, kTableHeaderStyle.labels); styleData.isValid()) {
             return styleData;
         }
         if (role != Qt::DisplayRole) {
@@ -429,6 +433,7 @@ TrackTable::TrackTable(QWidget *parent)
     horizontalHeader()->setFixedHeight(20);
     horizontalHeader()->setMinimumSectionSize(8);
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    applyHeaderViewStyle(horizontalHeader(), kTableHeaderStyle);
     applyDefaultTrackColumnOrder(horizontalHeader());
     verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);

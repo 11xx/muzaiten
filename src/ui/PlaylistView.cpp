@@ -2,6 +2,7 @@
 
 #include "db/PlaylistDatabase.h"
 #include "ui/DenseTableDelegate.h"
+#include "ui/HeaderLabelStyle.h"
 #include "ui/NavigableTableView.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
@@ -45,6 +46,11 @@
 #include <utility>
 
 namespace {
+
+constexpr HeaderViewStyle kTableHeaderStyle{
+    HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
+    false,
+};
 
 QString statusLabel(PlaylistItemStatus status)
 {
@@ -466,7 +472,13 @@ public:
 
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
     {
-        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+        if (orientation != Qt::Horizontal) {
+            return {};
+        }
+        if (const QVariant styleData = headerLabelStyleData(role, kTableHeaderStyle.labels); styleData.isValid()) {
+            return styleData;
+        }
+        if (role != Qt::DisplayRole) {
             return {};
         }
         switch (section) {
@@ -555,6 +567,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable->horizontalHeader()->setFixedHeight(20);
     m_itemTable->horizontalHeader()->setMinimumSectionSize(8);
     m_itemTable->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    applyHeaderViewStyle(m_itemTable->horizontalHeader(), kTableHeaderStyle);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
     m_itemTable->verticalHeader()->setMinimumSectionSize(20);
     m_itemTable->setContextMenuPolicy(Qt::CustomContextMenu);
