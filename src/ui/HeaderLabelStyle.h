@@ -81,8 +81,16 @@ inline QString headerViewStyleSheet(const HeaderViewStyle &style)
     }
 
     return QStringLiteral(
-        "QHeaderView { border: 0px; }"
-        "QHeaderView::section { border: none; }");
+        "QHeaderView {"
+        "  border: 0;"
+        "}"
+        "QHeaderView::section {"
+        "  background: palette(button);"
+        "  border-style: solid;"
+        "  border-width: 0 1px 0 0;"
+        "  border-color: palette(light);"
+        "  padding: 0 4px;"
+        "}");
 }
 
 inline void applyHeaderViewStyle(QHeaderView *header, const HeaderViewStyle &style)

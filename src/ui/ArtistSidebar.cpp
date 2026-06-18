@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QFrame>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QListView>
@@ -93,7 +94,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_tabBar->setVisible(false);
     m_tabBar->setStyleSheet(QStringLiteral(
         "QTabBar::tab {"
-        "  border: 1px solid palette(mid);"
+        "  border: 1px solid palette(light);"
         "  border-bottom: 0;"
         "  border-top-left-radius: 3px;"
         "  border-top-right-radius: 3px;"
@@ -122,6 +123,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view = new QListView(this);
     m_view->setModel(m_model);
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
+    m_view->setFrameShape(QFrame::NoFrame);
     m_view->setUniformItemSizes(true);
     m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
