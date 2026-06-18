@@ -408,6 +408,23 @@ QString formatTime(qint64 milliseconds)
         .arg(seconds % 60, 2, 10, QLatin1Char('0'));
 }
 
+bool isThemeChange(QEvent::Type type)
+{
+    return type == QEvent::PaletteChange
+        || type == QEvent::ApplicationPaletteChange
+        || type == QEvent::StyleChange;
+}
+
+void repolish(QWidget *widget)
+{
+    if (widget == nullptr || widget->style() == nullptr) {
+        return;
+    }
+    widget->style()->unpolish(widget);
+    widget->style()->polish(widget);
+    widget->update();
+}
+
 void styleMenu(QMenu *menu)
 {
     if (menu == nullptr) {
@@ -1004,21 +1021,44 @@ bool PlayerBar::shouldHoldTransitionPosition(qint64 positionMs, qint64 durationM
     return true;
 }
 
+void PlayerBar::scheduleThemeRefresh()
+{
+    if (m_themeRefreshPending) {
+        return;
+    }
+
+    m_themeRefreshPending = true;
+    QTimer::singleShot(0, this, [this]() {
+        refreshTheme();
+        m_themeRefreshPending = false;
+    });
+}
+
+void PlayerBar::refreshTheme()
+{
+    restyleFrame(true);
+    restyleMenuBar(true);
+    updateTransportIcons();
+    if (m_menuButton != nullptr) {
+        m_menuButton->setIcon(menuHamburgerIcon(palette()));
+    }
+    updateShuffleIcon();
+    updateRepeatIcon();
+    if (m_usingArtFallback) {
+        setAlbumArt(QString());
+    }
+
+    repolish(this);
+    for (QWidget *widget : findChildren<QWidget *>()) {
+        repolish(widget);
+    }
+}
+
 void PlayerBar::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
-    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::StyleChange) {
-        restyleFrame();
-        restyleMenuBar();
-        updateTransportIcons();
-        if (m_menuButton != nullptr) {
-            m_menuButton->setIcon(menuHamburgerIcon(palette()));
-        }
-        updateShuffleIcon();
-        updateRepeatIcon();
-        if (m_usingArtFallback) {
-            setAlbumArt(QString());
-        }
+    if (isThemeChange(event->type())) {
+        scheduleThemeRefresh();
     }
 }
 
@@ -1027,7 +1067,7 @@ void PlayerBar::resizeEvent(QResizeEvent *event)
     QWidget::resizeEvent(event);
 }
 
-void PlayerBar::restyleFrame()
+void PlayerBar::restyleFrame(bool force)
 {
     if (m_restylingFrame) {
         return;
@@ -1035,16 +1075,19 @@ void PlayerBar::restyleFrame()
 
     const QString style = panelBorderStyleSheet(
         QStringLiteral("QWidget#PlayerBar"), panelBottomBorder(), this, QStringLiteral(" background: palette(window);"));
-    if (styleSheet() == style) {
+    if (!force && styleSheet() == style) {
         return;
     }
 
     m_restylingFrame = true;
+    if (force && styleSheet() == style) {
+        setStyleSheet(QString());
+    }
     setStyleSheet(style);
     m_restylingFrame = false;
 }
 
-void PlayerBar::restyleMenuBar()
+void PlayerBar::restyleMenuBar(bool force)
 {
     if (m_menuBar == nullptr) {
         return;
@@ -1088,11 +1131,14 @@ void PlayerBar::restyleMenuBar()
         "QToolButton:pressed {"
         "  background: palette(highlight);"
         "}").arg(panelSeparatorColorCss(m_menuBar));
-    if (m_menuBar->styleSheet() == style) {
+    if (!force && m_menuBar->styleSheet() == style) {
         return;
     }
 
     m_restylingMenuBar = true;
+    if (force && m_menuBar->styleSheet() == style) {
+        m_menuBar->setStyleSheet(QString());
+    }
     m_menuBar->setStyleSheet(style);
     m_restylingMenuBar = false;
 }
@@ -1100,17 +1146,18 @@ void PlayerBar::restyleMenuBar()
 void PlayerBar::updateTransportIcons()
 {
     if (m_previous != nullptr) {
-        m_previous->setIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward));
+        m_previous->setIcon(m_previous->style()->standardIcon(QStyle::SP_MediaSkipBackward, nullptr, m_previous));
     }
     if (m_playPause != nullptr) {
-        m_playPause->setIcon(style()->standardIcon(m_isPlaying ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+        m_playPause->setIcon(m_playPause->style()->standardIcon(
+            m_isPlaying ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay, nullptr, m_playPause));
         m_playPause->setToolTip(m_isPlaying ? QStringLiteral("Pause") : QStringLiteral("Play"));
     }
     if (m_next != nullptr) {
-        m_next->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));
+        m_next->setIcon(m_next->style()->standardIcon(QStyle::SP_MediaSkipForward, nullptr, m_next));
     }
     if (m_volumeButton != nullptr) {
-        m_volumeButton->setIcon(style()->standardIcon(QStyle::SP_MediaVolume));
+        m_volumeButton->setIcon(m_volumeButton->style()->standardIcon(QStyle::SP_MediaVolume, nullptr, m_volumeButton));
     }
 }
 
