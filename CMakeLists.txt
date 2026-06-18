@@ -253,6 +253,7 @@ set(MUZAITEN_HEADERS
     src/ui/StarRatingDelegate.h
     src/ui/TrackPropertiesDialog.h
     src/ui/TrackTable.h
+    src/ui/UiMetrics.h
     src/ui/trackinfo/TrackInfoPanel.h
     src/ui/trackinfo/TrackInfoSettings.h
     src/ui/trackinfo/TrackInfoSettingsDialog.h

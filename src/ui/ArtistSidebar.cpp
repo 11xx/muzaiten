@@ -4,6 +4,7 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/SelectionColors.h"
+#include "ui/UiMetrics.h"
 
 #include <QAction>
 #include <QApplication>
@@ -127,7 +128,10 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
     m_view->setFrameShape(QFrame::NoFrame);
     m_view->setStyleSheet(panelBorderStyleSheet(
-        QStringLiteral("QListView#ArtistList"), panelAllBorders(), m_view, QStringLiteral(" border-radius: 3px;")));
+        QStringLiteral("QListView#ArtistList"),
+        panelAllBorders(),
+        m_view,
+        QStringLiteral(" border-radius: %1px;").arg(kAlbumGridSelectionRadius)));
     m_view->setUniformItemSizes(true);
     m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);

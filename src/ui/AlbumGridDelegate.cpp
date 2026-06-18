@@ -3,6 +3,7 @@
 #include "ui/AlbumGrid.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
+#include "ui/UiMetrics.h"
 
 #include <QApplication>
 #include <QPainter>
@@ -106,18 +107,21 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         hover.setAlpha(filledSelection ? 42 : 24);
         painter->setPen(Qt::NoPen);
         painter->setBrush(hover);
-        painter->drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 6, 6);
+        painter->drawRoundedRect(
+            option.rect.adjusted(2, 2, -3, -3), kAlbumGridSelectionRadius, kAlbumGridSelectionRadius);
     }
     if (filledSelection) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(SelectionColors::selectedFill(option));
-        painter->drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 6, 6);
+        painter->drawRoundedRect(
+            option.rect.adjusted(2, 2, -3, -3), kAlbumGridSelectionRadius, kAlbumGridSelectionRadius);
     } else if (rememberedOutline) {
         painter->setRenderHint(QPainter::Antialiasing, true);
         QPen pen(SelectionColors::selectedFill(option), 2);
         painter->setPen(pen);
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(option.rect.adjusted(3, 3, -4, -4), 6, 6);
+        painter->drawRoundedRect(
+            option.rect.adjusted(3, 3, -4, -4), kAlbumGridSelectionRadius, kAlbumGridSelectionRadius);
     }
     if (hovered && selected) {
         QColor hoverEdge = option.palette.color(QPalette::HighlightedText);
@@ -125,7 +129,8 @@ void AlbumGridDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setPen(QPen(hoverEdge, 1));
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(option.rect.adjusted(4, 4, -5, -5), 5, 5);
+        painter->drawRoundedRect(
+            option.rect.adjusted(4, 4, -5, -5), kAlbumGridSelectionInnerRadius, kAlbumGridSelectionInnerRadius);
     }
 
     const int padding = index.data(CellPaddingRole).toInt() > 0 ? index.data(CellPaddingRole).toInt() : 8;

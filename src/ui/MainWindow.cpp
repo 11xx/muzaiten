@@ -52,6 +52,7 @@
 #include "search/RankConfig.h"
 #include "ui/TrackPropertiesDialog.h"
 #include "ui/TrackTable.h"
+#include "ui/UiMetrics.h"
 
 #include <QAction>
 #include <QApplication>
@@ -686,7 +687,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         QStringLiteral("AlbumGrid#MainAlbumGrid"),
         panelTopBorder(),
         m_albumGrid,
-        QStringLiteral(" border-top-left-radius: 3px; border-top-right-radius: 3px;")));
+        QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius)));
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
