@@ -284,6 +284,14 @@ target_compile_features(test_navigation_scroll PRIVATE cxx_std_26)
 add_test(NAME test_navigation_scroll COMMAND test_navigation_scroll)
 set_tests_properties(test_navigation_scroll PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_panel_border_style
+    test_panel_border_style.cpp
+)
+target_include_directories(test_panel_border_style PRIVATE ../src)
+target_link_libraries(test_panel_border_style PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_panel_border_style PRIVATE cxx_std_26)
+add_test(NAME test_panel_border_style COMMAND test_panel_border_style)
+
 add_executable(test_queue_table
     test_queue_table.cpp
     ../src/ui/QueueKeybindings.cpp
