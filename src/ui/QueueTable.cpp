@@ -1,9 +1,9 @@
 #include "ui/QueueTable.h"
 
+#include "ui/HeaderLabelStyle.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/NavigableTableView.h"
 #include "ui/OverlayScrollBar.h"
-#include "ui/QuietHeaderView.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueStore.h"
 #include "ui/ResponsiveColumnLayout.h"
@@ -556,7 +556,14 @@ public:
 
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
     {
-        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
+        if (orientation != Qt::Horizontal) {
+            return {};
+        }
+        static constexpr HeaderLabelStyle kHeaderStyle{QFont::Normal, true, HeaderLabelTone::Muted};
+        if (const QVariant styleData = headerLabelStyleData(role, kHeaderStyle); styleData.isValid()) {
+            return styleData;
+        }
+        if (role != Qt::DisplayRole) {
             return {};
         }
         if (const ColumnSpec *spec = specForColumn(section)) {
@@ -743,7 +750,6 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_model = queueModel;
     m_view = queueView;
     queueView->setPreset(preset);
-    queueView->setHorizontalHeader(new QuietHeaderView(Qt::Horizontal, queueView));
     m_view->setModel(m_model);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_view->setDragEnabled(true);

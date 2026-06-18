@@ -233,9 +233,9 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
     src/ui/PlaylistAddDialog.h
+    src/ui/HeaderLabelStyle.h
     src/ui/PlaylistImportDialog.h
     src/ui/PlaylistView.h
-    src/ui/QuietHeaderView.h
     src/ui/QueueKeybindings.h
     src/ui/QueueScreen.h
     src/ui/QueueStore.h

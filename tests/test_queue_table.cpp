@@ -4,6 +4,8 @@
 #include "ui/ResponsiveColumnLayout.h"
 
 #include <QAbstractItemModel>
+#include <QApplication>
+#include <QBrush>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QTableView>
@@ -55,6 +57,21 @@ private slots:
         QVERIFY(widths.at(3) > widths.at(0));
         QVERIFY(widths.at(0) > widths.at(4));
         QVERIFY(widths.at(5) > widths.at(4));
+    }
+
+    void headerLabelsUseMutedThemeRoles()
+    {
+        QueueTable table(QueueTablePreset::FullScreen);
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+
+        const QVariant fontValue = view->model()->headerData(1, Qt::Horizontal, Qt::FontRole);
+        QVERIFY(fontValue.isValid());
+        QCOMPARE(fontValue.value<QFont>().weight(), QFont::Normal);
+
+        const QVariant brushValue = view->model()->headerData(1, Qt::Horizontal, Qt::ForegroundRole);
+        QVERIFY(brushValue.isValid());
+        QCOMPARE(brushValue.value<QBrush>().color(), QApplication::palette().color(QPalette::Disabled, QPalette::Text));
     }
 
     void displayDataUsesQueueColumnSemantics()
