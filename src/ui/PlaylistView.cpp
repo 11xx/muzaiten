@@ -544,7 +544,6 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     m_playlistList = new QListWidget(m_splitter);
     m_playlistList->setObjectName(QStringLiteral("PlaylistList"));
-    m_playlistList->setStyleSheet(panelBorderStyleSheet(QStringLiteral("QListWidget#PlaylistList"), panelTopBorder(), m_playlistList));
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setItemDelegate(new PlaylistListDelegate(this));
@@ -556,7 +555,6 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemModel = new PlaylistItemTableModel(this);
     m_itemTable = new NavigableTableView(m_splitter);
     m_itemTable->setObjectName(QStringLiteral("PlaylistItemTable"));
-    m_itemTable->setStyleSheet(panelBorderStyleSheet(QStringLiteral("NavigableTableView#PlaylistItemTable"), panelTopBorder(), m_itemTable));
     m_itemTable->setModel(m_itemModel);
     m_itemTable->setItemDelegate(new DenseTableDelegate(this));
     m_ratingDelegate = new StarRatingDelegate(this);
@@ -585,6 +583,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 3);
     m_splitter->setSizes({207, 1618});
+    restylePanelBorders();
 
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
         m_currentPlaylistId = currentPlaylistId();
@@ -2108,4 +2107,38 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     }
 
     return QWidget::eventFilter(watched, event);
+}
+
+void PlaylistView::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange
+        || event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::StyleChange) {
+        restylePanelBorders();
+        if (m_playlistList != nullptr) {
+            m_playlistList->viewport()->update();
+        }
+        if (m_itemTable != nullptr) {
+            applyHeaderViewStyle(m_itemTable->horizontalHeader(), kTableHeaderStyle);
+            m_itemTable->viewport()->update();
+            m_itemTable->horizontalHeader()->viewport()->update();
+        }
+    }
+}
+
+void PlaylistView::restylePanelBorders()
+{
+    if (m_playlistList != nullptr) {
+        const QString style = panelBorderStyleSheet(QStringLiteral("QListWidget#PlaylistList"), panelTopBorder(), m_playlistList);
+        if (m_playlistList->styleSheet() != style) {
+            m_playlistList->setStyleSheet(style);
+        }
+    }
+    if (m_itemTable != nullptr) {
+        const QString style = panelBorderStyleSheet(QStringLiteral("NavigableTableView#PlaylistItemTable"), panelTopBorder(), m_itemTable);
+        if (m_itemTable->styleSheet() != style) {
+            m_itemTable->setStyleSheet(style);
+        }
+    }
 }

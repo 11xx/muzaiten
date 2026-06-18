@@ -8,6 +8,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QEvent>
 #include <QFrame>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -76,25 +77,9 @@ public:
     }
 };
 
-} // namespace
-
-ArtistSidebar::ArtistSidebar(QWidget *parent)
-    : QWidget(parent)
+QString tabBarStyleSheet(const QWidget *widget)
 {
-    auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(6, 0, 6, 6);
-    layout->setSpacing(5);
-
-    m_tabBar = new QTabBar(this);
-    m_tabBar->addTab(QStringLiteral("Library"));
-    m_tabBar->addTab(QStringLiteral("MPD"));
-    m_tabBar->setExpanding(false);
-    m_tabBar->setDocumentMode(true);
-    m_tabBar->setDrawBase(false);
-    m_tabBar->setFixedHeight(22);
-    m_tabBar->setTabEnabled(1, false);
-    m_tabBar->setVisible(false);
-    m_tabBar->setStyleSheet(QStringLiteral(
+    return QStringLiteral(
         "QTabBar::tab {"
         "  border: 1px solid %1;"
         "  border-bottom: 0;"
@@ -114,7 +99,36 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
         "}"
         "QTabBar::tab:disabled {"
         "  color: palette(disabled, window-text);"
-        "}").arg(panelSeparatorColorCss(m_tabBar)));
+        "}").arg(panelSeparatorColorCss(widget));
+}
+
+QString artistListStyleSheet(const QWidget *widget)
+{
+    return panelBorderStyleSheet(
+        QStringLiteral("QListView#ArtistList"),
+        panelAllBorders(),
+        widget,
+        QStringLiteral(" border-radius: %1px;").arg(kAlbumGridSelectionRadius));
+}
+
+} // namespace
+
+ArtistSidebar::ArtistSidebar(QWidget *parent)
+    : QWidget(parent)
+{
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(6, 0, 6, 6);
+    layout->setSpacing(5);
+
+    m_tabBar = new QTabBar(this);
+    m_tabBar->addTab(QStringLiteral("Library"));
+    m_tabBar->addTab(QStringLiteral("MPD"));
+    m_tabBar->setExpanding(false);
+    m_tabBar->setDocumentMode(true);
+    m_tabBar->setDrawBase(false);
+    m_tabBar->setFixedHeight(22);
+    m_tabBar->setTabEnabled(1, false);
+    m_tabBar->setVisible(false);
     layout->addWidget(m_tabBar);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &ArtistSidebar::librarySourceChanged);
@@ -127,11 +141,6 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
     m_view->setModel(m_model);
     m_view->setItemDelegate(new ArtistSidebarDelegate(this));
     m_view->setFrameShape(QFrame::NoFrame);
-    m_view->setStyleSheet(panelBorderStyleSheet(
-        QStringLiteral("QListView#ArtistList"),
-        panelAllBorders(),
-        m_view,
-        QStringLiteral(" border-radius: %1px;").arg(kAlbumGridSelectionRadius)));
     m_view->setUniformItemSizes(true);
     m_view->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -143,6 +152,7 @@ ArtistSidebar::ArtistSidebar(QWidget *parent)
         emit artistSelected(index.data(Qt::UserRole).toString());
     });
     connect(m_view, &QListView::customContextMenuRequested, this, &ArtistSidebar::showContextMenu);
+    restyleChrome();
 }
 
 void ArtistSidebar::setArtists(const QVector<Artist> &artists)
@@ -390,6 +400,35 @@ bool ArtistSidebar::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void ArtistSidebar::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange
+        || event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::StyleChange) {
+        restyleChrome();
+        if (m_view != nullptr) {
+            m_view->viewport()->update();
+        }
+    }
+}
+
+void ArtistSidebar::restyleChrome()
+{
+    if (m_tabBar != nullptr) {
+        const QString style = tabBarStyleSheet(m_tabBar);
+        if (m_tabBar->styleSheet() != style) {
+            m_tabBar->setStyleSheet(style);
+        }
+    }
+    if (m_view != nullptr) {
+        const QString style = artistListStyleSheet(m_view);
+        if (m_view->styleSheet() != style) {
+            m_view->setStyleSheet(style);
+        }
+    }
 }
 
 void ArtistSidebar::showContextMenu(const QPoint &pos)

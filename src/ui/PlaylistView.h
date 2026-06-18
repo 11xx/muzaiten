@@ -117,8 +117,10 @@ signals:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
+    void restylePanelBorders();
     void cycleAddedSort();
     void sortByColumn(int column);
     void populateItems();
