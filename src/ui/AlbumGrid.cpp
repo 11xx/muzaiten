@@ -10,6 +10,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QFrame>
 #include <QIcon>
 #include <QImage>
 #include <QJsonDocument>
@@ -109,6 +110,7 @@ AlbumGrid::AlbumGrid(QWidget *parent)
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
+    setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
     viewport()->setMouseTracking(true);
     setContextMenuPolicy(Qt::CustomContextMenu);

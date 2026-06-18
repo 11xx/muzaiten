@@ -78,7 +78,8 @@ private slots:
         QVERIFY(brushValue.isValid());
         QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
         QCOMPARE(view->horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle, view->horizontalHeader()));
-        QVERIFY(view->horizontalHeader()->styleSheet().contains(QStringLiteral("border-width: 0 1px 0 1px")));
+        QVERIFY(view->horizontalHeader()->styleSheet().contains(QStringLiteral("border-width: 0 1px 0 0")));
+        QVERIFY(view->horizontalHeader()->styleSheet().contains(QStringLiteral("QHeaderView::section:last")));
     }
 
     void displayDataUsesQueueColumnSemantics()

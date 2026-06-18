@@ -12,7 +12,7 @@ QueueScreen::QueueScreen(QWidget *parent)
     layout->setSpacing(0);
 
     m_table = new QueueTable(QueueTablePreset::FullScreen, this);
-    m_table->setTableBorders(panelAllBorders(2));
+    m_table->setTableBorders(panelAllBorders());
     layout->addWidget(m_table, 1);
 
     connect(m_table, &QueueTable::trackActivated, this, &QueueScreen::queueTrackActivated);
