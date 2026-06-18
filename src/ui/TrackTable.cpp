@@ -13,6 +13,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QAbstractTableModel>
+#include <QFont>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -331,6 +332,11 @@ QVector<int> trackResponsiveDropOrder()
     return {6, 1, 5, 0, 3, 4, 2};
 }
 
+QVector<int> defaultTrackVisualOrder()
+{
+    return {1, 2, 3, 4, 5, 6, 0};
+}
+
 QVector<ResponsiveColumnSpec> trackResponsiveSpecs()
 {
     QVector<ResponsiveColumnSpec> specs;
@@ -378,6 +384,35 @@ QVector<ResponsiveColumnOption> responsiveColumnOptions()
     return options;
 }
 
+void applyQuietHeaderLabelStyle(QHeaderView *header)
+{
+    if (header == nullptr) {
+        return;
+    }
+
+    QFont font = header->font();
+    font.setWeight(QFont::Normal);
+    header->setFont(font);
+    header->setStyleSheet(QStringLiteral(
+        "QHeaderView::section {"
+        "  font-weight: normal;"
+        "  color: palette(disabled, window-text);"
+        "}"));
+}
+
+void applyDefaultTrackColumnOrder(QHeaderView *header)
+{
+    if (header == nullptr) {
+        return;
+    }
+
+    const QVector<int> order = defaultTrackVisualOrder();
+    for (int visual = 0; visual < order.size(); ++visual) {
+        const int logical = order.at(visual);
+        header->moveSection(header->visualIndex(logical), visual);
+    }
+}
+
 } // namespace
 
 TrackTable::TrackTable(QWidget *parent)
@@ -403,6 +438,8 @@ TrackTable::TrackTable(QWidget *parent)
     horizontalHeader()->setFixedHeight(20);
     horizontalHeader()->setMinimumSectionSize(8);
     horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    applyQuietHeaderLabelStyle(horizontalHeader());
+    applyDefaultTrackColumnOrder(horizontalHeader());
     verticalHeader()->setDefaultSectionSize(20);
     verticalHeader()->setMinimumSectionSize(20);
     verticalHeader()->setVisible(false);
@@ -562,11 +599,7 @@ void TrackTable::resetViewSettings()
     for (const ColumnSpec &spec : columns) {
         horizontalHeader()->setSectionResizeMode(spec.index, QHeaderView::Interactive);
     }
-    const int columnCount = static_cast<int>(std::size(columns));
-    for (int visual = 0; visual < columnCount; ++visual) {
-        const int logical = columns[visual].index;
-        horizontalHeader()->moveSection(horizontalHeader()->visualIndex(logical), visual);
-    }
+    applyDefaultTrackColumnOrder(horizontalHeader());
     m_columnLayout->resetToDefaults();
     m_columnLayout->setUserVisibleColumns(allTrackColumnKeys());
     setHeaderHeight(20);

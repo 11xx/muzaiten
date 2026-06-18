@@ -18,6 +18,7 @@
 #include <QActionGroup>
 #include <QDataStream>
 #include <QFileInfo>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -49,20 +50,20 @@ struct ColumnSpec {
     const char *label;
     int index;
     int sidebarPreferredWidth;
-    int fullScreenWeight;
+    int fullScreenPreferredWidth;
     int minWidth = 24;
 };
 
 constexpr ColumnSpec columns[] = {
-    {"position", "#", 0, 38, 4},
-    {"title", "Title", 1, 180, 94, 140},
-    {"ratingEdit", "Rating", 2, 96, 7, 56},
-    {"rating", "Rating (short)", 3, 56, 6, 12},
-    {"artist", "Artist", 4, 120, 27},
-    {"album", "Album", 5, 120, 59},
-    {"duration", "Duration", 6, 70, 5, 24},
-    {"year", "Year", 7, 58, 5},
-    {"track", "Track", 8, 36, 13, 12},
+    {"position", "#", 0, 49, 24},
+    {"title", "Title", 1, 163, 842, 140},
+    {"ratingEdit", "Rating", 2, 96, 115, 56},
+    {"rating", "Rating (short)", 3, 56, 12, 12},
+    {"artist", "Artist", 4, 120, 258},
+    {"album", "Album", 5, 120, 483},
+    {"duration", "Duration", 6, 70, 67, 24},
+    {"year", "Year", 7, 58, 24},
+    {"track", "Track", 8, 36, 49, 12},
 };
 
 constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
@@ -96,7 +97,7 @@ int preferredWidthForColumn(int column, QueueTablePreset preset)
 {
     if (const ColumnSpec *spec = specForColumn(column)) {
         return preset == QueueTablePreset::FullScreen
-            ? std::max(spec->minWidth, spec->fullScreenWeight * 2)
+            ? std::max(spec->minWidth, spec->fullScreenPreferredWidth)
             : spec->sidebarPreferredWidth;
     }
     return 60;
@@ -161,6 +162,22 @@ QSet<QString> defaultVisibleKeysForPreset(QueueTablePreset preset)
         keys.insert(columnKey(column));
     }
     return keys;
+}
+
+void applyQuietHeaderLabelStyle(QHeaderView *header)
+{
+    if (header == nullptr) {
+        return;
+    }
+
+    QFont font = header->font();
+    font.setWeight(QFont::Normal);
+    header->setFont(font);
+    header->setStyleSheet(QStringLiteral(
+        "QHeaderView::section {"
+        "  font-weight: normal;"
+        "  color: palette(disabled, window-text);"
+        "}"));
 }
 
 QString priorityLabel(ResponsiveColumnPriority priority)
@@ -772,6 +789,7 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     m_view->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->horizontalHeader()->setStretchLastSection(false);
     m_view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    applyQuietHeaderLabelStyle(m_view->horizontalHeader());
     m_view->setAlternatingRowColors(true);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->installEventFilter(this);

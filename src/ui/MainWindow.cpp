@@ -683,6 +683,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
     m_centerSplitter->setStretchFactor(0, 55);
     m_centerSplitter->setStretchFactor(1, 45);
+    m_centerSplitter->setSizes({540, 430});
 
     m_rightSidebar = new RightSidebar(m_rootSplitter);
     m_rightSidebar->setMinimumWidth(kRightSidebarMinimumWidth);
@@ -694,7 +695,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rootSplitter->setStretchFactor(0, 0);
     m_rootSplitter->setStretchFactor(1, 1);
     m_rootSplitter->setStretchFactor(2, 0);
-    m_rootSplitter->setSizes({260, 900, 300});
+    m_rootSplitter->setSizes({197, 1296, 298});
 
     m_libraryFileExplorer = new FileExplorerView(m_mainStack);
     m_libraryFileExplorer->setMode(FileExplorerMode::Library);
@@ -2628,8 +2629,8 @@ void MainWindow::resetViewPreferences()
     m_queueScreen->resetViewSettings();
     m_playlistView->resetViewSettings();
 
-    m_rootSplitter->setSizes({260, 900, 300});
-    m_centerSplitter->setSizes({500, 400});
+    m_rootSplitter->setSizes({197, 1296, 298});
+    m_centerSplitter->setSizes({540, 430});
     m_playerBar->setCompactMenu(false);
     m_playerBar->setTrackInfoPaneVisible(true);
     m_playerBar->setListUnsupportedFiles(false);

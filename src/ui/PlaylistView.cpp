@@ -108,7 +108,7 @@ struct PlaylistColumnSpec {
 
 constexpr PlaylistColumnSpec playlistColumns[] = {
     {OrdinalColumn, "#",      "#",      48, 38, ResponsiveColumnPriority::Keep},
-    {TitleColumn,   "title",  "Title", 260, 120, ResponsiveColumnPriority::Keep, true},
+    {TitleColumn,   "title",  "Title", 1115, 120, ResponsiveColumnPriority::Keep, true},
     {ArtistColumn,  "artist", "Artist", 190, 100, ResponsiveColumnPriority::Normal},
     {AlbumColumn,   "album",  "Album", 220, 100, ResponsiveColumnPriority::Normal},
     {LengthColumn,  "length", "Length",  76,  64, ResponsiveColumnPriority::HideEarly},
@@ -137,6 +137,15 @@ QVector<ResponsiveColumnSpec> playlistResponsiveSpecs()
                          spec.absorber});
     }
     return specs;
+}
+
+QSet<QString> defaultPlaylistVisibleColumns()
+{
+    return {QStringLiteral("#"),
+            QStringLiteral("title"),
+            QStringLiteral("artist"),
+            QStringLiteral("album"),
+            QStringLiteral("length")};
 }
 
 QVector<ResponsiveColumnOption> playlistResponsiveOptions()
@@ -557,7 +566,7 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 3);
-    m_splitter->setSizes({260, 780});
+    m_splitter->setSizes({207, 1618});
 
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
         m_currentPlaylistId = currentPlaylistId();
@@ -568,12 +577,7 @@ PlaylistView::PlaylistView(QWidget *parent)
             this, &PlaylistView::sortByColumn);
     m_columnLayout = new ResponsiveColumnLayout(m_itemTable, playlistResponsiveSpecs(), this);
     m_columnLayout->resetToDefaults();
-    m_columnLayout->setUserVisibleColumns({QStringLiteral("#"),
-                                           QStringLiteral("title"),
-                                           QStringLiteral("artist"),
-                                           QStringLiteral("album"),
-                                           QStringLiteral("length"),
-                                           QStringLiteral("rating")});
+    m_columnLayout->setUserVisibleColumns(defaultPlaylistVisibleColumns());
     auto *columnResizer = NeighborColumnResizer::install(
         m_itemTable->horizontalHeader(), [](int column) { return minWidthForPlaylistItemColumn(column); });
     connect(columnResizer, qOverload<int, int>(&NeighborColumnResizer::columnResized), this, [this](int leftLogical, int rightLogical) {
@@ -753,8 +757,9 @@ void PlaylistView::resetViewSettings()
     m_playlistRowHeight = 18;
     setHeaderHeight(20);
     m_itemTable->verticalHeader()->setDefaultSectionSize(20);
-    m_splitter->setSizes({260, 780});
+    m_splitter->setSizes({207, 1618});
     m_columnLayout->resetToDefaults();
+    m_columnLayout->setUserVisibleColumns(defaultPlaylistVisibleColumns());
     populateItems();
     reloadPlaylists();
     emit viewSettingsChanged();
