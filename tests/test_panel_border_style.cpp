@@ -110,6 +110,14 @@ private slots:
         QCOMPARE(kAlbumGridSelectionRadius, 6);
         QCOMPARE(kAlbumGridSelectionInnerRadius, 5);
     }
+
+    void stylesheetUsesRequestedPerEdgeWidths()
+    {
+        const QString style = panelBorderStyleSheet(QStringLiteral("QWidget#Probe"),
+                                                    panelBorders(1, 2, 3, 4),
+                                                    nullptr);
+        QVERIFY(style.contains(QStringLiteral("border-width: 1px 2px 3px 4px")));
+    }
 };
 
 QTEST_MAIN(PanelBorderStyleTest)

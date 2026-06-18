@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/PanelBorderStyle.h"
+
 #include <QTableView>
 
 class NavigableTableView : public QTableView {
@@ -10,6 +12,7 @@ public:
     ~NavigableTableView() override;
 
     void refreshTheme();
+    void setPanelBorders(PanelBorderEdges edges);
 
     void setNavigationScrollPadding(int rows);
     int navigationScrollPadding() const;
@@ -39,9 +42,14 @@ private:
     void scrollNavigationRowToAnchor(int row, int direction, int previousTopRow);
     void updateRow(const QModelIndex &index);
     void refreshInactiveHighlight();
+    void applyPanelBorderStyle(bool force = false);
     void refreshWidgetTheme(QWidget *widget);
 
+    PanelBorderEdges m_panelBorders;
     int m_navigationScrollPadding = 3;
     bool m_mainPanelActive = false;
     bool m_refreshingPalette = false;
+    bool m_hasPanelBorders = false;
+    bool m_panelBorderStyleApplied = false;
+    bool m_restylingPanelBorders = false;
 };

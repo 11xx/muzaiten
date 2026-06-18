@@ -3,6 +3,7 @@
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/KeyBindingTypes.h"
+#include "ui/PanelBorderStyle.h"
 
 #include <QWidget>
 
@@ -41,6 +42,7 @@ public:
     void setNavigationScrollPadding(int rows);
     void setKeyBindingProfileName(const QString &name);
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }
+    void setTableBorders(PanelBorderEdges edges);
     void setTableTopBorderVisible(bool visible);
 
 signals:
@@ -100,7 +102,7 @@ private:
     int m_pendingRestoreRow = -1;
     bool m_showPlayNextBadge = true;
     bool m_showPlayNextTitleAccent = false;
-    bool m_tableTopBorderVisible = false;
+    PanelBorderEdges m_tableBorders;
     bool m_restoreScrollPending = false;
     bool m_restoreScrollScheduled = false;
 

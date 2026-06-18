@@ -2130,15 +2130,14 @@ void PlaylistView::changeEvent(QEvent *event)
 void PlaylistView::restylePanelBorders()
 {
     if (m_playlistList != nullptr) {
-        const QString style = panelBorderStyleSheet(QStringLiteral("QListWidget#PlaylistList"), panelTopBorder(), m_playlistList);
+        const QString style = panelBorderStyleSheet(QStringLiteral("QListWidget#PlaylistList"),
+                                                    panelBorders(2, 1, 2, 2),
+                                                    m_playlistList);
         if (m_playlistList->styleSheet() != style) {
             m_playlistList->setStyleSheet(style);
         }
     }
     if (m_itemTable != nullptr) {
-        const QString style = panelBorderStyleSheet(QStringLiteral("NavigableTableView#PlaylistItemTable"), panelTopBorder(), m_itemTable);
-        if (m_itemTable->styleSheet() != style) {
-            m_itemTable->setStyleSheet(style);
-        }
+        m_itemTable->setPanelBorders(panelBorders(2, 2, 2, 1));
     }
 }

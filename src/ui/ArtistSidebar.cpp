@@ -106,7 +106,7 @@ QString artistListStyleSheet(const QWidget *widget)
 {
     return panelBorderStyleSheet(
         QStringLiteral("QListView#ArtistList"),
-        panelAllBorders(),
+        panelAllBorders(2),
         widget,
         QStringLiteral(" border-radius: %1px;").arg(kAlbumGridSelectionRadius));
 }

@@ -858,11 +858,16 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
 
 void QueueTable::setTableTopBorderVisible(bool visible)
 {
-    if (m_tableTopBorderVisible == visible) {
+    setTableBorders(visible ? panelTopBorder() : panelNoBorders());
+}
+
+void QueueTable::setTableBorders(PanelBorderEdges edges)
+{
+    if (m_tableBorders == edges) {
         return;
     }
 
-    m_tableTopBorderVisible = visible;
+    m_tableBorders = edges;
     applyTableFrameStyle();
 }
 
@@ -1111,17 +1116,8 @@ void QueueTable::applyTableFrameStyle()
         return;
     }
 
-    if (!m_tableTopBorderVisible) {
-        if (!m_view->styleSheet().isEmpty()) {
-            m_view->setStyleSheet({});
-        }
-        return;
-    }
-
-    m_view->setObjectName(QStringLiteral("QueueTableViewWithTopBorder"));
-    const QString style = panelBorderStyleSheet(QStringLiteral("QTableView#QueueTableViewWithTopBorder"), panelTopBorder(), m_view);
-    if (m_view->styleSheet() != style) {
-        m_view->setStyleSheet(style);
+    if (auto *view = qobject_cast<NavigableTableView *>(m_view)) {
+        view->setPanelBorders(m_tableBorders);
     }
 }
 

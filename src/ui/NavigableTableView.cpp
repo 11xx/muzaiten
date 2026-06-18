@@ -37,6 +37,13 @@ void NavigableTableView::setNavigationScrollPadding(int rows)
     m_navigationScrollPadding = std::max(0, rows);
 }
 
+void NavigableTableView::setPanelBorders(PanelBorderEdges edges)
+{
+    m_panelBorders = edges;
+    m_hasPanelBorders = edges != panelNoBorders();
+    applyPanelBorderStyle();
+}
+
 int NavigableTableView::navigationScrollPadding() const
 {
     return m_navigationScrollPadding;
@@ -114,6 +121,7 @@ void NavigableTableView::refreshInactiveHighlight()
 void NavigableTableView::refreshTheme()
 {
     refreshInactiveHighlight();
+    applyPanelBorderStyle(true);
     refreshWidgetTheme(this);
     refreshWidgetTheme(viewport());
     refreshWidgetTheme(horizontalHeader());
@@ -229,6 +237,33 @@ void NavigableTableView::updateRow(const QModelIndex &index)
     if (rect.isValid()) {
         viewport()->update(QRect(0, rect.top(), viewport()->width(), rect.height()));
     }
+}
+
+void NavigableTableView::applyPanelBorderStyle(bool force)
+{
+    if (m_restylingPanelBorders) {
+        return;
+    }
+
+    m_restylingPanelBorders = true;
+    if (!m_hasPanelBorders) {
+        if (m_panelBorderStyleApplied) {
+            setStyleSheet(QString());
+            m_panelBorderStyleApplied = false;
+        }
+        m_restylingPanelBorders = false;
+        return;
+    }
+
+    const QString style = panelBorderStyleSheet(QStringLiteral("QTableView"), m_panelBorders, this);
+    if (force && styleSheet() == style) {
+        setStyleSheet(QString());
+    }
+    if (styleSheet() != style) {
+        setStyleSheet(style);
+    }
+    m_panelBorderStyleApplied = true;
+    m_restylingPanelBorders = false;
 }
 
 void NavigableTableView::refreshWidgetTheme(QWidget *widget)

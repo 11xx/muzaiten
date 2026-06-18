@@ -16,25 +16,42 @@
 #include <vector>
 
 struct PanelBorderEdges {
-    bool top = false;
-    bool right = false;
-    bool bottom = false;
-    bool left = false;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    int left = 0;
+
+    constexpr bool operator==(const PanelBorderEdges &) const = default;
 };
 
-inline constexpr PanelBorderEdges panelTopBorder()
+inline constexpr PanelBorderEdges panelNoBorders()
 {
-    return PanelBorderEdges{true, false, false, false};
+    return PanelBorderEdges{};
 }
 
-inline constexpr PanelBorderEdges panelBottomBorder()
+inline constexpr PanelBorderEdges panelBorders(int top, int right, int bottom, int left)
 {
-    return PanelBorderEdges{false, false, true, false};
+    return PanelBorderEdges{top, right, bottom, left};
 }
 
-inline constexpr PanelBorderEdges panelAllBorders()
+inline constexpr PanelBorderEdges panelTopBorder(int width = 1)
 {
-    return PanelBorderEdges{true, true, true, true};
+    return PanelBorderEdges{width, 0, 0, 0};
+}
+
+inline constexpr PanelBorderEdges panelBottomBorder(int width = 1)
+{
+    return PanelBorderEdges{0, 0, width, 0};
+}
+
+inline constexpr PanelBorderEdges panelHorizontalBorders(int width = 1)
+{
+    return PanelBorderEdges{width, 0, width, 0};
+}
+
+inline constexpr PanelBorderEdges panelAllBorders(int width = 1)
+{
+    return PanelBorderEdges{width, width, width, width};
 }
 
 // Sample the native separator color the same way a real QFrame::HLine renders
@@ -107,8 +124,8 @@ inline QString panelBorderStyleSheet(const QString &selector,
         .arg(selector,
              extraDeclarations,
              panelSeparatorColorCss(widget),
-             QString::number(edges.top ? 1 : 0),
-             QString::number(edges.right ? 1 : 0),
-             QString::number(edges.bottom ? 1 : 0),
-             QString::number(edges.left ? 1 : 0));
+             QString::number(std::max(0, edges.top)),
+             QString::number(std::max(0, edges.right)),
+             QString::number(std::max(0, edges.bottom)),
+             QString::number(std::max(0, edges.left)));
 }
