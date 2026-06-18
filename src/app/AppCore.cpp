@@ -179,6 +179,7 @@ ListenHistoryStore *AppCore::listenHistory() const { return m_listenHistory.get(
 ListenTracker *AppCore::listenTracker() const { return m_listenTracker; }
 MprisService *AppCore::mpris() const { return m_mpris; }
 IpcServer *AppCore::ipc() const { return m_ipc; }
+MainWindow *AppCore::window() const { return m_window; }
 ListenBrainzScrobbler *AppCore::listenBrainzScrobbler() const { return m_listenBrainzScrobbler; }
 LastFmScrobbler *AppCore::lastFmScrobbler() const { return m_lastFmScrobbler; }
 QThread *AppCore::listenBrainzThread() const { return m_listenBrainzThread; }

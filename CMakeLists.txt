@@ -49,6 +49,7 @@ set(MUZAITEN_SOURCES
     src/app/main.cpp
     src/app/AppCore.cpp
     src/app/AppPaths.cpp
+    src/app/DemoScreens.cpp
     src/app/MuzaitenApplication.cpp
     src/core/HumanQuantity.cpp
     src/core/MetadataBlob.cpp
@@ -149,6 +150,7 @@ set(MUZAITEN_SOURCES
 set(MUZAITEN_HEADERS
     src/app/AppCore.h
     src/app/AppPaths.h
+    src/app/DemoScreens.h
     src/app/MuzaitenApplication.h
     src/core/Album.h
     src/core/Artist.h

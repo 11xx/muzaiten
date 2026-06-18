@@ -39,6 +39,7 @@ public:
     ListenTracker       *listenTracker() const;
     MprisService        *mpris() const;
     IpcServer           *ipc() const;
+    MainWindow          *window() const;
 
     ListenBrainzScrobbler *listenBrainzScrobbler() const;
     LastFmScrobbler       *lastFmScrobbler() const;
