@@ -121,7 +121,7 @@ private slots:
         QCOMPARE(saved.value(QStringLiteral("selectorDateFormat")).toString(), QStringLiteral("yyyy/MM/dd HH:mm"));
     }
 
-    void ratingColumnIsVisibleAndRightmostByDefault()
+    void ratingColumnIsHiddenByDefault()
     {
         PlaylistView view;
         auto *table = view.findChild<QTableView *>();
@@ -130,7 +130,7 @@ private slots:
         QVERIFY(header != nullptr);
 
         QCOMPARE(table->model()->headerData(5, Qt::Horizontal, Qt::DisplayRole).toString(), QStringLiteral("Rating"));
-        QVERIFY(!header->isSectionHidden(5));
+        QVERIFY(header->isSectionHidden(5));
         QCOMPARE(header->visualIndex(5), header->count() - 1);
     }
 };

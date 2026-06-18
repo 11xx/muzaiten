@@ -61,7 +61,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 0);
     m_splitter->setStretchFactor(2, 0);
-    m_splitter->setSizes({420, 150, 240});
+    m_splitter->setSizes({519, 152, 286});
     setTrackInfo({});
 
     connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
@@ -265,7 +265,7 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
 void RightSidebar::resetViewSettings()
 {
     m_queueTable->resetViewSettings();
-    m_splitter->setSizes({420, 150, 240});
+    m_splitter->setSizes({519, 152, 286});
     setTrackInfoVisible(true);
     m_trackInfoPanel->resetToDefaults();
     emit viewSettingsChanged();
