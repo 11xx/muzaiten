@@ -6,6 +6,7 @@
 #include "ui/NavigableTableView.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/PanelBorderStyle.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/SelectionColors.h"
@@ -542,6 +543,8 @@ PlaylistView::PlaylistView(QWidget *parent)
     layout->addWidget(m_splitter, 1);
 
     m_playlistList = new QListWidget(m_splitter);
+    m_playlistList->setObjectName(QStringLiteral("PlaylistList"));
+    m_playlistList->setStyleSheet(panelBorderStyleSheet(QStringLiteral("QListWidget#PlaylistList"), panelTopBorder(), m_playlistList));
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setItemDelegate(new PlaylistListDelegate(this));
@@ -552,6 +555,8 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     m_itemModel = new PlaylistItemTableModel(this);
     m_itemTable = new NavigableTableView(m_splitter);
+    m_itemTable->setObjectName(QStringLiteral("PlaylistItemTable"));
+    m_itemTable->setStyleSheet(panelBorderStyleSheet(QStringLiteral("NavigableTableView#PlaylistItemTable"), panelTopBorder(), m_itemTable));
     m_itemTable->setModel(m_itemModel);
     m_itemTable->setItemDelegate(new DenseTableDelegate(this));
     m_ratingDelegate = new StarRatingDelegate(this);

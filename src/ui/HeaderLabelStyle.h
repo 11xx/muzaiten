@@ -1,12 +1,14 @@
 #pragma once
 
-#include <QHeaderView>
 #include <QApplication>
 #include <QBrush>
 #include <QFont>
+#include <QHeaderView>
 #include <QPalette>
 #include <QString>
 #include <QVariant>
+
+#include "ui/PanelBorderStyle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -74,7 +76,7 @@ inline QVariant headerLabelStyleData(int role, const HeaderLabelStyle &style)
     }
 }
 
-inline QString headerViewStyleSheet(const HeaderViewStyle &style)
+inline QString headerViewStyleSheet(const HeaderViewStyle &style, const QWidget *header)
 {
     if (style.bottomBorderVisible) {
         return {};
@@ -88,9 +90,14 @@ inline QString headerViewStyleSheet(const HeaderViewStyle &style)
         "  background: palette(button);"
         "  border-style: solid;"
         "  border-width: 0 1px 0 0;"
-        "  border-color: palette(light);"
+        "  border-color: %1;"
         "  padding: 0 4px;"
-        "}");
+        "}").arg(panelSeparatorColorCss(header));
+}
+
+inline QString headerViewStyleSheet(const HeaderViewStyle &style)
+{
+    return headerViewStyleSheet(style, nullptr);
 }
 
 inline void applyHeaderViewStyle(QHeaderView *header, const HeaderViewStyle &style)
@@ -99,5 +106,5 @@ inline void applyHeaderViewStyle(QHeaderView *header, const HeaderViewStyle &sty
         return;
     }
 
-    header->setStyleSheet(headerViewStyleSheet(style));
+    header->setStyleSheet(headerViewStyleSheet(style, header));
 }

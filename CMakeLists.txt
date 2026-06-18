@@ -234,6 +234,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlayerBar.h
     src/ui/PlaylistAddDialog.h
     src/ui/HeaderLabelStyle.h
+    src/ui/PanelBorderStyle.h
     src/ui/PlaylistImportDialog.h
     src/ui/PlaylistView.h
     src/ui/QueueKeybindings.h

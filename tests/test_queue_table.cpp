@@ -77,7 +77,7 @@ private slots:
         const QVariant brushValue = view->model()->headerData(1, Qt::Horizontal, Qt::ForegroundRole);
         QVERIFY(brushValue.isValid());
         QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
-        QCOMPARE(view->horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle));
+        QCOMPARE(view->horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle, view->horizontalHeader()));
     }
 
     void displayDataUsesQueueColumnSemantics()
