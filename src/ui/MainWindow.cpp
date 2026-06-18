@@ -127,9 +127,8 @@ QString mainArtistSidebarStyleSheet(const QWidget *widget)
 QString mainCenterFrameStyleSheet(const QWidget *widget)
 {
     return panelBorderStyleSheet(QStringLiteral("QSplitter#MainCenterFrame"),
-                                 panelHorizontalBorders(),
-                                 widget,
-                                 QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius));
+                                 panelTopBorder(),
+                                 widget);
 }
 
 QString mainAlbumGridStyleSheet(const QWidget *widget)

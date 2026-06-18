@@ -4,7 +4,6 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/SelectionColors.h"
-#include "ui/UiMetrics.h"
 
 #include <QAction>
 #include <QApplication>
@@ -107,8 +106,7 @@ QString artistListStyleSheet(const QWidget *widget)
     return panelBorderStyleSheet(
         QStringLiteral("QListView#ArtistList"),
         panelAllBorders(),
-        widget,
-        QStringLiteral(" border-radius: %1px;").arg(kAlbumGridSelectionRadius));
+        widget);
 }
 
 } // namespace
