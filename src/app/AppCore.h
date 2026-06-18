@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Track.h"
+
 #include <QJsonObject>
 #include <QObject>
 #include <memory>
@@ -19,7 +21,6 @@ class PlaylistDatabase;
 class QSystemTrayIcon;
 class QThread;
 class SettingsStore;
-struct Track;
 
 class AppCore final : public QObject {
     Q_OBJECT
