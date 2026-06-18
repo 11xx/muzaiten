@@ -128,7 +128,7 @@ QString mainAlbumGridStyleSheet(const QWidget *widget)
 {
     return panelBorderStyleSheet(
         QStringLiteral("AlbumGrid#MainAlbumGrid"),
-        panelTopBorder(),
+        panelHorizontalBorders(),
         widget,
         QStringLiteral(" border-top-left-radius: %1px; border-top-right-radius: %1px;").arg(kAlbumGridSelectionRadius));
 }
@@ -706,6 +706,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_albumGrid->setObjectName(QStringLiteral("MainAlbumGrid"));
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
+    m_trackTable->setPanelBorders(panelBorders(1, 2, 2, 2));
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
     m_centerSplitter->setStretchFactor(0, 55);
     m_centerSplitter->setStretchFactor(1, 45);
