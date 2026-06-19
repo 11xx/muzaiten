@@ -15,7 +15,13 @@ The JSONL contract is [documented here](../../docs/playlist-import-jsonl.md).
   ISO-8601 timestamp. Empty or invalid source dates remain absent rather than
   being replaced with conversion time.
 - Rdio CSV exports: comma-delimited `Name`, `Artist`, `Album`, and `Track Number`
-  columns.
+  columns. A matching Rdio XSPF sidecar is used only after its ordered
+  title/artist sequence exactly matches the CSV; it supplies ISRCs and durations.
+  XSPF durations are milliseconds. Values that are implausibly long but exactly
+  1,000× a plausible 1-second-to-2-hour track duration are repaired; other
+  implausible values are omitted and reported.
+- SoundCloud CSV exports: a matching XML sidecar can supply numeric track IDs,
+  retained as `soundcloud:<id>` external identifiers.
 
 It recursively discovers CSVs, skips known metadata files, and writes one JSONL
 file per non-empty playlist. Every output begins with a playlist header followed
@@ -34,6 +40,9 @@ When the filename does not carry a plausible `playlistCSV<epoch>` suffix, the
 second line is instead `File modified: … UTC (filesystem timestamp)`. That is
 only provenance for the exported file, never a claimed playlist creation date.
 The converter does not synthesize per-item comments.
+When a verified sidecar contributes metadata, the header appends a
+`Supplemented by: <filename>` provenance line. Unpaired XSPF/XML files are not
+emitted as duplicate playlists.
 
 ## Usage
 
@@ -53,6 +62,19 @@ python3 tools/playlist-import/convert.py \
   --src ./exports \
   --out ./converted-playlists
 ```
+
+Soundiiz exports commonly use timezone-less `addedDate` values. To preserve
+them, declare their source timezone explicitly; otherwise they remain absent:
+
+```sh
+python3 tools/playlist-import/convert.py \
+  --src ./exports \
+  --out ./converted-playlists \
+  --naive-timezone America/Sao_Paulo
+```
+
+The timezone must be an IANA name. Nonexistent local times are omitted; repeated
+local times use the earlier UTC offset.
 
 Review the generated files before importing them through the playlist-import
 dialog. Re-running against the same output directory overwrites same-named

@@ -110,6 +110,15 @@ If no plausible `playlistCSV<epoch>` suffix exists, use `File modified: … UTC
 playlist creation date. Import only fills a playlist comment when it is empty;
 an existing non-empty playlist comment is never overwritten.
 
+### Rdio export archive
+
+Rdio CSVs preserve the canonical source sequence. A converter may enrich an
+exactly order-matched Rdio XSPF sidecar with a valid ISRC and duration. XSPF
+defines `<duration>` in milliseconds, but it is only a hint; malformed values
+are omitted. A source-specific converter may repair an exact 1,000× outlier
+only when the corrected value is a plausible one-second-to-two-hour track
+duration. Sidecar provenance belongs in the playlist header comment.
+
 ### m3u / m3u8
 
 `#EXTINF:<seconds>,Artist - Title` followed by a path line maps to `directPath`
