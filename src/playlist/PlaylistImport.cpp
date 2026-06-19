@@ -2,6 +2,9 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QRegularExpression>
 #include <QTextStream>
 
@@ -193,11 +196,83 @@ QVector<ImportEntry> parseCsv(const QString &text)
     return entries;
 }
 
+// Coerce a JSON value to a duration in milliseconds (accepts a number or a numeric
+// string; negative/invalid → 0).
+qint64 jsonDurationMs(const QJsonValue &value)
+{
+    qint64 ms = 0;
+    if (value.isDouble()) {
+        ms = static_cast<qint64>(value.toDouble());
+    } else if (value.isString()) {
+        ms = value.toString().toLongLong();
+    }
+    return ms > 0 ? ms : 0;
+}
+
+// JSONL (docs/playlist-import-jsonl.md): one JSON object per line. Blank lines and
+// '#'-comment lines are ignored; a malformed line is skipped (never aborts). The
+// first content line may be a {"playlist":{…}} header (reported via outHeader).
+QVector<ImportEntry> parseJsonl(const QString &text, ImportHeader *outHeader)
+{
+    QVector<ImportEntry> entries;
+    bool headerEligible = true;  // only the first content line may be the header
+    for (const QString &raw : text.split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#'))) {
+            continue;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8());
+        if (!doc.isObject()) {
+            headerEligible = false;  // a content line, just unusable
+            continue;
+        }
+        const QJsonObject obj = doc.object();
+
+        if (headerEligible && obj.size() == 1 && obj.value(QStringLiteral("playlist")).isObject()) {
+            const QJsonObject pl = obj.value(QStringLiteral("playlist")).toObject();
+            if (outHeader != nullptr) {
+                outHeader->present = true;
+                outHeader->name = pl.value(QStringLiteral("name")).toString().trimmed();
+                outHeader->comment = pl.value(QStringLiteral("comment")).toString().trimmed();
+            }
+            headerEligible = false;
+            continue;
+        }
+        headerEligible = false;
+
+        ImportEntry entry;
+        entry.rawLine = line;
+        entry.title = obj.value(QStringLiteral("title")).toString().trimmed();
+        entry.artist = obj.value(QStringLiteral("artist")).toString().trimmed();
+        entry.album = obj.value(QStringLiteral("album")).toString().trimmed();
+        entry.directPath = obj.value(QStringLiteral("directPath")).toString().trimmed();
+        entry.externalId = obj.value(QStringLiteral("externalId")).toString().trimmed();
+        entry.comment = obj.value(QStringLiteral("comment")).toString().trimmed();
+        entry.durationMs = jsonDurationMs(obj.value(QStringLiteral("durationMs")));
+        if (entry.title.isEmpty() && entry.directPath.isEmpty()) {
+            continue;  // nothing to match on
+        }
+        entries.append(entry);
+    }
+    return entries;
+}
+
 Format detectFormat(const QString &text)
 {
     const QString head = text.left(4096).trimmed();
     if (head.startsWith(QStringLiteral("#EXTM3U")) || head.contains(QStringLiteral("#EXTINF:"))) {
         return Format::M3U;
+    }
+    // First content line (skipping blanks and '#' comments) starting with '{' → JSONL.
+    for (const QString &raw : head.split(QLatin1Char('\n'))) {
+        const QString t = raw.trimmed();
+        if (t.isEmpty() || t.startsWith(QLatin1Char('#'))) {
+            continue;
+        }
+        if (t.startsWith(QLatin1Char('{'))) {
+            return Format::Jsonl;
+        }
+        break;  // first real line isn't a JSON object
     }
     const QString firstLine = head.section(QLatin1Char('\n'), 0, 0).toLower();
     if (firstLine.contains(QLatin1Char(','))
@@ -230,14 +305,19 @@ ImportEntry parseLine(const QString &line)
     return entry;
 }
 
-QVector<ImportEntry> parse(const QString &text, Format format)
+QVector<ImportEntry> parse(const QString &text, Format format, ImportHeader *outHeader)
 {
+    if (outHeader != nullptr) {
+        *outHeader = ImportHeader{};
+    }
     if (format == Format::Auto) {
         format = detectFormat(text);
     }
     switch (format) {
     case Format::M3U:
         return parseM3u(text);
+    case Format::Jsonl:
+        return parseJsonl(text, outHeader);
     case Format::Csv: {
         QVector<ImportEntry> entries = parseCsv(text);
         // A "csv" without a usable header degrades to plain text.
@@ -250,7 +330,7 @@ QVector<ImportEntry> parse(const QString &text, Format format)
     return parsePlainText(text);
 }
 
-QVector<ImportEntry> parseFile(const QString &filePath, QString *errorOut)
+QVector<ImportEntry> parseFile(const QString &filePath, QString *errorOut, ImportHeader *outHeader)
 {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -268,8 +348,10 @@ QVector<ImportEntry> parseFile(const QString &filePath, QString *errorOut)
         format = Format::M3U;
     } else if (ext == QStringLiteral("csv")) {
         format = Format::Csv;
+    } else if (ext == QStringLiteral("jsonl") || ext == QStringLiteral("ndjson")) {
+        format = Format::Jsonl;
     }
-    return parse(text, format);
+    return parse(text, format, outHeader);
 }
 
 QString normalizeForMatch(const QString &text)
