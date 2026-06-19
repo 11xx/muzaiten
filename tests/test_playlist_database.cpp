@@ -13,6 +13,7 @@ private slots:
     void itemOrderingAndRemoval();
     void reorderItems();
     void updateItemFields();
+    void addedAtRoundTrips();
     void markItemsMissingKeepsPlaylistRows();
     void candidatesRoundTripAndV1Migration();
     void externalIdRoundTripAndV2Migration();
@@ -125,6 +126,20 @@ void TestPlaylistDatabase::updateItemFields()
     QCOMPARE(reloaded.comment, QStringLiteral("from youtube"));
     QCOMPARE(reloaded.query, QStringLiteral("new query"));
     QCOMPARE(reloaded.status, PlaylistItemStatus::Pending);
+}
+
+void TestPlaylistDatabase::addedAtRoundTrips()
+{
+    QTemporaryDir dir;
+    PlaylistDatabase db(QStringLiteral("pl-test-added-at"));
+    QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+    const qint64 id = db.createPlaylist(QStringLiteral("Imported"));
+
+    PlaylistItem item = makeItem(QStringLiteral("/a.flac"), QStringLiteral("A"));
+    item.addedAt = 1604954896;
+    QVERIFY(db.addItem(id, item) > 0);
+
+    QCOMPARE(db.items(id).first().addedAt, qint64(1604954896));
 }
 
 void TestPlaylistDatabase::markItemsMissingKeepsPlaylistRows()
