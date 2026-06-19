@@ -3,6 +3,7 @@
 #include "core/Artist.h"
 #include "ui/OverlayScrollBar.h"
 #include "ui/PanelBorderStyle.h"
+#include "ui/RowHeightWheel.h"
 #include "ui/SelectionColors.h"
 
 #include <QAction>
@@ -388,12 +389,11 @@ bool ArtistSidebar::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
         auto *wheel = static_cast<QWheelEvent *>(event);
-        if (wheel->modifiers() & Qt::ControlModifier) {
-            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
-            m_rowHeight = std::clamp(m_rowHeight + step, 18, 40);
-            applyRowHeight();
-            emit viewSettingsChanged();
-            wheel->accept();
+        if (ui::applyCtrlWheelRowHeight(wheel, m_rowHeight, 18, 40, [this](int h) {
+                m_rowHeight = h;
+                applyRowHeight();
+                emit viewSettingsChanged();
+            })) {
             return true;
         }
     }

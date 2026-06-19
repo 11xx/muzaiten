@@ -9,6 +9,7 @@
 #include "ui/PanelBorderStyle.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
+#include "ui/RowHeightWheel.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -1979,22 +1980,21 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     }
     if (event->type() == QEvent::Wheel) {
         auto *wheel = static_cast<QWheelEvent *>(event);
-        if (wheel->modifiers() & Qt::ControlModifier) {
-            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
-            if (playlistListWatched) {
-                m_playlistRowHeight = std::clamp(m_playlistRowHeight + step, 18, 48);
-                applyPlaylistRowHeights();
-                emit viewSettingsChanged();
-                wheel->accept();
-                return true;
-            }
-            if (itemTableWatched) {
-                const int rowHeight = std::clamp(m_itemTable->verticalHeader()->defaultSectionSize() + step, 20, 48);
-                m_itemTable->verticalHeader()->setDefaultSectionSize(rowHeight);
-                emit viewSettingsChanged();
-                wheel->accept();
-                return true;
-            }
+        if (playlistListWatched
+            && ui::applyCtrlWheelRowHeight(wheel, m_playlistRowHeight, 18, 48, [this](int h) {
+                   m_playlistRowHeight = h;
+                   applyPlaylistRowHeights();
+                   emit viewSettingsChanged();
+               })) {
+            return true;
+        }
+        if (itemTableWatched
+            && ui::applyCtrlWheelRowHeight(wheel, m_itemTable->verticalHeader()->defaultSectionSize(), 20, 48,
+                   [this](int h) {
+                       m_itemTable->verticalHeader()->setDefaultSectionSize(h);
+                       emit viewSettingsChanged();
+                   })) {
+            return true;
         }
     }
     if (playlistListWatched && event->type() == QEvent::Resize) {

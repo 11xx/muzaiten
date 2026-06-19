@@ -10,6 +10,7 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
+#include "ui/RowHeightWheel.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 
@@ -1051,12 +1052,10 @@ void TrackTable::setCurrentTrackMarked(bool marked)
 
 void TrackTable::wheelEvent(QWheelEvent *event)
 {
-    if (event->modifiers() & Qt::ControlModifier) {
-        const int step = event->angleDelta().y() > 0 ? 2 : -2;
-        const int rowHeight = std::clamp(verticalHeader()->defaultSectionSize() + step, 20, 48);
-        verticalHeader()->setDefaultSectionSize(rowHeight);
-        emit viewSettingsChanged();
-        event->accept();
+    if (ui::applyCtrlWheelRowHeight(event, verticalHeader()->defaultSectionSize(), 20, 48, [this](int h) {
+            verticalHeader()->setDefaultSectionSize(h);
+            emit viewSettingsChanged();
+        })) {
         return;
     }
     QTableView::wheelEvent(event);
