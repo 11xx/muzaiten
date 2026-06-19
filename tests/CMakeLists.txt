@@ -378,6 +378,11 @@ target_link_libraries(test_playlist_import PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_playlist_import PRIVATE cxx_std_26)
 add_test(NAME test_playlist_import COMMAND test_playlist_import)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME test_playlist_converter
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_playlist_converter.py
+            ${CMAKE_SOURCE_DIR}/tools/playlist-import/convert.py)
+
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp
     ../src/ui/KeybindingsDialog.cpp
