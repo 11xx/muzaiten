@@ -3,6 +3,7 @@
 #include "playlist/import/YouTubeImport.h"
 
 #include <QColor>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QFileDialog>
@@ -154,7 +155,7 @@ void PlaylistImportDialog::loadFile()
 {
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("Import playlist file"), QString(),
-        QStringLiteral("Playlists (*.m3u *.m3u8 *.csv *.txt);;All files (*)"));
+        QStringLiteral("Playlists (*.jsonl *.ndjson *.m3u *.m3u8 *.csv *.txt);;All files (*)"));
     if (path.isEmpty()) {
         return;
     }
@@ -223,7 +224,8 @@ void PlaylistImportDialog::runMatch()
     if (m_matching) {
         return;
     }
-    const auto entries = PlaylistImport::parse(m_input->toPlainText());
+    const auto entries = PlaylistImport::parse(m_input->toPlainText(),
+                                               PlaylistImport::Format::Auto, &m_header);
     if (entries.isEmpty()) {
         m_status->setText(QStringLiteral("Nothing to match."));
         return;
@@ -259,10 +261,24 @@ void PlaylistImportDialog::onError(const QString &message)
     m_status->setText(QStringLiteral("Import error: %1").arg(message));
 }
 
+QHash<int, QString> PlaylistImportDialog::resolvedPaths() const
+{
+    QHash<int, QString> out;
+    for (auto it = m_resolvers.cbegin(); it != m_resolvers.cend(); ++it) {
+        const QString path = it.value()->currentData().toString();
+        if (!path.isEmpty()) {
+            out.insert(it.key(), path);
+        }
+    }
+    return out;
+}
+
 void PlaylistImportDialog::rebuildPreview()
 {
     m_preview->setRowCount(0);
-    for (const PlaylistImportMatch &match : m_results) {
+    m_resolvers.clear();
+    for (int i = 0; i < m_results.size(); ++i) {
+        const PlaylistImportMatch &match = m_results.at(i);
         const int row = m_preview->rowCount();
         m_preview->insertRow(row);
 
@@ -280,12 +296,10 @@ void PlaylistImportDialog::rebuildPreview()
         case PlaylistMatcher::Decision::Approximate:
             title = match.outcome.best.title;
             artist = match.outcome.best.artistName;
-            resolved = QStringLiteral("%1  (~%2%)")
-                           .arg(match.outcome.best.path).arg(match.outcome.confidence0To100);
+            statusItem->setText(QStringLiteral("approx ~%1%").arg(match.outcome.confidence0To100));
             statusItem->setForeground(QColor(0xff, 0xa7, 0x26));
             break;
         case PlaylistMatcher::Decision::MultiMatch:
-            resolved = QStringLiteral("%1 candidates").arg(match.outcome.candidatePaths.size());
             statusItem->setForeground(QColor(0xff, 0xb7, 0x4d));
             break;
         case PlaylistMatcher::Decision::Pending:
@@ -295,7 +309,21 @@ void PlaylistImportDialog::rebuildPreview()
         m_preview->setItem(row, 0, statusItem);
         m_preview->setItem(row, 1, readOnlyItem(title));
         m_preview->setItem(row, 2, readOnlyItem(artist));
-        m_preview->setItem(row, 3, readOnlyItem(resolved));
+
+        // Rows with candidates (MultiMatch / Approximate) get a triage picker:
+        // leave as-is, or resolve to one of the close candidates before committing.
+        if (!match.outcome.candidatePaths.isEmpty()) {
+            auto *combo = new QComboBox(m_preview);
+            combo->addItem(QStringLiteral("(keep %1)").arg(decisionLabel(match.outcome.decision)),
+                           QString());
+            for (const QString &candidate : match.outcome.candidatePaths) {
+                combo->addItem(candidate, candidate);
+            }
+            m_preview->setCellWidget(row, 3, combo);
+            m_resolvers.insert(i, combo);
+        } else {
+            m_preview->setItem(row, 3, readOnlyItem(resolved));
+        }
     }
     m_preview->resizeColumnToContents(0);
 }
@@ -311,7 +339,10 @@ void PlaylistImportDialog::updateSummary()
         case PlaylistMatcher::Decision::Pending:     ++pending; break;
         }
     }
-    m_status->setText(QStringLiteral("%1 matched · %2 approx · %3 multi · %4 pending — Add inserts "
-                                     "all (approx/multi/pending stay editable via 'e').")
-                          .arg(matched).arg(approx).arg(multi).arg(pending));
+    const QString headerNote = m_header.present && !m_header.name.isEmpty()
+        ? QStringLiteral("playlist \"%1\" · ").arg(m_header.name)
+        : QString();
+    m_status->setText(QStringLiteral("%1%2 matched · %3 approx · %4 multi · %5 pending — pick a "
+                                     "candidate to resolve a row; Add inserts all.")
+                          .arg(headerNote).arg(matched).arg(approx).arg(multi).arg(pending));
 }
