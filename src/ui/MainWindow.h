@@ -66,6 +66,8 @@ public:
     // before the widget tree is destroyed.
     void persistViewState();
     bool showDemoArtist(const QString &artistName);
+    bool showDemoAlbum(const QString &artistName, const QString &albumTitle, QString *error = nullptr);
+    bool showDemoNowPlaying(const QString &query, bool playing, double positionRatio, QString *error = nullptr);
 
 protected:
     void closeEvent(QCloseEvent *event) override;

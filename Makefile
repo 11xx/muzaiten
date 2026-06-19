@@ -24,10 +24,16 @@ MUZAITEN_LASTFM_API_KEY    ?=
 MUZAITEN_LASTFM_SHARED_SECRET ?=
 APP := $(BUILD_DIR)/muzaiten
 DEMO_SCREEN_DIR            ?= $(CURDIR)/demo-screens
+DEMO_THEMES                ?= light dark
+DEMO_SIZE                  ?= 1440x900
 DEMO_SEARCH                ?=
 DEMO_SEARCH_VIDEO          ?= 1
 DEMO_SEARCH_DELAY_MS       ?= 120
 DEMO_ARTIST                ?=
+DEMO_ALBUM                 ?=
+DEMO_NOW_PLAYING           ?=
+DEMO_NOW_PLAYING_STATE     ?= paused
+DEMO_NOW_PLAYING_POSITION  ?= 0.6667
 
 help:
 	@printf '%s\n' \
@@ -50,10 +56,16 @@ help:
 		'  CMAKE_BUILD_TYPE=Release' \
 		'  PREFIX=/usr            (install prefix; default ~/.local, no sudo)' \
 		'  DEMO_SCREEN_DIR=demo-screens' \
+		'  DEMO_THEMES="light dark"' \
+		'  DEMO_SIZE=1440x900' \
 		'  DEMO_SEARCH="artist:example"' \
 		'  DEMO_SEARCH_VIDEO=1' \
 		'  DEMO_SEARCH_DELAY_MS=120' \
 		'  DEMO_ARTIST="Rainbow"' \
+		'  DEMO_ALBUM="Rising"' \
+		'  DEMO_NOW_PLAYING="stargazer rainbow"' \
+		'  DEMO_NOW_PLAYING_STATE=paused' \
+		'  DEMO_NOW_PLAYING_POSITION=0.6667' \
 		'  MUZAITEN_LASTFM_API_KEY=...' \
 		'  MUZAITEN_LASTFM_SHARED_SECRET=...'
 
@@ -120,12 +132,20 @@ demo-screens: build
 	if [ -f "$$state_home/muzaiten/state.sqlite" ]; then cp "$$state_home/muzaiten/state.sqlite" "$$tmp_state/state/"; fi; \
 	if [ -f "$$cache_home/muzaiten/artwork.sqlite" ]; then cp "$$cache_home/muzaiten/artwork.sqlite" "$$tmp_state/cache/"; fi; \
 	mkdir -p "$(DEMO_SCREEN_DIR)"; \
+	theme_args=""; \
+	for theme in $(DEMO_THEMES); do theme_args="$$theme_args --demo-theme $$theme"; done; \
 	env "QT_QPA_PLATFORM=offscreen" "MUZAITEN_STATE_ROOT=$$tmp_state" \
 		./$(APP) --demo-screens "$(DEMO_SCREEN_DIR)" \
+		$$theme_args \
+		--demo-size "$(DEMO_SIZE)" \
 		$(if $(DEMO_SEARCH),--demo-search "$(DEMO_SEARCH)") \
 		$(if $(filter-out 0 false no,$(DEMO_SEARCH_VIDEO)),--demo-search-video) \
 		--demo-search-delay-ms "$(DEMO_SEARCH_DELAY_MS)" \
-		$(if $(DEMO_ARTIST),--demo-artist "$(DEMO_ARTIST)")
+		$(if $(DEMO_ARTIST),--demo-artist "$(DEMO_ARTIST)") \
+		$(if $(DEMO_ALBUM),--demo-album "$(DEMO_ALBUM)") \
+		$(if $(DEMO_NOW_PLAYING),--demo-now-playing "$(DEMO_NOW_PLAYING)") \
+		--demo-now-playing-state "$(DEMO_NOW_PLAYING_STATE)" \
+		--demo-now-playing-position "$(DEMO_NOW_PLAYING_POSITION)"
 
 # Installs the existing build. Run `make build` (optionally with
 # CMAKE_BUILD_TYPE=Release) first. Defaults to the user-space ~/.local prefix

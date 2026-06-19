@@ -63,6 +63,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QEvent>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QCheckBox>
@@ -85,6 +86,7 @@
 #include <QCloseEvent>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QShortcut>
 #include <QSet>
 #include <QSplitter>
@@ -2757,6 +2759,75 @@ bool MainWindow::showDemoArtist(const QString &artistName)
         return false;
     }
     showArtist(artistName, /*forceReload=*/true, /*clearAlbumSelectionOnArtistChange=*/true);
+    return true;
+}
+
+bool MainWindow::showDemoAlbum(const QString &artistName, const QString &albumTitle, QString *error)
+{
+    if (!showDemoArtist(artistName)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("artist not found for demo capture: %1").arg(artistName);
+        }
+        return false;
+    }
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    if (!m_albumGrid->selectAlbumTitleForDemo(albumTitle)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("album not found for demo capture: %1 - %2").arg(artistName, albumTitle);
+        }
+        return false;
+    }
+    m_trackTable->setFocus(Qt::OtherFocusReason);
+    return true;
+}
+
+bool MainWindow::showDemoNowPlaying(const QString &query, bool playing, double positionRatio, QString *error)
+{
+    const QString needle = query.trimmed();
+    if (needle.isEmpty()) {
+        return true;
+    }
+
+    Track track = m_database->trackForPath(needle);
+    if (track.path.isEmpty()) {
+        const QVector<Track> matches = m_database->searchTracksLike(needle, 1);
+        if (!matches.isEmpty()) {
+            track = matches.first();
+        }
+    }
+    if (track.path.isEmpty()) {
+        const QStringList terms = needle.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if (!terms.isEmpty()) {
+            const QVector<Track> candidates = m_database->searchTracksLike(terms.first(), 100);
+            for (const Track &candidate : candidates) {
+                const QString haystack = QStringLiteral("%1 %2 %3 %4")
+                                             .arg(candidate.title,
+                                                  candidate.artistName,
+                                                  candidate.albumArtistName,
+                                                  candidate.albumTitle)
+                                             .toCaseFolded();
+                const bool allTermsMatch = std::ranges::all_of(terms, [&haystack](const QString &term) {
+                    return haystack.contains(term.toCaseFolded());
+                });
+                if (allTermsMatch) {
+                    track = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    if (track.path.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("track not found for demo now-playing query: %1").arg(query);
+        }
+        return false;
+    }
+
+    m_player->presentTrack(track);
+    const qint64 durationMs = std::max<qint64>(0, track.durationMs);
+    const double safeRatio = std::clamp(positionRatio, 0.0, 1.0);
+    m_playerBar->setPosition(static_cast<qint64>(std::llround(static_cast<double>(durationMs) * safeRatio)), durationMs);
+    m_playerBar->setPlaying(playing);
     return true;
 }
 

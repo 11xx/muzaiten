@@ -49,6 +49,23 @@ private:
     bool m_verbose = false;
 };
 
+QSize parseDemoSize(const QString &value)
+{
+    const QString normalized = value.trimmed().toLower();
+    const QStringList parts = normalized.split(QLatin1Char('x'));
+    if (parts.size() != 2) {
+        return QSize(1440, 900);
+    }
+    bool widthOk = false;
+    bool heightOk = false;
+    const int width = parts.at(0).toInt(&widthOk);
+    const int height = parts.at(1).toInt(&heightOk);
+    if (!widthOk || !heightOk || width < 800 || height < 500) {
+        return QSize(1440, 900);
+    }
+    return QSize(width, height);
+}
+
 } // namespace
 
 MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
@@ -110,8 +127,14 @@ int MuzaitenApplication::run()
             options.outputDir = demoScreensDir;
             options.searchQuery = property("muzaiten.demoSearch").toString();
             options.artistName = property("muzaiten.demoArtist").toString();
+            options.albumTitle = property("muzaiten.demoAlbum").toString();
+            options.nowPlayingQuery = property("muzaiten.demoNowPlaying").toString();
+            options.colorSchemes = property("muzaiten.demoThemes").toStringList();
+            options.windowSize = property("muzaiten.demoSize").toSize();
+            options.nowPlaying = property("muzaiten.demoNowPlayingState").toString() == QStringLiteral("playing");
             options.searchVideo = property("muzaiten.demoSearchVideo").toBool();
             options.searchKeyDelayMs = property("muzaiten.demoSearchDelayMs").toInt();
+            options.nowPlayingPositionRatio = property("muzaiten.demoNowPlayingPosition").toDouble();
             const bool ok = DemoScreens::capture(core, options, &error);
             if (!ok) {
                 qCritical().noquote() << error;
@@ -161,6 +184,18 @@ void MuzaitenApplication::configureCommandLine()
     demoSearchDelayOption.setFlags(QCommandLineOption::HiddenFromHelp);
     QCommandLineOption demoArtistOption(QStringLiteral("demo-artist"), QStringLiteral("Hidden: select an album artist before the library screenshot."), QStringLiteral("name"));
     demoArtistOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoAlbumOption(QStringLiteral("demo-album"), QStringLiteral("Hidden: highlight an album before the library screenshot."), QStringLiteral("title"));
+    demoAlbumOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoThemeOption(QStringLiteral("demo-theme"), QStringLiteral("Hidden: capture a color scheme: light, dark, or both. Repeatable."), QStringLiteral("theme"));
+    demoThemeOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoSizeOption(QStringLiteral("demo-size"), QStringLiteral("Hidden: screenshot window size, for example 1440x900."), QStringLiteral("size"));
+    demoSizeOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoNowPlayingOption(QStringLiteral("demo-now-playing"), QStringLiteral("Hidden: present the first track matching <query> in the player bar."), QStringLiteral("query"));
+    demoNowPlayingOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoNowPlayingStateOption(QStringLiteral("demo-now-playing-state"), QStringLiteral("Hidden: player-bar visual state, playing or paused."), QStringLiteral("state"));
+    demoNowPlayingStateOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoNowPlayingPositionOption(QStringLiteral("demo-now-playing-position"), QStringLiteral("Hidden: player-bar progress ratio, 0.0 to 1.0."), QStringLiteral("ratio"));
+    demoNowPlayingPositionOption.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(verboseOption);
     parser.addOption(stateRootOption);
     parser.addOption(devStateOption);
@@ -173,6 +208,12 @@ void MuzaitenApplication::configureCommandLine()
     parser.addOption(demoSearchVideoOption);
     parser.addOption(demoSearchDelayOption);
     parser.addOption(demoArtistOption);
+    parser.addOption(demoAlbumOption);
+    parser.addOption(demoThemeOption);
+    parser.addOption(demoSizeOption);
+    parser.addOption(demoNowPlayingOption);
+    parser.addOption(demoNowPlayingStateOption);
+    parser.addOption(demoNowPlayingPositionOption);
     parser.process(*this);
 
     const bool verbose = parser.isSet(verboseOption) || qEnvironmentVariableIsSet("MUZAITEN_VERBOSE");
@@ -213,6 +254,25 @@ void MuzaitenApplication::configureCommandLine()
     if (!demoArtist.isEmpty()) {
         setProperty("muzaiten.demoArtist", demoArtist);
     }
+    const QString demoAlbum = parser.value(demoAlbumOption).trimmed();
+    if (!demoAlbum.isEmpty()) {
+        setProperty("muzaiten.demoAlbum", demoAlbum);
+    }
+    const QStringList demoThemes = parser.values(demoThemeOption);
+    if (!demoThemes.isEmpty()) {
+        setProperty("muzaiten.demoThemes", demoThemes);
+    }
+    setProperty("muzaiten.demoSize", parseDemoSize(parser.value(demoSizeOption)));
+    const QString demoNowPlaying = parser.value(demoNowPlayingOption).trimmed();
+    if (!demoNowPlaying.isEmpty()) {
+        setProperty("muzaiten.demoNowPlaying", demoNowPlaying);
+    }
+    const QString demoNowPlayingState = parser.value(demoNowPlayingStateOption).trimmed().toLower();
+    setProperty("muzaiten.demoNowPlayingState",
+                demoNowPlayingState == QStringLiteral("playing") ? QStringLiteral("playing") : QStringLiteral("paused"));
+    bool positionOk = false;
+    const double nowPlayingPosition = parser.value(demoNowPlayingPositionOption).toDouble(&positionOk);
+    setProperty("muzaiten.demoNowPlayingPosition", positionOk ? nowPlayingPosition : (2.0 / 3.0));
 }
 
 void MuzaitenApplication::configureLogging(bool verbose)

@@ -368,6 +368,20 @@ void AlbumGrid::setCurrentRow(int row)
     setCurrentRowInternal(row, true);
 }
 
+bool AlbumGrid::selectAlbumTitleForDemo(const QString &albumTitle)
+{
+    if (albumTitle.trimmed().isEmpty() || model() == nullptr) {
+        return false;
+    }
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        if (model()->index(row, 0).data(AlbumTitleRole).toString() == albumTitle) {
+            setCurrentRowInternal(row, true);
+            return true;
+        }
+    }
+    return false;
+}
+
 void AlbumGrid::setCurrentRowInternal(int row, bool clearRememberedOutline)
 {
     if (model() == nullptr || model()->rowCount() == 0) {
