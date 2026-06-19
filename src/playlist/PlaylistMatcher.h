@@ -59,6 +59,13 @@ inline constexpr int kConfidenceAlbumMatch  = 10;   // album corroborates
 inline constexpr int kConfidenceDuration    = 8;    // duration within tolerance
 inline constexpr int kMatchedConfidence     = 78;   // Matched at/above, else Approximate
 
+// Magnet guard (fuzzy tiers only): the minimum fraction of a candidate's
+// title+artist length the query must plausibly explain. A short query fuzzily
+// hitting a much longer field (e.g. a 4-token query on a 100-char opera title)
+// is almost always a false positive, since long strings contain nearly any short
+// subsequence. Exact-substring tiers are trustworthy and skip this.
+inline constexpr double kMinFuzzyCoverage = 0.2;
+
 Outcome match(const Search::SearchIndex &index, const PlaylistImport::ImportEntry &entry);
 
 } // namespace PlaylistMatcher

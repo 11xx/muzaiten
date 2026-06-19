@@ -86,6 +86,20 @@ QVector<ScoredResult> matchByPath(const SearchIndex &index, const QString &needl
     return index.match(query, /*fuzzyMode=*/false);
 }
 
+// Fraction of a candidate's title+artist length the query plausibly explains.
+// Used to reject fuzzy "magnet" candidates whose long fields dwarf a short query.
+double coverageRatio(const ScoredResult &hit, const ImportEntry &entry)
+{
+    const QString querySignal =
+        normalizeForMatch(entry.artist + QLatin1Char(' ') + stripTitleNoise(entry.title))
+            .remove(QLatin1Char(' '));
+    const qsizetype candSignal = hit.rec.normTitle.size() + hit.rec.normArtist.size();
+    if (querySignal.isEmpty() || candSignal <= 0) {
+        return 1.0;  // nothing to judge → don't penalise
+    }
+    return std::min(1.0, static_cast<double>(querySignal.size()) / static_cast<double>(candSignal));
+}
+
 // Heuristic certainty (0-100) of a single chosen hit: the tier `base` plus a
 // reward for being uncontested and for album/duration corroboration.
 int confidenceFor(const ScoredResult &hit, const ImportEntry &entry, int base, bool uncontested)
@@ -130,17 +144,32 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
 {
     Outcome outcome;
     outcome.queryUsed = queryUsed;
-    if (results.isEmpty()) {
-        return outcome;  // Pending
+
+    // Magnet guard on the fuzzy/relaxed tiers: drop candidates whose title+artist
+    // dwarf the query (a long field fuzzily "contains" almost any short query).
+    // Exact-substring tiers are reliable and keep every hit.
+    QVector<ScoredResult> kept;
+    if (base <= kConfidenceScopedFuzzy) {
+        for (const ScoredResult &r : results) {
+            if (coverageRatio(r, entry) >= kMinFuzzyCoverage) {
+                kept.append(r);
+            }
+        }
+    } else {
+        kept = results;
     }
-    if (results.size() == 1) {
-        return single(results.first(), entry, base, /*uncontested=*/true, queryUsed, results);
+
+    if (kept.isEmpty()) {
+        return outcome;  // Pending (nothing survived, or magnets only)
+    }
+    if (kept.size() == 1) {
+        return single(kept.first(), entry, base, /*uncontested=*/true, queryUsed, kept);
     }
 
     // The "close set": everything scoring near the top hit.
-    const int topScore = results.first().score;
+    const int topScore = kept.first().score;
     QVector<ScoredResult> close;
-    for (const ScoredResult &r : results) {
+    for (const ScoredResult &r : kept) {
         if (r.score >= static_cast<int>(topScore * kCloseScoreRatio)) {
             close.append(r);
         }
