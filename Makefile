@@ -56,7 +56,7 @@ help:
 		'  CMAKE_BUILD_TYPE=Release' \
 		'  PREFIX=/usr            (install prefix; default ~/.local, no sudo)' \
 		'  DEMO_SCREEN_DIR=demo-screens' \
-		'  DEMO_THEMES="light dark"' \
+		'  DEMO_THEMES="light dark"  (space- or comma-separated)' \
 		'  DEMO_SIZE=1440x900' \
 		'  DEMO_SEARCH="artist:example"' \
 		'  DEMO_SEARCH_VIDEO=1' \
@@ -132,11 +132,8 @@ demo-screens: build
 	if [ -f "$$state_home/muzaiten/state.sqlite" ]; then cp "$$state_home/muzaiten/state.sqlite" "$$tmp_state/state/"; fi; \
 	if [ -f "$$cache_home/muzaiten/artwork.sqlite" ]; then cp "$$cache_home/muzaiten/artwork.sqlite" "$$tmp_state/cache/"; fi; \
 	mkdir -p "$(DEMO_SCREEN_DIR)"; \
-	theme_args=""; \
-	for theme in $(DEMO_THEMES); do theme_args="$$theme_args --demo-theme $$theme"; done; \
-	env "QT_QPA_PLATFORM=offscreen" "MUZAITEN_STATE_ROOT=$$tmp_state" \
+	env "QT_QPA_PLATFORM=offscreen" "MUZAITEN_STATE_ROOT=$$tmp_state" "MUZAITEN_DEMO_THEMES=$(DEMO_THEMES)" \
 		./$(APP) --demo-screens "$(DEMO_SCREEN_DIR)" \
-		$$theme_args \
 		--demo-size "$(DEMO_SIZE)" \
 		$(if $(DEMO_SEARCH),--demo-search "$(DEMO_SEARCH)") \
 		$(if $(filter-out 0 false no,$(DEMO_SEARCH_VIDEO)),--demo-search-video) \

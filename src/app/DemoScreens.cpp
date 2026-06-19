@@ -15,6 +15,7 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QThread>
 #include <algorithm>
@@ -63,15 +64,68 @@ QPalette darkPalette()
     return palette;
 }
 
-void applyColorScheme(const QString &scheme)
+QString themeDirectoryName(const QString &theme)
+{
+    QString name = theme.trimmed();
+    name.replace(QRegularExpression(QStringLiteral("[/\\\\:]")), QStringLiteral("_"));
+    return name.isEmpty() ? QStringLiteral("default") : name;
+}
+
+QString currentPlasmaColorScheme()
+{
+    const QString tool = QStandardPaths::findExecutable(QStringLiteral("plasma-apply-colorscheme"));
+    if (tool.isEmpty()) {
+        return {};
+    }
+    QProcess process;
+    process.start(tool, {QStringLiteral("--list-schemes")});
+    if (!process.waitForFinished(3000) || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        return {};
+    }
+    const QString output = QString::fromUtf8(process.readAllStandardOutput());
+    const QRegularExpression currentRe(QStringLiteral("^\\s*\\*\\s+(.+?)\\s+\\(current color scheme\\)\\s*$"),
+                                       QRegularExpression::MultilineOption);
+    const QRegularExpressionMatch match = currentRe.match(output);
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+bool applyPlasmaColorScheme(const QString &scheme, QString *error)
+{
+    const QString tool = QStandardPaths::findExecutable(QStringLiteral("plasma-apply-colorscheme"));
+    if (tool.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("plasma-apply-colorscheme not found; cannot apply demo theme %1").arg(scheme);
+        }
+        return false;
+    }
+    QProcess process;
+    process.start(tool, {QStringLiteral("--platform"), QStringLiteral("offscreen"), scheme});
+    if (!process.waitForFinished(5000) || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        if (error != nullptr) {
+            const QString details = QString::fromUtf8(process.readAllStandardError()).trimmed();
+            *error = QStringLiteral("failed to apply demo theme %1 with plasma-apply-colorscheme (exit %2)%3")
+                         .arg(scheme)
+                         .arg(process.exitCode())
+                         .arg(details.isEmpty() ? QString() : QStringLiteral(": %1").arg(details));
+        }
+        return false;
+    }
+    waitForEvents(350);
+    return true;
+}
+
+bool applyColorScheme(const QString &scheme, QString *error)
 {
     const QString normalized = scheme.trimmed().toLower();
     if (normalized == QStringLiteral("dark")) {
         qApp->setPalette(darkPalette());
     } else if (normalized == QStringLiteral("light")) {
         qApp->setPalette(lightPalette());
+    } else {
+        return applyPlasmaColorScheme(scheme, error);
     }
     waitForEvents(150);
+    return true;
 }
 
 void waitForEvents(int ms)
@@ -226,11 +280,15 @@ QStringList normalizedSchemes(const QStringList &schemes)
 {
     QStringList result;
     for (const QString &scheme : schemes) {
-        const QString normalized = scheme.trimmed().toLower();
+        const QString trimmed = scheme.trimmed();
+        if (trimmed.isEmpty()) {
+            continue;
+        }
+        const QString normalized = trimmed.toLower();
         if (normalized == QStringLiteral("both")) {
             result << QStringLiteral("light") << QStringLiteral("dark");
-        } else if (normalized == QStringLiteral("light") || normalized == QStringLiteral("dark")) {
-            result << normalized;
+        } else {
+            result << trimmed;
         }
     }
     result.removeDuplicates();
@@ -317,12 +375,23 @@ bool capture(AppCore &core, const Options &options, QString *error)
     if (schemes.isEmpty()) {
         return captureOne(core, options, dir, error);
     }
+    const QString restoreScheme = currentPlasmaColorScheme();
     for (const QString &scheme : schemes) {
-        applyColorScheme(scheme);
-        QDir schemeDir(dir.filePath(scheme));
-        if (!captureOne(core, options, schemeDir, error)) {
+        if (!applyColorScheme(scheme, error)) {
             return false;
         }
+        QDir schemeDir(dir.filePath(themeDirectoryName(scheme)));
+        if (!captureOne(core, options, schemeDir, error)) {
+            if (!restoreScheme.isEmpty()) {
+                QString ignored;
+                applyPlasmaColorScheme(restoreScheme, &ignored);
+            }
+            return false;
+        }
+    }
+    if (!restoreScheme.isEmpty()) {
+        QString ignored;
+        applyPlasmaColorScheme(restoreScheme, &ignored);
     }
 
     return true;
