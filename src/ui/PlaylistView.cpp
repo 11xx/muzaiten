@@ -429,8 +429,16 @@ public:
             font.setItalic(true);
             return font;
         }
-        if (role == Qt::ForegroundRole && item.status == PlaylistItemStatus::Missing) {
-            return QColor(180, 48, 48);
+        if (role == Qt::ForegroundRole) {
+            // Tint rows that need manual attention; keep Matched at the default
+            // colour. The bracketed status text and italic (FontRole) are unchanged.
+            switch (item.status) {
+            case PlaylistItemStatus::Missing:     return QColor(180, 48, 48);   // strong red
+            case PlaylistItemStatus::Pending:     return QColor(200, 110, 110); // pink-ish red, weaker
+            case PlaylistItemStatus::MultiMatch:  return QColor(190, 150, 30);  // yellow/gold
+            case PlaylistItemStatus::Approximate: return QColor(210, 120, 40);  // amber
+            case PlaylistItemStatus::Matched:     break;
+            }
         }
         if (role == Qt::TextAlignmentRole) {
             return index.column() == OrdinalColumn || index.column() == LengthColumn
