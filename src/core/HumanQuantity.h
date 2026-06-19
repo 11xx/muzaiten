@@ -12,6 +12,11 @@ namespace humanquantity {
 // preserve the long-standing display). Empty string for non-positive input.
 QString formatDuration(qint64 ms);
 
+// Clock form that rolls into hours: "m:ss" under an hour, "h:mm:ss" at/over one.
+// For long items (history listens, podcasts) this reads better than uncapped
+// minutes. Empty string for non-positive input.
+QString formatClock(qint64 ms);
+
 // Parse a colon-separated clock string ("ss", "m:ss", "h:mm:ss") to
 // milliseconds. Blank components count as zero; returns 0 for empty input.
 qint64 parseDuration(const QString &text);

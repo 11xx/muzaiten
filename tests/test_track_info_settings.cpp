@@ -35,6 +35,13 @@ private slots:
         // Minutes are intentionally not capped at 59 (long-standing display).
         QCOMPARE(humanquantity::formatDuration(3750000), QStringLiteral("62:30"));
 
+        // formatClock rolls into hours instead of leaving minutes uncapped.
+        QCOMPARE(humanquantity::formatClock(225000), QStringLiteral("3:45"));
+        QCOMPARE(humanquantity::formatClock(0), QString());
+        QCOMPARE(humanquantity::formatClock(-5), QString());
+        QCOMPARE(humanquantity::formatClock(3750000), QStringLiteral("1:02:30"));
+        QCOMPARE(humanquantity::formatClock(3600000), QStringLiteral("1:00:00"));
+
         QCOMPARE(humanquantity::parseDuration(QStringLiteral("3:45")), qint64(225000));
         QCOMPARE(humanquantity::parseDuration(QStringLiteral("1:02:30")), qint64(3750000));
         QCOMPARE(humanquantity::parseDuration(QStringLiteral("45")), qint64(45000));

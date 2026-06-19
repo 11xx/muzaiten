@@ -1,5 +1,7 @@
 #include "ui/QueueTable.h"
 
+#include "core/HumanQuantity.h"
+#include "core/TrackDisplay.h"
 #include "ui/HeaderLabelStyle.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/NavigableTableView.h"
@@ -200,18 +202,6 @@ QString ratingText(int rating0To100)
     return QStringLiteral("%1 %2").arg(rating0To100 / 20.0, 0, 'f', 1).arg(QChar(0x2605));
 }
 
-QString formatDuration(qint64 durationMs)
-{
-    if (durationMs <= 0) {
-        return {};
-    }
-
-    const qint64 totalSeconds = durationMs / 1000;
-    const qint64 minutes = totalSeconds / 60;
-    const qint64 seconds = totalSeconds % 60;
-    return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
-}
-
 QString trackNumberText(const Track &track)
 {
     if (track.trackNumber > 0) {
@@ -229,32 +219,6 @@ QString trackNumberText(const Track &track)
         return base.left(end);
     }
     return {};
-}
-
-QString displayYear(const Track &track)
-{
-    for (const QString &candidate : {track.originalDate, track.date}) {
-        const QString trimmed = candidate.trimmed();
-        if (!trimmed.isEmpty()) {
-            return trimmed.left(4);
-        }
-    }
-    return {};
-}
-
-QString displayTitle(const Track &track)
-{
-    if (!track.title.trimmed().isEmpty()) {
-        return track.title;
-    }
-    const QString file = track.filename.isEmpty() ? track.path : track.filename;
-    const QString base = QFileInfo(file).completeBaseName();
-    return base.isEmpty() ? file : base;
-}
-
-QString displayArtist(const Track &track)
-{
-    return track.albumArtistName.trimmed().isEmpty() ? track.artistName : track.albumArtistName;
 }
 
 QKeySequence keySequenceForEvent(QKeyEvent *event)
@@ -620,19 +584,19 @@ public:
             return QString::number(index.row() + 1);
         }
         case 1:
-            return track.missing ? QStringLiteral("× %1").arg(displayTitle(track)) : displayTitle(track);
+            return track.missing ? QStringLiteral("× %1").arg(trackdisplay::title(track)) : trackdisplay::title(track);
         case 2:
             return {};
         case 3:
             return ratingText(track.effectiveRating0To100);
         case 4:
-            return displayArtist(track);
+            return trackdisplay::artist(track);
         case 5:
             return track.albumTitle;
         case 6:
-            return formatDuration(track.durationMs);
+            return humanquantity::formatDuration(track.durationMs);
         case 7:
-            return displayYear(track);
+            return trackdisplay::year(track);
         case 8:
             return trackNumberText(track);
         default:
