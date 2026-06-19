@@ -5127,6 +5127,7 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
             }
         }
         item.externalId = externalId;
+        item.addedAt = match.entry.addedAt;
         if (m_playlistDb->addItem(playlistId, item) > 0) {
             ++added;
             if (!externalId.isEmpty()) {

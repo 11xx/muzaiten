@@ -28,6 +28,7 @@ struct ImportEntry {
     QString album;       // only from csv/jsonl
     QString directPath;  // m3u/csv/jsonl path; matcher tries this before text matching
     qint64 durationMs = 0;  // from EXTINF/csv/jsonl; tiebreaker for matching
+    qint64 addedAt = 0;     // JSONL source playlist-add time, epoch seconds; 0 when unknown
     QString externalId;  // service id/url (e.g. YouTube video id); not matched on yet
     QString comment;     // jsonl free-form note; carried onto the playlist item
 };

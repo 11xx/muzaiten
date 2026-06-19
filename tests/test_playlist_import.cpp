@@ -166,7 +166,7 @@ private slots:
             "{\"playlist\":{\"name\":\"Mix 2019\",\"comment\":\"from takeout\"}}\n"
             "\n"
             "# a comment line\n"
-            "{\"title\":\"Karma Police\",\"artist\":\"Radiohead\",\"durationMs\":\"261000\"}\n"
+            "{\"title\":\"Karma Police\",\"artist\":\"Radiohead\",\"durationMs\":\"261000\",\"addedAt\":1604954896}\n"
             "{ this is not valid json }\n"
             "{\"comment\":\"no title or path\"}\n"
             "{\"title\":\"Hey Jude\",\"durationMs\":-5}\n"), Format::Auto, &header);
@@ -177,8 +177,26 @@ private slots:
         QCOMPARE(entries.size(), 2);
         QCOMPARE(entries.first().title, QStringLiteral("Karma Police"));
         QCOMPARE(entries.first().durationMs, qint64(261000));  // numeric string coerced
+        QCOMPARE(entries.first().addedAt, qint64(1604954896));
         QCOMPARE(entries.at(1).title, QStringLiteral("Hey Jude"));
         QCOMPARE(entries.at(1).durationMs, qint64(0));          // negative clamped
+    }
+
+    void parse_jsonlAddedAtNumericStringAndInvalidValues()
+    {
+        const auto entries = parse(QStringLiteral(
+            "{\"title\":\"String timestamp\",\"addedAt\":\"1604954896\"}\n"
+            "{\"title\":\"Zero\",\"addedAt\":0}\n"
+            "{\"title\":\"Negative\",\"addedAt\":-1}\n"
+            "{\"title\":\"Fraction\",\"addedAt\":1604954896.5}\n"
+            "{\"title\":\"Malformed\",\"addedAt\":\"1604.954896\"}\n"
+            "{\"title\":\"Out of range\",\"addedAt\":253402300800}\n"
+            "{\"title\":\"Missing\"}\n"), Format::Jsonl);
+        QCOMPARE(entries.size(), 7);
+        QCOMPARE(entries.at(0).addedAt, qint64(1604954896));
+        for (qsizetype i = 1; i < entries.size(); ++i) {
+            QCOMPARE(entries.at(i).addedAt, qint64(0));
+        }
     }
 
     void parse_jsonlHeaderOnlyWhenFirst()

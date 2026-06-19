@@ -8,6 +8,8 @@
 #include <QRegularExpression>
 #include <QTextStream>
 
+#include <cmath>
+
 namespace PlaylistImport {
 
 namespace {
@@ -209,6 +211,33 @@ qint64 jsonDurationMs(const QJsonValue &value)
     return ms > 0 ? ms : 0;
 }
 
+// JSONL addedAt is a positive, integral Unix timestamp in seconds. Bound it to
+// dates Qt can represent through year 9999 so malformed producer values cannot
+// silently become a plausible historical date.
+qint64 jsonAddedAt(const QJsonValue &value)
+{
+    constexpr qint64 kMaxUnixTimestamp = 253402300799;
+    if (value.isDouble()) {
+        const double seconds = value.toDouble();
+        if (!std::isfinite(seconds) || seconds <= 0.0 || seconds > kMaxUnixTimestamp
+            || std::trunc(seconds) != seconds) {
+            return 0;
+        }
+        return static_cast<qint64>(seconds);
+    }
+    if (value.isString()) {
+        const QString text = value.toString().trimmed();
+        static const QRegularExpression integer(QStringLiteral("^[0-9]+$"));
+        if (!integer.match(text).hasMatch()) {
+            return 0;
+        }
+        bool ok = false;
+        const qint64 seconds = text.toLongLong(&ok);
+        return ok && seconds > 0 && seconds <= kMaxUnixTimestamp ? seconds : 0;
+    }
+    return 0;
+}
+
 // JSONL (docs/playlist-import-jsonl.md): one JSON object per line. Blank lines and
 // '#'-comment lines are ignored; a malformed line is skipped (never aborts). The
 // first content line may be a {"playlist":{…}} header (reported via outHeader).
@@ -249,6 +278,7 @@ QVector<ImportEntry> parseJsonl(const QString &text, ImportHeader *outHeader)
         entry.externalId = obj.value(QStringLiteral("externalId")).toString().trimmed();
         entry.comment = obj.value(QStringLiteral("comment")).toString().trimmed();
         entry.durationMs = jsonDurationMs(obj.value(QStringLiteral("durationMs")));
+        entry.addedAt = jsonAddedAt(obj.value(QStringLiteral("addedAt")));
         if (entry.title.isEmpty() && entry.directPath.isEmpty()) {
             continue;  // nothing to match on
         }
