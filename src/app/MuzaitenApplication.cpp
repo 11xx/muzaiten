@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QLoggingCategory>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTimer>
 
@@ -64,6 +65,19 @@ QSize parseDemoSize(const QString &value)
         return QSize(1440, 900);
     }
     return QSize(width, height);
+}
+
+QStringList parseDemoThemes(const QStringList &values)
+{
+    QStringList themes;
+    for (const QString &value : values) {
+        const QString normalizedSeparators = QString(value).replace(QLatin1Char(','), QLatin1Char('\n'));
+        for (const QString &theme : normalizedSeparators.split(QRegularExpression(QStringLiteral("[\\r\\n\\t ]+")), Qt::SkipEmptyParts)) {
+            themes.push_back(theme.trimmed());
+        }
+    }
+    themes.removeDuplicates();
+    return themes;
 }
 
 } // namespace
@@ -258,7 +272,10 @@ void MuzaitenApplication::configureCommandLine()
     if (!demoAlbum.isEmpty()) {
         setProperty("muzaiten.demoAlbum", demoAlbum);
     }
-    const QStringList demoThemes = parser.values(demoThemeOption);
+    QStringList demoThemes = parseDemoThemes(parser.values(demoThemeOption));
+    if (demoThemes.isEmpty()) {
+        demoThemes = parseDemoThemes({qEnvironmentVariable("MUZAITEN_DEMO_THEMES")});
+    }
     if (!demoThemes.isEmpty()) {
         setProperty("muzaiten.demoThemes", demoThemes);
     }
