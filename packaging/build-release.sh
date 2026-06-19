@@ -137,7 +137,9 @@ echo ">> Building"
 cmake --build "$BUILD_DIR" -j "$JOBS"
 
 # Version derived the same way as cmake/MuzaitenVersion.cmake.
-version="$(git show -s --format=%cd --date=format:%Y.%m.%d.%H%M%S HEAD).g$(git rev-parse --short HEAD)"
+day="$(TZ=UTC0 git show -s --date=format-local:%Y-%m-%d --format=%cd HEAD)"
+n="$(TZ=UTC0 git rev-list --count --since="${day}T00:00:00" --until="${day}T23:59:59" HEAD)"
+version="${day//-/.}.${n}.g$(git rev-parse --short HEAD)"
 arch="$(uname -m)"
 
 stage="$(mktemp -d)"
