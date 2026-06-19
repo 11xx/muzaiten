@@ -1088,51 +1088,20 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         switchMainView(MainView::Playlist);
         m_playlistView->createPlaylist();
     });
-    connect(m_playerBar, &PlayerBar::playlistAddSongRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->addSongToCurrentPlaylist();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistPlayRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->playCurrentPlaylist();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->playNextCurrentPlaylist();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->addCurrentPlaylistToQueue();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistRenameRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->renameCurrentPlaylist();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistExportRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->exportCurrentPlaylist();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistDeleteRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->deleteCurrentPlaylist();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->moveCurrentItemUp();
-        }
-    });
-    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, this, [this]() {
-        if (m_mainView == MainView::Playlist) {
-            m_playlistView->moveCurrentItemDown();
-        }
-    });
+    // These actions live in PlayerBar's m_playlistViewActions set, which
+    // setPlaylistViewActionsActive() enables only while the Playlist view is
+    // current (see switchMainView). A disabled QAction never emits triggered, so
+    // the signals can't fire outside the Playlist view — connect straight to the
+    // view instead of re-checking m_mainView in a guard lambda.
+    connect(m_playerBar, &PlayerBar::playlistAddSongRequested, m_playlistView, &PlaylistView::addSongToCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistPlayRequested, m_playlistView, &PlaylistView::playCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, m_playlistView, &PlaylistView::playNextCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, m_playlistView, &PlaylistView::addCurrentPlaylistToQueue);
+    connect(m_playerBar, &PlayerBar::playlistRenameRequested, m_playlistView, &PlaylistView::renameCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistExportRequested, m_playlistView, &PlaylistView::exportCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistDeleteRequested, m_playlistView, &PlaylistView::deleteCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, m_playlistView, &PlaylistView::moveCurrentItemUp);
+    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, m_playlistView, &PlaylistView::moveCurrentItemDown);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
