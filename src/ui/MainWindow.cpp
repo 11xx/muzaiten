@@ -5128,6 +5128,18 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
         }
         item.externalId = externalId;
         item.addedAt = match.entry.addedAt;
+        // Immutable record of how the row was originally imported, kept even after
+        // the item is matched/replaced/edited (the snapshot fields are not).
+        QString sourceText = match.entry.artist.isEmpty()
+            ? match.entry.title
+            : QStringLiteral("%1 - %2").arg(match.entry.artist, match.entry.title);
+        if (sourceText.isEmpty()) {
+            sourceText = match.entry.rawLine;
+        }
+        if (!match.entry.album.isEmpty() && !sourceText.isEmpty()) {
+            sourceText += QStringLiteral(" — %1").arg(match.entry.album);
+        }
+        item.sourceText = sourceText;
         if (m_playlistDb->addItem(playlistId, item) > 0) {
             ++added;
             if (!externalId.isEmpty()) {
@@ -5169,10 +5181,12 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     dialog->setPreferredPaths(editedItem.candidatePaths);
 
     connect(dialog, &PlaylistAddDialog::itemChosen, this,
-            [this, itemId, comment = editedItem.comment](const Track &track, const QString &chosenQuery) {
+            [this, itemId, comment = editedItem.comment, sourceText = editedItem.sourceText](
+                const Track &track, const QString &chosenQuery) {
                 PlaylistItem item = playlistItemFromTrack(track, chosenQuery);
                 item.id = itemId;
-                item.comment = comment;  // a replacement pick must not drop the note
+                item.comment = comment;        // a replacement pick must not drop the note
+                item.sourceText = sourceText;  // nor the original imported string
                 m_playlistDb->updateItem(item);
             });
 

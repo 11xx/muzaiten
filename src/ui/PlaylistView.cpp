@@ -446,7 +446,16 @@ public:
                 : QVariant(Qt::AlignLeft | Qt::AlignVCenter);
         }
         if (role == Qt::ToolTipRole) {
-            return item.comment.isEmpty() ? QVariant() : item.comment;
+            // Surface the original imported string (kept even after a match/replace)
+            // alongside any free-form comment.
+            QStringList parts;
+            if (!item.sourceText.isEmpty()) {
+                parts << QStringLiteral("Imported as: %1").arg(item.sourceText);
+            }
+            if (!item.comment.isEmpty()) {
+                parts << item.comment;
+            }
+            return parts.isEmpty() ? QVariant() : parts.join(QLatin1Char('\n'));
         }
         if (role != Qt::DisplayRole) {
             return {};
@@ -1884,14 +1893,14 @@ void PlaylistView::exportCurrentPlaylist()
             escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
             return QStringLiteral("\"%1\"").arg(escaped);
         };
-        out << "ordinal,title,artist,album,duration_ms,path,status,query,comment,external_id\n";
+        out << "ordinal,title,artist,album,duration_ms,path,status,query,comment,external_id,source_text\n";
         for (const PlaylistItem &item : items) {
             out << item.ordinal + 1 << ','
                 << field(item.titleSnapshot) << ',' << field(item.artistSnapshot) << ','
                 << field(item.albumSnapshot) << ',' << item.durationMs << ','
                 << field(item.trackPath) << ',' << field(statusLabel(item.status)) << ','
                 << field(item.query) << ',' << field(item.comment) << ','
-                << field(item.externalId) << '\n';
+                << field(item.externalId) << ',' << field(item.sourceText) << '\n';
         }
     } else {
         out << "#EXTM3U\n";
