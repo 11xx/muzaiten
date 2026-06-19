@@ -1,5 +1,6 @@
 #include "ui/FileExplorerView.h"
 
+#include "core/HumanQuantity.h"
 #include "core/MusicSort.h"
 #include "scanner/LibraryScanner.h"
 #include "scanner/TagReader.h"
@@ -96,17 +97,6 @@ QString cleanPath(const QString &path)
         return cleaned.left(cleaned.size() - 1);
     }
     return cleaned;
-}
-
-QString formatDuration(qint64 durationMs)
-{
-    if (durationMs <= 0) {
-        return QString();
-    }
-    const qint64 totalSeconds = durationMs / 1000;
-    const qint64 minutes = totalSeconds / 60;
-    const qint64 seconds = totalSeconds % 60;
-    return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
 } // namespace
@@ -720,7 +710,7 @@ void FileExplorerView::applyTrackToItem(QTreeWidgetItem *item, const Track &trac
     item->setText(NameColumn, track.title.trimmed().isEmpty() ? track.filename : track.title);
     item->setText(ArtistColumn, track.artistName);
     item->setText(AlbumColumn, track.albumTitle);
-    item->setText(DurationColumn, formatDuration(track.durationMs));
+    item->setText(DurationColumn, humanquantity::formatDuration(track.durationMs));
     item->setText(RatingColumn, ratingStars(displayRating(track)));
     item->setText(SizeColumn, formatSize(track.fileSize));
     item->setData(0, TrackRole, QVariant::fromValue(track));

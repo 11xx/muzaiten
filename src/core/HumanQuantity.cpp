@@ -16,6 +16,24 @@ QString formatDuration(qint64 ms)
     return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
+QString formatClock(qint64 ms)
+{
+    if (ms <= 0) {
+        return {};
+    }
+    const qint64 totalSeconds = ms / 1000;
+    const qint64 hours = totalSeconds / 3600;
+    const qint64 minutes = (totalSeconds % 3600) / 60;
+    const qint64 seconds = totalSeconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(seconds, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
 qint64 parseDuration(const QString &text)
 {
     qint64 total = 0;

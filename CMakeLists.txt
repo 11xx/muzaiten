@@ -55,6 +55,7 @@ set(MUZAITEN_SOURCES
     src/core/MetadataBlob.cpp
     src/core/MusicSort.cpp
     src/core/Rating.cpp
+    src/core/TrackDisplay.cpp
     src/db/Database.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp

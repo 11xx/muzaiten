@@ -1,5 +1,6 @@
 #include "ui/ListeningHistoryDialog.h"
 
+#include "core/HumanQuantity.h"
 #include "ui/DenseTableDelegate.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/ResponsiveColumnLayout.h"
@@ -36,25 +37,6 @@ enum Column {
     PathColumn,
     ColumnCount,
 };
-
-QString formatDuration(qint64 milliseconds)
-{
-    if (milliseconds <= 0) {
-        return {};
-    }
-    const qint64 seconds = milliseconds / 1000;
-    const qint64 minutes = seconds / 60;
-    const qint64 hours = minutes / 60;
-    if (hours > 0) {
-        return QStringLiteral("%1:%2:%3")
-            .arg(hours)
-            .arg(minutes % 60, 2, 10, QLatin1Char('0'))
-            .arg(seconds % 60, 2, 10, QLatin1Char('0'));
-    }
-    return QStringLiteral("%1:%2")
-        .arg(minutes)
-        .arg(seconds % 60, 2, 10, QLatin1Char('0'));
-}
 
 QString serviceStatus(bool owed, bool sent)
 {
@@ -165,7 +147,7 @@ public:
         case AlbumColumn:
             return row.track.albumTitle;
         case DurationColumn:
-            return formatDuration(row.track.durationMs);
+            return humanquantity::formatClock(row.track.durationMs);
         case LastFmColumn:
             return serviceStatus(row.owedLastFm, row.sentLastFm);
         case ListenBrainzColumn:

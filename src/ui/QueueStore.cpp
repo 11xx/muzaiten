@@ -1,33 +1,8 @@
 #include "ui/QueueStore.h"
 
-#include <QFileInfo>
+#include "core/TrackDisplay.h"
 
 #include <algorithm>
-
-namespace {
-
-QString displayYear(const Track &track)
-{
-    for (const QString &candidate : {track.originalDate, track.date}) {
-        const QString trimmed = candidate.trimmed();
-        if (!trimmed.isEmpty()) {
-            return trimmed.left(4);
-        }
-    }
-    return {};
-}
-
-QString displayTitle(const Track &track)
-{
-    if (!track.title.trimmed().isEmpty()) {
-        return track.title;
-    }
-    const QString file = track.filename.isEmpty() ? track.path : track.filename;
-    const QString base = QFileInfo(file).completeBaseName();
-    return base.isEmpty() ? file : base;
-}
-
-} // namespace
 
 QueueStore::QueueStore(QObject *parent)
     : QObject(parent)
@@ -104,7 +79,7 @@ QVector<Search::MatchDocument> QueueStore::searchDocuments() const
     docs.reserve(m_tracks.size());
     for (int row = 0; row < m_tracks.size(); ++row) {
         const Track &track = m_tracks.at(row);
-        const QString title = displayTitle(track);
+        const QString title = trackdisplay::title(track);
         const QString free = QStringLiteral("%1 %2 %3 %4 %5")
                                  .arg(title,
                                       track.artistName,
@@ -112,7 +87,7 @@ QVector<Search::MatchDocument> QueueStore::searchDocuments() const
                                       track.albumTitle,
                                       track.path);
         QVector<Search::MatchNumeric> numeric;
-        const int year = displayYear(track).toInt();
+        const int year = trackdisplay::year(track).toInt();
         if (year > 0) numeric.push_back({Search::TermKind::Year, year});
         if (track.effectiveRating0To100 >= 0) numeric.push_back({Search::TermKind::Rating, track.effectiveRating0To100});
         if (track.durationMs > 0) numeric.push_back({Search::TermKind::DurationMs, track.durationMs});

@@ -1,7 +1,9 @@
 #include "ui/TrackTable.h"
 
+#include "core/HumanQuantity.h"
 #include "core/MusicSort.h"
 #include "core/Track.h"
+#include "core/TrackDisplay.h"
 #include "ui/DenseTableDelegate.h"
 #include "ui/HeaderLabelStyle.h"
 #include "ui/NeighborColumnResizer.h"
@@ -23,7 +25,6 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QSignalBlocker>
-#include <QTime>
 #include <QByteArray>
 #include <QWheelEvent>
 
@@ -59,22 +60,6 @@ enum TrackRoles {
     HoverRatingRole = Qt::UserRole + 2,
 };
 
-QString formatDuration(qint64 durationMs)
-{
-    const QTime duration = QTime(0, 0).addMSecs(static_cast<int>(durationMs));
-    return duration.hour() > 0 ? duration.toString(QStringLiteral("h:mm:ss")) : duration.toString(QStringLiteral("m:ss"));
-}
-
-QString displayYear(const Track &track)
-{
-    for (const QString &candidate : {track.originalDate, track.date}) {
-        const QString trimmed = candidate.trimmed();
-        if (!trimmed.isEmpty()) {
-            return trimmed.left(4);
-        }
-    }
-    return {};
-}
 
 class TrackTableModel final : public QAbstractTableModel {
 public:
@@ -147,9 +132,9 @@ public:
         case 4:
             return track.artistName;
         case 5:
-            return formatDuration(track.durationMs);
+            return humanquantity::formatClock(track.durationMs);
         case 6:
-            return displayYear(track);
+            return trackdisplay::year(track);
         default:
             return {};
         }
@@ -252,7 +237,7 @@ private:
         case 5:
             return track.durationMs;
         case 6:
-            return displayYear(track);
+            return trackdisplay::year(track);
         default:
             return {};
         }
@@ -778,7 +763,7 @@ QVector<Search::MatchDocument> TrackTable::searchDocuments() const
                                       track.filename,
                                       track.path);
         QVector<Search::MatchNumeric> numeric;
-        const int year = displayYear(track).toInt();
+        const int year = trackdisplay::year(track).toInt();
         if (year > 0) numeric.push_back({Search::TermKind::Year, year});
         if (track.effectiveRating0To100 >= 0) numeric.push_back({Search::TermKind::Rating, track.effectiveRating0To100});
         if (track.durationMs > 0) numeric.push_back({Search::TermKind::DurationMs, track.durationMs});

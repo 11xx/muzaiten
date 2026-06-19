@@ -1,5 +1,6 @@
 #include "ui/SearchResultDelegate.h"
 
+#include "core/HumanQuantity.h"
 #include "search/SearchIndex.h"
 #include "search/SearchRecord.h"
 #include "ui/SearchResultsModel.h"
@@ -15,23 +16,6 @@
 Q_DECLARE_METATYPE(Search::SearchRecord)
 
 namespace {
-
-// Format duration from ms to "m:ss" or "h:mm:ss".
-QString formatDuration(qint64 ms)
-{
-    if (ms <= 0) return {};
-    const int secs = static_cast<int>(ms / 1000);
-    const int h = secs / 3600;
-    const int m = (secs % 3600) / 60;
-    const int s = secs % 60;
-    if (h > 0) {
-        return QStringLiteral("%1:%2:%3")
-            .arg(h)
-            .arg(m, 2, 10, QLatin1Char('0'))
-            .arg(s, 2, 10, QLatin1Char('0'));
-    }
-    return QStringLiteral("%1:%2").arg(m).arg(s, 2, 10, QLatin1Char('0'));
-}
 
 // Convert match positions (char indices in the string) to a set for fast lookup.
 QSet<int> toSet(const QVector<int> &v)
@@ -264,7 +248,7 @@ void SearchResultDelegate::paint(QPainter *painter,
 
     // Line 0: title  [duration]
     {
-        const QString dur = formatDuration(rec.durationMs);
+        const QString dur = humanquantity::formatClock(rec.durationMs);
         const QString titleText = dur.isEmpty() ? rec.title
             : QStringLiteral("%1  %2").arg(rec.title, dur);
         // duration is not highlighted; draw title with highlights, duration plain

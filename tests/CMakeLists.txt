@@ -302,7 +302,9 @@ add_executable(test_queue_table
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
     ../src/ui/OverlayScrollBar.cpp
+    ../src/core/HumanQuantity.cpp
     ../src/core/Rating.cpp
+    ../src/core/TrackDisplay.cpp
     ../src/ui/StarRating.cpp
     ../src/ui/StarRatingDelegate.cpp
     ../src/search/FuzzyMatch.cpp
@@ -347,8 +349,10 @@ add_executable(test_responsive_column_layout
     ../src/ui/OverlayScrollBar.cpp
     ../src/ui/StarRating.cpp
     ../src/ui/StarRatingDelegate.cpp
+    ../src/core/HumanQuantity.cpp
     ../src/core/MusicSort.cpp
     ../src/core/Rating.cpp
+    ../src/core/TrackDisplay.cpp
     ../src/search/fold/Fold.cpp
 )
 target_include_directories(test_responsive_column_layout PRIVATE ../src)
