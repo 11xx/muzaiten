@@ -4,6 +4,7 @@
 #include "ui/MainWindow.h"
 
 #include <QApplication>
+#include <QColor>
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -11,6 +12,7 @@
 #include <QFileInfo>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QPalette>
 #include <QPixmap>
 #include <QProcess>
 #include <QStandardPaths>
@@ -18,6 +20,59 @@
 #include <algorithm>
 
 namespace {
+
+void waitForEvents(int ms);
+
+QPalette lightPalette()
+{
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor(246, 246, 246));
+    palette.setColor(QPalette::WindowText, QColor(24, 24, 24));
+    palette.setColor(QPalette::Base, QColor(255, 255, 255));
+    palette.setColor(QPalette::AlternateBase, QColor(242, 242, 242));
+    palette.setColor(QPalette::Text, QColor(24, 24, 24));
+    palette.setColor(QPalette::Button, QColor(240, 240, 240));
+    palette.setColor(QPalette::ButtonText, QColor(24, 24, 24));
+    palette.setColor(QPalette::BrightText, Qt::white);
+    palette.setColor(QPalette::Highlight, QColor(35, 111, 190));
+    palette.setColor(QPalette::HighlightedText, Qt::white);
+    palette.setColor(QPalette::ToolTipBase, QColor(255, 255, 220));
+    palette.setColor(QPalette::ToolTipText, QColor(24, 24, 24));
+    return palette;
+}
+
+QPalette darkPalette()
+{
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor(35, 35, 38));
+    palette.setColor(QPalette::WindowText, QColor(232, 232, 232));
+    palette.setColor(QPalette::Base, QColor(27, 27, 30));
+    palette.setColor(QPalette::AlternateBase, QColor(42, 42, 46));
+    palette.setColor(QPalette::Text, QColor(232, 232, 232));
+    palette.setColor(QPalette::Button, QColor(45, 45, 49));
+    palette.setColor(QPalette::ButtonText, QColor(232, 232, 232));
+    palette.setColor(QPalette::BrightText, Qt::white);
+    palette.setColor(QPalette::Highlight, QColor(73, 145, 217));
+    palette.setColor(QPalette::HighlightedText, Qt::white);
+    palette.setColor(QPalette::ToolTipBase, QColor(45, 45, 49));
+    palette.setColor(QPalette::ToolTipText, QColor(232, 232, 232));
+    palette.setColor(QPalette::PlaceholderText, QColor(170, 170, 170));
+    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(128, 128, 128));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(128, 128, 128));
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(128, 128, 128));
+    return palette;
+}
+
+void applyColorScheme(const QString &scheme)
+{
+    const QString normalized = scheme.trimmed().toLower();
+    if (normalized == QStringLiteral("dark")) {
+        qApp->setPalette(darkPalette());
+    } else if (normalized == QStringLiteral("light")) {
+        qApp->setPalette(lightPalette());
+    }
+    waitForEvents(150);
+}
 
 void waitForEvents(int ms)
 {
@@ -167,11 +222,22 @@ bool writeSearchVideo(MainWindow &window, const QDir &dir, const QString &query,
     return true;
 }
 
-} // namespace
+QStringList normalizedSchemes(const QStringList &schemes)
+{
+    QStringList result;
+    for (const QString &scheme : schemes) {
+        const QString normalized = scheme.trimmed().toLower();
+        if (normalized == QStringLiteral("both")) {
+            result << QStringLiteral("light") << QStringLiteral("dark");
+        } else if (normalized == QStringLiteral("light") || normalized == QStringLiteral("dark")) {
+            result << normalized;
+        }
+    }
+    result.removeDuplicates();
+    return result;
+}
 
-namespace DemoScreens {
-
-bool capture(AppCore &core, const Options &options, QString *error)
+bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &dir, QString *error)
 {
     MainWindow *window = core.window();
     if (window == nullptr) {
@@ -181,7 +247,6 @@ bool capture(AppCore &core, const Options &options, QString *error)
         return false;
     }
 
-    QDir dir(options.outputDir);
     if (!dir.exists() && !QDir().mkpath(dir.absolutePath())) {
         if (error != nullptr) {
             *error = QStringLiteral("failed to create %1").arg(dir.absolutePath());
@@ -189,16 +254,29 @@ bool capture(AppCore &core, const Options &options, QString *error)
         return false;
     }
 
-    window->resize(1440, 900);
+    window->resize(options.windowSize);
     window->show();
     waitForEvents(900);
 
-    if (!options.artistName.trimmed().isEmpty() && !window->showDemoArtist(options.artistName)) {
+    if (!options.nowPlayingQuery.trimmed().isEmpty()
+        && !window->showDemoNowPlaying(options.nowPlayingQuery,
+                                       options.nowPlaying,
+                                       options.nowPlayingPositionRatio,
+                                       error)) {
+        return false;
+    }
+
+    if (!options.albumTitle.trimmed().isEmpty()) {
+        if (!window->showDemoAlbum(options.artistName, options.albumTitle, error)) {
+            return false;
+        }
+    } else if (!options.artistName.trimmed().isEmpty() && !window->showDemoArtist(options.artistName)) {
         if (error != nullptr) {
             *error = QStringLiteral("artist not found for demo capture: %1").arg(options.artistName);
         }
         return false;
     }
+    waitForEvents(1800);
     if (!saveWindow(*window, dir, QStringLiteral("01-library.png"), error)) return false;
 
     activateDigitShortcut(*window, Qt::Key_4);
@@ -217,6 +295,35 @@ bool capture(AppCore &core, const Options &options, QString *error)
 
     activateDigitShortcut(*window, Qt::Key_3);
     if (!saveWindow(*window, dir, QStringLiteral("05-explorer.png"), error)) return false;
+
+    return true;
+}
+
+} // namespace
+
+namespace DemoScreens {
+
+bool capture(AppCore &core, const Options &options, QString *error)
+{
+    QDir dir(options.outputDir);
+    if (!dir.exists() && !QDir().mkpath(dir.absolutePath())) {
+        if (error != nullptr) {
+            *error = QStringLiteral("failed to create %1").arg(dir.absolutePath());
+        }
+        return false;
+    }
+
+    const QStringList schemes = normalizedSchemes(options.colorSchemes);
+    if (schemes.isEmpty()) {
+        return captureOne(core, options, dir, error);
+    }
+    for (const QString &scheme : schemes) {
+        applyColorScheme(scheme);
+        QDir schemeDir(dir.filePath(scheme));
+        if (!captureOne(core, options, schemeDir, error)) {
+            return false;
+        }
+    }
 
     return true;
 }

@@ -37,6 +37,7 @@ public:
     int rowCount() const;
     int currentRow() const;
     void setCurrentRow(int row);
+    bool selectAlbumTitleForDemo(const QString &albumTitle);
     void moveCurrentByGrid(int horizontal, int vertical);
     void activateCurrentAlbum();
     void addCurrentAlbumToQueue();
