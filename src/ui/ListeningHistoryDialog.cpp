@@ -4,6 +4,7 @@
 #include "ui/DenseTableDelegate.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/ResponsiveColumnLayout.h"
+#include "ui/RowHeightWheel.h"
 
 #include <QAbstractTableModel>
 #include <QAbstractItemView>
@@ -258,11 +259,8 @@ bool ListeningHistoryDialog::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
         auto *wheel = static_cast<QWheelEvent *>(event);
-        if (wheel->modifiers() & Qt::ControlModifier) {
-            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
-            const int rowHeight = std::clamp(m_view->verticalHeader()->defaultSectionSize() + step, 18, 48);
-            m_view->verticalHeader()->setDefaultSectionSize(rowHeight);
-            wheel->accept();
+        if (ui::applyCtrlWheelRowHeight(wheel, m_view->verticalHeader()->defaultSectionSize(), 18, 48,
+                [this](int h) { m_view->verticalHeader()->setDefaultSectionSize(h); })) {
             return true;
         }
     }

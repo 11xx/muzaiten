@@ -11,6 +11,7 @@
 #include "ui/QueueStore.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
+#include "ui/RowHeightWheel.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -1040,13 +1041,12 @@ bool QueueTable::eventFilter(QObject *watched, QEvent *event)
     }
     if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
         auto *wheel = static_cast<QWheelEvent *>(event);
-        if (wheel->modifiers() & Qt::ControlModifier) {
-            const int step = wheel->angleDelta().y() > 0 ? 2 : -2;
-            const int minHeight = m_preset == QueueTablePreset::FullScreen ? 20 : 18;
-            const int rowHeight = std::clamp(m_view->verticalHeader()->defaultSectionSize() + step, minHeight, 48);
-            m_view->verticalHeader()->setDefaultSectionSize(rowHeight);
-            emit viewSettingsChanged();
-            wheel->accept();
+        const int minHeight = m_preset == QueueTablePreset::FullScreen ? 20 : 18;
+        if (ui::applyCtrlWheelRowHeight(wheel, m_view->verticalHeader()->defaultSectionSize(), minHeight, 48,
+                [this](int h) {
+                    m_view->verticalHeader()->setDefaultSectionSize(h);
+                    emit viewSettingsChanged();
+                })) {
             return true;
         }
     }
