@@ -5064,6 +5064,20 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
             item.comment = match.entry.comment;  // matched rows keep only an explicit note
             break;
         }
+        case PlaylistMatcher::Decision::Approximate: {
+            // Auto-pick the best guess but flag it; keep the alternatives so the
+            // edit modal / triage can offer a quick re-pick.
+            const Search::SearchRecord &rec = match.outcome.best;
+            item.trackPath = rec.path;
+            item.titleSnapshot = rec.title;
+            item.artistSnapshot = rec.artistName;
+            item.albumSnapshot = rec.albumTitle;
+            item.durationMs = rec.durationMs;
+            item.status = PlaylistItemStatus::Approximate;
+            item.candidatePaths = match.outcome.candidatePaths;
+            item.comment = fallbackComment;
+            break;
+        }
         case PlaylistMatcher::Decision::MultiMatch:
             item.titleSnapshot = match.entry.title;
             item.artistSnapshot = match.entry.artist;

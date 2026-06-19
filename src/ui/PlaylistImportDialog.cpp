@@ -21,9 +21,10 @@ namespace {
 QString decisionLabel(PlaylistMatcher::Decision decision)
 {
     switch (decision) {
-    case PlaylistMatcher::Decision::Matched:    return QStringLiteral("matched");
-    case PlaylistMatcher::Decision::MultiMatch: return QStringLiteral("multi");
-    case PlaylistMatcher::Decision::Pending:    return QStringLiteral("pending");
+    case PlaylistMatcher::Decision::Matched:     return QStringLiteral("matched");
+    case PlaylistMatcher::Decision::Approximate: return QStringLiteral("approx");
+    case PlaylistMatcher::Decision::MultiMatch:  return QStringLiteral("multi");
+    case PlaylistMatcher::Decision::Pending:     return QStringLiteral("pending");
     }
     return QString();
 }
@@ -276,6 +277,13 @@ void PlaylistImportDialog::rebuildPreview()
             resolved = match.outcome.best.path;
             statusItem->setForeground(QColor(0x4c, 0xaf, 0x50));
             break;
+        case PlaylistMatcher::Decision::Approximate:
+            title = match.outcome.best.title;
+            artist = match.outcome.best.artistName;
+            resolved = QStringLiteral("%1  (~%2%)")
+                           .arg(match.outcome.best.path).arg(match.outcome.confidence0To100);
+            statusItem->setForeground(QColor(0xff, 0xa7, 0x26));
+            break;
         case PlaylistMatcher::Decision::MultiMatch:
             resolved = QStringLiteral("%1 candidates").arg(match.outcome.candidatePaths.size());
             statusItem->setForeground(QColor(0xff, 0xb7, 0x4d));
@@ -294,15 +302,16 @@ void PlaylistImportDialog::rebuildPreview()
 
 void PlaylistImportDialog::updateSummary()
 {
-    int matched = 0, multi = 0, pending = 0;
+    int matched = 0, approx = 0, multi = 0, pending = 0;
     for (const PlaylistImportMatch &match : m_results) {
         switch (match.outcome.decision) {
-        case PlaylistMatcher::Decision::Matched:    ++matched; break;
-        case PlaylistMatcher::Decision::MultiMatch: ++multi;   break;
-        case PlaylistMatcher::Decision::Pending:    ++pending; break;
+        case PlaylistMatcher::Decision::Matched:     ++matched; break;
+        case PlaylistMatcher::Decision::Approximate: ++approx;  break;
+        case PlaylistMatcher::Decision::MultiMatch:  ++multi;   break;
+        case PlaylistMatcher::Decision::Pending:     ++pending; break;
         }
     }
-    m_status->setText(QStringLiteral("%1 matched · %2 multi · %3 pending — Add inserts all "
-                                     "(multi/pending stay editable via 'e').")
-                          .arg(matched).arg(multi).arg(pending));
+    m_status->setText(QStringLiteral("%1 matched · %2 approx · %3 multi · %4 pending — Add inserts "
+                                     "all (approx/multi/pending stay editable via 'e').")
+                          .arg(matched).arg(approx).arg(multi).arg(pending));
 }

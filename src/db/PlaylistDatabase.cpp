@@ -17,10 +17,11 @@ namespace {
 QString statusToString(PlaylistItemStatus status)
 {
     switch (status) {
-    case PlaylistItemStatus::Matched:    return QStringLiteral("matched");
-    case PlaylistItemStatus::Missing:    return QStringLiteral("missing");
-    case PlaylistItemStatus::Pending:    return QStringLiteral("pending");
-    case PlaylistItemStatus::MultiMatch: return QStringLiteral("multi");
+    case PlaylistItemStatus::Matched:     return QStringLiteral("matched");
+    case PlaylistItemStatus::Missing:     return QStringLiteral("missing");
+    case PlaylistItemStatus::Pending:     return QStringLiteral("pending");
+    case PlaylistItemStatus::MultiMatch:  return QStringLiteral("multi");
+    case PlaylistItemStatus::Approximate: return QStringLiteral("approx");
     }
     return QStringLiteral("matched");
 }
@@ -30,6 +31,7 @@ PlaylistItemStatus statusFromString(const QString &value)
     if (value == QStringLiteral("missing")) return PlaylistItemStatus::Missing;
     if (value == QStringLiteral("pending")) return PlaylistItemStatus::Pending;
     if (value == QStringLiteral("multi"))   return PlaylistItemStatus::MultiMatch;
+    if (value == QStringLiteral("approx"))  return PlaylistItemStatus::Approximate;
     return PlaylistItemStatus::Matched;
 }
 

@@ -86,18 +86,47 @@ QVector<ScoredResult> matchByPath(const SearchIndex &index, const QString &needl
     return index.match(query, /*fuzzyMode=*/false);
 }
 
-Outcome matched(const ScoredResult &hit, const QString &queryUsed)
+// Heuristic certainty (0-100) of a single chosen hit: the tier `base` plus a
+// reward for being uncontested and for album/duration corroboration.
+int confidenceFor(const ScoredResult &hit, const ImportEntry &entry, int base, bool uncontested)
+{
+    int c = base + (uncontested ? kConfidenceUncontested : 0);
+    if (!entry.album.isEmpty() && !hit.rec.normAlbum.isEmpty()) {
+        const QString wantedAlbum = normalizeForMatch(entry.album);
+        if (!wantedAlbum.isEmpty() && hit.rec.normAlbum.contains(wantedAlbum)) {
+            c += kConfidenceAlbumMatch;
+        }
+    }
+    if (entry.durationMs > 0 && std::llabs(hit.rec.durationMs - entry.durationMs) <= kDurationToleranceMs) {
+        c += kConfidenceDuration;
+    }
+    return std::clamp(c, 0, 100);
+}
+
+// Finalize a single chosen hit: Matched when confident, else Approximate (still
+// auto-picked, but flagged with the close set kept for a quick review).
+Outcome single(const ScoredResult &hit, const ImportEntry &entry, int base, bool uncontested,
+               const QString &queryUsed, const QVector<ScoredResult> &alternatives)
 {
     Outcome outcome;
-    outcome.decision = Decision::Matched;
     outcome.best = hit.rec;
     outcome.queryUsed = queryUsed;
+    outcome.confidence0To100 = confidenceFor(hit, entry, base, uncontested);
+    if (outcome.confidence0To100 >= kMatchedConfidence) {
+        outcome.decision = Decision::Matched;
+    } else {
+        outcome.decision = Decision::Approximate;
+        for (const ScoredResult &r : alternatives) {
+            outcome.candidatePaths.append(r.rec.path);
+        }
+    }
     return outcome;
 }
 
-// Decide from a scored result list. `entry` supplies album/duration tiebreakers.
+// Decide from a scored result list. `base` is the match-tier confidence; `entry`
+// supplies album/duration tiebreakers.
 Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
-               const QString &queryUsed)
+               const QString &queryUsed, int base)
 {
     Outcome outcome;
     outcome.queryUsed = queryUsed;
@@ -105,7 +134,7 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
         return outcome;  // Pending
     }
     if (results.size() == 1) {
-        return matched(results.first(), queryUsed);
+        return single(results.first(), entry, base, /*uncontested=*/true, queryUsed, results);
     }
 
     // The "close set": everything scoring near the top hit.
@@ -120,11 +149,12 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
         }
     }
     if (close.size() == 1) {
-        return matched(close.first(), queryUsed);
+        return single(close.first(), entry, base, /*uncontested=*/true, queryUsed, close);
     }
 
     // Tiebreakers, never filters: album text, then duration proximity. If they
-    // single out exactly one of the close hits, trust it.
+    // single out exactly one of the close hits, trust it (corroborated, so not
+    // "uncontested" but the album/duration bonus lifts its confidence).
     if (!entry.album.isEmpty()) {
         const QString wantedAlbum = normalizeForMatch(entry.album);
         QVector<ScoredResult> albumHits;
@@ -134,7 +164,7 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
             }
         }
         if (albumHits.size() == 1) {
-            return matched(albumHits.first(), queryUsed);
+            return single(albumHits.first(), entry, base, /*uncontested=*/false, queryUsed, close);
         }
         if (!albumHits.isEmpty()) {
             close = albumHits;
@@ -148,7 +178,7 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
             }
         }
         if (durationHits.size() == 1) {
-            return matched(durationHits.first(), queryUsed);
+            return single(durationHits.first(), entry, base, /*uncontested=*/false, queryUsed, close);
         }
         if (!durationHits.isEmpty()) {
             close = durationHits;
@@ -171,31 +201,33 @@ Outcome match(const SearchIndex &index, const ImportEntry &entry)
     if (!entry.directPath.isEmpty()) {
         QVector<ScoredResult> hits = matchByPath(index, entry.directPath, false);
         if (hits.size() == 1) {
-            return matched(hits.first(), QString());
+            return single(hits.first(), entry, kConfidencePath, true, QString(), hits);
         }
         const QString basename = QFileInfo(entry.directPath).fileName();
         hits = matchByPath(index, basename, true);
         if (hits.size() == 1) {
-            return matched(hits.first(), QString());
+            return single(hits.first(), entry, kConfidencePath, true, QString(), hits);
         }
     }
 
     // 2. Field-scoped artist:/title: query — exact mode, then fuzzy.
     const QString scoped = scopedQueryString(entry);
     if (!scoped.isEmpty()) {
+        int base = kConfidenceScopedExact;
         QVector<ScoredResult> results = run(index, scoped, /*fuzzy=*/false);
         if (results.isEmpty()) {
             results = run(index, scoped, /*fuzzy=*/true);
+            base = kConfidenceScopedFuzzy;
         }
         if (!results.isEmpty()) {
-            return decide(results, entry, scoped);
+            return decide(results, entry, scoped, base);
         }
     }
 
-    // 3. Relaxed free-text fallback (whole haystack, fuzzy).
+    // 3. Relaxed free-text fallback (whole haystack, fuzzy) — least certain tier.
     const QString relaxed = relaxedQueryString(entry);
     QVector<ScoredResult> results = run(index, relaxed, /*fuzzy=*/true);
-    Outcome outcome = decide(results, entry, relaxed.isEmpty() ? scoped : relaxed);
+    Outcome outcome = decide(results, entry, relaxed.isEmpty() ? scoped : relaxed, kConfidenceRelaxed);
     if (outcome.decision == Decision::Pending && outcome.queryUsed.isEmpty()) {
         // Keep something re-runnable on the pending item for the edit modal.
         outcome.queryUsed = scoped.isEmpty() ? relaxed : scoped;

@@ -24,14 +24,18 @@
 
 namespace PlaylistMatcher {
 
-enum class Decision { Matched, MultiMatch, Pending };
+// Matched: a confident single pick. Approximate: a single pick we auto-chose but
+// whose confidence is below the bar — flagged for a glance. MultiMatch: several
+// close candidates, no confident pick. Pending: nothing found.
+enum class Decision { Matched, Approximate, MultiMatch, Pending };
 
 struct Outcome {
     Decision decision = Decision::Pending;
-    Search::SearchRecord best;       // valid when decision == Matched
-    QStringList candidatePaths;      // top candidates when decision == MultiMatch
+    Search::SearchRecord best;       // valid when decision == Matched or Approximate
+    QStringList candidatePaths;      // close candidates for MultiMatch/Approximate review
     QString queryUsed;               // SearchQuery::parse-compatible; stored on the
                                      // item so the edit modal can re-run it
+    int confidence0To100 = 0;        // heuristic certainty of `best` (not a probability)
 };
 
 // Score ratio below which a runner-up counts as "close" to the top hit.
@@ -40,6 +44,20 @@ inline constexpr double kCloseScoreRatio = 0.85;
 inline constexpr int kMaxCandidates = 5;
 // Duration tiebreaker tolerance.
 inline constexpr qint64 kDurationToleranceMs = 3000;
+
+// Confidence is a tuned heuristic, not a probability: a per-tier base reward for
+// how the hit was found, plus corroboration. At/above kMatchedConfidence a single
+// pick is "Matched"; below it the pick is still auto-chosen but flagged
+// "Approximate" for review. Tuned so exact/scoped matches stay Matched and only
+// loose free-text fallbacks land in the Approximate band.
+inline constexpr int kConfidencePath        = 100;  // resolved by file path
+inline constexpr int kConfidenceScopedExact = 90;   // artist:/title: exact-mode hit
+inline constexpr int kConfidenceScopedFuzzy = 72;   // artist:/title: fuzzy-mode hit
+inline constexpr int kConfidenceRelaxed     = 55;   // last-resort free-text hit
+inline constexpr int kConfidenceUncontested = 8;    // only one candidate found
+inline constexpr int kConfidenceAlbumMatch  = 10;   // album corroborates
+inline constexpr int kConfidenceDuration    = 8;    // duration within tolerance
+inline constexpr int kMatchedConfidence     = 78;   // Matched at/above, else Approximate
 
 Outcome match(const Search::SearchIndex &index, const PlaylistImport::ImportEntry &entry);
 
