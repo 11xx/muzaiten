@@ -1,11 +1,14 @@
 #pragma once
 
+#include "playlist/PlaylistImport.h"
 #include "playlist/PlaylistImportWorker.h"
 
 #include <QDialog>
+#include <QHash>
 #include <QString>
 #include <QVector>
 
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -27,6 +30,13 @@ public:
 
     // Valid after the dialog is accepted: one row per source line.
     QVector<PlaylistImportMatch> results() const { return m_results; }
+
+    // Per-row triage picks: result index → chosen library path for rows the user
+    // resolved in the preview (MultiMatch/Approximate). Rows left as-is are absent.
+    QHash<int, QString> resolvedPaths() const;
+
+    // The {"playlist":{…}} header from a JSONL import, if any (else not present).
+    PlaylistImport::ImportHeader header() const { return m_header; }
 
 private slots:
     void loadFile();
@@ -55,5 +65,7 @@ private:
     PlaylistImportWorker *m_worker = nullptr;
 
     QVector<PlaylistImportMatch> m_results;
+    PlaylistImport::ImportHeader m_header;
+    QHash<int, QComboBox *> m_resolvers;  // preview row → candidate picker (owned by the table)
     bool m_matching = false;
 };

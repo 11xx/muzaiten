@@ -5028,74 +5028,105 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
         return;
     }
 
+    const QVector<PlaylistImportMatch> matches = dialog.results();
+    const QHash<int, QString> resolved = dialog.resolvedPaths();
+    const PlaylistImport::ImportHeader header = dialog.header();
+
     // Existing import source ids in this playlist → skip re-importing the same item.
     QSet<QString> seenExternalIds;
-    for (const PlaylistItem &existing : m_playlistDb->items(playlistId)) {
+    const QVector<PlaylistItem> existingItems = m_playlistDb->items(playlistId);
+    for (const PlaylistItem &existing : existingItems) {
         if (!existing.externalId.isEmpty()) {
             seenExternalIds.insert(existing.externalId);
         }
     }
 
+    // Honor a JSONL playlist header: name an as-yet-empty target and fill a blank
+    // comment. Renaming a populated playlist would surprise the user, so guard on it.
+    if (header.present) {
+        if (existingItems.isEmpty() && !header.name.isEmpty() && header.name != playlist.name) {
+            m_playlistDb->renamePlaylist(playlistId, header.name);
+        }
+        if (!header.comment.isEmpty() && playlist.comment.isEmpty()) {
+            m_playlistDb->setPlaylistComment(playlistId, header.comment);
+        }
+    }
+
     int added = 0;
     int skipped = 0;
-    for (const PlaylistImportMatch &match : dialog.results()) {
+    for (int i = 0; i < matches.size(); ++i) {
+        const PlaylistImportMatch &match = matches.at(i);
         const QString externalId = match.entry.externalId;
         if (!externalId.isEmpty() && seenExternalIds.contains(externalId)) {
             ++skipped;
             continue;
         }
 
-        PlaylistItem item;
-        item.query = match.outcome.queryUsed;
-        item.externalId = externalId;
         // Prefer an explicit (JSONL) comment; otherwise keep the raw source line on
         // unresolved rows so the user can see what failed to match.
         const QString fallbackComment =
             match.entry.comment.isEmpty() ? match.entry.rawLine : match.entry.comment;
-        switch (match.outcome.decision) {
-        case PlaylistMatcher::Decision::Matched: {
-            const Search::SearchRecord &rec = match.outcome.best;
-            item.trackPath = rec.path;
-            item.titleSnapshot = rec.title;
-            item.artistSnapshot = rec.artistName;
-            item.albumSnapshot = rec.albumTitle;
-            item.durationMs = rec.durationMs;
-            item.status = PlaylistItemStatus::Matched;
-            item.comment = match.entry.comment;  // matched rows keep only an explicit note
-            break;
+
+        PlaylistItem item;
+        // A triage pick in the preview resolves the row to a chosen candidate.
+        bool resolvedByPick = false;
+        const QString chosenPath = resolved.value(i);
+        if (!chosenPath.isEmpty()) {
+            const Track picked = m_database->trackForPath(chosenPath);
+            if (!picked.path.isEmpty()) {
+                item = playlistItemFromTrack(picked, match.outcome.queryUsed);
+                item.comment = fallbackComment;
+                resolvedByPick = true;
+            }
         }
-        case PlaylistMatcher::Decision::Approximate: {
-            // Auto-pick the best guess but flag it; keep the alternatives so the
-            // edit modal / triage can offer a quick re-pick.
-            const Search::SearchRecord &rec = match.outcome.best;
-            item.trackPath = rec.path;
-            item.titleSnapshot = rec.title;
-            item.artistSnapshot = rec.artistName;
-            item.albumSnapshot = rec.albumTitle;
-            item.durationMs = rec.durationMs;
-            item.status = PlaylistItemStatus::Approximate;
-            item.candidatePaths = match.outcome.candidatePaths;
-            item.comment = fallbackComment;
-            break;
+        if (!resolvedByPick) {
+            item.query = match.outcome.queryUsed;
+            switch (match.outcome.decision) {
+            case PlaylistMatcher::Decision::Matched: {
+                const Search::SearchRecord &rec = match.outcome.best;
+                item.trackPath = rec.path;
+                item.titleSnapshot = rec.title;
+                item.artistSnapshot = rec.artistName;
+                item.albumSnapshot = rec.albumTitle;
+                item.durationMs = rec.durationMs;
+                item.status = PlaylistItemStatus::Matched;
+                item.comment = match.entry.comment;  // matched rows keep only an explicit note
+                break;
+            }
+            case PlaylistMatcher::Decision::Approximate: {
+                // Auto-pick the best guess but flag it; keep the alternatives so the
+                // edit modal / triage can offer a quick re-pick.
+                const Search::SearchRecord &rec = match.outcome.best;
+                item.trackPath = rec.path;
+                item.titleSnapshot = rec.title;
+                item.artistSnapshot = rec.artistName;
+                item.albumSnapshot = rec.albumTitle;
+                item.durationMs = rec.durationMs;
+                item.status = PlaylistItemStatus::Approximate;
+                item.candidatePaths = match.outcome.candidatePaths;
+                item.comment = fallbackComment;
+                break;
+            }
+            case PlaylistMatcher::Decision::MultiMatch:
+                item.titleSnapshot = match.entry.title;
+                item.artistSnapshot = match.entry.artist;
+                item.albumSnapshot = match.entry.album;
+                item.durationMs = match.entry.durationMs;
+                item.status = PlaylistItemStatus::MultiMatch;
+                item.candidatePaths = match.outcome.candidatePaths;
+                item.comment = fallbackComment;
+                break;
+            case PlaylistMatcher::Decision::Pending:
+                item.titleSnapshot = match.entry.title;
+                item.artistSnapshot = match.entry.artist;
+                item.albumSnapshot = match.entry.album;
+                item.durationMs = match.entry.durationMs;
+                item.status = PlaylistItemStatus::Pending;
+                item.comment = fallbackComment;
+                break;
+            }
         }
-        case PlaylistMatcher::Decision::MultiMatch:
-            item.titleSnapshot = match.entry.title;
-            item.artistSnapshot = match.entry.artist;
-            item.albumSnapshot = match.entry.album;
-            item.durationMs = match.entry.durationMs;
-            item.status = PlaylistItemStatus::MultiMatch;
-            item.candidatePaths = match.outcome.candidatePaths;
-            item.comment = fallbackComment;
-            break;
-        case PlaylistMatcher::Decision::Pending:
-            item.titleSnapshot = match.entry.title;
-            item.artistSnapshot = match.entry.artist;
-            item.albumSnapshot = match.entry.album;
-            item.durationMs = match.entry.durationMs;
-            item.status = PlaylistItemStatus::Pending;
-            item.comment = fallbackComment;
-            break;
-        }
+        item.externalId = externalId;
         if (m_playlistDb->addItem(playlistId, item) > 0) {
             ++added;
             if (!externalId.isEmpty()) {
