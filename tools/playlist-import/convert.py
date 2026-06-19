@@ -29,6 +29,7 @@ import csv
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # --- filename / playlist-name cleaning --------------------------------------
@@ -44,6 +45,9 @@ _SOURCE_PREFIX = re.compile(
     r"Soundcloud|Pandora|Rdio|Soundiiz)\s*[-–]\s*",
     re.IGNORECASE,
 )
+_PLAYLIST_CSV_TIMESTAMP = re.compile(r"playlistCSV(?P<epoch>\d{9,11})(?:-XML)?\s*$", re.IGNORECASE)
+_MIN_EXPORT_TIMESTAMP = 946684800       # 2000-01-01 UTC
+_MAX_EXPORT_TIMESTAMP = 4102444800      # 2100-01-01 UTC
 
 
 def clean_stem(name: str) -> str:
@@ -70,6 +74,37 @@ def source_label(stem: str, path: Path) -> str:
         if any(known in p for p in parts):
             return known.title()
     return "import"
+
+
+def source_provenance(dialect: str, stem: str, path: Path) -> str:
+    """Return the human-readable source line for the playlist header."""
+    if dialect == "rdio":
+        return "Rdio"
+    service = source_label(stem, path)
+    return "Soundiiz" if service.lower() in {"import", "soundiiz"} else f"{service} via Soundiiz"
+
+
+def format_utc(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def export_timestamp(path: Path) -> tuple[str, str]:
+    """Use Soundiiz's filename timestamp when plausible, otherwise file mtime."""
+    match = _PLAYLIST_CSV_TIMESTAMP.search(path.stem)
+    if match:
+        epoch = int(match.group("epoch"))
+        if _MIN_EXPORT_TIMESTAMP <= epoch <= _MAX_EXPORT_TIMESTAMP:
+            return "Exported", f"{format_utc(epoch)} (filename timestamp)"
+    return "File modified", f"{format_utc(path.stat().st_mtime)} (filesystem timestamp)"
+
+
+def playlist_comment(dialect: str, stem: str, path: Path) -> str:
+    timestamp_label, timestamp = export_timestamp(path)
+    return "\n".join((
+        f"Source: {source_provenance(dialect, stem, path)}",
+        f"{timestamp_label}: {timestamp}",
+        f"File: {path.name}",
+    ))
 
 
 # --- field helpers ----------------------------------------------------------
@@ -103,6 +138,23 @@ def external_id(url: str, isrc: str) -> str:
         if m:
             return f"spotify:track:{m.group(1)}"
     return ""
+
+
+def added_at(value: str) -> int | None:
+    """Parse an offset-bearing ISO-8601 source timestamp to epoch seconds."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    timestamp = int(parsed.timestamp())
+    return timestamp if timestamp > 0 else None
 
 
 # --- dialect detection + row parsing ----------------------------------------
@@ -147,6 +199,9 @@ def parse_rows(path: Path, dialect: str):
                 ext = external_id(row.get("url", ""), row.get("isrc", ""))
                 if ext:
                     rec["externalId"] = ext
+                timestamp = added_at(row.get("addeddate", ""))
+                if timestamp:
+                    rec["addedAt"] = timestamp
             else:  # rdio
                 title = row.get("name", "")
                 if not title:
@@ -208,7 +263,7 @@ def convert(src: Path, out_dir: Path, dry_run: bool) -> int:
 
         stem = clean_stem(path.stem)
         name = playlist_name(stem)
-        comment = f"from {source_label(stem, path)} ({path.name})"
+        comment = playlist_comment(dialect, stem, path)
         out_path = unique_out_path(out_dir, stem, used)
 
         total_files += 1

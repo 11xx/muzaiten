@@ -43,6 +43,7 @@ Every non-header content line is one playlist item.
 | `artist`     | string  | no                | primary artist; multiple artists as `"A, B"`                   |
 | `album`      | string  | no                | album title (improves match disambiguation)                    |
 | `durationMs` | integer | no                | duration in **milliseconds** (convert seconds × 1000)          |
+| `addedAt`    | integer | no                | source playlist-added Unix timestamp in **seconds**            |
 | `externalId` | string  | recommended       | namespaced source identifier, e.g. `"youtube:ID"`, `"isrc:..."` |
 | `directPath` | string  | no                | local file path (e.g. from m3u); tried before text matching    |
 | `comment`    | string  | no                | free-form note; displayed on the item and retained across edits |
@@ -54,6 +55,11 @@ Additional rules:
 
 - Unknown keys are ignored.
 - A negative or non-integer `durationMs` is treated as `0`.
+- `addedAt` accepts a JSON integer or numeric string. It must be a positive,
+  integral Unix timestamp in seconds within the supported date range; missing,
+  zero, negative, fractional, malformed, and out-of-range values are ignored.
+  It represents when the source playlist received the item, not when muzaiten
+  imports it. JSONL line order remains the canonical playlist ordinal.
 - Leading and trailing whitespace in string values is trimmed.
 - `externalId` should be namespaced (`source:id`) so it remains unambiguous across
   sources. It is used for source link-back and to make re-import idempotent
@@ -88,7 +94,21 @@ filename. Requests should be rate-limited; `yt-dlp` is the slow step.
 
 Columns map directly: `Title → title`, `Artist → artist`, `Album → album`,
 `Duration → durationMs` (parse `m:ss` or seconds), and `ISRC → externalId`
-(`"isrc:<ISRC>"`).
+(`"isrc:<ISRC>"`). A non-empty, valid ISO-8601 `addedDate` maps to `addedAt` in
+epoch seconds; empty or invalid dates are omitted. Converters should place
+human-readable provenance in the playlist header comment rather than creating
+synthetic item comments, for example:
+
+```text
+Source: Spotify via Soundiiz
+Exported: 2020-11-09 20:48:16 UTC (filename timestamp)
+File: Spotify - Forza - (484) playlistCSV1604954896.csv
+```
+
+If no plausible `playlistCSV<epoch>` suffix exists, use `File modified: … UTC
+(filesystem timestamp)` instead. Filesystem time is export provenance, not a
+playlist creation date. Import only fills a playlist comment when it is empty;
+an existing non-empty playlist comment is never overwritten.
 
 ### m3u / m3u8
 
