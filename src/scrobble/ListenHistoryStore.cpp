@@ -132,6 +132,12 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     pragma.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
 
+    // The schema defined below is the only supported revision. No migration of
+    // databases written by earlier revisions is performed or intended: a
+    // pre-existing table is left untouched by CREATE TABLE IF NOT EXISTS, and the
+    // schemaVersion row is overwritten unconditionally. Earlier schema revisions
+    // are therefore silently skipped or overridden; backward compatibility is not
+    // a goal of this store.
     QSqlQuery create(m_db);
     create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS listens ("
