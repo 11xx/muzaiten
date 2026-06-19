@@ -14,10 +14,11 @@
 // survives rescans, can be exported, and can represent unresolved imports.
 
 enum class PlaylistItemStatus {
-    Matched,    // resolved to a single library track
-    Missing,    // had a track once, but the path is no longer in the library
-    Pending,    // imported text with no confident match yet
-    MultiMatch, // import produced several candidates; awaiting a pick
+    Matched,     // resolved to a single library track
+    Missing,     // had a track once, but the path is no longer in the library
+    Pending,     // imported text with no confident match yet
+    MultiMatch,  // import produced several candidates; awaiting a pick
+    Approximate, // auto-picked a best guess below the confidence bar; awaiting a glance
 };
 
 struct PlaylistItem {

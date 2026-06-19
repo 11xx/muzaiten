@@ -256,6 +256,27 @@ private slots:
         QVERIFY(!outcome.queryUsed.isEmpty());  // edit modal can still re-run it
     }
 
+    void match_confidentHitIsMatched()
+    {
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Miles Davis - So What")));
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Matched);
+        QVERIFY(outcome.confidence0To100 >= PlaylistMatcher::kMatchedConfidence);
+    }
+
+    void match_relaxedFallbackIsApproximate()
+    {
+        // No "Artist - Title" separator, and the artist words live in the artist
+        // field, not the title — so the scoped query misses and only the relaxed
+        // free-text fallback resolves it: a single auto-pick, flagged Approximate.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Miles Davis So What")));
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Approximate);
+        QCOMPARE(outcome.best.title, QStringLiteral("So What"));
+        QVERIFY(outcome.confidence0To100 > 0
+                && outcome.confidence0To100 < PlaylistMatcher::kMatchedConfidence);
+    }
+
     void match_directPathWins()
     {
         ImportEntry entry;

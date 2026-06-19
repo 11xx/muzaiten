@@ -59,10 +59,11 @@ constexpr HeaderViewStyle kTableHeaderStyle{
 QString statusLabel(PlaylistItemStatus status)
 {
     switch (status) {
-    case PlaylistItemStatus::Matched:    return QString();
-    case PlaylistItemStatus::Missing:    return QStringLiteral("missing");
-    case PlaylistItemStatus::Pending:    return QStringLiteral("pending");
-    case PlaylistItemStatus::MultiMatch: return QStringLiteral("multi");
+    case PlaylistItemStatus::Matched:     return QString();
+    case PlaylistItemStatus::Missing:     return QStringLiteral("missing");
+    case PlaylistItemStatus::Pending:     return QStringLiteral("pending");
+    case PlaylistItemStatus::MultiMatch:  return QStringLiteral("multi");
+    case PlaylistItemStatus::Approximate: return QStringLiteral("approx");
     }
     return QString();
 }
