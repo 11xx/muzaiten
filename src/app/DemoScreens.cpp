@@ -356,7 +356,7 @@ bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &
     if (!saveWindow(*window, dir, QStringLiteral("01-library.png"), error)) return false;
 
     activateDigitShortcut(*window, Qt::Key_4);
-    if (options.searchVideo) {
+    if (options.searchVideo && !options.searchQuery.trimmed().isEmpty()) {
         if (!writeSearchVideo(*window,
                               dir,
                               options.searchQuery,

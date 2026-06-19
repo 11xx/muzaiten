@@ -295,7 +295,10 @@ void AppCore::quit()
     // of hiding/releasing. (If the window was already released to tray, its
     // state was saved when it closed, so there is nothing to do here.)
     if (m_window) {
-        m_window->close();
+        MainWindow *window = m_window;
+        window->close();
+        delete window;
+        m_window = nullptr;
     }
     QApplication::quit();
 }

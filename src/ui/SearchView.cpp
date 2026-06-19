@@ -428,8 +428,13 @@ void SearchView::setupWorker(const QString &dbPath)
 void SearchView::teardownWorker()
 {
     if (m_workerThread) {
+        if (m_worker && m_workerThread->isRunning()) {
+            QMetaObject::invokeMethod(m_worker, "clearIndex", Qt::BlockingQueuedConnection);
+        }
         m_workerThread->quit();
-        m_workerThread->wait(3000);
+        if (!m_workerThread->wait(3000)) {
+            m_workerThread->wait();
+        }
         m_workerThread = nullptr;
         m_worker = nullptr; // deleteLater handles it
     }
