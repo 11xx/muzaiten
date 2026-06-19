@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QKeyEvent>
@@ -190,7 +191,12 @@ void setFocusedSearchText(const QString &query)
     }
 }
 
-bool writeSearchVideo(MainWindow &window, const QDir &dir, const QString &query, int keyDelayMs, QString *error)
+bool writeSearchVideo(MainWindow &window,
+                      const QDir &dir,
+                      const QString &query,
+                      int keyDelayMs,
+                      const QString &finalStillPath,
+                      QString *error)
 {
     if (query.isEmpty()) {
         return true;
@@ -220,8 +226,10 @@ bool writeSearchVideo(MainWindow &window, const QDir &dir, const QString &query,
 
     const int delayMs = std::clamp(keyDelayMs, 40, 1000);
     int frame = 0;
+    QString lastFramePath;
     const auto saveFrame = [&]() {
-        return saveWindow(window, frameDir.filePath(QStringLiteral("search_%1.png").arg(frame++, 5, 10, QLatin1Char('0'))), error);
+        lastFramePath = frameDir.filePath(QStringLiteral("search_%1.png").arg(frame++, 5, 10, QLatin1Char('0')));
+        return saveWindow(window, lastFramePath, error);
     };
 
     edit->clear();
@@ -270,6 +278,16 @@ bool writeSearchVideo(MainWindow &window, const QDir &dir, const QString &query,
                          .arg(frameDir.absolutePath());
         }
         return false;
+    }
+
+    if (!finalStillPath.isEmpty()) {
+        QFile::remove(finalStillPath);
+        if (!QFile::copy(lastFramePath, finalStillPath)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("failed to save final search still %1").arg(finalStillPath);
+            }
+            return false;
+        }
     }
 
     frameDir.removeRecursively();
@@ -339,11 +357,18 @@ bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &
 
     activateDigitShortcut(*window, Qt::Key_4);
     if (options.searchVideo) {
-        if (!writeSearchVideo(*window, dir, options.searchQuery, options.searchKeyDelayMs, error)) return false;
+        if (!writeSearchVideo(*window,
+                              dir,
+                              options.searchQuery,
+                              options.searchKeyDelayMs,
+                              dir.filePath(QStringLiteral("02-search.png")),
+                              error)) {
+            return false;
+        }
     } else {
         setFocusedSearchText(options.searchQuery);
+        if (!saveWindow(*window, dir, QStringLiteral("02-search.png"), error)) return false;
     }
-    if (!saveWindow(*window, dir, QStringLiteral("02-search.png"), error)) return false;
 
     activateDigitShortcut(*window, Qt::Key_1);
     if (!saveWindow(*window, dir, QStringLiteral("03-queue.png"), error)) return false;
