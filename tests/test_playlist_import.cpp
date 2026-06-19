@@ -62,6 +62,19 @@ private slots:
                                   QStringLiteral("OK Computer"),
                                   QStringLiteral("/music/radiohead/ok-computer/06 Karma Police.flac"),
                                   4 * 60000 + 21000));
+        // Short, specific track for the radio-edit-noise + coverage cases.
+        records.append(makeRecord(QStringLiteral("Skinnyman"), QStringLiteral("Static-X"),
+                                  QStringLiteral("Start A War"),
+                                  QStringLiteral("/music/static-x/start-a-war/06 Skinnyman.flac"),
+                                  3 * 60000 + 12000));
+        // A long-title "magnet": its length makes it a fuzzy subsequence for almost
+        // any short query, so the coverage guard must keep it from being claimed.
+        records.append(makeRecord(
+            QStringLiteral("Eugene Onegin Op 24 Act 3 Scene and Arioso Itak poidyom tebya predstavlyu ya Uzhel ta samaya Tatyana"),
+            QStringLiteral("Dmitri Hvorostovsky Nuccia Focile Orchestre de Paris Semyon Bychkov"),
+            QStringLiteral("Tchaikovsky Eugene Onegin"),
+            QStringLiteral("/music/classical/eugene-onegin/13 act 3.flac"),
+            6 * 60000));
         m_index.build(records);
     }
 
@@ -293,6 +306,31 @@ private slots:
         QCOMPARE(outcome.best.title, QStringLiteral("So What"));
         QVERIFY(outcome.confidence0To100 > 0
                 && outcome.confidence0To100 < PlaylistMatcher::kMatchedConfidence);
+    }
+
+    void match_radioEditNoiseStripped()
+    {
+        // "(Clean Album Version) (Clean)" tags must not become title tokens — if
+        // they do, the real track is excluded (no such subsequence) and a long
+        // magnet that does contain them wins. After stripping, Skinnyman matches.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Static-X - Skinnyman (Clean Album Version) (Clean)")));
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Matched);
+        QCOMPARE(outcome.best.path,
+                 QStringLiteral("/music/static-x/start-a-war/06 Skinnyman.flac"));
+    }
+
+    void match_longFieldMagnetNotClaimed()
+    {
+        // A short query that only a long title could fuzzily subsequence must never
+        // be auto-matched to that magnet — better Pending than a confident-wrong
+        // green. (This is the Eugene-Onegin false positive the coverage guard kills.)
+        ImportEntry entry;
+        entry.artist = QStringLiteral("Aria");
+        entry.title = QStringLiteral("Stan");
+        const auto outcome = PlaylistMatcher::match(m_index, entry);
+        QVERIFY(outcome.best.path != QStringLiteral("/music/classical/eugene-onegin/13 act 3.flac"));
+        QVERIFY(outcome.decision != PlaylistMatcher::Decision::Matched);
     }
 
     void match_directPathWins()

@@ -26,7 +26,7 @@ bool isNoiseSegment(const QString &segment)
     static const QRegularExpression noise(QStringLiteral(
         "\\b(feat|ft|featuring|official|video|audio|lyric|lyrics|visualizer|"
         "remaster(ed)?|mono|stereo|live|version|edit|mix|hd|hq|mv|explicit|"
-        "bonus|deluxe|single|album|out now|full)\\b"),
+        "clean|censored|uncensored|dirty|radio|bonus|deluxe|single|album|out now|full)\\b"),
         QRegularExpression::CaseInsensitiveOption);
     return noise.match(segment).hasMatch();
 }
