@@ -116,7 +116,9 @@ bool MuzaitenApplication::raiseRunningInstance()
     }
     socket.write(QJsonDocument(QJsonObject{{QStringLiteral("command"), QStringLiteral("raise")}})
                      .toJson(QJsonDocument::Compact) + '\n');
-    socket.waitForReadyRead(2000);
+    // Flush the command to the kernel before the socket is destroyed; we don't
+    // care about (and used to needlessly block up to 2s on) the server's reply.
+    socket.waitForBytesWritten(1000);
     return true;
 }
 

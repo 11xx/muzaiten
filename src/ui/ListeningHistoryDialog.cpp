@@ -272,6 +272,8 @@ void ListeningHistoryDialog::reload()
     if (m_store == nullptr || !m_store->isOpen()) {
         static_cast<ListeningHistoryModel *>(m_model)->setRows({});
         m_summary->setText(QStringLiteral("Listening history is unavailable."));
+        m_clearLastFm->setEnabled(false);
+        m_clearListenBrainz->setEnabled(false);
         updateActions();
         return;
     }
@@ -285,6 +287,11 @@ void ListeningHistoryDialog::reload()
                            .arg(total)
                            .arg(lastFmPending)
                            .arg(listenBrainzPending));
+    // The clear-backlog buttons track the store's pending counts, not the
+    // selection, so set them here from the counts reload() already fetched
+    // instead of re-querying on every selection change in updateActions().
+    m_clearLastFm->setEnabled(lastFmPending > 0);
+    m_clearListenBrainz->setEnabled(listenBrainzPending > 0);
     updateActions();
 }
 
@@ -336,7 +343,6 @@ void ListeningHistoryDialog::updateActions()
     auto *model = static_cast<ListeningHistoryModel *>(m_model);
     m_queueLastFm->setEnabled(hasSelection && model->hasQueueableForService(selectedRows, ListenHistoryStore::LastFm));
     m_queueListenBrainz->setEnabled(hasSelection && model->hasQueueableForService(selectedRows, ListenHistoryStore::ListenBrainz));
-    const bool hasStore = m_store != nullptr && m_store->isOpen();
-    m_clearLastFm->setEnabled(hasStore && m_store->pendingCount(ListenHistoryStore::LastFm) > 0);
-    m_clearListenBrainz->setEnabled(hasStore && m_store->pendingCount(ListenHistoryStore::ListenBrainz) > 0);
+    // The clear-backlog buttons are selection-independent; reload() sets them
+    // from the pending counts it already fetches.
 }
