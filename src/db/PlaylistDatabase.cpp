@@ -137,6 +137,7 @@ bool PlaylistDatabase::migrate()
                        "query TEXT, "
                        "status TEXT NOT NULL DEFAULT 'matched', "
                        "candidates TEXT, "
+                       "external_id TEXT, "
                        "FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist ON playlist_items(playlist_id, ordinal)"),
         QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, datetime('now'))"),
@@ -166,6 +167,28 @@ bool PlaylistDatabase::migrate()
     }
     if (!query.exec(QStringLiteral(
             "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, datetime('now'))"))) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+
+    // v3: external_id column (import source id, e.g. "youtube:ID") for link-back
+    // and idempotent re-import. Same column-presence self-heal as v2.
+    bool hasExternalId = false;
+    if (query.exec(QStringLiteral("PRAGMA table_info(playlist_items)"))) {
+        while (query.next()) {
+            if (query.value(1).toString() == QStringLiteral("external_id")) {
+                hasExternalId = true;
+                break;
+            }
+        }
+    }
+    if (!hasExternalId
+        && !query.exec(QStringLiteral("ALTER TABLE playlist_items ADD COLUMN external_id TEXT"))) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    if (!query.exec(QStringLiteral(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(3, datetime('now'))"))) {
         m_lastError = query.lastError().text();
         return false;
     }
@@ -285,7 +308,7 @@ QVector<PlaylistItem> PlaylistDatabase::items(qint64 playlistId) const
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "SELECT id, playlist_id, ordinal, track_path, title_snapshot, artist_snapshot, "
-        "album_snapshot, duration_ms, added_at, modified_at, comment, query, status, candidates "
+        "album_snapshot, duration_ms, added_at, modified_at, comment, query, status, candidates, external_id "
         "FROM playlist_items WHERE playlist_id = ? ORDER BY ordinal"));
     query.addBindValue(playlistId);
     if (!query.exec()) {
@@ -308,6 +331,7 @@ QVector<PlaylistItem> PlaylistDatabase::items(qint64 playlistId) const
         item.query = query.value(11).toString();
         item.status = statusFromString(query.value(12).toString());
         item.candidatePaths = candidatesFromJson(query.value(13).toString());
+        item.externalId = query.value(14).toString();
         result.push_back(item);
     }
     return result;
@@ -327,8 +351,8 @@ qint64 PlaylistDatabase::addItem(qint64 playlistId, const PlaylistItem &item)
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "INSERT INTO playlist_items(playlist_id, ordinal, track_path, title_snapshot, "
-        "artist_snapshot, album_snapshot, duration_ms, added_at, modified_at, comment, query, status, candidates) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        "artist_snapshot, album_snapshot, duration_ms, added_at, modified_at, comment, query, status, candidates, external_id) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     query.addBindValue(playlistId);
     query.addBindValue(ordinal);
     query.addBindValue(item.trackPath);
@@ -342,6 +366,7 @@ qint64 PlaylistDatabase::addItem(qint64 playlistId, const PlaylistItem &item)
     query.addBindValue(item.query);
     query.addBindValue(statusToString(item.status));
     query.addBindValue(candidatesToJson(item.candidatePaths));
+    query.addBindValue(item.externalId);
     if (!query.exec()) {
         m_lastError = query.lastError().text();
         return 0;
@@ -356,7 +381,7 @@ bool PlaylistDatabase::updateItem(const PlaylistItem &item)
     query.prepare(QStringLiteral(
         "UPDATE playlist_items SET track_path = ?, title_snapshot = ?, artist_snapshot = ?, "
         "album_snapshot = ?, duration_ms = ?, modified_at = ?, comment = ?, query = ?, status = ?, "
-        "candidates = ? WHERE id = ?"));
+        "candidates = ?, external_id = ? WHERE id = ?"));
     query.addBindValue(item.trackPath);
     query.addBindValue(item.titleSnapshot);
     query.addBindValue(item.artistSnapshot);
@@ -367,6 +392,7 @@ bool PlaylistDatabase::updateItem(const PlaylistItem &item)
     query.addBindValue(item.query);
     query.addBindValue(statusToString(item.status));
     query.addBindValue(candidatesToJson(item.candidatePaths));
+    query.addBindValue(item.externalId);
     query.addBindValue(item.id);
     if (!query.exec()) {
         m_lastError = query.lastError().text();

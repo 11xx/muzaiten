@@ -15,6 +15,7 @@ private slots:
     void updateItemFields();
     void markItemsMissingKeepsPlaylistRows();
     void candidatesRoundTripAndV1Migration();
+    void externalIdRoundTripAndV2Migration();
 
 private:
     static PlaylistItem makeItem(const QString &path, const QString &title,
@@ -193,6 +194,52 @@ void TestPlaylistDatabase::candidatesRoundTripAndV1Migration()
     reloaded.candidatePaths.clear();
     QVERIFY(db.updateItem(reloaded));
     QCOMPARE(db.items(id).first().candidatePaths, QStringList());
+}
+
+void TestPlaylistDatabase::externalIdRoundTripAndV2Migration()
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath(QStringLiteral("playlists.sqlite"));
+
+    // Build a v2-shaped database (has candidates, lacks external_id) to exercise
+    // the v3 ALTER path in migrate().
+    {
+        QSqlDatabase v2 = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("pl-test-v2"));
+        v2.setDatabaseName(dbPath);
+        QVERIFY(v2.open());
+        QSqlQuery q(v2);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")));
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE playlists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
+                                      "comment TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)")));
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE playlist_items (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                      "playlist_id INTEGER NOT NULL, ordinal INTEGER NOT NULL, track_path TEXT, "
+                                      "title_snapshot TEXT, artist_snapshot TEXT, album_snapshot TEXT, "
+                                      "duration_ms INTEGER NOT NULL DEFAULT 0, added_at INTEGER NOT NULL, "
+                                      "modified_at INTEGER NOT NULL, comment TEXT, query TEXT, "
+                                      "status TEXT NOT NULL DEFAULT 'matched', candidates TEXT, "
+                                      "FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE)")));
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(1, datetime('now'))")));
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(2, datetime('now'))")));
+        v2.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("pl-test-v2"));
+
+    PlaylistDatabase db(QStringLiteral("pl-test-extid"));
+    QVERIFY(db.open(dbPath));  // migrate() must add the external_id column
+
+    const qint64 id = db.createPlaylist(QStringLiteral("Imported"));
+    PlaylistItem item = makeItem(QStringLiteral("/a.flac"), QStringLiteral("Nightcall"));
+    item.externalId = QStringLiteral("youtube:MV_3Dpw");
+    QVERIFY(db.addItem(id, item) > 0);
+
+    PlaylistItem reloaded = db.items(id).first();
+    QCOMPARE(reloaded.externalId, QStringLiteral("youtube:MV_3Dpw"));
+
+    // updateItem round-trips external_id too.
+    reloaded.playlistId = id;
+    reloaded.externalId = QStringLiteral("youtube:changed");
+    QVERIFY(db.updateItem(reloaded));
+    QCOMPARE(db.items(id).first().externalId, QStringLiteral("youtube:changed"));
 }
 
 QTEST_MAIN(TestPlaylistDatabase)

@@ -1875,13 +1875,14 @@ void PlaylistView::exportCurrentPlaylist()
             escaped.replace(QLatin1Char('"'), QStringLiteral("\"\""));
             return QStringLiteral("\"%1\"").arg(escaped);
         };
-        out << "ordinal,title,artist,album,duration_ms,path,status,query,comment\n";
+        out << "ordinal,title,artist,album,duration_ms,path,status,query,comment,external_id\n";
         for (const PlaylistItem &item : items) {
             out << item.ordinal + 1 << ','
                 << field(item.titleSnapshot) << ',' << field(item.artistSnapshot) << ','
                 << field(item.albumSnapshot) << ',' << item.durationMs << ','
                 << field(item.trackPath) << ',' << field(statusLabel(item.status)) << ','
-                << field(item.query) << ',' << field(item.comment) << '\n';
+                << field(item.query) << ',' << field(item.comment) << ','
+                << field(item.externalId) << '\n';
         }
     } else {
         out << "#EXTM3U\n";
