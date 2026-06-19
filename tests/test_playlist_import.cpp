@@ -141,6 +141,58 @@ private slots:
         QCOMPARE(entries.first().durationMs, qint64(261000));  // seconds heuristic
     }
 
+    void parse_jsonlItems()
+    {
+        ImportHeader header;
+        const auto entries = parse(QStringLiteral(
+            "{\"title\":\"So What\",\"artist\":\"Miles Davis\",\"album\":\"Kind of Blue\","
+            "\"durationMs\":540000,\"externalId\":\"youtube:abc\",\"comment\":\"jazz\"}\n"
+            "{\"directPath\":\"/music/x.flac\"}\n"), Format::Auto, &header);
+        QVERIFY(!header.present);
+        QCOMPARE(entries.size(), 2);
+        QCOMPARE(entries.first().title, QStringLiteral("So What"));
+        QCOMPARE(entries.first().artist, QStringLiteral("Miles Davis"));
+        QCOMPARE(entries.first().album, QStringLiteral("Kind of Blue"));
+        QCOMPARE(entries.first().durationMs, qint64(540000));
+        QCOMPARE(entries.first().externalId, QStringLiteral("youtube:abc"));
+        QCOMPARE(entries.first().comment, QStringLiteral("jazz"));
+        QCOMPARE(entries.at(1).directPath, QStringLiteral("/music/x.flac"));
+    }
+
+    void parse_jsonlHeaderAndTolerance()
+    {
+        ImportHeader header;
+        const auto entries = parse(QStringLiteral(
+            "{\"playlist\":{\"name\":\"Mix 2019\",\"comment\":\"from takeout\"}}\n"
+            "\n"
+            "# a comment line\n"
+            "{\"title\":\"Karma Police\",\"artist\":\"Radiohead\",\"durationMs\":\"261000\"}\n"
+            "{ this is not valid json }\n"
+            "{\"comment\":\"no title or path\"}\n"
+            "{\"title\":\"Hey Jude\",\"durationMs\":-5}\n"), Format::Auto, &header);
+        QVERIFY(header.present);
+        QCOMPARE(header.name, QStringLiteral("Mix 2019"));
+        QCOMPARE(header.comment, QStringLiteral("from takeout"));
+        // Blank, comment, malformed and the title/path-less line are all skipped.
+        QCOMPARE(entries.size(), 2);
+        QCOMPARE(entries.first().title, QStringLiteral("Karma Police"));
+        QCOMPARE(entries.first().durationMs, qint64(261000));  // numeric string coerced
+        QCOMPARE(entries.at(1).title, QStringLiteral("Hey Jude"));
+        QCOMPARE(entries.at(1).durationMs, qint64(0));          // negative clamped
+    }
+
+    void parse_jsonlHeaderOnlyWhenFirst()
+    {
+        // A "playlist" object that is not the first content line is treated as a
+        // (skipped) item, not a header.
+        ImportHeader header;
+        const auto entries = parse(QStringLiteral(
+            "{\"title\":\"So What\",\"artist\":\"Miles Davis\"}\n"
+            "{\"playlist\":{\"name\":\"Late\"}}\n"), Format::Auto, &header);
+        QVERIFY(!header.present);
+        QCOMPARE(entries.size(), 1);
+    }
+
     void stripTitleNoise_packaging()
     {
         QCOMPARE(stripTitleNoise(QStringLiteral("Karma Police (Official Video) [Remastered 2017]")),

@@ -11,6 +11,8 @@
 //    directPath so the matcher can resolve by path before falling back to text.
 //  - CSV: our own export columns (ordinal,title,artist,album,duration_ms,path,
 //    status,query,comment) or any csv with a header naming title/artist columns.
+//  - JSONL: the canonical interchange format (docs/playlist-import-jsonl.md) — one
+//    JSON object per line, with an optional leading {"playlist":{…}} header.
 
 #include <QMetaType>
 #include <QString>
@@ -23,22 +25,34 @@ struct ImportEntry {
     QString rawLine;     // original input line (trimmed), kept for display/debug
     QString title;       // guessed title (may be the whole line)
     QString artist;      // guessed artist; empty when the line had no separator
-    QString album;       // only from csv
-    QString directPath;  // m3u/csv path; matcher tries this before text matching
-    qint64 durationMs = 0;  // from EXTINF/csv; tiebreaker for matching
+    QString album;       // only from csv/jsonl
+    QString directPath;  // m3u/csv/jsonl path; matcher tries this before text matching
+    qint64 durationMs = 0;  // from EXTINF/csv/jsonl; tiebreaker for matching
     QString externalId;  // service id/url (e.g. YouTube video id); not matched on yet
+    QString comment;     // jsonl free-form note; carried onto the playlist item
 };
 
-enum class Format { Auto, PlainText, M3U, Csv };
+// Optional playlist-level metadata from a JSONL leading header line. When
+// `present`, the import can create/name the target playlist from it.
+struct ImportHeader {
+    bool present = false;
+    QString name;
+    QString comment;
+};
 
-// Parse pasted/loaded text. Auto detection: leading "#EXTM3U"/"#EXTINF" → M3U;
-// a first line that looks like a csv header with title/artist columns → Csv;
-// otherwise plain text.
-QVector<ImportEntry> parse(const QString &text, Format format = Format::Auto);
+enum class Format { Auto, PlainText, M3U, Csv, Jsonl };
+
+// Parse pasted/loaded text. Auto detection: leading "#EXTM3U"/"#EXTINF" → M3U; a
+// first content line starting with "{" → JSONL; a first line that looks like a csv
+// header with title/artist columns → Csv; otherwise plain text. When `outHeader`
+// is non-null and a JSONL playlist header is present, it is reported there.
+QVector<ImportEntry> parse(const QString &text, Format format = Format::Auto,
+                           ImportHeader *outHeader = nullptr);
 
 // Reads the file (utf-8) and parses it, picking the format from the extension
-// (.m3u/.m3u8/.csv) before falling back to content detection.
-QVector<ImportEntry> parseFile(const QString &filePath, QString *errorOut = nullptr);
+// (.m3u/.m3u8/.csv/.jsonl/.ndjson) before falling back to content detection.
+QVector<ImportEntry> parseFile(const QString &filePath, QString *errorOut = nullptr,
+                               ImportHeader *outHeader = nullptr);
 
 // Split one free-text line into artist/title guesses. Exposed for tests.
 ImportEntry parseLine(const QString &line);
