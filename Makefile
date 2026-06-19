@@ -34,6 +34,12 @@ DEMO_ALBUM                 ?=
 DEMO_NOW_PLAYING           ?=
 DEMO_NOW_PLAYING_STATE     ?= paused
 DEMO_NOW_PLAYING_POSITION  ?= 0.6667
+DEMO_OPTIMIZE_PNG          ?= 1
+DEMO_PNG_LOSSY             ?= 1
+DEMO_PNG_QUANTIZER         ?= pngquant
+DEMO_PNG_QUANTIZER_FLAGS   ?= --force --skip-if-larger --ext .png --strip --speed 1 --quality 0-90
+DEMO_PNG_OPTIMIZER         ?= oxipng
+DEMO_PNG_OPTIMIZER_FLAGS   ?= -o 4 --strip safe
 
 help:
 	@printf '%s\n' \
@@ -66,6 +72,12 @@ help:
 		'  DEMO_NOW_PLAYING="stargazer rainbow"' \
 		'  DEMO_NOW_PLAYING_STATE=paused' \
 		'  DEMO_NOW_PLAYING_POSITION=0.6667' \
+		'  DEMO_OPTIMIZE_PNG=1' \
+		'  DEMO_PNG_LOSSY=1' \
+		'  DEMO_PNG_QUANTIZER=pngquant' \
+		'  DEMO_PNG_QUANTIZER_FLAGS="--force --skip-if-larger --ext .png --strip --speed 1 --quality 0-90"' \
+		'  DEMO_PNG_OPTIMIZER=oxipng' \
+		'  DEMO_PNG_OPTIMIZER_FLAGS="-o 4 --strip safe"' \
 		'  MUZAITEN_LASTFM_API_KEY=...' \
 		'  MUZAITEN_LASTFM_SHARED_SECRET=...'
 
@@ -142,7 +154,23 @@ demo-screens: build
 		$(if $(DEMO_ALBUM),--demo-album "$(DEMO_ALBUM)") \
 		$(if $(DEMO_NOW_PLAYING),--demo-now-playing "$(DEMO_NOW_PLAYING)") \
 		--demo-now-playing-state "$(DEMO_NOW_PLAYING_STATE)" \
-		--demo-now-playing-position "$(DEMO_NOW_PLAYING_POSITION)"
+		--demo-now-playing-position "$(DEMO_NOW_PLAYING_POSITION)"; \
+		if [ "$(DEMO_OPTIMIZE_PNG)" != "0" ] && [ "$(DEMO_OPTIMIZE_PNG)" != "false" ] && [ "$(DEMO_OPTIMIZE_PNG)" != "no" ]; then \
+			if [ "$(DEMO_PNG_LOSSY)" != "0" ] && [ "$(DEMO_PNG_LOSSY)" != "false" ] && [ "$(DEMO_PNG_LOSSY)" != "no" ]; then \
+				if command -v "$(DEMO_PNG_QUANTIZER)" >/dev/null 2>&1; then \
+					find "$(DEMO_SCREEN_DIR)" -type f -name '*.png' -print0 \
+						| xargs -0 -r "$(DEMO_PNG_QUANTIZER)" $(DEMO_PNG_QUANTIZER_FLAGS) --; \
+				else \
+					printf '%s\n' "warning: $(DEMO_PNG_QUANTIZER) not found; skipping lossy demo PNG optimization" >&2; \
+				fi; \
+			fi; \
+			if command -v "$(DEMO_PNG_OPTIMIZER)" >/dev/null 2>&1; then \
+				find "$(DEMO_SCREEN_DIR)" -type f -name '*.png' -print0 \
+					| xargs -0 -r "$(DEMO_PNG_OPTIMIZER)" $(DEMO_PNG_OPTIMIZER_FLAGS); \
+			else \
+				printf '%s\n' "warning: $(DEMO_PNG_OPTIMIZER) not found; leaving demo PNGs unoptimized" >&2; \
+			fi; \
+		fi
 
 # Installs the existing build. Run `make build` (optionally with
 # CMAKE_BUILD_TYPE=Release) first. Defaults to the user-space ~/.local prefix
