@@ -315,7 +315,7 @@ private:
     // Core engine pointers — borrowed from AppCore (non-owning)
     AppCore        *m_core = nullptr;
     PlayerCore     *m_player = nullptr;
-    PlaybackBackend *m_playback = nullptr;  // m_player->backend(), kept for read/connect convenience
+    PlaybackBackend *m_playback = nullptr;  // cached m_core->backend(); sole backend accessor used below
     Database       *m_database = nullptr;
     PlaylistDatabase *m_playlistDb = nullptr;
     SettingsStore  *m_state = nullptr;
