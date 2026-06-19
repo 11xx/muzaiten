@@ -32,6 +32,7 @@ struct PlaylistItem {
     qint64 addedAt = 0;         // epoch seconds, first added
     qint64 modifiedAt = 0;      // epoch seconds, last edited
     QString comment;            // free-form note, e.g. "where this came from"
+    QString externalId;         // import source id (e.g. "youtube:ID"); link-back + dedup
     QString query;              // remembered search query used to add/edit it
     PlaylistItemStatus status = PlaylistItemStatus::Matched;
     QStringList candidatePaths; // MultiMatch: the import's close candidates,

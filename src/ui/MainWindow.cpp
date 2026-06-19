@@ -5028,10 +5028,30 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
         return;
     }
 
+    // Existing import source ids in this playlist → skip re-importing the same item.
+    QSet<QString> seenExternalIds;
+    for (const PlaylistItem &existing : m_playlistDb->items(playlistId)) {
+        if (!existing.externalId.isEmpty()) {
+            seenExternalIds.insert(existing.externalId);
+        }
+    }
+
     int added = 0;
+    int skipped = 0;
     for (const PlaylistImportMatch &match : dialog.results()) {
+        const QString externalId = match.entry.externalId;
+        if (!externalId.isEmpty() && seenExternalIds.contains(externalId)) {
+            ++skipped;
+            continue;
+        }
+
         PlaylistItem item;
         item.query = match.outcome.queryUsed;
+        item.externalId = externalId;
+        // Prefer an explicit (JSONL) comment; otherwise keep the raw source line on
+        // unresolved rows so the user can see what failed to match.
+        const QString fallbackComment =
+            match.entry.comment.isEmpty() ? match.entry.rawLine : match.entry.comment;
         switch (match.outcome.decision) {
         case PlaylistMatcher::Decision::Matched: {
             const Search::SearchRecord &rec = match.outcome.best;
@@ -5041,6 +5061,7 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
             item.albumSnapshot = rec.albumTitle;
             item.durationMs = rec.durationMs;
             item.status = PlaylistItemStatus::Matched;
+            item.comment = match.entry.comment;  // matched rows keep only an explicit note
             break;
         }
         case PlaylistMatcher::Decision::MultiMatch:
@@ -5050,7 +5071,7 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
             item.durationMs = match.entry.durationMs;
             item.status = PlaylistItemStatus::MultiMatch;
             item.candidatePaths = match.outcome.candidatePaths;
-            item.comment = match.entry.rawLine;
+            item.comment = fallbackComment;
             break;
         case PlaylistMatcher::Decision::Pending:
             item.titleSnapshot = match.entry.title;
@@ -5058,17 +5079,23 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
             item.albumSnapshot = match.entry.album;
             item.durationMs = match.entry.durationMs;
             item.status = PlaylistItemStatus::Pending;
-            item.comment = match.entry.rawLine;
+            item.comment = fallbackComment;
             break;
         }
         if (m_playlistDb->addItem(playlistId, item) > 0) {
             ++added;
+            if (!externalId.isEmpty()) {
+                seenExternalIds.insert(externalId);
+            }
         }
     }
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
-    statusBar()->showMessage(QStringLiteral("Imported %1 items into \"%2\"")
-                                 .arg(added).arg(playlist.name), 5000);
+    const QString message = skipped > 0
+        ? QStringLiteral("Imported %1 items into \"%2\" (%3 duplicates skipped)")
+              .arg(added).arg(playlist.name).arg(skipped)
+        : QStringLiteral("Imported %1 items into \"%2\"").arg(added).arg(playlist.name);
+    statusBar()->showMessage(message, 5000);
 }
 
 void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query)
