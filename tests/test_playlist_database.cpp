@@ -17,6 +17,7 @@ private slots:
     void markItemsMissingKeepsPlaylistRows();
     void candidatesRoundTripAndV1Migration();
     void externalIdRoundTripAndV2Migration();
+    void sourceTextRoundTripAndImmutability();
 
 private:
     static PlaylistItem makeItem(const QString &path, const QString &title,
@@ -255,6 +256,32 @@ void TestPlaylistDatabase::externalIdRoundTripAndV2Migration()
     reloaded.externalId = QStringLiteral("youtube:changed");
     QVERIFY(db.updateItem(reloaded));
     QCOMPARE(db.items(id).first().externalId, QStringLiteral("youtube:changed"));
+}
+
+void TestPlaylistDatabase::sourceTextRoundTripAndImmutability()
+{
+    QTemporaryDir dir;
+    PlaylistDatabase db(QStringLiteral("pl-test-src"));
+    QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+    const qint64 id = db.createPlaylist(QStringLiteral("Imported"));
+
+    PlaylistItem item = makeItem(QStringLiteral("/a.flac"), QStringLiteral("Skinnyman"));
+    item.sourceText = QStringLiteral("Static-X - Skinnyman (Clean)");
+    QVERIFY(db.addItem(id, item) > 0);
+
+    PlaylistItem reloaded = db.items(id).first();
+    QCOMPARE(reloaded.sourceText, QStringLiteral("Static-X - Skinnyman (Clean)"));
+
+    // Replacing the matched track must not drop the original imported string when
+    // the caller carries it through (mirrors the edit modal's itemChosen path).
+    reloaded.playlistId = id;
+    reloaded.trackPath = QStringLiteral("/b.flac");
+    reloaded.titleSnapshot = QStringLiteral("Different Title");
+    QVERIFY(db.updateItem(reloaded));
+
+    const PlaylistItem after = db.items(id).first();
+    QCOMPARE(after.titleSnapshot, QStringLiteral("Different Title"));
+    QCOMPARE(after.sourceText, QStringLiteral("Static-X - Skinnyman (Clean)"));
 }
 
 QTEST_MAIN(TestPlaylistDatabase)
