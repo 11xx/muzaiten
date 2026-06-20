@@ -1,8 +1,12 @@
 #include "playlist/PlaylistImportWorker.h"
 
 #include "db/Database.h"
+#include "search/Exclusion.h"
+#include "search/RankConfig.h"
 
 #include <QUuid>
+
+#include <algorithm>
 
 PlaylistImportWorker::PlaylistImportWorker(QString dbPath, QObject *parent)
     : QObject(parent)
@@ -32,7 +36,33 @@ bool PlaylistImportWorker::ensureIndex()
             return false;
         }
     }
-    m_index.build(m_db->allTracksForSearch());
+    // Honor the user's "Search ranking" exclude rules: drop excluded tracks before
+    // building the index so they never surface as import-match candidates (e.g.
+    // .Trash/.test/backup directories that otherwise pollute MultiMatch sets).
+    QVector<Search::SearchRecord> records = m_db->allTracksForSearch();
+    const Search::RankConfig rank =
+        Search::RankConfig::fromJsonString(m_db->setting(QStringLiteral("search.ranking")));
+    QVector<Search::ExcludeMatcher> excludes;
+    excludes.reserve(rank.excludes.size());
+    for (const Search::ExcludeRule &rule : rank.excludes) {
+        Search::ExcludeMatcher matcher(rule);
+        if (matcher.isValid()) {
+            excludes.append(matcher);
+        }
+    }
+    if (!excludes.isEmpty()) {
+        records.erase(std::remove_if(records.begin(), records.end(),
+                          [&excludes](const Search::SearchRecord &rec) {
+                              for (const Search::ExcludeMatcher &m : excludes) {
+                                  if (m.matches(rec)) {
+                                      return true;
+                                  }
+                              }
+                              return false;
+                          }),
+                      records.end());
+    }
+    m_index.build(records);
     m_indexBuilt = true;
     return true;
 }

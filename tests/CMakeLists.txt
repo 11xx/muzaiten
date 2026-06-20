@@ -60,6 +60,7 @@ add_executable(test_search_cli
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/IndexCache.cpp
@@ -198,6 +199,7 @@ add_test(NAME test_fold COMMAND test_fold)
 
 add_executable(test_search_index
     test_search_index.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchIndex.cpp
@@ -224,6 +226,7 @@ add_test(NAME test_search_matcher COMMAND test_search_matcher)
 
 add_executable(test_rank_config
     test_rank_config.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/RankConfig.cpp
     ../src/core/MusicSort.cpp
@@ -235,6 +238,7 @@ add_test(NAME test_rank_config COMMAND test_rank_config)
 
 add_executable(test_exclusion
     test_exclusion.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchIndex.cpp
@@ -249,6 +253,7 @@ add_test(NAME test_exclusion COMMAND test_exclusion)
 
 add_executable(test_result_ranker
     test_result_ranker.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/RankConfig.cpp
@@ -366,6 +371,7 @@ add_executable(test_playlist_import
     ../src/playlist/PlaylistImport.cpp
     ../src/playlist/PlaylistMatcher.cpp
     ../src/playlist/import/YouTubeImport.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/SearchIndex.cpp
@@ -471,9 +477,11 @@ add_executable(playlist_match_bench
     ../src/fs/PathResolver.cpp
     ../src/playlist/PlaylistImport.cpp
     ../src/playlist/PlaylistMatcher.cpp
+    ../src/core/MusicSort.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/IndexCache.cpp
+    ../src/search/RankConfig.cpp
     ../src/search/SearchIndex.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp

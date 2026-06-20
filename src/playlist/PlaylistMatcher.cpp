@@ -188,6 +188,11 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
         return single(close.first(), entry, base, /*uncontested=*/true, queryUsed, close);
     }
 
+    // The full close set is what a MultiMatch presents — tiebreakers below only
+    // try to RESOLVE to a single hit; they must not silently drop the other valid
+    // copies from the candidate list when they fail to resolve.
+    const QVector<ScoredResult> closeFull = close;
+
     // Tiebreakers, never filters: album text, then duration proximity. If they
     // single out exactly one of the close hits, trust it (corroborated, so not
     // "uncontested" but the album/duration bonus lifts its confidence).
@@ -222,7 +227,7 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
     }
 
     outcome.decision = Decision::MultiMatch;
-    for (const ScoredResult &r : close) {
+    for (const ScoredResult &r : closeFull) {
         outcome.candidatePaths.append(r.rec.path);
     }
     return outcome;
