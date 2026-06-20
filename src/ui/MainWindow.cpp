@@ -5071,7 +5071,17 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
         // A triage pick in the preview resolves the row to a chosen candidate.
         bool resolvedByPick = false;
         const QString chosenPath = resolved.value(i);
-        if (!chosenPath.isEmpty()) {
+        if (chosenPath == PlaylistImportDialog::noMatchMarker()) {
+            // User rejected all candidates → land it empty (Pending), not MultiMatch.
+            item.titleSnapshot = match.entry.title;
+            item.artistSnapshot = match.entry.artist;
+            item.albumSnapshot = match.entry.album;
+            item.durationMs = match.entry.durationMs;
+            item.status = PlaylistItemStatus::Pending;
+            item.comment = fallbackComment;
+            item.query = match.outcome.queryUsed;
+            resolvedByPick = true;
+        } else if (!chosenPath.isEmpty()) {
             const Track picked = m_database->trackForPath(chosenPath);
             if (!picked.path.isEmpty()) {
                 item = playlistItemFromTrack(picked, match.outcome.queryUsed);

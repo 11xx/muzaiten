@@ -39,6 +39,10 @@ public:
     // The {"playlist":{…}} header from a JSONL import, if any (else not present).
     PlaylistImport::ImportHeader header() const { return m_header; }
 
+    // Sentinel resolvedPaths() value meaning "reject all candidates": commit the
+    // row empty (Pending) instead of leaving it MultiMatch.
+    static const QString &noMatchMarker();
+
 private slots:
     void loadFile();
     void fetchUrl();
