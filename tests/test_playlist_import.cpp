@@ -86,6 +86,10 @@ private slots:
         records.append(makeRecord(QStringLiteral("My Hood (Acapella Mix)"), QStringLiteral("Suni Clay"),
                                   QStringLiteral("Suni Clay"),
                                   QStringLiteral("/music/suni/03 my hood aca.flac"), 4 * 60000));
+        // Library tags the duo with "&"; sources often write "and" / "+".
+        records.append(makeRecord(QStringLiteral("The Sound of Silence"),
+                                  QStringLiteral("Simon & Garfunkel"), QStringLiteral("Sounds of Silence"),
+                                  QStringLiteral("/music/simon/01 sound of silence.flac"), 3 * 60000));
         m_index.build(records);
     }
 
@@ -378,6 +382,16 @@ private slots:
         const auto outcome = PlaylistMatcher::match(m_index, entry);
         QCOMPARE(outcome.decision, PlaylistMatcher::Decision::MultiMatch);
         QVERIFY(outcome.candidatePaths.size() >= 2);
+    }
+
+    void match_separatorVariantStillResolves()
+    {
+        // Source writes "and"; library has "&". The strict phrase tiers miss, but
+        // the relaxed token fallback (separators drop out) still resolves it.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Simon and Garfunkel - The Sound of Silence")));
+        QVERIFY(outcome.decision != PlaylistMatcher::Decision::Pending);
+        QCOMPARE(outcome.best.path, QStringLiteral("/music/simon/01 sound of silence.flac"));
     }
 
     void match_directPathWins()
