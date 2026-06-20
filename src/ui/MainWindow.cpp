@@ -50,7 +50,9 @@
 #include "ui/SplitterPersistence.h"
 #include "ui/MainPanelKeybindings.h"
 #include "ui/TableNavigationScroll.h"
+#include "search/Exclusion.h"
 #include "search/RankConfig.h"
+#include "search/SearchIndex.h"
 #include "ui/TrackPropertiesDialog.h"
 #include "ui/TrackTable.h"
 #include "ui/UiMetrics.h"
@@ -1244,6 +1246,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
     connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
     connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
+    connect(m_playlistView, &PlaylistView::playlistFilesDropped, this, &MainWindow::importDroppedFiles);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
@@ -5033,10 +5036,14 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
 
 void MainWindow::commitImportResults(qint64 playlistId, const PlaylistImportDialog &dialog)
 {
+    commitImportItems(playlistId, dialog.results(), dialog.header(), dialog.resolvedPaths());
+}
+
+void MainWindow::commitImportItems(qint64 playlistId, const QVector<PlaylistImportMatch> &matches,
+                                   const PlaylistImport::ImportHeader &header,
+                                   const QHash<int, QString> &resolved)
+{
     const Playlist playlist = m_playlistDb->playlist(playlistId);
-    const QVector<PlaylistImportMatch> matches = dialog.results();
-    const QHash<int, QString> resolved = dialog.resolvedPaths();
-    const PlaylistImport::ImportHeader header = dialog.header();
 
     // Existing import source ids in this playlist → skip re-importing the same item.
     QSet<QString> seenExternalIds;
@@ -5199,6 +5206,97 @@ void MainWindow::importAsNewPlaylist()
         return;
     }
     commitImportResults(id, dialog);
+}
+
+QString MainWindow::uniquePlaylistName(const QString &base) const
+{
+    QSet<QString> taken;
+    for (const Playlist &p : m_playlistDb->playlists()) {
+        taken.insert(p.name);
+    }
+    if (!taken.contains(base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {  // distinct, never silently merge two same-named files
+        const QString candidate = QStringLiteral("%1 (%2)").arg(base).arg(n);
+        if (!taken.contains(candidate)) {
+            return candidate;
+        }
+    }
+}
+
+void MainWindow::importDroppedFiles(const QStringList &paths)
+{
+    if (m_playlistDb == nullptr || m_database == nullptr || paths.isEmpty()) {
+        return;
+    }
+    // Build the match index once (exclude-filtered, like the import worker), then
+    // create one playlist per file. Synchronous with a wait cursor — a one-shot.
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QVector<Search::SearchRecord> records = m_database->allTracksForSearch();
+    const Search::RankConfig rank =
+        Search::RankConfig::fromJsonString(m_database->setting(QStringLiteral("search.ranking")));
+    QVector<Search::ExcludeMatcher> excludes;
+    for (const Search::ExcludeRule &rule : rank.excludes) {
+        Search::ExcludeMatcher matcher(rule);
+        if (matcher.isValid()) {
+            excludes.append(matcher);
+        }
+    }
+    if (!excludes.isEmpty()) {
+        records.erase(std::remove_if(records.begin(), records.end(),
+                          [&excludes](const Search::SearchRecord &rec) {
+                              for (const Search::ExcludeMatcher &m : excludes) {
+                                  if (m.matches(rec)) { return true; }
+                              }
+                              return false;
+                          }),
+                      records.end());
+    }
+    Search::SearchIndex index;
+    index.build(records);
+
+    int playlists = 0;
+    int items = 0;
+    for (const QString &file : paths) {
+        PlaylistImport::ImportHeader header;
+        QString error;
+        const QVector<PlaylistImport::ImportEntry> entries =
+            PlaylistImport::parseFile(file, &error, &header);
+        if (entries.isEmpty()) {
+            continue;
+        }
+        QVector<PlaylistImportMatch> matches;
+        matches.reserve(entries.size());
+        for (const PlaylistImport::ImportEntry &entry : entries) {
+            PlaylistImportMatch match;
+            match.entry = entry;
+            match.outcome = PlaylistMatcher::match(index, entry);
+            matches.append(match);
+        }
+        QString name = (header.present && !header.name.trimmed().isEmpty())
+            ? header.name.trimmed()
+            : QFileInfo(file).completeBaseName();
+        if (name.isEmpty()) {
+            name = QStringLiteral("Imported playlist");
+        }
+        const qint64 id = m_playlistDb->createPlaylist(uniquePlaylistName(name), header.comment);
+        if (id <= 0) {
+            continue;
+        }
+        // The playlist is already named/commented above; pass an empty header so
+        // commitImportItems doesn't try to rename it back.
+        commitImportItems(id, matches, PlaylistImport::ImportHeader{}, {});
+        ++playlists;
+        items += static_cast<int>(matches.size());
+    }
+    QApplication::restoreOverrideCursor();
+    m_playlistView->reloadPlaylists();
+    m_playlistView->reloadItems();
+    statusBar()->showMessage(
+        QStringLiteral("Imported %1 playlists (%2 items) — resolve multi/pending via the 'e' edit modal.")
+            .arg(playlists).arg(items),
+        6000);
 }
 
 void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query)

@@ -16,6 +16,8 @@ class Database;
 class PlaylistDatabase;
 class PlaylistImportDialog;
 class PlaylistView;
+struct PlaylistImportMatch;
+namespace PlaylistImport { struct ImportHeader; }
 class SettingsStore;
 class AlbumGrid;
 class ArtistSidebar;
@@ -283,7 +285,12 @@ private:
     void openPlaylistAddModal(qint64 playlistId);
     void openPlaylistImportDialog(qint64 playlistId);
     void importAsNewPlaylist();
+    void importDroppedFiles(const QStringList &paths);
     void commitImportResults(qint64 playlistId, const PlaylistImportDialog &dialog);
+    void commitImportItems(qint64 playlistId, const QVector<PlaylistImportMatch> &matches,
+                           const PlaylistImport::ImportHeader &header,
+                           const QHash<int, QString> &resolved);
+    QString uniquePlaylistName(const QString &base) const;
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
     void openAddToPlaylistDialog(const QVector<Track> &tracks);
     QString resolvedReadPathForTrack(const Track &track) const;
