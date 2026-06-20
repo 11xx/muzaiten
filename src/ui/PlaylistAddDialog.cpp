@@ -1,5 +1,6 @@
 #include "ui/PlaylistAddDialog.h"
 
+#include "db/Database.h"
 #include "search/Exclusion.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
@@ -91,14 +92,15 @@ PlaylistAddDialog::PlaylistAddDialog(const QString &dbPath, const QString &playl
     connect(m_debounce, &QTimer::timeout, this, &PlaylistAddDialog::onDebounceTimeout);
     connect(m_box, &QLineEdit::textChanged, this, [this]() { m_debounce->start(); });
 
-    // Ranking tuned for adding: relevance first, then keep an album's tracks
-    // together, then prefer higher quality — so picking the right take is easy.
-    m_rankConfig.rules = {
-        {Search::RankKind::Relevance, {}, {}, {}, true},
-        {Search::RankKind::LibraryOrder, MusicSort::SortField::AlbumTitle, {},
-         MusicSort::SortDirection::Ascending, true},
-        {Search::RankKind::AudioQuality, {}, {}, {}, true},
-    };
+    // Use the user's saved Search-ranking config (same as the main search) so
+    // add-to-playlist results rank and exclude identically — one ranking system.
+    {
+        Database settingsDb(QStringLiteral("playlist-add-rank"));
+        if (settingsDb.open(dbPath)) {
+            m_rankConfig = Search::RankConfig::fromJsonString(
+                settingsDb.setting(QStringLiteral("search.ranking")));
+        }
+    }
     m_ranker.setConfig(m_rankConfig);
 
     m_box->installEventFilter(this);
@@ -116,6 +118,9 @@ PlaylistAddDialog::PlaylistAddDialog(const QString &dbPath, const QString &playl
     connect(m_worker, &Search::SearchWorker::resultsReady, this, &PlaylistAddDialog::onResultsReady, Qt::QueuedConnection);
     connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
     m_workerThread->start();
+    // Apply the saved exclude rules to the worker (same as the main search).
+    QMetaObject::invokeMethod(m_worker, "setExclusions", Qt::QueuedConnection,
+                              Q_ARG(QVector<Search::ExcludeRule>, m_rankConfig.excludes));
 
     updateStatus();
 }
