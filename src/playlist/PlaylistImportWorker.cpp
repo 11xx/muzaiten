@@ -67,7 +67,7 @@ bool PlaylistImportWorker::ensureIndex()
     return true;
 }
 
-void PlaylistImportWorker::matchEntries(QVector<PlaylistImport::ImportEntry> entries)
+void PlaylistImportWorker::matchEntries(QVector<PlaylistImport::ImportEntry> entries, bool exactOnly)
 {
     if (!ensureIndex()) {
         return;
@@ -79,7 +79,7 @@ void PlaylistImportWorker::matchEntries(QVector<PlaylistImport::ImportEntry> ent
     for (const PlaylistImport::ImportEntry &entry : entries) {
         PlaylistImportMatch match;
         match.entry = entry;
-        match.outcome = PlaylistMatcher::match(m_index, entry);
+        match.outcome = PlaylistMatcher::match(m_index, entry, exactOnly);
         results.append(match);
         emit progress(++done, total);
     }
