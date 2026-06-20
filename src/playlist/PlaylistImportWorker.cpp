@@ -72,16 +72,14 @@ void PlaylistImportWorker::matchEntries(QVector<PlaylistImport::ImportEntry> ent
     if (!ensureIndex()) {
         return;
     }
-    QVector<PlaylistImportMatch> results;
-    results.reserve(entries.size());
     const int total = static_cast<int>(entries.size());
     int done = 0;
     for (const PlaylistImport::ImportEntry &entry : entries) {
         PlaylistImportMatch match;
         match.entry = entry;
         match.outcome = PlaylistMatcher::match(m_index, entry, exactOnly);
-        results.append(match);
+        emit matched(match);          // stream for live preview
         emit progress(++done, total);
     }
-    emit finished(results);
+    emit finished();
 }

@@ -143,11 +143,13 @@ void PlaylistImportDialog::ensureWorker()
         return;
     }
     qRegisterMetaType<QVector<PlaylistImport::ImportEntry>>();
-    qRegisterMetaType<QVector<PlaylistImportMatch>>();
+    qRegisterMetaType<PlaylistImportMatch>();
     m_workerThread = new QThread(this);
     m_worker = new PlaylistImportWorker(m_dbPath);
     m_worker->moveToThread(m_workerThread);
     connect(m_worker, &PlaylistImportWorker::progress, this, &PlaylistImportDialog::onProgress,
+            Qt::QueuedConnection);
+    connect(m_worker, &PlaylistImportWorker::matched, this, &PlaylistImportDialog::onMatched,
             Qt::QueuedConnection);
     connect(m_worker, &PlaylistImportWorker::finished, this, &PlaylistImportDialog::onFinished,
             Qt::QueuedConnection);
@@ -240,6 +242,10 @@ void PlaylistImportDialog::runMatch()
     m_matching = true;
     m_matchButton->setEnabled(false);
     m_addButton->setEnabled(false);
+    // Reset the preview; rows stream in live via onMatched().
+    m_results.clear();
+    m_resolvers.clear();
+    m_preview->setRowCount(0);
     m_status->setText(QStringLiteral("Building index…"));
     QMetaObject::invokeMethod(m_worker, "matchEntries", Qt::QueuedConnection,
                               Q_ARG(QVector<PlaylistImport::ImportEntry>, entries),
@@ -251,12 +257,17 @@ void PlaylistImportDialog::onProgress(int done, int total)
     m_status->setText(QStringLiteral("Matching… %1 / %2").arg(done).arg(total));
 }
 
-void PlaylistImportDialog::onFinished(QVector<PlaylistImportMatch> results)
+void PlaylistImportDialog::onMatched(PlaylistImportMatch result)
+{
+    const int index = static_cast<int>(m_results.size());
+    m_results.append(std::move(result));
+    appendPreviewRow(index, m_results.last());
+}
+
+void PlaylistImportDialog::onFinished()
 {
     m_matching = false;
     m_matchButton->setEnabled(true);
-    m_results = std::move(results);
-    rebuildPreview();
     updateSummary();
     m_addButton->setEnabled(!m_results.isEmpty());
 }
@@ -286,12 +297,9 @@ QHash<int, QString> PlaylistImportDialog::resolvedPaths() const
     return out;
 }
 
-void PlaylistImportDialog::rebuildPreview()
+void PlaylistImportDialog::appendPreviewRow(int index, const PlaylistImportMatch &match)
 {
-    m_preview->setRowCount(0);
-    m_resolvers.clear();
-    for (int i = 0; i < m_results.size(); ++i) {
-        const PlaylistImportMatch &match = m_results.at(i);
+    {
         const int row = m_preview->rowCount();
         m_preview->insertRow(row);
 
@@ -334,7 +342,7 @@ void PlaylistImportDialog::rebuildPreview()
             }
             combo->addItem(QStringLiteral("(no match — clear)"), noMatchMarker());
             m_preview->setCellWidget(row, 3, combo);
-            m_resolvers.insert(i, combo);
+            m_resolvers.insert(index, combo);
         } else {
             m_preview->setItem(row, 3, readOnlyItem(resolved));
         }

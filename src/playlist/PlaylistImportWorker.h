@@ -35,7 +35,8 @@ public slots:
 
 signals:
     void progress(int done, int total);
-    void finished(QVector<PlaylistImportMatch> results);
+    void matched(PlaylistImportMatch result);  // streamed per entry, for live preview
+    void finished();                            // all entries matched
     void error(QString message);
 
 private:
