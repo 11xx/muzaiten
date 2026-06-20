@@ -29,21 +29,25 @@ bool isStopWord(const QString &word)
     return stop.contains(word);
 }
 
-// Build a parse-compatible scoped query string: each word becomes its own
-// field-scoped term (terms AND together). Word counts are capped so an
-// over-long source line can't over-narrow the query.
+// Build a scoped query that matches the artist and title as whole PHRASES
+// (quoted field values), e.g. artist:"suni clay" title:"my hood". Phrase matching
+// is far more precise than AND-ing each word separately, which scatter-matched
+// unrelated tracks and produced spurious MultiMatch. The relaxed per-word fallback
+// (relaxedQueryString) still provides recall when a phrase is too strict.
 QString scopedQueryString(const ImportEntry &entry)
 {
+    // Quote the raw (noise-stripped) values and let SearchQuery::parse fold them
+    // with the SAME Fold the index uses — folding both sides identically. (Do NOT
+    // pre-run normalizeForMatch: it turns punctuation into spaces, so "Static-X"
+    // would become "static x" and no longer phrase-match the index's "static-x".)
     QStringList parts;
-    const QStringList artistWords = normalizeForMatch(entry.artist).split(
-        QLatin1Char(' '), Qt::SkipEmptyParts);
-    for (qsizetype i = 0; i < std::min<qsizetype>(artistWords.size(), 4); ++i) {
-        parts.append(QStringLiteral("artist:%1").arg(artistWords.at(i)));
+    const QString artist = entry.artist.simplified();
+    if (!artist.isEmpty()) {
+        parts.append(QStringLiteral("artist:%1").arg(Search::quoteFieldValue(artist)));
     }
-    const QStringList titleWords = normalizeForMatch(stripTitleNoise(entry.title)).split(
-        QLatin1Char(' '), Qt::SkipEmptyParts);
-    for (qsizetype i = 0; i < std::min<qsizetype>(titleWords.size(), 6); ++i) {
-        parts.append(QStringLiteral("title:%1").arg(titleWords.at(i)));
+    const QString title = stripTitleNoise(entry.title).simplified();
+    if (!title.isEmpty()) {
+        parts.append(QStringLiteral("title:%1").arg(Search::quoteFieldValue(title)));
     }
     return parts.join(QLatin1Char(' '));
 }
