@@ -340,8 +340,20 @@ private slots:
         entry.artist = QStringLiteral("Aria");
         entry.title = QStringLiteral("Stan");
         const auto outcome = PlaylistMatcher::match(m_index, entry);
-        QVERIFY(outcome.best.path != QStringLiteral("/music/classical/eugene-onegin/13 act 3.flac"));
-        QVERIFY(outcome.decision != PlaylistMatcher::Decision::Matched);
+        // The title word "stan" appears in no real title, so the title-overlap gate
+        // also drops the long magnet → genuinely unmatched, not a multi of noise.
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Pending);
+    }
+
+    void match_noTitleOverlapIsNotMatched()
+    {
+        // Artist matches a real artist, but the title shares no real word with any
+        // track — must not latch onto an unrelated song via artist/fuzzy noise.
+        ImportEntry entry;
+        entry.artist = QStringLiteral("Miles Davis");
+        entry.title = QStringLiteral("Galactic Penguins");
+        const auto outcome = PlaylistMatcher::match(m_index, entry);
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Pending);
     }
 
     void match_versionDiscriminatorPicksRightCopy()
