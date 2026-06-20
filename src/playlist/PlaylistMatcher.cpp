@@ -107,6 +107,30 @@ double coverageRatio(const ScoredResult &hit, const ImportEntry &entry)
     return std::min(1.0, static_cast<double>(querySignal.size()) / static_cast<double>(candSignal));
 }
 
+// True when the candidate title shares a real word with the query title — used to
+// reject fuzzy/relaxed hits that matched only via the artist or scattered
+// subsequence noise (e.g. "The Only" landing on "Stronger (...) Remix"). A
+// significant query-title token (>= 4 chars) must appear in the candidate title.
+// Titles with no significant token are not gated (nothing to anchor on).
+bool titleWordOverlaps(const ScoredResult &hit, const ImportEntry &entry)
+{
+    if (hit.rec.normTitle.isEmpty()) {
+        return false;
+    }
+    const QStringList tokens = normalizeForMatch(stripTitleNoise(entry.title))
+                                   .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    bool hadSignificant = false;
+    for (const QString &token : tokens) {
+        if (token.size() >= 4) {
+            hadSignificant = true;
+            if (hit.rec.normTitle.contains(token)) {
+                return true;
+            }
+        }
+    }
+    return !hadSignificant;
+}
+
 // Heuristic certainty (0-100) of a single chosen hit: the tier `base` plus a
 // reward for being uncontested and for album/duration corroboration.
 int confidenceFor(const ScoredResult &hit, const ImportEntry &entry, int base, bool uncontested)
@@ -158,7 +182,7 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
     QVector<ScoredResult> kept;
     if (base <= kConfidenceScopedFuzzy) {
         for (const ScoredResult &r : results) {
-            if (coverageRatio(r, entry) >= kMinFuzzyCoverage) {
+            if (coverageRatio(r, entry) >= kMinFuzzyCoverage && titleWordOverlaps(r, entry)) {
                 kept.append(r);
             }
         }
