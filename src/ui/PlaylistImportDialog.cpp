@@ -2,6 +2,7 @@
 
 #include "playlist/import/YouTubeImport.h"
 
+#include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -89,6 +90,11 @@ PlaylistImportDialog::PlaylistImportDialog(const QString &dbPath, const QString 
     m_matchButton->setDefault(true);
     connect(m_matchButton, &QPushButton::clicked, this, &PlaylistImportDialog::runMatch);
     buttonRow->addWidget(m_matchButton);
+    m_exactMatch = new QCheckBox(QStringLiteral("Exact only"), this);
+    m_exactMatch->setToolTip(QStringLiteral(
+        "Match by exact text only — no fuzzy/relaxed guessing. Stricter: uncertain "
+        "rows stay pending instead of being approximated."));
+    buttonRow->addWidget(m_exactMatch);
     m_status = new QLabel(this);
     buttonRow->addWidget(m_status, 1);
     layout->addLayout(buttonRow);
@@ -236,7 +242,8 @@ void PlaylistImportDialog::runMatch()
     m_addButton->setEnabled(false);
     m_status->setText(QStringLiteral("Building index…"));
     QMetaObject::invokeMethod(m_worker, "matchEntries", Qt::QueuedConnection,
-                              Q_ARG(QVector<PlaylistImport::ImportEntry>, entries));
+                              Q_ARG(QVector<PlaylistImport::ImportEntry>, entries),
+                              Q_ARG(bool, m_exactMatch->isChecked()));
 }
 
 void PlaylistImportDialog::onProgress(int done, int total)

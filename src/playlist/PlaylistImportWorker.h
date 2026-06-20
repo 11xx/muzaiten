@@ -31,7 +31,7 @@ public:
 public slots:
     // Builds the index on first use (kept for the worker's lifetime), then
     // matches every entry. Emits progress(done, total) then finished(results).
-    void matchEntries(QVector<PlaylistImport::ImportEntry> entries);
+    void matchEntries(QVector<PlaylistImport::ImportEntry> entries, bool exactOnly);
 
 signals:
     void progress(int done, int total);

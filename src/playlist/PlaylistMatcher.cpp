@@ -259,7 +259,7 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
 
 } // namespace
 
-Outcome match(const SearchIndex &index, const ImportEntry &entry)
+Outcome match(const SearchIndex &index, const ImportEntry &entry, bool exactOnly)
 {
     // 1. Direct path resolution (m3u/csv exports). Exact full path, then
     //    basename — same files on a different machine/layout.
@@ -285,7 +285,11 @@ Outcome match(const SearchIndex &index, const ImportEntry &entry)
     if (stripped != full) {
         scopedQueries.append(stripped);
     }
-    for (const bool fuzzy : {false, true}) {
+    QVector<bool> modes{false};
+    if (!exactOnly) {
+        modes.append(true);  // fuzzy pass only when not restricted to exact
+    }
+    for (const bool fuzzy : modes) {
         for (const QString &scoped : scopedQueries) {
             if (scoped.isEmpty()) {
                 continue;
@@ -296,6 +300,12 @@ Outcome match(const SearchIndex &index, const ImportEntry &entry)
                               fuzzy ? kConfidenceScopedFuzzy : kConfidenceScopedExact);
             }
         }
+    }
+
+    if (exactOnly) {
+        Outcome pending;
+        pending.queryUsed = stripped.isEmpty() ? full : stripped;
+        return pending;  // strict mode: no fuzzy/relaxed guessing
     }
 
     // 3. Relaxed free-text fallback (whole haystack, fuzzy) — least certain tier.

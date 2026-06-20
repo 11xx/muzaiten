@@ -8,6 +8,7 @@
 #include <QString>
 #include <QVector>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -58,6 +59,7 @@ private:
     QPlainTextEdit *m_input = nullptr;
     QLabel *m_status = nullptr;
     QPushButton *m_matchButton = nullptr;
+    QCheckBox *m_exactMatch = nullptr;
     QPushButton *m_addButton = nullptr;
     QTableWidget *m_preview = nullptr;
 

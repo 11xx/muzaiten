@@ -66,6 +66,10 @@ inline constexpr int kMatchedConfidence     = 78;   // Matched at/above, else Ap
 // subsequence. Exact-substring tiers are trustworthy and skip this.
 inline constexpr double kMinFuzzyCoverage = 0.2;
 
-Outcome match(const Search::SearchIndex &index, const PlaylistImport::ImportEntry &entry);
+// With `exactOnly`, only the exact-substring tiers run (path + scoped phrase,
+// exact mode) — no fuzzy or relaxed fallback. Stricter: nothing matches unless it
+// matches exactly, so uncertain rows stay Pending instead of being guessed.
+Outcome match(const Search::SearchIndex &index, const PlaylistImport::ImportEntry &entry,
+              bool exactOnly = false);
 
 } // namespace PlaylistMatcher
