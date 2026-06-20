@@ -10,6 +10,8 @@
 #include "db/Database.h"
 #include "playlist/PlaylistImport.h"
 #include "playlist/PlaylistMatcher.h"
+#include "search/Exclusion.h"
+#include "search/RankConfig.h"
 #include "search/SearchIndex.h"
 
 #include <QCoreApplication>
@@ -17,6 +19,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace {
@@ -62,8 +65,33 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "open failed: %s\n", qPrintable(db.lastError()));
         return 1;
     }
+    // Mirror the app: drop tracks excluded by the saved Search-ranking rules.
+    QVector<Search::SearchRecord> records = db.allTracksForSearch();
+    const Search::RankConfig rank =
+        Search::RankConfig::fromJsonString(db.setting(QStringLiteral("search.ranking")));
+    QVector<Search::ExcludeMatcher> excludes;
+    for (const Search::ExcludeRule &rule : rank.excludes) {
+        Search::ExcludeMatcher matcher(rule);
+        if (matcher.isValid()) {
+            excludes.append(matcher);
+        }
+    }
+    const int beforeExcl = static_cast<int>(records.size());
+    if (!excludes.isEmpty()) {
+        records.erase(std::remove_if(records.begin(), records.end(),
+                          [&excludes](const Search::SearchRecord &rec) {
+                              for (const Search::ExcludeMatcher &m : excludes) {
+                                  if (m.matches(rec)) { return true; }
+                              }
+                              return false;
+                          }),
+                      records.end());
+    }
+    std::fprintf(stderr, "indexed %d tracks (%d excluded by %d rules)\n",
+                 static_cast<int>(records.size()), beforeExcl - static_cast<int>(records.size()),
+                 static_cast<int>(excludes.size()));
     Search::SearchIndex index;
-    index.build(db.allTracksForSearch());
+    index.build(records);
 
     int gM = 0, gA = 0, gMu = 0, gP = 0, gTotal = 0;
     using D = PlaylistMatcher::Decision;
@@ -86,7 +114,10 @@ int main(int argc, char **argv)
                 if (o.decision == D::Matched || o.decision == D::Approximate) {
                     resolved = QStringLiteral("%1%% => %2").arg(o.confidence0To100).arg(o.best.path);
                 } else if (o.decision == D::MultiMatch) {
-                    resolved = QStringLiteral("%1 candidates").arg(o.candidatePaths.size());
+                    resolved = QStringLiteral("%1 candidates:").arg(o.candidatePaths.size());
+                    for (const QString &c : o.candidatePaths) {
+                        resolved += QStringLiteral("\n        - %1").arg(c);
+                    }
                 }
                 std::printf("  [%s] %-55s | %s\n", label(o.decision),
                             qPrintable(src.left(55)), qPrintable(resolved));
