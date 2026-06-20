@@ -75,6 +75,17 @@ private slots:
             QStringLiteral("Tchaikovsky Eugene Onegin"),
             QStringLiteral("/music/classical/eugene-onegin/13 act 3.flac"),
             6 * 60000));
+        // Three versions of one track: a version tag in the source must pick the
+        // right copy instead of collapsing to MultiMatch.
+        records.append(makeRecord(QStringLiteral("My Hood (Full Mix)"), QStringLiteral("Suni Clay"),
+                                  QStringLiteral("Suni Clay"),
+                                  QStringLiteral("/music/suni/01 my hood full.flac"), 4 * 60000));
+        records.append(makeRecord(QStringLiteral("My Hood (Instrumental)"), QStringLiteral("Suni Clay"),
+                                  QStringLiteral("Suni Clay"),
+                                  QStringLiteral("/music/suni/02 my hood inst.flac"), 4 * 60000));
+        records.append(makeRecord(QStringLiteral("My Hood (Acapella Mix)"), QStringLiteral("Suni Clay"),
+                                  QStringLiteral("Suni Clay"),
+                                  QStringLiteral("/music/suni/03 my hood aca.flac"), 4 * 60000));
         m_index.build(records);
     }
 
@@ -331,6 +342,30 @@ private slots:
         const auto outcome = PlaylistMatcher::match(m_index, entry);
         QVERIFY(outcome.best.path != QStringLiteral("/music/classical/eugene-onegin/13 act 3.flac"));
         QVERIFY(outcome.decision != PlaylistMatcher::Decision::Matched);
+    }
+
+    void match_versionDiscriminatorPicksRightCopy()
+    {
+        // The library holds three "My Hood" versions; the source carries "(Full
+        // Mix)". Trying the full title before the noise-stripped one must pick the
+        // Full Mix copy rather than collapse to MultiMatch.
+        ImportEntry entry;
+        entry.artist = QStringLiteral("Suni Clay");
+        entry.title = QStringLiteral("My Hood (Full Mix)");
+        const auto outcome = PlaylistMatcher::match(m_index, entry);
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Matched);
+        QCOMPARE(outcome.best.path, QStringLiteral("/music/suni/01 my hood full.flac"));
+    }
+
+    void match_ambiguousVersionsStayMulti()
+    {
+        // Without a discriminator, the three versions are genuinely ambiguous.
+        ImportEntry entry;
+        entry.artist = QStringLiteral("Suni Clay");
+        entry.title = QStringLiteral("My Hood");
+        const auto outcome = PlaylistMatcher::match(m_index, entry);
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::MultiMatch);
+        QVERIFY(outcome.candidatePaths.size() >= 2);
     }
 
     void match_directPathWins()
