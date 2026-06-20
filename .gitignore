@@ -15,3 +15,6 @@ handoff-*.md
 .env
 build-new1/
 agent-state/
+# Demo captures are gitignored; only the few KvGnome/KvGnomeDark shots the README
+# references are force-added and tracked.
+demo-screens/
