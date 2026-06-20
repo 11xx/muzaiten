@@ -455,3 +455,31 @@ target_link_libraries(test_ipc_server PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 target_compile_features(test_ipc_server PRIVATE cxx_std_26)
 add_test(NAME test_ipc_server COMMAND test_ipc_server)
 set_tests_properties(test_ipc_server PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Offline matcher benchmark tool (dev only; not a registered test). Needs a real
+# library.sqlite copy: ./playlist_match_bench <library.sqlite> <playlist.jsonl ...>
+# Off by default so a normal build pays nothing; enable with
+#   cmake -DMUZAITEN_BUILD_MATCH_BENCH=ON
+option(MUZAITEN_BUILD_MATCH_BENCH "Build the offline playlist-matcher benchmark tool" OFF)
+if(MUZAITEN_BUILD_MATCH_BENCH)
+add_executable(playlist_match_bench
+    ../tools/playlist-import/match_bench.cpp
+    ../src/app/AppPaths.cpp
+    ../src/core/MetadataBlob.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+    ../src/fs/PathResolver.cpp
+    ../src/playlist/PlaylistImport.cpp
+    ../src/playlist/PlaylistMatcher.cpp
+    ../src/search/Exclusion.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/IndexCache.cpp
+    ../src/search/SearchIndex.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
+)
+target_include_directories(playlist_match_bench PRIVATE ../src)
+target_link_libraries(playlist_match_bench PRIVATE Qt6::Core Qt6::Sql PkgConfig::ZSTD)
+target_compile_features(playlist_match_bench PRIVATE cxx_std_26)
+endif()
