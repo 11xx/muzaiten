@@ -1243,6 +1243,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
     connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
+    connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
@@ -5027,7 +5028,12 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
+    commitImportResults(playlistId, dialog);
+}
 
+void MainWindow::commitImportResults(qint64 playlistId, const PlaylistImportDialog &dialog)
+{
+    const Playlist playlist = m_playlistDb->playlist(playlistId);
     const QVector<PlaylistImportMatch> matches = dialog.results();
     const QHash<int, QString> resolved = dialog.resolvedPaths();
     const PlaylistImport::ImportHeader header = dialog.header();
@@ -5164,6 +5170,35 @@ void MainWindow::openPlaylistImportDialog(qint64 playlistId)
               .arg(added).arg(playlist.name).arg(skipped)
         : QStringLiteral("Imported %1 items into \"%2\"").arg(added).arg(playlist.name);
     statusBar()->showMessage(message, 5000);
+}
+
+void MainWindow::importAsNewPlaylist()
+{
+    if (m_playlistDb == nullptr) {
+        return;
+    }
+    PlaylistImportDialog dialog(databasePath(), QStringLiteral("new playlist"), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    // Name the new playlist from the JSONL header, else ask.
+    const PlaylistImport::ImportHeader header = dialog.header();
+    QString name = header.present ? header.name.trimmed() : QString();
+    if (name.isEmpty()) {
+        bool ok = false;
+        name = QInputDialog::getText(this, QStringLiteral("Import playlist"),
+                                     QStringLiteral("Playlist name:"), QLineEdit::Normal,
+                                     QStringLiteral("Imported playlist"), &ok)
+                   .trimmed();
+        if (!ok || name.isEmpty()) {
+            return;
+        }
+    }
+    const qint64 id = m_playlistDb->createPlaylist(name, header.comment);
+    if (id <= 0) {
+        return;
+    }
+    commitImportResults(id, dialog);
 }
 
 void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query)
