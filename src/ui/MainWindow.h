@@ -14,6 +14,7 @@ class QJsonObject;
 struct SavedQueuePlaylistEntry;
 class Database;
 class PlaylistDatabase;
+class PlaylistImportDialog;
 class PlaylistView;
 class SettingsStore;
 class AlbumGrid;
@@ -281,6 +282,8 @@ private:
     QVector<Track> tracksForPaths(const QStringList &paths) const;
     void openPlaylistAddModal(qint64 playlistId);
     void openPlaylistImportDialog(qint64 playlistId);
+    void importAsNewPlaylist();
+    void commitImportResults(qint64 playlistId, const PlaylistImportDialog &dialog);
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
     void openAddToPlaylistDialog(const QVector<Track> &tracks);
     QString resolvedReadPathForTrack(const Track &track) const;

@@ -1429,9 +1429,11 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
     addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
-    QAction *importAction = menu.addAction(QStringLiteral("Import..."));
+    QAction *importAction = menu.addAction(QStringLiteral("Import into this playlist..."));
     importAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(importAction, &QAction::triggered, this, &PlaylistView::importIntoCurrentPlaylist);
+    QAction *importNew = menu.addAction(QStringLiteral("Import playlist..."));
+    connect(importNew, &QAction::triggered, this, &PlaylistView::importNewRequested);
     menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
     QAction *rename = menu.addAction(QStringLiteral("Rename"));
     rename->setEnabled(!savedQueue && m_currentPlaylistId > 0);
