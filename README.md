@@ -4,14 +4,41 @@ muzaiten is a native Linux music player focused on local-library browsing, queue
 
 The project is in early development. It currently uses C++26, Qt 6 Widgets, SQLite, TagLib, GStreamer, Qt DBus, Qt Network, and zstd.
 
-![muzaiten main window - light](docs/assets/screenshot-light.png#gh-light-mode-only)
-![muzaiten main window - dark](docs/assets/screenshot-dark.png#gh-dark-mode-only)
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img alt="Library browser" src="demo-screens/KvGnome/01-library.png#gh-light-mode-only" width="380">
+      <img alt="Library browser" src="demo-screens/KvGnomeDark/01-library.png#gh-dark-mode-only" width="380">
+      <br><sub><b>Library</b> — artist sidebar, album grid, track table</sub>
+    </td>
+    <td align="center" width="50%">
+      <img alt="Search demo" src="demo-screens/KvGnome/02-search.png#gh-light-mode-only" width="380">
+      <img alt="Search demo" src="demo-screens/KvGnomeDark/02-search.png#gh-dark-mode-only" width="380">
+      <br><sub><b>Search</b> — fzf-style, romaji ↔ kana/kanji, live results</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img alt="Playback queue" src="demo-screens/KvGnome/03-queue.png#gh-light-mode-only" width="380">
+      <img alt="Playback queue" src="demo-screens/KvGnomeDark/03-queue.png#gh-dark-mode-only" width="380">
+      <br><sub><b>Queue</b> — reorderable, play-next priority, missing-track marks</sub>
+    </td>
+    <td align="center" width="50%">
+      <img alt="Playlists" src="demo-screens/KvGnome/04-playlists.png#gh-light-mode-only" width="380">
+      <img alt="Playlists" src="demo-screens/KvGnomeDark/04-playlists.png#gh-dark-mode-only" width="380">
+      <br><sub><b>Playlists</b> — import &amp; match, drag-drop batch import</sub>
+    </td>
+  </tr>
+</table>
 
 ## Features
 
 - Local library scanner with source-directory management, incremental rescans, and missing-file marking.
 - Fast library search that matches by sound/shape across scripts — diacritics (`cafe`↔`Café`), Greek/Cyrillic/Turkish, and Japanese romaji↔kana/kanji (`sanshin no hana`→`三線の花`) — backed by an on-disk cache, in-app and via the `muzaitenctl` CLI (with an fzf picker).
 - Album artist sidebar, album grid, artist track table, and queue sidebar.
+- Playlists in a dedicated database: import from a pasted tracklist, `m3u`/`m3u8`, `csv`, or `jsonl`/`ndjson`, or fetch a YouTube / YT Music playlist via `yt-dlp`; tracks resolve by sound/shape matching with a live-streaming match preview and multi-candidate triage. Entries keep a metadata snapshot so playlists survive rescans and remember tracks that go missing.
 - Library file explorer and free-roam file explorer, with keyboard-oriented navigation profiles.
 - Cached album artwork from folder images and embedded artwork.
 - Queue playback through a GStreamer backend, with configurable output/resume behavior.
@@ -143,17 +170,20 @@ MUZAITEN_VERBOSE=1 ./build/muzaiten
 
 ## Common Controls
 
-- `1`: library panels view.
-- `2`: toggle between library explorer and free-roam explorer.
-- `3`: library search view (fzf-style, searches entire library including MPD tracks).
+- `1`: queue view (press again to reveal the currently playing row).
+- `2`: library panels view (artist sidebar, album grid, track table).
+- `3`: toggle between the library explorer and free-roam file explorer.
+- `4`: library search view (fzf-style, searches the entire library including MPD tracks; press again to rebuild the index).
+- `5`: playlist management view.
 - `o`: find the current track in the active library view.
+- `r` / `s`: cycle repeat / shuffle modes.
 - Queue context menu: play a row, find that row in the library, open its containing directory, remove rows, clear play-next priority, or clear the queue.
 - `Ctrl+scroll` over the queue or file explorers: adjust row height.
 - Context menus on tables, album grid, queue header, and explorer rows expose sorting, visibility, rating, and queue actions.
 
 ## Library Search
 
-Press `3` to open the search view. Type to filter interactively; all terms AND together in any order.
+Press `4` to open the search view. Type to filter interactively; all terms AND together in any order.
 
 Matching is by **sound/shape, not encoding**: both the query and the library are folded to a lowercase ASCII-leaning form before matching, so accents and scripts don't get in the way. `cafe` finds `Café`, `bjork` finds `Björk`, Greek/Cyrillic/Turkish transliterate (`σωκρατης`↔`sokrates`), and Japanese matches by romaji — kana and common kanji romanize (`sanshin no hana` or `san shin no ha na` → `三線の花`), with Picard/MusicBrainz `*sort` reading tags filling in proper-noun readings (`utada` → 宇多田ヒカル). Typing the original script still matches too.
 
@@ -172,7 +202,7 @@ Matching is by **sound/shape, not encoding**: both the query and the library are
 | Result order | Configurable via `Settings > Search ranking…` (see below) |
 | `Esc` / `Ctrl+G` | Clear the query; press again to leave text-input mode |
 | `/` | Return focus to the search box (from browse mode) |
-| `F5` (or re-press `3`) | Rebuild the search index |
+| `F5` (or re-press `4`) | Rebuild the search index |
 | `Ctrl+scroll` | Adjust result row height |
 | Double-click | Play now |
 | Right-click | Context menu: play / queue / play next / find in library / open directory |
@@ -230,6 +260,32 @@ ordered and what is filtered out:
   `*/Podcasts/*` (Path), `*.m4b` (Path), `*live*` (Any field).
 
 Ranking and exclusion changes apply live and persist across restarts.
+
+## Playlists
+
+Press `5` for the playlist management view: a playlist list on the left, the
+selected playlist's items on the right, keyboard-first (`h`/`l` switch panes,
+`j`/`k`/`n`/`p` move, `Enter` plays the focused playlist or item). Playlists live
+in their own database, separate from the scanned library, and each item carries a
+metadata snapshot plus the search query that produced it, so a playlist survives
+rescans and keeps remembering tracks even after they go missing.
+
+**Importing.** Add to an existing playlist or create a new one from:
+
+- a pasted tracklist (one `Artist - Title` per line),
+- an `m3u` / `m3u8`, `csv`, or `jsonl` / `ndjson` file (drag-drop a batch of files
+  to get one playlist per file), or
+- a YouTube / YT Music playlist URL, fetched with `yt-dlp` (no account or paid
+  middleman; the row is greyed out with an explanation when `yt-dlp` is missing).
+
+Each line is resolved against the library by the same sound/shape matcher used by
+search, so `Artist - Title` lines match regardless of script or accents. Matches
+**stream into the preview live** as they resolve. An **Exact only** toggle
+disables fuzzy/relaxed guessing for stricter imports. Rows that resolve to several
+candidates (or to a low-confidence best guess) are flagged for a quick triage
+pick — leave as-is, choose one of the close candidates, or clear the match —
+before committing. The original import text is preserved verbatim, so a row can be
+re-matched later without losing where it came from.
 
 ## Command-line client (`muzaitenctl`)
 
