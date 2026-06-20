@@ -268,6 +268,12 @@ void PlaylistImportDialog::onError(const QString &message)
     m_status->setText(QStringLiteral("Import error: %1").arg(message));
 }
 
+const QString &PlaylistImportDialog::noMatchMarker()
+{
+    static const QString marker = QStringLiteral("\x01no-match");
+    return marker;
+}
+
 QHash<int, QString> PlaylistImportDialog::resolvedPaths() const
 {
     QHash<int, QString> out;
@@ -326,6 +332,7 @@ void PlaylistImportDialog::rebuildPreview()
             for (const QString &candidate : match.outcome.candidatePaths) {
                 combo->addItem(candidate, candidate);
             }
+            combo->addItem(QStringLiteral("(no match — clear)"), noMatchMarker());
             m_preview->setCellWidget(row, 3, combo);
             m_resolvers.insert(i, combo);
         } else {
