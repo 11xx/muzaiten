@@ -31,7 +31,12 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QFileInfo>
 #include <QKeyEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -565,6 +570,7 @@ private:
 PlaylistView::PlaylistView(QWidget *parent)
     : QWidget(parent)
 {
+    setAcceptDrops(true);  // drop importable files → one new playlist per file
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
@@ -2185,6 +2191,48 @@ void PlaylistView::changeEvent(QEvent *event)
             m_itemTable->horizontalHeader()->viewport()->update();
         }
     }
+}
+
+namespace {
+// Local importable files (extensions PlaylistImport::parseFile understands).
+QStringList importableDroppedPaths(const QMimeData *mime)
+{
+    QStringList paths;
+    if (mime == nullptr || !mime->hasUrls()) {
+        return paths;
+    }
+    static const QStringList exts = {QStringLiteral("jsonl"), QStringLiteral("ndjson"),
+                                     QStringLiteral("json"),  QStringLiteral("m3u"),
+                                     QStringLiteral("m3u8"),  QStringLiteral("csv"),
+                                     QStringLiteral("txt")};
+    for (const QUrl &url : mime->urls()) {
+        if (!url.isLocalFile()) {
+            continue;
+        }
+        const QString local = url.toLocalFile();
+        if (exts.contains(QFileInfo(local).suffix().toLower())) {
+            paths << local;
+        }
+    }
+    return paths;
+}
+} // namespace
+
+void PlaylistView::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (!importableDroppedPaths(event->mimeData()).isEmpty()) {
+        event->acceptProposedAction();
+    }
+}
+
+void PlaylistView::dropEvent(QDropEvent *event)
+{
+    const QStringList paths = importableDroppedPaths(event->mimeData());
+    if (paths.isEmpty()) {
+        return;
+    }
+    event->acceptProposedAction();
+    emit playlistFilesDropped(paths);
 }
 
 void PlaylistView::restylePanelBorders()

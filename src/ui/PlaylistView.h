@@ -104,6 +104,8 @@ signals:
     void importRequested(qint64 playlistId);
     // Import into a freshly-created playlist (named from the JSONL header or a prompt).
     void importNewRequested();
+    // Importable files dropped onto the view → one new playlist per file (batch).
+    void playlistFilesDropped(const QStringList &paths);
     // Re-open the add modal pre-filled with this item's remembered query to edit
     // which track it resolves to.
     void editItemRequested(qint64 playlistId, qint64 itemId, const QString &query);
@@ -120,6 +122,8 @@ signals:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void changeEvent(QEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
 
 private:
     void restylePanelBorders();
