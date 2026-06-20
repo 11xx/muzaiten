@@ -34,18 +34,21 @@ bool isStopWord(const QString &word)
 // is far more precise than AND-ing each word separately, which scatter-matched
 // unrelated tracks and produced spurious MultiMatch. The relaxed per-word fallback
 // (relaxedQueryString) still provides recall when a phrase is too strict.
-QString scopedQueryString(const ImportEntry &entry)
+// Build a scoped artist+title phrase query. With `stripNoise`, packaging tags are
+// removed from the title; without it the FULL title is used so a real version
+// discriminator ("(Full Mix)", "(Instrumental)") still distinguishes copies.
+// Quote the raw values and let SearchQuery::parse fold them with the SAME Fold the
+// index uses — folding both sides identically. (Do NOT pre-run normalizeForMatch:
+// it turns punctuation into spaces, so "Static-X" would become "static x" and no
+// longer phrase-match the index's "static-x".)
+QString scopedQueryString(const ImportEntry &entry, bool stripNoise)
 {
-    // Quote the raw (noise-stripped) values and let SearchQuery::parse fold them
-    // with the SAME Fold the index uses — folding both sides identically. (Do NOT
-    // pre-run normalizeForMatch: it turns punctuation into spaces, so "Static-X"
-    // would become "static x" and no longer phrase-match the index's "static-x".)
     QStringList parts;
     const QString artist = entry.artist.simplified();
     if (!artist.isEmpty()) {
         parts.append(QStringLiteral("artist:%1").arg(Search::quoteFieldValue(artist)));
     }
-    const QString title = stripTitleNoise(entry.title).simplified();
+    const QString title = (stripNoise ? stripTitleNoise(entry.title) : entry.title).simplified();
     if (!title.isEmpty()) {
         parts.append(QStringLiteral("title:%1").arg(Search::quoteFieldValue(title)));
     }
@@ -243,27 +246,36 @@ Outcome match(const SearchIndex &index, const ImportEntry &entry)
         }
     }
 
-    // 2. Field-scoped artist:/title: query — exact mode, then fuzzy.
-    const QString scoped = scopedQueryString(entry);
-    if (!scoped.isEmpty()) {
-        int base = kConfidenceScopedExact;
-        QVector<ScoredResult> results = run(index, scoped, /*fuzzy=*/false);
-        if (results.isEmpty()) {
-            results = run(index, scoped, /*fuzzy=*/true);
-            base = kConfidenceScopedFuzzy;
-        }
-        if (!results.isEmpty()) {
-            return decide(results, entry, scoped, base);
+    // 2. Field-scoped artist:/title: phrase. Try the FULL title first so a version
+    //    discriminator like "(Full Mix)" still picks the right copy; then the
+    //    noise-stripped title to shed packaging junk. Exact mode for both before
+    //    fuzzy, so a precise hit always beats a loose one.
+    const QString full = scopedQueryString(entry, /*stripNoise=*/false);
+    const QString stripped = scopedQueryString(entry, /*stripNoise=*/true);
+    QStringList scopedQueries{full};
+    if (stripped != full) {
+        scopedQueries.append(stripped);
+    }
+    for (const bool fuzzy : {false, true}) {
+        for (const QString &scoped : scopedQueries) {
+            if (scoped.isEmpty()) {
+                continue;
+            }
+            const QVector<ScoredResult> results = run(index, scoped, fuzzy);
+            if (!results.isEmpty()) {
+                return decide(results, entry, scoped,
+                              fuzzy ? kConfidenceScopedFuzzy : kConfidenceScopedExact);
+            }
         }
     }
 
     // 3. Relaxed free-text fallback (whole haystack, fuzzy) — least certain tier.
     const QString relaxed = relaxedQueryString(entry);
     QVector<ScoredResult> results = run(index, relaxed, /*fuzzy=*/true);
-    Outcome outcome = decide(results, entry, relaxed.isEmpty() ? scoped : relaxed, kConfidenceRelaxed);
+    Outcome outcome = decide(results, entry, relaxed.isEmpty() ? stripped : relaxed, kConfidenceRelaxed);
     if (outcome.decision == Decision::Pending && outcome.queryUsed.isEmpty()) {
         // Keep something re-runnable on the pending item for the edit modal.
-        outcome.queryUsed = scoped.isEmpty() ? relaxed : scoped;
+        outcome.queryUsed = stripped.isEmpty() ? relaxed : stripped;
     }
     return outcome;
 }
