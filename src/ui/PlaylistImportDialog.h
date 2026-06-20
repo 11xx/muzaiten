@@ -48,12 +48,13 @@ private slots:
     void fetchUrl();
     void runMatch();
     void onProgress(int done, int total);
-    void onFinished(QVector<PlaylistImportMatch> results);
+    void onMatched(PlaylistImportMatch result);
+    void onFinished();
     void onError(const QString &message);
 
 private:
     void ensureWorker();
-    void rebuildPreview();
+    void appendPreviewRow(int index, const PlaylistImportMatch &match);
     void updateSummary();
 
     QString m_dbPath;
