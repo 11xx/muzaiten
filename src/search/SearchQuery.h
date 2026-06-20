@@ -14,6 +14,14 @@
 //     !word   — negate (must NOT match)
 //     'word   — force exact match even when fuzzy mode is on
 //
+//   Quoted field values — a field value may carry spaces when double-quoted
+//   directly after the colon (strict, no space between ':' and '"'):
+//     artist:"the beatles"   title:"my hood"
+//   The value matches as a single folded phrase (one substring/subsequence)
+//   rather than separate AND-ed words, which is far more precise. Internal
+//   whitespace is condensed to single spaces; \" and \\ are literal. A bare
+//   "quoted phrase" (no field) matches as one phrase across the haystack.
+//
 //   Field tokens — constrain a specific attribute:
 //     artist:      albumartist:    album:    title:    path:    file:
 //     ext:flac     (extension, no comparison op)
@@ -70,5 +78,10 @@ struct SearchQuery {
     // Parse a query string into terms.
     static SearchQuery parse(const QString &queryString);
 };
+
+// Wrap a raw value as a strict key:"..." phrase value: surrounds it with double
+// quotes and backslash-escapes embedded " and \. Used to build precise scoped
+// queries (e.g. artist:"suni clay") that match as one phrase.
+QString quoteFieldValue(const QString &raw);
 
 } // namespace Search

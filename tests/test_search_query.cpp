@@ -187,5 +187,53 @@ private slots:
     }
 };
 
+    void quotedFieldValuePhrase()
+    {
+        // artist:"the beatles" → ONE artist term holding the whole phrase (space
+        // kept), not two AND-ed words.
+        const SearchQuery q = SearchQuery::parse(QStringLiteral("artist:\"the beatles\""));
+        QCOMPARE(q.terms.size(), 1);
+        QCOMPARE(q.terms[0].kind, TermKind::ArtistText);
+        QCOMPARE(q.terms[0].text, QStringLiteral("the beatles"));
+    }
+
+    void quotedValuesAcrossFields()
+    {
+        const SearchQuery q = SearchQuery::parse(
+            QStringLiteral("artist:\"suni clay\" title:\"my hood\""));
+        QCOMPARE(q.terms.size(), 2);
+        QCOMPARE(q.terms[0].kind, TermKind::ArtistText);
+        QCOMPARE(q.terms[0].text, QStringLiteral("suni clay"));
+        QCOMPARE(q.terms[1].kind, TermKind::TitleText);
+        QCOMPARE(q.terms[1].text, QStringLiteral("my hood"));
+    }
+
+    void quotedValueCondensesWhitespaceAndFolds()
+    {
+        // Internal whitespace condenses to single spaces; folding still applies.
+        const SearchQuery q = SearchQuery::parse(QStringLiteral("artist:\"  Beyoncé   Knowles \""));
+        QCOMPARE(q.terms.size(), 1);
+        QCOMPARE(q.terms[0].text, QStringLiteral("beyonce knowles"));
+    }
+
+    void quotedValueEscapedQuote()
+    {
+        // A literal double quote inside the value via \".
+        const SearchQuery q = SearchQuery::parse(QStringLiteral("title:\"say \\\"hi\\\"\""));
+        QCOMPARE(q.terms.size(), 1);
+        QCOMPARE(q.terms[0].kind, TermKind::TitleText);
+        QCOMPARE(q.terms[0].text, QStringLiteral("say \"hi\""));
+    }
+
+    void quoteFieldValueRoundTrips()
+    {
+        // quoteFieldValue() builds a value that parses back to the same phrase.
+        const QString built = QStringLiteral("artist:%1").arg(quoteFieldValue(QStringLiteral("suni clay")));
+        const SearchQuery q = SearchQuery::parse(built);
+        QCOMPARE(q.terms.size(), 1);
+        QCOMPARE(q.terms[0].kind, TermKind::ArtistText);
+        QCOMPARE(q.terms[0].text, QStringLiteral("suni clay"));
+    }
+
 QTEST_MAIN(TestSearchQuery)
 #include "test_search_query.moc"
