@@ -156,6 +156,10 @@ private:
     // position). settleDelayMs waits for the backend to preroll before seeking.
     void resumePlaybackAt(int queueIndex, qint64 positionMs, bool playing, int settleDelayMs);
     void configurePlaybackProfile();
+    // Single device target: hand an exclusively-held card (bit-perfect, or a DSD
+    // takeover) back to PipeWire when the new profile stops wanting it that way,
+    // so a shared sink aimed at the same card isn't left silent.
+    void releaseDeviceForProfileSwitch(const PlaybackProfile &previous, const PlaybackProfile &next);
     void configurePlaybackResume();
     void showDsdTakeoverPrompt(const Track &track, const QString &device);
     void resolveDsdTakeoverPrompt(bool accepted);
