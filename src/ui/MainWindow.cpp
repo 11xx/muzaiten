@@ -3917,8 +3917,16 @@ void MainWindow::configurePlaybackProfile()
 void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &releasedHw,
                                     int queueIndex, qint64 positionMs, bool wasActive, bool wasPlaying)
 {
-    const auto apply = [this, next, queueIndex, positionMs, wasActive, wasPlaying]() {
-        m_playback->setProfile(next);
+    PlaybackProfile applied = next;
+    if (!releasedHw.isEmpty() && applied.mode == QStringLiteral("shared")) {
+        // Keep the physical release separate from the persisted shared profile:
+        // this one rebuilt sink must be pinned to the card we just returned.
+        // Otherwise WirePlumber can select the first available loopback during
+        // the device's delayed graph rebuild, leaving the new stream silent.
+        applied.device = releasedHw;
+    }
+    const auto apply = [this, applied, queueIndex, positionMs, wasActive, wasPlaying]() {
+        m_playback->setProfile(applied);
         if (wasActive) {
             // Re-open the current track at the captured position; the settle
             // delay lets the freshly-built sink preroll before the seek.
@@ -4137,6 +4145,22 @@ void MainWindow::resolveDsdTakeoverPrompt(bool accepted)
         m_takenOverDsdRestoreProfile = dev->currentProfileIndex;
         m_playerBar->setReleaseDeviceVisible(true);
         statusBar()->showMessage(QStringLiteral("Took over %1 for native DSD playback").arg(dev->description), 4000);
+
+        // A confirmed DSD takeover is an explicit switch to exclusive output.
+        // Keep subsequent PCM tracks on the already-free ALSA device instead of
+        // immediately racing PipeWire to restore shared routing after this DSD
+        // track. Switching back to Shared remains explicit and releases the card.
+        if (m_playbackProfile.mode != QStringLiteral("bit-perfect")) {
+            m_playbackProfile.mode = QStringLiteral("bit-perfect");
+            m_playbackProfile.sink = QStringLiteral("alsa");
+            m_playbackProfile.device = dev->hwPath;
+            m_playbackProfile.deviceId = dev->stableId;
+            m_playbackProfile.softwareVolume = false;
+            m_playbackProfile.allowResample = false;
+            m_playbackProfile.releaseSinkOnPause = true;
+            savePlaybackProfile();
+            m_playback->setProfile(m_playbackProfile);
+        }
     }
 
     // PipeWire needs a brief moment to drop the card after switching its profile

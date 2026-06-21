@@ -202,16 +202,16 @@ bool release(const DeviceState &dev, int restoreProfileIndex, QString *error)
     return setProfile(dev, target, error);
 }
 
-bool sinkNodeReady(const QString &hwPath)
+QString sinkNodeName(const QString &hwPath)
 {
     if (hwPath.isEmpty())
-        return false;
+        return {};
     QByteArray out;
     if (!run(QStringLiteral("pw-dump"), {}, &out, nullptr))
-        return false;
+        return {};
     const QJsonDocument doc = QJsonDocument::fromJson(out);
     if (!doc.isArray())
-        return false;
+        return {};
     const QJsonArray arr = doc.array();
 
     // Resolve the device's PipeWire object id from its hw: path.
@@ -223,7 +223,7 @@ bool sinkNodeReady(const QString &hwPath)
         }
     }
     if (deviceId < 0)
-        return false;
+        return {};
 
     // Ready once PipeWire has an Audio/Sink node bound to that device — the card
     // is back in the graph and routable (loopbacks re-link off this node).
@@ -235,10 +235,15 @@ bool sinkNodeReady(const QString &hwPath)
                                       .value(QStringLiteral("props")).toObject();
         if (props.value(QStringLiteral("media.class")).toString() == QStringLiteral("Audio/Sink")
             && propToInt(props.value(QStringLiteral("device.id")), -1) == deviceId) {
-            return true;
+            return props.value(QStringLiteral("node.name")).toString();
         }
     }
-    return false;
+    return {};
+}
+
+bool sinkNodeReady(const QString &hwPath)
+{
+    return !sinkNodeName(hwPath).isEmpty();
 }
 
 } // namespace AudioDeviceControl
