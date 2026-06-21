@@ -37,6 +37,9 @@ public:
     void setAlbumArt(const QImage &image);
     void setCompactMenu(bool compact);
     void setAlwaysShowTray(bool enabled);
+    // Native DSD can temporarily take a card away from PipeWire. Surface the
+    // release command only while muzaiten owns such a takeover.
+    void setReleaseDeviceVisible(bool visible);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
     void setVolume(int volume0To100);
@@ -68,6 +71,7 @@ signals:
     void retryPendingRatingTagsRequested();
     void playbackProfileRequested();
     void playbackResumeRequested();
+    void releaseDeviceRequested();
     void currentTrackLibraryRequested();
     void linkRootsRequested();
     void mpdSourceRequested();
@@ -151,6 +155,7 @@ private:
     class QAction *m_lastFmEnabled = nullptr;
     class QAction *m_scrobbleOffline = nullptr;
     class QAction *m_mergeSavedQueueAction = nullptr;
+    class QAction *m_releaseDeviceAction = nullptr;
     QList<class QAction *> m_playlistViewActions;
     QLabel *m_title = nullptr;
     QLabel *m_subtitle = nullptr;

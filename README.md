@@ -43,7 +43,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and reconstructed development
 - Playlists in a dedicated database: import from a pasted tracklist, `m3u`/`m3u8`, `csv`, or `jsonl`/`ndjson`, or fetch a YouTube / YT Music playlist via `yt-dlp`; tracks resolve by sound/shape matching with a live-streaming match preview and multi-candidate triage. Entries keep a metadata snapshot so playlists survive rescans and remember tracks that go missing.
 - Library file explorer and free-roam file explorer, with keyboard-oriented navigation profiles.
 - Cached album artwork from folder images and embedded artwork.
-- Queue playback through a GStreamer backend, with configurable output/resume behavior.
+- Queue playback through a GStreamer backend, with configurable output/resume behavior. DSF DSD files play natively and bit-perfect to a selected direct ALSA device when resampling is off; enabling resampling decodes DSD to PCM for normal shared output.
 - User ratings with optional MusicBee-compatible tag sync back to audio files.
 - ListenBrainz and Last.fm scrobbling, including now-playing updates and completed-listen submissions.
 - MPD metadata import for browsing MPD libraries alongside local sources.
@@ -68,6 +68,10 @@ Dependencies:
 - TagLib 2.x
 - GStreamer 1.x with audio and pbutils modules
 - zstd
+
+Optional for DSD (`.dsf`/`.dff`) playback: `gst-plugins-bad` and `gst-libav`.
+Native DSF output requires selecting a direct-capable device in `Playback >
+Output profile`; shared output with **Allow resampling** decodes DSD to PCM.
 
 Recommended development commands:
 

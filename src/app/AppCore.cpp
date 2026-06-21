@@ -245,6 +245,17 @@ void AppCore::releaseWindow()
 {
     if (!m_window) return;
     m_window->persistViewState();
+    // Native DSD may have switched the card's PipeWire profile off. Keep its
+    // small UI controller alive while tray-hidden so its pause/end timers can
+    // return the card; destroying it would either leak the takeover or interrupt
+    // active headless playback.
+    if (m_window->hasTakenOverDsdDevice()) {
+        m_window->hide();
+        if (m_tray && !m_trayAlwaysVisible) {
+            m_tray->show();
+        }
+        return;
+    }
     connect(m_window, &QObject::destroyed, this, [this]() {
         if (m_window == nullptr) {
             releaseIdleMemory();

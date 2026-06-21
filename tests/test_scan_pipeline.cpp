@@ -1,4 +1,5 @@
 #include "db/Database.h"
+#include "scanner/LibraryScanner.h"
 #include "scanner/ScanPipeline.h"
 
 #include <QByteArray>
@@ -18,6 +19,7 @@ class ScanPipelineTest final : public QObject {
 private slots:
     void fastFirstPassDefersThenFills();
     void turboFillReadsEveryFile();
+    void dsdExtensionsAreSupported();
 
 private:
     static void writeWav(const QString &path, int sampleRate, int bitsPerSample, int channels, int frames);
@@ -212,6 +214,13 @@ void ScanPipelineTest::turboFillReadsEveryFile()
     QVERIFY(batch.isEmpty()); // drained
     QCOMPARE(streamed, kFiles);
     QVERIFY(batches > 1);
+}
+
+void ScanPipelineTest::dsdExtensionsAreSupported()
+{
+    QVERIFY(LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.dsf")));
+    QVERIFY(LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.DFF")));
+    QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.dsf.txt")));
 }
 
 QTEST_MAIN(ScanPipelineTest)

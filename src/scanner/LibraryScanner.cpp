@@ -43,6 +43,8 @@ const QSet<QString> &LibraryScanner::supportedAudioExtensions()
         QStringLiteral("wav"),
         QStringLiteral("wv"),
         QStringLiteral("ape"),
+        QStringLiteral("dsf"),
+        QStringLiteral("dff"),
     };
     return extensions;
 }

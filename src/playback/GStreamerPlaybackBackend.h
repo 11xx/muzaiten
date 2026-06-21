@@ -7,6 +7,7 @@
 
 using GstElement = struct _GstElement;
 using GstMessage = struct _GstMessage;
+using GstPad = struct _GstPad;
 
 class GStreamerPlaybackBackend final : public PlaybackBackend {
     Q_OBJECT
@@ -29,9 +30,22 @@ public:
     qint64 position() const override;
     qint64 duration() const override;
     void onGaplessTrackAdvanced() override;
+    void setOutputMode(OutputMode mode, const QString &dsdDevice = QString()) override;
+    DsdSupport dsdSupport() const override;
 
 private:
     static void aboutToFinishCallback(GstElement *playbin, void *userData);
+    // Links avdemux_dsf's dynamically-added src pad to dsdconvert (userData).
+    static void dsdPadAddedCallback(GstElement *demux, GstPad *pad, void *userData);
+    // Builds (and makes m_playbin point at) a native DSD pipeline:
+    //   filesrc ! avdemux_dsf ! dsdconvert ! alsasink device=<dsdDevice>
+    // dsdconvert negotiates whatever DSD layout the DAC advertises (e.g. the
+    // K5 Pro's DSDU32BE), so this is true bit-perfect passthrough. Returns false
+    // (and reports via errorOccurred) if a required element is unavailable.
+    bool buildDsdPipeline(const QString &filePath, QString *error);
+    // Native-DSD analogue of play()/loadPaused(): tears down whatever pipeline is
+    // live, builds the DSD passthrough graph for |url|, and drives it to target.
+    void playDsd(const QUrl &url, State targetState);
 
     void rebuildPipeline();
     bool configureSink();
@@ -65,7 +79,18 @@ private:
     void warmFileHead(const QUrl &url) const;
 
     PlaybackProfile m_profile;
+    // The active top-level pipeline. Normally a playbin; in native-DSD mode it is
+    // instead the hand-built DSD passthrough GstPipeline. Keeping the single
+    // handle lets every generic operation (state, seek, bus, position) stay
+    // mode-agnostic — only the few playbin-specific property pokes are guarded by
+    // m_dsdActive.
     GstElement *m_playbin = nullptr;
+    // True while m_playbin holds the native DSD pipeline rather than a playbin.
+    bool m_dsdActive = false;
+    // Output mode selected for the next play()/loadPaused(), and the ALSA device
+    // to open for native DSD (empty → fall back to the profile device).
+    OutputMode m_pendingOutputMode = OutputMode::Normal;
+    QString m_dsdDevice;
     QTimer m_pollTimer;
     mutable QMutex m_mutex;
     QString m_currentUri;
