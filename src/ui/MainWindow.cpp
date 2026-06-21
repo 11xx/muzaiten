@@ -4015,6 +4015,16 @@ QString MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previou
         // Already owned by PipeWire (nothing to hand back) — just drop our
         // bookkeeping below if it pointed here.
     } else {
+        // Do not let the old direct ALSA pipeline continue while PipeWire is
+        // reclaiming this card. Apart from making the transition sound as if it
+        // has not started, that leaves two owners racing the same hardware and
+        // can delay WirePlumber's sink recreation. The caller captured the
+        // queue position/state before arriving here and will reopen it only
+        // after the replacement shared sink is usable.
+        if (m_playback->state() == PlaybackBackend::State::Playing
+            || m_playback->state() == PlaybackBackend::State::Paused) {
+            m_playback->stop();
+        }
         QString error;
         if (AudioDeviceControl::release(*dev, restoreProfile, &error)) {
             statusBar()->showMessage(
