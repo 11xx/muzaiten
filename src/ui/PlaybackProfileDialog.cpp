@@ -130,6 +130,29 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
         toggleSelectedDeviceTakeover();
     });
 
+    // Auto-release of an exclusively-held card lives in the bit-perfect frame
+    // (it is the "exclusive output" concern). Off by default — a takeover is
+    // deliberate. It still governs a shared-mode DSD takeover at runtime even
+    // while this control is greyed out in shared mode.
+    m_autoReleaseDevice = new QCheckBox(QStringLiteral("Auto-release the device after"), m_bitPerfectGroup);
+    m_autoReleaseDevice->setToolTip(
+        QStringLiteral("When muzaiten holds a card exclusively (bit-perfect, or a DSD device takeover), "
+                       "hand it back to PipeWire automatically after playback stays paused or stopped for "
+                       "this long. Off by default; otherwise it stays held until you release it via "
+                       "Playback → Release device."));
+    m_autoReleaseTimeout = new QSpinBox(m_bitPerfectGroup);
+    m_autoReleaseTimeout->setRange(1, 600);
+    m_autoReleaseTimeout->setSuffix(QStringLiteral(" s"));
+    m_autoReleaseTimeout->setValue(15);
+    m_autoReleaseTimeout->setEnabled(false);
+    connect(m_autoReleaseDevice, &QCheckBox::toggled, m_autoReleaseTimeout, &QWidget::setEnabled);
+    auto *autoReleaseRow = new QHBoxLayout;
+    autoReleaseRow->setContentsMargins(0, 0, 0, 0);
+    autoReleaseRow->addWidget(m_autoReleaseDevice);
+    autoReleaseRow->addWidget(m_autoReleaseTimeout);
+    autoReleaseRow->addStretch(1);
+    bpForm->addRow(QString(), autoReleaseRow);
+
     modesRow->addWidget(m_bitPerfectGroup, 1);
     layout->addLayout(modesRow);
 
@@ -145,42 +168,23 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
             QSignalBlocker block(m_sharedGroup);  // never leave both off
             m_sharedGroup->setChecked(true);
         }
+        // Re-evaluate the device status/action for the new active mode (Qt has
+        // just greyed/un-greyed the bit-perfect group's children).
+        refreshDeviceStatus();
     });
     connect(m_bitPerfectGroup, &QGroupBox::toggled, this, [this](bool on) {
         if (on) {
             QSignalBlocker block(m_sharedGroup);
             m_sharedGroup->setChecked(false);
-            refreshDeviceStatus();
         } else if (!m_sharedGroup->isChecked()) {
             QSignalBlocker block(m_bitPerfectGroup);
             m_bitPerfectGroup->setChecked(true);
         }
+        refreshDeviceStatus();
     });
 
     // --- Cross-mode options (apply regardless of the active mode) ------------
     auto *bottomForm = new QFormLayout;
-
-    // Auto-release applies to any exclusively-held card (bit-perfect device or a
-    // DSD takeover in shared mode), so it lives outside the mode groups and stays
-    // enabled in both. Off by default — a takeover is deliberate.
-    m_autoReleaseDevice = new QCheckBox(QStringLiteral("Auto-release a taken-over device after"), this);
-    m_autoReleaseDevice->setToolTip(
-        QStringLiteral("When muzaiten holds a card exclusively (bit-perfect, or a DSD device takeover), "
-                       "hand it back to PipeWire automatically after playback stays paused or stopped for "
-                       "this long. Off by default; otherwise it stays held until you release it via "
-                       "Playback → Release device."));
-    m_autoReleaseTimeout = new QSpinBox(this);
-    m_autoReleaseTimeout->setRange(1, 600);
-    m_autoReleaseTimeout->setSuffix(QStringLiteral(" s"));
-    m_autoReleaseTimeout->setValue(15);
-    m_autoReleaseTimeout->setEnabled(false);
-    connect(m_autoReleaseDevice, &QCheckBox::toggled, m_autoReleaseTimeout, &QWidget::setEnabled);
-    auto *autoReleaseRow = new QHBoxLayout;
-    autoReleaseRow->setContentsMargins(0, 0, 0, 0);
-    autoReleaseRow->addWidget(m_autoReleaseDevice);
-    autoReleaseRow->addWidget(m_autoReleaseTimeout);
-    autoReleaseRow->addStretch(1);
-    bottomForm->addRow(QString(), autoReleaseRow);
 
     // Disk read-ahead: warm the page cache ahead of the playhead.
     const QString readAheadHelp =
@@ -218,6 +222,10 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
 
     layout->activate();
     setMinimumSize(sizeHint());
+
+    // Surface the initially-selected device's state (greyed, since shared is the
+    // default active mode) so a held card is visible/releasable from the start.
+    refreshDeviceStatus();
 }
 
 bool PlaybackProfileDialog::bitPerfectActive() const
@@ -274,8 +282,10 @@ void PlaybackProfileDialog::populateDevices()
 
 void PlaybackProfileDialog::refreshDeviceStatus()
 {
-    if (!bitPerfectActive())
-        return;
+    // Runs in either mode: the selected device's state is informative even while
+    // bit-perfect is toggled off (its controls greyed). `active` gates the
+    // colour and which action stays usable.
+    const bool active = bitPerfectActive();
 
     if (!AudioDeviceControl::toolingAvailable()) {
         m_deviceStatus->clear();
@@ -294,27 +304,36 @@ void PlaybackProfileDialog::refreshDeviceStatus()
         // selected — nothing to take over.
         m_deviceStatus->setText(QStringLiteral("PipeWire does not manage this device."));
         m_deviceStatus->setStyleSheet(QString());
+        m_deviceStatus->setEnabled(active);
         m_deviceAction->setVisible(false);
         return;
     }
 
     m_deviceAction->setVisible(true);
-    if (dev->heldByPipeWire()) {
+    const bool held = dev->heldByPipeWire();
+    if (held) {
         m_deviceStatus->setText(
             QStringLiteral("⚠ Busy — PipeWire is holding this device; direct playback will fail."));
-        m_deviceStatus->setStyleSheet(QStringLiteral("color: #c0392b;"));
+        m_deviceStatus->setStyleSheet(active ? QStringLiteral("color: #c0392b;") : QString());
         m_deviceAction->setText(QStringLiteral("Take over"));
         m_deviceAction->setToolTip(
             QStringLiteral("Free %1 from PipeWire so muzaiten can open it directly.")
                 .arg(dev->description));
     } else {
         m_deviceStatus->setText(QStringLiteral("✓ Free for direct (bit-perfect) playback."));
-        m_deviceStatus->setStyleSheet(QStringLiteral("color: #27ae60;"));
+        m_deviceStatus->setStyleSheet(active ? QStringLiteral("color: #27ae60;") : QString());
         m_deviceAction->setText(QStringLiteral("Release"));
         m_deviceAction->setToolTip(
             QStringLiteral("Hand %1 back to PipeWire for shared use by other apps.")
                 .arg(dev->description));
     }
+
+    // When bit-perfect is off the whole group is greyed by Qt; still show the
+    // device's state (greyed), and keep only "Release" clickable so a held card
+    // can be handed back without first enabling bit-perfect. A "Take over" stays
+    // disabled there — taking a card over only makes sense for bit-perfect.
+    m_deviceStatus->setEnabled(active);
+    m_deviceAction->setEnabled(active || !held);
 }
 
 void PlaybackProfileDialog::toggleSelectedDeviceTakeover()
