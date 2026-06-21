@@ -62,7 +62,23 @@ inline bool isDsdCodec(const QString &codec)
     return c == QStringLiteral("dsf") || c == QStringLiteral("dff");
 }
 
-inline bool isDsdTrack(const Track &track) { return isDsdCodec(track.codec); }
+inline bool isDsdTrack(const Track &track)
+{
+    if (isDsdCodec(track.codec)) {
+        return true;
+    }
+    // codec is unset for tracks built straight from a path (enqueue-by-path, the
+    // file explorer, snapshots written before codec was persisted). Fall back to
+    // the file extension — exactly what the scanner stores — so DSD detection
+    // never silently fails and downgrades the track to PCM.
+    if (track.codec.isEmpty()) {
+        const qsizetype dot = track.path.lastIndexOf(QLatin1Char('.'));
+        if (dot >= 0) {
+            return isDsdCodec(track.path.mid(dot + 1));
+        }
+    }
+    return false;
+}
 
 Q_DECLARE_METATYPE(Track)
 Q_DECLARE_METATYPE(QVector<Track>)
