@@ -45,6 +45,7 @@ public:
     void setQueueCurrentRow(int row, int scrollDirection);
     void moveQueueCurrentRow(int delta);
     void activateCurrentQueueTrack();
+    void setQueueIsPlaylistSourced(bool sourced);
     QVector<Search::MatchDocument> queueSearchDocuments() const;
 
 signals:
@@ -57,6 +58,7 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
+    void unlinkQueueFromPlaylistRequested();
     void artistRequested(const QString &artistName);
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);

@@ -44,6 +44,9 @@ public:
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }
     void setTableBorders(PanelBorderEdges edges);
     void setTableTopBorderVisible(bool visible);
+    // Gates the "Unlink queue from playlist" context-menu entry, shown only while
+    // the live queue is mirroring a playlist.
+    void setQueueIsPlaylistSourced(bool sourced);
 
 signals:
     void trackActivated(int index);
@@ -55,6 +58,7 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
+    void unlinkFromPlaylistRequested();
     void findFileRequested(const Track &track);
     void trackLibraryRequested(const Track &track);
     void addToPlaylistRequested(const QVector<Track> &tracks);
@@ -105,6 +109,7 @@ private:
     PanelBorderEdges m_tableBorders;
     bool m_restoreScrollPending = false;
     bool m_restoreScrollScheduled = false;
+    bool m_queueIsPlaylistSourced = false;
 
     // Incremental-find state and widgets (created only for the FullScreen preset).
     QWidget *m_searchBar = nullptr;
