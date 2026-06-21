@@ -161,16 +161,20 @@ private:
     // takeover) back to PipeWire when the new profile stops wanting it that way,
     // so a shared sink aimed at the same card isn't left silent. Returns the hw
     // path it released (empty if it released nothing).
-    QString releaseDeviceForProfileSwitch(const PlaybackProfile &previous, const PlaybackProfile &next);
+    QString releaseDeviceForProfileSwitch(const PlaybackProfile &previous, const PlaybackProfile &next,
+                                          int *previousSinkNodeId);
     // Build the new output sink and restore playback, but first wait (poll, ~10s
     // budget) for any cross-profile device-ownership change to settle — a card
     // takes a couple of seconds to change hands, and building the sink onto a
     // half-transitioned device plays silently or fails to preroll.
     void applyOutputProfile(const PlaybackProfile &next, const QString &releasedHw,
-                            int queueIndex, qint64 positionMs, bool wasActive, bool wasPlaying);
-    // Poll until findByHwPath(hw).heldByPipeWire() == wantHeld (or the ~10s
-    // budget elapses), then invoke done. Calls done immediately when already met.
-    void waitForDeviceOwnership(const QString &hw, bool wantHeld, std::function<void()> done);
+                            int previousSinkNodeId, int queueIndex, qint64 positionMs,
+                            bool wasActive, bool wasPlaying);
+    // Poll until the requested cross-server hand-off is truly usable (a new
+    // shared sink after release, or no shared sink before direct ALSA open), or
+    // the ~10s budget elapses. Calls done immediately when already ready.
+    void waitForDeviceOwnership(const QString &hw, bool wantHeld, int previousSinkNodeId,
+                                std::function<void()> done);
     void configurePlaybackResume();
     // A shared-mode PCM track can't reach a card we hold off for native DSD;
     // hand the card back, wait for PipeWire to rebuild its sink, then restart the
@@ -435,5 +439,12 @@ private:
     // to resume after a bit-perfect takeover that left the pipeline in Error.
     QString m_lastHealthyTrackPath;
     qint64 m_lastHealthyPositionMs = 0;
+    // Exact transport snapshot for a shared → BP switch that initially fails
+    // because PipeWire still owns the card. This outlives the backend Error
+    // state, whose zero position must never overwrite the requested resume.
+    bool m_profileTakeoverResumePending = false;
+    QString m_profileTakeoverTrackPath;
+    qint64 m_profileTakeoverPositionMs = 0;
+    bool m_profileTakeoverWasPlaying = false;
     bool m_loadingViewSettings = false;
 };

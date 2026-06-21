@@ -177,23 +177,16 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
     // read-ahead (and any other non-output tweak) must not tear down a playing
     // pipeline.  This keeps a settings change seamless for the user.
     const bool rebuild = (m_playbin == nullptr) || outputConfigDiffers(m_profile, profile);
-    QString restoreUri;
-    const qint64 restorePositionMs = m_positionMs;
-    const State restoreState = m_state;
-    {
-        QMutexLocker locker(&m_mutex);
-        restoreUri = m_currentUri;
-    }
     m_profile = profile;
     if (rebuild) {
         m_softPaused = false;
         m_pendingSeekMs = -1;
         finishTargetTransition();
         rebuildPipeline();
-        if (m_playbin != nullptr && m_state != State::Error && !restoreUri.isEmpty()
-            && (restoreState == State::Playing || restoreState == State::Paused)) {
-            loadUri(restoreUri, restoreState, restorePositionMs);
-        }
+        // MainWindow owns transport restoration for output changes. It must
+        // coordinate the rebuild with PipeWire ownership first; restoring here
+        // as well races a second play/seek and can lose either position or
+        // play/pause intent during shared ↔ bit-perfect transitions.
         return;
     }
 

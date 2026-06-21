@@ -135,6 +135,48 @@ bool setProfile(const DeviceState &dev, int profileIndex, QString *error)
                nullptr, error);
 }
 
+struct SinkNode {
+    int id = -1;
+    QString name;
+};
+
+std::optional<SinkNode> findSinkNode(const QString &hwPath)
+{
+    if (hwPath.isEmpty())
+        return std::nullopt;
+    QByteArray out;
+    if (!run(QStringLiteral("pw-dump"), {}, &out, nullptr))
+        return std::nullopt;
+    const QJsonDocument doc = QJsonDocument::fromJson(out);
+    if (!doc.isArray())
+        return std::nullopt;
+    const QJsonArray arr = doc.array();
+
+    int deviceId = -1;
+    for (const QJsonValue &value : arr) {
+        if (auto dev = parseDevice(value.toObject()); dev && dev->hwPath == hwPath) {
+            deviceId = dev->pwId;
+            break;
+        }
+    }
+    if (deviceId < 0)
+        return std::nullopt;
+
+    for (const QJsonValue &value : arr) {
+        const QJsonObject obj = value.toObject();
+        if (obj.value(QStringLiteral("type")).toString() != QStringLiteral("PipeWire:Interface:Node"))
+            continue;
+        const QJsonObject props = obj.value(QStringLiteral("info")).toObject()
+                                      .value(QStringLiteral("props")).toObject();
+        if (props.value(QStringLiteral("media.class")).toString() == QStringLiteral("Audio/Sink")
+            && propToInt(props.value(QStringLiteral("device.id")), -1) == deviceId) {
+            return SinkNode{propToInt(obj.value(QStringLiteral("id"))),
+                            props.value(QStringLiteral("node.name")).toString()};
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 bool toolingAvailable()
@@ -204,41 +246,14 @@ bool release(const DeviceState &dev, int restoreProfileIndex, QString *error)
 
 QString sinkNodeName(const QString &hwPath)
 {
-    if (hwPath.isEmpty())
-        return {};
-    QByteArray out;
-    if (!run(QStringLiteral("pw-dump"), {}, &out, nullptr))
-        return {};
-    const QJsonDocument doc = QJsonDocument::fromJson(out);
-    if (!doc.isArray())
-        return {};
-    const QJsonArray arr = doc.array();
+    const auto sink = findSinkNode(hwPath);
+    return sink ? sink->name : QString();
+}
 
-    // Resolve the device's PipeWire object id from its hw: path.
-    int deviceId = -1;
-    for (const QJsonValue &value : arr) {
-        if (auto dev = parseDevice(value.toObject()); dev && dev->hwPath == hwPath) {
-            deviceId = dev->pwId;
-            break;
-        }
-    }
-    if (deviceId < 0)
-        return {};
-
-    // Ready once PipeWire has an Audio/Sink node bound to that device — the card
-    // is back in the graph and routable (loopbacks re-link off this node).
-    for (const QJsonValue &value : arr) {
-        const QJsonObject obj = value.toObject();
-        if (obj.value(QStringLiteral("type")).toString() != QStringLiteral("PipeWire:Interface:Node"))
-            continue;
-        const QJsonObject props = obj.value(QStringLiteral("info")).toObject()
-                                      .value(QStringLiteral("props")).toObject();
-        if (props.value(QStringLiteral("media.class")).toString() == QStringLiteral("Audio/Sink")
-            && propToInt(props.value(QStringLiteral("device.id")), -1) == deviceId) {
-            return props.value(QStringLiteral("node.name")).toString();
-        }
-    }
-    return {};
+int sinkNodeId(const QString &hwPath)
+{
+    const auto sink = findSinkNode(hwPath);
+    return sink ? sink->id : -1;
 }
 
 bool sinkNodeReady(const QString &hwPath)
