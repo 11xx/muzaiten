@@ -7,6 +7,7 @@
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
 
+#include <functional>
 #include <memory>
 
 class AppCore;
@@ -158,8 +159,18 @@ private:
     void configurePlaybackProfile();
     // Single device target: hand an exclusively-held card (bit-perfect, or a DSD
     // takeover) back to PipeWire when the new profile stops wanting it that way,
-    // so a shared sink aimed at the same card isn't left silent.
-    void releaseDeviceForProfileSwitch(const PlaybackProfile &previous, const PlaybackProfile &next);
+    // so a shared sink aimed at the same card isn't left silent. Returns the hw
+    // path it released (empty if it released nothing).
+    QString releaseDeviceForProfileSwitch(const PlaybackProfile &previous, const PlaybackProfile &next);
+    // Build the new output sink and restore playback, but first wait (poll, ~10s
+    // budget) for any cross-profile device-ownership change to settle — a card
+    // takes a couple of seconds to change hands, and building the sink onto a
+    // half-transitioned device plays silently or fails to preroll.
+    void applyOutputProfile(const PlaybackProfile &next, const QString &releasedHw,
+                            int queueIndex, qint64 positionMs, bool wasActive, bool wasPlaying);
+    // Poll until findByHwPath(hw).heldByPipeWire() == wantHeld (or the ~10s
+    // budget elapses), then invoke done. Calls done immediately when already met.
+    void waitForDeviceOwnership(const QString &hw, bool wantHeld, std::function<void()> done);
     void configurePlaybackResume();
     void showDsdTakeoverPrompt(const Track &track, const QString &device);
     void resolveDsdTakeoverPrompt(bool accepted);
