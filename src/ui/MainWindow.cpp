@@ -561,6 +561,14 @@ QJsonObject trackToJson(const Track &track)
     root.insert(QStringLiteral("hasUserRating"), track.hasUserRating);
     root.insert(QStringLiteral("fileSize"), QString::number(track.fileSize));
     root.insert(QStringLiteral("missing"), track.missing);
+    // Technical fields the playback path needs — codec especially, since the DSD
+    // output strategy (native vs PCM) keys off it. Without these a restored queue
+    // would lose its codec and silently fall back to PCM for DSD.
+    root.insert(QStringLiteral("codec"), track.codec);
+    root.insert(QStringLiteral("sampleRateHz"), track.sampleRateHz);
+    root.insert(QStringLiteral("bitrateKbps"), track.bitrateKbps);
+    root.insert(QStringLiteral("channels"), track.channels);
+    root.insert(QStringLiteral("bitDepth"), track.bitDepth);
     return root;
 }
 
@@ -584,6 +592,17 @@ Track trackFromJson(const QJsonObject &root)
     track.hasUserRating = root.value(QStringLiteral("hasUserRating")).toBool();
     track.fileSize = root.value(QStringLiteral("fileSize")).toString().toLongLong();
     track.missing = root.value(QStringLiteral("missing")).toBool(false);
+    track.codec = root.value(QStringLiteral("codec")).toString();
+    // Snapshots written before codec was persisted (and any other gap) fall back
+    // to the lower-cased file extension, which is exactly what the scanner stores
+    // — so DSD detection recovers immediately even for an old saved queue.
+    if (track.codec.isEmpty()) {
+        track.codec = QFileInfo(track.path).suffix().toLower();
+    }
+    track.sampleRateHz = root.value(QStringLiteral("sampleRateHz")).toInt();
+    track.bitrateKbps = root.value(QStringLiteral("bitrateKbps")).toInt();
+    track.channels = root.value(QStringLiteral("channels")).toInt();
+    track.bitDepth = root.value(QStringLiteral("bitDepth")).toInt();
     return track;
 }
 
