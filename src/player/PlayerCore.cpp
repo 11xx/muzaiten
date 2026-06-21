@@ -141,20 +141,43 @@ void PlayerCore::skipCurrentTrack()
 {
     // This is deliberately not onFinished(): a declined DSD must not be replayed
     // by Repeat One, and an unplayable row should not become shuffle history.
-    m_backend->prepareNext({});
-    const AutoNext target = decideAutoNext();
-    if (!target.injected.path.isEmpty()) {
-        emit aboutToAddTracks(QVector<Track>{target.injected});
-        m_queue.push_back(target.injected);
-        emit queueChanged();
-        playAt(static_cast<int>(m_queue.size()) - 1);
+    //
+    // The advance below routes through playAt()→playCurrent(), which may decide
+    // the new row is *also* skippable (a contiguous DSD block past a declined
+    // takeover, a run of unresolvable files) and call back in here. Recursing one
+    // stack frame per skipped track would overflow on a long block — and never
+    // terminate under Repeat All, which always offers another row. Flatten the
+    // cascade into a single loop: a re-entrant call just flags "go again", and a
+    // queue-length guard stops an all-skippable queue instead of spinning.
+    if (m_skipInProgress) {
+        m_skipPending = true;
         return;
     }
-    if (target.index >= 0 && target.index < m_queue.size()) {
-        playAt(target.index);
-        return;
+    m_skipInProgress = true;
+    int guard = static_cast<int>(m_queue.size()) + 1;
+    do {
+        m_skipPending = false;
+        m_backend->prepareNext({});
+        const AutoNext target = decideAutoNext();
+        if (!target.injected.path.isEmpty()) {
+            emit aboutToAddTracks(QVector<Track>{target.injected});
+            m_queue.push_back(target.injected);
+            emit queueChanged();
+            playAt(static_cast<int>(m_queue.size()) - 1);
+        } else if (target.index >= 0 && target.index < m_queue.size()) {
+            playAt(target.index);
+        } else {
+            m_backend->stop();
+            break;
+        }
+    } while (m_skipPending && --guard > 0);
+    // Everything reachable was skippable (e.g. an all-DSD queue under Repeat All
+    // with the takeover declined). Stop rather than loop forever.
+    if (m_skipPending && guard <= 0) {
+        m_backend->stop();
     }
-    m_backend->stop();
+    m_skipInProgress = false;
+    m_skipPending = false;
 }
 
 void PlayerCore::next()

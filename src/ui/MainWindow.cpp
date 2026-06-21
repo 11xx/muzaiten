@@ -800,7 +800,14 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             rejected.reason = reason;
             return rejected;
         };
-        const bool dff = track.codec.compare(QStringLiteral("dff"), Qt::CaseInsensitive) == 0;
+        // No DFF/DSDIFF demuxer ships with GStreamer or ffmpeg today, so neither
+        // the native passthrough nor the decode-to-PCM path can even parse a .dff
+        // container (avdemux_dsf is DSF-only). Skip honestly up front rather than
+        // routing it to playbin, which would only surface a decode error — and
+        // rather than implying resampling could rescue it, which it cannot.
+        if (track.codec.compare(QStringLiteral("dff"), Qt::CaseInsensitive) == 0) {
+            return skip(QStringLiteral("DFF/DSDIFF playback isn't supported by the installed GStreamer plugins (DSF only)"));
+        }
 
         // Shared output with resampling is deliberately the straightforward
         // decode-to-PCM path: playbin chooses the installed DSD decoder and no
@@ -811,9 +818,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                 return plan;
             }
             return skip(QStringLiteral("DSD PCM playback needs gst-plugins-bad and gst-libav"));
-        }
-        if (dff) {
-            return skip(QStringLiteral("Native DSD playback currently supports DSF; enable resampling to play DFF"));
         }
         if (!support.nativePassthrough) {
             return skip(QStringLiteral("Native DSD playback needs gst-plugins-bad and gst-libav"));

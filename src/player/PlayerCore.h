@@ -198,4 +198,8 @@ private:
     // Set after a declined/timed-out prompt. Native DSD tracks are then skipped
     // without further prompts until any track has successfully started.
     bool m_skipDsdTakeoverBlock = false;
+    // Re-entrancy guard for skipCurrentTrack(): flattens a cascade of skips into
+    // one loop instead of recursing a stack frame per skipped track.
+    bool m_skipInProgress = false;
+    bool m_skipPending = false;
 };
