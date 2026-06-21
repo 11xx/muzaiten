@@ -4,6 +4,8 @@ muzaiten is a native Linux music player focused on local-library browsing, queue
 
 The project is in early development. It currently uses C++26, Qt 6 Widgets, SQLite, TagLib, GStreamer, Qt DBus, Qt Network, and zstd.
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes and reconstructed development milestones.
+
 ## Screenshots
 
 <table>
