@@ -1,5 +1,7 @@
 #include "playback/GStreamerPlaybackBackend.h"
 
+#include "playback/AudioDeviceControl.h"
+
 #include <QMutexLocker>
 #include <QtGlobal>
 
@@ -32,6 +34,29 @@ bool factoryExists(const char *name)
     return true;
 }
 
+// The node.name exposed by PipeWire is also exported as the PulseAudio sink
+// name.  Targeting it bypasses WirePlumber's default-sink selection, which can
+// briefly pick an unrelated loopback while a released card is being rebuilt.
+QString sharedSinkTarget(const PlaybackProfile &profile)
+{
+    if (profile.mode != QStringLiteral("shared") || profile.device.isEmpty()) {
+        return {};
+    }
+    return AudioDeviceControl::sinkNodeName(profile.device);
+}
+
+void setStringPropertyIfSupported(GstElement *element, const char *property, const QString &value)
+{
+    if (element == nullptr || value.isEmpty()) {
+        return;
+    }
+    GParamSpec *spec = g_object_class_find_property(G_OBJECT_GET_CLASS(element), property);
+    if (spec != nullptr && G_IS_PARAM_SPEC_STRING(spec)) {
+        const QByteArray utf8 = value.toUtf8();
+        g_object_set(G_OBJECT(element), property, utf8.constData(), nullptr);
+    }
+}
+
 GstElement *makeSink(const PlaybackProfile &profile)
 {
     const auto make = [](const char *name) -> GstElement * {
@@ -58,6 +83,7 @@ GstElement *makeSink(const PlaybackProfile &profile)
         return sink;
     }
 
+    const QString target = sharedSinkTarget(profile);
     GstElement *sink = nullptr;
     if (profile.sink == QStringLiteral("alsa")) {
         sink = make("alsasink");
@@ -67,18 +93,24 @@ GstElement *makeSink(const PlaybackProfile &profile)
         return sink;
     }
     if (profile.sink == QStringLiteral("pipewire")) {
-        return make("pipewiresink");
+        sink = make("pipewiresink");
+        setStringPropertyIfSupported(sink, "target-object", target);
+        return sink;
     }
     if (profile.sink == QStringLiteral("pulse")) {
-        return make("pulsesink");
+        sink = make("pulsesink");
+        setStringPropertyIfSupported(sink, "device", target);
+        return sink;
     }
 
     sink = make("pipewiresink");
     if (sink != nullptr) {
+        setStringPropertyIfSupported(sink, "target-object", target);
         return sink;
     }
     sink = make("pulsesink");
     if (sink != nullptr) {
+        setStringPropertyIfSupported(sink, "device", target);
         return sink;
     }
     return make("autoaudiosink");

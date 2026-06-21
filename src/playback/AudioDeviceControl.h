@@ -63,6 +63,12 @@ bool takeOver(const DeviceState &dev, QString *error = nullptr);
 // available audio profile.
 bool release(const DeviceState &dev, int restoreProfileIndex = -1, QString *error = nullptr);
 
+// Return the PipeWire node.name for the card's Audio/Sink, or an empty string
+// until that node exists. The name is also the PipeWire Pulse-server sink name,
+// so a shared GStreamer sink can target this physical card explicitly instead
+// of racing the current default sink after release().
+QString sinkNodeName(const QString &hwPath);
+
 // Whether PipeWire has (re)created an Audio/Sink node for the card behind
 // "hw:N". After release() the profile flips instantly but PipeWire needs a
 // couple of seconds to rebuild the sink node and re-link any loopbacks — so
