@@ -594,6 +594,22 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         return;
     }
 
+    // We are an audio player: never let playbin render video or subtitles. Files
+    // with embedded cover art (common in DSF, FLAC, M4A…) otherwise expose an
+    // image/video stream that playbin auto-plugs into its own top-level output
+    // window — a stray window that also throws "output window was closed" errors
+    // if dismissed. Cover art is sourced separately (TagLib/ArtworkCache), so
+    // clear the VIDEO and TEXT bits of GstPlayFlags. (The flag bits aren't in a
+    // public header; mirror the playbin enum values.)
+    {
+        constexpr int kGstPlayFlagVideo = (1 << 0);
+        constexpr int kGstPlayFlagText = (1 << 2);
+        gint flags = 0;
+        g_object_get(G_OBJECT(m_playbin), "flags", &flags, nullptr);
+        flags &= ~(kGstPlayFlagVideo | kGstPlayFlagText);
+        g_object_set(G_OBJECT(m_playbin), "flags", flags, nullptr);
+    }
+
     if (!configureSink()) {
         // configureSink already reported the error and set State::Error; don't
         // advertise the pipeline as healthy or wire up gapless signalling.
