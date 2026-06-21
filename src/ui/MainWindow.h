@@ -172,6 +172,11 @@ private:
     // budget elapses), then invoke done. Calls done immediately when already met.
     void waitForDeviceOwnership(const QString &hw, bool wantHeld, std::function<void()> done);
     void configurePlaybackResume();
+    // A shared-mode PCM track can't reach a card we hold off for native DSD;
+    // hand the card back, wait for PipeWire to rebuild its sink, then restart the
+    // track so it routes to the live device instead of silence. No-op in
+    // bit-perfect (PCM plays straight to the ALSA device) or for a DSD follow-up.
+    void releaseDsdDeviceForPcmTrack(const Track &track);
     void showDsdTakeoverPrompt(const Track &track, const QString &device);
     void resolveDsdTakeoverPrompt(bool accepted);
     void releaseTakenOverDsdDevice();
