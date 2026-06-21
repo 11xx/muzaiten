@@ -784,7 +784,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_player, &PlayerCore::currentIndexChanged, this, &MainWindow::onPlayerIndexChanged);
     connect(m_player, &PlayerCore::playNextRangeChanged, this, &MainWindow::refreshPlayNextRange);
     connect(m_player, &PlayerCore::currentTrackChanged, this, &MainWindow::presentTrack);
-    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &, bool) {
+    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
         // Selecting a different playable track invalidates a still-visible DSD
         // question. PlayerCore has already discarded its pending request; this
         // only tears down the stale status-bar affordance.
@@ -795,6 +795,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_takeOverDeviceButton->setVisible(false);
             m_takeOverDeviceButton->setText(QStringLiteral("Take over device"));
         }
+        releaseDsdDeviceForPcmTrack(track);
     });
     connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
     connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
@@ -4191,6 +4192,35 @@ void MainWindow::releaseTakenOverDsdDevice()
     if (isHidden() && m_core != nullptr && !m_core->isQuitting()) {
         m_core->releaseWindow();
     }
+}
+
+void MainWindow::releaseDsdDeviceForPcmTrack(const Track &track)
+{
+    // Only relevant when we hold a card off for native DSD and the now-current
+    // track is ordinary PCM played through the shared graph — which can't reach a
+    // card that's switched off in PipeWire. Bit-perfect plays PCM straight to the
+    // ALSA device, and a DSD follow-up keeps using the takeover, so both no-op.
+    if (m_takenOverDsdDevice.isEmpty()
+        || isDsdTrack(track)
+        || m_playbackProfile.mode == QStringLiteral("bit-perfect")) {
+        return;
+    }
+
+    const QString hw = m_takenOverDsdDevice;
+    const int queueIndex = m_player->queueIndex();
+    const qint64 positionMs = m_playback->position();
+    const bool wasPlaying = m_playback->state() == PlaybackBackend::State::Playing;
+
+    // Hand the card back, then wait for PipeWire to rebuild its sink before
+    // restarting the track — otherwise the shared sink binds to the absent device
+    // and stays silent. (The just-started silent play continues until the restart.)
+    releaseTakenOverDsdDevice();
+    statusBar()->showMessage(QStringLiteral("Returning the device for shared playback…"), 10000);
+    waitForDeviceOwnership(hw, /*wantHeld=*/true, [this, queueIndex, positionMs, wasPlaying]() {
+        if (queueIndex >= 0) {
+            resumePlaybackAt(queueIndex, positionMs, wasPlaying, /*settleDelayMs=*/600);
+        }
+    });
 }
 
 void MainWindow::configurePlaybackResume()
