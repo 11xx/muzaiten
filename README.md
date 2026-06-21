@@ -69,7 +69,8 @@ Dependencies:
 - GStreamer 1.x with audio and pbutils modules
 - zstd
 
-Optional for DSD (`.dsf`/`.dff`) playback: `gst-plugins-bad` and `gst-libav`.
+Optional for DSD playback: `gst-plugins-bad` and `gst-libav`. Only the `.dsf`
+container is playable (no `.dff`/DSDIFF demuxer ships with GStreamer/ffmpeg).
 Native DSF output requires selecting a direct-capable device in `Playback >
 Output profile`; shared output with **Allow resampling** decodes DSD to PCM.
 

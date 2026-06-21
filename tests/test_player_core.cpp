@@ -106,6 +106,7 @@ private slots:
     void libraryShuffleInjectsLibraryTrack();
     void dsdTakeoverDefersThenStartsNatively();
     void declinedDsdSkipsContiguousBlockUntilPlaybackStarts();
+    void declinedDsdUnderRepeatAllStopsInsteadOfLooping();
 
 private:
     FakeBackend *m_backend = nullptr;   // owned by m_core
@@ -487,6 +488,33 @@ void PlayerCoreTest::declinedDsdSkipsContiguousBlockUntilPlaybackStarts()
     emit m_backend->stateChanged(PlaybackBackend::State::Playing);
     m_core->playAt(1);
     QCOMPARE(requested.count(), 2);
+}
+
+void PlayerCoreTest::declinedDsdUnderRepeatAllStopsInsteadOfLooping()
+{
+    // Every row is DSD and the takeover is declined, so the block-skip suppresses
+    // them all. Repeat All would otherwise hand decideAutoNext() an endless supply
+    // of rows; the skip cascade must terminate (and not recurse a frame per row).
+    Track a = makeTrack(QStringLiteral("/music/a.dsf"));
+    a.codec = QStringLiteral("dsf");
+    Track b = makeTrack(QStringLiteral("/music/b.dsf"));
+    b.codec = QStringLiteral("dsf");
+    m_core->resetQueue({a, b});
+    m_core->setRepeatMode(RepeatMode::All);
+    m_core->setPlaybackStartPlanner([](const Track &track) {
+        PlayerCore::PlaybackStartPlan plan;
+        if (isDsdTrack(track)) {
+            plan.action = PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover;
+            plan.device = QStringLiteral("hw:3");
+        }
+        return plan;
+    });
+
+    m_core->playAt(0);
+    m_core->resolveDsdTakeover(false);  // must return, not hang or overflow
+
+    QVERIFY(m_backend->playedUrls.isEmpty());
+    QVERIFY(m_backend->stopCalls > 0);
 }
 
 QTEST_GUILESS_MAIN(PlayerCoreTest)
