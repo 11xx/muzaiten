@@ -195,7 +195,18 @@ bool GStreamerPlaybackBackend::outputConfigDiffers(const PlaybackProfile &a,
 
 void GStreamerPlaybackBackend::play(const QUrl &url)
 {
-    if (m_playbin == nullptr || url.isEmpty()) {
+    if (url.isEmpty()) {
+        return;
+    }
+    if (m_pendingOutputMode == OutputMode::NativeDsd) {
+        playDsd(url, State::Playing);
+        return;
+    }
+    // Coming back from native DSD: rebuild the playbin the normal path expects.
+    if (m_dsdActive) {
+        rebuildPipeline();
+    }
+    if (m_playbin == nullptr) {
         return;
     }
 
@@ -215,7 +226,17 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
 
 void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
 {
-    if (m_playbin == nullptr || url.isEmpty()) {
+    if (url.isEmpty()) {
+        return;
+    }
+    if (m_pendingOutputMode == OutputMode::NativeDsd) {
+        playDsd(url, State::Paused);
+        return;
+    }
+    if (m_dsdActive) {
+        rebuildPipeline();
+    }
+    if (m_playbin == nullptr) {
         return;
     }
 
@@ -226,6 +247,139 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     loadUri(uriForUrl(url), State::Paused);
     // As in play(): wait for the bus to confirm the preroll instead of
     // publishing Paused for a source that may turn out to be unplayable.
+    startReadAhead(url);
+}
+
+void GStreamerPlaybackBackend::setOutputMode(OutputMode mode, const QString &dsdDevice)
+{
+    m_pendingOutputMode = mode;
+    m_dsdDevice = dsdDevice;
+}
+
+PlaybackBackend::DsdSupport GStreamerPlaybackBackend::dsdSupport() const
+{
+    DsdSupport support;
+    // The .dsf/.dsdiff demuxer comes from gst-libav; the DSD→PCM decoders too.
+    // dsdconvert (gst-plugins-base) plus alsasink's audio/x-dsd support give the
+    // native passthrough leg.
+    const bool demux = factoryExists("avdemux_dsf");
+    const bool decoder = factoryExists("avdec_dsd_lsbf") || factoryExists("avdec_dsd_msbf")
+                         || factoryExists("avdec_dsd_lsbf_planar") || factoryExists("avdec_dsd_msbf_planar");
+    support.pcmDecode = demux && decoder;
+    support.nativePassthrough = demux && factoryExists("dsdconvert");
+    return support;
+}
+
+void GStreamerPlaybackBackend::dsdPadAddedCallback(GstElement *demux, GstPad *pad, void *userData)
+{
+    Q_UNUSED(demux);
+    auto *convert = static_cast<GstElement *>(userData);
+    GstPad *sinkPad = gst_element_get_static_pad(convert, "sink");
+    if (sinkPad == nullptr) {
+        return;
+    }
+    if (!gst_pad_is_linked(sinkPad)) {
+        gst_pad_link(pad, sinkPad);
+    }
+    gst_object_unref(sinkPad);
+}
+
+bool GStreamerPlaybackBackend::buildDsdPipeline(const QString &filePath, QString *error)
+{
+    GstElement *src = gst_element_factory_make("filesrc", nullptr);
+    GstElement *demux = gst_element_factory_make("avdemux_dsf", nullptr);
+    GstElement *convert = gst_element_factory_make("dsdconvert", nullptr);
+    GstElement *sink = gst_element_factory_make("alsasink", nullptr);
+    if (src == nullptr || demux == nullptr || convert == nullptr || sink == nullptr) {
+        for (GstElement *e : {src, demux, convert, sink}) {
+            if (e != nullptr) {
+                gst_object_unref(e);
+            }
+        }
+        if (error != nullptr) {
+            *error = QStringLiteral("DSD playback needs the gst-plugins-bad and gst-libav plugins");
+        }
+        return false;
+    }
+
+    g_object_set(G_OBJECT(src), "location", filePath.toUtf8().constData(), nullptr);
+    // Native DSD must reach the DAC's raw hw device; the shared PipeWire/Pulse
+    // path cannot carry audio/x-dsd. The orchestration supplies the device.
+    const QString device = !m_dsdDevice.isEmpty() ? m_dsdDevice : m_profile.device;
+    if (!device.isEmpty()) {
+        g_object_set(G_OBJECT(sink), "device", device.toUtf8().constData(), nullptr);
+    }
+
+    GstElement *pipeline = gst_pipeline_new("muzaiten-dsd");
+    if (pipeline == nullptr) {
+        for (GstElement *e : {src, demux, convert, sink}) {
+            gst_object_unref(e);
+        }
+        if (error != nullptr) {
+            *error = QStringLiteral("Failed to create the DSD pipeline");
+        }
+        return false;
+    }
+
+    // gst_bin_add_many takes ownership; unref(pipeline) below frees the children
+    // if linking fails.
+    gst_bin_add_many(GST_BIN(pipeline), src, demux, convert, sink, nullptr);
+    if (!gst_element_link(src, demux) || !gst_element_link(convert, sink)) {
+        gst_object_unref(pipeline);
+        if (error != nullptr) {
+            *error = QStringLiteral("Failed to link the DSD pipeline");
+        }
+        return false;
+    }
+    // avdemux_dsf exposes its DSD src pad only once it has parsed the header.
+    g_signal_connect(demux, "pad-added", G_CALLBACK(dsdPadAddedCallback), convert);
+
+    m_playbin = pipeline;
+    m_dsdActive = true;
+    return true;
+}
+
+void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
+{
+    const QString filePath = url.toLocalFile();
+    if (filePath.isEmpty()) {
+        emit errorOccurred(QStringLiteral("Native DSD playback requires a local file"));
+        return;
+    }
+
+    // Tear down whatever pipeline is live (playbin or an earlier DSD graph) and
+    // build a fresh DSD passthrough graph for this file.
+    m_softPaused = false;
+    m_pendingSeekMs = -1;
+    finishTargetTransition();
+    if (m_playbin != nullptr) {
+        gst_element_set_state(m_playbin, GST_STATE_NULL);
+        gst_object_unref(m_playbin);
+        m_playbin = nullptr;
+    }
+    m_dsdActive = false;
+
+    QString error;
+    if (!buildDsdPipeline(filePath, &error)) {
+        m_targetState = State::Error;
+        finishTargetTransition();
+        updateState(State::Error);
+        emit errorOccurred(error);
+        return;
+    }
+
+    resetTimeline();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri = uriForUrl(url);
+        m_preparedUri.clear();
+        m_gaplessAdvancePending = false;
+    }
+    beginTargetTransition(targetState);
+    gst_element_set_state(m_playbin, targetState == State::Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+    // As with playbin, the real transition (and any preroll failure) arrives over
+    // the bus; the poll timer must be running to drain it.
+    m_pollTimer.start();
     startReadAhead(url);
 }
 
@@ -275,8 +429,11 @@ void GStreamerPlaybackBackend::pause()
         return;
     }
 
+    // Native DSD holds the ALSA device exclusively, so pausing must release it
+    // (READY) just like bit-perfect — otherwise the card stays locked while idle.
     const bool release = (m_profile.mode == QStringLiteral("bit-perfect"))
-                         || m_profile.releaseSinkOnPause;
+                         || m_profile.releaseSinkOnPause
+                         || m_dsdActive;
 
     if (release) {
         // Capture position before tearing down the pipeline.
@@ -364,7 +521,10 @@ void GStreamerPlaybackBackend::seek(qint64 positionMs)
 void GStreamerPlaybackBackend::setVolume(double volume0To1)
 {
     m_volume = std::clamp(volume0To1, 0.0, 1.0);
-    if (m_playbin != nullptr && m_profile.softwareVolume) {
+    // The native DSD pipeline is bit-perfect passthrough — it has no "volume"
+    // element, and poking a non-existent property would warn. Volume on DSD is
+    // the DAC's job.
+    if (m_playbin != nullptr && !m_dsdActive && m_profile.softwareVolume) {
         g_object_set(G_OBJECT(m_playbin), "volume", m_volume, nullptr);
     }
 }
@@ -417,6 +577,9 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    // Whatever we just tore down, we are about to build a playbin, so the active
+    // pipeline is no longer the native-DSD graph.
+    m_dsdActive = false;
 
     m_playbin = gst_element_factory_make("playbin3", "muzaiten-playbin");
     const QString playbinName = m_playbin != nullptr ? QStringLiteral("playbin3") : QStringLiteral("playbin");

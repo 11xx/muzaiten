@@ -34,6 +34,11 @@ public:
     }
     void seek(qint64 positionMs) override { lastSeekMs = positionMs; }
     void setVolume(double volume0To1) override { lastVolume = volume0To1; }
+    void setOutputMode(OutputMode mode, const QString &device = QString()) override
+    {
+        outputModes.push_back(mode);
+        outputDevices.push_back(device);
+    }
     State state() const override { return m_state; }
     bool hasSource() const override { return !m_source.isEmpty(); }
     qint64 position() const override { return positionMs; }
@@ -42,6 +47,8 @@ public:
     QVector<QUrl> playedUrls;
     QVector<QUrl> loadedPausedUrls;
     QVector<QUrl> preparedUrls;
+    QVector<OutputMode> outputModes;
+    QVector<QString> outputDevices;
     qint64 lastSeekMs = -1;
     double lastVolume = -1.0;
     qint64 positionMs = 0;
@@ -97,6 +104,8 @@ private slots:
     void shuffleVisitsEveryTrackOnceThenStops();
     void shufflePreviousRetracesHistory();
     void libraryShuffleInjectsLibraryTrack();
+    void dsdTakeoverDefersThenStartsNatively();
+    void declinedDsdSkipsContiguousBlockUntilPlaybackStarts();
 
 private:
     FakeBackend *m_backend = nullptr;   // owned by m_core
@@ -412,6 +421,72 @@ void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()
     QCOMPARE(m_core->queue().last().path, QStringLiteral("/lib"));
     QCOMPARE(m_core->currentTrack().path, QStringLiteral("/lib"));
     QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/lib"));
+}
+
+void PlayerCoreTest::dsdTakeoverDefersThenStartsNatively()
+{
+    Track dsd = makeTrack(QStringLiteral("/music/test.dsf"));
+    dsd.codec = QStringLiteral("dsf");
+    m_core->resetQueue({dsd});
+    m_core->setPlaybackStartPlanner([](const Track &track) {
+        PlayerCore::PlaybackStartPlan plan;
+        if (isDsdTrack(track)) {
+            plan.action = PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover;
+            plan.device = QStringLiteral("hw:3");
+        }
+        return plan;
+    });
+    QSignalSpy requested(m_core.get(), &PlayerCore::dsdTakeoverRequested);
+    QSignalSpy started(m_core.get(), &PlayerCore::currentTrackChanged);
+
+    m_core->playAt(0);
+
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(started.count(), 0);
+    QVERIFY(m_backend->playedUrls.isEmpty());
+    QCOMPARE(m_backend->stopCalls, 1);
+
+    m_core->resolveDsdTakeover(true);
+
+    QCOMPARE(started.count(), 1);
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile(dsd.path));
+    QCOMPARE(m_backend->outputModes.last(), PlaybackBackend::OutputMode::NativeDsd);
+    QCOMPARE(m_backend->outputDevices.last(), QStringLiteral("hw:3"));
+}
+
+void PlayerCoreTest::declinedDsdSkipsContiguousBlockUntilPlaybackStarts()
+{
+    Track first = makeTrack(QStringLiteral("/music/one.dsf"));
+    first.codec = QStringLiteral("dsf");
+    Track second = makeTrack(QStringLiteral("/music/two.dff"));
+    second.codec = QStringLiteral("dff");
+    Track pcm = makeTrack(QStringLiteral("/music/three.flac"));
+    pcm.codec = QStringLiteral("flac");
+    m_core->resetQueue({first, second, pcm});
+    m_core->setPlaybackStartPlanner([](const Track &track) {
+        PlayerCore::PlaybackStartPlan plan;
+        if (isDsdTrack(track)) {
+            plan.action = PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover;
+            plan.device = QStringLiteral("hw:3");
+        }
+        return plan;
+    });
+    QSignalSpy requested(m_core.get(), &PlayerCore::dsdTakeoverRequested);
+    QSignalSpy skipped(m_core.get(), &PlayerCore::trackStartSkipped);
+
+    m_core->playAt(0);
+    m_core->resolveDsdTakeover(false);
+
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(skipped.count(), 2);
+    QCOMPARE(m_core->queueIndex(), 2);
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile(pcm.path));
+    QCOMPARE(m_backend->outputModes.last(), PlaybackBackend::OutputMode::Normal);
+
+    // The suppression ends only after an actual successful playback transition.
+    emit m_backend->stateChanged(PlaybackBackend::State::Playing);
+    m_core->playAt(1);
+    QCOMPARE(requested.count(), 2);
 }
 
 QTEST_GUILESS_MAIN(PlayerCoreTest)

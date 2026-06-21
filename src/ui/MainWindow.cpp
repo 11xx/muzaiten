@@ -729,7 +729,26 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_takeOverDeviceButton->setToolTip(
         QStringLiteral("Free the audio device from PipeWire and retry bit-perfect playback"));
     statusBar()->addPermanentWidget(m_takeOverDeviceButton);
-    connect(m_takeOverDeviceButton, &QPushButton::clicked, this, &MainWindow::attemptDeviceTakeover);
+    connect(m_takeOverDeviceButton, &QPushButton::clicked, this, [this]() {
+        if (m_dsdTakeoverPromptActive) {
+            resolveDsdTakeoverPrompt(/*accepted=*/true);
+        } else {
+            attemptDeviceTakeover();
+        }
+    });
+    m_dsdTakeoverPromptTimer = new QTimer(this);
+    m_dsdTakeoverPromptTimer->setInterval(1000);
+    connect(m_dsdTakeoverPromptTimer, &QTimer::timeout, this, [this]() {
+        --m_dsdTakeoverSecondsRemaining;
+        if (m_dsdTakeoverSecondsRemaining <= 0) {
+            resolveDsdTakeoverPrompt(/*accepted=*/false);
+        } else {
+            updateDsdTakeoverPromptText();
+        }
+    });
+    m_takenOverDsdReleaseTimer = new QTimer(this);
+    m_takenOverDsdReleaseTimer->setSingleShot(true);
+    connect(m_takenOverDsdReleaseTimer, &QTimer::timeout, this, &MainWindow::releaseTakenOverDsdDevice);
 
     // PlayerCore, MprisService, and data stores are now owned by AppCore.
     // m_player, m_playback, m_mpris, m_database, etc. are all borrowed pointers
@@ -740,6 +759,18 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_player, &PlayerCore::currentIndexChanged, this, &MainWindow::onPlayerIndexChanged);
     connect(m_player, &PlayerCore::playNextRangeChanged, this, &MainWindow::refreshPlayNextRange);
     connect(m_player, &PlayerCore::currentTrackChanged, this, &MainWindow::presentTrack);
+    connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &, bool) {
+        // Selecting a different playable track invalidates a still-visible DSD
+        // question. PlayerCore has already discarded its pending request; this
+        // only tears down the stale status-bar affordance.
+        if (m_dsdTakeoverPromptActive) {
+            m_dsdTakeoverPromptTimer->stop();
+            m_dsdTakeoverPromptActive = false;
+            m_pendingDsdTakeoverDevice.clear();
+            m_takeOverDeviceButton->setVisible(false);
+            m_takeOverDeviceButton->setText(QStringLiteral("Take over device"));
+        }
+    });
     connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
     connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
     connect(m_player, &PlayerCore::volumeChanged, this, &MainWindow::applyPlayerVolume);
@@ -755,6 +786,70 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
+    });
+    m_player->setPlaybackStartPlanner([this](const Track &track) {
+        PlayerCore::PlaybackStartPlan plan;
+        if (!isDsdTrack(track)) {
+            return plan;
+        }
+
+        const PlaybackBackend::DsdSupport support = m_playback->dsdSupport();
+        const auto skip = [](const QString &reason) {
+            PlayerCore::PlaybackStartPlan rejected;
+            rejected.action = PlayerCore::PlaybackStartPlan::Action::Skip;
+            rejected.reason = reason;
+            return rejected;
+        };
+        const bool dff = track.codec.compare(QStringLiteral("dff"), Qt::CaseInsensitive) == 0;
+
+        // Shared output with resampling is deliberately the straightforward
+        // decode-to-PCM path: playbin chooses the installed DSD decoder and no
+        // device takeover or skip is involved.
+        if (m_playbackProfile.mode != QStringLiteral("bit-perfect")
+            && m_playbackProfile.allowResample) {
+            if (support.pcmDecode) {
+                return plan;
+            }
+            return skip(QStringLiteral("DSD PCM playback needs gst-plugins-bad and gst-libav"));
+        }
+        if (dff) {
+            return skip(QStringLiteral("Native DSD playback currently supports DSF; enable resampling to play DFF"));
+        }
+        if (!support.nativePassthrough) {
+            return skip(QStringLiteral("Native DSD playback needs gst-plugins-bad and gst-libav"));
+        }
+
+        QString device = m_playbackProfile.device;
+        if (m_playbackProfile.mode != QStringLiteral("bit-perfect")) {
+            if (m_playbackProfile.deviceId.isEmpty()) {
+                return skip(QStringLiteral("Choose a direct output device in Playback → Output profile before native DSD playback"));
+            }
+            const auto dev = AudioDeviceControl::findByStableId(m_playbackProfile.deviceId);
+            if (!dev || dev->hwPath.isEmpty()) {
+                return skip(QStringLiteral("The configured native DSD device is no longer available"));
+            }
+            device = dev->hwPath;
+            plan.device = device;
+            plan.action = dev->heldByPipeWire()
+                ? PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover
+                : PlayerCore::PlaybackStartPlan::Action::NativeDsd;
+            return plan;
+        }
+
+        if (device.isEmpty()) {
+            return skip(QStringLiteral("Choose a bit-perfect output device before native DSD playback"));
+        }
+        plan.action = PlayerCore::PlaybackStartPlan::Action::NativeDsd;
+        plan.device = device;
+        return plan;
+    });
+    connect(m_player, &PlayerCore::dsdTakeoverRequested, this, &MainWindow::showDsdTakeoverPrompt);
+    connect(m_player, &PlayerCore::trackStartSkipped, this, [this](const Track &track, const QString &reason) {
+        const QString title = track.title.isEmpty() ? track.filename : track.title;
+        statusBar()->showMessage(reason.isEmpty()
+                                     ? QStringLiteral("Skipped %1").arg(title)
+                                     : QStringLiteral("Skipped %1: %2").arg(title, reason),
+                                 8000);
     });
     m_playbackStateSaveTimer = new QTimer(this);
     m_playbackStateSaveTimer->setSingleShot(true);
@@ -1056,6 +1151,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
+    connect(m_playerBar, &PlayerBar::releaseDeviceRequested, this, &MainWindow::releaseTakenOverDsdDevice);
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
@@ -1318,6 +1414,15 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
         if (state != PlaybackBackend::State::Error)
             m_takeOverDeviceButton->setVisible(false);
+        if (!m_takenOverDsdDevice.isEmpty()) {
+            if (state == PlaybackBackend::State::Playing) {
+                m_takenOverDsdReleaseTimer->stop();
+            } else if (state == PlaybackBackend::State::Paused) {
+                scheduleTakenOverDsdDeviceRelease(10000);
+            } else if (state == PlaybackBackend::State::Stopped) {
+                scheduleTakenOverDsdDeviceRelease(30000);
+            }
+        }
     });
     connect(m_playback, &PlaybackBackend::errorOccurred, this, [this](const QString &errorString) {
         if (errorString.isEmpty())
@@ -1432,6 +1537,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // AppCore can destroy the widget tree while playback remains live in the
+    // tray. Only restore a taken-over card here during a real application quit;
+    // otherwise releasing it would interrupt headless native DSD playback.
+    if (m_core != nullptr && m_core->isQuitting()) {
+        releaseTakenOverDsdDevice();
+    }
     if (m_scanPipeline != nullptr) {
         m_scanPipeline->cancel();
     }
@@ -3790,6 +3901,133 @@ void MainWindow::attemptDeviceTakeover()
         if (index >= 0 && index < m_player->queue().size())
             resumePlaybackAt(index, resumePositionMs, /*playing=*/true, /*settleDelayMs=*/250);
     });
+}
+
+void MainWindow::showDsdTakeoverPrompt(const Track &track, const QString &device)
+{
+    Q_UNUSED(track);
+    if (device.isEmpty()) {
+        m_player->resolveDsdTakeover(false);
+        return;
+    }
+    m_dsdTakeoverPromptActive = true;
+    m_pendingDsdTakeoverDevice = device;
+    m_dsdTakeoverSecondsRemaining = 10;
+    updateDsdTakeoverPromptText();
+    m_dsdTakeoverPromptTimer->start();
+}
+
+void MainWindow::updateDsdTakeoverPromptText()
+{
+    if (!m_dsdTakeoverPromptActive) {
+        return;
+    }
+    const auto dev = AudioDeviceControl::findByHwPath(m_pendingDsdTakeoverDevice);
+    const QString name = dev ? dev->description : m_pendingDsdTakeoverDevice;
+    const QString text = QStringLiteral("DSD needs %1 — take over for bit-perfect playback? Skipping in %2s")
+                             .arg(name)
+                             .arg(m_dsdTakeoverSecondsRemaining);
+    statusBar()->showMessage(text);
+    m_takeOverDeviceButton->setText(QStringLiteral("Take over DSD (%1s)").arg(m_dsdTakeoverSecondsRemaining));
+    m_takeOverDeviceButton->setToolTip(text);
+    m_takeOverDeviceButton->setEnabled(true);
+    m_takeOverDeviceButton->setVisible(true);
+}
+
+void MainWindow::resolveDsdTakeoverPrompt(bool accepted)
+{
+    if (!m_dsdTakeoverPromptActive) {
+        return;
+    }
+    m_dsdTakeoverPromptTimer->stop();
+    m_dsdTakeoverPromptActive = false;
+    const QString devicePath = m_pendingDsdTakeoverDevice;
+    m_pendingDsdTakeoverDevice.clear();
+    m_takeOverDeviceButton->setVisible(false);
+    m_takeOverDeviceButton->setText(QStringLiteral("Take over device"));
+    m_takeOverDeviceButton->setToolTip(
+        QStringLiteral("Free the audio device from PipeWire and retry bit-perfect playback"));
+
+    if (!accepted) {
+        m_player->resolveDsdTakeover(false);
+        return;
+    }
+
+    const auto dev = AudioDeviceControl::findByHwPath(devicePath);
+    if (!dev) {
+        statusBar()->showMessage(QStringLiteral("The requested DSD device is no longer available"), 8000);
+        m_player->resolveDsdTakeover(false);
+        return;
+    }
+
+    bool tookOver = false;
+    if (dev->heldByPipeWire()) {
+        QString error;
+        if (!AudioDeviceControl::takeOver(*dev, &error)) {
+            statusBar()->showMessage(QStringLiteral("DSD takeover failed: %1").arg(error), 8000);
+            m_player->resolveDsdTakeover(false);
+            return;
+        }
+        tookOver = true;
+        m_takenOverDsdDevice = dev->hwPath;
+        m_takenOverDsdRestoreProfile = dev->currentProfileIndex;
+        m_playerBar->setReleaseDeviceVisible(true);
+        statusBar()->showMessage(QStringLiteral("Took over %1 for native DSD playback").arg(dev->description), 4000);
+    }
+
+    // PipeWire needs a brief moment to drop the card after switching its profile
+    // to Off. The PlayerCore request remains pending during this delay and safely
+    // becomes a no-op if the user selects another track in the meantime.
+    const auto start = [this]() { m_player->resolveDsdTakeover(true); };
+    if (tookOver) {
+        QTimer::singleShot(400, this, start);
+    } else {
+        start();
+    }
+}
+
+void MainWindow::scheduleTakenOverDsdDeviceRelease(int delayMs)
+{
+    if (m_takenOverDsdDevice.isEmpty()) {
+        return;
+    }
+    m_takenOverDsdReleaseTimer->start(delayMs);
+}
+
+void MainWindow::releaseTakenOverDsdDevice()
+{
+    if (m_takenOverDsdDevice.isEmpty()) {
+        return;
+    }
+    m_takenOverDsdReleaseTimer->stop();
+    const auto dev = AudioDeviceControl::findByHwPath(m_takenOverDsdDevice);
+    if (!dev) {
+        statusBar()->showMessage(QStringLiteral("The taken-over DSD device is no longer available"), 8000);
+        m_takenOverDsdDevice.clear();
+        m_takenOverDsdRestoreProfile = -1;
+        m_playerBar->setReleaseDeviceVisible(false);
+        if (isHidden() && m_core != nullptr && !m_core->isQuitting()) {
+            m_core->releaseWindow();
+        }
+        return;
+    }
+
+    QString error;
+    if (!AudioDeviceControl::release(*dev, m_takenOverDsdRestoreProfile, &error)) {
+        statusBar()->showMessage(QStringLiteral("Could not release %1: %2").arg(dev->description, error), 8000);
+        m_playerBar->setReleaseDeviceVisible(true);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Released %1 back to PipeWire").arg(dev->description), 4000);
+    m_takenOverDsdDevice.clear();
+    m_takenOverDsdRestoreProfile = -1;
+    m_playerBar->setReleaseDeviceVisible(false);
+    // A tray-hidden window was retained solely to own this takeover and its
+    // timers. Once the card is restored, return to the usual memory-saving
+    // headless state.
+    if (isHidden() && m_core != nullptr && !m_core->isQuitting()) {
+        m_core->releaseWindow();
+    }
 }
 
 void MainWindow::configurePlaybackResume()

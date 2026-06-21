@@ -51,5 +51,18 @@ struct Track {
     QString codec;  // file extension lower-cased, e.g. "flac", "mp3", "opus"
 };
 
+// DSD (Direct Stream Digital) source formats: the .dsf and .dsdiff (.dff)
+// containers. DSD needs a dedicated playback path — native bit-perfect to the
+// DAC, or live DSD→PCM decode — distinct from ordinary PCM codecs, so callers
+// branch on this. Track::codec is already the lower-cased extension; the
+// toLower() guard just keeps the helper safe for ad-hoc callers.
+inline bool isDsdCodec(const QString &codec)
+{
+    const QString c = codec.toLower();
+    return c == QStringLiteral("dsf") || c == QStringLiteral("dff");
+}
+
+inline bool isDsdTrack(const Track &track) { return isDsdCodec(track.codec); }
+
 Q_DECLARE_METATYPE(Track)
 Q_DECLARE_METATYPE(QVector<Track>)

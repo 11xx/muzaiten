@@ -42,12 +42,25 @@ public:
     // anything already in the queue. Keeps PlayerCore free of any DB dependency.
     using RandomTrackProvider = std::function<QVector<Track>(int count, const QSet<QString> &excludePaths)>;
 
+    // The UI decides whether a track can start normally, needs native DSD output,
+    // or must wait for a user-confirmed device takeover. Keeping the decision as
+    // a narrow callback preserves PlayerCore's window-free ownership of transport
+    // state while leaving PipeWire/device UI in MainWindow.
+    struct PlaybackStartPlan {
+        enum class Action { Normal, NativeDsd, DeferForDsdTakeover, Skip };
+        Action action = Action::Normal;
+        QString device;
+        QString reason;
+    };
+    using PlaybackStartPlanner = std::function<PlaybackStartPlan(const Track &)>;
+
     // Takes ownership of the (required) backend; tests inject a fake.
     explicit PlayerCore(PlaybackBackend *backend, QObject *parent = nullptr);
 
     PlaybackBackend *backend() const { return m_backend; }
     void setPathResolver(PathResolver resolver) { m_resolvePath = std::move(resolver); }
     void setRandomTrackProvider(RandomTrackProvider provider) { m_randomTracks = std::move(provider); }
+    void setPlaybackStartPlanner(PlaybackStartPlanner planner) { m_playbackStartPlanner = std::move(planner); }
 
     const QVector<Track> &queue() const { return m_queue; }
     int queueIndex() const { return m_queueIndex; }
@@ -72,6 +85,9 @@ public:
     void play();  // resume, or start the queue when nothing is loaded (MPRIS Play)
     void seekRelative(qint64 offsetMs);
     void setVolume(double volume0To1);
+    // Completes the one outstanding native-DSD takeover request. Stale UI timer
+    // callbacks are harmless: they become no-ops after a different track starts.
+    void resolveDsdTakeover(bool accepted);
 
     // -- queue mutation ------------------------------------------------------
     void appendAndPlay(const Track &track);
@@ -120,6 +136,8 @@ signals:
     void playbackCleared();
     void volumeChanged(double volume0To1);
     void trackUnresolvable(const Track &track);
+    void dsdTakeoverRequested(const Track &track, const QString &device);
+    void trackStartSkipped(const Track &track, const QString &reason);
     void repeatModeChanged(RepeatMode mode);
     void shuffleModeChanged(ShuffleMode mode);
     void libraryShufflePercentChanged(int percent);
@@ -139,6 +157,9 @@ private:
     void resetShuffleState();
 
     void playCurrent(bool notifyScrobbler, bool startPaused);
+    void startTrack(const Track &track, const QString &playbackPath, bool notifyScrobbler,
+                    bool startPaused, const PlaybackStartPlan &plan);
+    void skipCurrentTrack();
     void collapsePlayNextIfStale();
     void onPreparedTrackStarted();
     void onFinished();
@@ -147,6 +168,7 @@ private:
     PlaybackBackend *m_backend = nullptr;
     PathResolver m_resolvePath;
     RandomTrackProvider m_randomTracks;
+    PlaybackStartPlanner m_playbackStartPlanner;
     QVector<Track> m_queue;
     int m_queueIndex = -1;
     int m_playNextInsertIndex = -1;
@@ -164,4 +186,16 @@ private:
     QSet<int> m_shuffleVisited;
     // Previously-current rows, for retracing under shuffle on Previous.
     QVector<int> m_shuffleHistory;
+    struct PendingDsdTakeover {
+        bool active = false;
+        Track track;
+        QString playbackPath;
+        QString device;
+        bool notifyScrobbler = true;
+        bool startPaused = false;
+    };
+    PendingDsdTakeover m_pendingDsdTakeover;
+    // Set after a declined/timed-out prompt. Native DSD tracks are then skipped
+    // without further prompts until any track has successfully started.
+    bool m_skipDsdTakeoverBlock = false;
 };

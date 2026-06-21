@@ -18,6 +18,22 @@ public:
     };
     Q_ENUM(State)
 
+    // How the next play()/loadPaused() renders audio. NativeDsd builds a
+    // dedicated DSD-passthrough pipeline straight to the DAC (bit-perfect);
+    // Normal uses the ordinary decode path (incl. live DSD→PCM). Sticky until
+    // changed via setOutputMode().
+    enum class OutputMode { Normal, NativeDsd };
+    Q_ENUM(OutputMode)
+
+    // What DSD playback the backend can actually do given the installed plugins.
+    // Independent flags: a system may decode DSD→PCM, pass DSD through natively,
+    // both, or neither. Lets the orchestration warn precisely about what's
+    // missing instead of silently failing on a DSD track.
+    struct DsdSupport {
+        bool nativePassthrough = false;
+        bool pcmDecode = false;
+    };
+
     explicit PlaybackBackend(QObject *parent = nullptr)
         : QObject(parent)
     {
@@ -44,6 +60,17 @@ public:
     // Called after a gapless track advance so the backend can re-point any
     // per-track resources (e.g. read-ahead) at the newly-current track.
     virtual void onGaplessTrackAdvanced() {}
+
+    // Select how the next play()/loadPaused() renders. For NativeDsd, dsdDevice
+    // is the ALSA "hw:N" to open exclusively (empty → use the profile device).
+    // No-op default keeps backends that don't support DSD passthrough working.
+    virtual void setOutputMode(OutputMode mode, const QString &dsdDevice = QString())
+    {
+        Q_UNUSED(mode);
+        Q_UNUSED(dsdDevice);
+    }
+    // DSD capability of this backend with the currently-installed plugins.
+    virtual DsdSupport dsdSupport() const { return {}; }
 
 signals:
     void stateChanged(PlaybackBackend::State state);

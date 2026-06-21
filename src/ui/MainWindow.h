@@ -71,6 +71,9 @@ public:
     bool showDemoArtist(const QString &artistName);
     bool showDemoAlbum(const QString &artistName, const QString &albumTitle, QString *error = nullptr);
     bool showDemoNowPlaying(const QString &query, bool playing, double positionRatio, QString *error = nullptr);
+    // AppCore keeps the widget tree alive while it owns a PipeWire takeover, so
+    // the release timers can restore the card even when the window is tray-hidden.
+    bool hasTakenOverDsdDevice() const { return !m_takenOverDsdDevice.isEmpty(); }
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -154,6 +157,11 @@ private:
     void resumePlaybackAt(int queueIndex, qint64 positionMs, bool playing, int settleDelayMs);
     void configurePlaybackProfile();
     void configurePlaybackResume();
+    void showDsdTakeoverPrompt(const Track &track, const QString &device);
+    void resolveDsdTakeoverPrompt(bool accepted);
+    void releaseTakenOverDsdDevice();
+    void scheduleTakenOverDsdDeviceRelease(int delayMs);
+    void updateDsdTakeoverPromptText();
     void configureLinkRoots();
     void configureSourceDirectories();
     void findTrackFile(const Track &track);
@@ -323,6 +331,13 @@ private:
     // Offered in the status bar only when bit-perfect playback fails because
     // PipeWire is holding the target device; click frees it and retries.
     QPushButton *m_takeOverDeviceButton = nullptr;
+    QTimer *m_dsdTakeoverPromptTimer = nullptr;
+    QTimer *m_takenOverDsdReleaseTimer = nullptr;
+    bool m_dsdTakeoverPromptActive = false;
+    int m_dsdTakeoverSecondsRemaining = 0;
+    QString m_pendingDsdTakeoverDevice;
+    QString m_takenOverDsdDevice;
+    int m_takenOverDsdRestoreProfile = -1;
     // Core engine pointers — borrowed from AppCore (non-owning)
     AppCore        *m_core = nullptr;
     PlayerCore     *m_player = nullptr;

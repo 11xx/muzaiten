@@ -479,6 +479,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *playbackMenu = new QMenu(QStringLiteral("Playback"), this);
     QAction *findCurrentTrack = playbackMenu->addAction(QStringLiteral("Find current track in library"));
     QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
+    m_releaseDeviceAction = playbackMenu->addAction(QStringLiteral("Release device"));
+    m_releaseDeviceAction->setVisible(false);
+    m_releaseDeviceAction->setToolTip(
+        QStringLiteral("Hand a device taken over for native DSD playback back to PipeWire"));
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
     QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle..."));
 
@@ -737,6 +741,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(retryPendingRatingTags, &QAction::triggered, this, &PlayerBar::retryPendingRatingTagsRequested);
     connect(findCurrentTrack, &QAction::triggered, this, &PlayerBar::currentTrackLibraryRequested);
     connect(playbackOutput, &QAction::triggered, this, &PlayerBar::playbackProfileRequested);
+    connect(m_releaseDeviceAction, &QAction::triggered, this, &PlayerBar::releaseDeviceRequested);
     connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
     connect(libraryShuffleSettings, &QAction::triggered, this, &PlayerBar::libraryShuffleSettingsRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
@@ -788,6 +793,14 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     setCompactMenu(false);
     setPlaylistViewActionsActive(false);
+}
+
+void PlayerBar::setReleaseDeviceVisible(bool visible)
+{
+    if (m_releaseDeviceAction != nullptr) {
+        m_releaseDeviceAction->setVisible(visible);
+        m_releaseDeviceAction->setEnabled(visible);
+    }
 }
 
 void PlayerBar::setTrackText(const QString &text)

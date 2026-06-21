@@ -16,6 +16,13 @@ PlayerCore::PlayerCore(PlaybackBackend *backend, QObject *parent)
     m_backend->setParent(this);
     connect(m_backend, &PlaybackBackend::preparedTrackStarted, this, &PlayerCore::onPreparedTrackStarted);
     connect(m_backend, &PlaybackBackend::finished, this, &PlayerCore::onFinished);
+    connect(m_backend, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
+        // A successful start ends the one-prompt-per-DSD-block suppression. Do
+        // not reset it merely because a track was selected or preroll began.
+        if (state == PlaybackBackend::State::Playing) {
+            m_skipDsdTakeoverBlock = false;
+        }
+    });
 }
 
 QString PlayerCore::resolvePath(const Track &track) const
@@ -28,6 +35,11 @@ void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused, bool 
     if (index < 0 || index >= m_queue.size()) {
         return;
     }
+
+    // A user may move on while the status-bar takeover question is visible. The
+    // timer/button callback is intentionally allowed to arrive later, but it
+    // must not start the abandoned track.
+    m_pendingDsdTakeover.active = false;
 
     m_queueIndex = index;
     if (explicitJump) {
@@ -59,6 +71,41 @@ void PlayerCore::playCurrent(bool notifyScrobbler, bool startPaused)
         return;
     }
 
+    if (isDsdTrack(track) && m_skipDsdTakeoverBlock) {
+        emit trackStartSkipped(track, QStringLiteral("DSD device takeover was declined for this queue block"));
+        skipCurrentTrack();
+        return;
+    }
+
+    const PlaybackStartPlan plan = m_playbackStartPlanner
+        ? m_playbackStartPlanner(track) : PlaybackStartPlan{};
+    if (plan.action == PlaybackStartPlan::Action::Skip) {
+        emit trackStartSkipped(track, plan.reason);
+        skipCurrentTrack();
+        return;
+    }
+    if (plan.action == PlaybackStartPlan::Action::DeferForDsdTakeover) {
+        // Stop a manually selected previous source while waiting; for
+        // auto-advance the old source is already at EOS. Do not present or
+        // scrobble the new track until the user accepts the takeover.
+        m_backend->prepareNext({});
+        m_backend->stop();
+        m_pendingDsdTakeover = {true, track, playbackPath, plan.device, notifyScrobbler, startPaused};
+        emit dsdTakeoverRequested(track, plan.device);
+        return;
+    }
+
+    startTrack(track, playbackPath, notifyScrobbler, startPaused, plan);
+}
+
+void PlayerCore::startTrack(const Track &track, const QString &playbackPath, bool notifyScrobbler,
+                            bool startPaused, const PlaybackStartPlan &plan)
+{
+    m_backend->setOutputMode(plan.action == PlaybackStartPlan::Action::NativeDsd
+                                 ? PlaybackBackend::OutputMode::NativeDsd
+                                 : PlaybackBackend::OutputMode::Normal,
+                             plan.device);
+
     m_currentTrack = track;
     markVisited(m_queueIndex);
     emit currentTrackChanged(m_currentTrack, notifyScrobbler);
@@ -68,6 +115,46 @@ void PlayerCore::playCurrent(bool notifyScrobbler, bool startPaused)
         m_backend->play(QUrl::fromLocalFile(playbackPath));
     }
     prepareNext();
+}
+
+void PlayerCore::resolveDsdTakeover(bool accepted)
+{
+    if (!m_pendingDsdTakeover.active) {
+        return;
+    }
+    const PendingDsdTakeover pending = m_pendingDsdTakeover;
+    m_pendingDsdTakeover.active = false;
+    if (!accepted) {
+        m_skipDsdTakeoverBlock = true;
+        emit trackStartSkipped(pending.track, QStringLiteral("DSD device takeover was declined"));
+        skipCurrentTrack();
+        return;
+    }
+
+    PlaybackStartPlan plan;
+    plan.action = PlaybackStartPlan::Action::NativeDsd;
+    plan.device = pending.device;
+    startTrack(pending.track, pending.playbackPath, pending.notifyScrobbler, pending.startPaused, plan);
+}
+
+void PlayerCore::skipCurrentTrack()
+{
+    // This is deliberately not onFinished(): a declined DSD must not be replayed
+    // by Repeat One, and an unplayable row should not become shuffle history.
+    m_backend->prepareNext({});
+    const AutoNext target = decideAutoNext();
+    if (!target.injected.path.isEmpty()) {
+        emit aboutToAddTracks(QVector<Track>{target.injected});
+        m_queue.push_back(target.injected);
+        emit queueChanged();
+        playAt(static_cast<int>(m_queue.size()) - 1);
+        return;
+    }
+    if (target.index >= 0 && target.index < m_queue.size()) {
+        playAt(target.index);
+        return;
+    }
+    m_backend->stop();
 }
 
 void PlayerCore::next()
@@ -576,6 +663,13 @@ void PlayerCore::prepareNext()
     const bool gapless = m_preparedNext.index >= 0 && m_preparedNext.index < m_queue.size()
         && m_preparedNext.injected.path.isEmpty();
     if (!gapless) {
+        m_backend->prepareNext({});
+        return;
+    }
+    // A native-DSD boundary needs a different top-level pipeline, and a shared
+    // DSD start may wait on the asynchronous takeover prompt. Never preload
+    // through playbin across either side of that boundary.
+    if (isDsdTrack(m_currentTrack) || isDsdTrack(m_queue.at(m_preparedNext.index))) {
         m_backend->prepareNext({});
         return;
     }
