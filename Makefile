@@ -119,6 +119,10 @@ run:
 dev: build
 	MUZAITEN_DEV_STATE=1 ./$(APP) --verbose
 
+# Captures still PNGs plus an animated PNG (02-search.png, an APNG) for the search
+# demo. The PNG optimizers run only on static images: the `grep -aLZ acTL` filter
+# drops any file carrying an APNG animation-control chunk, since pngquant (and older
+# oxipng) would silently flatten it to its first frame.
 demo-screens: build
 	@set -eu; \
 	data_home="$${XDG_DATA_HOME:-$$HOME/.local/share}"; \
@@ -159,6 +163,7 @@ demo-screens: build
 			if [ "$(DEMO_PNG_LOSSY)" != "0" ] && [ "$(DEMO_PNG_LOSSY)" != "false" ] && [ "$(DEMO_PNG_LOSSY)" != "no" ]; then \
 				if command -v "$(DEMO_PNG_QUANTIZER)" >/dev/null 2>&1; then \
 					find "$(DEMO_SCREEN_DIR)" -type f -name '*.png' -print0 \
+						| xargs -0 -r grep -aLZ acTL \
 						| xargs -0 -r "$(DEMO_PNG_QUANTIZER)" $(DEMO_PNG_QUANTIZER_FLAGS) --; \
 				else \
 					printf '%s\n' "warning: $(DEMO_PNG_QUANTIZER) not found; skipping lossy demo PNG optimization" >&2; \
@@ -166,6 +171,7 @@ demo-screens: build
 			fi; \
 			if command -v "$(DEMO_PNG_OPTIMIZER)" >/dev/null 2>&1; then \
 				find "$(DEMO_SCREEN_DIR)" -type f -name '*.png' -print0 \
+					| xargs -0 -r grep -aLZ acTL \
 					| xargs -0 -r "$(DEMO_PNG_OPTIMIZER)" $(DEMO_PNG_OPTIMIZER_FLAGS); \
 			else \
 				printf '%s\n' "warning: $(DEMO_PNG_OPTIMIZER) not found; leaving demo PNGs unoptimized" >&2; \

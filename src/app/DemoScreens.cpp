@@ -226,11 +226,34 @@ bool writeSearchVideo(MainWindow &window,
 
     const int delayMs = std::clamp(keyDelayMs, 40, 1000);
     int frame = 0;
-    QString lastFramePath;
+    // Grab straight to disk without the settle wait saveWindow() does: the search
+    // box updates synchronously, and each frame's pacing comes from the explicit
+    // waitForEvents(delayMs) below. Skipping the extra ~250 ms per frame is what
+    // keeps the encoded playback in step with real wall-clock time (so any visible
+    // clock ticks at real speed instead of racing ahead).
     const auto saveFrame = [&]() {
-        lastFramePath = frameDir.filePath(QStringLiteral("search_%1.png").arg(frame++, 5, 10, QLatin1Char('0')));
-        return saveWindow(window, lastFramePath, error);
+        const QString path = frameDir.filePath(QStringLiteral("search_%1.png").arg(frame++, 5, 10, QLatin1Char('0')));
+        const QPixmap pixmap = window.grab();
+        if (pixmap.isNull()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("grab for search frame %1 returned a null pixmap").arg(frame - 1);
+            }
+            return false;
+        }
+        if (!pixmap.save(path, "PNG")) {
+            if (error != nullptr) {
+                *error = QStringLiteral("failed to save search frame %1").arg(path);
+            }
+            return false;
+        }
+        return true;
     };
+
+    // Measure the real capture span so the animation plays back over exactly the
+    // wall-clock time it took to record, rather than assuming each frame is exactly
+    // delayMs apart (grab + disk I/O add a little to every frame).
+    QElapsedTimer captureTimer;
+    captureTimer.start();
 
     edit->clear();
     waitForEvents(delayMs);
@@ -251,6 +274,8 @@ bool writeSearchVideo(MainWindow &window,
         if (!saveFrame()) return false;
     }
 
+    const qint64 elapsedMs = std::max<qint64>(1, captureTimer.elapsed());
+
     const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
     if (ffmpeg.isEmpty()) {
         if (error != nullptr) {
@@ -259,15 +284,23 @@ bool writeSearchVideo(MainWindow &window,
         return false;
     }
 
-    const double fps = 1000.0 / static_cast<double>(delayMs);
-    const QString output = dir.filePath(QStringLiteral("02-search.mp4"));
+    // Encode an animated PNG straight from the frames: one self-contained, loss-
+    // less, infinitely-looping file that animates inline in browsers/READMEs and
+    // (unlike a video) follows the page's light/dark theme via its alpha channel.
+    // The input framerate is the real average capture rate (frames / real span),
+    // so playback duration matches the recording.
+    const double fps = 1000.0 * static_cast<double>(frame) / static_cast<double>(elapsedMs);
+    const QString output = finalStillPath.isEmpty()
+        ? dir.filePath(QStringLiteral("02-search.png"))
+        : finalStillPath;
     const QStringList args{
         QStringLiteral("-y"),
         QStringLiteral("-v"), QStringLiteral("error"),
-        QStringLiteral("-framerate"), QString::number(fps, 'f', 2),
+        QStringLiteral("-framerate"), QString::number(fps, 'f', 4),
         QStringLiteral("-i"), frameDir.filePath(QStringLiteral("search_%05d.png")),
-        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
-        QStringLiteral("-movflags"), QStringLiteral("+faststart"),
+        QStringLiteral("-vf"), QStringLiteral("scale=900:-1:flags=lanczos,format=rgba"),
+        QStringLiteral("-plays"), QStringLiteral("0"),
+        QStringLiteral("-f"), QStringLiteral("apng"),
         output,
     };
     const int status = QProcess::execute(ffmpeg, args);
@@ -278,16 +311,6 @@ bool writeSearchVideo(MainWindow &window,
                          .arg(frameDir.absolutePath());
         }
         return false;
-    }
-
-    if (!finalStillPath.isEmpty()) {
-        QFile::remove(finalStillPath);
-        if (!QFile::copy(lastFramePath, finalStillPath)) {
-            if (error != nullptr) {
-                *error = QStringLiteral("failed to save final search still %1").arg(finalStillPath);
-            }
-            return false;
-        }
     }
 
     frameDir.removeRecursively();
