@@ -1,24 +1,6 @@
 # Changelog
 
-All notable user-facing changes to muzaiten are documented here.
-
-The entries through 2026.06.20 are a reconstructed release history from the
-`master` commit log. They describe development milestones; no corresponding
-upstream releases or date-version tags existed when this file was introduced.
-
-## Release policy
-
-- This file is the canonical, detailed change record. An upstream release page
-  should contain a short set of highlights, distribution assets and checksums,
-  upgrade notes where needed, and a link to the matching section below.
-- Create an annotated, immutable tag on the tested release commit. Use the UTC
-  release date as `YYYY.MM.DD`; if a distinct release must be published on the
-  same date, use `YYYY.MM.DD.1`, then `.2`, and so on. The suffix is a release
-  iteration, never a commit count.
-- The application's `YYYY.MM.DD.N.g<sha>` build identifier remains useful for
-  development builds. It must not determine the published release tag.
-
-## [Unreleased]
+## [2026.06.21.1]
 
 ### Fixed
 
