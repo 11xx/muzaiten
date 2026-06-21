@@ -454,6 +454,10 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
     profile.sharedReleaseSinkOnPause = root.value(QStringLiteral("sharedReleaseSinkOnPause"))
         .toBool(sharedActive ? profile.releaseSinkOnPause : true);
     profile.deviceId = root.value(QStringLiteral("deviceId")).toString(profile.deviceId);
+    profile.autoReleaseExclusiveDevice = root.value(QStringLiteral("autoReleaseExclusiveDevice"))
+        .toBool(profile.autoReleaseExclusiveDevice);
+    profile.autoReleaseTimeoutSec = std::clamp(
+        root.value(QStringLiteral("autoReleaseTimeoutSec")).toInt(profile.autoReleaseTimeoutSec), 1, 600);
     return profile;
 }
 
@@ -476,6 +480,8 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("sharedAllowResample"), profile.sharedAllowResample);
     root.insert(QStringLiteral("sharedReleaseSinkOnPause"), profile.sharedReleaseSinkOnPause);
     root.insert(QStringLiteral("deviceId"), profile.deviceId);
+    root.insert(QStringLiteral("autoReleaseExclusiveDevice"), profile.autoReleaseExclusiveDevice);
+    root.insert(QStringLiteral("autoReleaseTimeoutSec"), profile.autoReleaseTimeoutSec);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -1418,13 +1424,17 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
         if (state != PlaybackBackend::State::Error)
             m_takeOverDeviceButton->setVisible(false);
+        // Auto-release of a held card is opt-in (a takeover is deliberate). When
+        // enabled, hand it back after playback goes idle for the configured time;
+        // otherwise it stays ours until released explicitly.
         if (!m_takenOverDsdDevice.isEmpty()) {
             if (state == PlaybackBackend::State::Playing) {
                 m_takenOverDsdReleaseTimer->stop();
-            } else if (state == PlaybackBackend::State::Paused) {
-                scheduleTakenOverDsdDeviceRelease(10000);
-            } else if (state == PlaybackBackend::State::Stopped) {
-                scheduleTakenOverDsdDeviceRelease(30000);
+            } else if (m_playbackProfile.autoReleaseExclusiveDevice
+                       && (state == PlaybackBackend::State::Paused
+                           || state == PlaybackBackend::State::Stopped)) {
+                scheduleTakenOverDsdDeviceRelease(
+                    std::clamp(m_playbackProfile.autoReleaseTimeoutSec, 1, 600) * 1000);
             }
         }
     });
