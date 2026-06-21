@@ -20,7 +20,15 @@ upstream releases or date-version tags existed when this file was introduced.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- Output-profile changes now use readiness-gated PipeWire hand-offs: bit-perfect
+  playback stops before a card is returned, and shared playback targets the
+  freshly rebuilt physical sink instead of a transient fallback or loopback.
+- Native DSD takeover from shared output promotes the session to bit-perfect,
+  keeping subsequent PCM playback on the already-acquired device.
+- Restoring an output profile preserves the current track position and
+  play/pause intent, including a delayed Take over after a busy-device error.
 
 ## [2026.06.21]
 
