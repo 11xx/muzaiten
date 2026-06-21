@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHash>
 #include <QLabel>
@@ -58,42 +59,69 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     setWindowTitle(QStringLiteral("Playback output"));
 
     auto *layout = new QVBoxLayout(this);
-    m_form = new QFormLayout;
 
-    // Mode
-    m_mode = new QComboBox(this);
-    m_mode->addItem(QStringLiteral("Shared"),     QStringLiteral("shared"));
-    m_mode->addItem(QStringLiteral("Bit-perfect"), QStringLiteral("bit-perfect"));
-    m_form->addRow(QStringLiteral("Mode"), m_mode);
+    // --- The two modes, both visible side by side ---------------------------
+    // Each is a checkable group box: ticking one unchecks the other (so its
+    // contents grey out), and exactly one is always active. This shows the full
+    // configuration of both modes at a glance instead of swapping a single form.
+    auto *modesRow = new QHBoxLayout;
 
-    // Sink (shared mode only)
-    m_sink = new QComboBox(this);
-    m_sink->addItem(QStringLiteral("Auto"), QStringLiteral("auto"));
+    m_sharedGroup = new QGroupBox(QStringLiteral("Shared mode"), this);
+    m_sharedGroup->setCheckable(true);
+    m_sharedGroup->setToolTip(
+        QStringLiteral("Mix with other apps through PipeWire/PulseAudio."));
+    auto *sharedForm = new QFormLayout(m_sharedGroup);
+
+    m_sink = new QComboBox(m_sharedGroup);
+    m_sink->addItem(QStringLiteral("Auto"),       QStringLiteral("auto"));
     m_sink->addItem(QStringLiteral("PipeWire"),   QStringLiteral("pipewire"));
     m_sink->addItem(QStringLiteral("PulseAudio"), QStringLiteral("pulse"));
     m_sink->addItem(QStringLiteral("ALSA"),       QStringLiteral("alsa"));
-    m_form->addRow(QStringLiteral("Sink"), m_sink);
+    sharedForm->addRow(QStringLiteral("Sink"), m_sink);
 
-    // Device combo (bit-perfect mode only)
-    m_deviceCombo = new QComboBox(this);
+    m_softwareVolume = new QCheckBox(QStringLiteral("App controls volume"), m_sharedGroup);
+    m_softwareVolume->setToolTip(
+        QStringLiteral("When off, the volume slider has no effect and the DAC/hardware controls level."));
+    sharedForm->addRow(QString(), m_softwareVolume);
+
+    m_allowResample = new QCheckBox(QStringLiteral("Allow resampling"), m_sharedGroup);
+    m_allowResample->setToolTip(
+        QStringLiteral("Allow GStreamer to convert sample rates. Normally off — PipeWire handles rate "
+                       "negotiation. For DSD, off keeps native bit-perfect output; on decodes DSD to PCM."));
+    sharedForm->addRow(QString(), m_allowResample);
+
+    m_releaseSinkOnPause = new QCheckBox(QStringLiteral("Release output device on pause"), m_sharedGroup);
+    m_releaseSinkOnPause->setToolTip(
+        QStringLiteral("Free the audio device immediately on pause so other apps can use it. "
+                       "Resume seeks back to the paused position."));
+    sharedForm->addRow(QString(), m_releaseSinkOnPause);
+
+    modesRow->addWidget(m_sharedGroup, 1);
+
+    m_bitPerfectGroup = new QGroupBox(QStringLiteral("Bit-perfect mode"), this);
+    m_bitPerfectGroup->setCheckable(true);
+    m_bitPerfectGroup->setToolTip(
+        QStringLiteral("Open a chosen ALSA device directly for unmodified, exclusive output."));
+    auto *bpForm = new QFormLayout(m_bitPerfectGroup);
+
+    m_deviceCombo = new QComboBox(m_bitPerfectGroup);
     m_deviceCombo->setEditable(true);
     m_deviceCombo->setInsertPolicy(QComboBox::NoInsert);
     m_deviceCombo->setPlaceholderText(QStringLiteral("hw:0"));
     populateDevices();
-    m_form->addRow(QStringLiteral("Device"), m_deviceCombo);
+    bpForm->addRow(QStringLiteral("Device"), m_deviceCombo);
 
-    // Takeover status + action (bit-perfect mode only). A card PipeWire holds
-    // cannot be opened directly, so offer a one-click takeover (and release)
-    // here rather than making the user reach for an external script.
-    m_deviceStatus = new QLabel(this);
+    // A card PipeWire holds cannot be opened directly, so offer a one-click
+    // takeover (and release) here rather than reaching for an external script.
+    m_deviceStatus = new QLabel(m_bitPerfectGroup);
     m_deviceStatus->setWordWrap(true);
-    m_deviceAction = new QPushButton(this);
+    m_deviceAction = new QPushButton(m_bitPerfectGroup);
     m_deviceAction->setAutoDefault(false);
     auto *deviceStatusRow = new QHBoxLayout;
     deviceStatusRow->setContentsMargins(0, 0, 0, 0);
     deviceStatusRow->addWidget(m_deviceStatus, 1);
     deviceStatusRow->addWidget(m_deviceAction, 0);
-    m_form->addRow(QString(), deviceStatusRow);
+    bpForm->addRow(QString(), deviceStatusRow);
 
     connect(m_deviceCombo, &QComboBox::currentTextChanged, this, [this]() {
         refreshDeviceStatus();
@@ -102,25 +130,57 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
         toggleSelectedDeviceTakeover();
     });
 
-    // Software volume (shared mode only)
-    m_softwareVolume = new QCheckBox(QStringLiteral("App controls volume"), this);
-    m_softwareVolume->setToolTip(
-        QStringLiteral("When off, the volume slider has no effect and the DAC/hardware controls level."));
-    m_form->addRow(QString(), m_softwareVolume);
+    modesRow->addWidget(m_bitPerfectGroup, 1);
+    layout->addLayout(modesRow);
 
-    // Resampling (shared mode only)
-    m_allowResample = new QCheckBox(QStringLiteral("Allow resampling"), this);
-    m_allowResample->setToolTip(
-        QStringLiteral("Allow GStreamer to convert sample rates. Normally off — PipeWire handles rate negotiation."));
-    m_form->addRow(QString(), m_allowResample);
+    // Seed the initial active mode before wiring exclusivity, so the toggled
+    // handlers only fire on real user/setProfile changes.
+    m_sharedGroup->setChecked(true);
+    m_bitPerfectGroup->setChecked(false);
+    connect(m_sharedGroup, &QGroupBox::toggled, this, [this](bool on) {
+        if (on) {
+            QSignalBlocker block(m_bitPerfectGroup);
+            m_bitPerfectGroup->setChecked(false);
+        } else if (!m_bitPerfectGroup->isChecked()) {
+            QSignalBlocker block(m_sharedGroup);  // never leave both off
+            m_sharedGroup->setChecked(true);
+        }
+    });
+    connect(m_bitPerfectGroup, &QGroupBox::toggled, this, [this](bool on) {
+        if (on) {
+            QSignalBlocker block(m_sharedGroup);
+            m_sharedGroup->setChecked(false);
+            refreshDeviceStatus();
+        } else if (!m_sharedGroup->isChecked()) {
+            QSignalBlocker block(m_bitPerfectGroup);
+            m_bitPerfectGroup->setChecked(true);
+        }
+    });
 
-    // Release on pause (always on in bit-perfect; configurable in shared)
-    m_releaseSinkOnPause = new QCheckBox(QStringLiteral("Release output device on pause"), this);
-    m_releaseSinkOnPause->setToolTip(
-        QStringLiteral("Free the audio device immediately on pause so other apps can use it. "
-                       "Resume seeks back to the paused position. "
-                       "Always enabled in bit-perfect mode."));
-    m_form->addRow(QString(), m_releaseSinkOnPause);
+    // --- Cross-mode options (apply regardless of the active mode) ------------
+    auto *bottomForm = new QFormLayout;
+
+    // Auto-release applies to any exclusively-held card (bit-perfect device or a
+    // DSD takeover in shared mode), so it lives outside the mode groups and stays
+    // enabled in both. Off by default — a takeover is deliberate.
+    m_autoReleaseDevice = new QCheckBox(QStringLiteral("Auto-release a taken-over device after"), this);
+    m_autoReleaseDevice->setToolTip(
+        QStringLiteral("When muzaiten holds a card exclusively (bit-perfect, or a DSD device takeover), "
+                       "hand it back to PipeWire automatically after playback stays paused or stopped for "
+                       "this long. Off by default; otherwise it stays held until you release it via "
+                       "Playback → Release device."));
+    m_autoReleaseTimeout = new QSpinBox(this);
+    m_autoReleaseTimeout->setRange(1, 600);
+    m_autoReleaseTimeout->setSuffix(QStringLiteral(" s"));
+    m_autoReleaseTimeout->setValue(15);
+    m_autoReleaseTimeout->setEnabled(false);
+    connect(m_autoReleaseDevice, &QCheckBox::toggled, m_autoReleaseTimeout, &QWidget::setEnabled);
+    auto *autoReleaseRow = new QHBoxLayout;
+    autoReleaseRow->setContentsMargins(0, 0, 0, 0);
+    autoReleaseRow->addWidget(m_autoReleaseDevice);
+    autoReleaseRow->addWidget(m_autoReleaseTimeout);
+    autoReleaseRow->addStretch(1);
+    bottomForm->addRow(QString(), autoReleaseRow);
 
     // Disk read-ahead: warm the page cache ahead of the playhead.
     const QString readAheadHelp =
@@ -147,43 +207,33 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     readAheadRow->addWidget(m_readAheadMb);
     readAheadRow->addWidget(readAheadInfo);
     readAheadRow->addStretch(1);
-    m_form->addRow(QStringLiteral("Disk read-ahead"), readAheadRow);
+    bottomForm->addRow(QStringLiteral("Disk read-ahead"), readAheadRow);
 
-    connect(m_mode, &QComboBox::currentIndexChanged, this, [this]() {
-        updateModeVisibility();
-    });
-
-    layout->addLayout(m_form);
+    layout->addLayout(bottomForm);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
 
-    // Pin the minimum size to the fully-expanded (shared) state so switching
-    // modes never shrinks the dialog.
     layout->activate();
     setMinimumSize(sizeHint());
-
-    updateModeVisibility();
 }
 
-void PlaybackProfileDialog::updateModeVisibility()
+bool PlaybackProfileDialog::bitPerfectActive() const
 {
-    const bool bitPerfect = m_mode->currentData().toString() == QStringLiteral("bit-perfect");
-    m_form->setRowVisible(m_sink,          !bitPerfect);
-    m_form->setRowVisible(m_deviceCombo,    bitPerfect);
-    m_form->setRowVisible(m_softwareVolume, !bitPerfect);
-    m_form->setRowVisible(m_allowResample,  !bitPerfect);
-    // Release-on-pause is a shared-mode choice: bit-perfect always releases the
-    // device (exclusive ALSA access would block other apps while merely paused),
-    // so hide the row there and keep the widget holding the remembered shared
-    // value. The takeover status line only makes sense for a direct device.
-    m_form->setRowVisible(m_releaseSinkOnPause, !bitPerfect);
-    m_deviceStatus->setVisible(bitPerfect);
-    m_deviceAction->setVisible(bitPerfect);
-    if (bitPerfect)
-        refreshDeviceStatus();
+    return m_bitPerfectGroup->isChecked();
+}
+
+void PlaybackProfileDialog::setModeActive(bool bitPerfect)
+{
+    // Check the desired group; its toggled handler unchecks (greys out) the other
+    // and refreshes device status when bit-perfect becomes active.
+    if (bitPerfect) {
+        m_bitPerfectGroup->setChecked(true);
+    } else {
+        m_sharedGroup->setChecked(true);
+    }
 }
 
 void PlaybackProfileDialog::populateDevices()
@@ -224,7 +274,7 @@ void PlaybackProfileDialog::populateDevices()
 
 void PlaybackProfileDialog::refreshDeviceStatus()
 {
-    if (m_mode->currentData().toString() != QStringLiteral("bit-perfect"))
+    if (!bitPerfectActive())
         return;
 
     if (!AudioDeviceControl::toolingAvailable()) {
@@ -297,9 +347,6 @@ void PlaybackProfileDialog::toggleSelectedDeviceTakeover()
 
 void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
 {
-    const int modeIndex = m_mode->findData(profile.mode);
-    m_mode->setCurrentIndex(modeIndex >= 0 ? modeIndex : 0);
-
     // Seed the shared sub-form from the remembered shared selections so they are
     // restored even when the active mode is bit-perfect (where they were pinned).
     // Empty remembered sink defaults to "Auto", never "ALSA".
@@ -330,14 +377,18 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
 
     m_readAheadMb->setValue(std::clamp(profile.readAheadMb, 0, 1024));
 
-    updateModeVisibility();
+    m_autoReleaseDevice->setChecked(profile.autoReleaseExclusiveDevice);
+    m_autoReleaseTimeout->setValue(std::clamp(profile.autoReleaseTimeoutSec, 1, 600));
+    m_autoReleaseTimeout->setEnabled(profile.autoReleaseExclusiveDevice);
+
+    setModeActive(profile.mode == QStringLiteral("bit-perfect"));
 }
 
 PlaybackProfile PlaybackProfileDialog::profile() const
 {
     PlaybackProfile p;
     p.backend = QStringLiteral("gstreamer");
-    p.mode    = m_mode->currentData().toString();
+    p.mode    = bitPerfectActive() ? QStringLiteral("bit-perfect") : QStringLiteral("shared");
     p.replayGain = false;
 
     // Capture both sub-forms unconditionally so each mode's selection survives
@@ -374,6 +425,8 @@ PlaybackProfile PlaybackProfileDialog::profile() const
         p.releaseSinkOnPause = p.sharedReleaseSinkOnPause;
     }
     p.readAheadMb = m_readAheadMb->value();
+    p.autoReleaseExclusiveDevice = m_autoReleaseDevice->isChecked();
+    p.autoReleaseTimeoutSec = m_autoReleaseTimeout->value();
 
     return p;
 }

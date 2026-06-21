@@ -6,7 +6,7 @@
 
 class QCheckBox;
 class QComboBox;
-class QFormLayout;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -22,7 +22,10 @@ public:
     PlaybackProfile profile() const;
 
 private:
-    void updateModeVisibility();
+    // The two modes are mutually-exclusive checkable group boxes: activating one
+    // unchecks (and so greys out) the other, with exactly one always active.
+    bool bitPerfectActive() const;
+    void setModeActive(bool bitPerfect);
     // Repopulate the device combo, colouring cards PipeWire is currently
     // holding so a busy device is visible at a glance.
     void populateDevices();
@@ -31,8 +34,8 @@ private:
     // Take over (free) or release the selected card via AudioDeviceControl.
     void toggleSelectedDeviceTakeover();
 
-    QFormLayout *m_form = nullptr;
-    QComboBox *m_mode = nullptr;
+    QGroupBox *m_sharedGroup = nullptr;
+    QGroupBox *m_bitPerfectGroup = nullptr;
     QComboBox *m_sink = nullptr;
     QComboBox *m_deviceCombo = nullptr;
     QLabel *m_deviceStatus = nullptr;
@@ -40,5 +43,7 @@ private:
     QCheckBox *m_softwareVolume = nullptr;
     QCheckBox *m_allowResample = nullptr;
     QCheckBox *m_releaseSinkOnPause = nullptr;
+    QCheckBox *m_autoReleaseDevice = nullptr;
+    QSpinBox *m_autoReleaseTimeout = nullptr;
     QSpinBox *m_readAheadMb = nullptr;
 };

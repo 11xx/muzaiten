@@ -24,6 +24,14 @@ struct PlaybackProfile {
     // cache is reclaimable RAM, and warmed pages also serve soft-pause resume.
     int readAheadMb = 0;
 
+    // When muzaiten takes a card away from PipeWire (bit-perfect, or a DSD
+    // takeover), optionally hand it back automatically after playback goes idle
+    // (pause / end of queue) for this many seconds. Off by default: a takeover
+    // is deliberate, so the device stays ours until released explicitly (the
+    // Playback → Release device action) unless the user opts into auto-release.
+    bool autoReleaseExclusiveDevice = false;
+    int autoReleaseTimeoutSec = 15;
+
     // --- Cross-mode memory ---------------------------------------------------
     // The active fields above describe whichever mode is currently selected; in
     // bit-perfect mode `sink` is pinned to "alsa" and the shared toggles are
