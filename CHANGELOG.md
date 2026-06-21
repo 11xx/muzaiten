@@ -22,6 +22,30 @@ upstream releases or date-version tags existed when this file was introduced.
 
 Nothing yet.
 
+## [2026.06.21]
+
+### Added
+
+- Added DSD library scanning for `.dsf` and `.dff` files.
+- Added native bit-perfect DSF playback to a direct ALSA device, including a
+  shared-output PipeWire-takeover prompt and a Playback → Release device action.
+
+### Changed
+
+- DSD plays through the normal GStreamer path as PCM when resampling is enabled,
+  so shared output remains seamless without taking over the device.
+- A declined or timed-out takeover skips the contiguous native-DSD block once,
+  then prompts again after another track successfully starts.
+
+### Fixed
+
+- Tray-hidden playback retains the takeover controller until it can return an
+  owned device to PipeWire, rather than leaking or interrupting native output.
+
+### Packaging
+
+- Documented `gst-plugins-bad` and `gst-libav` as optional DSD dependencies.
+
 ## [2026.06.20]
 
 ### Added
