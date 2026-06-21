@@ -401,6 +401,10 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     m_autoReleaseTimeout->setEnabled(profile.autoReleaseExclusiveDevice);
 
     setModeActive(profile.mode == QStringLiteral("bit-perfect"));
+    // setModeActive is a no-op (no toggled signal) when the target mode already
+    // matches the construction default, so refresh explicitly to reflect the
+    // loaded device's live state and action button.
+    refreshDeviceStatus();
 }
 
 PlaybackProfile PlaybackProfileDialog::profile() const
