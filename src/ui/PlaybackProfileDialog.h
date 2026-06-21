@@ -20,6 +20,8 @@ public:
 
     void setProfile(const PlaybackProfile &profile);
     PlaybackProfile profile() const;
+    QString releasedDeviceHw() const { return m_releasedDeviceHw; }
+    int releasedSinkNodeId() const { return m_releasedSinkNodeId; }
 
 private:
     // The two modes are mutually-exclusive checkable group boxes: activating one
@@ -46,4 +48,6 @@ private:
     QCheckBox *m_autoReleaseDevice = nullptr;
     QSpinBox *m_autoReleaseTimeout = nullptr;
     QSpinBox *m_readAheadMb = nullptr;
+    QString m_releasedDeviceHw;
+    int m_releasedSinkNodeId = -1;
 };

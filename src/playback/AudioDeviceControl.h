@@ -69,6 +69,11 @@ bool release(const DeviceState &dev, int restoreProfileIndex = -1, QString *erro
 // of racing the current default sink after release().
 QString sinkNodeName(const QString &hwPath);
 
+// PipeWire global id of the card's current Audio/Sink, or -1 while no such
+// node exists. A restored profile creates a new node id, so callers can tell a
+// stale pre-release node from the sink that replaced it.
+int sinkNodeId(const QString &hwPath);
+
 // Whether PipeWire has (re)created an Audio/Sink node for the card behind
 // "hw:N". After release() the profile flips instantly but PipeWire needs a
 // couple of seconds to rebuild the sink node and re-link any loopbacks — so

@@ -346,17 +346,30 @@ void PlaybackProfileDialog::toggleSelectedDeviceTakeover()
     if (!dev)
         return;
 
+    const bool releasing = !dev->heldByPipeWire();
+    const int oldSinkNodeId = releasing ? AudioDeviceControl::sinkNodeId(hw) : -1;
     m_deviceAction->setEnabled(false);
     QString error;
-    const bool ok = dev->heldByPipeWire()
-        ? AudioDeviceControl::takeOver(*dev, &error)
-        : AudioDeviceControl::release(*dev, /*restoreProfileIndex=*/-1, &error);
+    const bool ok = releasing
+        ? AudioDeviceControl::release(*dev, /*restoreProfileIndex=*/-1, &error)
+        : AudioDeviceControl::takeOver(*dev, &error);
     m_deviceAction->setEnabled(true);
 
     if (!ok && !error.isEmpty()) {
         m_deviceStatus->setText(error);
         m_deviceStatus->setStyleSheet(QStringLiteral("color: #c0392b;"));
         return;
+    }
+
+    if (releasing) {
+        // Keep the pre-release node id for MainWindow. When the dialog later
+        // changes to Shared, it must wait for a *new* sink rather than mistake
+        // this old node for the completed PipeWire hand-back.
+        m_releasedDeviceHw = hw;
+        m_releasedSinkNodeId = oldSinkNodeId;
+    } else {
+        m_releasedDeviceHw.clear();
+        m_releasedSinkNodeId = -1;
     }
 
     // Re-read the live state so the list colours and status reflect the change.
