@@ -63,4 +63,11 @@ bool takeOver(const DeviceState &dev, QString *error = nullptr);
 // available audio profile.
 bool release(const DeviceState &dev, int restoreProfileIndex = -1, QString *error = nullptr);
 
+// Whether PipeWire has (re)created an Audio/Sink node for the card behind
+// "hw:N". After release() the profile flips instantly but PipeWire needs a
+// couple of seconds to rebuild the sink node and re-link any loopbacks — so
+// this is the real "the card is usable again" signal to wait on before routing
+// shared playback back to it. False if the card/tooling is absent.
+bool sinkNodeReady(const QString &hwPath);
+
 } // namespace AudioDeviceControl
