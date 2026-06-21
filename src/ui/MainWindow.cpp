@@ -3863,10 +3863,57 @@ void MainWindow::configurePlaybackProfile()
         return;
     }
 
+    const PlaybackProfile previous = m_playbackProfile;
     m_playbackProfile = dialog.profile();
     savePlaybackProfile();
+    // Free a card we were holding exclusively *before* the new sink is built, so
+    // a shared sink targeting that same device isn't left silent (and a stale
+    // bit-perfect/DSD takeover isn't stranded).
+    releaseDeviceForProfileSwitch(previous, m_playbackProfile);
     m_playback->setProfile(m_playbackProfile);
     statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
+}
+
+void MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
+                                               const PlaybackProfile &next)
+{
+    // Which card, if any, were we holding exclusively under the old profile?
+    // A tracked DSD takeover takes precedence; otherwise a bit-perfect profile
+    // implies its configured hw device is (or will be) held Off.
+    QString heldHw = m_takenOverDsdDevice;
+    int restoreProfile = m_takenOverDsdRestoreProfile;
+    if (heldHw.isEmpty() && previous.mode == QStringLiteral("bit-perfect")) {
+        heldHw = previous.device;
+        restoreProfile = -1;  // restore to the best audio profile
+    }
+    if (heldHw.isEmpty()) {
+        return;
+    }
+    // Still bit-perfect on the very same card: keep the exclusive hold.
+    if (next.mode == QStringLiteral("bit-perfect") && next.device == heldHw) {
+        return;
+    }
+    const auto dev = AudioDeviceControl::findByHwPath(heldHw);
+    if (!dev || dev->heldByPipeWire()) {
+        // Already owned by PipeWire (nothing to hand back) — just drop our
+        // bookkeeping below if it pointed here.
+    } else {
+        QString error;
+        if (AudioDeviceControl::release(*dev, restoreProfile, &error)) {
+            statusBar()->showMessage(
+                QStringLiteral("Released %1 back to PipeWire").arg(dev->description), 3000);
+        } else {
+            statusBar()->showMessage(
+                QStringLiteral("Could not release %1: %2").arg(heldHw, error), 6000);
+            return;
+        }
+    }
+    if (m_takenOverDsdDevice == heldHw) {
+        m_takenOverDsdReleaseTimer->stop();
+        m_takenOverDsdDevice.clear();
+        m_takenOverDsdRestoreProfile = -1;
+        m_playerBar->setReleaseDeviceVisible(false);
+    }
 }
 
 void MainWindow::attemptDeviceTakeover()
