@@ -1,6 +1,7 @@
 #include "playback/GStreamerPlaybackBackend.h"
 
 #include <QMutexLocker>
+#include <QtGlobal>
 
 #include <gst/gst.h>
 
@@ -36,6 +37,17 @@ GstElement *makeSink(const PlaybackProfile &profile)
     const auto make = [](const char *name) -> GstElement * {
         return factoryExists(name) ? gst_element_factory_make(name, nullptr) : nullptr;
     };
+
+    // Demo-screen capture only emulates playback; never open a real device (it
+    // would surface as a phantom stream in the user's mixer). A clock-synced
+    // fakesink swallows the audio while keeping pipeline timing intact.
+    if (qEnvironmentVariableIsSet("MUZAITEN_DEMO_SILENT_AUDIO")) {
+        GstElement *sink = make("fakesink");
+        if (sink != nullptr) {
+            g_object_set(G_OBJECT(sink), "sync", TRUE, nullptr);
+        }
+        return sink;
+    }
 
     // Bit-perfect always goes direct to ALSA hw: regardless of the sink field.
     if (profile.mode == QStringLiteral("bit-perfect")) {

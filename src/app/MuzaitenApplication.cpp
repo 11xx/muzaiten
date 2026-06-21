@@ -135,6 +135,12 @@ int MuzaitenApplication::run()
             return 2;
         }
 
+        // The demo only emulates playback (it sets the now-playing UI state); it
+        // must never grab a real audio device. Route the GStreamer backend to a
+        // silent sink before AppCore builds the pipeline, so capturing a demo on a
+        // live desktop doesn't pop up as a phantom stream in the user's mixer.
+        qputenv("MUZAITEN_DEMO_SILENT_AUDIO", "1");
+
         AppCore core;
         core.showWindow();
         QTimer::singleShot(0, this, [this, &core, demoScreensDir]() {
