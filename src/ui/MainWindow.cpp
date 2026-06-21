@@ -3895,16 +3895,87 @@ void MainWindow::configurePlaybackProfile()
     const PlaybackProfile previous = m_playbackProfile;
     m_playbackProfile = dialog.profile();
     savePlaybackProfile();
+
+    // Capture what to resume after the output is rebuilt: the same track at the
+    // same elapsed position and play/pause state it had before the switch.
+    const PlaybackBackend::State priorState = m_playback->state();
+    const int queueIndex = m_player->queueIndex();
+    const qint64 positionMs = m_playback->position();
+    const bool wasActive = queueIndex >= 0
+        && (priorState == PlaybackBackend::State::Playing
+            || priorState == PlaybackBackend::State::Paused);
+    const bool wasPlaying = priorState == PlaybackBackend::State::Playing;
+
     // Free a card we were holding exclusively *before* the new sink is built, so
     // a shared sink targeting that same device isn't left silent (and a stale
     // bit-perfect/DSD takeover isn't stranded).
-    releaseDeviceForProfileSwitch(previous, m_playbackProfile);
-    m_playback->setProfile(m_playbackProfile);
-    statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
+    const QString releasedHw = releaseDeviceForProfileSwitch(previous, m_playbackProfile);
+    applyOutputProfile(m_playbackProfile, releasedHw, queueIndex, positionMs, wasActive, wasPlaying);
 }
 
-void MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
-                                               const PlaybackProfile &next)
+void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &releasedHw,
+                                    int queueIndex, qint64 positionMs, bool wasActive, bool wasPlaying)
+{
+    const auto apply = [this, next, queueIndex, positionMs, wasActive, wasPlaying]() {
+        m_playback->setProfile(next);
+        if (wasActive) {
+            // Re-open the current track at the captured position; the settle
+            // delay lets the freshly-built sink preroll before the seek.
+            resumePlaybackAt(queueIndex, positionMs, wasPlaying, /*settleDelayMs=*/600);
+        }
+        statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
+    };
+
+    // Figure out which device-ownership change (if any) must settle first:
+    //  - released a card (→ shared): wait for PipeWire to reclaim it (held=true).
+    //  - switching to bit-perfect: wait for its device to be free/taken-over.
+    QString waitHw;
+    bool wantHeld = false;
+    if (!releasedHw.isEmpty()) {
+        waitHw = releasedHw;
+        wantHeld = true;
+    } else if (next.mode == QStringLiteral("bit-perfect") && !next.device.isEmpty()) {
+        waitHw = next.device;
+        wantHeld = false;
+    }
+
+    if (waitHw.isEmpty()) {
+        apply();
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Switching output…"), 10000);
+    waitForDeviceOwnership(waitHw, wantHeld, apply);
+}
+
+void MainWindow::waitForDeviceOwnership(const QString &hw, bool wantHeld, std::function<void()> done)
+{
+    const auto ready = [hw, wantHeld]() {
+        const auto dev = AudioDeviceControl::findByHwPath(hw);
+        // No PipeWire record (manual hw:, or tooling absent) → nothing to wait on.
+        return !dev || dev->heldByPipeWire() == wantHeld;
+    };
+    if (ready()) {
+        done();
+        return;
+    }
+    // Poll once a second; the card usually changes hands within 2–5 s. Give up
+    // after ~10 s and apply anyway (best effort — a stuck device then surfaces
+    // its own error/takeover affordance rather than hanging the switch).
+    auto *timer = new QTimer(this);
+    timer->setInterval(1000);
+    auto ticksLeft = std::make_shared<int>(10);
+    connect(timer, &QTimer::timeout, this, [timer, ready, done, ticksLeft]() {
+        if (ready() || --(*ticksLeft) <= 0) {
+            timer->stop();
+            timer->deleteLater();
+            done();
+        }
+    });
+    timer->start();
+}
+
+QString MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
+                                                  const PlaybackProfile &next)
 {
     // Which card, if any, were we holding exclusively under the old profile?
     // A tracked DSD takeover takes precedence; otherwise a bit-perfect profile
@@ -3916,12 +3987,13 @@ void MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
         restoreProfile = -1;  // restore to the best audio profile
     }
     if (heldHw.isEmpty()) {
-        return;
+        return {};
     }
     // Still bit-perfect on the very same card: keep the exclusive hold.
     if (next.mode == QStringLiteral("bit-perfect") && next.device == heldHw) {
-        return;
+        return {};
     }
+    bool released = false;
     const auto dev = AudioDeviceControl::findByHwPath(heldHw);
     if (!dev || dev->heldByPipeWire()) {
         // Already owned by PipeWire (nothing to hand back) — just drop our
@@ -3931,10 +4003,11 @@ void MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
         if (AudioDeviceControl::release(*dev, restoreProfile, &error)) {
             statusBar()->showMessage(
                 QStringLiteral("Released %1 back to PipeWire").arg(dev->description), 3000);
+            released = true;
         } else {
             statusBar()->showMessage(
                 QStringLiteral("Could not release %1: %2").arg(heldHw, error), 6000);
-            return;
+            return {};
         }
     }
     if (m_takenOverDsdDevice == heldHw) {
@@ -3943,6 +4016,9 @@ void MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
         m_takenOverDsdRestoreProfile = -1;
         m_playerBar->setReleaseDeviceVisible(false);
     }
+    // Only a card we actually just handed back needs the caller to wait for
+    // PipeWire to reclaim it before building the new sink.
+    return released ? heldHw : QString();
 }
 
 void MainWindow::attemptDeviceTakeover()
