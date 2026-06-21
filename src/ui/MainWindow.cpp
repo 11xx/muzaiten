@@ -1019,6 +1019,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_queueScreen, &QueueScreen::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
     // MPRIS transport, IPC, and tray are handled by AppCore.
@@ -1146,6 +1147,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_rightSidebar, &RightSidebar::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_rightSidebar, &RightSidebar::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
     connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
@@ -3301,13 +3303,32 @@ bool MainWindow::queueIsPlaylistSourced() const
     return m_queueSourceKind == QStringLiteral("playlist") && m_queueSourcePlaylistId > 0;
 }
 
+void MainWindow::unlinkQueueFromPlaylist()
+{
+    if (!queueIsPlaylistSourced()) {
+        return;
+    }
+    // Keep the tracks and the same queue identity; just sever the playlist link so
+    // later edits stop mirroring (and stop prompting). The playlist itself is left
+    // untouched — this only affects the live queue.
+    m_queueSourceKind = QStringLiteral("queue");
+    m_queueSourcePlaylistId = 0;
+    m_queueSourceName.clear();
+    // The "don't ask again" memory was keyed to that playlist; drop it so a future
+    // playlist-backed queue starts fresh.
+    m_mirrorPromptSuppressedForPlaylist = 0;
+    m_rememberedMirrorChoice = PlaylistMirrorChoice::AddToPlaylist;
+    refreshQueueSourceDependentUi();
+    scheduleQueueStateSave();
+}
+
 PlaylistMirrorChoice MainWindow::promptPlaylistMirror(int trackCount)
 {
     // "Don't ask again" stays in effect only while the same playlist backs the
-    // queue; once it does, normal adds quietly mirror (the explicit "(don't save
-    // to playlist)" menu items remain the way to add to the queue only).
+    // queue, and replays whichever button the user ticked it on — so "Queue only"
+    // keeps queueing and "Add to playlist" keeps saving, instead of always saving.
     if (m_mirrorPromptSuppressedForPlaylist == m_queueSourcePlaylistId) {
-        return PlaylistMirrorChoice::AddToPlaylist;
+        return m_rememberedMirrorChoice;
     }
 
     const QString playlist = m_queueSourceName.isEmpty()
@@ -3334,10 +3355,14 @@ PlaylistMirrorChoice MainWindow::promptPlaylistMirror(int trackCount)
     if (clicked == nullptr || (clicked != addToPlaylist && clicked != queueOnly)) {
         return PlaylistMirrorChoice::Cancel;
     }
+    const PlaylistMirrorChoice choice = clicked == queueOnly
+        ? PlaylistMirrorChoice::QueueOnly
+        : PlaylistMirrorChoice::AddToPlaylist;
     if (dontAsk->isChecked()) {
         m_mirrorPromptSuppressedForPlaylist = m_queueSourcePlaylistId;
+        m_rememberedMirrorChoice = choice;
     }
-    return clicked == queueOnly ? PlaylistMirrorChoice::QueueOnly : PlaylistMirrorChoice::AddToPlaylist;
+    return choice;
 }
 
 void MainWindow::enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMode mode, bool temporary)
@@ -4728,6 +4753,8 @@ void MainWindow::refreshQueueSourceDependentUi()
     if (m_freeRoamFileExplorer != nullptr) m_freeRoamFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
     if (m_searchView != nullptr) m_searchView->setQueueIsPlaylistSourced(playlistSourced);
     if (m_playlistView != nullptr) m_playlistView->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_queueScreen != nullptr) m_queueScreen->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_rightSidebar != nullptr) m_rightSidebar->setQueueIsPlaylistSourced(playlistSourced);
     if (m_playerBar != nullptr) m_playerBar->setMergeSavedQueueEnabled(!playlistSourced);
 }
 

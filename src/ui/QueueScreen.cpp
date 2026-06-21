@@ -24,6 +24,7 @@ QueueScreen::QueueScreen(QWidget *parent)
     connect(m_table, &QueueTable::clearPlayNextPriorityRequested, this, &QueueScreen::clearPlayNextPriorityRequested);
     connect(m_table, &QueueTable::saveQueueAsRequested, this, &QueueScreen::saveQueueAsRequested);
     connect(m_table, &QueueTable::restorePreviousQueueRequested, this, &QueueScreen::restorePreviousQueueRequested);
+    connect(m_table, &QueueTable::unlinkFromPlaylistRequested, this, &QueueScreen::unlinkQueueFromPlaylistRequested);
     connect(m_table, &QueueTable::findFileRequested, this, &QueueScreen::findFileRequested);
     connect(m_table, &QueueTable::addToPlaylistRequested, this, &QueueScreen::addToPlaylistRequested);
     connect(m_table, &QueueTable::propertiesRequested, this, &QueueScreen::propertiesRequested);
@@ -74,4 +75,9 @@ void QueueScreen::focusQueue()
 void QueueScreen::revealCurrentPlaying()
 {
     m_table->revealCurrentPlaying();
+}
+
+void QueueScreen::setQueueIsPlaylistSourced(bool sourced)
+{
+    m_table->setQueueIsPlaylistSourced(sourced);
 }

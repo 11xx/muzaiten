@@ -22,6 +22,7 @@ public:
     QString keyBindingProfileName() const;
     void focusQueue();
     void revealCurrentPlaying();
+    void setQueueIsPlaylistSourced(bool sourced);
 
 signals:
     void queueTrackActivated(int index);
@@ -33,6 +34,7 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
+    void unlinkQueueFromPlaylistRequested();
     void findFileRequested(const Track &track);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void propertiesRequested(const Track &track);

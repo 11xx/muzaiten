@@ -201,6 +201,7 @@ private:
     // stay mirror-by-default and are reserved for internal, non-menu callers.
     void enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMode mode, bool temporary);
     bool queueIsPlaylistSourced() const;
+    void unlinkQueueFromPlaylist();
     PlaylistMirrorChoice promptPlaylistMirror(int trackCount);
     void moveQueueRows(const QVector<int> &rows, int destinationRow);
     void removeQueueRows(const QVector<int> &rows);
@@ -351,6 +352,10 @@ private:
     // warning. Auto-expires when a different playlist (or no playlist) backs the
     // queue, since it is compared against m_queueSourcePlaylistId.
     qint64 m_mirrorPromptSuppressedForPlaylist = 0;
+    // The choice the user locked in alongside "don't ask again" — replayed for
+    // every later add while that playlist backs the queue, so ticking the box on
+    // "Queue only" keeps queueing rather than silently switching to saving.
+    PlaylistMirrorChoice m_rememberedMirrorChoice = PlaylistMirrorChoice::AddToPlaylist;
     int m_trackSortColumn = 0;
     Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
     int m_trackScrollValue = 0;

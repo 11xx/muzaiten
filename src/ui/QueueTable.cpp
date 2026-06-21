@@ -826,6 +826,11 @@ void QueueTable::setTableTopBorderVisible(bool visible)
     setTableBorders(visible ? panelTopBorder() : panelNoBorders());
 }
 
+void QueueTable::setQueueIsPlaylistSourced(bool sourced)
+{
+    m_queueIsPlaylistSourced = sourced;
+}
+
 void QueueTable::setTableBorders(PanelBorderEdges edges)
 {
     if (m_tableBorders == edges) {
@@ -1254,6 +1259,14 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(restorePrevious, &QAction::triggered, this, [this]() {
         emit restorePreviousQueueRequested();
     });
+    if (m_queueIsPlaylistSourced) {
+        menu.setToolTipsVisible(true);
+        QAction *unlink = menu.addAction(QStringLiteral("Detach queue from playlist"));
+        unlink->setToolTip(QStringLiteral("Stop mirroring edits back to the playlist; keep these tracks as a standalone queue."));
+        connect(unlink, &QAction::triggered, this, [this]() {
+            emit unlinkFromPlaylistRequested();
+        });
+    }
 
     menu.exec(m_view->viewport()->mapToGlobal(pos));
 }
