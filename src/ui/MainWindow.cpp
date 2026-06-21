@@ -3950,9 +3950,16 @@ void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &
 void MainWindow::waitForDeviceOwnership(const QString &hw, bool wantHeld, std::function<void()> done)
 {
     const auto ready = [hw, wantHeld]() {
+        if (wantHeld) {
+            // We handed the card back to PipeWire: the profile flips instantly,
+            // but the sink node (and any loopbacks re-linking off it) lag a few
+            // seconds. Wait for the node so shared playback isn't rebuilt onto a
+            // not-yet-present device and left silent.
+            return AudioDeviceControl::sinkNodeReady(hw);
+        }
+        // We need the card free for an exclusive (bit-perfect) open.
         const auto dev = AudioDeviceControl::findByHwPath(hw);
-        // No PipeWire record (manual hw:, or tooling absent) → nothing to wait on.
-        return !dev || dev->heldByPipeWire() == wantHeld;
+        return !dev || !dev->heldByPipeWire();
     };
     if (ready()) {
         done();
