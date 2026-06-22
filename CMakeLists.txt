@@ -113,6 +113,8 @@ set(MUZAITEN_SOURCES
     src/ui/MainWindow.cpp
     src/playlist/PlaylistImport.cpp
     src/playlist/PlaylistImportWorker.cpp
+    src/playlist/PlaylistDropImportWorker.cpp
+    src/playlist/PlaylistMatchIndex.cpp
     src/playlist/PlaylistMatcher.cpp
     src/playlist/import/YouTubeImport.cpp
     src/ui/MainPanelKeybindings.cpp

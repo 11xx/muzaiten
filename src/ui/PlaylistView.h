@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <QModelIndex>
+#include <QSet>
 #include <QStringList>
 #include <QVector>
 #include <QWidget>
@@ -18,6 +19,7 @@ class QLabel;
 class QEvent;
 class QPoint;
 class QSplitter;
+class QTimer;
 class PlaylistItemTableModel;
 
 struct SavedQueuePlaylistEntry {
@@ -48,6 +50,11 @@ public:
     void reloadItems();
     // Selects (or re-selects) a playlist by id after an external change.
     void selectPlaylist(qint64 playlistId);
+    // Marks a placeholder playlist as still filling from a background drop-import
+    // (drives the selector spinner). Refresh the live count + tracklist as items
+    // stream in via refreshImportingPlaylist().
+    void setPlaylistImporting(qint64 playlistId, bool importing);
+    void refreshImportingPlaylist(qint64 playlistId);
     // Restores the item cursor to the row backing `itemId` (used after the edit
     // modal so keyboard focus stays on the row that was just edited). No-op if the
     // id is not in the current display.
@@ -110,6 +117,8 @@ signals:
     void importNewRequested();
     // Importable files dropped onto the view → one new playlist per file (batch).
     void playlistFilesDropped(const QStringList &paths);
+    // Esc/C-g while a background drop-import is running asks to interrupt it.
+    void importInterruptRequested();
     // Re-open the add modal pre-filled with this item's remembered query to edit
     // which track it resolves to.
     void editItemRequested(qint64 playlistId, qint64 itemId, const QString &query);
@@ -193,6 +202,9 @@ private:
         QVector<PlaylistItem> items;  // canonical ordinal order, pre-mutation
     };
     QVector<UndoSnapshot> m_undoStack;
+    QSet<qint64> m_importingPlaylists;   // placeholders with a live drop-import
+    QTimer *m_spinnerTimer = nullptr;    // animates the selector spinner
+    int m_spinnerAngle = 0;
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;
 

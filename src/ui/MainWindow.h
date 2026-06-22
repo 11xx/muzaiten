@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QSet>
 #include <QStringList>
 
+#include "core/Playlist.h"
 #include "core/Track.h"
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
@@ -18,6 +20,7 @@ class PlaylistDatabase;
 class PlaylistImportDialog;
 class PlaylistView;
 struct PlaylistImportMatch;
+class PlaylistDropImportWorker;
 namespace PlaylistImport { struct ImportHeader; }
 class SettingsStore;
 class AlbumGrid;
@@ -334,6 +337,15 @@ private:
     void commitImportItems(qint64 playlistId, const QVector<PlaylistImportMatch> &matches,
                            const PlaylistImport::ImportHeader &header,
                            const QHash<int, QString> &resolved);
+    // One auto-resolved playlist item from a matcher outcome (no triage) — used for
+    // both the bulk commit and the streamed live drop-import.
+    PlaylistItem playlistItemFromImportMatch(const PlaylistImportMatch &match);
+    // Background, interruptible drop-import: creates placeholder playlists at once,
+    // then fills each live as the matcher streams results.
+    void cancelDropImport();
+    void onDropImportItemMatched(qint64 playlistId, const PlaylistImportMatch &match);
+    void onDropImportPlaylistFinished(qint64 playlistId);
+    void finishDropImport(bool interrupted);
     QString uniquePlaylistName(const QString &base) const;
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
     void openAddToPlaylistDialog(const QVector<Track> &tracks);
@@ -432,6 +444,9 @@ private:
     LastFmScrobbler *m_lastFmScrobbler = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
+    QThread *m_dropImportThread = nullptr;
+    PlaylistDropImportWorker *m_dropImportWorker = nullptr;
+    QSet<qint64> m_dropImportPlaylists;  // placeholders still being filled
     MprisService *m_mpris = nullptr;
     IpcServer *m_ipc = nullptr;
     bool m_ratingTagSyncRunning = false;

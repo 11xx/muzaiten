@@ -30,6 +30,7 @@
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QItemSelection>
+#include <QTimer>
 #include <QItemSelectionModel>
 #include <QSet>
 #include <QJsonArray>
@@ -110,6 +111,7 @@ constexpr int PlaylistMetaRole = Qt::UserRole + 8;
 constexpr int PlaylistSeparatorRole = Qt::UserRole + 9;
 constexpr int PlaylistUpdatedAtRole = Qt::UserRole + 10;
 constexpr int PlaylistSpacerRole = Qt::UserRole + 11;
+constexpr int PlaylistImportingRole = Qt::UserRole + 12;  // background drop-import in progress
 
 enum PlaylistItemRoles {
     ItemIdRole = Qt::UserRole,
@@ -295,6 +297,9 @@ public:
     {
     }
 
+    // Rotation phase for the import spinner, advanced by PlaylistView's timer.
+    void setSpinnerAngle(int angle) { m_spinnerAngle = angle; }
+
     QSize sizeHint(const QStyleOptionViewItem &, const QModelIndex &index) const override
     {
         if (index.data(PlaylistSpacerRole).toBool()) {
@@ -371,13 +376,31 @@ public:
 
         const QColor primary = selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Text);
         const QColor secondary = selected ? primary : option.palette.color(QPalette::Disabled, QPalette::Text);
+        const bool importing = index.data(PlaylistImportingRole).toBool();
         const int countWidth = option.fontMetrics.horizontalAdvance(count) + 8;
+        // A spinner sits just left of the count while this playlist is still filling.
+        const int spinnerSize = importing ? std::min(12, textRect.height() - 6) : 0;
+        const int spinnerGap = importing ? 5 : 0;
         QRect nameRect = textRect;
-        nameRect.setRight(textRect.right() - countWidth);
+        nameRect.setRight(textRect.right() - countWidth - spinnerSize - spinnerGap);
 
         painter->save();
         painter->setPen(secondary);
         painter->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, count);
+        if (importing && spinnerSize > 0) {
+            const int sx = textRect.right() - countWidth - spinnerSize;
+            const int sy = textRect.center().y() - spinnerSize / 2;
+            const QRect arcRect(sx, sy, spinnerSize, spinnerSize);
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, true);
+            QColor arc = selected ? primary : option.palette.color(QPalette::Highlight);
+            QPen pen(arc, 2);
+            pen.setCapStyle(Qt::RoundCap);
+            painter->setPen(pen);
+            // A 270° arc whose start sweeps with m_spinnerAngle reads as a spinner.
+            painter->drawArc(arcRect, -m_spinnerAngle * 16, 270 * 16);
+            painter->restore();
+        }
         painter->setPen(primary);
         if (detail.isEmpty()) {
             painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignVCenter,
@@ -395,6 +418,9 @@ public:
         }
         painter->restore();
     }
+
+private:
+    int m_spinnerAngle = 0;
 };
 
 class PlaylistItemTableModel final : public QAbstractTableModel {
@@ -618,6 +644,16 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setItemDelegate(new PlaylistListDelegate(this));
+    // Drives the selector spinner while a background drop-import is filling a
+    // placeholder; only runs while m_importingPlaylists is non-empty.
+    m_spinnerTimer = new QTimer(this);
+    m_spinnerTimer->setInterval(80);
+    connect(m_spinnerTimer, &QTimer::timeout, this, [this]() {
+        m_spinnerAngle = (m_spinnerAngle + 30) % 360;
+        // The selector delegate is always the PlaylistListDelegate set in the ctor.
+        static_cast<PlaylistListDelegate *>(m_playlistList->itemDelegate())->setSpinnerAngle(m_spinnerAngle);
+        m_playlistList->viewport()->update();
+    });
     m_playlistList->setWordWrap(true);
     m_playlistList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_playlistList->installEventFilter(this);
@@ -952,6 +988,7 @@ void PlaylistView::reloadPlaylists()
         item->setData(PlaylistKindRole, QStringLiteral("playlist"));
         item->setData(PlaylistNameRole, playlist.name);
         item->setData(PlaylistItemCountRole, playlist.itemCount);
+        item->setData(PlaylistImportingRole, m_importingPlaylists.contains(playlist.id));
         item->setData(PlaylistCreatedAtRole, playlist.createdAt);
         item->setData(PlaylistUpdatedAtRole, playlist.updatedAt);
         item->setData(PlaylistShowCreatedRole, !selectorMetadataForPlaylist(playlist).isEmpty());
@@ -1038,6 +1075,62 @@ void PlaylistView::selectItemById(qint64 itemId)
             m_itemTable->setFocus(Qt::OtherFocusReason);
             setCurrentItemRow(row);
             return;
+        }
+    }
+}
+
+void PlaylistView::setPlaylistImporting(qint64 playlistId, bool importing)
+{
+    if (playlistId <= 0) {
+        return;
+    }
+    const bool had = m_importingPlaylists.contains(playlistId);
+    if (importing == had) {
+        return;
+    }
+    if (importing) {
+        m_importingPlaylists.insert(playlistId);
+    } else {
+        m_importingPlaylists.remove(playlistId);
+    }
+    // Run the spinner animation only while something is importing.
+    if (m_spinnerTimer != nullptr) {
+        if (!m_importingPlaylists.isEmpty() && !m_spinnerTimer->isActive()) {
+            m_spinnerTimer->start();
+        } else if (m_importingPlaylists.isEmpty() && m_spinnerTimer->isActive()) {
+            m_spinnerTimer->stop();
+        }
+    }
+    // Update just the affected selector row's importing flag in place.
+    for (int row = 0; row < m_playlistList->count(); ++row) {
+        if (m_playlistList->item(row)->data(PlaylistIdRole).toLongLong() == playlistId) {
+            m_playlistList->item(row)->setData(PlaylistImportingRole, importing);
+            break;
+        }
+    }
+    m_playlistList->viewport()->update();
+}
+
+void PlaylistView::refreshImportingPlaylist(qint64 playlistId)
+{
+    if (m_db == nullptr || playlistId <= 0) {
+        return;
+    }
+    // Keep the selector count current as items stream in.
+    const int count = m_db->playlist(playlistId).itemCount;
+    for (int row = 0; row < m_playlistList->count(); ++row) {
+        if (m_playlistList->item(row)->data(PlaylistIdRole).toLongLong() == playlistId) {
+            m_playlistList->item(row)->setData(PlaylistItemCountRole, count);
+            break;
+        }
+    }
+    m_playlistList->viewport()->update();
+    // If the user is watching this playlist, show the new rows live.
+    if (playlistId == m_currentPlaylistId) {
+        const int keepRow = currentItemRow();
+        reloadItems();
+        if (keepRow >= 0) {
+            setCurrentItemRow(keepRow);
         }
     }
 }
@@ -2221,6 +2314,14 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     auto *ke = static_cast<QKeyEvent *>(event);
     const int key = ke->key();
     const Qt::KeyboardModifiers mods = ke->modifiers();
+
+    // Esc / C-g interrupts a running background drop-import (and only then, so it
+    // doesn't swallow Escape the rest of the time).
+    if ((key == Qt::Key_Escape || (mods == Qt::ControlModifier && key == Qt::Key_G))
+        && !m_importingPlaylists.isEmpty()) {
+        emit importInterruptRequested();
+        return true;
+    }
 
     if (watched == m_playlistList) {
         if (mods == Qt::ControlModifier && key == Qt::Key_D) {

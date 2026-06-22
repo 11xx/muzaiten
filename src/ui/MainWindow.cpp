@@ -43,6 +43,7 @@
 #include "ui/RankingDialog.h"
 #include "ui/RightSidebar.h"
 #include "ui/PlaylistAddDialog.h"
+#include "playlist/PlaylistDropImportWorker.h"
 #include "ui/PlaylistImportDialog.h"
 #include "ui/PlaylistView.h"
 #include "ui/SearchView.h"
@@ -1378,6 +1379,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
     connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
     connect(m_playlistView, &PlaylistView::playlistFilesDropped, this, &MainWindow::importDroppedFiles);
+    connect(m_playlistView, &PlaylistView::importInterruptRequested, this, &MainWindow::cancelDropImport);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
@@ -5633,6 +5635,88 @@ void MainWindow::commitImportResults(qint64 playlistId, const PlaylistImportDial
     commitImportItems(playlistId, dialog.results(), dialog.header(), dialog.resolvedPaths());
 }
 
+namespace {
+
+// Fill a playlist item from a matcher outcome (the auto-resolved, no-triage path).
+// Shared by the bulk commit and the live drop-import so a streamed item looks
+// exactly like one the dialog would have produced.
+void fillItemFromOutcome(PlaylistItem &item, const PlaylistImportMatch &match)
+{
+    const QString fallbackComment =
+        match.entry.comment.isEmpty() ? match.entry.rawLine : match.entry.comment;
+    item.query = match.outcome.queryUsed;
+    switch (match.outcome.decision) {
+    case PlaylistMatcher::Decision::Matched: {
+        const Search::SearchRecord &rec = match.outcome.best;
+        item.trackPath = rec.path;
+        item.titleSnapshot = rec.title;
+        item.artistSnapshot = rec.artistName;
+        item.albumSnapshot = rec.albumTitle;
+        item.durationMs = rec.durationMs;
+        item.status = PlaylistItemStatus::Matched;
+        item.comment = match.entry.comment;  // matched rows keep only an explicit note
+        break;
+    }
+    case PlaylistMatcher::Decision::Approximate: {
+        // Auto-pick the best guess but flag it; keep the alternatives for re-pick.
+        const Search::SearchRecord &rec = match.outcome.best;
+        item.trackPath = rec.path;
+        item.titleSnapshot = rec.title;
+        item.artistSnapshot = rec.artistName;
+        item.albumSnapshot = rec.albumTitle;
+        item.durationMs = rec.durationMs;
+        item.status = PlaylistItemStatus::Approximate;
+        item.candidatePaths = match.outcome.candidatePaths;
+        item.comment = fallbackComment;
+        break;
+    }
+    case PlaylistMatcher::Decision::MultiMatch:
+        item.titleSnapshot = match.entry.title;
+        item.artistSnapshot = match.entry.artist;
+        item.albumSnapshot = match.entry.album;
+        item.durationMs = match.entry.durationMs;
+        item.status = PlaylistItemStatus::MultiMatch;
+        item.candidatePaths = match.outcome.candidatePaths;
+        item.comment = fallbackComment;
+        break;
+    case PlaylistMatcher::Decision::Pending:
+        item.titleSnapshot = match.entry.title;
+        item.artistSnapshot = match.entry.artist;
+        item.albumSnapshot = match.entry.album;
+        item.durationMs = match.entry.durationMs;
+        item.status = PlaylistItemStatus::Pending;
+        item.comment = fallbackComment;
+        break;
+    }
+}
+
+// The immutable provenance fields (kept even after a row is matched/edited).
+void applyImportProvenance(PlaylistItem &item, const PlaylistImportMatch &match)
+{
+    item.externalId = match.entry.externalId;
+    item.addedAt = match.entry.addedAt;
+    QString sourceText = match.entry.artist.isEmpty()
+        ? match.entry.title
+        : QStringLiteral("%1 - %2").arg(match.entry.artist, match.entry.title);
+    if (sourceText.isEmpty()) {
+        sourceText = match.entry.rawLine;
+    }
+    if (!match.entry.album.isEmpty() && !sourceText.isEmpty()) {
+        sourceText += QStringLiteral(" — %1").arg(match.entry.album);
+    }
+    item.sourceText = sourceText;
+}
+
+} // namespace
+
+PlaylistItem MainWindow::playlistItemFromImportMatch(const PlaylistImportMatch &match)
+{
+    PlaylistItem item;
+    fillItemFromOutcome(item, match);
+    applyImportProvenance(item, match);
+    return item;
+}
+
 void MainWindow::commitImportItems(qint64 playlistId, const QVector<PlaylistImportMatch> &matches,
                                    const PlaylistImport::ImportHeader &header,
                                    const QHash<int, QString> &resolved)
@@ -5697,66 +5781,9 @@ void MainWindow::commitImportItems(qint64 playlistId, const QVector<PlaylistImpo
             }
         }
         if (!resolvedByPick) {
-            item.query = match.outcome.queryUsed;
-            switch (match.outcome.decision) {
-            case PlaylistMatcher::Decision::Matched: {
-                const Search::SearchRecord &rec = match.outcome.best;
-                item.trackPath = rec.path;
-                item.titleSnapshot = rec.title;
-                item.artistSnapshot = rec.artistName;
-                item.albumSnapshot = rec.albumTitle;
-                item.durationMs = rec.durationMs;
-                item.status = PlaylistItemStatus::Matched;
-                item.comment = match.entry.comment;  // matched rows keep only an explicit note
-                break;
-            }
-            case PlaylistMatcher::Decision::Approximate: {
-                // Auto-pick the best guess but flag it; keep the alternatives so the
-                // edit modal / triage can offer a quick re-pick.
-                const Search::SearchRecord &rec = match.outcome.best;
-                item.trackPath = rec.path;
-                item.titleSnapshot = rec.title;
-                item.artistSnapshot = rec.artistName;
-                item.albumSnapshot = rec.albumTitle;
-                item.durationMs = rec.durationMs;
-                item.status = PlaylistItemStatus::Approximate;
-                item.candidatePaths = match.outcome.candidatePaths;
-                item.comment = fallbackComment;
-                break;
-            }
-            case PlaylistMatcher::Decision::MultiMatch:
-                item.titleSnapshot = match.entry.title;
-                item.artistSnapshot = match.entry.artist;
-                item.albumSnapshot = match.entry.album;
-                item.durationMs = match.entry.durationMs;
-                item.status = PlaylistItemStatus::MultiMatch;
-                item.candidatePaths = match.outcome.candidatePaths;
-                item.comment = fallbackComment;
-                break;
-            case PlaylistMatcher::Decision::Pending:
-                item.titleSnapshot = match.entry.title;
-                item.artistSnapshot = match.entry.artist;
-                item.albumSnapshot = match.entry.album;
-                item.durationMs = match.entry.durationMs;
-                item.status = PlaylistItemStatus::Pending;
-                item.comment = fallbackComment;
-                break;
-            }
+            fillItemFromOutcome(item, match);
         }
-        item.externalId = externalId;
-        item.addedAt = match.entry.addedAt;
-        // Immutable record of how the row was originally imported, kept even after
-        // the item is matched/replaced/edited (the snapshot fields are not).
-        QString sourceText = match.entry.artist.isEmpty()
-            ? match.entry.title
-            : QStringLiteral("%1 - %2").arg(match.entry.artist, match.entry.title);
-        if (sourceText.isEmpty()) {
-            sourceText = match.entry.rawLine;
-        }
-        if (!match.entry.album.isEmpty() && !sourceText.isEmpty()) {
-            sourceText += QStringLiteral(" — %1").arg(match.entry.album);
-        }
-        item.sourceText = sourceText;
+        applyImportProvenance(item, match);
         if (m_playlistDb->addItem(playlistId, item) > 0) {
             ++added;
             if (!externalId.isEmpty()) {
@@ -5824,34 +5851,21 @@ void MainWindow::importDroppedFiles(const QStringList &paths)
     if (m_playlistDb == nullptr || m_database == nullptr || paths.isEmpty()) {
         return;
     }
-    // Build the match index once (exclude-filtered, like the import worker), then
-    // create one playlist per file. Synchronous with a wait cursor — a one-shot.
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    QVector<Search::SearchRecord> records = m_database->allTracksForSearch();
-    const Search::RankConfig rank =
-        Search::RankConfig::fromJsonString(m_database->setting(QStringLiteral("search.ranking")));
-    QVector<Search::ExcludeMatcher> excludes;
-    for (const Search::ExcludeRule &rule : rank.excludes) {
-        Search::ExcludeMatcher matcher(rule);
-        if (matcher.isValid()) {
-            excludes.append(matcher);
-        }
+    // Only accept drops while the playlist view is the active surface — a drop on
+    // any other view is a no-op (the placeholder/spinner UX only makes sense here).
+    if (m_mainView != MainView::Playlist) {
+        return;
     }
-    if (!excludes.isEmpty()) {
-        records.erase(std::remove_if(records.begin(), records.end(),
-                          [&excludes](const Search::SearchRecord &rec) {
-                              for (const Search::ExcludeMatcher &m : excludes) {
-                                  if (m.matches(rec)) { return true; }
-                              }
-                              return false;
-                          }),
-                      records.end());
+    if (m_dropImportWorker != nullptr) {
+        statusBar()->showMessage(
+            QStringLiteral("An import is already running — press Esc to interrupt it first."), 4000);
+        return;
     }
-    Search::SearchIndex index;
-    index.build(records);
 
-    int playlists = 0;
-    int items = 0;
+    // Parse on the UI thread (cheap) and create one empty placeholder playlist per
+    // file *now*, so they appear immediately; the slow matching runs in the worker
+    // and fills each placeholder live.
+    QVector<DropImportJob> jobs;
     for (const QString &file : paths) {
         PlaylistImport::ImportHeader header;
         QString error;
@@ -5859,14 +5873,6 @@ void MainWindow::importDroppedFiles(const QStringList &paths)
             PlaylistImport::parseFile(file, &error, &header);
         if (entries.isEmpty()) {
             continue;
-        }
-        QVector<PlaylistImportMatch> matches;
-        matches.reserve(entries.size());
-        for (const PlaylistImport::ImportEntry &entry : entries) {
-            PlaylistImportMatch match;
-            match.entry = entry;
-            match.outcome = PlaylistMatcher::match(index, entry);
-            matches.append(match);
         }
         QString name = (header.present && !header.name.trimmed().isEmpty())
             ? header.name.trimmed()
@@ -5878,18 +5884,89 @@ void MainWindow::importDroppedFiles(const QStringList &paths)
         if (id <= 0) {
             continue;
         }
-        // The playlist is already named/commented above; pass an empty header so
-        // commitImportItems doesn't try to rename it back.
-        commitImportItems(id, matches, PlaylistImport::ImportHeader{}, {});
-        ++playlists;
-        items += static_cast<int>(matches.size());
+        jobs.push_back({id, entries});
+        m_dropImportPlaylists.insert(id);
     }
-    QApplication::restoreOverrideCursor();
+    if (jobs.isEmpty()) {
+        return;
+    }
+
+    // Surface the placeholders (with their spinners) and drop the user onto the
+    // first one so they watch it fill.
+    m_playlistView->reloadPlaylists();
+    for (const DropImportJob &job : jobs) {
+        m_playlistView->setPlaylistImporting(job.playlistId, true);
+    }
+    m_playlistView->selectPlaylist(jobs.first().playlistId);
+    statusBar()->showMessage(
+        QStringLiteral("Importing %1 playlist(s)… matching in the background (Esc to interrupt)")
+            .arg(jobs.size()),
+        0);
+
+    qRegisterMetaType<PlaylistImportMatch>();
+    qRegisterMetaType<DropImportJob>();
+    qRegisterMetaType<QVector<DropImportJob>>();
+    m_dropImportThread = new QThread(this);
+    m_dropImportWorker = new PlaylistDropImportWorker(databasePath());
+    m_dropImportWorker->moveToThread(m_dropImportThread);
+    connect(m_dropImportThread, &QThread::finished, m_dropImportWorker, &QObject::deleteLater);
+    connect(m_dropImportWorker, &PlaylistDropImportWorker::itemMatched,
+            this, &MainWindow::onDropImportItemMatched, Qt::QueuedConnection);
+    connect(m_dropImportWorker, &PlaylistDropImportWorker::playlistFinished,
+            this, &MainWindow::onDropImportPlaylistFinished, Qt::QueuedConnection);
+    connect(m_dropImportWorker, &PlaylistDropImportWorker::finished,
+            this, &MainWindow::finishDropImport, Qt::QueuedConnection);
+    connect(m_dropImportWorker, &PlaylistDropImportWorker::error, this, [this](const QString &message) {
+        statusBar()->showMessage(QStringLiteral("Import error: %1").arg(message), 6000);
+    });
+    m_dropImportThread->start();
+    QMetaObject::invokeMethod(m_dropImportWorker, "run", Qt::QueuedConnection,
+                              Q_ARG(QVector<DropImportJob>, jobs));
+}
+
+void MainWindow::onDropImportItemMatched(qint64 playlistId, const PlaylistImportMatch &match)
+{
+    if (m_playlistDb == nullptr) {
+        return;
+    }
+    const PlaylistItem item = playlistItemFromImportMatch(match);
+    m_playlistDb->addItem(playlistId, item);
+    m_playlistView->refreshImportingPlaylist(playlistId);
+}
+
+void MainWindow::onDropImportPlaylistFinished(qint64 playlistId)
+{
+    m_dropImportPlaylists.remove(playlistId);
+    m_playlistView->setPlaylistImporting(playlistId, false);
+    m_playlistView->refreshImportingPlaylist(playlistId);
+}
+
+void MainWindow::cancelDropImport()
+{
+    if (m_dropImportWorker != nullptr) {
+        m_dropImportWorker->requestStop();
+        statusBar()->showMessage(QStringLiteral("Interrupting import…"), 2000);
+    }
+}
+
+void MainWindow::finishDropImport(bool interrupted)
+{
+    // Clear any spinners still showing (an interrupt skips the rest).
+    for (const qint64 id : m_dropImportPlaylists) {
+        m_playlistView->setPlaylistImporting(id, false);
+    }
+    m_dropImportPlaylists.clear();
+    if (m_dropImportThread != nullptr) {
+        m_dropImportThread->quit();
+        m_dropImportThread->wait(3000);
+        m_dropImportThread = nullptr;
+        m_dropImportWorker = nullptr;  // deleteLater on thread finish
+    }
     m_playlistView->reloadPlaylists();
     m_playlistView->reloadItems();
     statusBar()->showMessage(
-        QStringLiteral("Imported %1 playlists (%2 items) — resolve multi/pending via the 'e' edit modal.")
-            .arg(playlists).arg(items),
+        interrupted ? QStringLiteral("Import interrupted — partial playlists kept.")
+                    : QStringLiteral("Import complete — resolve multi/pending via the 'e' edit modal."),
         6000);
 }
 
