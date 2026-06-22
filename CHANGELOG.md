@@ -13,6 +13,8 @@
   and fill live as matching runs in the background. Matching is interruptible
   with `Esc` (partial playlists are kept). Drops are accepted only in the
   playlist view.
+- When the queue is playing a playlist and that playlist is open, its tracklist
+  highlights the currently-playing row, linking the view to playback.
 - Search results (and the add/edit modal) show a codec · sample-rate · bitrate
   badge next to each result's duration.
 - Double-clicking a result in the add/edit modal confirms it, like Return.
@@ -34,6 +36,10 @@
 
 - Restoring a tray-hidden instance with a bare `muzaiten` command (no arguments,
   same state root) no longer crashes; it raises the existing window.
+- The track-count badge beside a drop-import's spinner now ticks up live as
+  matches stream in, instead of appearing frozen until the import finished.
+- Scrolling the tracklist with the mouse during a live drop-import no longer
+  snaps back to the keyboard cursor on every new row.
 - Removed a stray focus rectangle that appeared on clicked track-table cells.
 
 ## [2026.06.21.1]
