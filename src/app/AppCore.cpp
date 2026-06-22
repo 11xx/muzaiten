@@ -504,7 +504,10 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         return ipcStatus();
     }
     if (command == QLatin1String("raise")) {
-        showWindow();
+        // Build/show the window after this IPC callback returns — showWindow()
+        // constructs a whole MainWindow and would otherwise pump the event loop
+        // from inside the socket read handler (re-entrancy → use-after-free).
+        QMetaObject::invokeMethod(this, [this]() { showWindow(); }, Qt::QueuedConnection);
         return status();
     }
     if (command == QLatin1String("play")) {
