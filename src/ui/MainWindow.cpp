@@ -5880,6 +5880,8 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     delete dialog;
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+    // Keep keyboard focus on the row just edited rather than snapping to the top.
+    m_playlistView->selectItemById(itemId);
 }
 
 void MainWindow::openAddToPlaylistDialog(const QVector<Track> &tracks)

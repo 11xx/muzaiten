@@ -48,6 +48,10 @@ public:
     void reloadItems();
     // Selects (or re-selects) a playlist by id after an external change.
     void selectPlaylist(qint64 playlistId);
+    // Restores the item cursor to the row backing `itemId` (used after the edit
+    // modal so keyboard focus stays on the row that was just edited). No-op if the
+    // id is not in the current display.
+    void selectItemById(qint64 itemId);
 
     qint64 currentPlaylistId() const;
     QString currentQueueSnapshotId() const;
