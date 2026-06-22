@@ -1694,8 +1694,12 @@ void PlaylistView::moveSelectedItems(int delta)
 
     const int current = std::clamp(currentItemRow() + delta, 0, m_itemModel->rowCount() - 1);
     reloadItems();
-    setCurrentItemRow(current, delta);
+    // reloadPlaylists() clear()s the selector list, which transiently empties the
+    // item table (currentRowChanged → reloadItems with no current playlist) and
+    // would clamp the cursor back to row 0. Refresh the selector first, then plant
+    // the cursor on the moved row last so repeated Shift+n/p chains stay put.
     reloadPlaylists();
+    setCurrentItemRow(current, delta);
 }
 
 void PlaylistView::updatePaneFocus()
@@ -2036,6 +2040,10 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     const Qt::KeyboardModifiers mods = ke->modifiers();
 
     if (watched == m_playlistList) {
+        if (mods == Qt::ControlModifier && key == Qt::Key_D) {
+            deleteCurrentPlaylist();
+            return true;
+        }
         switch (key) {
         case Qt::Key_J:
         case Qt::Key_N:
@@ -2085,7 +2093,6 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         case Qt::Key_C:
             editCurrentPlaylistComment();
             return true;
-        case Qt::Key_D:
         case Qt::Key_Delete:
             deleteCurrentPlaylist();
             return true;
@@ -2102,12 +2109,19 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     }
 
     if (watched == m_itemTable) {
-        if (mods == Qt::AltModifier && (key == Qt::Key_J || key == Qt::Key_N || key == Qt::Key_Down)) {
+        // Shift+n/p (and the hjkl-equivalent Shift+j/k) reorder the selection.
+        // Arrow variants are intentionally omitted — Shift+Arrow is the platform
+        // selection-extend gesture and rebinding it would surprise.
+        if (mods == Qt::ShiftModifier && (key == Qt::Key_N || key == Qt::Key_J)) {
             moveSelectedItems(+1);
             return true;
         }
-        if (mods == Qt::AltModifier && (key == Qt::Key_K || key == Qt::Key_P || key == Qt::Key_Up)) {
+        if (mods == Qt::ShiftModifier && (key == Qt::Key_P || key == Qt::Key_K)) {
             moveSelectedItems(-1);
+            return true;
+        }
+        if (mods == Qt::ControlModifier && key == Qt::Key_D) {
+            removeSelectedItems();
             return true;
         }
         switch (key) {
@@ -2147,7 +2161,6 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         case Qt::Key_C:
             editCurrentItemComment();
             return true;
-        case Qt::Key_D:
         case Qt::Key_Delete:
             removeSelectedItems();
             return true;

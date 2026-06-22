@@ -49,6 +49,9 @@ void DenseTableDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     }
     opt.state &= ~QStyle::State_MouseOver;
     opt.state &= ~QStyle::State_Selected;
+    // The style otherwise paints a focus rectangle (a faint rounded outline) on
+    // the clicked cell. We draw our own selection/hover fills, so suppress it.
+    opt.state &= ~QStyle::State_HasFocus;
     opt.features &= ~QStyleOptionViewItem::Alternate;
     opt.backgroundBrush = Qt::NoBrush;
     opt.displayAlignment = opt.displayAlignment | Qt::AlignVCenter;
