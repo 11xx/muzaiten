@@ -18,9 +18,14 @@ class ListeningHistoryDialog final : public QDialog {
 public:
     explicit ListeningHistoryDialog(ListenHistoryStore *store, QWidget *parent = nullptr);
 
+    // Restores the persisted Ctrl+wheel row height (the dialog is recreated per
+    // open, so the owner round-trips it through settings).
+    void setRowHeight(int height);
+
 signals:
     void backlogChanged(QString service, int changedCount);
     void statusMessageRequested(QString message, int timeoutMs);
+    void rowHeightChanged(int height);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

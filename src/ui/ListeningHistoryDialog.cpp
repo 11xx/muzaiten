@@ -260,11 +260,20 @@ bool ListeningHistoryDialog::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
         auto *wheel = static_cast<QWheelEvent *>(event);
         if (ui::applyCtrlWheelRowHeight(wheel, m_view->verticalHeader()->defaultSectionSize(), 18, 48,
-                [this](int h) { m_view->verticalHeader()->setDefaultSectionSize(h); })) {
+                [this](int h) {
+                    m_view->verticalHeader()->setDefaultSectionSize(h);
+                    emit rowHeightChanged(h);  // persisted by the owner; dialog is per-open
+                })) {
             return true;
         }
     }
     return QDialog::eventFilter(watched, event);
+}
+
+void ListeningHistoryDialog::setRowHeight(int height)
+{
+    const int clamped = std::clamp(height, 18, 48);
+    m_view->verticalHeader()->setDefaultSectionSize(clamped);
 }
 
 void ListeningHistoryDialog::reload()

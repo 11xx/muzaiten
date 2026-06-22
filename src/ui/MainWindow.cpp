@@ -4743,6 +4743,18 @@ void MainWindow::showListeningHistory()
     }
 
     ListeningHistoryDialog dialog(m_listenHistory, this);
+    if (m_state != nullptr) {
+        bool ok = false;
+        const int saved = m_state->setting(QStringLiteral("listeningHistory.rowHeight")).toInt(&ok);
+        if (ok && saved > 0) {
+            dialog.setRowHeight(saved);
+        }
+    }
+    connect(&dialog, &ListeningHistoryDialog::rowHeightChanged, this, [this](int height) {
+        if (m_state != nullptr) {
+            m_state->setSetting(QStringLiteral("listeningHistory.rowHeight"), QString::number(height));
+        }
+    });
     connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
         if (changedCount > 0) {
             triggerScrobbleUpload(service);
