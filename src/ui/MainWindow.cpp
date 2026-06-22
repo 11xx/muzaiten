@@ -1181,7 +1181,10 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
-    connect(m_playerBar, &PlayerBar::releaseDeviceRequested, this, &MainWindow::releaseTakenOverDsdDevice);
+    connect(m_playerBar, &PlayerBar::releaseDeviceRequested, this, &MainWindow::releaseHeldOutputDevice);
+    connect(m_playerBar, &PlayerBar::playbackMenuAboutToShow, this, [this]() {
+        m_playerBar->setReleaseDeviceVisible(canReleaseOutputDevice());
+    });
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
@@ -4276,6 +4279,45 @@ void MainWindow::releaseTakenOverDsdDevice()
     if (isHidden() && m_core != nullptr && !m_core->isQuitting()) {
         m_core->releaseWindow();
     }
+}
+
+bool MainWindow::canReleaseOutputDevice() const
+{
+    // A DSD takeover is always releasable; otherwise a bit-perfect profile holds
+    // (or will hold) its configured card exclusively.
+    return !m_takenOverDsdDevice.isEmpty()
+        || (m_playbackProfile.mode == QStringLiteral("bit-perfect") && !m_playbackProfile.device.isEmpty());
+}
+
+void MainWindow::releaseHeldOutputDevice()
+{
+    // A tracked DSD takeover has its own restore-the-prior-profile path.
+    if (!m_takenOverDsdDevice.isEmpty()) {
+        releaseTakenOverDsdDevice();
+        return;
+    }
+    if (m_playbackProfile.mode != QStringLiteral("bit-perfect")) {
+        return;
+    }
+    // Hand the exclusive card back by switching the output to shared — mirrors the
+    // profile-dialog apply path, forcing shared so the card isn't re-grabbed. The
+    // current track resumes at its position through the rebuilt shared sink.
+    const PlaybackProfile previous = m_playbackProfile;
+    PlaybackProfile next = m_playbackProfile;
+    next.mode = QStringLiteral("shared");
+    m_playbackProfile = next;
+    savePlaybackProfile();
+
+    const PlaybackBackend::State priorState = m_playback->state();
+    const int queueIndex = m_player->queueIndex();
+    const qint64 positionMs = m_playback->position();
+    const bool wasActive = queueIndex >= 0
+        && (priorState == PlaybackBackend::State::Playing || priorState == PlaybackBackend::State::Paused);
+    const bool wasPlaying = priorState == PlaybackBackend::State::Playing;
+
+    int previousSinkNodeId = -1;
+    const QString releasedHw = releaseDeviceForProfileSwitch(previous, next, &previousSinkNodeId);
+    applyOutputProfile(next, releasedHw, previousSinkNodeId, queueIndex, positionMs, wasActive, wasPlaying);
 }
 
 void MainWindow::releaseDsdDeviceForPcmTrack(const Track &track)
