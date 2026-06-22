@@ -73,7 +73,7 @@ void TestPlaylistDatabase::itemOrderingAndRemoval()
     QCOMPARE(items.at(1).ordinal, 1);
     QCOMPARE(items.at(2).ordinal, 2);
     QCOMPARE(items.at(0).titleSnapshot, QStringLiteral("A"));
-    QCOMPARE(db.playlist(id).itemCount, 0); // itemCount only populated by playlists()
+    QCOMPARE(db.playlist(id).itemCount, 3); // single-playlist lookup carries the live count
     QCOMPARE(db.playlists().first().itemCount, 3);
 
     // Removing the middle item compacts ordinals to stay contiguous.

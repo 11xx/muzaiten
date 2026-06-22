@@ -46,6 +46,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QScrollBar>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
@@ -1128,9 +1129,18 @@ void PlaylistView::refreshImportingPlaylist(qint64 playlistId)
     // If the user is watching this playlist, show the new rows live.
     if (playlistId == m_currentPlaylistId) {
         const int keepRow = currentItemRow();
+        QScrollBar *vbar = m_itemTable->verticalScrollBar();
+        const int keepScroll = vbar != nullptr ? vbar->value() : 0;
         reloadItems();
         if (keepRow >= 0) {
             setCurrentItemRow(keepRow);
+        }
+        // New rows stream in at the bottom; don't yank the viewport back to the
+        // keyboard cursor on every tick — that fights a mouse user scrolling
+        // through the partially-filled list. The keyboard cursor still moves the
+        // view normally; this only stops the live refresh from stealing scroll.
+        if (vbar != nullptr) {
+            vbar->setValue(std::min(keepScroll, vbar->maximum()));
         }
     }
 }
