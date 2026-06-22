@@ -5173,6 +5173,7 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
     m_playerBar->setPosition(0, track.durationMs);
+    refreshPlaylistNowPlaying();
     // AppCore handles MPRIS mirroring and scrobble notification.
     if (notifyScrobbler) {
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
@@ -5199,6 +5200,7 @@ void MainWindow::clearPresentedTrack()
     m_playerBar->setTrackText({});
     m_playerBar->setAlbumArt(QString());
     m_rightSidebar->setTrackInfo({});
+    refreshPlaylistNowPlaying();
     // AppCore handles MPRIS clearing.
     savePlaybackState(true);
 }
@@ -5325,6 +5327,16 @@ void MainWindow::refreshQueueSourceDependentUi()
     if (m_queueScreen != nullptr) m_queueScreen->setQueueIsPlaylistSourced(playlistSourced);
     if (m_rightSidebar != nullptr) m_rightSidebar->setQueueIsPlaylistSourced(playlistSourced);
     if (m_playerBar != nullptr) m_playerBar->setMergeSavedQueueEnabled(!playlistSourced);
+    refreshPlaylistNowPlaying();
+}
+
+void MainWindow::refreshPlaylistNowPlaying()
+{
+    if (m_playlistView == nullptr) {
+        return;
+    }
+    const qint64 sourceId = queueIsPlaylistSourced() ? m_queueSourcePlaylistId : 0;
+    m_playlistView->setNowPlaying(m_player->currentTrack().path, sourceId);
 }
 
 void MainWindow::syncQueueState()

@@ -59,6 +59,12 @@ public:
     // modal so keyboard focus stays on the row that was just edited). No-op if the
     // id is not in the current display.
     void selectItemById(qint64 itemId);
+    // Mirrors the queue's now-playing state into the tracklist: when the queue is
+    // sourced from a playlist (`sourcePlaylistId` > 0) and that playlist is the one
+    // on screen, the row backing `trackPath` is tinted like the queue's
+    // currently-playing row. Pass an empty path or a non-matching/zero source id to
+    // clear the indicator.
+    void setNowPlaying(const QString &trackPath, qint64 sourcePlaylistId);
 
     qint64 currentPlaylistId() const;
     QString currentQueueSnapshotId() const;
@@ -170,6 +176,10 @@ private:
     void pushUndoSnapshot();
     void undoLastChange();
     void restorePlaylistItems(qint64 playlistId, const QVector<PlaylistItem> &snapshot);
+    // Recomputes which display row (if any) the now-playing track maps to and
+    // pushes it to the item delegates. Called on track/queue-source change and
+    // whenever the tracklist is rebuilt (populateItems).
+    void updatePlayingHighlight();
 
     void moveSelectedItems(int delta);
     // Mouse drag-reorder: move the dragged display `rows` so they land at the
@@ -222,6 +232,8 @@ private:
     class StarRatingDelegate *m_ratingDelegate = nullptr;
     QLabel *m_header = nullptr;
     bool m_queueIsPlaylistSourced = false;
+    QString m_nowPlayingPath;             // path of the currently-playing track
+    qint64 m_nowPlayingPlaylistId = 0;    // playlist feeding the queue (0 if none)
     int m_itemHoveredRow = -1;
     QModelIndex m_hoverRatingIndex;
 };

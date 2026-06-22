@@ -1247,6 +1247,7 @@ void PlaylistView::populateItems()
         setCurrentItemRow(std::clamp(keepRow, 0, m_itemModel->rowCount() - 1));
     }
     updateHeader();
+    updatePlayingHighlight();
 }
 
 void PlaylistView::cycleAddedSort()
@@ -1750,6 +1751,42 @@ void PlaylistView::setCurrentItemRow(int row, int direction)
 int PlaylistView::currentItemRow() const
 {
     return m_itemTable->currentNavigationRow();
+}
+
+void PlaylistView::setNowPlaying(const QString &trackPath, qint64 sourcePlaylistId)
+{
+    if (m_nowPlayingPath == trackPath && m_nowPlayingPlaylistId == sourcePlaylistId) {
+        return;
+    }
+    m_nowPlayingPath = trackPath;
+    m_nowPlayingPlaylistId = sourcePlaylistId;
+    updatePlayingHighlight();
+}
+
+void PlaylistView::updatePlayingHighlight()
+{
+    // Only mark a row when the on-screen playlist is the one feeding the queue.
+    // Match by path: the canonical case is one row per track, and a duplicate path
+    // simply tints every copy — acceptable and far cheaper than threading the
+    // queue index back through to a playlist ordinal.
+    int playingRow = -1;
+    if (m_nowPlayingPlaylistId > 0 && m_nowPlayingPlaylistId == m_currentPlaylistId
+        && !m_nowPlayingPath.isEmpty()) {
+        for (int row = 0; row < m_itemModel->rowCount(); ++row) {
+            if (const PlaylistItem *item = itemForDisplayRow(row);
+                item != nullptr && item->trackPath == m_nowPlayingPath) {
+                playingRow = row;
+                break;
+            }
+        }
+    }
+    if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(m_itemTable->itemDelegate())) {
+        denseDelegate->setPlayingRow(playingRow);
+    }
+    if (m_ratingDelegate != nullptr) {
+        m_ratingDelegate->setPlayingRow(playingRow);
+    }
+    m_itemTable->viewport()->update();
 }
 
 void PlaylistView::setHoveredItemRow(int row)

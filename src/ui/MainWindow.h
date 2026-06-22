@@ -265,6 +265,9 @@ private:
     // Called from syncQueueState and from the queue-replace paths (play/restore),
     // which use resetQueue() and so never emit queueChanged.
     void refreshQueueSourceDependentUi();
+    // Tells the playlist view which track is playing and which playlist (if any)
+    // feeds the queue, so it can tint the matching tracklist row.
+    void refreshPlaylistNowPlaying();
     void playAlbumNow(const QString &albumTitle);
     void playAlbumsNow(const QStringList &albumTitles);
     void playAlbumsReplacingQueue(const QStringList &albumTitles);
