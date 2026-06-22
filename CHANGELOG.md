@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Playlist items can be reordered by mouse drag, using the same single
+  insertion-line cue as the queue (now a shared, reusable behavior).
+- Undo (`u`) in the playlist items pane reverts the last reorder or removal,
+  re-adding removed rows; scoped to the playlist view so it doesn't leak.
+- Dropping playlist files onto the playlist view now imports without freezing:
+  placeholder playlists appear immediately with a spinner by their track count
+  and fill live as matching runs in the background. Matching is interruptible
+  with `Esc` (partial playlists are kept). Drops are accepted only in the
+  playlist view.
+- Search results (and the add/edit modal) show a codec · sample-rate · bitrate
+  badge next to each result's duration.
+- Double-clicking a result in the add/edit modal confirms it, like Return.
+- The listening-history modal remembers its `Ctrl`+wheel row height.
+
+### Changed
+
+- Playlist item reorder moved from `Alt`+n/p to `Shift`+n/p; the keyboard cursor
+  now stays on the moved row so reorders chain.
+- Playlist delete is now `Ctrl`+D (was `d`); the `Delete` key still works.
+- The add/edit search modal opens nearly as wide as the main window, and returns
+  the cursor to the just-edited row on close.
+- Playback → Release device is available whenever a held card can be returned
+  (DSD takeover or a bit-perfect profile), not only after a DSD takeover; it
+  hands the card back to PipeWire and switches to shared output. The idle
+  auto-release timer now applies to bit-perfect holds too.
+
+### Fixed
+
+- Restoring a tray-hidden instance with a bare `muzaiten` command (no arguments,
+  same state root) no longer crashes; it raises the existing window.
+- Removed a stray focus rectangle that appeared on clicked track-table cells.
+
 ## [2026.06.21.1]
 
 ### Fixed
