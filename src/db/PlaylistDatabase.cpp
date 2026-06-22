@@ -257,7 +257,13 @@ Playlist PlaylistDatabase::playlist(qint64 id) const
 {
     Playlist playlist;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT id, name, comment, created_at, updated_at FROM playlists WHERE id = ?"));
+    // Mirror playlists(): carry the live item count so single-playlist lookups
+    // (e.g. the selector badge during a streaming drop-import) stay current
+    // instead of reporting a default 0.
+    query.prepare(QStringLiteral(
+        "SELECT p.id, p.name, p.comment, p.created_at, p.updated_at, "
+        "(SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = p.id) "
+        "FROM playlists p WHERE p.id = ?"));
     query.addBindValue(id);
     if (query.exec() && query.next()) {
         playlist.id = query.value(0).toLongLong();
@@ -265,6 +271,7 @@ Playlist PlaylistDatabase::playlist(qint64 id) const
         playlist.comment = query.value(2).toString();
         playlist.createdAt = query.value(3).toLongLong();
         playlist.updatedAt = query.value(4).toLongLong();
+        playlist.itemCount = query.value(5).toInt();
     }
     return playlist;
 }
