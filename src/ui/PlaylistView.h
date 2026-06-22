@@ -151,6 +151,10 @@ private:
     int currentItemRow() const;
     void setHoveredItemRow(int row);
     void moveSelectedItems(int delta);
+    // Mouse drag-reorder: move the dragged display `rows` so they land at the
+    // `destinationRow` insertion index (Qt drop convention). No-op for saved
+    // queues; forces canonical (ordinal) order first like the keyboard move.
+    void moveItemsToIndex(const QVector<int> &rows, int destinationRow);
     void applyPlaylistRowHeights();
     void updateSavedQueueSpacerHeight();
     QString selectorMetadataForPlaylist(const Playlist &playlist) const;

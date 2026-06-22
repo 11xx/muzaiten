@@ -131,6 +131,7 @@ set(MUZAITEN_SOURCES
     src/ui/QueueTable.cpp
     src/ui/RankingDialog.cpp
     src/ui/ReorderableTableWidget.cpp
+    src/ui/RowReorderSupport.cpp
     src/ui/RightSidebar.cpp
     src/ui/SettingsDialogSupport.cpp
     src/ui/SearchResultDelegate.cpp

@@ -282,6 +282,7 @@ add_test(NAME test_main_panel_keybindings COMMAND test_main_panel_keybindings)
 add_executable(test_navigation_scroll
     test_navigation_scroll.cpp
     ../src/ui/NavigableTableView.cpp
+    ../src/ui/RowReorderSupport.cpp
 )
 target_include_directories(test_navigation_scroll PRIVATE ../src)
 target_link_libraries(test_navigation_scroll PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
@@ -303,6 +304,7 @@ add_executable(test_queue_table
     ../src/ui/QueueStore.cpp
     ../src/ui/QueueTable.cpp
     ../src/ui/NavigableTableView.cpp
+    ../src/ui/RowReorderSupport.cpp
     ../src/ui/NeighborColumnResizer.cpp
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
@@ -329,6 +331,7 @@ add_executable(test_playlist_view
     ../src/ui/PlaylistView.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
+    ../src/ui/RowReorderSupport.cpp
     ../src/ui/NeighborColumnResizer.cpp
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
@@ -350,6 +353,7 @@ add_executable(test_responsive_column_layout
     ../src/ui/TrackTable.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
+    ../src/ui/RowReorderSupport.cpp
     ../src/ui/NeighborColumnResizer.cpp
     ../src/ui/OverlayScrollBar.cpp
     ../src/ui/StarRating.cpp
@@ -428,6 +432,7 @@ add_executable(test_panel_search
     ../src/ui/PanelSearchController.cpp
     ../src/ui/MainPanelKeybindings.cpp
     ../src/ui/NavigableTableView.cpp
+    ../src/ui/RowReorderSupport.cpp
     ../src/search/SearchMatcher.cpp
     ../src/search/SearchQuery.cpp
     ../src/search/FuzzyMatch.cpp

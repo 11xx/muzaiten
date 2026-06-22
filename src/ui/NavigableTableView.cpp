@@ -1,13 +1,20 @@
 #include "ui/NavigableTableView.h"
 
+#include "ui/RowReorderSupport.h"
 #include "ui/SelectionColors.h"
 
 #include <QAbstractItemModel>
 #include <QApplication>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QEvent>
 #include <QFrame>
 #include <QHeaderView>
 #include <QItemSelectionModel>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QScrollBar>
 #include <QScopedValueRollback>
 #include <QStyle>
@@ -272,4 +279,103 @@ void NavigableTableView::refreshWidgetTheme(QWidget *widget)
         widget->style()->polish(widget);
     }
     widget->update();
+}
+
+void NavigableTableView::enableRowReorder(const QString &mimeType)
+{
+    m_reorderMimeType = mimeType;
+    setDragEnabled(true);
+    setAcceptDrops(true);
+    setDropIndicatorShown(false);  // we paint our own single insertion line
+    setDragDropMode(QAbstractItemView::InternalMove);
+    setDefaultDropAction(Qt::MoveAction);
+    setDragDropOverwriteMode(false);
+}
+
+void NavigableTableView::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (reorderEnabled() && RowReorder::contains(m_reorderMimeType, event->mimeData())) {
+        event->setDropAction(Qt::MoveAction);
+        event->accept();
+        return;
+    }
+    QTableView::dragEnterEvent(event);
+}
+
+void NavigableTableView::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (reorderEnabled() && RowReorder::contains(m_reorderMimeType, event->mimeData())) {
+        event->setDropAction(Qt::MoveAction);
+        event->accept();
+        setReorderDropRow(reorderRowForPosition(event->position().toPoint()));
+        return;
+    }
+    QTableView::dragMoveEvent(event);
+}
+
+void NavigableTableView::dragLeaveEvent(QDragLeaveEvent *event)
+{
+    QTableView::dragLeaveEvent(event);
+    setReorderDropRow(-1);
+}
+
+void NavigableTableView::dropEvent(QDropEvent *event)
+{
+    if (reorderEnabled() && RowReorder::contains(m_reorderMimeType, event->mimeData())) {
+        const QVector<int> rows = RowReorder::decode(m_reorderMimeType, event->mimeData());
+        const int destinationRow = reorderRowForPosition(event->position().toPoint());
+        setReorderDropRow(-1);
+        if (!rows.isEmpty()) {
+            emit rowsReorderRequested(rows, destinationRow);
+        }
+        event->acceptProposedAction();
+        return;
+    }
+    QTableView::dropEvent(event);
+    setReorderDropRow(-1);
+}
+
+void NavigableTableView::paintEvent(QPaintEvent *event)
+{
+    QTableView::paintEvent(event);
+    if (m_reorderDropRow < 0 || model() == nullptr) {
+        return;
+    }
+    QPainter painter(viewport());
+    const int y = reorderYForRow(m_reorderDropRow);
+    QColor color = palette().color(QPalette::Highlight);
+    color.setAlpha(210);
+    painter.setPen(QPen(color, 2));
+    painter.drawLine(QLine(0, y, viewport()->width(), y));
+}
+
+int NavigableTableView::reorderRowForPosition(const QPoint &pos) const
+{
+    const QModelIndex index = indexAt(pos);
+    if (!index.isValid()) {
+        return model() == nullptr ? 0 : model()->rowCount();
+    }
+    const QRect rect = visualRect(index);
+    return pos.y() < rect.center().y() ? index.row() : index.row() + 1;
+}
+
+int NavigableTableView::reorderYForRow(int row) const
+{
+    if (model() == nullptr || model()->rowCount() == 0) {
+        return 0;
+    }
+    const int lastRow = model()->rowCount() - 1;
+    if (row > lastRow) {
+        return rowViewportPosition(lastRow) + rowHeight(lastRow);
+    }
+    return rowViewportPosition(row);
+}
+
+void NavigableTableView::setReorderDropRow(int row)
+{
+    if (m_reorderDropRow == row) {
+        return;
+    }
+    m_reorderDropRow = row;
+    viewport()->update();
 }
