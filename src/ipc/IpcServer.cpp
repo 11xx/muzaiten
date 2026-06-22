@@ -7,6 +7,7 @@
 #include <QLockFile>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QPointer>
 
 namespace {
 
@@ -99,17 +100,29 @@ void IpcServer::onNewConnection()
 
 void IpcServer::onReadyRead(QLocalSocket *socket)
 {
-    QByteArray &buffer = m_buffers[socket];
-    buffer += socket->readAll();
-    qsizetype newline = -1;
-    while ((newline = buffer.indexOf('\n')) >= 0) {
-        const QByteArray line = buffer.left(newline).trimmed();
-        buffer.remove(0, newline + 1);
-        if (!line.isEmpty()) {
-            socket->write(replyFor(line));
-        }
+    if (!m_buffers.contains(socket)) {
+        return;
     }
-    if (buffer.size() > maxRequestBytes) {
+    m_buffers[socket] += socket->readAll();
+    // A handler may pump the event loop (e.g. "raise" builds the window), during
+    // which the client can disconnect — the disconnected slot then removes this
+    // socket from m_buffers and deleteLater()s it. So never hold a reference into
+    // m_buffers across a handler call, and re-validate the socket after each one.
+    QPointer<QLocalSocket> guard(socket);
+    qsizetype newline = -1;
+    while (m_buffers.contains(socket) && (newline = m_buffers[socket].indexOf('\n')) >= 0) {
+        const QByteArray line = m_buffers[socket].left(newline).trimmed();
+        m_buffers[socket].remove(0, newline + 1);
+        if (line.isEmpty()) {
+            continue;
+        }
+        const QByteArray reply = replyFor(line);
+        if (guard.isNull()) {
+            return;  // the client went away while the handler ran
+        }
+        socket->write(reply);
+    }
+    if (!guard.isNull() && m_buffers.contains(socket) && m_buffers[socket].size() > maxRequestBytes) {
         socket->write(encodeReply(errorPayload(QStringLiteral("request too large"))));
         socket->disconnectFromServer();
     }
