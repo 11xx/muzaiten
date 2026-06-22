@@ -1670,6 +1670,68 @@ QVector<qint64> PlaylistView::displayedItemIds() const
     return ids;
 }
 
+void PlaylistView::pushUndoSnapshot()
+{
+    if (m_db == nullptr || m_currentPlaylistId <= 0) {
+        return;
+    }
+    constexpr int kMaxUndo = 50;
+    m_undoStack.push_back({m_currentPlaylistId, m_items});
+    if (m_undoStack.size() > kMaxUndo) {
+        m_undoStack.removeFirst();
+    }
+}
+
+void PlaylistView::undoLastChange()
+{
+    if (m_db == nullptr || m_undoStack.isEmpty()) {
+        return;
+    }
+    const UndoSnapshot snapshot = m_undoStack.takeLast();
+    restorePlaylistItems(snapshot.playlistId, snapshot.items);
+    // Make the restored playlist current and refresh both panes.
+    selectPlaylist(snapshot.playlistId);
+    reloadItems();
+    reloadPlaylists();
+}
+
+void PlaylistView::restorePlaylistItems(qint64 playlistId, const QVector<PlaylistItem> &snapshot)
+{
+    if (m_db == nullptr || playlistId <= 0) {
+        return;
+    }
+    const QVector<PlaylistItem> current = m_db->items(playlistId);
+    QSet<qint64> currentIds;
+    for (const PlaylistItem &item : current) {
+        currentIds.insert(item.id);
+    }
+    QSet<qint64> snapshotIds;
+    for (const PlaylistItem &item : snapshot) {
+        snapshotIds.insert(item.id);
+    }
+    // Rebuild the snapshot order, re-adding any rows that were removed since (they
+    // come back with fresh ids, but identical data — see addItem).
+    QVector<qint64> desired;
+    desired.reserve(snapshot.size());
+    for (const PlaylistItem &item : snapshot) {
+        qint64 id = item.id;
+        if (!currentIds.contains(id)) {
+            id = m_db->addItem(playlistId, item);
+            if (id <= 0) {
+                continue;
+            }
+        }
+        desired.push_back(id);
+    }
+    // Drop anything added after the snapshot (undoing an addition).
+    for (const PlaylistItem &item : current) {
+        if (!snapshotIds.contains(item.id)) {
+            m_db->removeItem(item.id);
+        }
+    }
+    m_db->reorderItems(playlistId, desired);
+}
+
 void PlaylistView::moveSelectedItems(int delta)
 {
     if (m_db == nullptr || m_currentPlaylistId <= 0 || delta == 0 || m_itemModel->rowCount() <= 1) {
@@ -1720,6 +1782,7 @@ void PlaylistView::moveSelectedItems(int delta)
             ids.swapItemsAt(row, row + 1);
         }
     }
+    pushUndoSnapshot();
     if (!m_db->reorderItems(m_currentPlaylistId, ids)) {
         QMessageBox::warning(this, QStringLiteral("Playlist"), m_db->lastError());
         return;
@@ -1788,6 +1851,7 @@ void PlaylistView::moveItemsToIndex(const QVector<int> &rows, int destinationRow
     reordered += rest.mid(0, insertAt);
     reordered += movingIds;
     reordered += rest.mid(insertAt);
+    pushUndoSnapshot();
     if (!m_db->reorderItems(m_currentPlaylistId, reordered)) {
         QMessageBox::warning(this, QStringLiteral("Playlist"), m_db->lastError());
         return;
@@ -2071,6 +2135,7 @@ void PlaylistView::removeSelectedItemsImpl(bool missingOnly)
     }
     std::sort(targets.begin(), targets.end(),
               [](const PlaylistItem &a, const PlaylistItem &b) { return a.ordinal > b.ordinal; });
+    pushUndoSnapshot();
     for (const PlaylistItem &item : targets) {
         m_db->removeItem(item.id);
     }
@@ -2146,6 +2211,10 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_playlistList) {
         if (mods == Qt::ControlModifier && key == Qt::Key_D) {
             deleteCurrentPlaylist();
+            return true;
+        }
+        if (mods == Qt::NoModifier && key == Qt::Key_U) {
+            undoLastChange();
             return true;
         }
         switch (key) {
@@ -2226,6 +2295,10 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         }
         if (mods == Qt::ControlModifier && key == Qt::Key_D) {
             removeSelectedItems();
+            return true;
+        }
+        if (mods == Qt::NoModifier && key == Qt::Key_U) {
+            undoLastChange();
             return true;
         }
         switch (key) {

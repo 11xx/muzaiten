@@ -150,6 +150,14 @@ private:
     void setCurrentItemRow(int row, int direction = 0);
     int currentItemRow() const;
     void setHoveredItemRow(int row);
+    // Undo, scoped to the items pane (bound to "u" only inside PlaylistView's
+    // event filter so it never leaks to other views). Each structural mutation —
+    // reorder (keyboard or drag) and removal — snapshots the playlist's items
+    // first; undo restores that snapshot, re-adding removed rows as needed.
+    void pushUndoSnapshot();
+    void undoLastChange();
+    void restorePlaylistItems(qint64 playlistId, const QVector<PlaylistItem> &snapshot);
+
     void moveSelectedItems(int delta);
     // Mouse drag-reorder: move the dragged display `rows` so they land at the
     // `destinationRow` insertion index (Qt drop convention). No-op for saved
@@ -176,6 +184,11 @@ private:
     QString m_currentQueueSnapshotId;
     QVector<SavedQueuePlaylistEntry> m_savedQueueEntries;
     QVector<PlaylistItem> m_items;   // canonical, ordinal order
+    struct UndoSnapshot {
+        qint64 playlistId = 0;
+        QVector<PlaylistItem> items;  // canonical ordinal order, pre-mutation
+    };
+    QVector<UndoSnapshot> m_undoStack;
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;
 
