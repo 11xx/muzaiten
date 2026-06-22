@@ -72,6 +72,9 @@ signals:
     void playbackProfileRequested();
     void playbackResumeRequested();
     void releaseDeviceRequested();
+    // The Playback menu is opening — owners refresh the "Release device" item's
+    // availability (it depends on live device-hold state).
+    void playbackMenuAboutToShow();
     void currentTrackLibraryRequested();
     void linkRootsRequested();
     void mpdSourceRequested();

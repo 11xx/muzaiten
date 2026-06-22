@@ -184,6 +184,11 @@ private:
     void showDsdTakeoverPrompt(const Track &track, const QString &device);
     void resolveDsdTakeoverPrompt(bool accepted);
     void releaseTakenOverDsdDevice();
+    // Menu-driven "Release device": hands back whatever card is held — a tracked
+    // DSD takeover, or a bit-perfect profile's exclusive device (switching output
+    // to shared so it won't immediately re-grab).
+    void releaseHeldOutputDevice();
+    bool canReleaseOutputDevice() const;
     void scheduleTakenOverDsdDeviceRelease(int delayMs);
     void updateDsdTakeoverPromptText();
     void configureLinkRoots();

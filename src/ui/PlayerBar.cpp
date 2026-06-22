@@ -482,7 +482,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_releaseDeviceAction = playbackMenu->addAction(QStringLiteral("Release device"));
     m_releaseDeviceAction->setVisible(false);
     m_releaseDeviceAction->setToolTip(
-        QStringLiteral("Hand a device taken over for native DSD playback back to PipeWire"));
+        QStringLiteral("Hand the held output device back to PipeWire (switches to shared output)"));
+    // Availability depends on live device-hold state (DSD takeover or a bit-perfect
+    // profile holding a card), so refresh it each time the menu opens.
+    connect(playbackMenu, &QMenu::aboutToShow, this, &PlayerBar::playbackMenuAboutToShow);
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
     QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle..."));
 
