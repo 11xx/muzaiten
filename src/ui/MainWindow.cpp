@@ -773,7 +773,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     m_takenOverDsdReleaseTimer = new QTimer(this);
     m_takenOverDsdReleaseTimer->setSingleShot(true);
-    connect(m_takenOverDsdReleaseTimer, &QTimer::timeout, this, &MainWindow::releaseTakenOverDsdDevice);
+    connect(m_takenOverDsdReleaseTimer, &QTimer::timeout, this, &MainWindow::releaseHeldOutputDevice);
 
     // PlayerCore, MprisService, and data stores are now owned by AppCore.
     // m_player, m_playback, m_mpris, m_database, etc. are all borrowed pointers
@@ -1450,13 +1450,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         // Auto-release of a held card is opt-in (a takeover is deliberate). When
         // enabled, hand it back after playback goes idle for the configured time;
         // otherwise it stays ours until released explicitly.
-        if (!m_takenOverDsdDevice.isEmpty()) {
+        if (canReleaseOutputDevice()) {
             if (state == PlaybackBackend::State::Playing) {
                 m_takenOverDsdReleaseTimer->stop();
             } else if (m_playbackProfile.autoReleaseExclusiveDevice
                        && (state == PlaybackBackend::State::Paused
                            || state == PlaybackBackend::State::Stopped)) {
-                scheduleTakenOverDsdDeviceRelease(
+                scheduleHeldDeviceRelease(
                     std::clamp(m_playbackProfile.autoReleaseTimeoutSec, 1, 600) * 1000);
             }
         }
@@ -3901,11 +3901,20 @@ void MainWindow::configurePlaybackProfile()
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
-
     const PlaybackProfile previous = m_playbackProfile;
-    const QString manuallyReleasedHw = dialog.releasedDeviceHw();
-    int previousSinkNodeId = dialog.releasedSinkNodeId();
-    m_playbackProfile = dialog.profile();
+    applyProfileTransition(previous, dialog.profile(),
+                           dialog.releasedDeviceHw(), dialog.releasedSinkNodeId());
+}
+
+void MainWindow::applyProfileTransition(const PlaybackProfile &previous, const PlaybackProfile &next,
+                                        const QString &manuallyReleasedHw, int manualSinkNodeId)
+{
+    // The single hand-off path shared by every output transition — the profile
+    // dialog, the "Release device" action, and the idle auto-release timer. It
+    // frees any exclusively-held card before the new sink is built and resumes the
+    // current track through it. Keeping it in one place is what makes the delicate
+    // bit-perfect→shared PipeWire hand-back behave identically everywhere.
+    m_playbackProfile = next;
     savePlaybackProfile();
 
     // Capture what to resume after the output is rebuilt: the same track at the
@@ -3917,7 +3926,7 @@ void MainWindow::configurePlaybackProfile()
         && (priorState == PlaybackBackend::State::Playing
             || priorState == PlaybackBackend::State::Paused);
     const bool wasPlaying = priorState == PlaybackBackend::State::Playing;
-    if (m_playbackProfile.mode == QStringLiteral("bit-perfect") && wasActive) {
+    if (next.mode == QStringLiteral("bit-perfect") && wasActive) {
         m_profileTakeoverResumePending = true;
         m_profileTakeoverTrackPath = m_player->currentTrack().path;
         m_profileTakeoverPositionMs = positionMs;
@@ -3927,15 +3936,16 @@ void MainWindow::configurePlaybackProfile()
     // Free a card we were holding exclusively *before* the new sink is built, so
     // a shared sink targeting that same device isn't left silent (and a stale
     // bit-perfect/DSD takeover isn't stranded).
-    QString releasedHw = releaseDeviceForProfileSwitch(previous, m_playbackProfile, &previousSinkNodeId);
-    if (releasedHw.isEmpty() && m_playbackProfile.mode == QStringLiteral("shared")
-        && manuallyReleasedHw == previous.device) {
-        // The dialog can hand the card back before OK. Its saved pre-release
-        // node id lets the normal hand-off wait distinguish the old sink from
-        // the one WirePlumber will create after the profile change settles.
+    int previousSinkNodeId = manualSinkNodeId;
+    QString releasedHw = releaseDeviceForProfileSwitch(previous, next, &previousSinkNodeId);
+    if (releasedHw.isEmpty() && next.mode == QStringLiteral("shared")
+        && !manuallyReleasedHw.isEmpty() && manuallyReleasedHw == previous.device) {
+        // A caller (the dialog) can hand the card back before arriving here. Its
+        // saved pre-release node id lets the hand-off wait distinguish the old sink
+        // from the one WirePlumber will create after the change settles.
         releasedHw = manuallyReleasedHw;
     }
-    applyOutputProfile(m_playbackProfile, releasedHw, previousSinkNodeId,
+    applyOutputProfile(next, releasedHw, previousSinkNodeId,
                        queueIndex, positionMs, wasActive, wasPlaying);
 }
 
@@ -4237,9 +4247,9 @@ void MainWindow::resolveDsdTakeoverPrompt(bool accepted)
     }
 }
 
-void MainWindow::scheduleTakenOverDsdDeviceRelease(int delayMs)
+void MainWindow::scheduleHeldDeviceRelease(int delayMs)
 {
-    if (m_takenOverDsdDevice.isEmpty()) {
+    if (!canReleaseOutputDevice()) {
         return;
     }
     m_takenOverDsdReleaseTimer->start(delayMs);
@@ -4299,25 +4309,12 @@ void MainWindow::releaseHeldOutputDevice()
     if (m_playbackProfile.mode != QStringLiteral("bit-perfect")) {
         return;
     }
-    // Hand the exclusive card back by switching the output to shared — mirrors the
-    // profile-dialog apply path, forcing shared so the card isn't re-grabbed. The
-    // current track resumes at its position through the rebuilt shared sink.
+    // Hand the exclusive card back by switching the output to shared via the shared
+    // transition path, forcing shared so the card isn't immediately re-grabbed.
     const PlaybackProfile previous = m_playbackProfile;
     PlaybackProfile next = m_playbackProfile;
     next.mode = QStringLiteral("shared");
-    m_playbackProfile = next;
-    savePlaybackProfile();
-
-    const PlaybackBackend::State priorState = m_playback->state();
-    const int queueIndex = m_player->queueIndex();
-    const qint64 positionMs = m_playback->position();
-    const bool wasActive = queueIndex >= 0
-        && (priorState == PlaybackBackend::State::Playing || priorState == PlaybackBackend::State::Paused);
-    const bool wasPlaying = priorState == PlaybackBackend::State::Playing;
-
-    int previousSinkNodeId = -1;
-    const QString releasedHw = releaseDeviceForProfileSwitch(previous, next, &previousSinkNodeId);
-    applyOutputProfile(next, releasedHw, previousSinkNodeId, queueIndex, positionMs, wasActive, wasPlaying);
+    applyProfileTransition(previous, next);
 }
 
 void MainWindow::releaseDsdDeviceForPcmTrack(const Track &track)

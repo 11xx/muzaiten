@@ -157,6 +157,12 @@ private:
     // position). settleDelayMs waits for the backend to preroll before seeking.
     void resumePlaybackAt(int queueIndex, qint64 positionMs, bool playing, int settleDelayMs);
     void configurePlaybackProfile();
+    // Shared output-transition path used by the profile dialog, the Release-device
+    // action and the idle auto-release timer: persist `next`, free any held card
+    // and rebuild the sink, resuming the current track. `manuallyReleasedHw`/
+    // `manualSinkNodeId` carry a hand-back a caller (the dialog) already performed.
+    void applyProfileTransition(const PlaybackProfile &previous, const PlaybackProfile &next,
+                                const QString &manuallyReleasedHw = {}, int manualSinkNodeId = -1);
     // Single device target: hand an exclusively-held card (bit-perfect, or a DSD
     // takeover) back to PipeWire when the new profile stops wanting it that way,
     // so a shared sink aimed at the same card isn't left silent. Returns the hw
@@ -189,7 +195,7 @@ private:
     // to shared so it won't immediately re-grab).
     void releaseHeldOutputDevice();
     bool canReleaseOutputDevice() const;
-    void scheduleTakenOverDsdDeviceRelease(int delayMs);
+    void scheduleHeldDeviceRelease(int delayMs);
     void updateDsdTakeoverPromptText();
     void configureLinkRoots();
     void configureSourceDirectories();
