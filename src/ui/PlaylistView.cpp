@@ -1028,6 +1028,20 @@ void PlaylistView::selectPlaylist(qint64 playlistId)
     }
 }
 
+void PlaylistView::selectItemById(qint64 itemId)
+{
+    if (itemId <= 0) {
+        return;
+    }
+    for (int row = 0; row < m_itemModel->rowCount(); ++row) {
+        if (const PlaylistItem *item = itemForDisplayRow(row); item != nullptr && item->id == itemId) {
+            m_itemTable->setFocus(Qt::OtherFocusReason);
+            setCurrentItemRow(row);
+            return;
+        }
+    }
+}
+
 void PlaylistView::reloadItems()
 {
     m_items.clear();
