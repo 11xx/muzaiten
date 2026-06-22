@@ -12,6 +12,7 @@
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/RowHeightWheel.h"
+#include "ui/RowReorderSupport.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -75,7 +76,6 @@ constexpr ColumnSpec columns[] = {
     {"track", "Track", 8, 36, 49, 12},
 };
 
-constexpr auto queueRowsMimeType = "application/x-muzaiten-queue-rows";
 constexpr int kCellHorizontalPadding = 3;
 
 enum QueueRoles {
@@ -255,119 +255,29 @@ public:
         return m_currentPlayingRow;
     }
 
-    std::function<void(const QVector<int> &rows, int destinationRow)> rowsMoveRequested;
-
 protected:
-    bool isQueueDrag(const QMimeData *mime) const
-    {
-        return mime != nullptr && mime->hasFormat(QString::fromLatin1(queueRowsMimeType));
-    }
-
-    void dragEnterEvent(QDragEnterEvent *event) override
-    {
-        if (isQueueDrag(event->mimeData())) {
-            event->setDropAction(Qt::MoveAction);
-            event->accept();
-        } else {
-            NavigableTableView::dragEnterEvent(event);
-        }
-    }
-
-    void dragMoveEvent(QDragMoveEvent *event) override
-    {
-        if (isQueueDrag(event->mimeData())) {
-            event->setDropAction(Qt::MoveAction);
-            event->accept();
-        } else {
-            NavigableTableView::dragMoveEvent(event);
-        }
-        setDropIndicatorRow(rowForDropPosition(event->position().toPoint()));
-    }
-
-    void dragLeaveEvent(QDragLeaveEvent *event) override
-    {
-        NavigableTableView::dragLeaveEvent(event);
-        setDropIndicatorRow(-1);
-    }
-
-    void dropEvent(QDropEvent *event) override
-    {
-        if (isQueueDrag(event->mimeData())) {
-            QVector<int> rows;
-            QByteArray payload = event->mimeData()->data(QString::fromLatin1(queueRowsMimeType));
-            QDataStream stream(&payload, QIODevice::ReadOnly);
-            stream >> rows;
-            if (rowsMoveRequested) {
-                rowsMoveRequested(rows, rowForDropPosition(event->position().toPoint()));
-            }
-            event->acceptProposedAction();
-        } else {
-            NavigableTableView::dropEvent(event);
-        }
-        setDropIndicatorRow(-1);
-    }
-
+    // The drop-indicator line and internal-move drag handling live in the shared
+    // NavigableTableView base (enabled via enableRowReorder()); here we only add
+    // the queue-specific playing-row accent on top of the base paint.
     void paintEvent(QPaintEvent *event) override
     {
         NavigableTableView::paintEvent(event);
         if (model() == nullptr) {
             return;
         }
-
-        QPainter painter(viewport());
         if (m_currentPlayingRow >= 0 && m_currentPlayingRow < model()->rowCount()) {
             const int y = rowViewportPosition(m_currentPlayingRow);
             const int h = rowHeight(m_currentPlayingRow);
             if (h > 0 && y + h > 0 && y < viewport()->height()) {
+                QPainter painter(viewport());
                 const QColor color = palette().color(QPalette::Highlight);
                 painter.fillRect(QRect(0, y, 3, h), color);
             }
         }
-
-        if (m_dropIndicatorRow >= 0) {
-            const int y = yForDropRow(m_dropIndicatorRow);
-            QColor color = palette().color(QPalette::Highlight);
-            color.setAlpha(210);
-            QPen pen(color, 2);
-            painter.setPen(pen);
-            painter.drawLine(QLine(0, y, viewport()->width(), y));
-        }
     }
 
 private:
-    int rowForDropPosition(const QPoint &pos) const
-    {
-        const QModelIndex index = indexAt(pos);
-        if (!index.isValid()) {
-            return model() == nullptr ? -1 : model()->rowCount();
-        }
-        const QRect rect = visualRect(index);
-        return pos.y() < rect.center().y() ? index.row() : index.row() + 1;
-    }
-
-    int yForDropRow(int row) const
-    {
-        if (model() == nullptr || model()->rowCount() == 0) {
-            return 0;
-        }
-        const int lastRow = model()->rowCount() - 1;
-        if (row > lastRow) {
-            return rowViewportPosition(lastRow) + rowHeight(lastRow);
-        }
-        return rowViewportPosition(row);
-    }
-
-    void setDropIndicatorRow(int row)
-    {
-        if (m_dropIndicatorRow == row) {
-            return;
-        }
-        m_dropIndicatorRow = row;
-        viewport()->update();
-    }
-
     QueueTablePreset m_preset = QueueTablePreset::Sidebar;
-    int m_dropIndicatorRow = -1;
     int m_currentPlayingRow = -1;
 };
 
@@ -630,49 +540,15 @@ public:
 
     QStringList mimeTypes() const override
     {
-        return {QString::fromLatin1(queueRowsMimeType)};
+        return {QString::fromLatin1(RowReorder::queueMimeType)};
     }
 
+    // Drag source only — the actual drop is handled by NavigableTableView's
+    // reorder support, which emits rowsReorderRequested with these rows.
     QMimeData *mimeData(const QModelIndexList &indexes) const override
     {
-        auto *mime = new QMimeData;
-        QVector<int> rows;
-        rows.reserve(indexes.size());
-        for (const QModelIndex &index : indexes) {
-            if (index.isValid() && !rows.contains(index.row())) {
-                rows.push_back(index.row());
-            }
-        }
-        std::sort(rows.begin(), rows.end());
-
-        QByteArray payload;
-        QDataStream stream(&payload, QIODevice::WriteOnly);
-        stream << rows;
-        mime->setData(QString::fromLatin1(queueRowsMimeType), payload);
-        return mime;
-    }
-
-    bool dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int, const QModelIndex &parent) override
-    {
-        if (action != Qt::MoveAction || data == nullptr || !data->hasFormat(QString::fromLatin1(queueRowsMimeType))) {
-            return false;
-        }
-
-        QVector<int> rows;
-        QByteArray payload = data->data(QString::fromLatin1(queueRowsMimeType));
-        QDataStream stream(&payload, QIODevice::ReadOnly);
-        stream >> rows;
-        int destinationRow = row;
-        if (destinationRow < 0 && parent.isValid()) {
-            destinationRow = parent.row();
-        }
-        if (destinationRow < 0) {
-            destinationRow = rowCount();
-        }
-        if (rowsMoveRequested) {
-            rowsMoveRequested(rows, destinationRow);
-        }
-        return true;
+        return RowReorder::encode(QString::fromLatin1(RowReorder::queueMimeType),
+                                  RowReorder::rowsFromIndexes(indexes));
     }
 
     void setShowPlayNextBadge(bool show)
@@ -685,8 +561,6 @@ public:
             emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {Qt::DisplayRole});
         }
     }
-
-    std::function<void(const QVector<int> &rows, int destinationRow)> rowsMoveRequested;
 
 private:
     int playNextOrdinalForRow(int row) const
@@ -722,12 +596,7 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
     queueView->setPreset(preset);
     m_view->setModel(m_model);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_view->setDragEnabled(true);
-    m_view->setAcceptDrops(true);
-    m_view->setDropIndicatorShown(false);
-    m_view->setDragDropMode(QAbstractItemView::InternalMove);
-    m_view->setDefaultDropAction(Qt::MoveAction);
-    m_view->setDragDropOverwriteMode(false);
+    queueView->enableRowReorder(QString::fromLatin1(RowReorder::queueMimeType));
     m_itemDelegate = new QueueItemDelegate(this);
     static_cast<QueueItemDelegate *>(m_itemDelegate)->setForcePlayingHighlight(preset == QueueTablePreset::Sidebar);
     m_view->setItemDelegate(m_itemDelegate);
@@ -806,12 +675,10 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
         scheduleRestoreScrollToCurrentRow();
     });
     connect(m_view, &QWidget::customContextMenuRequested, this, &QueueTable::showQueueMenu);
-    queueView->rowsMoveRequested = [this](const QVector<int> &rows, int destinationRow) {
-        emit rowsMoveRequested(rows, destinationRow);
-    };
-    queueModel->rowsMoveRequested = [this](const QVector<int> &rows, int destinationRow) {
-        emit rowsMoveRequested(rows, destinationRow);
-    };
+    connect(queueView, &NavigableTableView::rowsReorderRequested, this,
+            [this](const QVector<int> &rows, int destinationRow) {
+                emit rowsMoveRequested(rows, destinationRow);
+            });
     connect(m_ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
         const Track track = index.data(TrackRole).value<Track>();
         if (!track.path.isEmpty()) {

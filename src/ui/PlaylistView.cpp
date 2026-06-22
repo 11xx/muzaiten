@@ -10,6 +10,7 @@
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
 #include "ui/RowHeightWheel.h"
+#include "ui/RowReorderSupport.h"
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
@@ -28,6 +29,9 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
+#include <QItemSelection>
+#include <QItemSelectionModel>
+#include <QSet>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -509,6 +513,32 @@ public:
         return false;
     }
 
+    Qt::ItemFlags flags(const QModelIndex &index) const override
+    {
+        if (index.isValid()) {
+            return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
+        }
+        return Qt::ItemIsEnabled | Qt::ItemIsDropEnabled;
+    }
+
+    Qt::DropActions supportedDropActions() const override
+    {
+        return Qt::MoveAction;
+    }
+
+    QStringList mimeTypes() const override
+    {
+        return {QString::fromLatin1(RowReorder::playlistMimeType)};
+    }
+
+    // Drag source only — NavigableTableView's reorder support performs the drop
+    // and emits rowsReorderRequested with these rows (see PlaylistView wiring).
+    QMimeData *mimeData(const QModelIndexList &indexes) const override
+    {
+        return RowReorder::encode(QString::fromLatin1(RowReorder::playlistMimeType),
+                                  RowReorder::rowsFromIndexes(indexes));
+    }
+
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override
     {
         if (orientation != Qt::Horizontal) {
@@ -597,6 +627,9 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_itemTable = new NavigableTableView(m_splitter);
     m_itemTable->setObjectName(QStringLiteral("PlaylistItemTable"));
     m_itemTable->setModel(m_itemModel);
+    m_itemTable->enableRowReorder(QString::fromLatin1(RowReorder::playlistMimeType));
+    connect(m_itemTable, &NavigableTableView::rowsReorderRequested, this,
+            &PlaylistView::moveItemsToIndex);
     m_itemTable->setItemDelegate(new DenseTableDelegate(this));
     m_ratingDelegate = new StarRatingDelegate(this);
     m_itemTable->setItemDelegateForColumn(RatingColumn, m_ratingDelegate);
@@ -1700,6 +1733,77 @@ void PlaylistView::moveSelectedItems(int delta)
     // the cursor on the moved row last so repeated Shift+n/p chains stay put.
     reloadPlaylists();
     setCurrentItemRow(current, delta);
+}
+
+void PlaylistView::moveItemsToIndex(const QVector<int> &rows, int destinationRow)
+{
+    if (m_db == nullptr || m_currentPlaylistId <= 0 || rows.isEmpty() || m_itemModel->rowCount() <= 1) {
+        return;
+    }
+    // Reordering is only meaningful against the canonical ordinal order; a drag
+    // while a display sort is active falls back to it first (mirrors the keyboard
+    // Shift+n/p path).
+    if (m_sortKey != SortKey::Ordinal || m_sortDescending) {
+        m_sortKey = SortKey::Ordinal;
+        m_sortDescending = false;
+        populateItems();
+        emit viewSettingsChanged();
+    }
+
+    QVector<qint64> ids = displayedItemIds();
+    const int count = static_cast<int>(ids.size());
+    QSet<int> moving;
+    for (int row : rows) {
+        if (row >= 0 && row < count) {
+            moving.insert(row);
+        }
+    }
+    if (moving.isEmpty()) {
+        return;
+    }
+    // Pull the dragged ids out (keeping their relative order), then splice them
+    // back in at the insertion point, adjusted for rows removed from above it.
+    QVector<qint64> movingIds;
+    QVector<qint64> rest;
+    movingIds.reserve(moving.size());
+    rest.reserve(count - moving.size());
+    int removedBefore = 0;
+    for (int i = 0; i < count; ++i) {
+        if (moving.contains(i)) {
+            movingIds.push_back(ids.at(i));
+            if (i < destinationRow) {
+                ++removedBefore;
+            }
+        } else {
+            rest.push_back(ids.at(i));
+        }
+    }
+    const int insertAt = std::clamp(destinationRow - removedBefore, 0, static_cast<int>(rest.size()));
+    if (movingIds == ids.mid(insertAt, movingIds.size())) {
+        return;  // already in place — nothing to do
+    }
+
+    QVector<qint64> reordered;
+    reordered.reserve(count);
+    reordered += rest.mid(0, insertAt);
+    reordered += movingIds;
+    reordered += rest.mid(insertAt);
+    if (!m_db->reorderItems(m_currentPlaylistId, reordered)) {
+        QMessageBox::warning(this, QStringLiteral("Playlist"), m_db->lastError());
+        return;
+    }
+
+    reloadItems();
+    reloadPlaylists();
+    // Park the cursor on the first moved row and select the moved block so it
+    // stays visible and chainable.
+    setCurrentItemRow(insertAt, 0);
+    if (m_itemTable->selectionModel() != nullptr && movingIds.size() > 1) {
+        const int lastRow = insertAt + static_cast<int>(movingIds.size()) - 1;
+        QItemSelection selection(m_itemModel->index(insertAt, 0),
+                                 m_itemModel->index(lastRow, m_itemModel->columnCount() - 1));
+        m_itemTable->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+    }
 }
 
 void PlaylistView::updatePaneFocus()
