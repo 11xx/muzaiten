@@ -3,6 +3,7 @@
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 
+#include <QApplication>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -16,6 +17,11 @@ StarRatingDelegate::StarRatingDelegate(QObject *parent)
 void StarRatingDelegate::setHoveredRow(int row)
 {
     m_hoveredRow = row;
+}
+
+void StarRatingDelegate::setPlayingRow(int row)
+{
+    m_playingRow = row;
 }
 
 bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index)
@@ -56,6 +62,7 @@ void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     // Row-based hover only (m_hoveredRow tracks the cursor on move and scroll);
     // never the lone cell under the pointer.
     const bool hovered = (m_hoveredRow == index.row());
+    const bool playing = (m_playingRow == index.row());
     if (selected) {
         painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
         SelectionColors::applySelectedPalette(&opt);
@@ -63,6 +70,10 @@ void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
         QColor hover = opt.palette.color(QPalette::Highlight);
         hover.setAlpha(34);
         painter->fillRect(opt.rect, hover);
+    } else if (playing) {
+        QColor tint = QApplication::palette().color(QPalette::Highlight);
+        tint.setAlpha(48);
+        painter->fillRect(opt.rect, tint);
     } else if (index.row() % 2 == 1) {
         painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
     }
