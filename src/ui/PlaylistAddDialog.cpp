@@ -84,6 +84,13 @@ PlaylistAddDialog::PlaylistAddDialog(const QString &dbPath, const QString &playl
     m_list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setFocusPolicy(Qt::NoFocus);  // keep keyboard focus in the box
+    // Double-click confirms, mirroring RET (adds, or in edit mode replaces & closes).
+    connect(m_list, &QAbstractItemView::doubleClicked, this, [this](const QModelIndex &index) {
+        if (index.isValid()) {
+            setCursorRow(index.row());
+            chooseCurrent();
+        }
+    });
     layout->addWidget(m_list, 1);
 
     m_debounce = new QTimer(this);
@@ -138,6 +145,18 @@ PlaylistAddDialog::~PlaylistAddDialog()
 void PlaylistAddDialog::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
+    // Results are wide (long paths/titles, extended metadata on the right), so span
+    // nearly the whole parent window horizontally — leave a small gap for framing —
+    // and re-center over it. Height keeps the designed default.
+    if (QWidget *win = parentWidget() != nullptr ? parentWidget()->window() : nullptr) {
+        constexpr int kSideGap = 24;  // small padding each side
+        const int desired = std::max(620, win->width() - 2 * kSideGap);
+        if (desired != width()) {
+            resize(desired, height());
+        }
+        const QRect winGeo = win->geometry();
+        move(winGeo.center().x() - width() / 2, geometry().y());
+    }
     if (!m_indexLoaded && m_worker != nullptr) {
         m_status->setText(QStringLiteral("Loading index…"));
         QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);

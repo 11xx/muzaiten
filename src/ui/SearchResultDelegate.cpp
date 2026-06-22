@@ -10,6 +10,7 @@
 #include <QPainter>
 #include <QRect>
 #include <QSize>
+#include <QStringList>
 #include <QStyleOptionViewItem>
 #include <QTextLayout>
 
@@ -24,6 +25,26 @@ QSet<int> toSet(const QVector<int> &v)
     s.reserve(v.size());
     for (int i : v) s.insert(i);
     return s;
+}
+
+// Compact extended-metadata badge for the result's top-right: codec, sample rate
+// and bitrate, e.g. "FLAC · 44.1 kHz · 1411k". Empty parts are skipped so lossy
+// files without a meaningful sample rate still read cleanly.
+QString qualityBadge(const Search::SearchRecord &rec)
+{
+    QStringList parts;
+    if (!rec.codec.isEmpty()) {
+        parts << rec.codec.toUpper();
+    }
+    if (rec.sampleRateHz > 0) {
+        parts << (rec.sampleRateHz % 1000 == 0
+                      ? QStringLiteral("%1 kHz").arg(rec.sampleRateHz / 1000)
+                      : QStringLiteral("%1 kHz").arg(QString::number(rec.sampleRateHz / 1000.0, 'f', 1)));
+    }
+    if (rec.bitrateKbps > 0) {
+        parts << QStringLiteral("%1k").arg(rec.bitrateKbps);
+    }
+    return parts.join(QStringLiteral(" · "));
 }
 
 } // namespace
@@ -246,23 +267,26 @@ void SearchResultDelegate::paint(QPainter *painter,
     static const QIcon iconPath     = QIcon::fromTheme(QStringLiteral("folder"),
                                        QIcon::fromTheme(QStringLiteral("inode-directory")));
 
-    // Line 0: title  [duration]
+    // Line 0: title  [codec · quality   duration]
     {
         const QString dur = humanquantity::formatClock(rec.durationMs);
-        const QString titleText = dur.isEmpty() ? rec.title
-            : QStringLiteral("%1  %2").arg(rec.title, dur);
-        // duration is not highlighted; draw title with highlights, duration plain
+        const QString quality = qualityBadge(rec);
+        // Right-aligned info column: the extended-metadata badge, then duration.
+        QString rightText = quality;
+        if (!dur.isEmpty()) {
+            rightText = rightText.isEmpty() ? dur : QStringLiteral("%1   %2").arg(quality, dur);
+        }
         if (!iconTitle.isNull()) iconTitle.paint(painter, iconRect(0), Qt::AlignCenter,
                                                   QIcon::Normal, QIcon::Off);
-        if (!dur.isEmpty() && !rec.title.isEmpty()) {
-            // Draw title portion highlighted, then duration suffix plain
-            const int durW = fm.horizontalAdvance(QStringLiteral("  ") + dur) + 2;
-            const QRect titleOnly(textLeft, lineRect(0).top(), std::max(0, textW - durW), lineH);
-            const QRect durOnly(textLeft + std::max(0, textW - durW), lineRect(0).top(), durW, lineH);
+        if (!rightText.isEmpty() && !rec.title.isEmpty()) {
+            // Draw title portion highlighted, then the right-info column plain.
+            const int rightW = fm.horizontalAdvance(QStringLiteral("  ") + rightText) + 2;
+            const QRect titleOnly(textLeft, lineRect(0).top(), std::max(0, textW - rightW), lineH);
+            const QRect rightOnly(textLeft + std::max(0, textW - rightW), lineRect(0).top(), rightW, lineH);
             drawHighlightedText(painter, titleOnly, Qt::AlignLeft, rec.title,
                                 titlePos, primaryColor, matchColor, fm);
             painter->setPen(secondaryColor);
-            painter->drawText(durOnly, Qt::AlignRight | Qt::AlignVCenter, dur);
+            painter->drawText(rightOnly, Qt::AlignRight | Qt::AlignVCenter, rightText);
         } else {
             drawHighlightedText(painter, lineRect(0), Qt::AlignLeft, rec.title,
                                 titlePos, primaryColor, matchColor, fm);
