@@ -59,10 +59,22 @@ PlaylistAddDialog::PlaylistAddDialog(const QString &dbPath, const QString &playl
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
+    // Edit-mode context line: what the row being edited expects. Hidden until
+    // setEditContext() supplies text, so plain "Add to playlist" is unchanged.
+    m_editHeader = new QLabel(this);
+    m_editHeader->setWordWrap(true);
+    m_editHeader->setContentsMargins(8, 6, 8, 2);
+    m_editHeader->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_editHeader->setVisible(false);
+    layout->addWidget(m_editHeader);
+
     m_box = new QLineEdit(this);
     m_box->setPlaceholderText(QStringLiteral("Search to add…  RET adds & readies the next, C-/ undo, Esc closes"));
     m_box->setClearButtonEnabled(true);
-    m_box->setContentsMargins(8, 6, 8, 4);
+    // Inset the text with setTextMargins, not setContentsMargins: the built-in
+    // clear button is positioned by the style within the text-margin area, so a
+    // widget contents-margin left it drawn over the right frame border instead.
+    m_box->setTextMargins(8, 6, 8, 4);
     layout->addWidget(m_box);
 
     m_status = new QLabel(this);
@@ -175,6 +187,12 @@ void PlaylistAddDialog::setQueryText(const QString &query)
     m_box->setText(query);
     m_box->selectAll();
     m_box->setFocus();
+}
+
+void PlaylistAddDialog::setEditContext(const QString &text)
+{
+    m_editHeader->setText(text);
+    m_editHeader->setVisible(!text.isEmpty());
 }
 
 void PlaylistAddDialog::onDebounceTimeout()

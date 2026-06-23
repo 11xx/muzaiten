@@ -43,6 +43,9 @@ public:
     void setQueryText(const QString &query);
     // In edit mode the dialog chooses a single replacement and closes.
     void setEditMode(bool editMode) { m_editMode = editMode; }
+    // A one-line reference shown above the search box in edit mode: what the row
+    // being edited expects (e.g. "Imported as: …", "Editing: …"). Empty hides it.
+    void setEditContext(const QString &text);
     // Stored MultiMatch candidates: hoisted to the top of every result list so
     // the import's shortlist is one keypress away.
     void setPreferredPaths(const QStringList &paths);
@@ -69,6 +72,7 @@ private:
     void chooseCurrent();
     void updateStatus();
 
+    QLabel               *m_editHeader = nullptr;
     QLineEdit            *m_box      = nullptr;
     QLabel               *m_status   = nullptr;
     QListView            *m_list     = nullptr;
