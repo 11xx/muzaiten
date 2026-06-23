@@ -12,7 +12,9 @@
 
 #include <QAtomicInt>
 #include <QMetaType>
+#include <QMutex>
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -33,6 +35,10 @@ public:
     // Thread-safe: asks the run loop to stop after the current entry.
     void requestStop() { m_stop.storeRelaxed(1); }
 
+    // Thread-safe: asks the run loop to stop filling just this playlist (and
+    // skip it if it hasn't started yet), leaving the rest of the batch running.
+    void skipPlaylist(qint64 playlistId);
+
 public slots:
     // Builds the (exclude-filtered) index once, then resolves every job's entries
     // in order, emitting itemMatched per entry and playlistFinished per job.
@@ -47,12 +53,15 @@ signals:
 
 private:
     bool ensureIndex();
+    bool isSkipped(qint64 playlistId);
 
     QString m_dbPath;
     Search::SearchIndex m_index;
     bool m_indexBuilt = false;
     Database *m_db = nullptr;  // opened on the worker thread
     QAtomicInt m_stop{0};
+    QMutex m_skipMutex;
+    QSet<qint64> m_skip;  // playlists to stop filling individually
 };
 
 Q_DECLARE_METATYPE(DropImportJob)

@@ -39,6 +39,18 @@ bool PlaylistDropImportWorker::ensureIndex()
     return true;
 }
 
+void PlaylistDropImportWorker::skipPlaylist(qint64 playlistId)
+{
+    QMutexLocker lock(&m_skipMutex);
+    m_skip.insert(playlistId);
+}
+
+bool PlaylistDropImportWorker::isSkipped(qint64 playlistId)
+{
+    QMutexLocker lock(&m_skipMutex);
+    return m_skip.contains(playlistId);
+}
+
 void PlaylistDropImportWorker::run(QVector<DropImportJob> jobs)
 {
     if (!ensureIndex()) {
@@ -47,15 +59,26 @@ void PlaylistDropImportWorker::run(QVector<DropImportJob> jobs)
     }
     bool interrupted = false;
     for (const DropImportJob &job : jobs) {
-        for (const PlaylistImport::ImportEntry &entry : job.entries) {
-            if (m_stop.loadRelaxed() != 0) {
-                interrupted = true;
-                break;
+        if (m_stop.loadRelaxed() != 0) {
+            interrupted = true;
+            break;
+        }
+        if (!isSkipped(job.playlistId)) {
+            for (const PlaylistImport::ImportEntry &entry : job.entries) {
+                if (m_stop.loadRelaxed() != 0) {
+                    interrupted = true;
+                    break;
+                }
+                // Per-playlist stop: drop the rest of this playlist's entries but
+                // keep the global run going for the other jobs.
+                if (isSkipped(job.playlistId)) {
+                    break;
+                }
+                PlaylistImportMatch match;
+                match.entry = entry;
+                match.outcome = PlaylistMatcher::match(m_index, entry);
+                emit itemMatched(job.playlistId, match);
             }
-            PlaylistImportMatch match;
-            match.entry = entry;
-            match.outcome = PlaylistMatcher::match(m_index, entry);
-            emit itemMatched(job.playlistId, match);
         }
         emit playlistFinished(job.playlistId);
         if (interrupted) {

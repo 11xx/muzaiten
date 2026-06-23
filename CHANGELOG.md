@@ -2,7 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Drag-dropping playlist files now queues onto an import already in progress
+  instead of being rejected — drop more files at any time and they fill in turn.
+- A running drop-import can be stopped per playlist via a transient "Stop import"
+  right-click action; deleting an importing playlist also interrupts its import.
+- The playlist view shows a dashed "Drop to import" overlay while an importable
+  file is dragged over it, so the page's accept-drop behavior is discoverable.
+
 ### Fixed
+
+- Closing the window to the tray (or quitting) while a playlist drop-import was
+  running no longer crashes: the worker is kept alive on hide and cleanly stopped
+  and joined on quit, leaving the tracks matched so far persisted.
 
 - Shuffle now remembers playback order in both directions: after stepping back
   with Previous, Next (or auto-advance) replays the exact tracks you just

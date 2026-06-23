@@ -125,6 +125,8 @@ signals:
     void playlistFilesDropped(const QStringList &paths);
     // Esc/C-g while a background drop-import is running asks to interrupt it.
     void importInterruptRequested();
+    // Stop filling just one importing playlist (context menu / before deleting it).
+    void stopPlaylistImportRequested(qint64 playlistId);
     // Re-open the add modal pre-filled with this item's remembered query to edit
     // which track it resolves to.
     void editItemRequested(qint64 playlistId, qint64 itemId, const QString &query);
@@ -144,7 +146,10 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void changeEvent(QEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void restylePanelBorders();
@@ -233,6 +238,7 @@ private:
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     class StarRatingDelegate *m_ratingDelegate = nullptr;
     QLabel *m_header = nullptr;
+    QLabel *m_dropHint = nullptr;  // overlay shown while an importable drag hovers
     bool m_queueIsPlaylistSourced = false;
     QString m_nowPlayingPath;             // path of the currently-playing track
     qint64 m_nowPlayingPlaylistId = 0;    // playlist feeding the queue (0 if none)

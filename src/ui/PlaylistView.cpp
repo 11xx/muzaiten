@@ -707,6 +707,18 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_userSplitterSizes = {kPlaylistListDefaultWidth, kPlaylistSplitterMinimumTotal - kPlaylistListDefaultWidth};
     restylePanelBorders();
 
+    // Affordance shown only while an importable file is dragged over the view, so
+    // the user sees this page accepts the drop. Hidden (zero cost) otherwise.
+    m_dropHint = new QLabel(QStringLiteral("Drop to import as new playlist(s)"), this);
+    m_dropHint->setAlignment(Qt::AlignCenter);
+    m_dropHint->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_dropHint->setObjectName(QStringLiteral("PlaylistDropHint"));
+    m_dropHint->setStyleSheet(QStringLiteral(
+        "#PlaylistDropHint { background: rgba(0,0,0,90); color: palette(bright-text);"
+        " border: 2px dashed palette(highlight); border-radius: 8px;"
+        " font-size: 15px; font-weight: 600; }"));
+    m_dropHint->hide();
+
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
         m_currentPlaylistId = currentPlaylistId();
         m_currentQueueSnapshotId = currentQueueSnapshotId();
@@ -1601,6 +1613,13 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     QAction *deleteAction = menu.addAction(QStringLiteral("Delete"));
     deleteAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(deleteAction, &QAction::triggered, this, &PlaylistView::deleteCurrentPlaylist);
+    // Transient: only for a playlist currently being filled by a drop-import.
+    if (m_importingPlaylists.contains(m_currentPlaylistId)) {
+        QAction *stopImport = menu.addAction(QStringLiteral("Stop import"));
+        const qint64 importingId = m_currentPlaylistId;
+        connect(stopImport, &QAction::triggered, this,
+                [this, importingId]() { emit stopPlaylistImportRequested(importingId); });
+    }
     QAction *deleteSavedQueue = menu.addAction(QStringLiteral("Delete saved queue"));
     deleteSavedQueue->setEnabled(savedQueue);
     connect(deleteSavedQueue, &QAction::triggered, this, [this]() {
@@ -2204,6 +2223,11 @@ void PlaylistView::deleteCurrentPlaylist()
         != QMessageBox::Yes) {
         return;
     }
+    // Interrupt an in-flight drop-import first so the worker stops feeding items
+    // into the row we're about to delete.
+    if (m_importingPlaylists.contains(m_currentPlaylistId)) {
+        emit stopPlaylistImportRequested(m_currentPlaylistId);
+    }
     m_db->deletePlaylist(m_currentPlaylistId);
     m_currentPlaylistId = 0;
     reloadPlaylists();
@@ -2587,17 +2611,48 @@ void PlaylistView::dragEnterEvent(QDragEnterEvent *event)
 {
     if (!importableDroppedPaths(event->mimeData()).isEmpty()) {
         event->acceptProposedAction();
+        if (m_dropHint != nullptr) {
+            m_dropHint->setGeometry(rect().adjusted(6, 6, -6, -6));
+            m_dropHint->raise();
+            m_dropHint->show();
+        }
+    }
+}
+
+void PlaylistView::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (!importableDroppedPaths(event->mimeData()).isEmpty()) {
+        event->acceptProposedAction();
+    }
+}
+
+void PlaylistView::dragLeaveEvent(QDragLeaveEvent *event)
+{
+    Q_UNUSED(event);
+    if (m_dropHint != nullptr) {
+        m_dropHint->hide();
     }
 }
 
 void PlaylistView::dropEvent(QDropEvent *event)
 {
+    if (m_dropHint != nullptr) {
+        m_dropHint->hide();
+    }
     const QStringList paths = importableDroppedPaths(event->mimeData());
     if (paths.isEmpty()) {
         return;
     }
     event->acceptProposedAction();
     emit playlistFilesDropped(paths);
+}
+
+void PlaylistView::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (m_dropHint != nullptr && m_dropHint->isVisible()) {
+        m_dropHint->setGeometry(rect().adjusted(6, 6, -6, -6));
+    }
 }
 
 void PlaylistView::restylePanelBorders()
