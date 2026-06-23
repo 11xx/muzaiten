@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.06.23]
+
 ### Added
 
 - Playlist items can be reordered by mouse drag, using the same single
@@ -19,6 +21,16 @@
   badge next to each result's duration.
 - Double-clicking a result in the add/edit modal confirms it, like Return.
 - The listening-history modal remembers its `Ctrl`+wheel row height.
+- A `muzaiten-import` companion CLI is installed alongside the binaries, with two
+  subcommands: `convert` (offline conversion of CSV playlist exports to the
+  import JSONL) and `youtube` (yt-dlp enrichment of a Google Takeout CSV, a
+  playlist URL, or a list of links — inputs are auto-detected by kind).
+- The playlist context menu offers "Resolve multi-matches (best guess)" when a
+  list has unresolved multi-match rows: it picks each row's top candidate and
+  marks it Approximate, flagged for a quick glance rather than a silent match.
+- The playlist add/edit modal shows a reference line above the search box for
+  what the row being edited expects — "Imported as:" while an import is
+  unresolved, "Missing track was:" for a missing row, "Editing:" otherwise.
 
 ### Changed
 
@@ -31,11 +43,15 @@
   (DSD takeover or a bit-perfect profile), not only after a DSD takeover; it
   hands the card back to PipeWire and switches to shared output. The idle
   auto-release timer now applies to bit-perfect holds too.
+- The Output profile dialog's two toggles are now labelled "Shared" and
+  "Bit-perfect" (the trailing "mode" was redundant next to a mode selector).
 
 ### Fixed
 
 - Restoring a tray-hidden instance with a bare `muzaiten` command (no arguments,
   same state root) no longer crashes; it raises the existing window.
+- The playlist add/edit search box's built-in clear button no longer overlaps
+  the right frame border.
 - The track-count badge beside a drop-import's spinner now ticks up live as
   matches stream in, instead of appearing frozen until the import finished.
 - Scrolling the tracklist with the mouse during a live drop-import no longer
