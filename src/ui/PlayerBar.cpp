@@ -11,6 +11,7 @@
 #include <QCursor>
 #include <QFileInfo>
 #include <QFont>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
@@ -645,13 +646,11 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_next = iconButton(this, QStyle::SP_MediaSkipForward, QStringLiteral("Next"));
     controls->addWidget(m_next);
 
-    auto *progressLayout = new QVBoxLayout;
-    progressLayout->setContentsMargins(4, 0, 4, 0);
-    progressLayout->setSpacing(4);
-
-    auto *metaLayout = new QHBoxLayout;
-    metaLayout->setContentsMargins(0, 0, 0, 0);
-    metaLayout->setSpacing(10);
+    auto *progressGrid = new QGridLayout;
+    progressGrid->setContentsMargins(4, 0, 4, 0);
+    progressGrid->setHorizontalSpacing(8);
+    progressGrid->setVerticalSpacing(4);
+    progressGrid->setColumnStretch(1, 1);
 
     auto *textLayout = new QVBoxLayout;
     textLayout->setContentsMargins(0, 0, 0, 0);
@@ -668,37 +667,31 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_subtitle->setTextInteractionFlags(Qt::NoTextInteraction);
     m_subtitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     textLayout->addWidget(m_subtitle);
-    metaLayout->addLayout(textLayout, 1);
+    progressGrid->addLayout(textLayout, 0, 0, 1, 2);
 
     auto *rating = new RatingStrip(this);
     rating->ratingChanged = [this](int value) {
         emit currentTrackRatingChanged(value);
     };
     m_rating = rating;
-    metaLayout->addWidget(m_rating, 0, Qt::AlignVCenter);
-    progressLayout->addLayout(metaLayout);
-
-    auto *timeline = new QHBoxLayout;
-    timeline->setContentsMargins(0, 0, 0, 0);
-    timeline->setSpacing(8);
+    progressGrid->addWidget(m_rating, 0, 2, Qt::AlignVCenter);
 
     m_elapsed = new QLabel(QStringLiteral("0:00"), this);
     m_elapsed->setMinimumWidth(42);
     m_elapsed->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    timeline->addWidget(m_elapsed);
+    progressGrid->addWidget(m_elapsed, 1, 0);
 
     m_progress = new ClickSeekSlider(Qt::Horizontal, this);
     m_progress->setRange(0, 0);
     m_progress->setEnabled(false);
-    timeline->addWidget(m_progress, 1);
+    progressGrid->addWidget(m_progress, 1, 1);
 
     m_duration = new QLabel(QStringLiteral("0:00"), this);
     m_duration->setMinimumWidth(42);
     m_duration->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    timeline->addWidget(m_duration);
+    progressGrid->addWidget(m_duration, 1, 2);
 
-    progressLayout->addLayout(timeline);
-    controls->addLayout(progressLayout, 1);
+    controls->addLayout(progressGrid, 1);
 
     auto *volume = new VolumeButton(this);
     volume->volumeChanged = [this](int value) {
