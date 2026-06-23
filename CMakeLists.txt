@@ -329,6 +329,13 @@ include(GNUInstallDirs)
 install(TARGETS muzaiten muzaitenctl
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+# The standalone playlist-import helper (convert/youtube subcommands). Deployed
+# to bin/ alongside the binaries so it shares the muzaiten* namespace and turns
+# up under `muzaiten<Tab>`. PROGRAMS (not FILES) preserves its executable bit; a
+# pure Python single-file tool, so no build target — just copied as-is.
+install(PROGRAMS tools/playlist-import/muzaiten-import
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
 install(FILES packaging/org.11xx.muzaiten.desktop
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications
 )
