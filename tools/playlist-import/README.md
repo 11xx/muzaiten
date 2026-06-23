@@ -67,16 +67,27 @@ metadata with `yt-dlp` and emits the same JSONL. It is a separate subcommand so
 `convert` keeps its offline guarantee; this one is slow, rate-limited, cached,
 and meant to be run interactively.
 
-Three input modes (combine freely; each input becomes one `.jsonl`):
+Inputs are **positional and auto-detected** — mix any number freely. Each is
+classified by what it is, not by a flag:
 
-- `--takeout PATH` — Google Takeout YouTube playlist CSV(s) (the primary use):
-  the `Video ID,<timestamp>` table or localized `ID do vídeo,Horário da adição`,
-  with or without a playlist-metadata preamble. Per-video timestamps become
-  `addedAt`.
-- `--playlist URL` — a normal YouTube / YouTube Music playlist link, enumerated
-  with `yt-dlp --flat-playlist`. This lets the app's internal YouTube playlist
-  parsing be superseded by calling this subcommand and importing its JSONL.
-- `--links FILE` — a text file of YouTube video URLs/ids, one per line.
+- **Takeout CSV** (the primary use) — a file (or a directory of them) carrying
+  the Google Takeout header: the `Video ID,<timestamp>` table or localized
+  `ID do vídeo,Horário da adição`, with or without a playlist-metadata preamble.
+  Per-video timestamps become `addedAt`. → one `.jsonl` per CSV.
+- **playlist URL** — a YouTube / YouTube Music link with a `list=` query or
+  `/playlist` path, enumerated with `yt-dlp --flat-playlist`. This lets the
+  app's internal YouTube playlist parsing be superseded by importing the JSONL.
+  → one `.jsonl` per playlist.
+- **video URL/id** — a single `watch`/`youtu.be`/`shorts` URL or a bare 11-char
+  id. All loose videos on the command line are grouped → one `youtube-videos.jsonl`.
+- **links file** — a text file of video URLs/ids, one per line (`#` comments and
+  blank lines ignored). → one `.jsonl` per file.
+
+Detection is unambiguous (path vs URL; a Takeout header vs not; `list=` vs not).
+The `--takeout` / `--playlist` / `--video` / `--links` flags are optional
+**filters**: pass one or more to keep only inputs of those kinds (e.g.
+`--playlist` skips loose videos and files); with none, every detected kind is
+processed. A filtered-out playlist URL is never fetched.
 
 A YouTube Music `track`/`artist`/`album` is used when present; otherwise the
 title is split on `Artist - Title` and an `<Artist> - Topic` channel is
@@ -85,10 +96,13 @@ recognised. Unavailable/deleted videos (yt-dlp placeholder titles) are skipped.
 rate-limits fetches; `--dry-run` parses inputs and lists ids without any network.
 
 ```sh
-tools/playlist-import/muzaiten-import youtube --out ./converted \
-  --takeout "./Takeout/YouTube and YouTube Music/playlists" --cache ./yt-cache.json
-tools/playlist-import/muzaiten-import youtube --out ./converted \
-  --playlist "https://www.youtube.com/playlist?list=PL..." --sleep 1.5
+# auto-detected mix: a Takeout dir, a playlist URL, a links file, a loose video
+tools/playlist-import/muzaiten-import youtube --out ./converted --cache ./yt-cache.json \
+  "./Takeout/YouTube and YouTube Music/playlists" \
+  "https://www.youtube.com/playlist?list=PL..." \
+  ./links.txt https://youtu.be/dQw4w9WgXcQ
+# keep only the playlists from a mixed dump
+tools/playlist-import/muzaiten-import youtube --out ./converted --playlist ./dump.txt --sleep 1.5
 ```
 
 ## `convert` — usage
