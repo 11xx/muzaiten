@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Shuffle now remembers playback order in both directions: after stepping back
+  with Previous, Next (or auto-advance) replays the exact tracks you just
+  retraced instead of re-rolling, and only resumes fresh randomness once the
+  remembered trail is spent. Picking a track, reordering, or editing the queue
+  still clears the trail.
+- Under shuffle, the rows between the current track and a higher row played
+  earlier are no longer mislabelled as "play next": any shuffle jump (forward,
+  backward, or repeat-all wrap) now collapses the play-next region.
+- The right sidebar's queue / track-info / album-art split is persisted reliably:
+  sizes are saved only from real user drags (never transient or panel-hidden
+  distributions), so the track-info pane's height survives restarts and toggles.
+- The queue tables (full-screen and the right-sidebar panel) no longer draw a
+  faint rounded outline on the cell you last clicked.
+
 ## [2026.06.23]
 
 ### Added
