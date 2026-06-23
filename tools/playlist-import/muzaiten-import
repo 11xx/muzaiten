@@ -19,9 +19,10 @@ offline guarantee.
 
 Usage:
     muzaiten-import convert --src ./exports --out ./converted-playlists
-    muzaiten-import youtube --out ./converted --takeout ./Takeout/playlists
-    muzaiten-import youtube --out ./converted --playlist "https://www.youtube.com/playlist?list=PL..."
-    muzaiten-import youtube --out ./converted --links ./links.txt --cache ./yt-cache.json
+    muzaiten-import youtube --out ./converted ./Takeout/playlists
+    muzaiten-import youtube --out ./converted "https://www.youtube.com/playlist?list=PL..."
+    muzaiten-import youtube --out ./converted ./links.txt https://youtu.be/dQw4w9WgXcQ
+    muzaiten-import youtube --out ./converted --playlist ./mixed-dump.txt   # keep only playlists
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CONVERT_DESC = """\
@@ -75,18 +77,25 @@ subcommand fills that gap: it resolves YouTube metadata with yt-dlp and emits
 the same JSONL. It needs the network, is slow and rate-limited, and caches
 results, so it is meant to be run interactively.
 
-Three input modes (combine freely; each input becomes one .jsonl):
+Inputs are positional and auto-detected; mix freely. Each is classified as:
 
-* --takeout PATH   Google Takeout YouTube playlist CSV(s) -- the primary use.
-  The official Takeout format is a "Video ID, <timestamp>" table (English) or
-  "ID do video, Horario da adicao" (localized), optionally preceded by a
-  playlist-metadata preamble. Per-video added timestamps become addedAt.
-* --playlist URL   A normal YouTube / YouTube Music playlist link. The video
-  list is read with yt-dlp --flat-playlist and each entry enriched. This is the
-  path that lets the app's internal YouTube playlist parsing be superseded by
-  simply calling this tool and importing the JSONL it produces.
-* --links PATH     A text file of YouTube video URLs/IDs, one per line
-  (# comments and blanks ignored).
+* Takeout CSV   a file (or directory of them) with the Google Takeout header --
+  "Video ID, <timestamp>" (English) or "ID do video, Horario da adicao"
+  (localized), with or without a playlist-metadata preamble. Per-video added
+  timestamps become addedAt. This is the primary use. -> one .jsonl per CSV.
+* playlist URL  a YouTube / YouTube Music link with a list= query or /playlist
+  path. The video list is read with yt-dlp --flat-playlist and each entry
+  enriched -- this is the path that lets the app's internal YouTube playlist
+  parsing be superseded by importing the JSONL. -> one .jsonl per playlist.
+* video URL/id  a single watch/youtu.be/shorts URL or a bare 11-char id. All
+  loose videos on the command line are grouped -> one youtube-videos.jsonl.
+* links file    a text file of video URLs/IDs, one per line (# comments and
+  blanks ignored). -> one .jsonl per file.
+
+Detection is unambiguous (path vs URL; a Takeout header vs not; list= vs not).
+The --playlist/--video/--takeout/--links flags are optional *filters*: pass one
+or more to keep only inputs of those kinds (e.g. --playlist skips loose videos);
+with none, every detected kind is processed.
 
 Metadata mapping: a YouTube Music track/artist/album is used when present;
 otherwise the video title is split on "Artist - Title" and an "<Artist> - Topic"
@@ -660,6 +669,18 @@ def ytdlp_json(target: str, flat: bool = False) -> dict | None:
         return None
 
 
+def looks_like_playlist(token: str) -> bool:
+    """A YouTube/YT-Music URL carrying a list= query or a /playlist path."""
+    try:
+        parsed = urlparse(token)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if not (host.endswith("youtube.com") or host == "youtu.be"):
+        return False
+    return "list" in parse_qs(parsed.query) or parsed.path.startswith("/playlist")
+
+
 def parse_playlist_url(url: str) -> tuple[str, list[tuple[str, int | None]]] | None:
     info = ytdlp_json(url, flat=True)
     if not info:
@@ -756,31 +777,65 @@ def write_jsonl(out_dir: Path, name: str, comment: str, records: list[dict]) -> 
     return path
 
 
-def iter_inputs(args):
-    """Yield (kind, label, provenance, (name, items)) for every input."""
-    for spec in args.takeout or []:
-        path = Path(spec).expanduser()
-        files = sorted(path.rglob("*.csv")) if path.is_dir() else [path]
-        for file in files:
-            parsed = parse_takeout(file)
+def iter_inputs(inputs, allowed):
+    """Auto-classify each positional input and yield
+    (kind, label, provenance, (name, items)). `allowed` is the set of kinds to
+    keep; classification is cheap and runs before any network enumeration, so a
+    filtered-out playlist URL is never fetched. Loose video URLs/ids are grouped
+    into a single synthetic input."""
+    loose_videos: list[tuple[str, int | None]] = []
+    for token in inputs:
+        path = Path(token).expanduser()
+        if path.is_dir():                                    # a directory of Takeout CSVs
+            if "takeout" not in allowed:
+                continue
+            for file in sorted(path.rglob("*.csv")):
+                parsed = parse_takeout(file)
+                if parsed:
+                    yield "takeout", file.name, f"Source: YouTube (Google Takeout)\nFile: {file.name}", parsed
+                else:
+                    print(f"  - skipped (not a Takeout playlist CSV): {file.name}", file=sys.stderr)
+            continue
+        if path.is_file():                                   # Takeout CSV or links file?
+            parsed = parse_takeout(path)                     # header present -> Takeout
+            if parsed is not None:
+                if "takeout" in allowed:
+                    yield "takeout", path.name, f"Source: YouTube (Google Takeout)\nFile: {path.name}", parsed
+                continue
+            parsed = parse_links(path)                       # else any extractable links
+            if parsed is not None:
+                if "links" in allowed:
+                    yield "links", path.name, f"Source: YouTube links\nFile: {path.name}", parsed
+                continue
+            print(f"  - skipped (no Takeout header or video links): {path.name}", file=sys.stderr)
+            continue
+        if looks_like_playlist(token):                       # a playlist URL
+            if "playlist" not in allowed:
+                continue
+            parsed = parse_playlist_url(token)
             if parsed:
-                yield "takeout", file.name, f"Source: YouTube (Google Takeout)\nFile: {file.name}", parsed
-            else:
-                print(f"  - skipped (not a Takeout playlist CSV): {file.name}", file=sys.stderr)
-    for url in args.playlist or []:
-        parsed = parse_playlist_url(url)
-        if parsed:
-            yield "playlist", url, f"Source: YouTube playlist\nURL: {url}", parsed
-    for spec in args.links or []:
-        path = Path(spec).expanduser()
-        parsed = parse_links(path)
-        if parsed:
-            yield "links", path.name, f"Source: YouTube links\nFile: {path.name}", parsed
+                yield "playlist", token, f"Source: YouTube playlist\nURL: {token}", parsed
+            continue
+        vid = extract_id(token)                              # a single video URL/id
+        if vid:
+            if "video" in allowed:
+                loose_videos.append((vid, None))
+            continue
+        print(f"  ! unrecognized input (not a file, playlist URL, or video URL/id): {token}",
+              file=sys.stderr)
+    if loose_videos and "video" in allowed:
+        yield "video", f"{len(loose_videos)} loose video(s)", "Source: YouTube videos", \
+            ("youtube-videos", loose_videos)
 
 
 def cmd_youtube(args) -> int:
-    if not (args.takeout or args.playlist or args.links):
-        sys.exit("error: provide at least one of --takeout / --playlist / --links")
+    if not args.inputs:
+        sys.exit("error: provide at least one input "
+                 "(playlist URL, video URL/id, Takeout CSV, or links file)")
+    # The kind flags are filters: any set => keep only those kinds; none => all.
+    filters = {kind for kind, on in (("playlist", args.playlist), ("video", args.video),
+                                     ("takeout", args.takeout), ("links", args.links)) if on}
+    allowed = filters or {"playlist", "video", "takeout", "links"}
 
     cache: dict = {}
     if args.cache and args.cache.exists():
@@ -792,7 +847,7 @@ def cmd_youtube(args) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     total_playlists = total_items = total_skipped = total_fetched = 0
-    for kind, label, provenance, (name, items) in iter_inputs(args):
+    for kind, label, provenance, (name, items) in iter_inputs(args.inputs, allowed):
         print(f"  {label}  [{kind}]  ({len(items)} videos)")
         records, skipped, fetched = enrich(items, cache, args.sleep, args.dry_run, args.limit)
         total_skipped += skipped
@@ -840,13 +895,18 @@ def main(argv=None) -> int:
     yt = sub.add_parser(
         "youtube", help="enrich YouTube (Takeout/playlist/links) to JSONL via yt-dlp",
         description=YOUTUBE_DESC, formatter_class=argparse.RawDescriptionHelpFormatter)
+    yt.add_argument("inputs", nargs="*", metavar="INPUT",
+                    help="any mix of: a playlist URL, a video URL/id, a Google Takeout CSV "
+                         "(file or directory), or a links file — each auto-detected")
     yt.add_argument("--out", required=True, type=Path, help="output directory for .jsonl")
-    yt.add_argument("--takeout", action="append", metavar="PATH",
-                    help="Google Takeout playlist CSV or a directory of them")
-    yt.add_argument("--playlist", action="append", metavar="URL",
-                    help="a YouTube / YouTube Music playlist URL")
-    yt.add_argument("--links", action="append", metavar="FILE",
-                    help="a text file of YouTube video URLs/IDs, one per line")
+    yt.add_argument("--takeout", action="store_true",
+                    help="filter: only process Google Takeout CSV inputs")
+    yt.add_argument("--playlist", action="store_true",
+                    help="filter: only process playlist-URL inputs (skip loose videos/files)")
+    yt.add_argument("--video", action="store_true",
+                    help="filter: only process single video URL/id inputs")
+    yt.add_argument("--links", action="store_true",
+                    help="filter: only process links-file inputs")
     yt.add_argument("--cache", type=Path,
                     help="JSON cache of resolved metadata (read + updated); makes re-runs cheap")
     yt.add_argument("--sleep", type=float, default=1.0,
