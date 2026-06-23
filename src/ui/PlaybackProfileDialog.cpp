@@ -66,7 +66,7 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     // configuration of both modes at a glance instead of swapping a single form.
     auto *modesRow = new QHBoxLayout;
 
-    m_sharedGroup = new QGroupBox(QStringLiteral("Shared mode"), this);
+    m_sharedGroup = new QGroupBox(QStringLiteral("Shared"), this);
     m_sharedGroup->setCheckable(true);
     m_sharedGroup->setToolTip(
         QStringLiteral("Mix with other apps through PipeWire/PulseAudio."));
@@ -98,7 +98,7 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
 
     modesRow->addWidget(m_sharedGroup, 1);
 
-    m_bitPerfectGroup = new QGroupBox(QStringLiteral("Bit-perfect mode"), this);
+    m_bitPerfectGroup = new QGroupBox(QStringLiteral("Bit-perfect"), this);
     m_bitPerfectGroup->setCheckable(true);
     m_bitPerfectGroup->setToolTip(
         QStringLiteral("Open a chosen ALSA device directly for unmodified, exclusive output."));
