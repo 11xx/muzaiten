@@ -21,19 +21,14 @@ The JSONL contract is [documented here](../../docs/playlist-import-jsonl.md).
   URL, and writes `addedAt` only when `addedDate` is a valid offset-bearing
   ISO-8601 timestamp. Empty or invalid source dates remain absent rather than
   being replaced with conversion time.
-- Rdio CSV exports: comma-delimited `Name`, `Artist`, `Album`, and `Track Number`
-  columns. A matching Rdio XSPF sidecar is used only after its ordered
-  title/artist sequence exactly matches the CSV; it supplies ISRCs and durations.
-  XSPF durations are milliseconds. Values that are implausibly long but exactly
-  1,000× a plausible 1-second-to-2-hour track duration are repaired; other
-  implausible values are omitted and reported.
+- Rdio CSV exports: comma-delimited `Name`, `Artist`, `Album`, `Track Number`.
 - SoundCloud CSV exports: a matching XML sidecar can supply numeric track IDs,
   retained as `soundcloud:<id>` external identifiers.
 - muzaiten central authoritatives: a file named `<service>--gen-N--<kind>` (e.g.
   `spotify--gen-2--authoritative`, `spotify--gen-4--a-z`) is parsed by its CSV
   dialect like any other input; the name only sets a tidy playlist name
   ("Spotify Gen 2") and a `muzaiten central authoritative` provenance line. The
-  Spotify/Rdio central authoritatives are Soundiiz-dialect and convert directly.
+  Spotify central authoritatives are Soundiiz-dialect and convert directly.
   The YouTube `mus--gen-N` central files are `Video ID`/timestamp lists with no
   title and are skipped — they require metadata enrichment (e.g. yt-dlp) that
   this offline tool does not perform.
