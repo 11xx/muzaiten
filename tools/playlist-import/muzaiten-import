@@ -766,9 +766,11 @@ def enrich(items, cache, sleep, dry_run, limit):
     return records, skipped, fetched
 
 
-def write_jsonl(out_dir: Path, name: str, comment: str, records: list[dict]) -> Path:
-    safe = re.sub(r"[\\/:*?\"<>|]+", "_", name).strip() or "playlist"
-    path = out_dir / f"{safe}.jsonl"
+def write_jsonl(out_dir: Path, name: str, comment: str, records: list[dict], used: set) -> Path:
+    # Reuse convert's collision-avoider so a second same-named input (e.g. two
+    # playlists titled "Mix") gets a " (2)" suffix instead of overwriting the
+    # first — fetching is network-expensive, so never silently clobber it.
+    path = unique_out_path(out_dir, name, used)
     with path.open("w", encoding="utf-8") as fh:
         fh.write(json.dumps({"playlist": {"name": name, "comment": comment}},
                             ensure_ascii=False) + "\n")
@@ -846,6 +848,7 @@ def cmd_youtube(args) -> int:
             print(f"  ! ignoring unreadable cache {args.cache}", file=sys.stderr)
 
     args.out.mkdir(parents=True, exist_ok=True)
+    used: set = set()
     total_playlists = total_items = total_skipped = total_fetched = 0
     for kind, label, provenance, (name, items) in iter_inputs(args.inputs, allowed):
         print(f"  {label}  [{kind}]  ({len(items)} videos)")
@@ -854,7 +857,7 @@ def cmd_youtube(args) -> int:
         total_fetched += fetched
         if args.dry_run:
             continue
-        out_path = write_jsonl(args.out, name, provenance, records)
+        out_path = write_jsonl(args.out, name, provenance, records, used)
         total_playlists += 1
         total_items += len(records)
         print(f"    -> {out_path.name}  ({len(records)} items, {skipped} skipped)")
