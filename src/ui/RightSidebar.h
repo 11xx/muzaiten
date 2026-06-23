@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QList>
 #include <QString>
 
 #include "core/Track.h"
@@ -76,6 +77,10 @@ private:
     QLabel *m_albumArt = nullptr;
     TrackInfoPanel *m_trackInfoPanel = nullptr;
     QSplitter *m_splitter = nullptr;
+    // Sizes persisted to settings — only updated by a real splitterMoved (user
+    // drag), never by programmatic setSizes() or transient/relaid-out
+    // distributions. See SplitterPersistence.h.
+    QList<int> m_userSplitterSizes;
     QVector<Track> m_tracks;
     int m_queueHoveredRow = -1;
     int m_queueDropIndicatorRow = -1;
