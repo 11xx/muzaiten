@@ -1379,6 +1379,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
     connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
     connect(m_playlistView, &PlaylistView::playlistFilesDropped, this, &MainWindow::importDroppedFiles);
+    connect(m_playlistView, &PlaylistView::stopPlaylistImportRequested, this, &MainWindow::stopPlaylistImport);
     connect(m_playlistView, &PlaylistView::importInterruptRequested, this, &MainWindow::cancelDropImport);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
     connect(m_playlistView, &PlaylistView::resolveMultiMatchesRequested, this, &MainWindow::resolvePlaylistMultiMatches);
@@ -1609,6 +1610,18 @@ MainWindow::~MainWindow()
             m_mpdImportThread->wait();
         }
     }
+    if (m_dropImportThread != nullptr) {
+        // requestStop() ends matching after the current (CPU-bound, prompt) entry,
+        // so the worker never outlives the window and emits into a freed DB
+        // connection. Partial matches are already persisted via addItem.
+        if (m_dropImportWorker != nullptr) {
+            m_dropImportWorker->requestStop();
+        }
+        m_dropImportThread->quit();
+        if (!m_dropImportThread->wait(5000)) {
+            m_dropImportThread->wait();
+        }
+    }
 }
 
 void MainWindow::openLibraryFolder()
@@ -1631,7 +1644,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
         // Keep the window alive while a scan, fill, or MPD import is in
         // flight — those pipelines live in MainWindow and report into
         // window widgets.  Fall back to plain hide() so playback continues.
-        if (m_scanThread != nullptr || m_fillThread != nullptr || m_mpdImportThread != nullptr) {
+        if (m_scanThread != nullptr || m_fillThread != nullptr || m_mpdImportThread != nullptr
+            || m_dropImportThread != nullptr) {
             hide();
             event->ignore();
             return;
@@ -5869,12 +5883,6 @@ void MainWindow::importDroppedFiles(const QStringList &paths)
     if (m_mainView != MainView::Playlist) {
         return;
     }
-    if (m_dropImportWorker != nullptr) {
-        statusBar()->showMessage(
-            QStringLiteral("An import is already running — press Esc to interrupt it first."), 4000);
-        return;
-    }
-
     // Parse on the UI thread (cheap) and create one empty placeholder playlist per
     // file *now*, so they appear immediately; the slow matching runs in the worker
     // and fills each placeholder live.
@@ -5911,6 +5919,18 @@ void MainWindow::importDroppedFiles(const QStringList &paths)
         m_playlistView->setPlaylistImporting(job.playlistId, true);
     }
     m_playlistView->selectPlaylist(jobs.first().playlistId);
+
+    // An import is already running — auto-matching is linear, so queue these new
+    // placeholders onto it instead of rejecting the drop. finishDropImport drains
+    // the queue into the same worker (reusing its cached match index).
+    if (m_dropImportWorker != nullptr) {
+        m_pendingDropJobs.append(jobs);
+        statusBar()->showMessage(
+            QStringLiteral("Queued %1 more playlist(s) onto the running import…").arg(jobs.size()),
+            0);
+        return;
+    }
+
     statusBar()->showMessage(
         QStringLiteral("Importing %1 playlist(s)… matching in the background (Esc to interrupt)")
             .arg(jobs.size()),
@@ -5942,9 +5962,29 @@ void MainWindow::onDropImportItemMatched(qint64 playlistId, const PlaylistImport
     if (m_playlistDb == nullptr) {
         return;
     }
+    // Drop late matches for a playlist whose import was stopped or deleted — the
+    // worker may emit a few more before it notices the skip flag.
+    if (!m_dropImportPlaylists.contains(playlistId)) {
+        return;
+    }
     const PlaylistItem item = playlistItemFromImportMatch(match);
     m_playlistDb->addItem(playlistId, item);
     m_playlistView->refreshImportingPlaylist(playlistId);
+}
+
+void MainWindow::stopPlaylistImport(qint64 playlistId)
+{
+    // Queued but not yet started: just drop its job so the worker never sees it.
+    m_pendingDropJobs.erase(
+        std::remove_if(m_pendingDropJobs.begin(), m_pendingDropJobs.end(),
+                       [playlistId](const DropImportJob &job) { return job.playlistId == playlistId; }),
+        m_pendingDropJobs.end());
+    // In flight: ask the worker to stop filling just this one.
+    if (m_dropImportWorker != nullptr) {
+        m_dropImportWorker->skipPlaylist(playlistId);
+    }
+    m_dropImportPlaylists.remove(playlistId);
+    m_playlistView->setPlaylistImporting(playlistId, false);
 }
 
 void MainWindow::onDropImportPlaylistFinished(qint64 playlistId)
@@ -5964,6 +6004,18 @@ void MainWindow::cancelDropImport()
 
 void MainWindow::finishDropImport(bool interrupted)
 {
+    // Drops that landed while this run was matching were queued; feed them to the
+    // same worker (its match index is already built) instead of tearing down.
+    if (!interrupted && !m_pendingDropJobs.isEmpty() && m_dropImportWorker != nullptr) {
+        QVector<DropImportJob> next = std::move(m_pendingDropJobs);
+        m_pendingDropJobs.clear();
+        statusBar()->showMessage(
+            QStringLiteral("Importing %1 more playlist(s)… (Esc to interrupt)").arg(next.size()), 0);
+        QMetaObject::invokeMethod(m_dropImportWorker, "run", Qt::QueuedConnection,
+                                  Q_ARG(QVector<DropImportJob>, next));
+        return;  // worker/thread stay alive
+    }
+    m_pendingDropJobs.clear();
     // Clear any spinners still showing (an interrupt skips the rest).
     for (const qint64 id : m_dropImportPlaylists) {
         m_playlistView->setPlaylistImporting(id, false);

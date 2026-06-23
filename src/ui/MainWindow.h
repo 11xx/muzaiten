@@ -21,6 +21,7 @@ class PlaylistImportDialog;
 class PlaylistView;
 struct PlaylistImportMatch;
 class PlaylistDropImportWorker;
+struct DropImportJob;
 namespace PlaylistImport { struct ImportHeader; }
 class SettingsStore;
 class AlbumGrid;
@@ -348,6 +349,7 @@ private:
     void cancelDropImport();
     void onDropImportItemMatched(qint64 playlistId, const PlaylistImportMatch &match);
     void onDropImportPlaylistFinished(qint64 playlistId);
+    void stopPlaylistImport(qint64 playlistId);
     void finishDropImport(bool interrupted);
     QString uniquePlaylistName(const QString &base) const;
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
@@ -451,6 +453,7 @@ private:
     QThread *m_dropImportThread = nullptr;
     PlaylistDropImportWorker *m_dropImportWorker = nullptr;
     QSet<qint64> m_dropImportPlaylists;  // placeholders still being filled
+    QVector<DropImportJob> m_pendingDropJobs;  // drops queued onto a running import
     MprisService *m_mpris = nullptr;
     IpcServer *m_ipc = nullptr;
     bool m_ratingTagSyncRunning = false;
