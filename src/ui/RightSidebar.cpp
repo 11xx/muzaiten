@@ -4,6 +4,7 @@
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumArtView.h"
 #include "ui/QueueStore.h"
+#include "ui/SplitterPersistence.h"
 #include "ui/trackinfo/TrackInfoPanel.h"
 
 #include <QEvent>
@@ -17,6 +18,21 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+
+namespace {
+// Per-pane height floors for the vertical splitter (queue / track info / album
+// art), plus a floor for the total. Distributions below these are degenerate
+// (one pane collapsed to ~0, or the panel laid out before it has a real height)
+// and must never be persisted or restored. See SplitterPersistence.h.
+constexpr int kQueuePaneMinimumHeight = 60;
+constexpr int kTrackInfoPaneMinimumHeight = 48;
+constexpr int kAlbumArtPaneMinimumHeight = 120;
+constexpr int kRightSidebarSplitterMinimumTotal = 300;
+const QList<int> kRightSidebarPaneMinimums = {kQueuePaneMinimumHeight,
+                                              kTrackInfoPaneMinimumHeight,
+                                              kAlbumArtPaneMinimumHeight};
+const QList<int> kRightSidebarDefaultSizes = {519, 152, 286};
+}  // namespace
 
 
 RightSidebar::RightSidebar(QWidget *parent)
@@ -63,10 +79,20 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 0);
     m_splitter->setStretchFactor(2, 0);
-    m_splitter->setSizes({519, 152, 286});
+    m_splitter->setSizes(kRightSidebarDefaultSizes);
+    m_userSplitterSizes = kRightSidebarDefaultSizes;
     setTrackInfo({});
 
     connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
+        // Only a real drag updates the persisted sizes, and only when the live
+        // distribution is sane: programmatic setSizes() emits no splitterMoved,
+        // and a transient layout (tiny window, hidden track-info pane) must not
+        // clobber the user-tuned three-pane sizes.
+        const QList<int> live = m_splitter->sizes();
+        if (SplitterPersistence::splitterSizesAreStable(live, kRightSidebarPaneMinimums,
+                                                        kRightSidebarSplitterMinimumTotal)) {
+            m_userSplitterSizes = live;
+        }
         emit viewSettingsChanged();
     });
 }
@@ -223,7 +249,16 @@ void RightSidebar::setTrackInfo(const Track &track)
 
 void RightSidebar::setTrackInfoVisible(bool visible)
 {
+    const bool wasHidden = m_trackInfoPanel->isHidden();
     m_trackInfoPanel->setVisible(visible);
+    // Re-showing a hidden pane: QSplitter would otherwise hand it an arbitrary
+    // slice. Restore the last user-tuned three-pane distribution so the queue /
+    // track-info / album-art boundaries land where the user left them.
+    if (visible && wasHidden
+        && SplitterPersistence::splitterSizesAreStable(m_userSplitterSizes, kRightSidebarPaneMinimums,
+                                                       kRightSidebarSplitterMinimumTotal)) {
+        m_splitter->setSizes(m_userSplitterSizes);
+    }
 }
 
 void RightSidebar::configureTrackInfoPanel(QWidget *parent)
@@ -239,11 +274,10 @@ QString RightSidebar::viewSettingsJson() const
     for (auto it = info.begin(); it != info.end(); ++it) {
         root.insert(it.key(), it.value());
     }
-    QJsonArray splitterSizes;
-    for (int size : m_splitter->sizes()) {
-        splitterSizes.append(size);
-    }
-    root.insert(QStringLiteral("splitter"), splitterSizes);
+    // Persist the last user-tuned sizes, never the live ones: a save can be
+    // triggered (track-info/queue settings changes) while the splitter is in a
+    // transient or track-info-hidden distribution, which would corrupt the layout.
+    root.insert(QStringLiteral("splitter"), SplitterPersistence::splitterSizesToJson(m_userSplitterSizes));
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
@@ -255,15 +289,24 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
 
     const QJsonObject root = QJsonDocument::fromJson(json.toUtf8()).object();
     m_queueTable->applyViewSettingsJson(json);
-    const QJsonArray splitter = root.value(QStringLiteral("splitter")).toArray();
-    QList<int> sizes;
-    for (const QJsonValue &value : splitter) {
-        sizes.push_back(value.toInt());
-    }
+    QList<int> sizes = SplitterPersistence::splitterSizesFromJson(root.value(QStringLiteral("splitter")).toArray());
     if (sizes.size() == 2) {
-        m_splitter->setSizes({sizes.value(0), 150, sizes.value(1)});
-    } else if (sizes.size() == 3) {
-        m_splitter->setSizes(sizes);
+        // Legacy two-pane layout (queue + album art) from before the track-info
+        // pane existed; insert a default middle size so it restores as three.
+        sizes = {sizes.value(0), 150, sizes.value(1)};
+    } else if (sizes.size() == 3 && sizes.at(1) < kTrackInfoPaneMinimumHeight) {
+        // A layout saved while the track-info pane was hidden records its size as
+        // ~0. Substitute the default so the stability check passes and the queue /
+        // album-art ratio survives instead of resetting to the built-in defaults.
+        sizes[1] = 150;
+    }
+    // Restore only a sane distribution; an unstable/missing one leaves the
+    // constructor defaults in place. Keep the persisted sizes in sync so a later
+    // save doesn't overwrite them with the defaults.
+    if (SplitterPersistence::restoreSplitterIfStable(m_splitter,
+            SplitterPersistence::splitterSizesToJson(sizes),
+            kRightSidebarPaneMinimums, kRightSidebarSplitterMinimumTotal)) {
+        m_userSplitterSizes = sizes;
     }
     setTrackInfoVisible(root.value(QStringLiteral("showTrackInfo")).toBool(true));
     m_trackInfoPanel->applySettings(root);
@@ -272,7 +315,8 @@ void RightSidebar::applyViewSettingsJson(const QString &json)
 void RightSidebar::resetViewSettings()
 {
     m_queueTable->resetViewSettings();
-    m_splitter->setSizes({519, 152, 286});
+    m_splitter->setSizes(kRightSidebarDefaultSizes);
+    m_userSplitterSizes = kRightSidebarDefaultSizes;
     setTrackInfoVisible(true);
     m_trackInfoPanel->resetToDefaults();
     emit viewSettingsChanged();
