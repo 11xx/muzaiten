@@ -154,6 +154,14 @@ private:
     void applyAutoNext(const AutoNext &next);
     void markVisited(int index);
     void pushHistory(int index);
+    // Records a forward auto-advance from `fromIndex` to `toIndex`: pushes the
+    // departing row onto the back history and consumes the matching entry from
+    // the forward trail (a remembered Next), or drops the trail on a fresh pick.
+    void recordForwardStep(int fromIndex, int toIndex);
+    // Navigates to `index` as an internal shuffle jump (Previous retrace / Next
+    // replay): always collapses the play-next region so the rows skipped over
+    // aren't badged, but keeps the shuffle forward trail intact.
+    void playShuffleJump(int index);
     void resetShuffleState();
 
     void playCurrent(bool notifyScrobbler, bool startPaused);
@@ -184,8 +192,13 @@ private:
     AutoNext m_preparedNext;
     // Queue rows already played in the current shuffle cycle (includes current).
     QSet<int> m_shuffleVisited;
-    // Previously-current rows, for retracing under shuffle on Previous.
+    // Previously-current rows, for retracing under shuffle on Previous (back trail).
     QVector<int> m_shuffleHistory;
+    // Rows retraced past by Previous, so a subsequent Next/auto-advance replays the
+    // same shuffle order forward instead of re-rolling. Top is the immediate next.
+    // Populated only by Previous; consumed by forward navigation; dropped on any
+    // explicit jump, fresh pick, or queue mutation.
+    QVector<int> m_shuffleForward;
     struct PendingDsdTakeover {
         bool active = false;
         Track track;

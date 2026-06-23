@@ -103,6 +103,8 @@ private slots:
     void repeatOneReplaysCurrentTrack();
     void shuffleVisitsEveryTrackOnceThenStops();
     void shufflePreviousRetracesHistory();
+    void shuffleNextReplaysForwardAfterPrevious();
+    void shuffleBackwardJumpDoesNotBadgePlayNext();
     void libraryShuffleInjectsLibraryTrack();
     void dsdTakeoverDefersThenStartsNatively();
     void declinedDsdSkipsContiguousBlockUntilPlaybackStarts();
@@ -405,6 +407,55 @@ void PlayerCoreTest::shufflePreviousRetracesHistory()
     // Previous walks the shuffle history back to the starting track.
     m_core->previous();
     QCOMPARE(m_core->queueIndex(), 0);
+}
+
+void PlayerCoreTest::shuffleNextReplaysForwardAfterPrevious()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c", "/d"}));
+    m_core->setShuffleMode(ShuffleMode::Queue);
+    m_core->playAt(0);
+
+    m_core->next();
+    const int first = m_core->queueIndex();
+    m_core->next();
+    const int second = m_core->queueIndex();
+    QVERIFY(first != 0);
+    QVERIFY(second != first);
+
+    // Retrace all the way back to the starting track.
+    m_core->previous();
+    QCOMPARE(m_core->queueIndex(), first);
+    m_core->previous();
+    QCOMPARE(m_core->queueIndex(), 0);
+
+    // Next now replays the exact same forward order it just retraced, rather than
+    // re-rolling a fresh shuffle pick: shuffle navigation is linear in memory.
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), first);
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), second);
+}
+
+void PlayerCoreTest::shuffleBackwardJumpDoesNotBadgePlayNext()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c", "/d"}));
+    m_core->setShuffleMode(ShuffleMode::Queue);
+    m_core->playAt(0);
+    // Under shuffle the next track is a random/remembered pick, not the row after
+    // current, so the play-next region is meaningless and must stay collapsed:
+    // every move keeps it at current+1 so no skipped-over rows are badged.
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+
+    m_core->next();
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+    m_core->next();
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+
+    // Retracing backward must not leave a stale region spanning the skipped rows.
+    m_core->previous();
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+    m_core->previous();
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
 }
 
 void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()

@@ -51,6 +51,9 @@ void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused, bool 
         // into a new play-next span — that was misleading and is intentionally
         // not done here.
         m_playNextInsertIndex = m_queueIndex + 1;
+        // A deliberate pick steps off any remembered shuffle trail: a later Next
+        // must re-roll rather than replay a now-stale forward entry.
+        m_shuffleForward.clear();
     } else {
         collapsePlayNextIfStale();
     }
@@ -209,7 +212,12 @@ void PlayerCore::previous()
     if (m_shuffleMode != ShuffleMode::Off && !m_shuffleHistory.isEmpty()) {
         int previousIndex = m_shuffleHistory.takeLast();
         previousIndex = std::clamp(previousIndex, 0, static_cast<int>(m_queue.size()) - 1);
-        playAt(previousIndex);
+        // Remember the row we're leaving so a subsequent Next/auto-advance replays
+        // it forward (linear retrace) instead of re-rolling a fresh shuffle pick.
+        if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
+            m_shuffleForward.push_back(m_queueIndex);
+        }
+        playShuffleJump(previousIndex);
         return;
     }
     playAt(std::max(0, m_queueIndex - 1));
@@ -749,6 +757,12 @@ PlayerCore::AutoNext PlayerCore::decideAutoNext()
     if (m_queue.isEmpty() || m_queueIndex < 0) {
         return {};
     }
+    // A remembered forward trail (built by Previous) wins over any re-roll or
+    // library injection: Next/auto-advance must retrace the exact order the user
+    // already heard until the trail is spent, then resume fresh randomness.
+    if (m_shuffleMode != ShuffleMode::Off && !m_shuffleForward.isEmpty()) {
+        return {std::clamp(m_shuffleForward.last(), 0, static_cast<int>(m_queue.size()) - 1), {}};
+    }
     // Library-wide shuffle: with the configured probability, pull a fresh track
     // from the whole library instead of advancing within the queue.
     if (m_shuffleMode == ShuffleMode::Library && m_randomTracks && m_libraryShufflePercent > 0) {
@@ -812,16 +826,26 @@ void PlayerCore::applyAutoNext(const AutoNext &next)
 {
     if (!next.injected.path.isEmpty()) {
         // Library-wide injection: append the fresh track, then play it. playAt
-        // re-presents, re-prepares and marks it visited.
+        // re-presents, re-prepares and marks it visited. A fresh injection
+        // diverges from any remembered forward trail.
         emit aboutToAddTracks(QVector<Track>{next.injected});
         m_queue.push_back(next.injected);
         pushHistory(m_queueIndex);
+        m_shuffleForward.clear();
         emit queueChanged();
         playAt(static_cast<int>(m_queue.size()) - 1);
         return;
     }
     if (next.index >= 0 && next.index < m_queue.size()) {
-        pushHistory(m_queueIndex);
+        // A plain non-shuffle step to the very next row consumes the play-next
+        // region in order; every other move (shuffle pick, remembered retrace,
+        // repeat-all wrap) is a jump that must collapse the region so the rows it
+        // skips over aren't spuriously badged as "play next".
+        const bool linearConsume = m_shuffleMode == ShuffleMode::Off && next.index == m_queueIndex + 1;
+        recordForwardStep(m_queueIndex, next.index);
+        if (!linearConsume) {
+            m_playNextInsertIndex = -1;
+        }
         playAt(next.index);
     }
 }
@@ -840,9 +864,34 @@ void PlayerCore::pushHistory(int index)
     }
 }
 
+void PlayerCore::recordForwardStep(int fromIndex, int toIndex)
+{
+    pushHistory(fromIndex);
+    // If the move matches the trail's top, it's a remembered Next: consume it.
+    // Otherwise it's a fresh pick that diverges from the trail, which is no longer
+    // valid forward navigation, so discard it.
+    if (!m_shuffleForward.isEmpty()
+        && std::clamp(m_shuffleForward.last(), 0, static_cast<int>(m_queue.size()) - 1) == toIndex) {
+        m_shuffleForward.removeLast();
+    } else {
+        m_shuffleForward.clear();
+    }
+}
+
+void PlayerCore::playShuffleJump(int index)
+{
+    // An internal shuffle jump is never a linear consume: force the play-next
+    // region to collapse to the new current+1 (playAt's stale-collapse will turn
+    // the -1 sentinel into queueIndex+1) so the rows between the old and new
+    // positions aren't badged. The forward trail is intentionally preserved.
+    m_playNextInsertIndex = -1;
+    playAt(index);
+}
+
 void PlayerCore::resetShuffleState()
 {
     m_shuffleHistory.clear();
+    m_shuffleForward.clear();
     m_shuffleVisited.clear();
     if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
         m_shuffleVisited.insert(m_queueIndex);
@@ -861,9 +910,17 @@ void PlayerCore::onPreparedTrackStarted()
     }
 
     m_backend->onGaplessTrackAdvanced();
-    pushHistory(m_queueIndex);
+    // Mirror applyAutoNext: only a plain non-shuffle step to the next row consumes
+    // the play-next region; a shuffle pick, remembered retrace or repeat-all wrap
+    // is a jump that collapses it (so skipped rows aren't badged "play next").
+    const bool linearConsume = m_shuffleMode == ShuffleMode::Off && target == m_queueIndex + 1;
+    recordForwardStep(m_queueIndex, target);
     m_queueIndex = target;
-    collapsePlayNextIfStale();
+    if (linearConsume) {
+        collapsePlayNextIfStale();
+    } else {
+        m_playNextInsertIndex = m_queueIndex + 1;
+    }
     emit currentIndexChanged(m_queueIndex, /*userInitiated=*/false);
     emit playNextRangeChanged();
     m_currentTrack = m_queue.at(m_queueIndex);
