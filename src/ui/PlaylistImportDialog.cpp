@@ -214,6 +214,9 @@ void PlaylistImportDialog::fetchUrl()
                     m_status->setText(QStringLiteral("Fetched %1 tracks from \"%2\" — press Match.")
                                           .arg(entries.size()).arg(title));
                 });
+        connect(m_fetcher, &YouTubePlaylistFetcher::progress, this, [this](int count) {
+            m_status->setText(QStringLiteral("Fetching playlist… %1 tracks (yt-dlp)").arg(count));
+        });
         connect(m_fetcher, &YouTubePlaylistFetcher::error, this, [this](const QString &message) {
             m_fetchButton->setEnabled(true);
             m_status->setText(QStringLiteral("Fetch failed: %1").arg(message));
