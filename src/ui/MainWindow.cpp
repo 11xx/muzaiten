@@ -6006,6 +6006,37 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     // For MultiMatch imports, surface the stored candidate shortlist first.
     dialog->setPreferredPaths(editedItem.candidatePaths);
 
+    // A one-line reference above the box: what this row expects. While an import
+    // is unresolved it shows the immutable import string ("Imported as: …"); a
+    // missing row shows the library track it had registered; otherwise it just
+    // names the track being edited.
+    const auto snapshotDisplay = [](const PlaylistItem &it) -> QString {
+        QString name = it.artistSnapshot.isEmpty()
+            ? it.titleSnapshot
+            : QStringLiteral("%1 — %2").arg(it.artistSnapshot, it.titleSnapshot);
+        if (!name.isEmpty() && !it.albumSnapshot.isEmpty()) {
+            name += QStringLiteral(" · %1").arg(it.albumSnapshot);
+        }
+        return name;
+    };
+    const bool unresolvedImport = !editedItem.sourceText.isEmpty()
+        && (editedItem.status == PlaylistItemStatus::Pending
+            || editedItem.status == PlaylistItemStatus::MultiMatch
+            || editedItem.status == PlaylistItemStatus::Approximate);
+    QString context;
+    if (unresolvedImport) {
+        context = QStringLiteral("Imported as:  %1").arg(editedItem.sourceText);
+    } else if (editedItem.status == PlaylistItemStatus::Missing) {
+        const QString shown = snapshotDisplay(editedItem);
+        const QString fallback = shown.isEmpty() ? editedItem.sourceText : shown;
+        if (!fallback.isEmpty()) {
+            context = QStringLiteral("Missing track was:  %1").arg(fallback);
+        }
+    } else if (const QString shown = snapshotDisplay(editedItem); !shown.isEmpty()) {
+        context = QStringLiteral("Editing:  %1").arg(shown);
+    }
+    dialog->setEditContext(context);
+
     connect(dialog, &PlaylistAddDialog::itemChosen, this,
             [this, itemId, comment = editedItem.comment, sourceText = editedItem.sourceText](
                 const Track &track, const QString &chosenQuery) {
