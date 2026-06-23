@@ -14,8 +14,17 @@ Handled input dialects (auto-detected from the header):
   ``externalId`` (youtube:ID, else isrc:ISRC, else spotify:track:ID).
 * Rdio CSV       ``Name,Artist,Album,Track Number`` (comma-delimited).
 
+A muzaiten "central" file named ``<service>--gen-N--<kind>`` (e.g.
+``spotify--gen-2--authoritative``, ``spotify--gen-4--a-z``) is parsed by its CSV
+dialect exactly like any other file; the recognised name only yields a tidy
+playlist name ("Spotify Gen 2") and a "muzaiten central authoritative"
+provenance line. The Spotify/Rdio central authoritatives are Soundiiz-dialect
+and convert directly; their extra ``source``/``ordinal`` columns are ignored.
+
 Files that are clearly not track lists (artist lists, comments, XML/XSPF
-alternatives, spreadsheets, READMEs) are skipped.
+alternatives, spreadsheets, READMEs) are skipped. YouTube ``mus--gen-N`` central
+files are ``Video ID``/timestamp lists with no title/artist and are skipped:
+they need metadata enrichment (e.g. yt-dlp), which this offline tool does not do.
 
 Usage:
     convert.py --src ./exports --out ./converted-playlists
@@ -87,6 +96,28 @@ def source_provenance(dialect: str, stem: str, path: Path) -> str:
         return "Rdio"
     service = source_label(stem, path)
     return "Soundiiz" if service.lower() in {"import", "soundiiz"} else f"{service} via Soundiiz"
+
+
+# A muzaiten "central" authoritative/snapshot file: ``<service>--gen-<n>--<kind>``
+# (e.g. ``spotify--gen-2--authoritative``, ``spotify--gen-4--a-z``). These are
+# this archive's own assembled generations; recognising the convention only
+# yields a nicer playlist name and provenance — it changes no parsing or
+# selection. The file is still parsed by its detected CSV dialect like any other.
+_CENTRAL_NAME = re.compile(r"^(spotify|rdio|mus)--gen-(\d+)--(.+)$", re.IGNORECASE)
+_CENTRAL_SERVICE = {"spotify": "Spotify", "rdio": "Rdio", "mus": "YouTube Music"}
+
+
+def central_meta(file_stem: str) -> tuple[str, str] | None:
+    """(playlist name, provenance) for a central ``<service>--gen-N--<kind>``
+    filename, or None when the name does not follow that convention."""
+    match = _CENTRAL_NAME.match(file_stem.strip())
+    if not match:
+        return None
+    service, number, kind = match.group(1).lower(), match.group(2), match.group(3).lower()
+    name = f"{_CENTRAL_SERVICE[service]} Gen {number}"
+    if kind != "authoritative":
+        name += f" ({kind})"
+    return name, "muzaiten central authoritative"
 
 
 def format_utc(timestamp: float) -> str:
@@ -419,9 +450,16 @@ def convert(src: Path, out_dir: Path, dry_run: bool, naive_timezone: ZoneInfo | 
             continue
 
         stem = clean_stem(path.stem)
-        name = playlist_name(stem)
         sidecars = enrich_records(records, dialect, path)
-        comment = playlist_comment(dialect, stem, path, sidecars)
+        central = central_meta(path.stem)
+        if central:
+            name, provenance = central
+            comment_lines = [f"Source: {provenance}", f"File: {path.name}"]
+            comment_lines.extend(f"Supplemented by: {s.name}" for s in sidecars)
+            comment = "\n".join(comment_lines)
+        else:
+            name = playlist_name(stem)
+            comment = playlist_comment(dialect, stem, path, sidecars)
         out_path = unique_out_path(out_dir, stem, used)
 
         total_files += 1
