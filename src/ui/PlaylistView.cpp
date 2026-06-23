@@ -1673,6 +1673,19 @@ void PlaylistView::showItemMenu(const QPoint &pos)
             emit removeAllMissingTracksRequested();
         });
     }
+    const bool hasMultiMatch = !currentSelectionIsSavedQueue() && m_currentPlaylistId > 0
+        && std::any_of(m_items.cbegin(), m_items.cend(), [](const PlaylistItem &it) {
+               return it.status == PlaylistItemStatus::MultiMatch;
+           });
+    if (hasMultiMatch) {
+        menu.addSeparator();
+        QAction *resolveMulti = menu.addAction(QStringLiteral("Resolve multi-matches (best guess)"));
+        resolveMulti->setToolTip(QStringLiteral(
+            "Pick each unresolved multi-match's top candidate and flag it as Approximate for a later glance."));
+        connect(resolveMulti, &QAction::triggered, this, [this]() {
+            emit resolveMultiMatchesRequested(m_currentPlaylistId);
+        });
+    }
     QAction *remove = menu.addAction(QStringLiteral("Remove selected"));
     remove->setEnabled(item != nullptr && !currentSelectionIsSavedQueue());
     connect(remove, &QAction::triggered, this, &PlaylistView::removeSelectedItems);
