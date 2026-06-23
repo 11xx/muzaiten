@@ -24,7 +24,7 @@ def read_jsonl(path: Path) -> list[dict]:
 class PlaylistConverterTest(unittest.TestCase):
     def run_converter(self, source: Path, output: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(CONVERTER), "--src", str(source), "--out", str(output), *extra],
+            [sys.executable, str(CONVERTER), "convert", "--src", str(source), "--out", str(output), *extra],
             check=True,
             text=True,
             capture_output=True,
@@ -172,7 +172,7 @@ class PlaylistConverterTest(unittest.TestCase):
             self.assertNotIn("addedAt", lines[2])  # DST spring-forward gap
 
             result = subprocess.run(
-                [sys.executable, str(CONVERTER), "--src", str(source), "--out", str(root / "invalid-zone"),
+                [sys.executable, str(CONVERTER), "convert", "--src", str(source), "--out", str(root / "invalid-zone"),
                  "--naive-timezone", "Not/A_Zone"],
                 text=True,
                 capture_output=True,
