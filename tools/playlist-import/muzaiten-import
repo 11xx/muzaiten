@@ -21,11 +21,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 import re
 import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -55,8 +57,18 @@ no titles (use the youtube subcommand to enrich those).
 
 YOUTUBE_DESC = """\
 Enrich YouTube exports into muzaiten's JSONL interchange format. YouTube exports
-carry only video ids, so metadata is resolved over the network with yt-dlp; this
-is slow and rate-limited, so --cache makes re-runs cheap.
+carry only video ids, so metadata is resolved over the network with yt-dlp.
+
+YouTube soft-throttles request bursts per-IP (and recovers after a short
+cooldown), so throughput is bounded by request rate, not parallelism. Fetches
+are therefore paced (--sleep) and transient failures retried with backoff
+(--retries) rather than mistaken for unavailable videos; raise concurrency
+(--jobs) only with cookies (--cookies-from-browser/--cookies), which lift the
+ceiling. For playlist URLs, --flat skips per-video resolution entirely. Output
+is appended to the per-playlist .jsonl as each track resolves and a re-run
+resumes where an interrupted one stopped (skipping ids already in the file); to
+restart, delete the target file. --cache additionally makes re-runs cheap by
+remembering resolved metadata across different outputs.
 
 The kind flags (--takeout/--playlist/--video/--links) are optional filters: name
 one or more to keep only those kinds; the default keeps every detected kind.
@@ -613,8 +625,12 @@ def parse_links(path: Path) -> tuple[str, list[tuple[str, int | None]]] | None:
 
 # --- yt-dlp -----------------------------------------------------------------
 
-def ytdlp_json(target: str, flat: bool = False) -> dict | None:
-    cmd = ["yt-dlp", "-J", "--no-warnings", "--ignore-no-formats-error"]
+def ytdlp_json(target: str, flat: bool = False, cookies: list[str] | None = None) -> dict | None:
+    # --ignore-config: resolve metadata deterministically, independent of the
+    # user's personal ~/.config/yt-dlp/config (which may inject --format,
+    # --sleep-requests, archive, or output flags that slow or corrupt the parse).
+    cmd = ["yt-dlp", "-J", "--ignore-config", "--no-warnings", "--ignore-no-formats-error"]
+    cmd.extend(cookies or [])
     if flat:
         cmd.append("--flat-playlist")
     cmd.append(target)
@@ -632,6 +648,28 @@ def ytdlp_json(target: str, flat: bool = False) -> dict | None:
         return None
 
 
+def ytdlp_json_retry(target: str, *, cookies: list[str] | None,
+                     retries: int, backoff: float) -> dict | None:
+    """Resolve one video, retrying transient failures with exponential backoff.
+
+    A None result means a *failed* fetch (timeout, non-zero exit, throttle) and
+    is worth retrying — the live benchmarks show YouTube soft-throttles request
+    bursts per-IP and recovers after a short cooldown, so a single failure must
+    not be mistaken for a permanently unavailable video. A *deleted/private*
+    video instead returns a dict with a placeholder title, which record_from_info
+    rejects without burning a retry. Backoff is jittered to desynchronise the
+    worker pool so retries don't stampede the very limit that caused them."""
+    delay = backoff
+    for attempt in range(retries + 1):
+        info = ytdlp_json(target, cookies=cookies)
+        if info is not None:
+            return info
+        if attempt < retries:
+            time.sleep(delay + random.uniform(0, delay))
+            delay *= 2
+    return None
+
+
 def looks_like_playlist(token: str) -> bool:
     """A YouTube/YT-Music URL carrying a list= query or a /playlist path."""
     try:
@@ -644,13 +682,25 @@ def looks_like_playlist(token: str) -> bool:
     return "list" in parse_qs(parsed.query) or parsed.path.startswith("/playlist")
 
 
-def parse_playlist_url(url: str) -> tuple[str, list[tuple[str, int | None]]] | None:
-    info = ytdlp_json(url, flat=True)
+def parse_playlist_url(url: str, *, cookies: list[str] | None = None,
+                       preresolved: dict | None = None
+                       ) -> tuple[str, list[tuple[str, int | None]]] | None:
+    """Enumerate a playlist's ids cheaply via --flat-playlist (one extraction,
+    ~ceil(N/100) requests for the whole list). When `preresolved` is given (flat
+    mode), the flat entries — which already carry title/duration/channel — are
+    kept and used as the final metadata, so no per-video fetch is needed. The
+    only thing per-video resolution would add is YouTube Music's structured
+    track/artist/album split."""
+    info = ytdlp_json(url, flat=True, cookies=cookies)
     if not info:
         print(f"  ! could not read playlist {url}", file=sys.stderr)
         return None
     name = (info.get("title") or "youtube-playlist").strip()
-    items = [(e["id"], None) for e in info.get("entries") or [] if e.get("id")]
+    entries = [e for e in info.get("entries") or [] if e.get("id")]
+    if preresolved is not None:
+        for entry in entries:
+            preresolved[entry["id"]] = entry
+    items = [(entry["id"], None) for entry in entries]
     return name, items
 
 
@@ -701,53 +751,139 @@ def watch_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
-def enrich(items, cache, sleep, dry_run, limit):
-    """Resolve [(id, addedAt)] to JSONL records, with cache + rate limiting."""
+def done_video_ids(path: Path) -> set[str]:
+    """Video ids already written to an existing target .jsonl, for resume.
+
+    The target file is its own ledger: each track line carries
+    externalId "youtube:<id>", so a re-run can skip what a prior (possibly
+    interrupted) run already resolved without re-hitting the network. There is
+    no --force flag by design — delete the file to start over."""
+    done: set[str] = set()
+    if not path.exists():
+        return done
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ext = rec.get("externalId", "") if isinstance(rec, dict) else ""
+                if isinstance(ext, str) and ext.startswith("youtube:"):
+                    done.add(ext[len("youtube:"):])
+    except OSError as exc:
+        print(f"  ! cannot read existing {path.name} for resume: {exc}", file=sys.stderr)
+    return done
+
+
+def has_header(path: Path) -> bool:
+    """True when the target already begins with a playlist-header line."""
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return False
+        with path.open(encoding="utf-8") as fh:
+            return '"playlist"' in fh.readline()
+    except OSError:
+        return False
+
+
+def resolve_to_file(items, *, path: Path, name: str, comment: str, cache: dict,
+                    preresolved: dict, cookies: list[str] | None, jobs: int,
+                    sleep: float, retries: int, backoff: float, limit, dry_run):
+    """Resolve [(id, addedAt)] to JSONL records appended to `path` in source
+    order. Resumable (ids already in `path` are skipped) and crash-safe: records
+    are flushed as soon as their in-order prefix is ready, so an interrupted run
+    leaves a valid partial file a re-run continues. Returns
+    (written, skipped, fetched)."""
     if limit:
         items = items[:limit]
-    records, skipped, fetched = [], 0, 0
-    for video_id, added in items:
-        if dry_run:
-            print(f"    would fetch youtube:{video_id}")
-            continue
-        info = cache.get(video_id)
+
+    done = done_video_ids(path)
+    pending = [(vid, added) for vid, added in items if vid not in done]
+    if done:
+        print(f"    resuming {path.name}: {len(items) - len(pending)} already done, "
+              f"{len(pending)} to resolve")
+
+    if dry_run:
+        for vid, _ in pending:
+            print(f"    would fetch youtube:{vid}")
+        return 0, 0, 0
+
+    def resolve_one(vid, added):
+        """Return (record_or_None, did_network_fetch). Thread-safe."""
+        info = preresolved.get(vid)
         if info is None:
-            if fetched and sleep:
-                time.sleep(sleep)
-            info = ytdlp_json(watch_url(video_id))
-            fetched += 1
-            if info is None:
-                print(f"    ! unavailable: youtube:{video_id}", file=sys.stderr)
+            info = cache.get(vid)
+        if info is not None:
+            return record_from_info(info, added), False
+        if sleep:                            # pace + jitter to dodge burst throttle
+            time.sleep(sleep + random.uniform(0, sleep))
+        info = ytdlp_json_retry(watch_url(vid), cookies=cookies,
+                                retries=retries, backoff=backoff)
+        if info is None:
+            print(f"    ! unavailable after {retries} retries: youtube:{vid}",
+                  file=sys.stderr)
+            return None, True
+        cache[vid] = info
+        return record_from_info(info, added), True
+
+    written = skipped = fetched = 0
+    buffer: dict[int, dict | None] = {}
+    next_pos = 0
+    new_file = not has_header(path)
+
+    with path.open("a", encoding="utf-8") as fh:
+        if new_file:
+            fh.write(json.dumps({"playlist": {"name": name, "comment": comment}},
+                                ensure_ascii=False) + "\n")
+            fh.flush()
+
+        def absorb(pos, rec, did_fetch):
+            """Buffer one result and flush the longest ready in-order prefix."""
+            nonlocal next_pos, written, skipped, fetched
+            if did_fetch:
+                fetched += 1
+            if rec is None:
                 skipped += 1
-                continue
-            cache[video_id] = info
-        rec = record_from_info(info, added)
-        if rec is None:
-            skipped += 1
-            continue
-        records.append(rec)
-    return records, skipped, fetched
+            buffer[pos] = rec
+            while next_pos in buffer:
+                ready = buffer.pop(next_pos)
+                if ready is not None:
+                    fh.write(json.dumps(ready, ensure_ascii=False) + "\n")
+                    fh.flush()
+                    written += 1
+                next_pos += 1
+
+        if jobs <= 1:
+            for pos, (vid, added) in enumerate(pending):
+                rec, did_fetch = resolve_one(vid, added)
+                absorb(pos, rec, did_fetch)
+        else:
+            with ThreadPoolExecutor(max_workers=jobs) as pool:
+                futures = {pool.submit(resolve_one, vid, added): pos
+                           for pos, (vid, added) in enumerate(pending)}
+                for future in as_completed(futures):
+                    pos = futures[future]
+                    try:
+                        rec, did_fetch = future.result()
+                    except Exception as exc:  # noqa: BLE001 - one bad item must not abort the run
+                        print(f"    ! error resolving item {pos}: {exc}", file=sys.stderr)
+                        rec, did_fetch = None, True
+                    absorb(pos, rec, did_fetch)
+
+    return written, skipped, fetched
 
 
-def write_jsonl(out_dir: Path, name: str, comment: str, records: list[dict], used: set) -> Path:
-    # Reuse convert's collision-avoider so a second same-named input (e.g. two
-    # playlists titled "Mix") gets a " (2)" suffix instead of overwriting the
-    # first — fetching is network-expensive, so never silently clobber it.
-    path = unique_out_path(out_dir, name, used)
-    with path.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"playlist": {"name": name, "comment": comment}},
-                            ensure_ascii=False) + "\n")
-        for rec in records:
-            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    return path
-
-
-def iter_inputs(inputs, allowed):
+def iter_inputs(inputs, allowed, *, cookies=None, flat=False, preresolved=None):
     """Auto-classify each positional input and yield
     (kind, label, provenance, (name, items)). `allowed` is the set of kinds to
     keep; classification is cheap and runs before any network enumeration, so a
     filtered-out playlist URL is never fetched. Loose video URLs/ids are grouped
-    into a single synthetic input."""
+    into a single synthetic input. In flat mode the playlist enumeration keeps
+    its metadata in `preresolved` so it is never refetched per video."""
     loose_videos: list[tuple[str, int | None]] = []
     for token in inputs:
         path = Path(token).expanduser()
@@ -777,7 +913,9 @@ def iter_inputs(inputs, allowed):
         if looks_like_playlist(token):                       # a playlist URL
             if "playlist" not in allowed:
                 continue
-            parsed = parse_playlist_url(token)
+            parsed = parse_playlist_url(
+                token, cookies=cookies,
+                preresolved=preresolved if flat else None)
             if parsed:
                 yield "playlist", token, f"Source: YouTube playlist\nURL: {token}", parsed
             continue
@@ -802,6 +940,14 @@ def cmd_youtube(args) -> int:
                                      ("takeout", args.takeout), ("links", args.links)) if on}
     allowed = filters or {"playlist", "video", "takeout", "links"}
 
+    cookies: list[str] = []
+    if args.cookies_from_browser:
+        cookies += ["--cookies-from-browser", args.cookies_from_browser]
+    if args.cookies:
+        cookies += ["--cookies", str(args.cookies)]
+    if cookies:
+        print("using cookies for authenticated requests (higher rate limits)")
+
     cache: dict = {}
     if args.cache and args.cache.exists():
         try:
@@ -810,20 +956,30 @@ def cmd_youtube(args) -> int:
         except (OSError, json.JSONDecodeError):
             print(f"  ! ignoring unreadable cache {args.cache}", file=sys.stderr)
 
+    # Flat-mode playlist entries, kept out of --cache so a poorer flat record
+    # never shadows a richer per-video fetch in a later non-flat run.
+    preresolved: dict = {}
+
     args.out.mkdir(parents=True, exist_ok=True)
     used: set = set()
     total_playlists = total_items = total_skipped = total_fetched = 0
-    for kind, label, provenance, (name, items) in iter_inputs(args.inputs, allowed):
+    for kind, label, provenance, (name, items) in iter_inputs(
+            args.inputs, allowed, cookies=cookies, flat=args.flat, preresolved=preresolved):
         print(f"  {label}  [{kind}]  ({len(items)} videos)")
-        records, skipped, fetched = enrich(items, cache, args.sleep, args.dry_run, args.limit)
+        # Deterministic name (used is fresh per run) so a re-run resumes the same
+        # file; the in-run `used` set still suffixes two same-named inputs.
+        out_path = unique_out_path(args.out, name, used)
+        written, skipped, fetched = resolve_to_file(
+            items, path=out_path, name=name, comment=provenance, cache=cache,
+            preresolved=preresolved, cookies=cookies, jobs=args.jobs, sleep=args.sleep,
+            retries=args.retries, backoff=args.backoff, limit=args.limit, dry_run=args.dry_run)
         total_skipped += skipped
         total_fetched += fetched
         if args.dry_run:
             continue
-        out_path = write_jsonl(args.out, name, provenance, records, used)
         total_playlists += 1
-        total_items += len(records)
-        print(f"    -> {out_path.name}  ({len(records)} items, {skipped} skipped)")
+        total_items += written
+        print(f"    -> {out_path.name}  ({written} items written, {skipped} skipped)")
         if args.cache:                                # persist after each playlist
             args.cache.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
 
@@ -876,10 +1032,30 @@ def main(argv=None) -> int:
                     help="filter: only process single video URL/id inputs")
     yt.add_argument("--links", action="store_true",
                     help="filter: only process links-file inputs")
+    yt.add_argument("--flat", action="store_true",
+                    help="playlist URLs only: trust --flat-playlist metadata "
+                         "(title/channel/duration) and skip per-video resolution "
+                         "(~ceil(N/100) requests, no ban risk); drops YouTube Music's "
+                         "track/artist/album split. Per-video resolution is the default")
+    yt.add_argument("--jobs", type=int, default=1, metavar="N",
+                    help="resolve up to N videos concurrently (default 1, ordered + safe). "
+                         "The throughput ceiling is YouTube's per-IP request rate, so raise "
+                         "this only with --cookies-from-browser/--cookies")
+    yt.add_argument("--retries", type=int, default=2, metavar="N",
+                    help="retry a failed (likely throttled) fetch N times with exponential "
+                         "backoff before marking it unavailable (default 2)")
+    yt.add_argument("--backoff", type=float, default=3.0, metavar="SECS",
+                    help="base seconds for retry backoff, doubled and jittered each try (default 3.0)")
+    yt.add_argument("--cookies-from-browser", metavar="BROWSER",
+                    help="pass through to yt-dlp: load cookies from a browser "
+                         "(e.g. firefox, chrome) for higher rate limits and less bot-flagging")
+    yt.add_argument("--cookies", type=Path, metavar="FILE",
+                    help="pass through to yt-dlp: Netscape-format cookies file")
     yt.add_argument("--cache", type=Path,
                     help="JSON cache of resolved metadata (read + updated); makes re-runs cheap")
     yt.add_argument("--sleep", type=float, default=1.0,
-                    help="seconds to wait between yt-dlp fetches (default 1.0)")
+                    help="base seconds to pace each yt-dlp fetch, plus equal random jitter "
+                         "(default 1.0); paces requests under the per-IP throttle")
     yt.add_argument("--limit", type=int, help="only process the first N items per input (testing)")
     yt.add_argument("--dry-run", action="store_true",
                     help="parse inputs and list video ids without calling yt-dlp")

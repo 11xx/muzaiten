@@ -59,8 +59,8 @@ emitted as duplicate playlists.
 `convert` is offline and cannot handle YouTube, whose exports carry only video
 ids. The `youtube` subcommand is the network-using companion: it resolves
 metadata with `yt-dlp` and emits the same JSONL. It is a separate subcommand so
-`convert` keeps its offline guarantee; this one is slow, rate-limited, cached,
-and meant to be run interactively.
+`convert` keeps its offline guarantee; this one is rate-limited, cached,
+resumable, and meant to be run interactively.
 
 Inputs are **positional and auto-detected** — mix any number freely. Each is
 classified by what it is, not by a flag:
@@ -87,8 +87,32 @@ processed. A filtered-out playlist URL is never fetched.
 A YouTube Music `track`/`artist`/`album` is used when present; otherwise the
 title is split on `Artist - Title` and an `<Artist> - Topic` channel is
 recognised. Unavailable/deleted videos (yt-dlp placeholder titles) are skipped.
-`--cache FILE` memoizes resolved metadata so re-runs are cheap; `--sleep`
-rate-limits fetches; `--dry-run` parses inputs and lists ids without any network.
+
+**Rate limits & throughput.** YouTube soft-throttles request *bursts* per-IP and
+recovers after a short cooldown, so throughput is bounded by request rate, not
+parallelism — flooding it with concurrency just trips the throttle. Accordingly:
+
+- `--sleep SECS` (default 1.0) paces each fetch, plus equal random jitter.
+- `--retries N` (default 2) retries a *failed* fetch with exponential backoff
+  (`--backoff SECS`, default 3.0) before marking it unavailable — a transient
+  throttle is no longer mistaken for a dead video.
+- `--jobs N` (default 1, ordered + safe) resolves up to N videos concurrently.
+  Raise it only with cookies, which lift the per-IP ceiling.
+- `--cookies-from-browser BROWSER` / `--cookies FILE` pass through to yt-dlp for
+  authenticated requests (higher limits, less bot-flagging).
+- `--flat` *(playlist URLs only)* trusts the `--flat-playlist` metadata
+  (title/channel/duration) and skips per-video resolution — `~ceil(N/100)`
+  requests for the whole list, no ban risk. It drops the structured
+  `track`/`artist`/`album` split, so titles that aren't `Artist - Title` may
+  mis-split; per-video resolution is the correctness-preferring default.
+
+**Resumable output.** Each playlist's `.jsonl` is its own ledger: records are
+appended (and flushed) as they resolve, in source order, so an interrupted run
+leaves a valid partial file. Re-running the same command **resumes** — ids
+already in the target file are skipped (no re-fetch). There is no `--force`; to
+start over, delete the target file. `--cache FILE` is the orthogonal speed-up: it
+memoizes resolved metadata across *different* outputs. `--dry-run` lists the ids
+that would be fetched (honouring resume) without any network.
 
 ```sh
 # auto-detected mix: a Takeout dir, a playlist URL, a links file, a loose video
@@ -98,6 +122,12 @@ tools/playlist-import/muzaiten-import youtube --out ./converted --cache ./yt-cac
   ./links.txt https://youtu.be/dQw4w9WgXcQ
 # keep only the playlists from a mixed dump
 tools/playlist-import/muzaiten-import youtube --out ./converted --playlist ./dump.txt --sleep 1.5
+# fast, ban-free playlist import (flat metadata, no per-video fetch)
+tools/playlist-import/muzaiten-import youtube --out ./converted --flat \
+  "https://www.youtube.com/playlist?list=PL..."
+# push volume safely: cookies raise the ceiling, then a small worker pool
+tools/playlist-import/muzaiten-import youtube --out ./converted \
+  --cookies-from-browser firefox --jobs 4 ./big-takeout-dir
 ```
 
 ## `convert` — usage
