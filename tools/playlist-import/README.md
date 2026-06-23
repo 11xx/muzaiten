@@ -52,6 +52,38 @@ When a verified sidecar contributes metadata, the header appends a
 `Supplemented by: <filename>` provenance line. Unpaired XSPF/XML files are not
 emitted as duplicate playlists.
 
+## YouTube enrichment (`youtube_to_jsonl.py`)
+
+`convert.py` is offline and cannot handle YouTube, whose exports carry only video
+ids. `youtube_to_jsonl.py` is the dedicated, network-using companion: it resolves
+metadata with `yt-dlp` and emits the same JSONL. It is kept separate so
+`convert.py` keeps its offline guarantee; this one is slow, rate-limited, cached,
+and meant to be run interactively.
+
+Three input modes (combine freely; each input becomes one `.jsonl`):
+
+- `--takeout PATH` — Google Takeout YouTube playlist CSV(s) (the primary use):
+  the `Video ID,<timestamp>` table or localized `ID do vídeo,Horário da adição`,
+  with or without a playlist-metadata preamble. Per-video timestamps become
+  `addedAt`.
+- `--playlist URL` — a normal YouTube / YouTube Music playlist link, enumerated
+  with `yt-dlp --flat-playlist`. This lets the app's internal YouTube playlist
+  parsing be superseded by calling this script and importing its JSONL.
+- `--links FILE` — a text file of YouTube video URLs/ids, one per line.
+
+A YouTube Music `track`/`artist`/`album` is used when present; otherwise the
+title is split on `Artist - Title` and an `<Artist> - Topic` channel is
+recognised. Unavailable/deleted videos (yt-dlp placeholder titles) are skipped.
+`--cache FILE` memoizes resolved metadata so re-runs are cheap; `--sleep`
+rate-limits fetches; `--dry-run` parses inputs and lists ids without any network.
+
+```sh
+python3 tools/playlist-import/youtube_to_jsonl.py --out ./converted \
+  --takeout "./Takeout/YouTube and YouTube Music/playlists" --cache ./yt-cache.json
+python3 tools/playlist-import/youtube_to_jsonl.py --out ./converted \
+  --playlist "https://www.youtube.com/playlist?list=PL..." --sleep 1.5
+```
+
 ## Usage
 
 Preview discovery without writing output:
