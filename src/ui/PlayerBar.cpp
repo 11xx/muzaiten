@@ -674,11 +674,11 @@ PlayerBar::PlayerBar(QWidget *parent)
         emit currentTrackRatingChanged(value);
     };
     m_rating = rating;
-    progressGrid->addWidget(m_rating, 0, 2, Qt::AlignVCenter);
+    progressGrid->addWidget(m_rating, 0, 2, Qt::AlignRight | Qt::AlignVCenter);
 
     m_elapsed = new QLabel(QStringLiteral("0:00"), this);
     m_elapsed->setMinimumWidth(42);
-    m_elapsed->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_elapsed->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     progressGrid->addWidget(m_elapsed, 1, 0);
 
     m_progress = new ClickSeekSlider(Qt::Horizontal, this);
@@ -688,7 +688,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     m_duration = new QLabel(QStringLiteral("0:00"), this);
     m_duration->setMinimumWidth(42);
-    m_duration->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_duration->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     progressGrid->addWidget(m_duration, 1, 2);
 
     controls->addLayout(progressGrid, 1);
