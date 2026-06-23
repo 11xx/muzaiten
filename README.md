@@ -122,8 +122,10 @@ sudo make install PREFIX=/usr      # system-wide instead
 make uninstall                     # reverse it (mirrors the PREFIX you used)
 ```
 
-Installing drops the `muzaiten` binary and the `muzaitenctl` CLI plus a desktop
-entry, scalable icon, and AppStream metadata into the prefix. `make uninstall` removes exactly those files
+Installing drops the `muzaiten` binary, the `muzaitenctl` CLI, and the
+`muzaiten-import` playlist-conversion tool (`convert`/`youtube` subcommands),
+plus a desktop entry, scalable icon, and AppStream metadata into the prefix.
+`make uninstall` removes exactly those files
 (it reads `install_manifest.txt`, so it cleans whichever prefix you installed
 into; use `sudo` for a system prefix). (`make` here is only a thin alias for the
 fixed CMake commands — use `cmake`/`cmake --install` directly if you need finer
