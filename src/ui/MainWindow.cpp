@@ -1381,6 +1381,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playlistView, &PlaylistView::playlistFilesDropped, this, &MainWindow::importDroppedFiles);
     connect(m_playlistView, &PlaylistView::importInterruptRequested, this, &MainWindow::cancelDropImport);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
+    connect(m_playlistView, &PlaylistView::resolveMultiMatchesRequested, this, &MainWindow::resolvePlaylistMultiMatches);
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
     });
@@ -6053,6 +6054,53 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     m_playlistView->reloadPlaylists();
     // Keep keyboard focus on the row just edited rather than snapping to the top.
     m_playlistView->selectItemById(itemId);
+}
+
+void MainWindow::resolvePlaylistMultiMatches(qint64 playlistId)
+{
+    if (m_playlistDb == nullptr || m_database == nullptr || playlistId <= 0) {
+        return;
+    }
+    int resolved = 0;
+    int skipped = 0;
+    for (const PlaylistItem &original : m_playlistDb->items(playlistId)) {
+        if (original.status != PlaylistItemStatus::MultiMatch) {
+            continue;
+        }
+        // The candidate list is the matcher's close set in ranked order, so the
+        // first is the top guess (the one the edit modal hoists to the cursor).
+        const QString topCandidate = original.candidatePaths.value(0);
+        const Track track = topCandidate.isEmpty() ? Track() : m_database->trackForPath(topCandidate);
+        if (track.path.isEmpty()) {   // no candidate, or it left the library
+            ++skipped;
+            continue;
+        }
+        PlaylistItem item = playlistItemFromTrack(track, original.query);
+        item.id = original.id;
+        // Auto-picked below the user's eye — flag Approximate so it stays marked
+        // for a glance instead of passing as a confident match.
+        item.status = PlaylistItemStatus::Approximate;
+        item.comment = original.comment;             // keep the user's note,
+        item.sourceText = original.sourceText;        // the immutable import string,
+        item.externalId = original.externalId;        // the source id,
+        item.addedAt = original.addedAt;              // and the original add time.
+        item.candidatePaths = original.candidatePaths; // keep the shortlist for re-editing
+        if (m_playlistDb->updateItem(item)) {
+            ++resolved;
+        }
+    }
+    m_playlistView->reloadItems();
+    m_playlistView->reloadPlaylists();
+    if (resolved == 0 && skipped == 0) {
+        return;
+    }
+    QString message = QStringLiteral("Resolved %1 multi-match%2 to best guess (Approximate — give them a glance).")
+                          .arg(resolved)
+                          .arg(resolved == 1 ? QString() : QStringLiteral("es"));
+    if (skipped > 0) {
+        message += QStringLiteral(" %1 skipped (no candidate in the library).").arg(skipped);
+    }
+    statusBar()->showMessage(message, 6000);
 }
 
 void MainWindow::openAddToPlaylistDialog(const QVector<Track> &tracks)

@@ -351,6 +351,7 @@ private:
     void finishDropImport(bool interrupted);
     QString uniquePlaylistName(const QString &base) const;
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
+    void resolvePlaylistMultiMatches(qint64 playlistId);
     void openAddToPlaylistDialog(const QVector<Track> &tracks);
     QString resolvedReadPathForTrack(const Track &track) const;
     void rememberTrackTableViewState();
