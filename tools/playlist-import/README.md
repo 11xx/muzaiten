@@ -22,6 +22,14 @@ The JSONL contract is [documented here](../../docs/playlist-import-jsonl.md).
   implausible values are omitted and reported.
 - SoundCloud CSV exports: a matching XML sidecar can supply numeric track IDs,
   retained as `soundcloud:<id>` external identifiers.
+- muzaiten central authoritatives: a file named `<service>--gen-N--<kind>` (e.g.
+  `spotify--gen-2--authoritative`, `spotify--gen-4--a-z`) is parsed by its CSV
+  dialect like any other input; the name only sets a tidy playlist name
+  ("Spotify Gen 2") and a `muzaiten central authoritative` provenance line. The
+  Spotify/Rdio central authoritatives are Soundiiz-dialect and convert directly.
+  The YouTube `mus--gen-N` central files are `Video ID`/timestamp lists with no
+  title and are skipped — they require metadata enrichment (e.g. yt-dlp) that
+  this offline tool does not perform.
 
 It recursively discovers CSVs, skips known metadata files, and writes one JSONL
 file per non-empty playlist. Every output begins with a playlist header followed
