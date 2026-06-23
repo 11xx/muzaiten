@@ -391,7 +391,7 @@ add_test(NAME test_playlist_import COMMAND test_playlist_import)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME test_playlist_converter
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_playlist_converter.py
-            ${CMAKE_SOURCE_DIR}/tools/playlist-import/convert.py)
+            ${CMAKE_SOURCE_DIR}/tools/playlist-import/muzaiten-import)
 
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp

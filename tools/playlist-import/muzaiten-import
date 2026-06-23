@@ -1,0 +1,864 @@
+#!/usr/bin/env python3
+"""muzaiten playlist-import tooling: external exports -> muzaiten JSONL.
+
+One self-contained CLI with two subcommands, both emitting the JSONL
+interchange format documented in ``docs/playlist-import-jsonl.md`` (the app only
+ever imports that JSONL; it never runs this tool):
+
+* ``convert``   Offline converter for already-rich CSV exports
+                (Soundiiz/Rdio/SoundCloud, plus muzaiten "central" generations).
+                Pure parsing, no network — instant and reproducible.
+* ``youtube``   Network-using enricher for YouTube, whose exports carry only
+                video ids. Resolves metadata with ``yt-dlp`` from a Google
+                Takeout CSV, a playlist URL, or a list of links.
+
+The two live in one script but stay operationally distinct: ``convert`` is
+offline and pure; ``youtube`` is slow, rate-limited, cached, and meant to be run
+interactively. Keeping ``convert`` free of any network path preserves its
+offline guarantee.
+
+Usage:
+    muzaiten-import convert --src ./exports --out ./converted-playlists
+    muzaiten-import youtube --out ./converted --takeout ./Takeout/playlists
+    muzaiten-import youtube --out ./converted --playlist "https://www.youtube.com/playlist?list=PL..."
+    muzaiten-import youtube --out ./converted --links ./links.txt --cache ./yt-cache.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import re
+import subprocess
+import sys
+import time
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+CONVERT_DESC = """\
+Convert exported playlist files into muzaiten's JSONL interchange format.
+
+Reads playlist CSV exports and emits one .jsonl file per playlist, matching the
+schema in docs/playlist-import-jsonl.md. The app never runs this; it only
+imports the .jsonl output.
+
+Handled input dialects (auto-detected from the header):
+
+* Soundiiz CSV   title;artist;album;isrc;addedDate;addedBy;duration;url
+  (semicolon-delimited, UTF-8 BOM; covers Spotify/Pandora/YouTube/Soundcloud
+  exports). duration is like 225s; url yields a namespaced externalId
+  (youtube:ID, else isrc:ISRC, else spotify:track:ID).
+* Rdio CSV       Name,Artist,Album,Track Number (comma-delimited).
+
+A muzaiten "central" file named <service>--gen-N--<kind> (e.g.
+spotify--gen-2--authoritative, spotify--gen-4--a-z) is parsed by its CSV dialect
+exactly like any other file; the recognised name only yields a tidy playlist
+name ("Spotify Gen 2") and a "muzaiten central authoritative" provenance line.
+The Spotify/Rdio central authoritatives are Soundiiz-dialect and convert
+directly; their extra source/ordinal columns are ignored.
+
+Files that are clearly not track lists (artist lists, comments, XML/XSPF
+alternatives, spreadsheets, READMEs) are skipped. YouTube mus--gen-N central
+files are Video ID/timestamp lists with no title/artist and are skipped: they
+need metadata enrichment (the `youtube` subcommand), not this offline path.
+"""
+
+YOUTUBE_DESC = """\
+Enrich YouTube playlists into muzaiten's JSONL interchange format.
+
+convert is strictly offline and handles already-rich CSV exports; it
+deliberately cannot handle YouTube, whose exports carry only video IDs. This
+subcommand fills that gap: it resolves YouTube metadata with yt-dlp and emits
+the same JSONL. It needs the network, is slow and rate-limited, and caches
+results, so it is meant to be run interactively.
+
+Three input modes (combine freely; each input becomes one .jsonl):
+
+* --takeout PATH   Google Takeout YouTube playlist CSV(s) -- the primary use.
+  The official Takeout format is a "Video ID, <timestamp>" table (English) or
+  "ID do video, Horario da adicao" (localized), optionally preceded by a
+  playlist-metadata preamble. Per-video added timestamps become addedAt.
+* --playlist URL   A normal YouTube / YouTube Music playlist link. The video
+  list is read with yt-dlp --flat-playlist and each entry enriched. This is the
+  path that lets the app's internal YouTube playlist parsing be superseded by
+  simply calling this tool and importing the JSONL it produces.
+* --links PATH     A text file of YouTube video URLs/IDs, one per line
+  (# comments and blanks ignored).
+
+Metadata mapping: a YouTube Music track/artist/album is used when present;
+otherwise the video title is split on "Artist - Title" and an "<Artist> - Topic"
+channel is recognised. durationMs = duration * 1000; externalId = "youtube:<id>".
+Items that resolve no title are skipped.
+"""
+
+
+# ============================================================================
+# convert: offline CSV -> JSONL
+# ============================================================================
+
+# --- filename / playlist-name cleaning --------------------------------------
+
+# Export-tool noise stripped from a source filename to recover the playlist name.
+_SUFFIX_NOISE = re.compile(
+    r"\s*(?:_files)?\s*(?:playlist(?:CSV|XSPF)?|XML\s*playlist)\s*\d+(?:-XML)?\s*$",
+    re.IGNORECASE,
+)
+_COUNT_TAG = re.compile(r"\s*[-–]?\s*\(\s*\d+\s*(?:DUPPED)?\s*\)\s*$", re.IGNORECASE)
+_SOURCE_PREFIX = re.compile(
+    r"^(Spotify(?:\s+Generated)?|YouTube\s*Music|Youtube\s*Music|YT\s*Music|"
+    r"Soundcloud|Pandora|Rdio|Soundiiz)\s*[-–]\s*",
+    re.IGNORECASE,
+)
+_PLAYLIST_CSV_TIMESTAMP = re.compile(r"playlistCSV(?P<epoch>\d{9,11})(?:-XML)?\s*$", re.IGNORECASE)
+_MIN_EXPORT_TIMESTAMP = 946684800       # 2000-01-01 UTC
+_MAX_EXPORT_TIMESTAMP = 4102444800      # 2100-01-01 UTC
+_MIN_TRACK_DURATION_MS = 1000
+_MAX_TRACK_DURATION_MS = 2 * 60 * 60 * 1000
+_ISRC = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}\d{7}$")
+
+
+def clean_stem(name: str) -> str:
+    """Source basename (no extension) with export-tool digits/suffixes removed."""
+    stem = _SUFFIX_NOISE.sub("", name).strip()
+    stem = re.sub(r"\s{2,}", " ", stem)
+    return stem.strip(" -–")
+
+
+def playlist_name(stem: str) -> str:
+    """Human playlist name: cleaned stem minus a leading source + count tag."""
+    name = _COUNT_TAG.sub("", stem).strip()
+    no_prefix = _SOURCE_PREFIX.sub("", name).strip()
+    return no_prefix or name or stem
+
+
+def source_label(stem: str, path: Path) -> str:
+    m = _SOURCE_PREFIX.match(stem)
+    if m:
+        return m.group(1).strip()
+    # Fall back to a containing directory hint (e.g. Rdio export trees).
+    parts = [p.lower() for p in path.parts]
+    for known in ("rdio", "soundiiz", "pandora", "yt music"):
+        if any(known in p for p in parts):
+            return known.title()
+    return "import"
+
+
+def source_provenance(dialect: str, stem: str, path: Path) -> str:
+    """Return the human-readable source line for the playlist header."""
+    if dialect == "rdio":
+        return "Rdio"
+    service = source_label(stem, path)
+    return "Soundiiz" if service.lower() in {"import", "soundiiz"} else f"{service} via Soundiiz"
+
+
+# A muzaiten "central" authoritative/snapshot file: ``<service>--gen-<n>--<kind>``
+# (e.g. ``spotify--gen-2--authoritative``, ``spotify--gen-4--a-z``). These are
+# this archive's own assembled generations; recognising the convention only
+# yields a nicer playlist name and provenance — it changes no parsing or
+# selection. The file is still parsed by its detected CSV dialect like any other.
+_CENTRAL_NAME = re.compile(r"^(spotify|rdio|mus)--gen-(\d+)--(.+)$", re.IGNORECASE)
+_CENTRAL_SERVICE = {"spotify": "Spotify", "rdio": "Rdio", "mus": "YouTube Music"}
+
+
+def central_meta(file_stem: str) -> tuple[str, str] | None:
+    """(playlist name, provenance) for a central ``<service>--gen-N--<kind>``
+    filename, or None when the name does not follow that convention."""
+    match = _CENTRAL_NAME.match(file_stem.strip())
+    if not match:
+        return None
+    service, number, kind = match.group(1).lower(), match.group(2), match.group(3).lower()
+    name = f"{_CENTRAL_SERVICE[service]} Gen {number}"
+    if kind != "authoritative":
+        name += f" ({kind})"
+    return name, "muzaiten central authoritative"
+
+
+def format_utc(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def export_timestamp(path: Path) -> tuple[str, str]:
+    """Use Soundiiz's filename timestamp when plausible, otherwise file mtime."""
+    match = _PLAYLIST_CSV_TIMESTAMP.search(path.stem)
+    if match:
+        epoch = int(match.group("epoch"))
+        if _MIN_EXPORT_TIMESTAMP <= epoch <= _MAX_EXPORT_TIMESTAMP:
+            return "Exported", f"{format_utc(epoch)} (filename timestamp)"
+    return "File modified", f"{format_utc(path.stat().st_mtime)} (filesystem timestamp)"
+
+
+def playlist_comment(dialect: str, stem: str, path: Path, sidecars: list[Path] | None = None) -> str:
+    timestamp_label, timestamp = export_timestamp(path)
+    lines = [
+        f"Source: {source_provenance(dialect, stem, path)}",
+        f"{timestamp_label}: {timestamp}",
+        f"File: {path.name}",
+    ]
+    lines.extend(f"Supplemented by: {sidecar.name}" for sidecar in sidecars or [])
+    return "\n".join(lines)
+
+
+# --- field helpers ----------------------------------------------------------
+
+_SPOTIFY = re.compile(r"open\.spotify\.com/track/([A-Za-z0-9]+)")
+_YOUTUBE = re.compile(r"(?:music\.)?youtube\.com/watch\?v=([\w-]+)")
+
+
+def duration_ms(value: str) -> int:
+    value = (value or "").strip().lower().rstrip("s").strip()
+    if not value:
+        return 0
+    try:
+        secs = int(float(value))
+    except ValueError:
+        return 0
+    return secs * 1000 if secs > 0 else 0
+
+
+def external_id(url: str, isrc: str) -> str:
+    url = (url or "").strip()
+    isrc = (isrc or "").strip()
+    if url:
+        m = _YOUTUBE.search(url)
+        if m:
+            return f"youtube:{m.group(1)}"
+    if isrc:
+        return f"isrc:{isrc}"
+    if url:
+        m = _SPOTIFY.search(url)
+        if m:
+            return f"spotify:track:{m.group(1)}"
+    return ""
+
+
+def added_at(value: str, naive_timezone: ZoneInfo | None = None) -> int | None:
+    """Parse an ISO-8601 source timestamp to epoch seconds when unambiguous."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        if naive_timezone is None:
+            return None
+        # `fold=0` deliberately chooses the earlier offset when a local time is
+        # repeated at DST fall-back. A UTC round trip detects nonexistent local
+        # times at DST spring-forward, which must not be guessed.
+        parsed = parsed.replace(tzinfo=naive_timezone, fold=0)
+        round_trip = parsed.astimezone(timezone.utc).astimezone(naive_timezone)
+        if round_trip.replace(tzinfo=None) != parsed.replace(tzinfo=None):
+            return None
+    timestamp = int(parsed.timestamp())
+    return timestamp if timestamp > 0 else None
+
+
+# --- dialect detection + row parsing ----------------------------------------
+
+# Basenames / patterns that are never track lists.
+_SKIP_NAME = re.compile(
+    r"^(artists|artistsCSV|result_playlists|favorites_(artists|labels|stations)|"
+    r"comments|downloaded)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_dialect(header_line: str):
+    low = header_line.lstrip("﻿").lower()
+    if ";" in low and "title" in low and "artist" in low:
+        return "soundiiz"
+    if "," in low and "name" in low and "artist" in low:
+        return "rdio"
+    return None
+
+
+def parse_rows(path: Path, dialect: str, naive_timezone: ZoneInfo | None):
+    """Yield JSONL record dicts for each track row."""
+    delimiter = ";" if dialect == "soundiiz" else ","
+    with path.open("r", encoding="utf-8-sig", newline="") as fh:
+        reader = csv.DictReader(fh, delimiter=delimiter)
+        # Normalize header keys to lowercase for stable lookup.
+        for raw in reader:
+            row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+            if dialect == "soundiiz":
+                title = row.get("title", "")
+                if not title:
+                    continue
+                rec = {"title": title}
+                if row.get("artist"):
+                    rec["artist"] = row["artist"]
+                if row.get("album"):
+                    rec["album"] = row["album"]
+                ms = duration_ms(row.get("duration", ""))
+                if ms:
+                    rec["durationMs"] = ms
+                ext = external_id(row.get("url", ""), row.get("isrc", ""))
+                if ext:
+                    rec["externalId"] = ext
+                timestamp = added_at(row.get("addeddate", ""), naive_timezone)
+                if timestamp:
+                    rec["addedAt"] = timestamp
+            else:  # rdio
+                title = row.get("name", "")
+                if not title:
+                    continue
+                rec = {"title": title}
+                if row.get("artist"):
+                    rec["artist"] = row["artist"]
+                if row.get("album"):
+                    rec["album"] = row["album"]
+            yield rec
+
+
+# --- source-specific sidecar enrichment -------------------------------------
+
+
+def local_name(element: ET.Element) -> str:
+    return element.tag.rsplit("}", 1)[-1]
+
+
+def child_text(element: ET.Element, name: str) -> str:
+    return next(((child.text or "").strip() for child in element if local_name(child) == name), "")
+
+
+def parse_rdio_xspf(path: Path) -> list[dict] | None:
+    """Read the Rdio-specific fields from an XSPF sidecar, if it is one."""
+    try:
+        playlist = ET.parse(path).getroot()
+    except (ET.ParseError, OSError) as exc:
+        print(f"  ! cannot read XSPF sidecar {path.name}: {exc}", file=sys.stderr)
+        return None
+    if not any(local_name(meta) == "meta" and meta.attrib.get("rel", "").startswith("https://rdio.com/xspf/")
+               for meta in playlist):
+        return None
+
+    records = []
+    for track in playlist.iter():
+        if local_name(track) != "track":
+            continue
+        isrcs = next(((child.text or "").strip() for child in track
+                      if local_name(child) == "meta"
+                      and child.attrib.get("rel") == "https://rdio.com/xspf/t/isrcs"), "")
+        records.append({
+            "title": child_text(track, "title"),
+            "artist": child_text(track, "creator"),
+            "duration": child_text(track, "duration"),
+            "isrcs": isrcs,
+        })
+    return records
+
+
+def parse_soundcloud_xml(path: Path) -> list[dict] | None:
+    """Read numeric SoundCloud track ids from the provider's XML sidecar."""
+    try:
+        playlist = ET.parse(path).getroot()
+    except (ET.ParseError, OSError) as exc:
+        print(f"  ! cannot read XML sidecar {path.name}: {exc}", file=sys.stderr)
+        return None
+    if local_name(playlist) != "playlist":
+        return None
+    records = []
+    for track in playlist.iter():
+        if local_name(track) != "track":
+            continue
+        records.append({
+            "title": child_text(track, "title"),
+            "artist": child_text(track, "artist"),
+            "id": child_text(track, "id"),
+        })
+    return records
+
+
+def matching_sidecar(records: list[dict], candidates: list[tuple[Path, list[dict] | None]]) -> tuple[Path, list[dict]] | None:
+    """Require an unambiguous ordered title/artist match before enrichment."""
+    matches = []
+    for path, sidecar_records in candidates:
+        if sidecar_records is None or len(records) != len(sidecar_records):
+            continue
+        if all((record.get("title", ""), record.get("artist", ""))
+               == (sidecar.get("title", ""), sidecar.get("artist", ""))
+               for record, sidecar in zip(records, sidecar_records)):
+            matches.append((path, sidecar_records))
+    return matches[0] if len(matches) == 1 else None
+
+
+def first_isrc(value: str) -> str:
+    for candidate in value.split(","):
+        normalized = candidate.strip().upper()
+        if _ISRC.fullmatch(normalized):
+            return normalized
+    return ""
+
+
+def normalized_rdio_duration(value: str) -> tuple[int, bool]:
+    """Return XSPF milliseconds, repairing only observed 1,000x Rdio outliers."""
+    try:
+        raw = int(value)
+    except ValueError:
+        return 0, False
+    if _MIN_TRACK_DURATION_MS <= raw <= _MAX_TRACK_DURATION_MS:
+        return raw, False
+    if raw > _MAX_TRACK_DURATION_MS and raw % 1000 == 0:
+        repaired = raw // 1000
+        if _MIN_TRACK_DURATION_MS <= repaired <= _MAX_TRACK_DURATION_MS:
+            return repaired, True
+    return 0, False
+
+
+def enrich_rdio(records: list[dict], path: Path) -> list[Path]:
+    sidecar_path = path.with_suffix(".xspf")
+    if not sidecar_path.is_file():
+        return []
+    match = matching_sidecar(records, [(sidecar_path, parse_rdio_xspf(sidecar_path))])
+    if match is None:
+        print(f"  ! Rdio XSPF sidecar not applied to {path.name}: ordered tracks differ", file=sys.stderr)
+        return []
+    _, sidecar_records = match
+    corrected = 0
+    for record, sidecar in zip(records, sidecar_records):
+        if not record.get("durationMs"):
+            duration, was_corrected = normalized_rdio_duration(sidecar["duration"])
+            if duration:
+                record["durationMs"] = duration
+            corrected += was_corrected
+        if not record.get("externalId"):
+            isrc = first_isrc(sidecar["isrcs"])
+            if isrc:
+                record["externalId"] = f"isrc:{isrc}"
+    detail = f"; repaired {corrected} duration values" if corrected else ""
+    print(f"  + enriched from {sidecar_path.name}{detail}", file=sys.stderr)
+    return [sidecar_path]
+
+
+def enrich_soundcloud(records: list[dict], path: Path) -> list[Path]:
+    if source_label(clean_stem(path.stem), path).lower() != "soundcloud":
+        return []
+    candidates = [(candidate, parse_soundcloud_xml(candidate))
+                  for candidate in sorted(path.parent.glob("*.xml"))]
+    match = matching_sidecar(records, candidates)
+    if match is None:
+        return []
+    sidecar_path, sidecar_records = match
+    for record, sidecar in zip(records, sidecar_records):
+        if not record.get("externalId") and sidecar["id"].isdigit():
+            record["externalId"] = f"soundcloud:{sidecar['id']}"
+    print(f"  + enriched from {sidecar_path.name}", file=sys.stderr)
+    return [sidecar_path]
+
+
+def enrich_records(records: list[dict], dialect: str, path: Path) -> list[Path]:
+    if dialect == "rdio":
+        return enrich_rdio(records, path)
+    return enrich_soundcloud(records, path)
+
+
+# --- discovery + conversion -------------------------------------------------
+
+
+def iter_csv_files(src: Path):
+    if src.is_file():
+        yield src
+        return
+    for path in sorted(src.rglob("*.csv")):
+        if _SKIP_NAME.match(path.name):
+            continue
+        yield path
+
+
+def unique_out_path(out_dir: Path, stem: str, used: set) -> Path:
+    safe = re.sub(r"[\\/:*?\"<>|]+", "_", stem).strip() or "playlist"
+    candidate = safe
+    n = 2
+    while candidate.lower() in used:
+        candidate = f"{safe} ({n})"
+        n += 1
+    used.add(candidate.lower())
+    return out_dir / f"{candidate}.jsonl"
+
+
+def convert(src: Path, out_dir: Path, dry_run: bool, naive_timezone: ZoneInfo | None = None) -> int:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    used: set = set()
+    total_files = total_tracks = skipped = 0
+
+    for path in iter_csv_files(src):
+        try:
+            with path.open("r", encoding="utf-8-sig") as fh:
+                header = fh.readline()
+        except OSError as exc:
+            print(f"  ! cannot read {path.name}: {exc}", file=sys.stderr)
+            skipped += 1
+            continue
+        dialect = detect_dialect(header)
+        if dialect is None:
+            skipped += 1
+            continue
+
+        records = list(parse_rows(path, dialect, naive_timezone))
+        if not records:
+            skipped += 1
+            continue
+
+        stem = clean_stem(path.stem)
+        sidecars = enrich_records(records, dialect, path)
+        central = central_meta(path.stem)
+        if central:
+            name, provenance = central
+            comment_lines = [f"Source: {provenance}", f"File: {path.name}"]
+            comment_lines.extend(f"Supplemented by: {s.name}" for s in sidecars)
+            comment = "\n".join(comment_lines)
+        else:
+            name = playlist_name(stem)
+            comment = playlist_comment(dialect, stem, path, sidecars)
+        out_path = unique_out_path(out_dir, stem, used)
+
+        total_files += 1
+        total_tracks += len(records)
+        print(f"  {path.name}  [{dialect}]  -> {out_path.name}  ({len(records)} tracks)")
+        if dry_run:
+            continue
+        with out_path.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"playlist": {"name": name, "comment": comment}},
+                                ensure_ascii=False) + "\n")
+            for rec in records:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    print(f"\n{total_files} playlists, {total_tracks} tracks"
+          f"{' (dry run)' if dry_run else f' -> {out_dir}'}; {skipped} files skipped.")
+    return 0
+
+
+def cmd_convert(args) -> int:
+    src = args.src.expanduser()
+    out = args.out.expanduser()
+    if not src.exists():
+        sys.exit(f"error: source does not exist: {src}")
+    naive_timezone = None
+    if args.naive_timezone:
+        try:
+            naive_timezone = ZoneInfo(args.naive_timezone)
+        except ZoneInfoNotFoundError:
+            sys.exit(f"error: unknown IANA timezone: {args.naive_timezone}")
+    return convert(src, out, args.dry_run, naive_timezone)
+
+
+# ============================================================================
+# youtube: yt-dlp enrichment -> JSONL
+# ============================================================================
+
+_YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+# yt-dlp's placeholder title for an unavailable/private/deleted video.
+_PLACEHOLDER_TITLE = re.compile(r"^youtube video #[A-Za-z0-9_-]{11}$", re.IGNORECASE)
+# Pull a video id out of a watch URL, youtu.be, music.youtube, or a bare id.
+_URL_ID = re.compile(
+    r"(?:v=|/shorts/|youtu\.be/|/watch/|/embed/)([A-Za-z0-9_-]{11})")
+_TAKEOUT_HEADER = re.compile(r"^(video[\s_-]*id|id\s*do\s*v[íi]deo)\b", re.IGNORECASE)
+
+
+# --- timestamp parsing ------------------------------------------------------
+
+def parse_timestamp(text: str) -> int | None:
+    """Takeout uses ISO-8601 (``...T...+00:00``) or ``YYYY-MM-DD HH:MM:SS UTC``."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text.endswith(" UTC"):
+        try:
+            dt = datetime.strptime(text, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    else:
+        iso = f"{text[:-1]}+00:00" if text.endswith(("Z", "z")) else text
+        try:
+            dt = datetime.fromisoformat(iso)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+    ts = int(dt.timestamp())
+    return ts if ts > 0 else None
+
+
+# --- input parsing ----------------------------------------------------------
+
+def extract_id(token: str) -> str | None:
+    token = token.strip()
+    m = _URL_ID.search(token)
+    if m:
+        return m.group(1)
+    return token if _YT_ID.fullmatch(token) else None
+
+
+def parse_takeout(path: Path) -> tuple[str, list[tuple[str, int | None]]] | None:
+    """(playlist name, [(video_id, addedAt|None)]) from a Takeout playlist CSV.
+
+    Handles both the bare ``Video ID,<timestamp>`` table and the composite file
+    that prefixes a playlist-metadata block before the track section."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError as exc:
+        print(f"  ! cannot read {path.name}: {exc}", file=sys.stderr)
+        return None
+    header_idx = next((i for i, ln in enumerate(lines)
+                       if ln and _TAKEOUT_HEADER.match(next(csv.reader([ln]))[0].strip())), None)
+    if header_idx is None:
+        return None
+    items: list[tuple[str, int | None]] = []
+    for ln in lines[header_idx + 1:]:
+        if not ln.strip():
+            continue
+        cells = next(csv.reader([ln]))
+        vid = cells[0].strip()
+        if not _YT_ID.fullmatch(vid):
+            continue
+        items.append((vid, parse_timestamp(cells[1]) if len(cells) > 1 else None))
+    stem = re.sub(r"[-_\s]*videos?$", "", path.stem, flags=re.IGNORECASE).strip()
+    return stem or path.stem, items
+
+
+def parse_links(path: Path) -> tuple[str, list[tuple[str, int | None]]] | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"  ! cannot read {path.name}: {exc}", file=sys.stderr)
+        return None
+    items = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        vid = extract_id(line)
+        if vid:
+            items.append((vid, None))
+    return (path.stem or "youtube-links", items) if items else None
+
+
+# --- yt-dlp -----------------------------------------------------------------
+
+def ytdlp_json(target: str, flat: bool = False) -> dict | None:
+    cmd = ["yt-dlp", "-J", "--no-warnings", "--ignore-no-formats-error"]
+    if flat:
+        cmd.append("--flat-playlist")
+    cmd.append(target)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        sys.exit("error: yt-dlp is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def parse_playlist_url(url: str) -> tuple[str, list[tuple[str, int | None]]] | None:
+    info = ytdlp_json(url, flat=True)
+    if not info:
+        print(f"  ! could not read playlist {url}", file=sys.stderr)
+        return None
+    name = (info.get("title") or "youtube-playlist").strip()
+    items = [(e["id"], None) for e in info.get("entries") or [] if e.get("id")]
+    return name, items
+
+
+def pick_artist(info: dict) -> str:
+    for key in ("artist", "creator"):
+        if info.get(key):
+            return str(info[key]).strip()
+    artists = info.get("artists")
+    if isinstance(artists, list) and artists:
+        return ", ".join(str(a).strip() for a in artists if a)
+    channel = (info.get("uploader") or info.get("channel") or "").strip()
+    if channel.endswith(" - Topic"):                 # auto-generated music channel
+        return channel[: -len(" - Topic")].strip()
+    return ""
+
+
+def record_from_info(info: dict, added: int | None) -> dict | None:
+    """Map a yt-dlp info dict to a muzaiten JSONL item, or None if unusable."""
+    is_music = bool(info.get("track"))
+    title = str(info.get("track") or info.get("title") or "").strip()
+    if not title or _PLACEHOLDER_TITLE.match(title):   # unavailable/deleted video
+        return None
+    artist = pick_artist(info)
+    album = str(info.get("album") or "").strip()
+    if not is_music and not artist and " - " in title:   # "Artist - Title"
+        left, right = title.split(" - ", 1)
+        artist, title = left.strip(), right.strip()
+    if not title:
+        return None
+    rec: dict = {"title": title}
+    if artist:
+        rec["artist"] = artist
+    if album:
+        rec["album"] = album
+    duration = info.get("duration")
+    if isinstance(duration, (int, float)) and duration > 0:
+        rec["durationMs"] = int(duration * 1000)
+    if info.get("id"):
+        rec["externalId"] = f"youtube:{info['id']}"
+    if added:
+        rec["addedAt"] = added
+    return rec
+
+
+# --- driver -----------------------------------------------------------------
+
+def watch_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def enrich(items, cache, sleep, dry_run, limit):
+    """Resolve [(id, addedAt)] to JSONL records, with cache + rate limiting."""
+    if limit:
+        items = items[:limit]
+    records, skipped, fetched = [], 0, 0
+    for video_id, added in items:
+        if dry_run:
+            print(f"    would fetch youtube:{video_id}")
+            continue
+        info = cache.get(video_id)
+        if info is None:
+            if fetched and sleep:
+                time.sleep(sleep)
+            info = ytdlp_json(watch_url(video_id))
+            fetched += 1
+            if info is None:
+                print(f"    ! unavailable: youtube:{video_id}", file=sys.stderr)
+                skipped += 1
+                continue
+            cache[video_id] = info
+        rec = record_from_info(info, added)
+        if rec is None:
+            skipped += 1
+            continue
+        records.append(rec)
+    return records, skipped, fetched
+
+
+def write_jsonl(out_dir: Path, name: str, comment: str, records: list[dict]) -> Path:
+    safe = re.sub(r"[\\/:*?\"<>|]+", "_", name).strip() or "playlist"
+    path = out_dir / f"{safe}.jsonl"
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"playlist": {"name": name, "comment": comment}},
+                            ensure_ascii=False) + "\n")
+        for rec in records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return path
+
+
+def iter_inputs(args):
+    """Yield (kind, label, provenance, (name, items)) for every input."""
+    for spec in args.takeout or []:
+        path = Path(spec).expanduser()
+        files = sorted(path.rglob("*.csv")) if path.is_dir() else [path]
+        for file in files:
+            parsed = parse_takeout(file)
+            if parsed:
+                yield "takeout", file.name, f"Source: YouTube (Google Takeout)\nFile: {file.name}", parsed
+            else:
+                print(f"  - skipped (not a Takeout playlist CSV): {file.name}", file=sys.stderr)
+    for url in args.playlist or []:
+        parsed = parse_playlist_url(url)
+        if parsed:
+            yield "playlist", url, f"Source: YouTube playlist\nURL: {url}", parsed
+    for spec in args.links or []:
+        path = Path(spec).expanduser()
+        parsed = parse_links(path)
+        if parsed:
+            yield "links", path.name, f"Source: YouTube links\nFile: {path.name}", parsed
+
+
+def cmd_youtube(args) -> int:
+    if not (args.takeout or args.playlist or args.links):
+        sys.exit("error: provide at least one of --takeout / --playlist / --links")
+
+    cache: dict = {}
+    if args.cache and args.cache.exists():
+        try:
+            cache = json.loads(args.cache.read_text(encoding="utf-8"))
+            print(f"loaded {len(cache)} cached entries from {args.cache}")
+        except (OSError, json.JSONDecodeError):
+            print(f"  ! ignoring unreadable cache {args.cache}", file=sys.stderr)
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    total_playlists = total_items = total_skipped = total_fetched = 0
+    for kind, label, provenance, (name, items) in iter_inputs(args):
+        print(f"  {label}  [{kind}]  ({len(items)} videos)")
+        records, skipped, fetched = enrich(items, cache, args.sleep, args.dry_run, args.limit)
+        total_skipped += skipped
+        total_fetched += fetched
+        if args.dry_run:
+            continue
+        out_path = write_jsonl(args.out, name, provenance, records)
+        total_playlists += 1
+        total_items += len(records)
+        print(f"    -> {out_path.name}  ({len(records)} items, {skipped} skipped)")
+        if args.cache:                                # persist after each playlist
+            args.cache.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+
+    if args.dry_run:
+        print("\n(dry run: no network calls, no output written)")
+    else:
+        print(f"\n{total_playlists} playlists, {total_items} items -> {args.out}; "
+              f"{total_skipped} skipped, {total_fetched} fetched via yt-dlp.")
+    return 0
+
+
+# ============================================================================
+# dispatch
+# ============================================================================
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="muzaiten-import", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
+
+    conv = sub.add_parser(
+        "convert", help="convert offline CSV exports (Soundiiz/Rdio/SoundCloud) to JSONL",
+        description=CONVERT_DESC, formatter_class=argparse.RawDescriptionHelpFormatter)
+    conv.add_argument("--src", required=True, type=Path,
+                      help="source directory (searched recursively) or a single CSV")
+    conv.add_argument("--out", required=True, type=Path,
+                      help="output directory for the .jsonl files")
+    conv.add_argument("--dry-run", action="store_true",
+                      help="report what would be written without writing")
+    conv.add_argument("--naive-timezone", metavar="IANA_ZONE",
+                      help="interpret timezone-less Soundiiz addedDate values in this IANA timezone")
+    conv.set_defaults(func=cmd_convert)
+
+    yt = sub.add_parser(
+        "youtube", help="enrich YouTube (Takeout/playlist/links) to JSONL via yt-dlp",
+        description=YOUTUBE_DESC, formatter_class=argparse.RawDescriptionHelpFormatter)
+    yt.add_argument("--out", required=True, type=Path, help="output directory for .jsonl")
+    yt.add_argument("--takeout", action="append", metavar="PATH",
+                    help="Google Takeout playlist CSV or a directory of them")
+    yt.add_argument("--playlist", action="append", metavar="URL",
+                    help="a YouTube / YouTube Music playlist URL")
+    yt.add_argument("--links", action="append", metavar="FILE",
+                    help="a text file of YouTube video URLs/IDs, one per line")
+    yt.add_argument("--cache", type=Path,
+                    help="JSON cache of resolved metadata (read + updated); makes re-runs cheap")
+    yt.add_argument("--sleep", type=float, default=1.0,
+                    help="seconds to wait between yt-dlp fetches (default 1.0)")
+    yt.add_argument("--limit", type=int, help="only process the first N items per input (testing)")
+    yt.add_argument("--dry-run", action="store_true",
+                    help="parse inputs and list video ids without calling yt-dlp")
+    yt.set_defaults(func=cmd_youtube)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

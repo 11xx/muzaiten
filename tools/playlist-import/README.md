@@ -1,12 +1,19 @@
-# Playlist export converter
+# Playlist import tooling
 
-`convert.py` converts supported playlist exports into the JSONL format consumed
-by muzaiten. It is a standalone, offline tool: it does not build, launch, or
-modify the application, its database, or an existing music library.
+`muzaiten-import` converts external playlist exports into the JSONL format
+consumed by muzaiten. It is a standalone tool: it does not build, launch, or
+modify the application, its database, or an existing music library. Two
+subcommands:
+
+- `muzaiten-import convert` — the offline CSV converter (this document's bulk).
+- `muzaiten-import youtube` — the network-using `yt-dlp` enricher (see below).
+
+The examples below invoke the script from the repo (`tools/playlist-import/muzaiten-import`,
+which is executable); once installed it is simply `muzaiten-import` on `PATH`.
 
 The JSONL contract is [documented here](../../docs/playlist-import-jsonl.md).
 
-## Supported input
+## `convert` — supported input
 
 - Soundiiz CSV exports: semicolon-delimited `title`, `artist`, `album`, `isrc`,
   `addedDate`, `duration`, and `url` columns. The converter retains duration,
@@ -52,12 +59,12 @@ When a verified sidecar contributes metadata, the header appends a
 `Supplemented by: <filename>` provenance line. Unpaired XSPF/XML files are not
 emitted as duplicate playlists.
 
-## YouTube enrichment (`youtube_to_jsonl.py`)
+## `youtube` — YouTube enrichment
 
-`convert.py` is offline and cannot handle YouTube, whose exports carry only video
-ids. `youtube_to_jsonl.py` is the dedicated, network-using companion: it resolves
-metadata with `yt-dlp` and emits the same JSONL. It is kept separate so
-`convert.py` keeps its offline guarantee; this one is slow, rate-limited, cached,
+`convert` is offline and cannot handle YouTube, whose exports carry only video
+ids. The `youtube` subcommand is the network-using companion: it resolves
+metadata with `yt-dlp` and emits the same JSONL. It is a separate subcommand so
+`convert` keeps its offline guarantee; this one is slow, rate-limited, cached,
 and meant to be run interactively.
 
 Three input modes (combine freely; each input becomes one `.jsonl`):
@@ -68,7 +75,7 @@ Three input modes (combine freely; each input becomes one `.jsonl`):
   `addedAt`.
 - `--playlist URL` — a normal YouTube / YouTube Music playlist link, enumerated
   with `yt-dlp --flat-playlist`. This lets the app's internal YouTube playlist
-  parsing be superseded by calling this script and importing its JSONL.
+  parsing be superseded by calling this subcommand and importing its JSONL.
 - `--links FILE` — a text file of YouTube video URLs/ids, one per line.
 
 A YouTube Music `track`/`artist`/`album` is used when present; otherwise the
@@ -78,18 +85,18 @@ recognised. Unavailable/deleted videos (yt-dlp placeholder titles) are skipped.
 rate-limits fetches; `--dry-run` parses inputs and lists ids without any network.
 
 ```sh
-python3 tools/playlist-import/youtube_to_jsonl.py --out ./converted \
+tools/playlist-import/muzaiten-import youtube --out ./converted \
   --takeout "./Takeout/YouTube and YouTube Music/playlists" --cache ./yt-cache.json
-python3 tools/playlist-import/youtube_to_jsonl.py --out ./converted \
+tools/playlist-import/muzaiten-import youtube --out ./converted \
   --playlist "https://www.youtube.com/playlist?list=PL..." --sleep 1.5
 ```
 
-## Usage
+## `convert` — usage
 
 Preview discovery without writing output:
 
 ```sh
-python3 tools/playlist-import/convert.py \
+tools/playlist-import/muzaiten-import convert \
   --src ./exports \
   --out ./converted-playlists \
   --dry-run
@@ -98,7 +105,7 @@ python3 tools/playlist-import/convert.py \
 Write the JSONL files to a dedicated output directory:
 
 ```sh
-python3 tools/playlist-import/convert.py \
+tools/playlist-import/muzaiten-import convert \
   --src ./exports \
   --out ./converted-playlists
 ```
@@ -107,7 +114,7 @@ Soundiiz exports commonly use timezone-less `addedDate` values. To preserve
 them, declare their source timezone explicitly; otherwise they remain absent:
 
 ```sh
-python3 tools/playlist-import/convert.py \
+tools/playlist-import/muzaiten-import convert \
   --src ./exports \
   --out ./converted-playlists \
   --naive-timezone America/Sao_Paulo
