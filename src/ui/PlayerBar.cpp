@@ -117,6 +117,7 @@ public:
         : QWidget(parent)
     {
         setFixedSize(100, 22);
+        setMouseTracking(true);
     }
 
     void setRating(int rating0To100)
@@ -146,8 +147,13 @@ protected:
         }
 
         const int rating = StarRating::ratingFromPosition(StarRating::ratingRect(rect(), 18), event->pos());
-        if (rating >= 0 && ratingChanged) {
-            ratingChanged(rating);
+        if (rating >= 0) {
+            m_rating0To100 = rating;
+            m_hoverRating0To100 = StarRating::unset;
+            update();
+            if (ratingChanged) {
+                ratingChanged(rating);
+            }
         }
     }
 
