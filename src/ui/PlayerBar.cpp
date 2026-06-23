@@ -11,7 +11,6 @@
 #include <QCursor>
 #include <QFileInfo>
 #include <QFont>
-#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
@@ -646,11 +645,19 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_next = iconButton(this, QStyle::SP_MediaSkipForward, QStringLiteral("Next"));
     controls->addWidget(m_next);
 
-    auto *progressGrid = new QGridLayout;
-    progressGrid->setContentsMargins(4, 0, 4, 0);
-    progressGrid->setHorizontalSpacing(8);
-    progressGrid->setVerticalSpacing(4);
-    progressGrid->setColumnStretch(1, 1);
+    // Two stacked rows that share the same left/right edges: the meta row
+    // (title+subtitle | stars) sits above the timeline row (elapsed | bar |
+    // duration). The outer margin restores the breathing room the controls had
+    // before; the time labels are content-width (no fixed box) so elapsed's left
+    // edge meets the title's, duration's right edge meets the stars', and the
+    // gap from each label to the bar stays a single, symmetric spacing step.
+    auto *progressLayout = new QVBoxLayout;
+    progressLayout->setContentsMargins(16, 0, 16, 0);
+    progressLayout->setSpacing(4);
+
+    auto *metaLayout = new QHBoxLayout;
+    metaLayout->setContentsMargins(0, 0, 0, 0);
+    metaLayout->setSpacing(10);
 
     auto *textLayout = new QVBoxLayout;
     textLayout->setContentsMargins(0, 0, 0, 0);
@@ -667,31 +674,35 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_subtitle->setTextInteractionFlags(Qt::NoTextInteraction);
     m_subtitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     textLayout->addWidget(m_subtitle);
-    progressGrid->addLayout(textLayout, 0, 0, 1, 2);
+    metaLayout->addLayout(textLayout, 1);
 
     auto *rating = new RatingStrip(this);
     rating->ratingChanged = [this](int value) {
         emit currentTrackRatingChanged(value);
     };
     m_rating = rating;
-    progressGrid->addWidget(m_rating, 0, 2, Qt::AlignRight | Qt::AlignVCenter);
+    metaLayout->addWidget(m_rating, 0, Qt::AlignVCenter);
+    progressLayout->addLayout(metaLayout);
+
+    auto *timeline = new QHBoxLayout;
+    timeline->setContentsMargins(0, 0, 0, 0);
+    timeline->setSpacing(8);
 
     m_elapsed = new QLabel(QStringLiteral("0:00"), this);
-    m_elapsed->setMinimumWidth(42);
     m_elapsed->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    progressGrid->addWidget(m_elapsed, 1, 0);
+    timeline->addWidget(m_elapsed);
 
     m_progress = new ClickSeekSlider(Qt::Horizontal, this);
     m_progress->setRange(0, 0);
     m_progress->setEnabled(false);
-    progressGrid->addWidget(m_progress, 1, 1);
+    timeline->addWidget(m_progress, 1);
 
     m_duration = new QLabel(QStringLiteral("0:00"), this);
-    m_duration->setMinimumWidth(42);
     m_duration->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    progressGrid->addWidget(m_duration, 1, 2);
+    timeline->addWidget(m_duration);
 
-    controls->addLayout(progressGrid, 1);
+    progressLayout->addLayout(timeline);
+    controls->addLayout(progressLayout, 1);
 
     auto *volume = new VolumeButton(this);
     volume->volumeChanged = [this](int value) {
