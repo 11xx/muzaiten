@@ -79,6 +79,12 @@ QString statusLabel(PlaylistItemStatus status)
     return QString();
 }
 
+bool isPlayablePlaylistItem(const PlaylistItem &item)
+{
+    return !item.trackPath.isEmpty()
+        && (item.status == PlaylistItemStatus::Matched || item.status == PlaylistItemStatus::Approximate);
+}
+
 QString durationText(qint64 ms)
 {
     if (ms <= 0) {
@@ -720,6 +726,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_dropHint->hide();
 
     connect(m_playlistList, &QListWidget::currentRowChanged, this, [this](int) {
+        rememberTracklistViewState();
         m_currentPlaylistId = currentPlaylistId();
         m_currentQueueSnapshotId = currentQueueSnapshotId();
         reloadItems();
@@ -988,6 +995,7 @@ void PlaylistView::reloadPlaylists()
     if (m_db == nullptr) {
         return;
     }
+    rememberTracklistViewState();
     const qint64 keep = m_currentPlaylistId;
     const QString keepQueueId = m_currentQueueSnapshotId;
     m_playlistList->clear();
@@ -1159,6 +1167,9 @@ void PlaylistView::refreshImportingPlaylist(qint64 playlistId)
 
 void PlaylistView::reloadItems()
 {
+    if (m_loadedTracklistStateKey == tracklistViewStateKey()) {
+        rememberTracklistViewState();
+    }
     m_items.clear();
     if (!m_currentQueueSnapshotId.isEmpty()) {
         for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
@@ -1173,6 +1184,8 @@ void PlaylistView::reloadItems()
     }
     refreshItemRatings();
     populateItems();
+    m_loadedTracklistStateKey = tracklistViewStateKey();
+    restoreTracklistViewState();
     emit viewSettingsChanged();
 }
 
@@ -1342,7 +1355,7 @@ QStringList PlaylistView::pathsForSavedQueue(const QString &snapshotId, int *sta
         }
         for (int row = 0; row < queue.items.size(); ++row) {
             const PlaylistItem &item = queue.items.at(row);
-            if (item.status != PlaylistItemStatus::Matched || item.trackPath.isEmpty()) {
+            if (!isPlayablePlaylistItem(item)) {
                 continue;
             }
             if (row == current && startIndex != nullptr) {
@@ -1373,7 +1386,7 @@ QStringList PlaylistView::selectedItemPaths(int *startIndex) const
         std::sort(rows.begin(), rows.end());  // honor on-screen (display) order
         for (int row : rows) {
             const PlaylistItem *item = itemForDisplayRow(row);
-            if (item != nullptr && item->status == PlaylistItemStatus::Matched && !item->trackPath.isEmpty()) {
+            if (item != nullptr && isPlayablePlaylistItem(*item)) {
                 paths << item->trackPath;
             }
         }
@@ -1387,7 +1400,7 @@ QStringList PlaylistView::selectedItemPaths(int *startIndex) const
     const int current = currentItemRow();
     for (int row = 0; row < m_itemModel->rowCount(); ++row) {
         const PlaylistItem *item = itemForDisplayRow(row);
-        if (item == nullptr || item->status != PlaylistItemStatus::Matched || item->trackPath.isEmpty()) {
+        if (item == nullptr || !isPlayablePlaylistItem(*item)) {
             continue;
         }
         if (row == current) {
@@ -1420,7 +1433,7 @@ QStringList PlaylistView::selectedOnlyItemPaths() const
 
     for (int row : rows) {
         const PlaylistItem *item = itemForDisplayRow(row);
-        if (item != nullptr && item->status == PlaylistItemStatus::Matched && !item->trackPath.isEmpty()) {
+        if (item != nullptr && isPlayablePlaylistItem(*item)) {
             paths << item->trackPath;
         }
     }
@@ -1438,7 +1451,7 @@ void PlaylistView::playCurrentPlaylist()
     }
     QStringList paths;
     for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
-        if (item.status == PlaylistItemStatus::Matched && !item.trackPath.isEmpty()) {
+        if (isPlayablePlaylistItem(item)) {
             paths << item.trackPath;
         }
     }
@@ -1474,7 +1487,7 @@ void PlaylistView::enqueueCurrentPlaylist(bool playNext, bool temporary)
     }
     QStringList paths;
     for (const PlaylistItem &item : m_db->items(m_currentPlaylistId)) {
-        if (item.status == PlaylistItemStatus::Matched && !item.trackPath.isEmpty()) {
+        if (isPlayablePlaylistItem(item)) {
             paths << item.trackPath;
         }
     }
@@ -1652,7 +1665,7 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     const bool hasPlayableSelection = !selectedOnlyItemPaths().isEmpty();
     QMenu menu(this);
     QAction *play = menu.addAction(QStringLiteral("Play"));
-    play->setEnabled(item != nullptr && item->status == PlaylistItemStatus::Matched && !item->trackPath.isEmpty());
+    play->setEnabled(item != nullptr && isPlayablePlaylistItem(*item));
     connect(play, &QAction::triggered, this, &PlaylistView::playCurrentItem);
     QAction *playNext = menu.addAction(QStringLiteral("Play next"));
     playNext->setEnabled(hasPlayableSelection);
@@ -1677,9 +1690,9 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     edit->setEnabled(item != nullptr && !currentSelectionIsSavedQueue() && m_currentPlaylistId > 0);
     connect(edit, &QAction::triggered, this, &PlaylistView::editCurrentItem);
     QAction *properties = menu.addAction(QStringLiteral("Properties"));
-    properties->setEnabled(item != nullptr && item->status == PlaylistItemStatus::Matched && !item->trackPath.isEmpty());
+    properties->setEnabled(item != nullptr && isPlayablePlaylistItem(*item));
     connect(properties, &QAction::triggered, this, [this, item]() {
-        if (item != nullptr && item->status == PlaylistItemStatus::Matched && !item->trackPath.isEmpty()) {
+        if (item != nullptr && isPlayablePlaylistItem(*item)) {
             emit propertiesForPathRequested(item->trackPath);
         }
     });
@@ -1795,6 +1808,89 @@ void PlaylistView::setNowPlaying(const QString &trackPath, qint64 sourcePlaylist
     updatePlayingHighlight();
 }
 
+bool PlaylistView::revealNowPlaying()
+{
+    if (m_nowPlayingPlaylistId <= 0 || m_nowPlayingPath.isEmpty()) {
+        return false;
+    }
+    if (m_currentPlaylistId != m_nowPlayingPlaylistId) {
+        selectPlaylist(m_nowPlayingPlaylistId);
+    }
+    for (int row = 0; row < m_itemModel->rowCount(); ++row) {
+        const PlaylistItem *item = itemForDisplayRow(row);
+        if (item == nullptr || item->trackPath != m_nowPlayingPath) {
+            continue;
+        }
+        m_itemTable->setFocus(Qt::OtherFocusReason);
+        setCurrentItemRow(row);
+        if (m_itemTable->selectionModel() != nullptr) {
+            m_itemTable->selectionModel()->select(m_itemModel->index(row, 0),
+                                                  QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        }
+        m_itemTable->scrollTo(m_itemModel->index(row, 0), QAbstractItemView::PositionAtCenter);
+        rememberTracklistViewState();
+        return true;
+    }
+    return false;
+}
+
+QString PlaylistView::tracklistViewStateKey() const
+{
+    if (!m_currentQueueSnapshotId.isEmpty()) {
+        return QStringLiteral("queue:%1").arg(m_currentQueueSnapshotId);
+    }
+    return m_currentPlaylistId > 0 ? QStringLiteral("playlist:%1").arg(m_currentPlaylistId) : QString();
+}
+
+void PlaylistView::rememberTracklistViewState()
+{
+    const QString key = tracklistViewStateKey();
+    if (key.isEmpty() || m_itemModel == nullptr || m_itemTable == nullptr) {
+        return;
+    }
+    TracklistViewState state;
+    state.scrollValue = m_itemTable->verticalScrollBar()->value();
+    if (const PlaylistItem *current = itemForDisplayRow(currentItemRow()); current != nullptr) {
+        state.currentItemId = current->id;
+    }
+    if (const QItemSelectionModel *selection = m_itemTable->selectionModel(); selection != nullptr) {
+        for (const QModelIndex &index : selection->selectedRows(0)) {
+            if (const PlaylistItem *item = itemForDisplayRow(index.row()); item != nullptr) {
+                state.selectedItemIds.push_back(item->id);
+            }
+        }
+    }
+    m_tracklistViewStates.insert(key, state);
+}
+
+void PlaylistView::restoreTracklistViewState()
+{
+    const auto it = m_tracklistViewStates.constFind(tracklistViewStateKey());
+    if (it == m_tracklistViewStates.cend() || m_itemModel == nullptr) {
+        return;
+    }
+    const TracklistViewState &state = it.value();
+    QHash<qint64, int> rows;
+    for (int row = 0; row < m_itemModel->rowCount(); ++row) {
+        if (const PlaylistItem *item = itemForDisplayRow(row); item != nullptr) {
+            rows.insert(item->id, row);
+        }
+    }
+    if (QItemSelectionModel *selection = m_itemTable->selectionModel(); selection != nullptr) {
+        selection->clearSelection();
+        for (qint64 id : state.selectedItemIds) {
+            if (const auto row = rows.constFind(id); row != rows.cend()) {
+                selection->select(m_itemModel->index(*row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            }
+        }
+    }
+    if (const auto row = rows.constFind(state.currentItemId); row != rows.cend()) {
+        setCurrentItemRow(*row);
+    }
+    m_itemTable->verticalScrollBar()->setValue(
+        std::min(state.scrollValue, m_itemTable->verticalScrollBar()->maximum()));
+}
+
 void PlaylistView::updatePlayingHighlight()
 {
     // Only mark a row when the on-screen playlist is the one feeding the queue.
@@ -1879,6 +1975,7 @@ void PlaylistView::undoLastChange()
     selectPlaylist(snapshot.playlistId);
     reloadItems();
     reloadPlaylists();
+    emit playlistItemsChanged(snapshot.playlistId);
 }
 
 void PlaylistView::restorePlaylistItems(qint64 playlistId, const QVector<PlaylistItem> &snapshot)
@@ -1982,6 +2079,7 @@ void PlaylistView::moveSelectedItems(int delta)
     // the cursor on the moved row last so repeated Shift+n/p chains stay put.
     reloadPlaylists();
     setCurrentItemRow(current, delta);
+    emit playlistItemsChanged(m_currentPlaylistId);
 }
 
 void PlaylistView::moveItemsToIndex(const QVector<int> &rows, int destinationRow)
@@ -2054,6 +2152,7 @@ void PlaylistView::moveItemsToIndex(const QVector<int> &rows, int destinationRow
                                  m_itemModel->index(lastRow, m_itemModel->columnCount() - 1));
         m_itemTable->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
     }
+    emit playlistItemsChanged(m_currentPlaylistId);
 }
 
 void PlaylistView::updatePaneFocus()
@@ -2276,7 +2375,7 @@ void PlaylistView::exportCurrentPlaylist()
     } else {
         out << "#EXTM3U\n";
         for (const PlaylistItem &item : items) {
-            if (item.status != PlaylistItemStatus::Matched || item.trackPath.isEmpty()) {
+            if (!isPlayablePlaylistItem(item)) {
                 continue;  // unresolved (pending/missing) rows have no playable path
             }
             const int seconds = static_cast<int>(item.durationMs / 1000);
@@ -2332,6 +2431,7 @@ void PlaylistView::removeSelectedItemsImpl(bool missingOnly)
     }
     reloadItems();
     reloadPlaylists();
+    emit playlistItemsChanged(m_currentPlaylistId);
 }
 
 // NOTE: the Keybinds-dialog reference for this view lives in
@@ -2549,7 +2649,7 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
         case Qt::Key_I:
             if (mods == Qt::NoModifier) {
                 const PlaylistItem *item = itemForDisplayRow(currentItemRow());
-                if (item != nullptr && item->status == PlaylistItemStatus::Matched && !item->trackPath.isEmpty()) {
+                if (item != nullptr && isPlayablePlaylistItem(*item)) {
                     emit propertiesForPathRequested(item->trackPath);
                 }
                 return true;

@@ -5,6 +5,7 @@
 #include "ui/KeyBindingTypes.h"
 
 #include <functional>
+#include <QHash>
 #include <QModelIndex>
 #include <QSet>
 #include <QStringList>
@@ -65,6 +66,9 @@ public:
     // currently-playing row. Pass an empty path or a non-matching/zero source id to
     // clear the indicator.
     void setNowPlaying(const QString &trackPath, qint64 sourcePlaylistId);
+    // Selects and reveals the current queue track when this view is displaying
+    // the playlist that backs that queue. Returns false for a normal queue.
+    bool revealNowPlaying();
 
     qint64 currentPlaylistId() const;
     QString currentQueueSnapshotId() const;
@@ -140,6 +144,9 @@ signals:
     void playNextSavedQueueRequested(const QString &snapshotId);
     void deleteSavedQueueRequested(const QString &snapshotId);
     void trackRatingChanged(const QString &path, int rating0To100);
+    // Emitted after a structural edit made directly in this view. MainWindow
+    // uses it to rebuild a queue that is mirroring this playlist.
+    void playlistItemsChanged(qint64 playlistId);
     void viewSettingsChanged();
 
 protected:
@@ -187,6 +194,9 @@ private:
     // pushes it to the item delegates. Called on track/queue-source change and
     // whenever the tracklist is rebuilt (populateItems).
     void updatePlayingHighlight();
+    void rememberTracklistViewState();
+    void restoreTracklistViewState();
+    QString tracklistViewStateKey() const;
 
     void moveSelectedItems(int delta);
     // Mouse drag-reorder: move the dragged display `rows` so they land at the
@@ -214,6 +224,16 @@ private:
     QString m_currentQueueSnapshotId;
     QVector<SavedQueuePlaylistEntry> m_savedQueueEntries;
     QVector<PlaylistItem> m_items;   // canonical, ordinal order
+    struct TracklistViewState {
+        QVector<qint64> selectedItemIds;
+        qint64 currentItemId = 0;
+        int scrollValue = 0;
+    };
+    QHash<QString, TracklistViewState> m_tracklistViewStates;
+    // Key represented by the current model contents. Selector rebuilds briefly
+    // empty the model; this prevents that transient state from overwriting the
+    // saved state of the playlist we are about to restore.
+    QString m_loadedTracklistStateKey;
     struct UndoSnapshot {
         qint64 playlistId = 0;
         QVector<PlaylistItem> items;  // canonical ordinal order, pre-mutation

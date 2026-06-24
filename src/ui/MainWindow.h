@@ -269,6 +269,9 @@ private:
     // Tells the playlist view which track is playing and which playlist (if any)
     // feeds the queue, so it can tint the matching tracklist row.
     void refreshPlaylistNowPlaying();
+    // Rebuild the live queue after an edit to the playlist that currently backs
+    // it, without restarting the current track.
+    void syncPlaylistBackedQueue(qint64 playlistId);
     void playAlbumNow(const QString &albumTitle);
     void playAlbumsNow(const QStringList &albumTitles);
     void playAlbumsReplacingQueue(const QStringList &albumTitles);

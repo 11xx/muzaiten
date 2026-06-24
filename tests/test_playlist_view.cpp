@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QMetaObject>
 #include <QSignalSpy>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QTableView>
 #include <QHeaderView>
@@ -162,6 +163,46 @@ private slots:
         QCOMPARE(list->item(3)->text(), QStringLiteral("Saved queues"));
         QCOMPARE(list->item(4)->text(), QStringLiteral("saved queue 1"));
         QCOMPARE(list->item(4)->data(Qt::UserRole + 8).toString(), expectedMeta);
+    }
+
+    void tracklistScrollAndSelectionSurvivePlaylistRefresh()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-state-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Long list"));
+        QVERIFY(playlistId > 0);
+        qint64 selectedId = 0;
+        for (int i = 0; i < 80; ++i) {
+            PlaylistItem item;
+            item.titleSnapshot = QStringLiteral("Track %1").arg(i);
+            const qint64 id = db.addItem(playlistId, item);
+            QVERIFY(id > 0);
+            if (i == 50) {
+                selectedId = id;
+            }
+        }
+
+        PlaylistView view;
+        view.resize(900, 220);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectItemById(selectedId);
+        auto *table = view.findChild<QTableView *>();
+        QVERIFY(table != nullptr);
+        table->verticalScrollBar()->setValue(35);
+        const int scrollBefore = table->verticalScrollBar()->value();
+        QVERIFY(scrollBefore > 0);
+
+        // MainWindow refreshes the selector whenever returning to key-5.
+        view.reloadPlaylists();
+        QCoreApplication::processEvents();
+
+        QCOMPARE(table->verticalScrollBar()->value(), scrollBefore);
+        QVERIFY(table->currentIndex().isValid());
+        QCOMPARE(table->currentIndex().row(), 50);
     }
 
     void selectorMetadataModePersistsInViewSettings()

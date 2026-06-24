@@ -63,6 +63,7 @@ KeyBindingReferenceList PlaylistView::keyBindingReference()
         {QStringLiteral("Drag"), QStringLiteral("Reorder items (mouse)")},
         {QStringLiteral("s"), QStringLiteral("Cycle sort (display-only)")},
         {QStringLiteral("i"), QStringLiteral("Track properties")},
+        {QStringLiteral("o"), QStringLiteral("Jump to current song when this playlist is playing")},
         {QStringLiteral("Ctrl+Wheel"), QStringLiteral("Adjust row height")},
     };
 }
