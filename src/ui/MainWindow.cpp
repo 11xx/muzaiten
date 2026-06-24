@@ -1383,6 +1383,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playlistView, &PlaylistView::importInterruptRequested, this, &MainWindow::cancelDropImport);
     connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
     connect(m_playlistView, &PlaylistView::resolveMultiMatchesRequested, this, &MainWindow::resolvePlaylistMultiMatches);
+    connect(m_playlistView, &PlaylistView::playlistItemsChanged, this, &MainWindow::syncPlaylistBackedQueue);
     connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
         openAddToPlaylistDialog(tracksForPaths(paths));
     });
@@ -1535,6 +1536,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         }
         if (m_mainView == MainView::Queue) {
             m_queueScreen->revealCurrentPlaying();
+            return;
+        }
+        if (m_mainView == MainView::Playlist && m_playlistView->revealNowPlaying()) {
             return;
         }
         jumpToPlayingSong();
@@ -5377,6 +5381,42 @@ void MainWindow::syncQueueState()
     scheduleQueueStateSave();
 }
 
+void MainWindow::syncPlaylistBackedQueue(qint64 playlistId)
+{
+    if (!queueIsPlaylistSourced() || playlistId != m_queueSourcePlaylistId || m_playlistDb == nullptr) {
+        return;
+    }
+    QVector<Track> tracks;
+    for (const PlaylistItem &item : m_playlistDb->items(playlistId)) {
+        if (item.trackPath.isEmpty()
+            || (item.status != PlaylistItemStatus::Matched && item.status != PlaylistItemStatus::Approximate)) {
+            continue;
+        }
+        const Track track = m_database->trackForPath(item.trackPath);
+        if (!track.path.isEmpty()) {
+            tracks.push_back(track);
+        }
+    }
+    const QString currentPath = m_player->currentTrack().path;
+    int currentIndex = -1;
+    for (int i = 0; i < tracks.size(); ++i) {
+        if (tracks.at(i).path == currentPath) {
+            currentIndex = i;
+            break;
+        }
+    }
+    m_player->resetQueue(tracks, currentIndex);
+    m_player->prepareNext();
+    m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
+                              m_player->queueIndex() + 1, m_player->playNextInsertIndex());
+    refreshPlayNextRange();
+    refreshPlaylistNowPlaying();
+    if (m_panelSearch != nullptr) {
+        m_panelSearch->refreshPanel(MainPanelId::Queue);
+    }
+    scheduleQueueStateSave();
+}
+
 void MainWindow::playAlbumNow(const QString &albumTitle)
 {
     playAlbumsNow(albumTitle.isEmpty() ? QStringList() : QStringList{albumTitle});
@@ -5615,6 +5655,7 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
                     addedIds->push_back(id);
                     m_playlistView->reloadItems();
                     m_playlistView->reloadPlaylists();
+                    syncPlaylistBackedQueue(playlistId);
                 }
                 refreshAdded();
             });
@@ -5634,6 +5675,7 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
                 m_playlistDb->removeItem(last);
                 m_playlistView->reloadItems();
                 m_playlistView->reloadPlaylists();
+                syncPlaylistBackedQueue(playlistId);
                 refreshAdded();
                 dialog->setQueryText(restoreQuery);
             });
@@ -5642,6 +5684,7 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
     delete dialog;
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+    syncPlaylistBackedQueue(playlistId);
 }
 
 void MainWindow::openPlaylistImportDialog(qint64 playlistId)
@@ -5820,6 +5863,7 @@ void MainWindow::commitImportItems(qint64 playlistId, const QVector<PlaylistImpo
     }
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+    syncPlaylistBackedQueue(playlistId);
     const QString message = skipped > 0
         ? QStringLiteral("Imported %1 items into \"%2\" (%3 duplicates skipped)")
               .arg(added).arg(playlist.name).arg(skipped)
@@ -5970,6 +6014,7 @@ void MainWindow::onDropImportItemMatched(qint64 playlistId, const PlaylistImport
     const PlaylistItem item = playlistItemFromImportMatch(match);
     m_playlistDb->addItem(playlistId, item);
     m_playlistView->refreshImportingPlaylist(playlistId);
+    syncPlaylistBackedQueue(playlistId);
 }
 
 void MainWindow::stopPlaylistImport(qint64 playlistId)
@@ -6104,6 +6149,7 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     delete dialog;
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+    syncPlaylistBackedQueue(playlistId);
     // Keep keyboard focus on the row just edited rather than snapping to the top.
     m_playlistView->selectItemById(itemId);
 }
@@ -6143,6 +6189,7 @@ void MainWindow::resolvePlaylistMultiMatches(qint64 playlistId)
     }
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+    syncPlaylistBackedQueue(playlistId);
     if (resolved == 0 && skipped == 0) {
         return;
     }
@@ -6194,6 +6241,7 @@ void MainWindow::openAddToPlaylistDialog(const QVector<Track> &tracks)
     }
     m_playlistView->reloadItems();
     m_playlistView->reloadPlaylists();
+    syncPlaylistBackedQueue(id);
 }
 
 QString MainWindow::resolvedReadPathForTrack(const Track &track) const

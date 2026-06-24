@@ -4,6 +4,10 @@
 
 ### Added
 
+- Playlist tracklists now retain their scroll position and selection when
+  returning to the view. While playing a playlist, `o` jumps directly to its
+  current row; playlist edits, imports, and resolved matches update the live
+  playlist-backed queue without interrupting the current track.
 - Drag-dropping playlist files now queues onto an import already in progress
   instead of being rejected — drop more files at any time and they fill in turn.
 - A running drop-import can be stopped per playlist via a transient "Stop import"
