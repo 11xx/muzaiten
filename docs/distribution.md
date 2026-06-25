@@ -112,7 +112,8 @@ This produces, under `dist/`:
   the `muzaitenctl` CLI, plus the desktop entry, icon, metainfo, and license), and
 - `muzaiten-<version>-<arch>.tar.zst.sha256`.
 
-`<version>` is the date-based `YYYY.MM.DD.HHMMSS.g<sha>` derived from `HEAD`.
+`<version>` is the date-based `YYYY.MM.DD.N.g<sha>` derived from `HEAD`, where
+`N` is the number of commits made on HEAD's UTC calendar day.
 Upload both files to a Codeberg release whose tag is exactly `<version>`.
 
 ### Dry-running the prebuilt-dist packaging (dev)

@@ -89,7 +89,8 @@ configure:
 			rm -rf "$(BUILD_DIR)/CMakeCache.txt" "$(BUILD_DIR)/CMakeFiles"; \
 		fi; \
 	fi
-	$(CMAKE) -S . -B $(BUILD_DIR) -G $(CMAKE_GENERATOR) \
+	@printf '%s\n' "Configuring $(BUILD_DIR) with $(CMAKE_GENERATOR)"
+	@$(CMAKE) -S . -B $(BUILD_DIR) -G $(CMAKE_GENERATOR) \
 		$(if $(NINJA),-DCMAKE_MAKE_PROGRAM="$(NINJA)") \
 		$(if $(CMAKE_BUILD_TYPE),-DCMAKE_BUILD_TYPE="$(CMAKE_BUILD_TYPE)") \
 		$(if $(LINKER_TYPE),-DCMAKE_LINKER_TYPE="$(LINKER_TYPE)") \

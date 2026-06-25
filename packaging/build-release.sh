@@ -71,11 +71,13 @@ pkgdesc="Native music player for local libraries (local dev build for packaging 
 arch=('${arch}')
 url="https://codeberg.org/11xx/muzaiten"
 license=('Unlicense')
-depends=('qt6-base' 'qt6-multimedia' 'taglib' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd')
+depends=('qt6-base' 'qt6-multimedia' 'taglib' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
 optdepends=('gst-plugins-good: extra audio decoders and sinks'
             'gst-plugin-pipewire: PipeWire audio output'
-            'gst-plugins-bad: additional codecs (e.g. Musepack, APE)'
-            'mpd: browse an MPD library alongside local sources')
+            'gst-plugins-bad: additional codecs and native DSF DSD playback'
+            'gst-libav: DSD demux and DSD-to-PCM decode'
+            'mpd: browse an MPD library alongside local sources'
+            'yt-dlp: enrich YouTube playlist imports with metadata')
 provides=('muzaiten')
 conflicts=('muzaiten' 'muzaiten-bin' 'muzaiten-git')
 options=('!strip')  # build-release.sh already strips the binary
