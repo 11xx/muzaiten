@@ -505,16 +505,19 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
     m_listenBrainzEnabled->setCheckable(true);
     QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token..."));
-    QAction *clearListenBrainzBacklog = scrobblersMenu->addAction(QStringLiteral("Clear ListenBrainz backlog"));
+    m_clearListenBrainzBacklog = scrobblersMenu->addAction(QStringLiteral("Clear ListenBrainz backlog"));
+    m_clearListenBrainzBacklog->setVisible(false);
     scrobblersMenu->addSeparator();
     m_lastFmEnabled = scrobblersMenu->addAction(QStringLiteral("Last.fm scrobbling"));
     m_lastFmEnabled->setCheckable(true);
     QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings..."));
-    QAction *clearLastFmBacklog = scrobblersMenu->addAction(QStringLiteral("Clear Last.fm backlog"));
+    m_clearLastFmBacklog = scrobblersMenu->addAction(QStringLiteral("Clear Last.fm backlog"));
+    m_clearLastFmBacklog->setVisible(false);
     scrobblersMenu->addSeparator();
     m_scrobbleOffline = scrobblersMenu->addAction(QStringLiteral("Offline mode (buffer listens locally)"));
     m_scrobbleOffline->setCheckable(true);
     m_scrobbleOffline->setToolTip(QStringLiteral("Keep collecting listening history but send nothing; unchecking uploads the buffered backlog."));
+    connect(scrobblersMenu, &QMenu::aboutToShow, this, &PlayerBar::scrobblersMenuAboutToShow);
     historyMenu->addMenu(scrobblersMenu);
 
     auto *viewMenu = new QMenu(QStringLiteral("View"), this);
@@ -793,10 +796,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(movePlaylistItemDown, &QAction::triggered, this, &PlayerBar::playlistMoveItemDownRequested);
     connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
     connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
-    connect(clearListenBrainzBacklog, &QAction::triggered, this, &PlayerBar::listenBrainzBacklogClearRequested);
+    connect(m_clearListenBrainzBacklog, &QAction::triggered, this, &PlayerBar::listenBrainzBacklogClearRequested);
     connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
     connect(lastFmSettings, &QAction::triggered, this, &PlayerBar::lastFmSettingsRequested);
-    connect(clearLastFmBacklog, &QAction::triggered, this, &PlayerBar::lastFmBacklogClearRequested);
+    connect(m_clearLastFmBacklog, &QAction::triggered, this, &PlayerBar::lastFmBacklogClearRequested);
     connect(m_scrobbleOffline, &QAction::toggled, this, &PlayerBar::scrobbleOfflineChanged);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(m_next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
@@ -813,6 +816,22 @@ void PlayerBar::setReleaseDeviceVisible(bool visible)
     if (m_releaseDeviceAction != nullptr) {
         m_releaseDeviceAction->setVisible(visible);
         m_releaseDeviceAction->setEnabled(visible);
+    }
+}
+
+void PlayerBar::setScrobbleBacklogCounts(int lastFmPending, int listenBrainzPending)
+{
+    if (m_clearLastFmBacklog != nullptr) {
+        m_clearLastFmBacklog->setVisible(lastFmPending > 0);
+        m_clearLastFmBacklog->setText(lastFmPending > 0
+                                          ? QStringLiteral("Clear Last.fm backlog (%1)").arg(lastFmPending)
+                                          : QStringLiteral("Clear Last.fm backlog"));
+    }
+    if (m_clearListenBrainzBacklog != nullptr) {
+        m_clearListenBrainzBacklog->setVisible(listenBrainzPending > 0);
+        m_clearListenBrainzBacklog->setText(listenBrainzPending > 0
+                                                ? QStringLiteral("Clear ListenBrainz backlog (%1)").arg(listenBrainzPending)
+                                                : QStringLiteral("Clear ListenBrainz backlog"));
     }
 }
 

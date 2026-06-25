@@ -15,6 +15,14 @@
 - The playlist view shows a dashed "Drop to import" overlay while an importable
   file is dragged over it, so the page's accept-drop behavior is discoverable.
 
+### Changed
+
+- Scrobbler backlog-clearing actions in the menu now appear only while that
+  service has pending scrobbles, with the pending count shown in the action.
+- Listening history now labels manual resubmission actions as "Scrobble to
+  Last.fm" and "Scrobble to ListenBrainz"; row state remains visible in the
+  service columns.
+
 ### Fixed
 
 - Closing the window to the tray (or quitting) while a playlist drop-import was

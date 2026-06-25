@@ -23,6 +23,7 @@ public:
     void setListenBrainzEnabled(bool enabled);
     void setLastFmEnabled(bool enabled);
     void setScrobbleOffline(bool offline);
+    void setScrobbleBacklogCounts(int lastFmPending, int listenBrainzPending);
     void setListUnsupportedFiles(bool show);
     // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
     void setScanProfile(int profile);
@@ -80,6 +81,7 @@ signals:
     void mpdSourceRequested();
     void mpdImportRequested();
     void listeningHistoryRequested();
+    void scrobblersMenuAboutToShow();
     void lastFmBacklogClearRequested();
     void listenBrainzBacklogClearRequested();
     void compactMenuChanged(bool compact);
@@ -157,6 +159,8 @@ private:
     class QAction *m_listenBrainzEnabled = nullptr;
     class QAction *m_lastFmEnabled = nullptr;
     class QAction *m_scrobbleOffline = nullptr;
+    class QAction *m_clearLastFmBacklog = nullptr;
+    class QAction *m_clearListenBrainzBacklog = nullptr;
     class QAction *m_mergeSavedQueueAction = nullptr;
     class QAction *m_releaseDeviceAction = nullptr;
     QList<class QAction *> m_playlistViewActions;
