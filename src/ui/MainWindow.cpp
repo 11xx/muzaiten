@@ -920,6 +920,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                                      .arg(skipped)
                                      .arg(remaining),
                                  6000);
+        updateScrobbleBacklogActions();
     });
     connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::disabledAfterFailures, this, [this](const QString &message) {
         m_database->setSetting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false"));
@@ -942,6 +943,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                                      .arg(skipped)
                                      .arg(remaining),
                                  6000);
+        updateScrobbleBacklogActions();
     });
     connect(m_lastFmScrobbler, &LastFmScrobbler::disabledAfterFailures, this, [this](const QString &message) {
         m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
@@ -1190,6 +1192,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::listeningHistoryRequested, this, &MainWindow::showListeningHistory);
+    connect(m_playerBar, &PlayerBar::scrobblersMenuAboutToShow, this, &MainWindow::updateScrobbleBacklogActions);
     connect(m_playerBar, &PlayerBar::lastFmBacklogClearRequested, this, [this]() {
         clearScrobbleBacklog(ListenHistoryStore::LastFm);
     });
@@ -4816,6 +4819,7 @@ void MainWindow::showListeningHistory()
         }
     });
     connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
+        updateScrobbleBacklogActions();
         if (changedCount > 0) {
             triggerScrobbleUpload(service);
         }
@@ -4850,6 +4854,7 @@ void MainWindow::clearScrobbleBacklog(const QString &service)
     }
     const int cleared = m_listenHistory->clearPending(service);
     statusBar()->showMessage(QStringLiteral("Cleared %1 pending %2 scrobbles").arg(cleared).arg(serviceName), 5000);
+    updateScrobbleBacklogActions();
 }
 
 void MainWindow::triggerScrobbleUpload(const QString &service)
@@ -4859,6 +4864,16 @@ void MainWindow::triggerScrobbleUpload(const QString &service)
     } else if (service == ListenHistoryStore::ListenBrainz) {
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
     }
+}
+
+void MainWindow::updateScrobbleBacklogActions()
+{
+    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
+        m_playerBar->setScrobbleBacklogCounts(0, 0);
+        return;
+    }
+    m_playerBar->setScrobbleBacklogCounts(m_listenHistory->pendingCount(ListenHistoryStore::LastFm),
+                                          m_listenHistory->pendingCount(ListenHistoryStore::ListenBrainz));
 }
 
 bool MainWindow::scrobbleOffline() const

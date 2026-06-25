@@ -221,6 +221,7 @@ private:
     void showListeningHistory();
     void clearScrobbleBacklog(const QString &service);
     void triggerScrobbleUpload(const QString &service);
+    void updateScrobbleBacklogActions();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
     void configureLastFm();

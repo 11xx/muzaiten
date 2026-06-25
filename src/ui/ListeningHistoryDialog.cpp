@@ -228,8 +228,8 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     layout->addWidget(m_view, 1);
 
     auto *actions = new QHBoxLayout;
-    m_queueLastFm = new QPushButton(QStringLiteral("Queue selected for Last.fm"), this);
-    m_queueListenBrainz = new QPushButton(QStringLiteral("Queue selected for ListenBrainz"), this);
+    m_queueLastFm = new QPushButton(QStringLiteral("Scrobble to Last.fm"), this);
+    m_queueListenBrainz = new QPushButton(QStringLiteral("Scrobble to ListenBrainz"), this);
     m_clearLastFm = new QPushButton(QStringLiteral("Clear Last.fm backlog"), this);
     m_clearListenBrainz = new QPushButton(QStringLiteral("Clear ListenBrainz backlog"), this);
     auto *refresh = new QPushButton(QStringLiteral("Refresh"), this);
@@ -325,7 +325,7 @@ void ListeningHistoryDialog::queueSelected(const QString &service)
     const int changed = m_store->markOwed(service, ids);
     reload();
     emit backlogChanged(service, changed);
-    emit statusMessageRequested(QStringLiteral("Queued %1 history listens for %2")
+    emit statusMessageRequested(QStringLiteral("Marked %1 history listens to scrobble to %2")
                                     .arg(changed)
                                     .arg(service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz")),
                                 5000);
