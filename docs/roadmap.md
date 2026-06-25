@@ -1,6 +1,6 @@
 # Roadmap
 
-Versions are date-based (`YYYY.MM.DD.HHMMSS.g<sha>`), derived from the committed
+Versions are date-based (`YYYY.MM.DD.N.g<sha>`), derived from the committed
 HEAD. There is no separate semantic version.
 
 ## Shipped

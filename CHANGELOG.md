@@ -43,6 +43,14 @@
 - The queue tables (full-screen and the right-sidebar panel) no longer draw a
   faint rounded outline on the cell you last clicked.
 
+### Packaging
+
+- `make build` no longer echoes build-time Last.fm credential values from `.env`
+  while configuring CMake.
+- AUR package metadata now includes the Python runtime required by the installed
+  `muzaiten-import` helper, and lists `yt-dlp` as the optional dependency for
+  YouTube playlist import enrichment.
+
 ## [2026.06.23]
 
 ### Added
