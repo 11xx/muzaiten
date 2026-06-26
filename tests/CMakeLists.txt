@@ -467,6 +467,16 @@ target_compile_features(test_ipc_server PRIVATE cxx_std_26)
 add_test(NAME test_ipc_server COMMAND test_ipc_server)
 set_tests_properties(test_ipc_server PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_idle_release_controller
+    test_idle_release_controller.cpp
+    ../src/ui/IdleReleaseController.cpp
+)
+target_include_directories(test_idle_release_controller PRIVATE ../src)
+target_link_libraries(test_idle_release_controller PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_idle_release_controller PRIVATE cxx_std_26)
+add_test(NAME test_idle_release_controller COMMAND test_idle_release_controller)
+set_tests_properties(test_idle_release_controller PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Offline matcher benchmark tool (dev only; not a registered test). Needs a real
 # library.sqlite copy: ./playlist_match_bench <library.sqlite> <playlist.jsonl ...>
 # Off by default so a normal build pays nothing; enable with
