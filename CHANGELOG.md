@@ -17,6 +17,11 @@
 
 ### Changed
 
+- Background screens now release their memory when left idle. After about a
+  minute on another screen, the file explorers, playlist view, search index, and
+  the library's decoded cover thumbnails free their retained data and return to
+  baseline memory, rebuilding it on return. Quick back-and-forth navigation
+  within the idle window keeps everything resident, so it stays instant.
 - Scrobbler backlog-clearing actions in the menu now appear only while that
   service has pending scrobbles, with the pending count shown in the action.
 - Listening history now labels manual resubmission actions as "Scrobble to
