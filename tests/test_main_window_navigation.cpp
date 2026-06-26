@@ -29,6 +29,8 @@ private slots:
         AppCore core;
         MainWindow window(&core);
 
+        QVERIFY(window.m_queueScreen == nullptr);
+
         window.persistViewState();
         window.switchMainView(MainView::LibraryPanels);
         window.switchMainView(MainView::LibraryFileExplorer);

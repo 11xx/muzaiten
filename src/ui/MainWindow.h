@@ -117,6 +117,7 @@ private:
     void resetPanelOrder();
     void restylePanelBorders();
     void openPanelOrderDialog();
+    QueueScreen *ensureQueueScreen();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();
