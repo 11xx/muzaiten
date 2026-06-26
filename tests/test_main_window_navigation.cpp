@@ -31,6 +31,8 @@ private slots:
 
         QVERIFY(window.m_queueScreen == nullptr);
         QVERIFY(window.m_searchView == nullptr);
+        QVERIFY(window.m_libraryFileExplorer == nullptr);
+        QVERIFY(window.m_freeRoamFileExplorer == nullptr);
 
         window.persistViewState();
         window.switchMainView(MainView::LibraryPanels);

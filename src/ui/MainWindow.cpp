@@ -726,19 +726,10 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                              [this] { m_albumGrid->releaseArtwork(); },
                              [this] { m_albumGrid->reloadArtwork(); });
 
-    m_libraryFileExplorer = new FileExplorerView(m_mainStack);
-    m_libraryFileExplorer->setMode(FileExplorerMode::Library);
-    m_libraryFileExplorer->setModeTitle(QStringLiteral("Library Explorer"));
-    m_freeRoamFileExplorer = new FileExplorerView(m_mainStack);
-    m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
-    m_freeRoamFileExplorer->setRootPath(QDir::homePath());
-    m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
     m_playlistView = new PlaylistView(m_mainStack);
     m_panelSearch = new PanelSearchController(central);
 
     m_mainStack->addWidget(m_rootSplitter);
-    m_mainStack->addWidget(m_libraryFileExplorer);
-    m_mainStack->addWidget(m_freeRoamFileExplorer);
     m_mainStack->addWidget(m_playlistView);
 
     centralLayout->addWidget(m_mainStack, 1);
@@ -1160,8 +1151,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_playerBar, &PlayerBar::removeMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_playerBar, &PlayerBar::listUnsupportedFilesChanged, this, [this](bool show) {
-        m_freeRoamFileExplorer->setShowUnsupportedFiles(show);
-        m_libraryFileExplorer->setShowUnsupportedFiles(show);
+        if (m_freeRoamFileExplorer != nullptr) {
+            m_freeRoamFileExplorer->setShowUnsupportedFiles(show);
+        }
+        if (m_libraryFileExplorer != nullptr) {
+            m_libraryFileExplorer->setShowUnsupportedFiles(show);
+        }
         m_state->setSetting(QStringLiteral("fileExplorer.showUnsupported"), show ? QStringLiteral("true") : QStringLiteral("false"));
     });
     connect(m_playerBar, &PlayerBar::syncCurrentTrackRatingTagsRequested, this, &MainWindow::syncCurrentTrackRatingTags);
@@ -1271,49 +1266,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
-    connect(m_libraryFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setLibraryExplorerDirectory);
-    connect(m_libraryFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
-    connect(m_libraryFileExplorer, &FileExplorerView::playNextRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
-        startScan(path);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
-    connect(m_libraryFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_libraryFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
-        startScan(path);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
-    connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
-
     // Playlist view (key 5). Resolves stored paths against the live library;
     // playing a playlist replaces the queue (snapshotting the previous one).
     connect(m_playlistView, &PlaylistView::playPathsRequested, this, [this](const QStringList &paths, int startIndex) {
@@ -1367,49 +1319,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         applyTrackRating(track, rating);
     });
 
-    const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
-    m_libraryFileExplorer->setTrackResolver(trackResolver);
-    m_freeRoamFileExplorer->setTrackResolver(trackResolver);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::startDirectoryChanged, this, [this](const QString &path) {
-        m_state->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
-        m_freeRoamFileExplorer->setRowHeight(height);
-        m_state->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
-        m_libraryFileExplorer->setRowHeight(height);
-        m_state->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
-        m_freeRoamFileExplorer->setKeyBindingProfileName(name);
-        m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
-        m_libraryFileExplorer->setKeyBindingProfileName(name);
-        m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
-    });
-    connect(m_libraryFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
-        m_freeRoamFileExplorer->setKeyHintBarVisible(visible);
-        m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
-        m_libraryFileExplorer->setKeyHintBarVisible(visible);
-        m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
-    });
-    auto persistExplorerSort = [this](const QString &field, bool descending, bool reverseGroups) {
-        m_state->setSetting(QStringLiteral("fileExplorer.sortField"), field);
-        m_state->setSetting(QStringLiteral("fileExplorer.sortDescending"), descending ? QStringLiteral("true") : QStringLiteral("false"));
-        m_state->setSetting(QStringLiteral("fileExplorer.sortReverseGroups"), reverseGroups ? QStringLiteral("true") : QStringLiteral("false"));
-    };
-    connect(m_libraryFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
-        m_freeRoamFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
-        persistExplorerSort(field, descending, reverseGroups);
-    });
-    connect(m_freeRoamFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
-        m_libraryFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
-        persistExplorerSort(field, descending, reverseGroups);
-    });
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
@@ -2578,38 +2487,9 @@ void MainWindow::loadViewSettings()
     m_mainView = mainViewFromName(mainWindow.value(QStringLiteral("mainView")).toString());
     m_libraryExplorerDirectory = mainWindow.value(QStringLiteral("libraryExplorerDirectory")).toString();
     m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
-    m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
-    refreshLibraryFileExplorer();
-
-    const QString keyProfile = m_state->setting(QStringLiteral("fileExplorer.keyBindingProfile"));
-    if (!keyProfile.isEmpty()) {
-        m_libraryFileExplorer->setKeyBindingProfileName(keyProfile);
-        m_freeRoamFileExplorer->setKeyBindingProfileName(keyProfile);
-    }
-    const QString showHints = m_state->setting(QStringLiteral("fileExplorer.showKeyHints"));
-    const bool hintsVisible = showHints == QStringLiteral("true");
-    m_libraryFileExplorer->setKeyHintBarVisible(hintsVisible);
-    m_freeRoamFileExplorer->setKeyHintBarVisible(hintsVisible);
 
     const bool showUnsupported = m_state->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
     m_playerBar->setListUnsupportedFiles(showUnsupported);
-    m_libraryFileExplorer->setShowUnsupportedFiles(showUnsupported);
-    m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
-
-    m_freeRoamFileExplorer->setStartDirectory(m_state->setting(QStringLiteral("fileExplorer.startDirectory")));
-
-    const int explorerRowHeight = m_state->setting(QStringLiteral("fileExplorer.rowHeight")).toInt();
-    if (explorerRowHeight > 0) {
-        m_libraryFileExplorer->setRowHeight(explorerRowHeight);
-        m_freeRoamFileExplorer->setRowHeight(explorerRowHeight);
-    }
-
-    const MusicSort::SortField explorerSortField = MusicSort::sortFieldFromString(
-        m_state->setting(QStringLiteral("fileExplorer.sortField")), MusicSort::SortField::FileName);
-    const bool explorerSortDesc = m_state->setting(QStringLiteral("fileExplorer.sortDescending")) == QStringLiteral("true");
-    const bool explorerSortReverseGroups = m_state->setting(QStringLiteral("fileExplorer.sortReverseGroups")) == QStringLiteral("true");
-    m_libraryFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
-    m_freeRoamFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
 
     if (m_panelSearch != nullptr) {
         m_panelSearch->setKeyBindingProfileName(m_state->setting(QStringLiteral("mainPanel.keyBindingProfile"),
@@ -2767,17 +2647,21 @@ void MainWindow::resetViewPreferences()
     const QString explorerProfile = defaultKeyBindingProfiles().isEmpty()
         ? QStringLiteral("vim")
         : defaultKeyBindingProfiles().first().name;
-    m_libraryFileExplorer->setKeyBindingProfileName(explorerProfile);
-    m_freeRoamFileExplorer->setKeyBindingProfileName(explorerProfile);
-    m_libraryFileExplorer->setKeyHintBarVisible(false);
-    m_freeRoamFileExplorer->setKeyHintBarVisible(false);
-    m_libraryFileExplorer->setShowUnsupportedFiles(false);
-    m_freeRoamFileExplorer->setShowUnsupportedFiles(false);
-    m_freeRoamFileExplorer->setStartDirectory(QString());
-    m_libraryFileExplorer->setRowHeight(18);
-    m_freeRoamFileExplorer->setRowHeight(18);
-    m_libraryFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
-    m_freeRoamFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
+    if (m_libraryFileExplorer != nullptr) {
+        m_libraryFileExplorer->setKeyBindingProfileName(explorerProfile);
+        m_libraryFileExplorer->setKeyHintBarVisible(false);
+        m_libraryFileExplorer->setShowUnsupportedFiles(false);
+        m_libraryFileExplorer->setRowHeight(18);
+        m_libraryFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
+    }
+    if (m_freeRoamFileExplorer != nullptr) {
+        m_freeRoamFileExplorer->setKeyBindingProfileName(explorerProfile);
+        m_freeRoamFileExplorer->setKeyHintBarVisible(false);
+        m_freeRoamFileExplorer->setShowUnsupportedFiles(false);
+        m_freeRoamFileExplorer->setStartDirectory(QString());
+        m_freeRoamFileExplorer->setRowHeight(18);
+        m_freeRoamFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
+    }
 
     if (m_queueScreen != nullptr) {
         m_queueScreen->setKeyBindingProfileName(defaultQueueKeyBindingProfileName());
@@ -2898,6 +2782,154 @@ SearchView *MainWindow::ensureSearchView()
     return m_searchView;
 }
 
+void MainWindow::ensureFileExplorers()
+{
+    if (m_libraryFileExplorer != nullptr && m_freeRoamFileExplorer != nullptr) {
+        return;
+    }
+
+    m_libraryFileExplorer = new FileExplorerView(m_mainStack);
+    m_libraryFileExplorer->setMode(FileExplorerMode::Library);
+    m_libraryFileExplorer->setModeTitle(QStringLiteral("Library Explorer"));
+    m_libraryFileExplorer->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+
+    m_freeRoamFileExplorer = new FileExplorerView(m_mainStack);
+    m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
+    m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
+    m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
+    m_freeRoamFileExplorer->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+
+    const auto trackResolver = [this](const QString &path) { return m_database->trackForPath(path); };
+    m_libraryFileExplorer->setTrackResolver(trackResolver);
+    m_freeRoamFileExplorer->setTrackResolver(trackResolver);
+
+    const QString keyProfile = m_state->setting(QStringLiteral("fileExplorer.keyBindingProfile"));
+    if (!keyProfile.isEmpty()) {
+        m_libraryFileExplorer->setKeyBindingProfileName(keyProfile);
+        m_freeRoamFileExplorer->setKeyBindingProfileName(keyProfile);
+    }
+    const bool hintsVisible = m_state->setting(QStringLiteral("fileExplorer.showKeyHints")) == QStringLiteral("true");
+    m_libraryFileExplorer->setKeyHintBarVisible(hintsVisible);
+    m_freeRoamFileExplorer->setKeyHintBarVisible(hintsVisible);
+
+    const bool showUnsupported = m_state->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
+    m_libraryFileExplorer->setShowUnsupportedFiles(showUnsupported);
+    m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
+    m_freeRoamFileExplorer->setStartDirectory(m_state->setting(QStringLiteral("fileExplorer.startDirectory")));
+
+    const int explorerRowHeight = m_state->setting(QStringLiteral("fileExplorer.rowHeight")).toInt();
+    if (explorerRowHeight > 0) {
+        m_libraryFileExplorer->setRowHeight(explorerRowHeight);
+        m_freeRoamFileExplorer->setRowHeight(explorerRowHeight);
+    }
+
+    const MusicSort::SortField explorerSortField = MusicSort::sortFieldFromString(
+        m_state->setting(QStringLiteral("fileExplorer.sortField")), MusicSort::SortField::FileName);
+    const bool explorerSortDesc = m_state->setting(QStringLiteral("fileExplorer.sortDescending")) == QStringLiteral("true");
+    const bool explorerSortReverseGroups = m_state->setting(QStringLiteral("fileExplorer.sortReverseGroups")) == QStringLiteral("true");
+    m_libraryFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
+    m_freeRoamFileExplorer->setSort(explorerSortField, explorerSortDesc, explorerSortReverseGroups);
+
+    connect(m_libraryFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setLibraryExplorerDirectory);
+    connect(m_libraryFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_libraryFileExplorer, &FileExplorerView::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
+        startScan(path);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_libraryFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_libraryFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::importDirectoryRequested, this, [this](const QString &path) {
+        startScan(path);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
+
+    connect(m_freeRoamFileExplorer, &FileExplorerView::startDirectoryChanged, this, [this](const QString &path) {
+        m_state->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
+        m_freeRoamFileExplorer->setRowHeight(height);
+        m_state->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::rowHeightChanged, this, [this](int height) {
+        m_libraryFileExplorer->setRowHeight(height);
+        m_state->setSetting(QStringLiteral("fileExplorer.rowHeight"), QString::number(height));
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
+        m_freeRoamFileExplorer->setKeyBindingProfileName(name);
+        m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::keyBindingProfileChanged, this, [this](const QString &name) {
+        m_libraryFileExplorer->setKeyBindingProfileName(name);
+        m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), name);
+    });
+    connect(m_libraryFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
+        m_freeRoamFileExplorer->setKeyHintBarVisible(visible);
+        m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::keyHintVisibilityChanged, this, [this](bool visible) {
+        m_libraryFileExplorer->setKeyHintBarVisible(visible);
+        m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"), visible ? QStringLiteral("true") : QStringLiteral("false"));
+    });
+    auto persistExplorerSort = [this](const QString &field, bool descending, bool reverseGroups) {
+        m_state->setSetting(QStringLiteral("fileExplorer.sortField"), field);
+        m_state->setSetting(QStringLiteral("fileExplorer.sortDescending"), descending ? QStringLiteral("true") : QStringLiteral("false"));
+        m_state->setSetting(QStringLiteral("fileExplorer.sortReverseGroups"), reverseGroups ? QStringLiteral("true") : QStringLiteral("false"));
+    };
+    connect(m_libraryFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
+        m_freeRoamFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
+        persistExplorerSort(field, descending, reverseGroups);
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::sortChanged, this, [this, persistExplorerSort](const QString &field, bool descending, bool reverseGroups) {
+        m_libraryFileExplorer->setSort(MusicSort::sortFieldFromString(field, MusicSort::SortField::FileName), descending, reverseGroups);
+        persistExplorerSort(field, descending, reverseGroups);
+    });
+
+    m_mainStack->addWidget(m_libraryFileExplorer);
+    m_mainStack->addWidget(m_freeRoamFileExplorer);
+}
+
+FileExplorerView *MainWindow::ensureLibraryFileExplorer()
+{
+    ensureFileExplorers();
+    return m_libraryFileExplorer;
+}
+
+FileExplorerView *MainWindow::ensureFreeRoamFileExplorer()
+{
+    ensureFileExplorers();
+    return m_freeRoamFileExplorer;
+}
+
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
@@ -2913,8 +2945,9 @@ void MainWindow::switchMainView(MainView view)
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
         }
+        FileExplorerView *libraryFileExplorer = ensureLibraryFileExplorer();
         refreshLibraryFileExplorer();
-        m_mainStack->setCurrentWidget(m_libraryFileExplorer);
+        m_mainStack->setCurrentWidget(libraryFileExplorer);
     } else if (view == MainView::Search) {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
@@ -2941,8 +2974,9 @@ void MainWindow::switchMainView(MainView view)
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
         }
-        m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
-        m_mainStack->setCurrentWidget(m_freeRoamFileExplorer);
+        FileExplorerView *freeRoamFileExplorer = ensureFreeRoamFileExplorer();
+        freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
+        m_mainStack->setCurrentWidget(freeRoamFileExplorer);
     }
     saveMainWindowViewSettings();
 }
@@ -3073,11 +3107,11 @@ void MainWindow::revealTrackInLibrary(const Track &track)
         break;
     }
     case MainView::LibraryFileExplorer:
-        m_libraryFileExplorer->revealFile(track.path);
+        ensureLibraryFileExplorer()->revealFile(track.path);
         break;
     case MainView::FreeRoamFileExplorer: {
         const QString resolved = resolvedReadPathForTrack(track);
-        m_freeRoamFileExplorer->revealFile(resolved.isEmpty() ? track.path : resolved);
+        ensureFreeRoamFileExplorer()->revealFile(resolved.isEmpty() ? track.path : resolved);
         break;
     }
     case MainView::Search:
@@ -3110,12 +3144,17 @@ void MainWindow::setFreeRoamDirectory(const QString &path)
         return;
     }
     m_freeRoamDirectory = cleanDirectoryPath(path);
-    m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
+    if (m_freeRoamFileExplorer != nullptr) {
+        m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
+    }
     saveMainWindowViewSettings();
 }
 
 void MainWindow::refreshLibraryFileExplorer()
 {
+    if (m_libraryFileExplorer == nullptr) {
+        return;
+    }
     const QStringList directories = m_database->localLibraryDirectories(m_libraryExplorerDirectory);
     const QVector<Track> tracks = m_libraryExplorerDirectory.isEmpty() ? QVector<Track>() : m_database->tracksForDirectory(m_libraryExplorerDirectory);
     if (!m_libraryExplorerDirectory.isEmpty() && directories.isEmpty() && tracks.isEmpty()) {
@@ -4645,12 +4684,19 @@ void MainWindow::configureKeybindings()
     if (m_panelSearch != nullptr) {
         dialog.setMainPanelProfileName(m_panelSearch->keyBindingProfileName());
     }
-    dialog.setFileExplorerProfileName(m_libraryFileExplorer->keyBindingProfileName());
+    dialog.setFileExplorerProfileName(m_libraryFileExplorer != nullptr
+                                          ? m_libraryFileExplorer->keyBindingProfileName()
+                                          : m_state->setting(QStringLiteral("fileExplorer.keyBindingProfile"),
+                                                             defaultKeyBindingProfiles().isEmpty()
+                                                                 ? QStringLiteral("vim")
+                                                                 : defaultKeyBindingProfiles().first().name));
     dialog.setQueueProfileName(m_queueScreen != nullptr
                                    ? m_queueScreen->keyBindingProfileName()
                                    : m_state->setting(QStringLiteral("queueScreen.keyBindingProfile"),
                                                       defaultQueueKeyBindingProfileName()));
-    dialog.setFileExplorerKeyHintsVisible(m_libraryFileExplorer->isKeyHintBarVisible());
+    dialog.setFileExplorerKeyHintsVisible(m_libraryFileExplorer != nullptr
+                                              ? m_libraryFileExplorer->isKeyHintBarVisible()
+                                              : m_state->setting(QStringLiteral("fileExplorer.showKeyHints")) == QStringLiteral("true"));
 
     if (dialog.exec() != QDialog::Accepted) {
         return;
@@ -4660,13 +4706,21 @@ void MainWindow::configureKeybindings()
         m_panelSearch->setKeyBindingProfileName(dialog.mainPanelProfileName());
         saveMainWindowViewSettings();
     }
-    m_libraryFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
-    m_freeRoamFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+    if (m_libraryFileExplorer != nullptr) {
+        m_libraryFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+    }
+    if (m_freeRoamFileExplorer != nullptr) {
+        m_freeRoamFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+    }
     if (m_queueScreen != nullptr) {
         m_queueScreen->setKeyBindingProfileName(dialog.queueProfileName());
     }
-    m_libraryFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
-    m_freeRoamFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
+    if (m_libraryFileExplorer != nullptr) {
+        m_libraryFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
+    }
+    if (m_freeRoamFileExplorer != nullptr) {
+        m_freeRoamFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
+    }
     m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), dialog.fileExplorerProfileName());
     m_state->setSetting(QStringLiteral("queueScreen.keyBindingProfile"), dialog.queueProfileName());
     m_state->setSetting(QStringLiteral("fileExplorer.showKeyHints"),
