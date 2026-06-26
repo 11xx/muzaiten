@@ -122,6 +122,7 @@ private:
     void ensureFileExplorers();
     FileExplorerView *ensureLibraryFileExplorer();
     FileExplorerView *ensureFreeRoamFileExplorer();
+    PlaylistView *ensurePlaylistView();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();

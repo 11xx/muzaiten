@@ -33,6 +33,7 @@ private slots:
         QVERIFY(window.m_searchView == nullptr);
         QVERIFY(window.m_libraryFileExplorer == nullptr);
         QVERIFY(window.m_freeRoamFileExplorer == nullptr);
+        QVERIFY(window.m_playlistView == nullptr);
 
         window.persistViewState();
         window.switchMainView(MainView::LibraryPanels);
