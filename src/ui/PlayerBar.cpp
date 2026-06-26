@@ -579,6 +579,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
     settingsMenu->addMenu(mpdMenu);
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
+    QAction *memoryReclaim = settingsMenu->addAction(QStringLiteral("Memory reclaim..."));
     QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
@@ -772,6 +773,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(albumArtResolution, &QAction::triggered, this, &PlayerBar::albumArtResolutionRequested);
     connect(playlistMetadataDisplay, &QAction::triggered, this, &PlayerBar::playlistMetadataDisplayRequested);
     connect(searchRanking, &QAction::triggered, this, &PlayerBar::searchRankingRequested);
+    connect(memoryReclaim, &QAction::triggered, this, &PlayerBar::memoryReclaimRequested);
     connect(keybindings, &QAction::triggered, this, &PlayerBar::keybindingsRequested);
     connect(resetPanelOrder, &QAction::triggered, this, &PlayerBar::resetPanelOrderRequested);
     connect(resetViewPreferences, &QAction::triggered, this, &PlayerBar::resetViewPreferencesRequested);

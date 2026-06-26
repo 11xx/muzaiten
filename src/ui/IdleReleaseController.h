@@ -25,6 +25,7 @@ class IdleReleaseController final : public QObject {
 public:
     // Default idle window before a hidden screen frees its data.
     static constexpr int kDefaultIdleMs = 60000; // 1 minute
+    static constexpr int kDisabledIdleMs = 0;
 
     IdleReleaseController(QWidget *page,
                           std::function<void()> release,

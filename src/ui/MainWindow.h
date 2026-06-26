@@ -215,9 +215,12 @@ private:
     void configureAlbumArtResolution();
     void configurePlaylistMetadataDisplay();
     void configureSearchRanking();
+    void configureMemoryReclaim();
     void configureKeybindings();
     void loadSearchRankingConfig();
     void loadPlaybackModes();
+    int idleReleaseMs() const;
+    int deepReleaseMs() const;
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
     void configureMpdSource();

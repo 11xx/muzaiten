@@ -92,6 +92,7 @@ signals:
     void albumArtResolutionRequested();
     void playlistMetadataDisplayRequested();
     void searchRankingRequested();
+    void memoryReclaimRequested();
     void keybindingsRequested();
     void resetPanelOrderRequested();
     void resetViewPreferencesRequested();

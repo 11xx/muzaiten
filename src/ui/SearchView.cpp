@@ -62,10 +62,10 @@ static Track trackFromRecord(const Search::SearchRecord &rec)
     return t;
 }
 
-SearchView::SearchView(QWidget *parent)
+SearchView::SearchView(QWidget *parent, int idleReleaseMs)
     : QWidget(parent)
 {
-    setupUi();
+    setupUi(idleReleaseMs);
 }
 
 SearchView::~SearchView()
@@ -73,7 +73,7 @@ SearchView::~SearchView()
     teardownWorker();
 }
 
-void SearchView::setupUi()
+void SearchView::setupUi(int idleReleaseMs)
 {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -186,7 +186,8 @@ void SearchView::setupUi()
     // it was actually freed, so quick re-opens stay instant.
     new IdleReleaseController(this,
                               [this] { releaseIdleResources(); },
-                              [this] { if (!m_dbPath.isEmpty()) ensureIndexLoaded(m_dbPath); });
+                              [this] { if (!m_dbPath.isEmpty()) ensureIndexLoaded(m_dbPath); },
+                              idleReleaseMs);
 }
 
 void SearchView::changeEvent(QEvent *event)

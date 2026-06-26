@@ -5,6 +5,7 @@
 #include "search/ResultRanker.h"
 #include "search/SearchIndex.h"
 #include "search/SearchRecord.h"
+#include "ui/IdleReleaseController.h"
 #include "ui/KeyBindingTypes.h"
 
 #include <QWidget>
@@ -26,7 +27,8 @@ class SearchWorker;
 class SearchView : public QWidget {
     Q_OBJECT
 public:
-    explicit SearchView(QWidget *parent = nullptr);
+    explicit SearchView(QWidget *parent = nullptr,
+                        int idleReleaseMs = IdleReleaseController::kDefaultIdleMs);
     ~SearchView() override;
 
     // Called by MainWindow when the view becomes visible; builds the in-memory
@@ -83,7 +85,7 @@ private slots:
     void onDoubleClicked(const QModelIndex &index);
 
 private:
-    void setupUi();
+    void setupUi(int idleReleaseMs);
     void setupWorker(const QString &dbPath);
     void teardownWorker();
     void submitQuery();
