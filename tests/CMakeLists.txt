@@ -303,6 +303,7 @@ add_executable(test_queue_table
     ../src/ui/QueueKeybindings.cpp
     ../src/ui/QueueStore.cpp
     ../src/ui/QueueTable.cpp
+    ../src/ui/PanelSearchBar.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp
     ../src/ui/NeighborColumnResizer.cpp

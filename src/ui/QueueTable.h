@@ -13,6 +13,7 @@ class QLabel;
 class QLineEdit;
 class QStyledItemDelegate;
 class QTableView;
+class PanelSearchBar;
 class ResponsiveColumnLayout;
 class StarRatingDelegate;
 
@@ -78,15 +79,6 @@ private:
     void applyTableFrameStyle();
     void setHeaderHeight(int height);
     bool handleKeyPress(QKeyEvent *event);
-    // Incremental find (FullScreen preset only): jumps the cursor to matching
-    // rows as you type, mirroring the main-panel PanelSearchController.
-    void openSearch();
-    void escapeSearch();
-    void setSearchQuery(const QString &query);
-    void rebuildSearchMatches(bool jumpToFirst);
-    void updateSearchUi();
-    void cycleSearchMatch(int direction);
-    bool handleSearchEditKey(QKeyEvent *event);
     int pageStepRows() const;
     QVector<int> selectedRowsForAction() const;
     Track currentTrackForAction() const;
@@ -111,13 +103,6 @@ private:
     bool m_restoreScrollScheduled = false;
     bool m_queueIsPlaylistSourced = false;
 
-    // Incremental-find state and widgets (created only for the FullScreen preset).
-    QWidget *m_searchBar = nullptr;
-    QLabel *m_searchPrompt = nullptr;
-    QLineEdit *m_searchEdit = nullptr;
-    QLabel *m_searchStatus = nullptr;
-    QString m_searchQuery;
-    QVector<Search::PanelMatch> m_searchMatches;
-    int m_searchCurrentMatch = -1;
-    bool m_searchFuzzy = false;
+    // Incremental "/" find (FullScreen preset only); null for the sidebar preset.
+    PanelSearchBar *m_search = nullptr;
 };

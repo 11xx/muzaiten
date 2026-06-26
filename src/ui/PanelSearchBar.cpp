@@ -164,6 +164,15 @@ void PanelSearchBar::cycle(int direction)
     updateUi();
 }
 
+void PanelSearchBar::refresh()
+{
+    if (hasActiveQuery()) {
+        rebuildMatches(/*jumpToFirst=*/false);
+    } else {
+        updateUi();
+    }
+}
+
 void PanelSearchBar::updateUi()
 {
     m_prompt->setText(QStringLiteral("Search %1:").arg(m_label));
