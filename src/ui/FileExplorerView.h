@@ -2,6 +2,7 @@
 
 #include "core/MusicSort.h"
 #include "core/Track.h"
+#include "search/SearchMatcher.h"
 #include "ui/FileExplorerKeybindings.h"
 
 #include <QHash>
@@ -17,6 +18,7 @@ class QMenu;
 class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
+class PanelSearchBar;
 
 enum class FileExplorerMode {
     Library,
@@ -89,6 +91,11 @@ private:
     // Frees the populated tree when idle-hidden; the owning view repopulates it
     // on the next navigation.
     void releaseIdleResources();
+    // Backing for the "/" PanelSearchBar: one document per top-level row, plus
+    // cursor row accessors over the tree's top-level items.
+    QVector<Search::MatchDocument> searchDocuments() const;
+    int currentTopLevelRow() const;
+    void selectTopLevelRow(int row);
     void activateItem(QTreeWidgetItem *item);
     void showContextMenu(const QPoint &pos);
     void navigateUp();
@@ -119,6 +126,7 @@ private:
     QWidget *m_hintBar = nullptr;
     QLabel *m_hintLabel = nullptr;
     QTreeWidget *m_tree = nullptr;
+    PanelSearchBar *m_search = nullptr;
     QTimer *m_ggTimer = nullptr;
     QTimer *m_metadataTimer = nullptr;
     QList<QTreeWidgetItem *> m_pendingMetadata;
