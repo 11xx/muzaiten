@@ -28,6 +28,12 @@ public:
     // per-album loading spinner while art is fetched. Within-artist selection
     // changes and narrow rating refreshes pass false (no spinner).
     void setAlbums(const QVector<Album> &albums, bool freshLoad = false);
+    // Drops the decoded cover thumbnails (reverting every cell to the fallback
+    // art) to reclaim memory while the grid is idle-hidden; reloadArtwork()
+    // re-streams the covers when the library view is shown again. The album rows
+    // themselves are untouched, so the layout and selection survive.
+    void releaseArtwork();
+    void reloadArtwork();
     void setSelectedAlbumTitle(const QString &albumTitle);
     void setRememberedOutlineVisible(bool visible);
     int loadingAngle() const { return m_loadingAngle; }
