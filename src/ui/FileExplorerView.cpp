@@ -6,6 +6,7 @@
 #include "scanner/TagReader.h"
 #include "ui/IdleReleaseController.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/PanelSearchBar.h"
 
 #include <QAction>
 #include <QApplication>
@@ -151,6 +152,16 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     applyRowHeight();
     layout->addWidget(m_tree, 1);
 
+    m_search = new PanelSearchBar(this);
+    PanelSearchBar::Providers searchProviders;
+    searchProviders.documents = [this] { return searchDocuments(); };
+    searchProviders.rowCount = [this] { return m_tree->topLevelItemCount(); };
+    searchProviders.currentRow = [this] { return currentTopLevelRow(); };
+    searchProviders.setCurrentRow = [this](int row) { selectTopLevelRow(row); };
+    searchProviders.focusList = [this] { m_tree->setFocus(); };
+    m_search->setProviders(searchProviders);
+    layout->addWidget(m_search);
+
     m_hintBar = new QWidget(this);
     m_hintBar->setAutoFillBackground(true);
     applyHintBarPalette();
@@ -214,6 +225,55 @@ void FileExplorerView::releaseIdleResources()
     m_metadataTimer->stop();
     m_pendingMetadata.clear();
     m_tree->clear();
+}
+
+QVector<Search::MatchDocument> FileExplorerView::searchDocuments() const
+{
+    QVector<Search::MatchDocument> docs;
+    const int count = m_tree->topLevelItemCount();
+    docs.reserve(count);
+    for (int row = 0; row < count; ++row) {
+        QTreeWidgetItem *item = m_tree->topLevelItem(row);
+        if (item == nullptr) {
+            continue;
+        }
+        const QString name = item->text(0);
+        const QString path = item->data(0, PathRole).toString();
+        QVector<Search::MatchField> fields;
+        if (item->data(0, TypeRole).toInt() == TrackItem) {
+            const Track track = item->data(0, TrackRole).value<Track>();
+            fields = {
+                Search::makeField(Search::MatchFieldRole::Filename, name, 300),
+                Search::makeField(Search::MatchFieldRole::Artist, track.artistName, 200),
+                Search::makeField(Search::MatchFieldRole::AlbumArtist, track.albumArtistName, 200),
+                Search::makeField(Search::MatchFieldRole::Album, track.albumTitle, 150),
+                Search::makeField(Search::MatchFieldRole::Path, path, 60),
+            };
+        } else {
+            fields = {
+                Search::makeField(Search::MatchFieldRole::Filename, name, 300),
+                Search::makeField(Search::MatchFieldRole::Path, path, 60),
+            };
+        }
+        docs.push_back({row, fields, {}});
+    }
+    return docs;
+}
+
+int FileExplorerView::currentTopLevelRow() const
+{
+    QTreeWidgetItem *current = m_tree->currentItem();
+    return current != nullptr ? m_tree->indexOfTopLevelItem(current) : 0;
+}
+
+void FileExplorerView::selectTopLevelRow(int row)
+{
+    if (row < 0 || row >= m_tree->topLevelItemCount()) {
+        return;
+    }
+    QTreeWidgetItem *item = m_tree->topLevelItem(row);
+    m_tree->setCurrentItem(item);
+    m_tree->scrollToItem(item);
 }
 
 void FileExplorerView::setMode(FileExplorerMode mode)
@@ -884,6 +944,9 @@ QVector<Track> FileExplorerView::selectedTracks() const
 void FileExplorerView::setModeTitle(const QString &title)
 {
     m_modeTitle->setText(title);
+    if (m_search != nullptr) {
+        m_search->setLabel(title);
+    }
 }
 
 void FileExplorerView::setKeyBindingProfileName(const QString &name)
@@ -951,6 +1014,27 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
     auto *keyEvent = static_cast<QKeyEvent *>(event);
     const int key = keyEvent->key();
     const auto modifiers = keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
+
+    // "/" search, mirroring the main view: open, M-n/M-p cycle confirmed matches,
+    // Esc clears the constraint. The bar handles its own edit keys internally.
+    if (m_search != nullptr) {
+        if (!modifiers && key == Qt::Key_Slash) {
+            m_search->open();
+            return true;
+        }
+        if (modifiers == Qt::AltModifier && key == Qt::Key_N) {
+            m_search->cycle(+1);
+            return true;
+        }
+        if (modifiers == Qt::AltModifier && key == Qt::Key_P) {
+            m_search->cycle(-1);
+            return true;
+        }
+        if (key == Qt::Key_Escape && (m_search->isSearchVisible() || m_search->hasActiveQuery())) {
+            m_search->escape();
+            return true;
+        }
+    }
 
     if (!modifiers && key == Qt::Key_Backspace) {
         navigateUp();
