@@ -119,6 +119,9 @@ private:
     void openPanelOrderDialog();
     QueueScreen *ensureQueueScreen();
     SearchView *ensureSearchView();
+    void ensureFileExplorers();
+    FileExplorerView *ensureLibraryFileExplorer();
+    FileExplorerView *ensureFreeRoamFileExplorer();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();
