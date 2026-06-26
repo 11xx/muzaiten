@@ -331,6 +331,11 @@ add_executable(test_playlist_view
     ../src/db/PlaylistDatabase.cpp
     ../src/ui/PlaylistView.cpp
     ../src/ui/IdleReleaseController.cpp
+    ../src/ui/PanelSearchBar.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/fold/Fold.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp

@@ -7,6 +7,7 @@
 #include "ui/NavigableTableView.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
+#include "ui/PanelSearchBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/ResponsiveColumnOptionsDialog.h"
@@ -646,6 +647,17 @@ PlaylistView::PlaylistView(QWidget *parent)
     m_splitter->setObjectName(QStringLiteral("PlaylistFrame"));
     layout->addWidget(m_splitter, 1);
 
+    m_search = new PanelSearchBar(this);
+    m_search->setLabel(QStringLiteral("Playlist"));
+    PanelSearchBar::Providers searchProviders;
+    searchProviders.documents = [this] { return searchDocuments(); };
+    searchProviders.rowCount = [this] { return m_itemModel != nullptr ? m_itemModel->rowCount() : 0; };
+    searchProviders.currentRow = [this] { return currentItemRow(); };
+    searchProviders.setCurrentRow = [this](int row) { setCurrentItemRow(row); };
+    searchProviders.focusList = [this] { m_itemTable->setFocus(); };
+    m_search->setProviders(searchProviders);
+    layout->addWidget(m_search);
+
     m_playlistList = new QListWidget(m_splitter);
     m_playlistList->setObjectName(QStringLiteral("PlaylistList"));
     m_playlistList->setFrameShape(QFrame::NoFrame);
@@ -793,6 +805,26 @@ void PlaylistView::releaseIdleResources()
     if (m_itemModel != nullptr) {
         m_itemModel->setItems({});
     }
+}
+
+QVector<Search::MatchDocument> PlaylistView::searchDocuments() const
+{
+    const QVector<PlaylistItem> rows = displayItems();
+    QVector<Search::MatchDocument> docs;
+    docs.reserve(rows.size());
+    for (int row = 0; row < rows.size(); ++row) {
+        const PlaylistItem &item = rows.at(row);
+        docs.push_back({row,
+                        {
+                            Search::makeField(Search::MatchFieldRole::Title, item.titleSnapshot, 400),
+                            Search::makeField(Search::MatchFieldRole::Artist, item.artistSnapshot, 300),
+                            Search::makeField(Search::MatchFieldRole::Album, item.albumSnapshot, 200),
+                            Search::makeField(Search::MatchFieldRole::Path, item.trackPath, 60),
+                            Search::makeField(Search::MatchFieldRole::Free, item.sourceText, 80),
+                        },
+                        {}});
+    }
+    return docs;
 }
 
 void PlaylistView::setDatabase(PlaylistDatabase *db)
@@ -2595,6 +2627,26 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     }
 
     if (watched == m_itemTable) {
+        // "/" search over the tracklist, mirroring the main view: open, M-n/M-p
+        // cycle confirmed matches, Esc clears the constraint.
+        if (m_search != nullptr) {
+            if (mods == Qt::NoModifier && key == Qt::Key_Slash) {
+                m_search->open();
+                return true;
+            }
+            if (mods == Qt::AltModifier && key == Qt::Key_N) {
+                m_search->cycle(+1);
+                return true;
+            }
+            if (mods == Qt::AltModifier && key == Qt::Key_P) {
+                m_search->cycle(-1);
+                return true;
+            }
+            if (key == Qt::Key_Escape && (m_search->isSearchVisible() || m_search->hasActiveQuery())) {
+                m_search->escape();
+                return true;
+            }
+        }
         // Shift+n/p (and the hjkl-equivalent Shift+j/k) reorder the selection.
         // Arrow variants are intentionally omitted — Shift+Arrow is the platform
         // selection-extend gesture and rebinding it would surprise.
