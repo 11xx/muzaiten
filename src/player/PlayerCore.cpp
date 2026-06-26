@@ -41,6 +41,7 @@ void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused, bool 
     // must not start the abandoned track.
     m_pendingDsdTakeover.active = false;
 
+    const int previousIndex = m_queueIndex;
     m_queueIndex = index;
     if (explicitJump) {
         // A manual jump to any row (forward or backward) clears the play-next
@@ -51,9 +52,7 @@ void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused, bool 
         // into a new play-next span — that was misleading and is intentionally
         // not done here.
         m_playNextInsertIndex = m_queueIndex + 1;
-        // A deliberate pick steps off any remembered shuffle trail: a later Next
-        // must re-roll rather than replay a now-stale forward entry.
-        m_shuffleForward.clear();
+        refreshShuffleForManualPick(previousIndex, m_queueIndex);
     } else {
         collapsePlayNextIfStale();
     }
@@ -277,7 +276,7 @@ void PlayerCore::appendAndPlay(const Track &track)
             // m_queue.size() (left over from playing the last track) would
             // survive the guard check and spuriously badge all trailing entries.
             m_playNextInsertIndex = -1;
-            playAt(index);
+            playAt(index, true, false, /*explicitJump=*/true);
             return;
         }
     }
@@ -285,7 +284,7 @@ void PlayerCore::appendAndPlay(const Track &track)
     emit aboutToAddTracks(QVector<Track>{track});
     m_queue.push_back(track);
     emit queueChanged();
-    playAt(static_cast<int>(m_queue.size() - 1));
+    playAt(static_cast<int>(m_queue.size() - 1), true, false, /*explicitJump=*/true);
 }
 
 void PlayerCore::playTracksNext(const QVector<Track> &tracks)
@@ -886,6 +885,22 @@ void PlayerCore::playShuffleJump(int index)
     // positions aren't badged. The forward trail is intentionally preserved.
     m_playNextInsertIndex = -1;
     playAt(index);
+}
+
+void PlayerCore::refreshShuffleForManualPick(int previousIndex, int selectedIndex)
+{
+    if (m_shuffleMode == ShuffleMode::Off) {
+        m_shuffleForward.clear();
+        return;
+    }
+    if (previousIndex >= 0 && previousIndex < m_queue.size() && previousIndex != selectedIndex) {
+        m_shuffleHistory.push_back(previousIndex);
+    }
+    m_shuffleForward.clear();
+    m_shuffleVisited.clear();
+    if (selectedIndex >= 0 && selectedIndex < m_queue.size()) {
+        m_shuffleVisited.insert(selectedIndex);
+    }
 }
 
 void PlayerCore::resetShuffleState()
