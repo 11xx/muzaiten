@@ -726,11 +726,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                              [this] { m_albumGrid->releaseArtwork(); },
                              [this] { m_albumGrid->reloadArtwork(); });
 
-    m_playlistView = new PlaylistView(m_mainStack);
     m_panelSearch = new PanelSearchController(central);
 
     m_mainStack->addWidget(m_rootSplitter);
-    m_mainStack->addWidget(m_playlistView);
 
     centralLayout->addWidget(m_mainStack, 1);
     centralLayout->addWidget(m_panelSearch, 0);
@@ -896,11 +894,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         m_rightSidebar->setDatabase(m_database);
     }
 
-    m_playlistView->setDatabase(m_playlistDb);
-    m_playlistView->setTrackResolver([this](const QString &path) {
-        return m_database != nullptr ? m_database->trackForPath(path) : Track();
-    });
-
     connect(m_artworkCache, &ArtworkCache::artworkReady, this, &MainWindow::onArtworkReady);
     connect(m_artworkCache, &ArtworkCache::artworkMissing, this, &MainWindow::onArtworkMissing);
 
@@ -1005,7 +998,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::viewSettingsChanged, this, &MainWindow::saveAlbumGridViewSettings);
     connect(m_artistSidebar, &ArtistSidebar::viewSettingsChanged, this, &MainWindow::saveArtistSidebarViewSettings);
     connect(m_rightSidebar, &RightSidebar::viewSettingsChanged, this, &MainWindow::saveRightSidebarViewSettings);
-    connect(m_playlistView, &PlaylistView::viewSettingsChanged, this, &MainWindow::savePlaylistViewSettings);
     m_panelSearch->registerTarget({
         MainPanelId::Queue,
         QStringLiteral("Queue"),
@@ -1204,22 +1196,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
     connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {
         switchMainView(MainView::Playlist);
-        m_playlistView->createPlaylist();
+        ensurePlaylistView()->createPlaylist();
     });
-    // These actions live in PlayerBar's m_playlistViewActions set, which
-    // setPlaylistViewActionsActive() enables only while the Playlist view is
-    // current (see switchMainView). A disabled QAction never emits triggered, so
-    // the signals can't fire outside the Playlist view — connect straight to the
-    // view instead of re-checking m_mainView in a guard lambda.
-    connect(m_playerBar, &PlayerBar::playlistAddSongRequested, m_playlistView, &PlaylistView::addSongToCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistPlayRequested, m_playlistView, &PlaylistView::playCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, m_playlistView, &PlaylistView::playNextCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, m_playlistView, &PlaylistView::addCurrentPlaylistToQueue);
-    connect(m_playerBar, &PlayerBar::playlistRenameRequested, m_playlistView, &PlaylistView::renameCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistExportRequested, m_playlistView, &PlaylistView::exportCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistDeleteRequested, m_playlistView, &PlaylistView::deleteCurrentPlaylist);
-    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, m_playlistView, &PlaylistView::moveCurrentItemUp);
-    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, m_playlistView, &PlaylistView::moveCurrentItemDown);
     connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
     connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
     connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
@@ -1266,59 +1244,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_rightSidebar, &RightSidebar::artistRequested, this, &MainWindow::jumpToTrackInfoArtist);
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
-    // Playlist view (key 5). Resolves stored paths against the live library;
-    // playing a playlist replaces the queue (snapshotting the previous one).
-    connect(m_playlistView, &PlaylistView::playPathsRequested, this, [this](const QStringList &paths, int startIndex) {
-        const QVector<Track> tracks = tracksForPaths(paths);
-        if (!tracks.isEmpty()) {
-            const qint64 playlistId = m_playlistView->currentPlaylistId();
-            const Playlist playlist = m_playlistDb != nullptr ? m_playlistDb->playlist(playlistId) : Playlist();
-            replaceQueueWithTracks(tracks, startIndex,
-                                   QStringLiteral("playlist"),
-                                   playlistId,
-                                   playlist.name);
-        }
-    });
-    connect(m_playlistView, &PlaylistView::addPathsToQueueRequested, this, [this](const QStringList &paths) {
-        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::Append, false);
-    });
-    connect(m_playlistView, &PlaylistView::playNextPathsRequested, this, [this](const QStringList &paths) {
-        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::PlayNext, false);
-    });
-    connect(m_playlistView, &PlaylistView::addPathsToQueueTemporaryRequested, this, [this](const QStringList &paths) {
-        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::Append, true);
-    });
-    connect(m_playlistView, &PlaylistView::playNextPathsTemporaryRequested, this, [this](const QStringList &paths) {
-        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::PlayNext, true);
-    });
-    connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
-        showTrackProperties(m_database->trackForPath(path));
-    });
-    connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
-    connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
-    connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
-    connect(m_playlistView, &PlaylistView::playlistFilesDropped, this, &MainWindow::importDroppedFiles);
-    connect(m_playlistView, &PlaylistView::stopPlaylistImportRequested, this, &MainWindow::stopPlaylistImport);
-    connect(m_playlistView, &PlaylistView::importInterruptRequested, this, &MainWindow::cancelDropImport);
-    connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
-    connect(m_playlistView, &PlaylistView::resolveMultiMatchesRequested, this, &MainWindow::resolvePlaylistMultiMatches);
-    connect(m_playlistView, &PlaylistView::playlistItemsChanged, this, &MainWindow::syncPlaylistBackedQueue);
-    connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
-        openAddToPlaylistDialog(tracksForPaths(paths));
-    });
-    connect(m_playlistView, &PlaylistView::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
-    connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
-    connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
-    connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);
-    connect(m_playlistView, &PlaylistView::deleteSavedQueueRequested, this, &MainWindow::deleteQueueSnapshotById);
-    connect(m_playlistView, &PlaylistView::trackRatingChanged, this, [this](const QString &path, int rating) {
-        Track track = m_database != nullptr ? m_database->trackForPath(path) : Track();
-        if (track.path.isEmpty()) {
-            track.path = path;
-        }
-        applyTrackRating(track, rating);
-    });
-
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
@@ -1414,7 +1339,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             ensureQueueScreen()->revealCurrentPlaying();
             return;
         }
-        if (m_mainView == MainView::Playlist && m_playlistView->revealNowPlaying()) {
+        if (m_mainView == MainView::Playlist && ensurePlaylistView()->revealNowPlaying()) {
             return;
         }
         jumpToPlayingSong();
@@ -2460,7 +2385,6 @@ void MainWindow::loadViewSettings()
     m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
     const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
     m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
-    m_playlistView->applyViewSettingsJson(m_state->setting(QStringLiteral("playlistView.view")));
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
     const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
     m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
@@ -2545,6 +2469,9 @@ void MainWindow::saveQueueScreenViewSettings()
 
 void MainWindow::savePlaylistViewSettings()
 {
+    if (m_playlistView == nullptr) {
+        return;
+    }
     m_state->setSetting(QStringLiteral("playlistView.view"), m_playlistView->viewSettingsJson());
     applySharedTableSettings();
 }
@@ -2595,7 +2522,9 @@ void MainWindow::saveAllViewSettings()
     if (m_queueScreen != nullptr) {
         saveQueueScreenViewSettings();
     }
-    savePlaylistViewSettings();
+    if (m_playlistView != nullptr) {
+        savePlaylistViewSettings();
+    }
     saveMainWindowViewSettings();
 }
 
@@ -2636,7 +2565,9 @@ void MainWindow::resetViewPreferences()
     if (m_queueScreen != nullptr) {
         m_queueScreen->resetViewSettings();
     }
-    m_playlistView->resetViewSettings();
+    if (m_playlistView != nullptr) {
+        m_playlistView->resetViewSettings();
+    }
 
     m_rootSplitter->setSizes({197, 1296, 298});
     m_centerSplitter->setSizes({540, 430});
@@ -2930,6 +2861,94 @@ FileExplorerView *MainWindow::ensureFreeRoamFileExplorer()
     return m_freeRoamFileExplorer;
 }
 
+PlaylistView *MainWindow::ensurePlaylistView()
+{
+    if (m_playlistView != nullptr) {
+        return m_playlistView;
+    }
+
+    m_playlistView = new PlaylistView(m_mainStack);
+    m_playlistView->setDatabase(m_playlistDb);
+    m_playlistView->setTrackResolver([this](const QString &path) {
+        return m_database != nullptr ? m_database->trackForPath(path) : Track();
+    });
+    m_playlistView->applyViewSettingsJson(m_state->setting(QStringLiteral("playlistView.view")));
+    m_playlistView->setSavedQueueEntries(savedQueuePlaylistEntries());
+    m_playlistView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    if (!m_player->currentTrack().path.isEmpty()) {
+        const qint64 sourceId = m_queueSourceKind == QStringLiteral("playlist") ? m_queueSourcePlaylistId : 0;
+        m_playlistView->setNowPlaying(m_player->currentTrack().path, sourceId);
+    }
+
+    connect(m_playlistView, &PlaylistView::viewSettingsChanged, this, &MainWindow::savePlaylistViewSettings);
+    connect(m_playerBar, &PlayerBar::playlistAddSongRequested, m_playlistView, &PlaylistView::addSongToCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistPlayRequested, m_playlistView, &PlaylistView::playCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistPlayNextRequested, m_playlistView, &PlaylistView::playNextCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistAddToQueueRequested, m_playlistView, &PlaylistView::addCurrentPlaylistToQueue);
+    connect(m_playerBar, &PlayerBar::playlistRenameRequested, m_playlistView, &PlaylistView::renameCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistExportRequested, m_playlistView, &PlaylistView::exportCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistDeleteRequested, m_playlistView, &PlaylistView::deleteCurrentPlaylist);
+    connect(m_playerBar, &PlayerBar::playlistMoveItemUpRequested, m_playlistView, &PlaylistView::moveCurrentItemUp);
+    connect(m_playerBar, &PlayerBar::playlistMoveItemDownRequested, m_playlistView, &PlaylistView::moveCurrentItemDown);
+
+    // Playlist view (key 5). Resolves stored paths against the live library;
+    // playing a playlist replaces the queue (snapshotting the previous one).
+    connect(m_playlistView, &PlaylistView::playPathsRequested, this, [this](const QStringList &paths, int startIndex) {
+        const QVector<Track> tracks = tracksForPaths(paths);
+        if (!tracks.isEmpty()) {
+            const qint64 playlistId = m_playlistView->currentPlaylistId();
+            const Playlist playlist = m_playlistDb != nullptr ? m_playlistDb->playlist(playlistId) : Playlist();
+            replaceQueueWithTracks(tracks, startIndex,
+                                   QStringLiteral("playlist"),
+                                   playlistId,
+                                   playlist.name);
+        }
+    });
+    connect(m_playlistView, &PlaylistView::addPathsToQueueRequested, this, [this](const QStringList &paths) {
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::Append, false);
+    });
+    connect(m_playlistView, &PlaylistView::playNextPathsRequested, this, [this](const QStringList &paths) {
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::PlayNext, false);
+    });
+    connect(m_playlistView, &PlaylistView::addPathsToQueueTemporaryRequested, this, [this](const QStringList &paths) {
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::Append, true);
+    });
+    connect(m_playlistView, &PlaylistView::playNextPathsTemporaryRequested, this, [this](const QStringList &paths) {
+        enqueueTracksFromMenu(tracksForPaths(paths), QueueAddMode::PlayNext, true);
+    });
+    connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
+        showTrackProperties(m_database->trackForPath(path));
+    });
+    connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
+    connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
+    connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
+    connect(m_playlistView, &PlaylistView::playlistFilesDropped, this, &MainWindow::importDroppedFiles);
+    connect(m_playlistView, &PlaylistView::stopPlaylistImportRequested, this, &MainWindow::stopPlaylistImport);
+    connect(m_playlistView, &PlaylistView::importInterruptRequested, this, &MainWindow::cancelDropImport);
+    connect(m_playlistView, &PlaylistView::editItemRequested, this, &MainWindow::openPlaylistEditModal);
+    connect(m_playlistView, &PlaylistView::resolveMultiMatchesRequested, this, &MainWindow::resolvePlaylistMultiMatches);
+    connect(m_playlistView, &PlaylistView::playlistItemsChanged, this, &MainWindow::syncPlaylistBackedQueue);
+    connect(m_playlistView, &PlaylistView::addToPlaylistRequested, this, [this](const QStringList &paths) {
+        openAddToPlaylistDialog(tracksForPaths(paths));
+    });
+    connect(m_playlistView, &PlaylistView::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
+    connect(m_playlistView, &PlaylistView::playSavedQueueRequested, this, &MainWindow::playQueueSnapshotById);
+    connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
+    connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);
+    connect(m_playlistView, &PlaylistView::deleteSavedQueueRequested, this, &MainWindow::deleteQueueSnapshotById);
+    connect(m_playlistView, &PlaylistView::trackRatingChanged, this, [this](const QString &path, int rating) {
+        Track track = m_database != nullptr ? m_database->trackForPath(path) : Track();
+        if (track.path.isEmpty()) {
+            track.path = path;
+        }
+        applyTrackRating(track, rating);
+    });
+
+    m_mainStack->addWidget(m_playlistView);
+    applySharedTableSettings();
+    return m_playlistView;
+}
+
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
@@ -2967,9 +2986,10 @@ void MainWindow::switchMainView(MainView view)
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
         }
-        m_playlistView->reloadPlaylists();
-        m_mainStack->setCurrentWidget(m_playlistView);
-        m_playlistView->focusPlaylistList();
+        PlaylistView *playlistView = ensurePlaylistView();
+        playlistView->reloadPlaylists();
+        m_mainStack->setCurrentWidget(playlistView);
+        playlistView->focusPlaylistList();
     } else {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
@@ -3828,7 +3848,9 @@ void MainWindow::applySharedTableSettings()
     const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(playlistSettings.value(QStringLiteral("headerHeight")).toInt(20))));
     m_trackTable->setHeaderHeight(headerHeight);
     m_rightSidebar->setHeaderHeight(headerHeight);
-    m_playlistView->setHeaderHeight(headerHeight);
+    if (m_playlistView != nullptr) {
+        m_playlistView->setHeaderHeight(headerHeight);
+    }
 
     QJsonObject shared;
     shared.insert(QStringLiteral("headerHeight"), headerHeight);
@@ -5784,8 +5806,10 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
                 const qint64 id = m_playlistDb->addItem(playlistId, playlistItemFromTrack(track, query));
                 if (id > 0) {
                     addedIds->push_back(id);
-                    m_playlistView->reloadItems();
-                    m_playlistView->reloadPlaylists();
+                    if (m_playlistView != nullptr) {
+                        m_playlistView->reloadItems();
+                        m_playlistView->reloadPlaylists();
+                    }
                     syncPlaylistBackedQueue(playlistId);
                 }
                 refreshAdded();
@@ -5804,8 +5828,10 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
                     }
                 }
                 m_playlistDb->removeItem(last);
-                m_playlistView->reloadItems();
-                m_playlistView->reloadPlaylists();
+                if (m_playlistView != nullptr) {
+                    m_playlistView->reloadItems();
+                    m_playlistView->reloadPlaylists();
+                }
                 syncPlaylistBackedQueue(playlistId);
                 refreshAdded();
                 dialog->setQueryText(restoreQuery);
@@ -5813,8 +5839,10 @@ void MainWindow::openPlaylistAddModal(qint64 playlistId)
 
     dialog->exec();
     delete dialog;
-    m_playlistView->reloadItems();
-    m_playlistView->reloadPlaylists();
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadItems();
+        m_playlistView->reloadPlaylists();
+    }
     syncPlaylistBackedQueue(playlistId);
 }
 
@@ -5992,8 +6020,10 @@ void MainWindow::commitImportItems(qint64 playlistId, const QVector<PlaylistImpo
             }
         }
     }
-    m_playlistView->reloadItems();
-    m_playlistView->reloadPlaylists();
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadItems();
+        m_playlistView->reloadPlaylists();
+    }
     syncPlaylistBackedQueue(playlistId);
     const QString message = skipped > 0
         ? QStringLiteral("Imported %1 items into \"%2\" (%3 duplicates skipped)")
@@ -6089,11 +6119,13 @@ void MainWindow::importDroppedFiles(const QStringList &paths)
 
     // Surface the placeholders (with their spinners) and drop the user onto the
     // first one so they watch it fill.
-    m_playlistView->reloadPlaylists();
-    for (const DropImportJob &job : jobs) {
-        m_playlistView->setPlaylistImporting(job.playlistId, true);
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadPlaylists();
+        for (const DropImportJob &job : jobs) {
+            m_playlistView->setPlaylistImporting(job.playlistId, true);
+        }
+        m_playlistView->selectPlaylist(jobs.first().playlistId);
     }
-    m_playlistView->selectPlaylist(jobs.first().playlistId);
 
     // An import is already running — auto-matching is linear, so queue these new
     // placeholders onto it instead of rejecting the drop. finishDropImport drains
@@ -6144,7 +6176,9 @@ void MainWindow::onDropImportItemMatched(qint64 playlistId, const PlaylistImport
     }
     const PlaylistItem item = playlistItemFromImportMatch(match);
     m_playlistDb->addItem(playlistId, item);
-    m_playlistView->refreshImportingPlaylist(playlistId);
+    if (m_playlistView != nullptr) {
+        m_playlistView->refreshImportingPlaylist(playlistId);
+    }
     syncPlaylistBackedQueue(playlistId);
 }
 
@@ -6160,14 +6194,18 @@ void MainWindow::stopPlaylistImport(qint64 playlistId)
         m_dropImportWorker->skipPlaylist(playlistId);
     }
     m_dropImportPlaylists.remove(playlistId);
-    m_playlistView->setPlaylistImporting(playlistId, false);
+    if (m_playlistView != nullptr) {
+        m_playlistView->setPlaylistImporting(playlistId, false);
+    }
 }
 
 void MainWindow::onDropImportPlaylistFinished(qint64 playlistId)
 {
     m_dropImportPlaylists.remove(playlistId);
-    m_playlistView->setPlaylistImporting(playlistId, false);
-    m_playlistView->refreshImportingPlaylist(playlistId);
+    if (m_playlistView != nullptr) {
+        m_playlistView->setPlaylistImporting(playlistId, false);
+        m_playlistView->refreshImportingPlaylist(playlistId);
+    }
 }
 
 void MainWindow::cancelDropImport()
@@ -6193,8 +6231,10 @@ void MainWindow::finishDropImport(bool interrupted)
     }
     m_pendingDropJobs.clear();
     // Clear any spinners still showing (an interrupt skips the rest).
-    for (const qint64 id : m_dropImportPlaylists) {
-        m_playlistView->setPlaylistImporting(id, false);
+    if (m_playlistView != nullptr) {
+        for (const qint64 id : m_dropImportPlaylists) {
+            m_playlistView->setPlaylistImporting(id, false);
+        }
     }
     m_dropImportPlaylists.clear();
     if (m_dropImportThread != nullptr) {
@@ -6203,8 +6243,10 @@ void MainWindow::finishDropImport(bool interrupted)
         m_dropImportThread = nullptr;
         m_dropImportWorker = nullptr;  // deleteLater on thread finish
     }
-    m_playlistView->reloadPlaylists();
-    m_playlistView->reloadItems();
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadPlaylists();
+        m_playlistView->reloadItems();
+    }
     statusBar()->showMessage(
         interrupted ? QStringLiteral("Import interrupted — partial playlists kept.")
                     : QStringLiteral("Import complete — resolve multi/pending via the 'e' edit modal."),
@@ -6278,11 +6320,13 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
 
     dialog->exec();
     delete dialog;
-    m_playlistView->reloadItems();
-    m_playlistView->reloadPlaylists();
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadItems();
+        m_playlistView->reloadPlaylists();
+        // Keep keyboard focus on the row just edited rather than snapping to the top.
+        m_playlistView->selectItemById(itemId);
+    }
     syncPlaylistBackedQueue(playlistId);
-    // Keep keyboard focus on the row just edited rather than snapping to the top.
-    m_playlistView->selectItemById(itemId);
 }
 
 void MainWindow::resolvePlaylistMultiMatches(qint64 playlistId)
@@ -6318,8 +6362,10 @@ void MainWindow::resolvePlaylistMultiMatches(qint64 playlistId)
             ++resolved;
         }
     }
-    m_playlistView->reloadItems();
-    m_playlistView->reloadPlaylists();
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadItems();
+        m_playlistView->reloadPlaylists();
+    }
     syncPlaylistBackedQueue(playlistId);
     if (resolved == 0 && skipped == 0) {
         return;
@@ -6370,8 +6416,10 @@ void MainWindow::openAddToPlaylistDialog(const QVector<Track> &tracks)
         }
         m_playlistDb->addItem(id, playlistItemFromTrack(track, QString()));
     }
-    m_playlistView->reloadItems();
-    m_playlistView->reloadPlaylists();
+    if (m_playlistView != nullptr) {
+        m_playlistView->reloadItems();
+        m_playlistView->reloadPlaylists();
+    }
     syncPlaylistBackedQueue(id);
 }
 
