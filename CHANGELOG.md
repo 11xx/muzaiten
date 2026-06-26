@@ -4,6 +4,11 @@
 
 ### Added
 
+- The "/" incremental search now works the same way everywhere. The queue, both
+  file explorers, and the playlist tracklist gain the main view's ncmpcpp-style
+  behavior: "/" opens the search, Return confirms the constraint (so M-n/M-p keep
+  cycling matches with the list focused), and Escape clears it. The queue's
+  search previously had no confirm step, so cycling only worked while typing.
 - Playlist tracklists now retain their scroll position and selection when
   returning to the view. While playing a playlist, `o` jumps directly to its
   current row; playlist edits, imports, and resolved matches update the live
