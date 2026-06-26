@@ -329,6 +329,7 @@ add_executable(test_playlist_view
     test_playlist_view.cpp
     ../src/db/PlaylistDatabase.cpp
     ../src/ui/PlaylistView.cpp
+    ../src/ui/IdleReleaseController.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp

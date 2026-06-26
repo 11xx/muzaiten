@@ -86,6 +86,9 @@ protected:
 
 private:
     void refreshFreeRoam();
+    // Frees the populated tree when idle-hidden; the owning view repopulates it
+    // on the next navigation.
+    void releaseIdleResources();
     void activateItem(QTreeWidgetItem *item);
     void showContextMenu(const QPoint &pos);
     void navigateUp();
