@@ -498,6 +498,12 @@ target_compile_features(test_idle_release_controller PRIVATE cxx_std_26)
 add_test(NAME test_idle_release_controller COMMAND test_idle_release_controller)
 set_tests_properties(test_idle_release_controller PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_main_window_navigation test_main_window_navigation.cpp)
+target_link_libraries(test_main_window_navigation PRIVATE muzaiten_app_objects Qt6::Test)
+target_compile_features(test_main_window_navigation PRIVATE cxx_std_26)
+add_test(NAME test_main_window_navigation COMMAND test_main_window_navigation)
+set_tests_properties(test_main_window_navigation PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Offline matcher benchmark tool (dev only; not a registered test). Needs a real
 # library.sqlite copy: ./playlist_match_bench <library.sqlite> <playlist.jsonl ...>
 # Off by default so a normal build pays nothing; enable with

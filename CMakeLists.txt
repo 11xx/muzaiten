@@ -270,19 +270,22 @@ set(MUZAITEN_HEADERS
     src/ui/trackinfo/TrackInfoSettingsDialog.h
 )
 
-add_executable(muzaiten ${MUZAITEN_SOURCES} ${MUZAITEN_HEADERS})
+set(MUZAITEN_APP_SOURCES ${MUZAITEN_SOURCES})
+list(REMOVE_ITEM MUZAITEN_APP_SOURCES src/app/main.cpp)
 
-target_include_directories(muzaiten PRIVATE
+add_library(muzaiten_app_objects OBJECT ${MUZAITEN_APP_SOURCES} ${MUZAITEN_HEADERS})
+
+target_include_directories(muzaiten_app_objects PUBLIC
     src
     ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
-target_compile_definitions(muzaiten PRIVATE
+target_compile_definitions(muzaiten_app_objects PUBLIC
     MUZAITEN_LASTFM_API_KEY="${MUZAITEN_LASTFM_API_KEY}"
     MUZAITEN_LASTFM_SHARED_SECRET="${MUZAITEN_LASTFM_SHARED_SECRET}"
 )
 
-target_link_libraries(muzaiten PRIVATE
+target_link_libraries(muzaiten_app_objects PUBLIC
     Qt6::Core
     Qt6::DBus
     Qt6::Network
@@ -294,6 +297,12 @@ target_link_libraries(muzaiten PRIVATE
     PkgConfig::ZSTD
 )
 
+target_compile_options(muzaiten_app_objects PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+
+add_executable(muzaiten src/app/main.cpp $<TARGET_OBJECTS:muzaiten_app_objects>)
+target_link_libraries(muzaiten PRIVATE muzaiten_app_objects)
 target_compile_options(muzaiten PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
