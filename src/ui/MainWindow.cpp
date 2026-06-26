@@ -93,6 +93,7 @@
 #include <QRegularExpression>
 #include <QShortcut>
 #include <QSet>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -125,6 +126,9 @@ constexpr int kArtistSidebarMinimumWidth = 180;
 constexpr int kCenterPaneMinimumWidth = 500;
 constexpr int kRightSidebarMinimumWidth = 220;
 constexpr int kPanelMinimumHeight = 140;
+constexpr int kDefaultIdleReleaseSeconds = 60;
+constexpr int kDefaultDeepReleaseSeconds = 300;
+constexpr int kMaxMemoryReleaseSeconds = 3600;
 
 QString mainArtistSidebarStyleSheet(const QWidget *widget)
 {
@@ -724,7 +728,17 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     // when they return.
     new IdleReleaseController(m_rootSplitter,
                              [this] { m_albumGrid->releaseArtwork(); },
-                             [this] { m_albumGrid->reloadArtwork(); });
+                             [this] { m_albumGrid->reloadArtwork(); },
+                             idleReleaseMs());
+    // A longer second tier asks SQLite to drop retained artwork-cache pages too.
+    // Returning to the library can still re-stream covers, but a long stay on a
+    // different screen reclaims more memory than dropping per-cell QIcons alone.
+    new IdleReleaseController(m_rootSplitter,
+                             [this] {
+                                 QMetaObject::invokeMethod(m_artworkCache, "releaseCacheMemory", Qt::QueuedConnection);
+                             },
+                             {},
+                             deepReleaseMs());
 
     m_panelSearch = new PanelSearchController(central);
 
@@ -1182,6 +1196,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::albumArtResolutionRequested, this, &MainWindow::configureAlbumArtResolution);
     connect(m_playerBar, &PlayerBar::playlistMetadataDisplayRequested, this, &MainWindow::configurePlaylistMetadataDisplay);
     connect(m_playerBar, &PlayerBar::searchRankingRequested, this, &MainWindow::configureSearchRanking);
+    connect(m_playerBar, &PlayerBar::memoryReclaimRequested, this, &MainWindow::configureMemoryReclaim);
     connect(m_playerBar, &PlayerBar::keybindingsRequested, this, &MainWindow::configureKeybindings);
     connect(m_playerBar, &PlayerBar::resetPanelOrderRequested, this, &MainWindow::resetPanelOrder);
     connect(m_playerBar, &PlayerBar::resetViewPreferencesRequested, this, &MainWindow::resetViewPreferences);
@@ -2683,7 +2698,7 @@ SearchView *MainWindow::ensureSearchView()
         return m_searchView;
     }
 
-    m_searchView = new SearchView(m_mainStack);
+    m_searchView = new SearchView(m_mainStack, idleReleaseMs());
     m_searchView->setRankConfig(Search::RankConfig::fromJsonString(m_database->setting(QStringLiteral("search.ranking"))));
     m_searchView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
 
@@ -2719,12 +2734,13 @@ void MainWindow::ensureFileExplorers()
         return;
     }
 
-    m_libraryFileExplorer = new FileExplorerView(m_mainStack);
+    const int idleMs = idleReleaseMs();
+    m_libraryFileExplorer = new FileExplorerView(m_mainStack, idleMs);
     m_libraryFileExplorer->setMode(FileExplorerMode::Library);
     m_libraryFileExplorer->setModeTitle(QStringLiteral("Library Explorer"));
     m_libraryFileExplorer->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
 
-    m_freeRoamFileExplorer = new FileExplorerView(m_mainStack);
+    m_freeRoamFileExplorer = new FileExplorerView(m_mainStack, idleMs);
     m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
     m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory.isEmpty() ? QDir::homePath() : m_freeRoamDirectory);
     m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
@@ -2867,7 +2883,7 @@ PlaylistView *MainWindow::ensurePlaylistView()
         return m_playlistView;
     }
 
-    m_playlistView = new PlaylistView(m_mainStack);
+    m_playlistView = new PlaylistView(m_mainStack, idleReleaseMs());
     m_playlistView->setDatabase(m_playlistDb);
     m_playlistView->setTrackResolver([this](const QString &path) {
         return m_database != nullptr ? m_database->trackForPath(path) : Track();
@@ -4507,6 +4523,24 @@ void MainWindow::loadSearchRankingConfig()
     }
 }
 
+int MainWindow::idleReleaseMs() const
+{
+    const int seconds = std::clamp(m_state->setting(QStringLiteral("memory.idleReleaseSeconds"),
+                                                    QString::number(kDefaultIdleReleaseSeconds)).toInt(),
+                                   0,
+                                   kMaxMemoryReleaseSeconds);
+    return seconds * 1000;
+}
+
+int MainWindow::deepReleaseMs() const
+{
+    const int seconds = std::clamp(m_state->setting(QStringLiteral("memory.deepReleaseSeconds"),
+                                                    QString::number(kDefaultDeepReleaseSeconds)).toInt(),
+                                   0,
+                                   kMaxMemoryReleaseSeconds);
+    return seconds * 1000;
+}
+
 void MainWindow::loadPlaybackModes()
 {
     const RepeatMode repeat = repeatModeFromString(m_state->setting(QStringLiteral("playback.repeatMode")));
@@ -4540,6 +4574,48 @@ void MainWindow::configureSearchRanking()
         m_searchView->setRankConfig(updated);
     }
     statusBar()->showMessage(QStringLiteral("Search ranking updated"), 3000);
+}
+
+void MainWindow::configureMemoryReclaim()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Memory reclaim"));
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+
+    auto *idleSeconds = new QSpinBox(&dialog);
+    idleSeconds->setRange(0, kMaxMemoryReleaseSeconds);
+    idleSeconds->setSuffix(QStringLiteral(" seconds"));
+    idleSeconds->setSpecialValueText(QStringLiteral("Disabled"));
+    idleSeconds->setValue(std::clamp(m_state->setting(QStringLiteral("memory.idleReleaseSeconds"),
+                                                      QString::number(kDefaultIdleReleaseSeconds)).toInt(),
+                                     0,
+                                     kMaxMemoryReleaseSeconds));
+    form->addRow(QStringLiteral("Hidden screen release:"), idleSeconds);
+
+    auto *deepSeconds = new QSpinBox(&dialog);
+    deepSeconds->setRange(0, kMaxMemoryReleaseSeconds);
+    deepSeconds->setSuffix(QStringLiteral(" seconds"));
+    deepSeconds->setSpecialValueText(QStringLiteral("Disabled"));
+    deepSeconds->setValue(std::clamp(m_state->setting(QStringLiteral("memory.deepReleaseSeconds"),
+                                                      QString::number(kDefaultDeepReleaseSeconds)).toInt(),
+                                     0,
+                                     kMaxMemoryReleaseSeconds));
+    form->addRow(QStringLiteral("Artwork cache release:"), deepSeconds);
+
+    layout->addLayout(form);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    m_state->setSetting(QStringLiteral("memory.idleReleaseSeconds"), QString::number(idleSeconds->value()));
+    m_state->setSetting(QStringLiteral("memory.deepReleaseSeconds"), QString::number(deepSeconds->value()));
+    statusBar()->showMessage(QStringLiteral("Memory reclaim settings updated"), 3000);
 }
 
 void MainWindow::configureLinkRoots()

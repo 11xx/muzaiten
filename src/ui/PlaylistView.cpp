@@ -632,7 +632,7 @@ private:
     QVector<int> m_hoverRatings;
 };
 
-PlaylistView::PlaylistView(QWidget *parent)
+PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
     : QWidget(parent)
 {
     setAcceptDrops(true);  // drop importable files → one new playlist per file
@@ -796,7 +796,7 @@ PlaylistView::PlaylistView(QWidget *parent)
     // Free the populated track rows once the view has been hidden for a while;
     // switchMainView calls reloadPlaylists() on the way back in, which refetches
     // the items from the database (or saved-queue store).
-    new IdleReleaseController(this, [this] { releaseIdleResources(); });
+    new IdleReleaseController(this, [this] { releaseIdleResources(); }, {}, idleReleaseMs);
 }
 
 void PlaylistView::releaseIdleResources()

@@ -4,6 +4,7 @@
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/FileExplorerKeybindings.h"
+#include "ui/IdleReleaseController.h"
 
 #include <QHash>
 #include <QList>
@@ -29,7 +30,8 @@ class FileExplorerView final : public QWidget {
     Q_OBJECT
 
 public:
-    explicit FileExplorerView(QWidget *parent = nullptr);
+    explicit FileExplorerView(QWidget *parent = nullptr,
+                              int idleReleaseMs = IdleReleaseController::kDefaultIdleMs);
 
     void setMode(FileExplorerMode mode);
     FileExplorerMode mode() const;
@@ -146,5 +148,3 @@ private:
     bool m_sortReverseGroups = false;
     bool m_queueIsPlaylistSourced = false;
 };
-
-

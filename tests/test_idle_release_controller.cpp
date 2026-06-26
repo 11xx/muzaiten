@@ -13,6 +13,7 @@ private slots:
     void releasesAfterIdleHide();
     void quickReshowCancelsRelease();
     void restoreRunsOncePerRelease();
+    void zeroIdleDisablesRelease();
 };
 
 void TestIdleReleaseController::releasesAfterIdleHide()
@@ -67,6 +68,19 @@ void TestIdleReleaseController::restoreRunsOncePerRelease()
     page.show();
     QTest::qWait(10);
     QCOMPARE(restored, 1);
+}
+
+void TestIdleReleaseController::zeroIdleDisablesRelease()
+{
+    QWidget page;
+    int released = 0;
+    IdleReleaseController controller(&page, [&] { ++released; }, {}, IdleReleaseController::kDisabledIdleMs);
+    page.show();
+    QTest::qWait(10);
+
+    page.hide();
+    QTest::qWait(60);
+    QCOMPARE(released, 0);
 }
 
 QTEST_MAIN(TestIdleReleaseController)

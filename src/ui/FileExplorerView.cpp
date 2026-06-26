@@ -103,7 +103,7 @@ QString cleanPath(const QString &path)
 
 } // namespace
 
-FileExplorerView::FileExplorerView(QWidget *parent)
+FileExplorerView::FileExplorerView(QWidget *parent, int idleReleaseMs)
     : QWidget(parent)
 {
     auto *layout = new QVBoxLayout(this);
@@ -217,7 +217,7 @@ FileExplorerView::FileExplorerView(QWidget *parent)
     // Drop the populated tree once the explorer has been hidden for a while; the
     // owning view repopulates it (setLibraryEntries / setRootPath) on the next
     // navigation, and per-directory selection memory survives the release.
-    new IdleReleaseController(this, [this] { releaseIdleResources(); });
+    new IdleReleaseController(this, [this] { releaseIdleResources(); }, {}, idleReleaseMs);
 }
 
 void FileExplorerView::releaseIdleResources()

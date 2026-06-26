@@ -3,6 +3,7 @@
 #include "core/Playlist.h"
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
+#include "ui/IdleReleaseController.h"
 #include "ui/KeyBindingTypes.h"
 
 #include <functional>
@@ -42,7 +43,8 @@ struct SavedQueuePlaylistEntry {
 class PlaylistView final : public QWidget {
     Q_OBJECT
 public:
-    explicit PlaylistView(QWidget *parent = nullptr);
+    explicit PlaylistView(QWidget *parent = nullptr,
+                          int idleReleaseMs = IdleReleaseController::kDefaultIdleMs);
 
     enum class SelectorMetadata { None, CreatedAt, UpdatedAt, Comment };
 
