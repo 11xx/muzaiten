@@ -30,6 +30,7 @@ private slots:
         MainWindow window(&core);
 
         QVERIFY(window.m_queueScreen == nullptr);
+        QVERIFY(window.m_searchView == nullptr);
 
         window.persistViewState();
         window.switchMainView(MainView::LibraryPanels);

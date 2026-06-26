@@ -733,14 +733,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_freeRoamFileExplorer->setMode(FileExplorerMode::FreeRoam);
     m_freeRoamFileExplorer->setRootPath(QDir::homePath());
     m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
-    m_searchView = new SearchView(m_mainStack);
     m_playlistView = new PlaylistView(m_mainStack);
     m_panelSearch = new PanelSearchController(central);
 
     m_mainStack->addWidget(m_rootSplitter);
     m_mainStack->addWidget(m_libraryFileExplorer);
     m_mainStack->addWidget(m_freeRoamFileExplorer);
-    m_mainStack->addWidget(m_searchView);
     m_mainStack->addWidget(m_playlistView);
 
     centralLayout->addWidget(m_mainStack, 1);
@@ -1316,29 +1314,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
 
-    // Search view
-    connect(m_searchView, &SearchView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
-    });
-    connect(m_searchView, &SearchView::playNextRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
-    });
-    connect(m_searchView, &SearchView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
-    });
-    connect(m_searchView, &SearchView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
-        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
-    });
-    connect(m_searchView, &SearchView::playNowRequested, this, [this](const QVector<Track> &tracks) {
-        if (tracks.isEmpty()) return;
-        addTracksToQueue(tracks);
-        playQueueIndex(static_cast<int>(m_player->queue().size()) - static_cast<int>(tracks.size()));
-    });
-    connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
-    connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
-    connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
-
     // Playlist view (key 5). Resolves stored paths against the live library;
     // playing a playlist replaces the queue (snapshotting the previous one).
     connect(m_playlistView, &PlaylistView::playPathsRequested, this, [this](const QStringList &paths, int startIndex) {
@@ -1509,7 +1484,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             return;
         }
         if (m_mainView == MainView::Search) {
-            m_searchView->forceRefresh();  // re-press 4 in browse mode forces a refresh
+            ensureSearchView()->forceRefresh();  // re-press 4 in browse mode forces a refresh
         } else {
             switchMainView(MainView::Search);
         }
@@ -1988,7 +1963,9 @@ void MainWindow::finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 sk
     if (m_database->enumeratedOnlyPaths({}, 1).isEmpty()) {
         qCInfo(uiLog) << "background metadata fill complete";
         flushIncrementalRefresh();
-        m_searchView->invalidateIndex(databasePath());
+        if (m_searchView != nullptr) {
+            m_searchView->invalidateIndex(databasePath());
+        }
         statusBar()->showMessage(QStringLiteral("Library metadata complete"), 4000);
     }
 }
@@ -2039,7 +2016,7 @@ void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, b
     statusBar()->showMessage(summary, 10000);
     flushIncrementalRefresh();
     // Rebuild the search index with fresh library data
-    if (!canceled) {
+    if (!canceled && m_searchView != nullptr) {
         m_searchView->invalidateIndex(databasePath());
     }
     if (!canceled && !m_pendingScanRoots.isEmpty()) {
@@ -2885,6 +2862,42 @@ QueueScreen *MainWindow::ensureQueueScreen()
     return m_queueScreen;
 }
 
+SearchView *MainWindow::ensureSearchView()
+{
+    if (m_searchView != nullptr) {
+        return m_searchView;
+    }
+
+    m_searchView = new SearchView(m_mainStack);
+    m_searchView->setRankConfig(Search::RankConfig::fromJsonString(m_database->setting(QStringLiteral("search.ranking"))));
+    m_searchView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+
+    connect(m_searchView, &SearchView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_searchView, &SearchView::playNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_searchView, &SearchView::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
+    connect(m_searchView, &SearchView::playNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_searchView, &SearchView::playNowRequested, this, [this](const QVector<Track> &tracks) {
+        if (tracks.isEmpty()) return;
+        addTracksToQueue(tracks);
+        playQueueIndex(static_cast<int>(m_player->queue().size()) - static_cast<int>(tracks.size()));
+    });
+    connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
+    connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+
+    m_mainStack->addWidget(m_searchView);
+    return m_searchView;
+}
+
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
@@ -2906,9 +2919,10 @@ void MainWindow::switchMainView(MainView view)
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
         }
-        m_mainStack->setCurrentWidget(m_searchView);
-        m_searchView->ensureIndexLoaded(databasePath());
-        m_searchView->focusSearchBox();
+        SearchView *searchView = ensureSearchView();
+        m_mainStack->setCurrentWidget(searchView);
+        searchView->ensureIndexLoaded(databasePath());
+        searchView->focusSearchBox();
     } else if (view == MainView::Queue) {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
@@ -4427,7 +4441,9 @@ void MainWindow::configurePlaybackResume()
 void MainWindow::loadSearchRankingConfig()
 {
     const QString json = m_database->setting(QStringLiteral("search.ranking"));
-    m_searchView->setRankConfig(Search::RankConfig::fromJsonString(json));
+    if (m_searchView != nullptr) {
+        m_searchView->setRankConfig(Search::RankConfig::fromJsonString(json));
+    }
 }
 
 void MainWindow::loadPlaybackModes()
@@ -4459,7 +4475,9 @@ void MainWindow::configureSearchRanking()
 
     const Search::RankConfig updated = dialog.config();
     m_database->setSetting(QStringLiteral("search.ranking"), updated.toJsonString());
-    m_searchView->setRankConfig(updated);
+    if (m_searchView != nullptr) {
+        m_searchView->setRankConfig(updated);
+    }
     statusBar()->showMessage(QStringLiteral("Search ranking updated"), 3000);
 }
 
@@ -4748,8 +4766,10 @@ void MainWindow::importMpdLibraryMetadata()
             if (m_librarySource == LibrarySource::Mpd) {
                 refreshArtists();
             }
-            // Rebuild the search index to include the newly imported MPD tracks
-            m_searchView->invalidateIndex(databasePath());
+            // Rebuild the search index to include the newly imported MPD tracks.
+            if (m_searchView != nullptr) {
+                m_searchView->invalidateIndex(databasePath());
+            }
         }
         m_mpdImportThread->quit();
     });
