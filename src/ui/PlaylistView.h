@@ -163,6 +163,9 @@ private:
     void cycleAddedSort();
     void sortByColumn(int column);
     void populateItems();
+    // Frees the populated track rows when idle-hidden; reloadPlaylists() (run on
+    // the way back in) refetches them.
+    void releaseIdleResources();
     void refreshItemRatings();
     QVector<PlaylistItem> displayItems() const;
     void updateHeader();

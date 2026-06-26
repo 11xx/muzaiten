@@ -4,6 +4,7 @@
 #include "core/MusicSort.h"
 #include "scanner/LibraryScanner.h"
 #include "scanner/TagReader.h"
+#include "ui/IdleReleaseController.h"
 #include "ui/OverlayScrollBar.h"
 
 #include <QAction>
@@ -201,6 +202,18 @@ FileExplorerView::FileExplorerView(QWidget *parent)
         }
         m_lastSelectedByDir.insert(m_currentDirectory, current->data(0, PathRole).toString());
     });
+
+    // Drop the populated tree once the explorer has been hidden for a while; the
+    // owning view repopulates it (setLibraryEntries / setRootPath) on the next
+    // navigation, and per-directory selection memory survives the release.
+    new IdleReleaseController(this, [this] { releaseIdleResources(); });
+}
+
+void FileExplorerView::releaseIdleResources()
+{
+    m_metadataTimer->stop();
+    m_pendingMetadata.clear();
+    m_tree->clear();
 }
 
 void FileExplorerView::setMode(FileExplorerMode mode)

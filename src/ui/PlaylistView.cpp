@@ -3,6 +3,7 @@
 #include "db/PlaylistDatabase.h"
 #include "ui/DenseTableDelegate.h"
 #include "ui/HeaderLabelStyle.h"
+#include "ui/IdleReleaseController.h"
 #include "ui/NavigableTableView.h"
 #include "ui/NeighborColumnResizer.h"
 #include "ui/OverlayScrollBar.h"
@@ -779,6 +780,19 @@ PlaylistView::PlaylistView(QWidget *parent)
 
     updatePaneFocus();
     updateHeader();
+
+    // Free the populated track rows once the view has been hidden for a while;
+    // switchMainView calls reloadPlaylists() on the way back in, which refetches
+    // the items from the database (or saved-queue store).
+    new IdleReleaseController(this, [this] { releaseIdleResources(); });
+}
+
+void PlaylistView::releaseIdleResources()
+{
+    m_items.clear();
+    if (m_itemModel != nullptr) {
+        m_itemModel->setItems({});
+    }
 }
 
 void PlaylistView::setDatabase(PlaylistDatabase *db)
