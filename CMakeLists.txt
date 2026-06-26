@@ -107,6 +107,7 @@ set(MUZAITEN_SOURCES
     src/ui/DenseTableDelegate.cpp
     src/ui/FileExplorerView.cpp
     src/ui/FileExplorerKeybindings.cpp
+    src/ui/IdleReleaseController.cpp
     src/ui/KeybindingsDialog.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/ListeningHistoryDialog.cpp
@@ -226,6 +227,7 @@ set(MUZAITEN_HEADERS
     src/ui/DenseTableDelegate.h
     src/ui/FileExplorerView.h
     src/ui/FileExplorerKeybindings.h
+    src/ui/IdleReleaseController.h
     src/ui/KeybindingsDialog.h
     src/ui/LinkRootsDialog.h
     src/ui/ListeningHistoryDialog.h
