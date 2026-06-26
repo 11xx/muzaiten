@@ -51,6 +51,9 @@ public:
     void cycle(int direction); // +1 next, -1 previous
     // Returns true if the Escape was consumed (the bar was visible / had a query).
     bool escape();
+    // Recompute matches/status against the current rows without moving the
+    // cursor — call when the underlying list changes while a search is open.
+    void refresh();
 
     bool isSearchVisible() const;
     bool hasActiveQuery() const;
