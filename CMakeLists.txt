@@ -123,6 +123,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelOrderDialog.cpp
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlaybackResumeDialog.cpp
+    src/ui/PanelSearchBar.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
     src/ui/PlaylistAddDialog.cpp
@@ -235,6 +236,7 @@ set(MUZAITEN_HEADERS
     src/ui/MainWindow.h
     src/ui/MainPanelKeybindings.h
     src/ui/NavigableTableView.h
+    src/ui/PanelSearchBar.h
     src/ui/PanelSearchController.h
     src/ui/PanelOrderDialog.h
     src/ui/PlaybackProfileDialog.h

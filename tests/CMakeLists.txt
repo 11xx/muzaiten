@@ -428,6 +428,20 @@ target_compile_features(test_album_grid PRIVATE cxx_std_26)
 add_test(NAME test_album_grid COMMAND test_album_grid)
 set_tests_properties(test_album_grid PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_panel_search_bar
+    test_panel_search_bar.cpp
+    ../src/ui/PanelSearchBar.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/fold/Fold.cpp
+)
+target_include_directories(test_panel_search_bar PRIVATE ../src ${CMAKE_CURRENT_BINARY_DIR}/../generated)
+target_link_libraries(test_panel_search_bar PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_panel_search_bar PRIVATE cxx_std_26)
+add_test(NAME test_panel_search_bar COMMAND test_panel_search_bar)
+set_tests_properties(test_panel_search_bar PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_panel_search
     test_panel_search.cpp
     ../src/ui/PanelSearchController.cpp
