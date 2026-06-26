@@ -32,8 +32,11 @@
 - Shuffle now remembers playback order in both directions: after stepping back
   with Previous, Next (or auto-advance) replays the exact tracks you just
   retraced instead of re-rolling, and only resumes fresh randomness once the
-  remembered trail is spent. Picking a track, reordering, or editing the queue
-  still clears the trail.
+  remembered trail is spent. Picking a track clears the forward retrace trail;
+  reordering or editing the queue still resets shuffle memory.
+- Manually picking a track while shuffle is on now refreshes the no-repeat
+  shuffle bucket from that track, while keeping Previous able to return to the
+  track you left.
 - Under shuffle, the rows between the current track and a higher row played
   earlier are no longer mislabelled as "play next": any shuffle jump (forward,
   backward, or repeat-all wrap) now collapses the play-next region.

@@ -162,6 +162,10 @@ private:
     // replay): always collapses the play-next region so the rows skipped over
     // aren't badged, but keeps the shuffle forward trail intact.
     void playShuffleJump(int index);
+    // A user-selected track starts a fresh no-repeat shuffle bucket from that
+    // row, but keeps back navigation meaningful by preserving history and
+    // adding the row we left as the immediate Previous target.
+    void refreshShuffleForManualPick(int previousIndex, int selectedIndex);
     void resetShuffleState();
 
     void playCurrent(bool notifyScrobbler, bool startPaused);

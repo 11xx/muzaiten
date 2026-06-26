@@ -294,9 +294,8 @@ private:
     void saveCurrentQueueAs();
     void mergeSavedQueueViaPlayNext();
     int savedQueueLimitSetting() const;
-    // explicitJump=true marks a user-activated jump (clicking a queue row). A
-    // backward explicit jump turns the skipped-over tracks into the play-next
-    // region; forward jumps and sequential prev/next leave it alone.
+    // explicitJump=true marks a user-activated jump (clicking a queue row),
+    // which collapses play-next priority and refreshes the shuffle bucket.
     void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false, bool explicitJump = false);
     void playPreviousTrack();
     void playNextTrack();

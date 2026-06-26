@@ -104,6 +104,8 @@ private slots:
     void shuffleVisitsEveryTrackOnceThenStops();
     void shufflePreviousRetracesHistory();
     void shuffleNextReplaysForwardAfterPrevious();
+    void shuffleManualPickRefreshesBucketAndPreservesPrevious();
+    void shuffleAppendAndPlayRefreshesBucket();
     void shuffleBackwardJumpDoesNotBadgePlayNext();
     void libraryShuffleInjectsLibraryTrack();
     void dsdTakeoverDefersThenStartsNatively();
@@ -434,6 +436,48 @@ void PlayerCoreTest::shuffleNextReplaysForwardAfterPrevious()
     QCOMPARE(m_core->queueIndex(), first);
     m_core->next();
     QCOMPARE(m_core->queueIndex(), second);
+}
+
+void PlayerCoreTest::shuffleManualPickRefreshesBucketAndPreservesPrevious()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setShuffleMode(ShuffleMode::Queue);
+    m_core->playAt(0);
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+
+    // Exhausted before the manual pick: without a bucket refresh, this would
+    // leave no eligible next track.
+    m_core->playAt(0, true, false, /*explicitJump=*/true);
+    QCOMPARE(m_core->queueIndex(), 0);
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+
+    // The manual pick also becomes a normal navigation step for Previous.
+    m_core->playAt(0, true, false, /*explicitJump=*/true);
+    m_core->previous();
+    QCOMPARE(m_core->queueIndex(), 1);
+}
+
+void PlayerCoreTest::shuffleAppendAndPlayRefreshesBucket()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->setShuffleMode(ShuffleMode::Queue);
+    m_core->playAt(0);
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+
+    m_core->appendAndPlay(makeTrack("/a"));
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(m_core->queueIndex(), 0);
+    m_core->next();
+    QCOMPARE(m_core->queueIndex(), 1);
+
+    m_core->appendAndPlay(makeTrack("/c"));
+    QCOMPARE(m_core->queue().size(), 3);
+    QCOMPARE(m_core->queueIndex(), 2);
+    m_core->next();
+    QVERIFY(m_core->queueIndex() != 2);
 }
 
 void PlayerCoreTest::shuffleBackwardJumpDoesNotBadgePlayNext()
