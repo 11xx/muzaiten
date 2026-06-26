@@ -22,6 +22,10 @@
 
 ### Changed
 
+- Secondary screens are now built only on first use. Startup opens with just the
+  library home in memory; the file explorers, search page, queue screen, and
+  playlist view are constructed the first time you navigate to them, with saved
+  view settings restored at that point.
 - Background screens now release their memory when left idle. After about a
   minute on another screen, the file explorers, playlist view, search index, and
   the library's decoded cover thumbnails free their retained data and return to
