@@ -734,8 +734,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_freeRoamFileExplorer->setRootPath(QDir::homePath());
     m_freeRoamFileExplorer->setModeTitle(QStringLiteral("File System Explorer"));
     m_searchView = new SearchView(m_mainStack);
-    m_queueScreen = new QueueScreen(m_mainStack);
-    m_queueScreen->setQueueStore(m_queueStore);
     m_playlistView = new PlaylistView(m_mainStack);
     m_panelSearch = new PanelSearchController(central);
 
@@ -743,7 +741,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_mainStack->addWidget(m_libraryFileExplorer);
     m_mainStack->addWidget(m_freeRoamFileExplorer);
     m_mainStack->addWidget(m_searchView);
-    m_mainStack->addWidget(m_queueScreen);
     m_mainStack->addWidget(m_playlistView);
 
     centralLayout->addWidget(m_mainStack, 1);
@@ -1142,23 +1139,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_rightSidebar, &RightSidebar::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
-    connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) {
-        playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
-    });
-    connect(m_queueScreen, &QueueScreen::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
-    connect(m_queueScreen, &QueueScreen::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
-    connect(m_queueScreen, &QueueScreen::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
-    connect(m_queueScreen, &QueueScreen::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
-    connect(m_queueScreen, &QueueScreen::queueClearRequested, this, &MainWindow::clearQueue);
-    connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
-    connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
-    connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
-    connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
-    connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
-    connect(m_queueScreen, &QueueScreen::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
-    connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
-    connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
     // MPRIS transport, IPC, and tray are handled by AppCore.
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
@@ -1503,7 +1483,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             return;
         }
         if (m_mainView == MainView::Queue) {
-            m_queueScreen->revealCurrentPlaying();
+            ensureQueueScreen()->revealCurrentPlaying();
         } else {
             switchMainView(MainView::Queue);
         }
@@ -1547,7 +1527,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             return;
         }
         if (m_mainView == MainView::Queue) {
-            m_queueScreen->revealCurrentPlaying();
+            ensureQueueScreen()->revealCurrentPlaying();
             return;
         }
         if (m_mainView == MainView::Playlist && m_playlistView->revealNowPlaying()) {
@@ -2594,7 +2574,6 @@ void MainWindow::loadViewSettings()
     m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
     const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
     m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
-    m_queueScreen->applyViewSettingsJson(m_state->setting(QStringLiteral("queueScreen.view")));
     m_playlistView->applyViewSettingsJson(m_state->setting(QStringLiteral("playlistView.view")));
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
     const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
@@ -2641,7 +2620,6 @@ void MainWindow::loadViewSettings()
     m_freeRoamFileExplorer->setShowUnsupportedFiles(showUnsupported);
 
     m_freeRoamFileExplorer->setStartDirectory(m_state->setting(QStringLiteral("fileExplorer.startDirectory")));
-    m_queueScreen->setKeyBindingProfileName(m_state->setting(QStringLiteral("queueScreen.keyBindingProfile")));
 
     const int explorerRowHeight = m_state->setting(QStringLiteral("fileExplorer.rowHeight")).toInt();
     if (explorerRowHeight > 0) {
@@ -2667,7 +2645,6 @@ void MainWindow::loadViewSettings()
                                                                    QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
                                                   0, 20);
     m_rightSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
-    m_queueScreen->setNavigationScrollPadding(mainPanelScrollPadding);
     m_artistSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
     m_trackTable->setNavigationScrollPadding(mainPanelScrollPadding);
 
@@ -2703,6 +2680,9 @@ void MainWindow::saveRightSidebarViewSettings()
 
 void MainWindow::saveQueueScreenViewSettings()
 {
+    if (m_queueScreen == nullptr) {
+        return;
+    }
     m_state->setSetting(QStringLiteral("queueScreen.view"), m_queueScreen->viewSettingsJson());
 }
 
@@ -2755,7 +2735,9 @@ void MainWindow::saveAllViewSettings()
     saveAlbumGridViewSettings();
     saveArtistSidebarViewSettings();
     saveRightSidebarViewSettings();
-    saveQueueScreenViewSettings();
+    if (m_queueScreen != nullptr) {
+        saveQueueScreenViewSettings();
+    }
     savePlaylistViewSettings();
     saveMainWindowViewSettings();
 }
@@ -2794,7 +2776,9 @@ void MainWindow::resetViewPreferences()
     m_albumGrid->resetViewSettings();
     m_artistSidebar->resetViewSettings();
     m_rightSidebar->resetViewSettings();
-    m_queueScreen->resetViewSettings();
+    if (m_queueScreen != nullptr) {
+        m_queueScreen->resetViewSettings();
+    }
     m_playlistView->resetViewSettings();
 
     m_rootSplitter->setSizes({197, 1296, 298});
@@ -2818,7 +2802,9 @@ void MainWindow::resetViewPreferences()
     m_libraryFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
     m_freeRoamFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
 
-    m_queueScreen->setKeyBindingProfileName(defaultQueueKeyBindingProfileName());
+    if (m_queueScreen != nullptr) {
+        m_queueScreen->setKeyBindingProfileName(defaultQueueKeyBindingProfileName());
+    }
     if (m_panelSearch != nullptr) {
         m_panelSearch->setKeyBindingProfileName(defaultMainPanelKeyBindingProfileName());
         m_panelSearch->setFocusOrder(defaultMainPanelFocusOrder());
@@ -2826,7 +2812,9 @@ void MainWindow::resetViewPreferences()
     }
     const int defaultScrollPadding = TableNavigationScroll::kDefaultPaddingRows;
     m_rightSidebar->setNavigationScrollPadding(defaultScrollPadding);
-    m_queueScreen->setNavigationScrollPadding(defaultScrollPadding);
+    if (m_queueScreen != nullptr) {
+        m_queueScreen->setNavigationScrollPadding(defaultScrollPadding);
+    }
     m_artistSidebar->setNavigationScrollPadding(defaultScrollPadding);
     m_trackTable->setNavigationScrollPadding(defaultScrollPadding);
 
@@ -2858,6 +2846,45 @@ void MainWindow::openPanelOrderDialog()
                         QString::fromUtf8(QJsonDocument(mainPanelFocusOrderToJson(m_panelSearch->focusOrder())).toJson(QJsonDocument::Compact)));
 }
 
+QueueScreen *MainWindow::ensureQueueScreen()
+{
+    if (m_queueScreen != nullptr) {
+        return m_queueScreen;
+    }
+
+    m_queueScreen = new QueueScreen(m_mainStack);
+    m_queueScreen->setQueueStore(m_queueStore);
+    m_queueScreen->applyViewSettingsJson(m_state->setting(QStringLiteral("queueScreen.view")));
+    m_queueScreen->setKeyBindingProfileName(m_state->setting(QStringLiteral("queueScreen.keyBindingProfile"),
+                                                             defaultQueueKeyBindingProfileName()));
+    const int mainPanelScrollPadding = std::clamp(m_state->setting(QStringLiteral("mainPanel.scrollPadding"),
+                                                                   QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
+                                                  0, 20);
+    m_queueScreen->setNavigationScrollPadding(mainPanelScrollPadding);
+    m_queueScreen->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+
+    connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) {
+        playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
+    });
+    connect(m_queueScreen, &QueueScreen::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_queueScreen, &QueueScreen::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
+    connect(m_queueScreen, &QueueScreen::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
+    connect(m_queueScreen, &QueueScreen::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
+    connect(m_queueScreen, &QueueScreen::queueClearRequested, this, &MainWindow::clearQueue);
+    connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
+    connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
+    connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_queueScreen, &QueueScreen::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
+    connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
+    connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);
+
+    m_mainStack->addWidget(m_queueScreen);
+    return m_queueScreen;
+}
+
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
@@ -2886,8 +2913,9 @@ void MainWindow::switchMainView(MainView view)
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
         }
-        m_mainStack->setCurrentWidget(m_queueScreen);
-        m_queueScreen->focusQueue();
+        QueueScreen *queueScreen = ensureQueueScreen();
+        m_mainStack->setCurrentWidget(queueScreen);
+        queueScreen->focusQueue();
     } else if (view == MainView::Playlist) {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
@@ -4600,7 +4628,10 @@ void MainWindow::configureKeybindings()
         dialog.setMainPanelProfileName(m_panelSearch->keyBindingProfileName());
     }
     dialog.setFileExplorerProfileName(m_libraryFileExplorer->keyBindingProfileName());
-    dialog.setQueueProfileName(m_queueScreen->keyBindingProfileName());
+    dialog.setQueueProfileName(m_queueScreen != nullptr
+                                   ? m_queueScreen->keyBindingProfileName()
+                                   : m_state->setting(QStringLiteral("queueScreen.keyBindingProfile"),
+                                                      defaultQueueKeyBindingProfileName()));
     dialog.setFileExplorerKeyHintsVisible(m_libraryFileExplorer->isKeyHintBarVisible());
 
     if (dialog.exec() != QDialog::Accepted) {
@@ -4613,7 +4644,9 @@ void MainWindow::configureKeybindings()
     }
     m_libraryFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
     m_freeRoamFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
-    m_queueScreen->setKeyBindingProfileName(dialog.queueProfileName());
+    if (m_queueScreen != nullptr) {
+        m_queueScreen->setKeyBindingProfileName(dialog.queueProfileName());
+    }
     m_libraryFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
     m_freeRoamFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());
     m_state->setSetting(QStringLiteral("fileExplorer.keyBindingProfile"), dialog.fileExplorerProfileName());
@@ -5254,7 +5287,7 @@ void MainWindow::onPlayerIndexChanged(int index, bool userInitiated)
     if (userInitiated) {
         m_rightSidebar->setCurrentIndex(index, /*reveal=*/true);
         if (m_mainView == MainView::Queue) {
-            m_queueScreen->revealCurrentPlaying();
+            ensureQueueScreen()->revealCurrentPlaying();
         }
     }
     scheduleQueueStateSave();
