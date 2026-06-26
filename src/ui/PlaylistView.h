@@ -2,6 +2,7 @@
 
 #include "core/Playlist.h"
 #include "core/Track.h"
+#include "search/SearchMatcher.h"
 #include "ui/KeyBindingTypes.h"
 
 #include <functional>
@@ -14,6 +15,7 @@
 
 class PlaylistDatabase;
 class NavigableTableView;
+class PanelSearchBar;
 class ResponsiveColumnLayout;
 class QListWidget;
 class QLabel;
@@ -166,6 +168,8 @@ private:
     // Frees the populated track rows when idle-hidden; reloadPlaylists() (run on
     // the way back in) refetches them.
     void releaseIdleResources();
+    // Backing for the "/" PanelSearchBar over the item table (display order).
+    QVector<Search::MatchDocument> searchDocuments() const;
     void refreshItemRatings();
     QVector<PlaylistItem> displayItems() const;
     void updateHeader();
@@ -253,6 +257,7 @@ private:
     int m_playlistRowHeight = 18;
     QListWidget *m_playlistList = nullptr;
     NavigableTableView *m_itemTable = nullptr;
+    PanelSearchBar *m_search = nullptr;
     QSplitter *m_splitter = nullptr;
     // Sizes persisted to settings — only updated by a real splitterMoved
     // (user drag), never by programmatic setSizes(). See SplitterPersistence.h.
