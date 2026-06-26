@@ -28,6 +28,7 @@
 #include "ui/ArtistSidebar.h"
 #include "ui/FileExplorerKeybindings.h"
 #include "ui/FileExplorerView.h"
+#include "ui/IdleReleaseController.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/ListeningHistoryDialog.h"
@@ -716,6 +717,14 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rootSplitter->setStretchFactor(2, 0);
     m_rootSplitter->setSizes({197, 1296, 298});
     restylePanelBorders();
+
+    // The library home stays constructed (it's the default view), but its decoded
+    // cover thumbnails are the single biggest heap consumer. Drop them once the
+    // user has been on another screen past the idle window, and re-stream them
+    // when they return.
+    new IdleReleaseController(m_rootSplitter,
+                             [this] { m_albumGrid->releaseArtwork(); },
+                             [this] { m_albumGrid->reloadArtwork(); });
 
     m_libraryFileExplorer = new FileExplorerView(m_mainStack);
     m_libraryFileExplorer->setMode(FileExplorerMode::Library);

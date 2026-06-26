@@ -1292,6 +1292,38 @@ void AlbumGrid::loadNextAlbumArtwork()
     }
 }
 
+void AlbumGrid::releaseArtwork()
+{
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr) {
+        return;
+    }
+    m_artworkTimer->stop();
+    // Replace every decoded cover with the shared fallback icon, releasing the
+    // per-cell QPixmaps. Keeping the same fallback the cells already use means no
+    // new allocation for the placeholder.
+    const QIcon fallbackIcon(AlbumArtFallback::resourcePath(palette()));
+    for (int i = 0; i < itemModel->rowCount(); ++i) {
+        if (QStandardItem *item = itemModel->item(i); item != nullptr) {
+            item->setIcon(fallbackIcon);
+        }
+    }
+}
+
+void AlbumGrid::reloadArtwork()
+{
+    auto *itemModel = qobject_cast<QStandardItemModel *>(model());
+    if (itemModel == nullptr || m_artworkCache == nullptr) {
+        return;
+    }
+    // Re-stream covers from the top against the current generation; the artwork
+    // cache serves still-resident decodes instantly and re-reads the rest.
+    m_nextArtworkRow = 0;
+    if (itemModel->rowCount() > 0 && !m_artworkTimer->isActive()) {
+        m_artworkTimer->start();
+    }
+}
+
 void AlbumGrid::onArtworkReady(const QString &token, const QImage &image, quint64 generation)
 {
     if (image.isNull() || generation != static_cast<quint64>(m_artworkGeneration)) {
