@@ -31,6 +31,10 @@
   the library's decoded cover thumbnails free their retained data and return to
   baseline memory, rebuilding it on return. Quick back-and-forth navigation
   within the idle window keeps everything resident, so it stays instant.
+- Memory reclaim timings are configurable from Settings > Memory reclaim. Set
+  the hidden-screen or deeper artwork-cache release interval to `0` to disable
+  that tier; the deeper tier also asks the artwork cache to release retained
+  decoded-image memory after a longer stay away from the library home.
 - Scrobbler backlog-clearing actions in the menu now appear only while that
   service has pending scrobbles, with the pending count shown in the action.
 - Listening history now labels manual resubmission actions as "Scrobble to
