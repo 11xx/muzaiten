@@ -7,6 +7,7 @@
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
 #include "search/SearchWorker.h"
+#include "ui/IdleReleaseController.h"
 #include "ui/OverlayScrollBar.h"
 #include "ui/SearchResultDelegate.h"
 #include "ui/SearchResultsModel.h"
@@ -36,13 +37,6 @@
 Q_DECLARE_METATYPE(QVector<Search::ScoredResult>)
 Q_DECLARE_METATYPE(Search::SearchRecord)
 Q_DECLARE_METATYPE(Search::ScoredResult)
-
-namespace {
-// Keep the index resident for this long after the search view is hidden, so
-// re-opening search feels instant. After it elapses the index memory is freed
-// (it's the bulk of the app's heap for a large library, so reclaim it promptly).
-constexpr int kIndexCleanupMs = 60000; // 1 minute
-}
 
 // Build a minimal Track from a SearchRecord — sufficient for playback and display.
 static Track trackFromRecord(const Search::SearchRecord &rec)
@@ -135,11 +129,6 @@ void SearchView::setupUi()
     m_debounce->setSingleShot(true);
     m_debounce->setInterval(20);
 
-    // Cleanup timer — frees the resident index a while after the view is hidden.
-    m_cleanupTimer = new QTimer(this);
-    m_cleanupTimer->setSingleShot(true);
-    m_cleanupTimer->setInterval(kIndexCleanupMs);
-
     // Spinner timer — animates the status-label glyph while the index streams
     // in. (Queries against loaded data are instant, so there is no per-keystroke
     // spinner; this only runs during the streaming build.)
@@ -163,7 +152,6 @@ void SearchView::setupUi()
     // Connections
     connect(m_searchBox, &QLineEdit::textChanged, this, &SearchView::onTextChanged);
     connect(m_debounce,  &QTimer::timeout,         this, &SearchView::onDebounceTimeout);
-    connect(m_cleanupTimer, &QTimer::timeout,      this, &SearchView::onCleanupTimeout);
     connect(m_spinnerTimer, &QTimer::timeout,      this, &SearchView::onSpinnerTick);
     connect(m_streamRerunTimer, &QTimer::timeout,  this, &SearchView::submitQuery);
     connect(m_cacheMsgTimer, &QTimer::timeout,     this, [this] {
@@ -192,6 +180,13 @@ void SearchView::setupUi()
     m_resultList->viewport()->installEventFilter(this);
 
     updateStatusLabel();
+
+    // Free the resident index a while after the view is hidden (it's the bulk of
+    // the app's heap for a large library), and rebuild it on return — but only if
+    // it was actually freed, so quick re-opens stay instant.
+    new IdleReleaseController(this,
+                              [this] { releaseIdleResources(); },
+                              [this] { if (!m_dbPath.isEmpty()) ensureIndexLoaded(m_dbPath); });
 }
 
 void SearchView::changeEvent(QEvent *event)
@@ -202,22 +197,6 @@ void SearchView::changeEvent(QEvent *event)
      || event->type() == QEvent::StyleChange) {
         m_resultList->viewport()->update();
     }
-}
-
-void SearchView::showEvent(QShowEvent *event)
-{
-    QWidget::showEvent(event);
-    m_cleanupTimer->stop();           // staying resident
-    if (!m_dbPath.isEmpty()) {
-        ensureIndexLoaded(m_dbPath);  // rebuild if it was freed while hidden
-    }
-}
-
-void SearchView::hideEvent(QHideEvent *event)
-{
-    QWidget::hideEvent(event);
-    // Keep the index for a buffer window, then free it.
-    m_cleanupTimer->start();
 }
 
 bool SearchView::eventFilter(QObject *watched, QEvent *event)
@@ -440,9 +419,8 @@ void SearchView::teardownWorker()
     }
 }
 
-void SearchView::onCleanupTimeout()
+void SearchView::releaseIdleResources()
 {
-    if (isVisible()) return;  // became visible again
     if (m_worker) {
         QMetaObject::invokeMethod(m_worker, "clearIndex", Qt::QueuedConnection);
     }

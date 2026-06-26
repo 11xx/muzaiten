@@ -67,8 +67,6 @@ signals:
 
 protected:
     void changeEvent(QEvent *event) override;
-    void showEvent(QShowEvent *event) override;
-    void hideEvent(QHideEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
@@ -80,7 +78,6 @@ private slots:
     void onIndexRefreshed(int count);
     void onIndexError(const QString &error);
     void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
-    void onCleanupTimeout();
     void onSpinnerTick();
     void showContextMenu(const QPoint &pos);
     void onDoubleClicked(const QModelIndex &index);
@@ -91,6 +88,9 @@ private:
     void teardownWorker();
     void submitQuery();
     void updateStatusLabel();
+    // Frees the resident search index when idle-hidden; the index is rebuilt on
+    // the next show (and on explicit navigation back to search).
+    void releaseIdleResources();
 
     // Returns true if the key was a navigation/action key we handled.
     bool handleNavKey(class QKeyEvent *ke);
@@ -113,7 +113,6 @@ private:
     SearchResultsModel   *m_model        = nullptr;
     SearchResultDelegate *m_delegate     = nullptr;
     QTimer               *m_debounce     = nullptr;
-    QTimer               *m_cleanupTimer = nullptr;
     QTimer               *m_spinnerTimer = nullptr;
     QTimer               *m_streamRerunTimer = nullptr;
     QTimer               *m_cacheMsgTimer = nullptr;
