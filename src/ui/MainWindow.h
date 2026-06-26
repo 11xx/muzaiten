@@ -118,6 +118,7 @@ private:
     void restylePanelBorders();
     void openPanelOrderDialog();
     QueueScreen *ensureQueueScreen();
+    SearchView *ensureSearchView();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
     void jumpToPlayingSong();
