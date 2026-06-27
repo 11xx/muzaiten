@@ -787,6 +787,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     // m_player, m_playback, m_mpris, m_database, etc. are all borrowed pointers
     // assigned from AppCore at the top of this constructor.
     connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
+    connect(m_player, &PlayerCore::aboutToInjectLibraryTrack, this, &MainWindow::prepareQueueForLibraryInjection);
     connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
     connect(m_player, &PlayerCore::queueTracksChanged, this, &MainWindow::patchQueueRows);
     connect(m_player, &PlayerCore::currentIndexChanged, this, &MainWindow::onPlayerIndexChanged);
@@ -3589,6 +3590,29 @@ void MainWindow::prepareQueueForTrackAddition(const QVector<Track> &tracks)
         }
         return;
     }
+    if (m_queueSourceKind == QStringLiteral("album")) {
+        markQueueAsSpontaneous();
+        return;
+    }
+    ensureCurrentQueueIdentity();
+}
+
+void MainWindow::prepareQueueForLibraryInjection(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+    // A library-shuffle injection is the player appending a fresh track it chose
+    // itself, never a user edit. For a playlist-backed queue the track joins the
+    // live queue only — it is deliberately NOT mirrored into the playlist, since
+    // it was never part of that playlist. The playlist link stays intact so the
+    // user's own subsequent adds still mirror (and still prompt) as usual.
+    if (m_queueSourceKind == QStringLiteral("playlist")) {
+        return;
+    }
+    // For album / standalone queues the injected foreign track means the queue is
+    // no longer a faithful copy of its source, so apply the same identity policy a
+    // user add would: drop the album identity, or anchor a standalone queue id.
     if (m_queueSourceKind == QStringLiteral("album")) {
         markQueueAsSpontaneous();
         return;

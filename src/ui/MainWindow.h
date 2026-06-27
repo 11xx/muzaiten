@@ -150,6 +150,7 @@ private:
     void pushCurrentQueueToBacklog(const QString &name);
     void adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<Track> &tracks, int playIndex);
     void prepareQueueForTrackAddition(const QVector<Track> &tracks);
+    void prepareQueueForLibraryInjection(const Track &track);
     void appendTracksToCurrentPlaylist(const QVector<Track> &tracks);
     void markQueueAsSpontaneous(const QString &id = {});
     void loadExplorerState();

@@ -43,6 +43,12 @@
 
 ### Fixed
 
+- Library-wide shuffle no longer grows a playlist while playing it. When the
+  queue is mirroring a playlist, the fresh library tracks shuffle injects join
+  the live queue only and are no longer saved into the playlist — those tracks
+  were never part of it. Your own adds to a playlist-backed queue still mirror
+  (and still prompt) as before.
+
 - Closing the window to the tray (or quitting) while a playlist drop-import was
   running no longer crashes: the worker is kept alive on hide and cleanly stopped
   and joined on quit, leaving the tracks matched so far persisted.

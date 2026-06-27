@@ -512,11 +512,20 @@ void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()
     m_core->setLibraryShufflePercent(100);  // always inject
     m_core->playAt(0);
 
+    // A library injection is the player's own pick, not a user edit: it must
+    // announce itself via aboutToInjectLibraryTrack so a playlist-backed queue
+    // can keep it queue-only, and must NOT fire the user-add aboutToAddTracks.
+    QSignalSpy injected(m_core.get(), &PlayerCore::aboutToInjectLibraryTrack);
+    QSignalSpy userAdd(m_core.get(), &PlayerCore::aboutToAddTracks);
+
     m_core->next();
     QCOMPARE(m_core->queue().size(), 3);
     QCOMPARE(m_core->queue().last().path, QStringLiteral("/lib"));
     QCOMPARE(m_core->currentTrack().path, QStringLiteral("/lib"));
     QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/lib"));
+    QCOMPARE(injected.count(), 1);
+    QCOMPARE(injected.first().first().value<Track>().path, QStringLiteral("/lib"));
+    QCOMPARE(userAdd.count(), 0);
 }
 
 void PlayerCoreTest::dsdTakeoverDefersThenStartsNatively()

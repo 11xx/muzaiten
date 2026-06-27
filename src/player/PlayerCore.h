@@ -119,6 +119,11 @@ signals:
     // Emitted before tracks are added, so the owner can apply its queue
     // identity policy (append to source playlist / mark spontaneous).
     void aboutToAddTracks(const QVector<Track> &tracks);
+    // Emitted before a library-wide-shuffle injection appends a fresh, non-source
+    // track that the player itself chose (never a user edit). Distinct from
+    // aboutToAddTracks: the owner must treat the track as queue-only and must not
+    // mirror it into any backing playlist, since it was never part of that source.
+    void aboutToInjectLibraryTrack(const Track &track);
     // Queue contents/order changed; observers re-derive every queue view.
     void queueChanged();
     // Queue track metadata changed in place; row order/current index did not.
