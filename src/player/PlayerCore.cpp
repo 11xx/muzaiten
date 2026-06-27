@@ -162,7 +162,7 @@ void PlayerCore::skipCurrentTrack()
         m_backend->prepareNext({});
         const AutoNext target = decideAutoNext();
         if (!target.injected.path.isEmpty()) {
-            emit aboutToAddTracks(QVector<Track>{target.injected});
+            emit aboutToInjectLibraryTrack(target.injected);
             m_queue.push_back(target.injected);
             emit queueChanged();
             playAt(static_cast<int>(m_queue.size()) - 1);
@@ -827,7 +827,7 @@ void PlayerCore::applyAutoNext(const AutoNext &next)
         // Library-wide injection: append the fresh track, then play it. playAt
         // re-presents, re-prepares and marks it visited. A fresh injection
         // diverges from any remembered forward trail.
-        emit aboutToAddTracks(QVector<Track>{next.injected});
+        emit aboutToInjectLibraryTrack(next.injected);
         m_queue.push_back(next.injected);
         pushHistory(m_queueIndex);
         m_shuffleForward.clear();
