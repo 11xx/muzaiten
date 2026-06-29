@@ -238,6 +238,39 @@ private slots:
         QCOMPARE(header->visualIndex(5), header->count() - 1);
     }
 
+    void nowPlayingRowPaintsLeftMarker()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-marker-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Now playing"));
+        QVERIFY(playlistId > 0);
+
+        PlaylistItem item;
+        item.trackPath = QStringLiteral("/music/current.flac");
+        item.titleSnapshot = QStringLiteral("Current");
+        QVERIFY(db.addItem(playlistId, item) > 0);
+
+        PlaylistView view;
+        view.resize(900, 260);
+        view.setDatabase(&db);
+        view.selectPlaylist(playlistId);
+        view.setNowPlaying(item.trackPath, playlistId);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QCoreApplication::processEvents();
+
+        auto *table = view.findChild<QTableView *>();
+        QVERIFY(table != nullptr);
+        const QRect rowRect = table->visualRect(table->model()->index(0, 0));
+        QVERIFY(rowRect.isValid());
+
+        const QImage image = table->viewport()->grab().toImage();
+        const QColor marker = QColor::fromRgba(image.pixel(1, rowRect.center().y()));
+        QCOMPARE(marker, table->palette().color(QPalette::Highlight));
+    }
+
     void tracklistHeaderUsesMutedFlatStyle()
     {
         PlaylistView view;
