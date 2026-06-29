@@ -87,6 +87,41 @@ bool isPlayablePlaylistItem(const PlaylistItem &item)
         && (item.status == PlaylistItemStatus::Matched || item.status == PlaylistItemStatus::Approximate);
 }
 
+class PlaylistItemTableView final : public NavigableTableView {
+public:
+    using NavigableTableView::NavigableTableView;
+
+    void setCurrentPlayingRow(int row)
+    {
+        if (m_currentPlayingRow == row) {
+            return;
+        }
+        m_currentPlayingRow = row;
+        viewport()->update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        NavigableTableView::paintEvent(event);
+        if (model() == nullptr || m_currentPlayingRow < 0 || m_currentPlayingRow >= model()->rowCount()) {
+            return;
+        }
+
+        const int y = rowViewportPosition(m_currentPlayingRow);
+        const int h = rowHeight(m_currentPlayingRow);
+        if (h <= 0 || y + h <= 0 || y >= viewport()->height()) {
+            return;
+        }
+
+        QPainter painter(viewport());
+        painter.fillRect(QRect(0, y, 3, h), palette().color(QPalette::Highlight));
+    }
+
+private:
+    int m_currentPlayingRow = -1;
+};
+
 QString durationText(qint64 ms)
 {
     if (ms <= 0) {
@@ -680,7 +715,7 @@ PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
     m_playlistList->viewport()->installEventFilter(this);
 
     m_itemModel = new PlaylistItemTableModel(this);
-    m_itemTable = new NavigableTableView(m_splitter);
+    m_itemTable = new PlaylistItemTableView(m_splitter);
     m_itemTable->setObjectName(QStringLiteral("PlaylistItemTable"));
     m_itemTable->setModel(m_itemModel);
     m_itemTable->enableRowReorder(QString::fromLatin1(RowReorder::playlistMimeType));
@@ -1960,6 +1995,7 @@ void PlaylistView::updatePlayingHighlight()
     if (m_ratingDelegate != nullptr) {
         m_ratingDelegate->setPlayingRow(playingRow);
     }
+    static_cast<PlaylistItemTableView *>(m_itemTable)->setCurrentPlayingRow(playingRow);
     m_itemTable->viewport()->update();
 }
 

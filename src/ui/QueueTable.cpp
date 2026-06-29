@@ -740,10 +740,12 @@ void QueueTable::setQueueStore(QueueStore *store)
     connect(m_store, &QueueStore::currentIndexChanged, this, [this](int index) {
         static_cast<QueueTableView *>(m_view)->setCurrentPlayingRow(index);
         static_cast<QueueItemDelegate *>(m_itemDelegate)->setCurrentRow(index);
+        m_ratingDelegate->setPlayingRow(index);
         m_view->viewport()->update();
     });
     static_cast<QueueTableView *>(m_view)->setCurrentPlayingRow(store->currentIndex());
     static_cast<QueueItemDelegate *>(m_itemDelegate)->setCurrentRow(store->currentIndex());
+    m_ratingDelegate->setPlayingRow(store->currentIndex());
 }
 
 QString QueueTable::viewSettingsJson() const

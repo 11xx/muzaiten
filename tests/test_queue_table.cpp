@@ -3,6 +3,7 @@
 #include "ui/QueueTable.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/ResponsiveColumnLayout.h"
+#include "ui/StarRatingDelegate.h"
 
 #include <QAbstractItemModel>
 #include <QApplication>
@@ -166,6 +167,27 @@ private slots:
 
         store.setCurrentIndex(0);
         QCOMPARE(view->currentIndex().row(), 1);
+    }
+
+    void currentPlayingUpdatesRatingDelegate()
+    {
+        QueueStore store;
+        Track first;
+        first.path = QStringLiteral("/a.flac");
+        Track second;
+        second.path = QStringLiteral("/b.flac");
+        store.setSnapshot({first, second}, 0, -1, -1);
+
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+        auto *delegate = qobject_cast<StarRatingDelegate *>(view->itemDelegateForColumn(2));
+        QVERIFY(delegate != nullptr);
+        QCOMPARE(delegate->playingRow(), 0);
+
+        store.setCurrentIndex(1);
+        QCOMPARE(delegate->playingRow(), 1);
     }
 
     void playNextOrdinalRoleUpdatesFromStore()
