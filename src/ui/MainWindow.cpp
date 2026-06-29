@@ -3948,6 +3948,7 @@ void MainWindow::loadPlaybackProfile()
         }
     }
     m_playback->setProfile(m_playbackProfile);
+    m_playerBar->setVolumeControlEnabled(m_playbackProfile.softwareVolume);
 }
 
 void MainWindow::savePlaybackProfile()
@@ -4092,6 +4093,7 @@ void MainWindow::applyProfileTransition(const PlaybackProfile &previous, const P
     // bit-perfect→shared PipeWire hand-back behave identically everywhere.
     m_playbackProfile = next;
     savePlaybackProfile();
+    m_playerBar->setVolumeControlEnabled(m_playbackProfile.softwareVolume);
 
     // Capture what to resume after the output is rebuilt: the same track at the
     // same elapsed position and play/pause state it had before the switch.
@@ -4409,6 +4411,7 @@ void MainWindow::resolveDsdTakeoverPrompt(bool accepted)
             m_playbackProfile.releaseSinkOnPause = true;
             savePlaybackProfile();
             m_playback->setProfile(m_playbackProfile);
+            m_playerBar->setVolumeControlEnabled(m_playbackProfile.softwareVolume);
         }
     }
 

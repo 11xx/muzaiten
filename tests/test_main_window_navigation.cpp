@@ -2,9 +2,11 @@
 
 #define private public
 #include "ui/MainWindow.h"
+#include "ui/PlayerBar.h"
 #undef private
 
 #include <QTemporaryDir>
+#include <QToolButton>
 #include <QtTest/QtTest>
 
 class MainWindowNavigationTest final : public QObject {
@@ -52,6 +54,22 @@ private slots:
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);
+    }
+
+    void playerBarGraysVolumeWhenControlIsDisabled()
+    {
+        PlayerBar bar;
+        QVERIFY(bar.m_volumeButton != nullptr);
+        QVERIFY(bar.m_volumeButton->isEnabled());
+        QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
+
+        bar.setVolumeControlEnabled(false);
+        QVERIFY(!bar.m_volumeButton->isEnabled());
+        QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume disabled by the output profile"));
+
+        bar.setVolumeControlEnabled(true);
+        QVERIFY(bar.m_volumeButton->isEnabled());
+        QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
     }
 
 private:
