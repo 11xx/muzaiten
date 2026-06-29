@@ -13,6 +13,11 @@ class QMouseEvent;
 class QWheelEvent;
 class ResponsiveColumnLayout;
 
+enum class TrackTableChrome {
+    Panel,
+    Inline,
+};
+
 class TrackTable final : public NavigableTableView {
     Q_OBJECT
 
@@ -20,6 +25,9 @@ public:
     explicit TrackTable(QWidget *parent = nullptr);
 
     void setTracks(const QVector<Track> &tracks);
+    void setChrome(TrackTableChrome chrome);
+    TrackTableChrome chrome() const { return m_chrome; }
+    void setAutoHeightToRows(bool autoHeight);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();
@@ -86,4 +94,6 @@ private:
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     int m_hoveredRow = -1;
     bool m_queueIsPlaylistSourced = false;
+    TrackTableChrome m_chrome = TrackTableChrome::Panel;
+    bool m_autoHeightToRows = false;
 };

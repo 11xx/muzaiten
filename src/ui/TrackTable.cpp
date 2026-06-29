@@ -17,6 +17,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QAbstractTableModel>
+#include <QFrame>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -465,6 +466,53 @@ TrackTable::TrackTable(QWidget *parent)
     OverlayScrollBar::install(this);
 }
 
+void TrackTable::setChrome(TrackTableChrome chrome)
+{
+    if (m_chrome == chrome) {
+        return;
+    }
+    m_chrome = chrome;
+    if (m_chrome == TrackTableChrome::Inline) {
+        setPanelBorders(panelNoBorders());
+        setFrameShape(QFrame::NoFrame);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setShowGrid(false);
+        setAlternatingRowColors(false);
+        viewport()->setAutoFillBackground(false);
+        setAutoFillBackground(false);
+    } else {
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        setAlternatingRowColors(true);
+        viewport()->setAutoFillBackground(true);
+        setAutoFillBackground(true);
+    }
+    viewport()->update();
+}
+
+void TrackTable::setAutoHeightToRows(bool autoHeight)
+{
+    if (m_autoHeightToRows == autoHeight) {
+        return;
+    }
+    m_autoHeightToRows = autoHeight;
+    if (!m_autoHeightToRows) {
+        setMinimumHeight(0);
+        setMaximumHeight(QWIDGETSIZE_MAX);
+        updateGeometry();
+        return;
+    }
+    const int rows = model() != nullptr ? model()->rowCount() : 0;
+    const int header = horizontalHeader() != nullptr && !horizontalHeader()->isHidden() ? horizontalHeader()->height() : 0;
+    const int rowHeight = verticalHeader() != nullptr ? verticalHeader()->defaultSectionSize() : 20;
+    const int frame = frameWidth() * 2;
+    const int height = header + frame + std::max(1, rows) * rowHeight + 2;
+    setMinimumHeight(height);
+    setMaximumHeight(height);
+    updateGeometry();
+}
+
 void TrackTable::updateTrackRating(const QString &path, int effectiveRating, bool hasUserRating)
 {
     if (path.isEmpty()) {
@@ -591,6 +639,10 @@ void TrackTable::resetViewSettings()
 void TrackTable::setHeaderHeight(int height)
 {
     horizontalHeader()->setFixedHeight(std::clamp(height, 18, 40));
+    if (m_autoHeightToRows) {
+        setAutoHeightToRows(false);
+        setAutoHeightToRows(true);
+    }
 }
 
 void TrackTable::setTracks(const QVector<Track> &tracks)
@@ -631,6 +683,10 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
         }
     }
     reselectMarkedRows();
+    if (m_autoHeightToRows) {
+        setAutoHeightToRows(false);
+        setAutoHeightToRows(true);
+    }
 }
 
 int TrackTable::rowCount() const

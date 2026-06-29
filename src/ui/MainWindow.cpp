@@ -51,6 +51,7 @@
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
 #include "ui/MainPanelKeybindings.h"
+#include "ui/MusicExplorerView.h"
 #include "ui/TableNavigationScroll.h"
 #include "search/Exclusion.h"
 #include "search/RankConfig.h"
@@ -91,6 +92,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QScopedValueRollback>
 #include <QShortcut>
 #include <QSet>
 #include <QSpinBox>
@@ -496,6 +498,8 @@ QString mainViewName(MainView view)
     switch (view) {
     case MainView::LibraryPanels:
         return QStringLiteral("libraryPanels");
+    case MainView::LibraryMusicExplorer:
+        return QStringLiteral("libraryMusicExplorer");
     case MainView::LibraryFileExplorer:
         return QStringLiteral("libraryFileExplorer");
     case MainView::FreeRoamFileExplorer:
@@ -512,6 +516,9 @@ QString mainViewName(MainView view)
 
 MainView mainViewFromName(const QString &name)
 {
+    if (name == QStringLiteral("libraryMusicExplorer")) {
+        return MainView::LibraryMusicExplorer;
+    }
     if (name == QStringLiteral("libraryFileExplorer")) {
         return MainView::LibraryFileExplorer;
     }
@@ -695,7 +702,10 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_artistSidebar->setObjectName(QStringLiteral("MainArtistSidebar"));
     m_artistSidebar->setMinimumWidth(kArtistSidebarMinimumWidth);
 
-    m_centerSplitter = new QSplitter(Qt::Vertical, m_rootSplitter);
+    m_libraryCenterStack = new QStackedWidget(m_rootSplitter);
+    m_libraryCenterStack->setMinimumWidth(kCenterPaneMinimumWidth);
+
+    m_centerSplitter = new QSplitter(Qt::Vertical, m_libraryCenterStack);
     m_centerSplitter->setObjectName(QStringLiteral("MainCenterFrame"));
     m_centerSplitter->setChildrenCollapsible(false);
     m_centerSplitter->setMinimumWidth(kCenterPaneMinimumWidth);
@@ -707,6 +717,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_centerSplitter->setStretchFactor(0, 55);
     m_centerSplitter->setStretchFactor(1, 45);
     m_centerSplitter->setSizes({540, 430});
+    m_libraryCenterStack->addWidget(m_centerSplitter);
 
     m_rightSidebar = new RightSidebar(m_rootSplitter);
     m_rightSidebar->setObjectName(QStringLiteral("MainRightSidebar"));
@@ -714,7 +725,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rightSidebar->setQueueStore(m_queueStore);
 
     m_rootSplitter->addWidget(m_artistSidebar);
-    m_rootSplitter->addWidget(m_centerSplitter);
+    m_rootSplitter->addWidget(m_libraryCenterStack);
     m_rootSplitter->addWidget(m_rightSidebar);
     m_rootSplitter->setStretchFactor(0, 0);
     m_rootSplitter->setStretchFactor(1, 1);
@@ -1318,7 +1329,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         if (qobject_cast<QLineEdit *>(QApplication::focusWidget()) != nullptr) {
             return;
         }
-        switchMainView(MainView::LibraryPanels);
+        switchMainView(m_mainView == MainView::LibraryPanels ? MainView::LibraryMusicExplorer : MainView::LibraryPanels);
     });
     auto *fileExplorerShortcut = new QShortcut(QKeySequence(QStringLiteral("3")), this);
     connect(fileExplorerShortcut, &QShortcut::activated, this, [this]() {
@@ -2179,10 +2190,15 @@ void MainWindow::refreshAlbumGrid(bool freshLoad)
     if (m_currentArtist.isEmpty()) {
         return;
     }
+    QVector<Album> albums;
     if (m_librarySource == LibrarySource::Mpd) {
-        m_albumGrid->setAlbums(m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory()), freshLoad);
+        albums = m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory());
     } else {
-        m_albumGrid->setAlbums(m_database->albumsForArtist(m_currentArtist), freshLoad);
+        albums = m_database->albumsForArtist(m_currentArtist);
+    }
+    m_albumGrid->setAlbums(albums, freshLoad);
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->setAlbums(albums);
     }
     m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
     if (m_panelSearch != nullptr) {
@@ -2204,6 +2220,9 @@ void MainWindow::refreshTrackTable()
     }
     if (m_panelSearch != nullptr) {
         m_panelSearch->refreshPanel(MainPanelId::Tracks);
+    }
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->refreshExpandedTracks();
     }
 }
 
@@ -2227,6 +2246,9 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     // a user rating is cleared.
     const bool nowHasUserRating = rating0To100 >= 0;
     m_trackTable->updateTrackRating(track.path, nowHasUserRating ? rating0To100 : track.rating0To100, nowHasUserRating);
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->refreshExpandedTracks();
+    }
     refreshAlbumGrid();
     m_player->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
     if (m_player->currentTrack().path == track.path) {
@@ -2295,6 +2317,9 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
             const int effective = update.effectiveRating0To100;
             const bool hasUserRating = effective >= 0;
             m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
+            if (m_musicExplorerView != nullptr) {
+                m_musicExplorerView->refreshExpandedTracks();
+            }
             if (m_playlistView != nullptr) {
                 m_playlistView->updateTrackRating(update.path, effective);
             }
@@ -2399,6 +2424,10 @@ void MainWindow::loadViewSettings()
 {
     m_loadingViewSettings = true;
     m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->applyAlbumGridViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
+        m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
+    }
     const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
     m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
     m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
@@ -2444,6 +2473,9 @@ void MainWindow::loadViewSettings()
     m_rightSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
     m_artistSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
     m_trackTable->setNavigationScrollPadding(mainPanelScrollPadding);
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->setNavigationScrollPadding(mainPanelScrollPadding);
+    }
 
     switchMainView(m_mainView);
     applySharedTableSettings();
@@ -2452,13 +2484,32 @@ void MainWindow::loadViewSettings()
 
 void MainWindow::saveTrackTableViewSettings()
 {
-    m_state->setSetting(QStringLiteral("trackTable.view"), m_trackTable->viewSettingsJson());
+    if (m_loadingViewSettings || m_applyingTrackTableViewSettings) {
+        return;
+    }
+
+    QObject *source = sender();
+    const QString settings = source == m_musicExplorerView && m_musicExplorerView != nullptr
+        ? m_musicExplorerView->trackTableViewSettingsJson()
+        : m_trackTable->viewSettingsJson();
+    m_state->setSetting(QStringLiteral("trackTable.view"), settings);
+
+    QScopedValueRollback<bool> applying(m_applyingTrackTableViewSettings, true);
+    if (source == m_musicExplorerView) {
+        m_trackTable->applyViewSettingsJson(settings);
+    } else if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->applyTrackTableViewSettingsJson(settings);
+    }
     applySharedTableSettings();
 }
 
 void MainWindow::saveAlbumGridViewSettings()
 {
-    m_state->setSetting(QStringLiteral("albumGrid.view"), m_albumGrid->viewSettingsJson());
+    const QString settings = m_albumGrid->viewSettingsJson();
+    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->applyAlbumGridViewSettingsJson(settings);
+    }
 }
 
 void MainWindow::saveArtistSidebarViewSettings()
@@ -2575,7 +2626,13 @@ void MainWindow::resetViewPreferences()
     }
 
     m_trackTable->resetViewSettings();
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->applyTrackTableViewSettingsJson(m_trackTable->viewSettingsJson());
+    }
     m_albumGrid->resetViewSettings();
+    if (m_musicExplorerView != nullptr) {
+        m_musicExplorerView->applyAlbumGridViewSettingsJson(m_albumGrid->viewSettingsJson());
+    }
     m_artistSidebar->resetViewSettings();
     m_rightSidebar->resetViewSettings();
     if (m_queueScreen != nullptr) {
@@ -2878,6 +2935,68 @@ FileExplorerView *MainWindow::ensureFreeRoamFileExplorer()
     return m_freeRoamFileExplorer;
 }
 
+MusicExplorerView *MainWindow::ensureMusicExplorerView()
+{
+    if (m_musicExplorerView != nullptr) {
+        return m_musicExplorerView;
+    }
+
+    m_musicExplorerView = new MusicExplorerView(m_libraryCenterStack);
+    m_musicExplorerView->setArtworkCache(m_artworkCache);
+    m_musicExplorerView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    m_musicExplorerView->applyAlbumGridViewSettingsJson(m_albumGrid->viewSettingsJson());
+    m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
+    m_musicExplorerView->setTrackProvider([this](const Album &album) {
+        const QString albumArtist = album.albumArtistName.isEmpty() ? m_currentArtist : album.albumArtistName;
+        return m_librarySource == LibrarySource::Mpd
+            ? m_database->mpdTracksForArtist(albumArtist, mpdMusicDirectory(), album.title)
+            : m_database->tracksForArtist(albumArtist, album.title);
+    });
+
+    connect(m_musicExplorerView, &MusicExplorerView::albumPlayNextRequested, this, &MainWindow::playNextAlbum);
+    connect(m_musicExplorerView, &MusicExplorerView::albumPlayReplaceRequested, this, &MainWindow::playAlbumsReplacingQueue);
+    connect(m_musicExplorerView, &MusicExplorerView::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
+    connect(m_musicExplorerView, &MusicExplorerView::albumPlayNextTemporaryRequested, this, &MainWindow::playNextAlbumTemporary);
+    connect(m_musicExplorerView, &MusicExplorerView::albumAddToQueueTemporaryRequested, this, &MainWindow::addAlbumToQueueTemporary);
+    connect(m_musicExplorerView, &MusicExplorerView::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
+        QVector<Track> tracks;
+        for (const QString &title : titles) {
+            const QVector<Track> albumTracks = m_librarySource == LibrarySource::Mpd
+                ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), title)
+                : m_database->tracksForArtist(m_currentArtist, title);
+            tracks.append(albumTracks);
+        }
+        openAddToPlaylistDialog(tracks);
+    });
+    connect(m_musicExplorerView, &MusicExplorerView::albumRatingChanged, this, &MainWindow::applyAlbumRating);
+    connect(m_musicExplorerView, &MusicExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
+    connect(m_musicExplorerView, &MusicExplorerView::trackPlayNextRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+    });
+    connect(m_musicExplorerView, &MusicExplorerView::trackAddToQueueRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+    });
+    connect(m_musicExplorerView, &MusicExplorerView::trackPlayNextTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, true);
+    });
+    connect(m_musicExplorerView, &MusicExplorerView::trackAddToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
+        enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
+    });
+    connect(m_musicExplorerView, &MusicExplorerView::trackAddToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_musicExplorerView, &MusicExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
+    connect(m_musicExplorerView, &MusicExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
+
+    m_libraryCenterStack->addWidget(m_musicExplorerView);
+    if (!m_currentArtist.isEmpty()) {
+        m_musicExplorerView->setAlbums(m_librarySource == LibrarySource::Mpd
+                                           ? m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory())
+                                           : m_database->albumsForArtist(m_currentArtist));
+    }
+    return m_musicExplorerView;
+}
+
 PlaylistView *MainWindow::ensurePlaylistView()
 {
     if (m_playlistView != nullptr) {
@@ -2973,10 +3092,24 @@ void MainWindow::switchMainView(MainView view)
     m_playerBar->setQueueViewLayoutActive(view == MainView::Queue);
     m_playerBar->setPlaylistViewActionsActive(view == MainView::Playlist);
     if (view == MainView::LibraryPanels) {
+        m_libraryCenterStack->setCurrentWidget(m_centerSplitter);
         m_mainStack->setCurrentWidget(m_rootSplitter);
         if (m_panelSearch != nullptr) {
             m_panelSearch->activateForMainView();
         }
+    } else if (view == MainView::LibraryMusicExplorer) {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->deactivateForNonMainView();
+        }
+        MusicExplorerView *musicExplorer = ensureMusicExplorerView();
+        if (!m_currentArtist.isEmpty()) {
+            musicExplorer->setAlbums(m_librarySource == LibrarySource::Mpd
+                                         ? m_database->mpdAlbumsForArtist(m_currentArtist, mpdMusicDirectory())
+                                         : m_database->albumsForArtist(m_currentArtist));
+        }
+        m_libraryCenterStack->setCurrentWidget(musicExplorer);
+        m_mainStack->setCurrentWidget(m_rootSplitter);
+        musicExplorer->setFocus(Qt::OtherFocusReason);
     } else if (view == MainView::LibraryFileExplorer) {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();
@@ -3140,6 +3273,19 @@ void MainWindow::revealTrackInLibrary(const Track &track)
         m_trackTable->selectTrackByPath(track.path);
         if (m_panelSearch != nullptr) {
             m_panelSearch->setActivePanel(MainPanelId::Tracks, true);
+        }
+        break;
+    }
+    case MainView::LibraryMusicExplorer: {
+        const QString artist = !track.albumArtistName.trimmed().isEmpty()
+            ? track.albumArtistName
+            : track.artistName;
+        if (!artist.isEmpty()) {
+            m_artistSidebar->selectArtist(artist);
+            showArtist(artist, false, true);
+            MusicExplorerView *musicExplorer = ensureMusicExplorerView();
+            musicExplorer->selectAlbumTitle(track.albumTitle, true);
+            musicExplorer->selectTrackByPath(track.path);
         }
         break;
     }
@@ -3887,6 +4033,10 @@ void MainWindow::applySharedTableSettings()
     const QJsonObject playlistSettings = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playlistView.view")).toUtf8()).object();
     const int headerHeight = sharedSettings.value(QStringLiteral("headerHeight")).toInt(trackSettings.value(QStringLiteral("headerHeight")).toInt(sidebarSettings.value(QStringLiteral("headerHeight")).toInt(playlistSettings.value(QStringLiteral("headerHeight")).toInt(20))));
     m_trackTable->setHeaderHeight(headerHeight);
+    if (m_musicExplorerView != nullptr) {
+        QScopedValueRollback<bool> applying(m_applyingTrackTableViewSettings, true);
+        m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
+    }
     m_rightSidebar->setHeaderHeight(headerHeight);
     if (m_playlistView != nullptr) {
         m_playlistView->setHeaderHeight(headerHeight);
@@ -4978,6 +5128,9 @@ void MainWindow::onLibrarySourceChanged(int index)
         m_loadedPanelSource = m_librarySource;
         rememberCurrentSourceSelection();
         m_albumGrid->setAlbums({});
+        if (m_musicExplorerView != nullptr) {
+            m_musicExplorerView->setAlbums({});
+        }
         m_trackTable->setTracks({});
         saveExplorerState();
         statusBar()->showMessage(QStringLiteral("No MPD source configured. Use the menu to configure and import."), 5000);
@@ -5595,6 +5748,7 @@ void MainWindow::refreshQueueSourceDependentUi()
     const bool playlistSourced = queueIsPlaylistSourced();
     if (m_trackTable != nullptr) m_trackTable->setQueueIsPlaylistSourced(playlistSourced);
     if (m_albumGrid != nullptr) m_albumGrid->setQueueIsPlaylistSourced(playlistSourced);
+    if (m_musicExplorerView != nullptr) m_musicExplorerView->setQueueIsPlaylistSourced(playlistSourced);
     if (m_libraryFileExplorer != nullptr) m_libraryFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
     if (m_freeRoamFileExplorer != nullptr) m_freeRoamFileExplorer->setQueueIsPlaylistSourced(playlistSourced);
     if (m_searchView != nullptr) m_searchView->setQueueIsPlaylistSourced(playlistSourced);

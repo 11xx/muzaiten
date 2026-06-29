@@ -51,12 +51,13 @@ class QueueScreen;
 class QueueStore;
 class RightSidebar;
 class TrackTable;
+class MusicExplorerView;
 class ScanPipeline;
 class ArtworkCache;
 class SearchView;
 
 enum class LibrarySource { Local, Mpd };
-enum class MainView { LibraryPanels, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue, Playlist };
+enum class MainView { LibraryPanels, LibraryMusicExplorer, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue, Playlist };
 enum class QueueAddMode { Append, PlayNext };
 // Outcome of the warning shown when adding to a queue that is mirroring a
 // playlist: append to both queue and playlist, append to the queue only
@@ -122,6 +123,7 @@ private:
     void ensureFileExplorers();
     FileExplorerView *ensureLibraryFileExplorer();
     FileExplorerView *ensureFreeRoamFileExplorer();
+    MusicExplorerView *ensureMusicExplorerView();
     PlaylistView *ensurePlaylistView();
     void switchMainView(MainView view);
     void toggleFileExplorerView();
@@ -380,10 +382,12 @@ private:
     ArtistSidebar *m_artistSidebar = nullptr;
     QStackedWidget *m_mainStack = nullptr;
     QSplitter *m_rootSplitter = nullptr;
+    QStackedWidget *m_libraryCenterStack = nullptr;
     QSplitter *m_centerSplitter = nullptr;
     PlayerBar *m_playerBar = nullptr;
     AlbumGrid *m_albumGrid = nullptr;
     TrackTable *m_trackTable = nullptr;
+    MusicExplorerView *m_musicExplorerView = nullptr;
     RightSidebar *m_rightSidebar = nullptr;
     QueueScreen *m_queueScreen = nullptr;
     QueueStore *m_queueStore = nullptr;
@@ -493,4 +497,5 @@ private:
     qint64 m_profileTakeoverPositionMs = 0;
     bool m_profileTakeoverWasPlaying = false;
     bool m_loadingViewSettings = false;
+    bool m_applyingTrackTableViewSettings = false;
 };

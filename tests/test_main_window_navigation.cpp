@@ -35,10 +35,12 @@ private slots:
         QVERIFY(window.m_searchView == nullptr);
         QVERIFY(window.m_libraryFileExplorer == nullptr);
         QVERIFY(window.m_freeRoamFileExplorer == nullptr);
+        QVERIFY(window.m_musicExplorerView == nullptr);
         QVERIFY(window.m_playlistView == nullptr);
 
         window.persistViewState();
         window.switchMainView(MainView::LibraryPanels);
+        window.switchMainView(MainView::LibraryMusicExplorer);
         window.switchMainView(MainView::LibraryFileExplorer);
         window.switchMainView(MainView::FreeRoamFileExplorer);
         window.switchMainView(MainView::Search);
@@ -51,6 +53,7 @@ private slots:
         QVERIFY(window.m_rootSplitter != nullptr);
         QVERIFY(window.m_libraryFileExplorer != nullptr);
         QVERIFY(window.m_freeRoamFileExplorer != nullptr);
+        QVERIFY(window.m_musicExplorerView != nullptr);
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);

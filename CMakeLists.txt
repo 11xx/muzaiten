@@ -112,6 +112,7 @@ set(MUZAITEN_SOURCES
     src/ui/LinkRootsDialog.cpp
     src/ui/ListeningHistoryDialog.cpp
     src/ui/MainWindow.cpp
+    src/ui/MusicExplorerView.cpp
     src/playlist/PlaylistImport.cpp
     src/playlist/PlaylistImportWorker.cpp
     src/playlist/PlaylistDropImportWorker.cpp
@@ -234,6 +235,7 @@ set(MUZAITEN_HEADERS
     src/ui/ListeningHistoryDialog.h
     src/ui/KeyBindingTypes.h
     src/ui/MainWindow.h
+    src/ui/MusicExplorerView.h
     src/ui/MainPanelKeybindings.h
     src/ui/NavigableTableView.h
     src/ui/PanelSearchBar.h
