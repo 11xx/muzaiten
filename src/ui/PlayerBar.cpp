@@ -207,11 +207,26 @@ public:
         m_slider->setValue(std::clamp(volume0To100, 0, 100));
     }
 
+    void setVolumeControlEnabled(bool enabled)
+    {
+        setEnabled(enabled);
+        m_slider->setEnabled(enabled);
+        setToolTip(enabled
+                       ? QStringLiteral("Volume")
+                       : QStringLiteral("Volume disabled by the output profile"));
+        if (!enabled) {
+            m_menu.close();
+        }
+    }
+
     std::function<void(int)> volumeChanged;
 
 protected:
     void enterEvent(QEnterEvent *) override
     {
+        if (!isEnabled()) {
+            return;
+        }
         const QPoint at = mapToGlobal(QPoint(0, height()));
         m_menu.popup(at);
     }
@@ -1021,6 +1036,13 @@ void PlayerBar::setVolume(int volume0To100)
 {
     if (m_volumeButton != nullptr) {
         static_cast<VolumeButton *>(m_volumeButton)->setValue(volume0To100);
+    }
+}
+
+void PlayerBar::setVolumeControlEnabled(bool enabled)
+{
+    if (m_volumeButton != nullptr) {
+        static_cast<VolumeButton *>(m_volumeButton)->setVolumeControlEnabled(enabled);
     }
 }
 

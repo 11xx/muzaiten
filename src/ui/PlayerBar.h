@@ -44,6 +44,7 @@ public:
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
     void setVolume(int volume0To100);
+    void setVolumeControlEnabled(bool enabled);
     // Reflect externally-driven mode state (persisted settings, MPRIS) on the
     // transport buttons without re-emitting a change request.
     void setRepeatMode(RepeatMode mode);
