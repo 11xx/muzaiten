@@ -434,6 +434,38 @@ target_compile_features(test_album_grid PRIVATE cxx_std_26)
 add_test(NAME test_album_grid COMMAND test_album_grid)
 set_tests_properties(test_album_grid PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_music_explorer_view
+    test_music_explorer_view.cpp
+    ../src/ui/MusicExplorerView.cpp
+    ../src/ui/TrackTable.cpp
+    ../src/ui/DenseTableDelegate.cpp
+    ../src/ui/NavigableTableView.cpp
+    ../src/ui/RowReorderSupport.cpp
+    ../src/ui/NeighborColumnResizer.cpp
+    ../src/ui/ResponsiveColumnLayout.cpp
+    ../src/ui/ResponsiveColumnOptionsDialog.cpp
+    ../src/ui/OverlayScrollBar.cpp
+    ../src/ui/AlbumArtFallback.cpp
+    ../src/ui/StarRating.cpp
+    ../src/ui/StarRatingDelegate.cpp
+    ../src/core/HumanQuantity.cpp
+    ../src/core/MusicSort.cpp
+    ../src/core/Rating.cpp
+    ../src/core/TrackDisplay.cpp
+    ../src/search/FuzzyMatch.cpp
+    ../src/search/SearchMatcher.cpp
+    ../src/search/SearchQuery.cpp
+    ../src/search/fold/Fold.cpp
+    ArtworkCacheStub.cpp
+    ../src/scanner/ArtworkCache.h
+    ../resources/resources.qrc
+)
+target_include_directories(test_music_explorer_view PRIVATE ../src ${CMAKE_CURRENT_BINARY_DIR}/../generated)
+target_link_libraries(test_music_explorer_view PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Sql Qt6::Test)
+target_compile_features(test_music_explorer_view PRIVATE cxx_std_26)
+add_test(NAME test_music_explorer_view COMMAND test_music_explorer_view)
+set_tests_properties(test_music_explorer_view PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_panel_search_bar
     test_panel_search_bar.cpp
     ../src/ui/PanelSearchBar.cpp
