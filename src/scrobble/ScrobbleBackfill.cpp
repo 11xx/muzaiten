@@ -2,6 +2,8 @@
 
 #include "scrobble/BackfillParse.h"
 
+#include "core/FoldKey.h"
+
 #include <QDateTime>
 #include <QLoggingCategory>
 #include <QNetworkAccessManager>
@@ -51,7 +53,7 @@ ScrobbleBackfill::~ScrobbleBackfill() = default;
 
 QString ScrobbleBackfill::foldedArtistTitleKey(const QString &artist, const QString &title)
 {
-    return artist.simplified().toCaseFolded() + QLatin1Char('\n') + title.simplified().toCaseFolded();
+    return FoldKey::fold(artist) + QLatin1Char('\n') + FoldKey::fold(title);
 }
 
 QString ScrobbleBackfill::matchTrackPath(const LibraryIndex &index, const QString &mbRecordingId,

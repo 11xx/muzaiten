@@ -627,6 +627,60 @@ int ListenHistoryStore::importedListenCount(const QString &source) const
     return query.value(0).toInt();
 }
 
+QHash<QString, ListenHistoryStore::TrackAffinityRow> ListenHistoryStore::trackAffinities() const
+{
+    QHash<QString, TrackAffinityRow> affinities;
+    if (!m_db.isOpen()) {
+        return affinities;
+    }
+
+    // play_events: spins, split by outcome, plus the most recent start.
+    QSqlQuery events(m_db);
+    if (events.exec(QStringLiteral(
+            "SELECT track_path, COUNT(*), "
+            "SUM(outcome = 'finished'), SUM(outcome = 'skipped'), MAX(started_at) "
+            "FROM play_events WHERE track_path <> '' GROUP BY track_path"))) {
+        while (events.next()) {
+            TrackAffinityRow &row = affinities[events.value(0).toString()];
+            row.playEvents = events.value(1).toInt();
+            row.finished = events.value(2).toInt();
+            row.skipped = events.value(3).toInt();
+            row.lastPlayedAtSecs = events.value(4).toLongLong();
+        }
+    }
+
+    // Local listens by resolved path.
+    QSqlQuery listens(m_db);
+    if (listens.exec(QStringLiteral(
+            "SELECT path, COUNT(*) FROM listens WHERE path IS NOT NULL AND path <> '' GROUP BY path"))) {
+        while (listens.next()) {
+            affinities[listens.value(0).toString()].listenCount += listens.value(1).toInt();
+        }
+    }
+
+    // Imported listens by matched library path (unmatched rows carry NULL).
+    QSqlQuery imported(m_db);
+    if (imported.exec(QStringLiteral(
+            "SELECT matched_track_path, COUNT(*) FROM imported_listens "
+            "WHERE matched_track_path IS NOT NULL AND matched_track_path <> '' GROUP BY matched_track_path"))) {
+        while (imported.next()) {
+            affinities[imported.value(0).toString()].listenCount += imported.value(1).toInt();
+        }
+    }
+
+    // Playcount baselines: max across services (never summed — sources overlap).
+    QSqlQuery baselines(m_db);
+    if (baselines.exec(QStringLiteral(
+            "SELECT matched_track_path, MAX(count) FROM playcount_baselines "
+            "WHERE matched_track_path IS NOT NULL AND matched_track_path <> '' GROUP BY matched_track_path"))) {
+        while (baselines.next()) {
+            affinities[baselines.value(0).toString()].baselineMax = baselines.value(1).toInt();
+        }
+    }
+
+    return affinities;
+}
+
 QString ListenHistoryStore::metaValue(const QString &key) const
 {
     if (!m_db.isOpen()) {

@@ -238,6 +238,50 @@ Track readTrackRow(const QSqlQuery &query)
     return track;
 }
 
+// Leading 4-digit year of a release date ("2004-05-01", "2004", ...); 0 when the
+// string has no parseable leading year. Kept in C++ rather than SQL so the date
+// forms scanned into `date`/`original_date` are all handled the same way.
+int parseLeadingYear(const QString &date)
+{
+    if (date.size() < 4) {
+        return 0;
+    }
+    bool ok = false;
+    const int year = QStringView(date).left(4).toInt(&ok);
+    return ok ? year : 0;
+}
+
+// GROUP_CONCAT separator for the folded genre list: the ASCII unit separator can
+// never appear inside a simplified()/case-folded genre value.
+constexpr QChar kGenreSeparator = QChar(0x1F);
+
+// Decode one row from the radio-candidate query (see the two callers below);
+// mirrors readTrackRow's pending-write effective-rating overlay exactly.
+RadioCandidateRow readRadioCandidateRow(const QSqlQuery &query)
+{
+    RadioCandidateRow row;
+    row.path            = query.value(0).toString();
+    row.artistName      = query.value(1).toString();
+    row.albumArtistName = query.value(2).toString();
+    row.albumTitle      = query.value(3).toString();
+    const QString genres = query.value(4).toString();
+    if (!genres.isEmpty()) {
+        row.genresFolded = genres.split(kGenreSeparator, Qt::SkipEmptyParts);
+    }
+    const QString original = query.value(5).toString();
+    row.year = parseLeadingYear(!original.isEmpty() ? original : query.value(6).toString());
+    const int scannedRating = query.value(7).isNull() ? Rating::unset : query.value(7).toInt();
+    row.hasUserRating = !query.value(8).isNull();
+    const QString status = query.value(9).toString();
+    const bool pendingDbRating = status == QStringLiteral("pending")
+        || status == QStringLiteral("failed")
+        || status == QStringLiteral("blocked_no_writable_path");
+    row.effectiveRating0To100 = pendingDbRating && row.hasUserRating
+        ? query.value(8).toInt()
+        : (scannedRating >= 0 ? scannedRating : (row.hasUserRating ? query.value(8).toInt() : Rating::unset));
+    return row;
+}
+
 } // namespace
 
 Database::Database(QString connectionName)
@@ -1645,6 +1689,80 @@ QVector<Track> Database::randomTracks(int count, const QSet<QString> &excludePat
         tracks.push_back(readTrackRow(query));
     }
     return tracks;
+}
+
+QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGenres, int limit) const
+{
+    QVector<RadioCandidateRow> rows;
+    if (foldedGenres.isEmpty() || limit <= 0) {
+        return rows;
+    }
+    // Genre join selects the pool; the correlated subquery keeps a track that
+    // shares ANY seed genre, while the outer GROUP_CONCAT still returns ALL of
+    // that track's folded genres (not just the matched ones).
+    QString sql = QStringLiteral(
+        "SELECT t.path, t.artist_name, t.album_artist_name, t.album_title, "
+        "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
+        "t.rating_0_100, utr.rating_0_100, p.status "
+        "FROM tracks t "
+        "JOIN track_genres g ON g.track_id = t.id "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
+        "AND t.id IN (SELECT track_id FROM track_genres WHERE genre_folded IN (%1))")
+        .arg(sqlPlaceholders(foldedGenres.size()));
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    sql += QStringLiteral(" GROUP BY t.id LIMIT ?");
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    for (const QString &genre : foldedGenres) {
+        query.addBindValue(genre);
+    }
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        return rows;
+    }
+    while (query.next()) {
+        rows.push_back(readRadioCandidateRow(query));
+    }
+    return rows;
+}
+
+QVector<RadioCandidateRow> Database::radioFallbackCandidates(int limit) const
+{
+    QVector<RadioCandidateRow> rows;
+    if (limit <= 0) {
+        return rows;
+    }
+    // No genre to match on (seed had none): a random sample of the library, with
+    // whatever genres each track does carry still folded in.
+    QString sql = QStringLiteral(
+        "SELECT t.path, t.artist_name, t.album_artist_name, t.album_title, "
+        "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
+        "t.rating_0_100, utr.rating_0_100, p.status "
+        "FROM tracks t "
+        "LEFT JOIN track_genres g ON g.track_id = t.id "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.missing = 0 AND t.metadata_scanned = 1");
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    sql += QStringLiteral(" GROUP BY t.id ORDER BY RANDOM() LIMIT ?");
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        return rows;
+    }
+    while (query.next()) {
+        rows.push_back(readRadioCandidateRow(query));
+    }
+    return rows;
 }
 
 QStringList Database::localLibraryDirectories(const QString &parentDirectory) const

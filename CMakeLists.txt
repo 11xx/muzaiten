@@ -68,6 +68,8 @@ set(MUZAITEN_SOURCES
     src/ipc/IpcSocket.cpp
     src/mpris/MprisService.cpp
     src/player/PlayerCore.cpp
+    src/reco/RadioSession.cpp
+    src/reco/TrackScorer.cpp
     src/playback/AudioDeviceControl.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp

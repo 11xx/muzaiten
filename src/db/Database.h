@@ -28,6 +28,22 @@
 
 class Database;
 
+// One library track offered to the radio recommender (Stage 1). Deliberately
+// lighter than Track: only the fields TrackScorer needs, plus the raw genre and
+// rating pieces the caller folds/resolves. `year` is parsed from the date in
+// C++; `effectiveRating0To100` mirrors the pending-write rating overlay used by
+// the full track loaders; `genresFolded` is every folded genre of the track.
+struct RadioCandidateRow {
+    QString path;
+    QString artistName;
+    QString albumArtistName;
+    QString albumTitle;
+    QStringList genresFolded;
+    int year = 0;                   // 0 = unknown
+    int effectiveRating0To100 = -1; // -1 = unrated
+    bool hasUserRating = false;
+};
+
 // Streaming cursor over the search row set: local tracks first, then MPD
 // tracks, folded into their norm fields as they are pulled. Lets the search
 // worker build the in-memory index incrementally (fzf-from-a-pipe style)
@@ -144,6 +160,13 @@ public:
     // Up to `count` random non-missing library tracks for library-wide shuffle,
     // skipping any path in `excludePaths` (typically the current queue).
     QVector<Track> randomTracks(int count, const QSet<QString> &excludePaths = {}) const;
+    // Radio candidate generation (Stage 1). Non-missing, metadata-scanned local
+    // tracks that share ANY of `foldedGenres` (track_genres join). Each row
+    // carries the track's full folded genre set, not just the matched ones.
+    QVector<RadioCandidateRow> radioCandidates(const QStringList &foldedGenres, int limit = 2000) const;
+    // Random-sample fallback for seeds with no genres to match on (same ORDER BY
+    // RANDOM() idiom as randomTracks). Genres are still returned when present.
+    QVector<RadioCandidateRow> radioFallbackCandidates(int limit = 2000) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);

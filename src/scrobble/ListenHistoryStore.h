@@ -2,6 +2,7 @@
 
 #include "core/Track.h"
 
+#include <QHash>
 #include <QList>
 #include <QSqlDatabase>
 #include <QString>
@@ -82,6 +83,18 @@ public:
         qint64 syncedAtSecs = 0;
     };
 
+    // Per-track listening affinity aggregated across every history source, for
+    // the radio recommender (Stage 1). Fields mirror TrackScorer::Affinity so the
+    // caller can copy them across without a Qt-SQL dependency leaking into reco/.
+    struct TrackAffinityRow {
+        int playEvents = 0;
+        int finished = 0;
+        int skipped = 0;
+        qint64 lastPlayedAtSecs = 0;
+        int listenCount = 0;   // local listens + imported listens
+        int baselineMax = 0;   // max playcount baseline across services
+    };
+
     // Service identifiers for the sent flags.
     static const QString LastFm;
     static const QString ListenBrainz;
@@ -136,6 +149,11 @@ public:
 
     QList<PlaycountBaseline> playcountBaselines(const QString &source) const;
     int importedListenCount(const QString &source) const;
+
+    // Per-track affinity across play_events, listens, imported_listens and
+    // playcount_baselines, keyed by library track path. Four GROUP BY queries
+    // merged into one hash; tracks with no history at all are simply absent.
+    QHash<QString, TrackAffinityRow> trackAffinities() const;
 
     // Backfill cursor persistence, stored in the existing `meta` table (see the
     // constructor). Empty string when the key is absent.

@@ -1,0 +1,210 @@
+#include "reco/RadioSession.h"
+
+#include "core/FoldKey.h"
+
+#include <QRandomGenerator>
+
+#include <algorithm>
+#include <cmath>
+#include <utility>
+
+namespace {
+
+// Draw from among the top-scoring candidates rather than always the single best:
+// a deterministic top-1 queue quickly feels dead (same track every time the same
+// context recurs). K is small so picks stay strongly on-theme.
+constexpr int kTopK = 5;
+// Hard sequencing throttles (enforced before scoring, not as score terms).
+constexpr int kThrottleArtists = 3;   // no artist within the last 3 picks/plays
+constexpr int kAlbumCap = 2;          // at most 2 tracks per album per session
+
+// Keep only the most recent `limit` entries of a consecutive-deduped artist list.
+void pushRecentArtist(QStringList &artists, const QString &folded, int limit)
+{
+    if (folded.isEmpty()) {
+        return;
+    }
+    if (artists.isEmpty() || artists.last() != folded) {
+        artists.push_back(folded);
+    }
+    while (artists.size() > limit) {
+        artists.removeFirst();
+    }
+}
+
+} // namespace
+
+RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
+                           QHash<QString, TrackScorer::Affinity> affinities,
+                           TrackScorer::Candidate seed,
+                           int exploration0To100,
+                           qint64 nowSecs,
+                           QRandomGenerator *rng)
+    : m_pool(std::move(pool))
+    , m_affinities(std::move(affinities))
+    , m_seed(std::move(seed))
+    , m_exploration(std::clamp(exploration0To100, 0, 100))
+    , m_nowSecs(nowSecs)
+    , m_rng(rng != nullptr ? rng : QRandomGenerator::global())
+{
+    m_byPath.reserve(m_pool.size() + 1);
+    for (const TrackScorer::Candidate &candidate : m_pool) {
+        m_byPath.insert(candidate.path, candidate);
+    }
+    if (!m_seed.path.isEmpty()) {
+        m_byPath.insert(m_seed.path, m_seed);
+    }
+}
+
+QStringList RadioSession::rollingGenres() const
+{
+    // The seed always anchors the mood; the last few played tracks let it drift.
+    QStringList genres = m_seed.genresFolded;
+    QSet<QString> seen(genres.cbegin(), genres.cend());
+    for (const QStringList &played : m_playedGenres) {
+        for (const QString &genre : played) {
+            if (!seen.contains(genre)) {
+                seen.insert(genre);
+                genres.push_back(genre);
+            }
+        }
+    }
+    return genres;
+}
+
+void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored)
+{
+    m_usedPaths.insert(candidate.path);
+    m_albumCounts[candidate.albumKey] += 1;
+    m_pickReasons.insert(candidate.path, scored.components);
+}
+
+QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludePaths,
+                                        const std::function<Track(const QString &path)> &resolveTrack)
+{
+    QVector<Track> result;
+    if (count <= 0) {
+        return result;
+    }
+    // A batch-local recent-artist list so a multi-pick call throttles within
+    // itself the same way successive single picks (fed back via notePlayed) do.
+    QStringList batchArtists = m_recentArtists;
+
+    for (int picked = 0; picked < count; ++picked) {
+        TrackScorer::SeedContext context;
+        context.genresFolded = rollingGenres();
+        context.recentArtistsFolded = QSet<QString>(batchArtists.cbegin(), batchArtists.cend());
+        context.year = m_seed.year;
+        context.nowSecs = m_nowSecs;
+        context.exploration0To100 = m_exploration;
+
+        const QSet<QString> throttled = context.recentArtistsFolded;
+
+        QList<std::pair<TrackScorer::Scored, const TrackScorer::Candidate *>> scored;
+        scored.reserve(m_pool.size());
+        for (const TrackScorer::Candidate &candidate : m_pool) {
+            if (candidate.path.isEmpty() || m_usedPaths.contains(candidate.path)
+                || excludePaths.contains(candidate.path)) {
+                continue;
+            }
+            if (!candidate.artistFolded.isEmpty() && throttled.contains(candidate.artistFolded)) {
+                continue;
+            }
+            if (m_albumCounts.value(candidate.albumKey) >= kAlbumCap) {
+                continue;
+            }
+            scored.push_back({TrackScorer::score(candidate, m_affinities.value(candidate.path), context),
+                              &candidate});
+        }
+        if (scored.isEmpty()) {
+            break;
+        }
+
+        std::sort(scored.begin(), scored.end(), [](const auto &left, const auto &right) {
+            return left.first.score > right.first.score;
+        });
+        const int topN = std::min<int>(kTopK, static_cast<int>(scored.size()));
+
+        // Weighted-random draw among the top N. Scores can be negative, so shift
+        // by the batch minimum plus a floor to keep every weight positive while
+        // preserving the ordering's relative pull.
+        double minScore = scored.front().first.score;
+        for (int i = 0; i < topN; ++i) {
+            minScore = std::min(minScore, scored.at(i).first.score);
+        }
+        double total = 0.0;
+        for (int i = 0; i < topN; ++i) {
+            total += (scored.at(i).first.score - minScore) + 0.001;
+        }
+        double roll = m_rng->generateDouble() * total;
+        int chosenIndex = topN - 1;
+        for (int i = 0; i < topN; ++i) {
+            roll -= (scored.at(i).first.score - minScore) + 0.001;
+            if (roll <= 0.0) {
+                chosenIndex = i;
+                break;
+            }
+        }
+
+        const TrackScorer::Candidate &chosen = *scored.at(chosenIndex).second;
+        recordPick(chosen, scored.at(chosenIndex).first);
+        pushRecentArtist(batchArtists, chosen.artistFolded, kThrottleArtists);
+
+        const Track resolved = resolveTrack(chosen.path);
+        if (!resolved.path.isEmpty()) {
+            result.push_back(resolved);
+        }
+    }
+    return result;
+}
+
+void RadioSession::notePlayed(const Track &track)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+    pushRecentArtist(m_recentArtists, FoldKey::fold(track.artistName), kThrottleArtists);
+
+    QStringList genres;
+    QString albumKey = FoldKey::albumKey(track.albumArtistName, track.albumTitle);
+    const auto it = m_byPath.constFind(track.path);
+    if (it != m_byPath.constEnd()) {
+        genres = it->genresFolded;
+        albumKey = it->albumKey;
+    }
+    m_playedGenres.push_back(genres);
+    while (m_playedGenres.size() > kThrottleArtists) {
+        m_playedGenres.removeFirst();
+    }
+
+    // Count the album only once: a radio pick already tallied it at pick time;
+    // the seed and user-queued interruptions get counted here (first sighting).
+    if (!m_usedPaths.contains(track.path)) {
+        m_usedPaths.insert(track.path);
+        m_albumCounts[albumKey] += 1;
+    }
+}
+
+QString RadioSession::reasonFor(const QString &path) const
+{
+    const auto it = m_pickReasons.constFind(path);
+    if (it == m_pickReasons.constEnd() || it->isEmpty()) {
+        return {};
+    }
+    // Terse and data-driven: strongest-contributing components first, each as
+    // "name +/-value" rounded to one decimal. Stage 3 dresses this up for the UI.
+    QList<TrackScorer::Component> components = *it;
+    std::sort(components.begin(), components.end(), [](const auto &left, const auto &right) {
+        return std::abs(left.value) > std::abs(right.value);
+    });
+    QStringList parts;
+    parts.reserve(components.size());
+    for (const TrackScorer::Component &component : components) {
+        const double rounded = std::round(component.value * 10.0) / 10.0;
+        parts.push_back(QStringLiteral("%1 %2%3")
+                            .arg(component.name,
+                                 rounded >= 0.0 ? QStringLiteral("+") : QStringLiteral("-"))
+                            .arg(std::abs(rounded), 0, 'f', 1));
+    }
+    return parts.join(QStringLiteral("; "));
+}

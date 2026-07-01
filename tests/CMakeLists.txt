@@ -107,6 +107,26 @@ target_compile_features(test_play_events PRIVATE cxx_std_26)
 add_test(NAME test_play_events COMMAND test_play_events)
 set_tests_properties(test_play_events PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_radio
+    test_radio.cpp
+    ../src/app/AppPaths.cpp
+    ../src/core/GenreTags.cpp
+    ../src/core/MetadataBlob.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+    ../src/fs/PathResolver.cpp
+    ../src/reco/RadioSession.cpp
+    ../src/reco/TrackScorer.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/search/IndexCache.cpp
+    ../src/search/fold/Fold.cpp
+)
+target_include_directories(test_radio PRIVATE ../src)
+target_link_libraries(test_radio PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
+target_compile_features(test_radio PRIVATE cxx_std_26)
+add_test(NAME test_radio COMMAND test_radio)
+set_tests_properties(test_radio PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_scrobble_backfill
     test_scrobble_backfill.cpp
     ../src/scrobble/ListenHistoryStore.cpp
