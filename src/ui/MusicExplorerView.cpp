@@ -1030,14 +1030,13 @@ void MusicExplorerView::setCurrentRowInternal(int row, bool ensureVisible)
     }
 }
 
-bool MusicExplorerView::moveExpandedPanelToRow(int row)
+bool MusicExplorerView::placeExpandedPanelAtRow(int row)
 {
-    // Fast path for switching which album is expanded while a panel already
-    // exists and the grid structure is intact. Reusing the cards and inline
-    // table (instead of tearing everything down in rebuildLayout) avoids the
-    // flicker and focus loss that a full rebuild causes — especially after the
-    // tracklist has been interacted with.
-    if (m_expandedPanel == nullptr || m_columnCount <= 0 || row < 0 || row >= m_albums.size()
+    // Expand or switch the expanded album while the grid structure is intact by
+    // creating/moving just the panel — the cards and their loaded artwork stay
+    // put. A full rebuildLayout would destroy and recreate every card, blanking
+    // all album art until the async artwork cache reloads it (a visible flash).
+    if (m_columnCount <= 0 || row < 0 || row >= m_albums.size()
         || m_cards.size() != m_albums.size() || m_gridRows.isEmpty()) {
         return false;
     }
@@ -1050,13 +1049,21 @@ bool MusicExplorerView::moveExpandedPanelToRow(int row)
     if (blockUpdates) {
         m_scroll->viewport()->setUpdatesEnabled(false);
         m_content->setUpdatesEnabled(false);
-        m_expandedPanel->setUpdatesEnabled(false);
-        m_inlineTrackTable->setUpdatesEnabled(false);
     }
 
-    // Detach the panel from its current slot (without destroying it), then
-    // reinsert it right after the grid row that holds the newly expanded album.
-    m_rows->removeWidget(m_expandedPanel);
+    if (m_expandedPanel == nullptr) {
+        m_expandedPanel = new ExpandedPanel(m_content);
+        m_expandedPanel->setUpdatesEnabled(false);
+        m_inlineTrackTable->setUpdatesEnabled(false);
+        m_expandedPanel->layout()->addWidget(m_inlineTrackTable);
+        m_inlineTrackTable->show();
+    } else {
+        m_expandedPanel->setUpdatesEnabled(false);
+        m_inlineTrackTable->setUpdatesEnabled(false);
+        // Detach from the current slot (without destroying it) before reinserting.
+        m_rows->removeWidget(m_expandedPanel);
+    }
+
     int insertIndex = m_rows->count();
     for (int i = 0; i < m_rows->count(); ++i) {
         if (m_rows->itemAt(i)->widget() == m_gridRows.at(gridRow)) {
@@ -1065,6 +1072,9 @@ bool MusicExplorerView::moveExpandedPanelToRow(int row)
         }
     }
     m_rows->insertWidget(insertIndex, m_expandedPanel);
+    if (blockUpdates) {
+        m_expandedPanel->show();
+    }
 
     m_expandedAlbumRow = row;
     m_expandedAlbumTitle = m_albums.at(row).title;
@@ -1086,10 +1096,40 @@ bool MusicExplorerView::moveExpandedPanelToRow(int row)
     return true;
 }
 
+bool MusicExplorerView::removeExpandedPanelInPlace()
+{
+    // Collapse without a rebuild: drop just the panel and keep every card (and
+    // its artwork) alive so the grid does not flash.
+    if (m_expandedPanel == nullptr || m_cards.size() != m_albums.size() || m_gridRows.isEmpty()) {
+        return false;
+    }
+    const bool blockUpdates = isVisible();
+    if (blockUpdates) {
+        m_scroll->viewport()->setUpdatesEnabled(false);
+        m_content->setUpdatesEnabled(false);
+    }
+    m_inlineTrackTable->setParent(this);
+    m_inlineTrackTable->hide();
+    m_rows->removeWidget(m_expandedPanel);
+    m_expandedPanel->deleteLater();
+    m_expandedPanel = nullptr;
+    m_expandedAlbumRow = -1;
+    m_expandedAlbumTitle.clear();
+    setFocus(Qt::OtherFocusReason);
+    m_rows->activate();
+    updateCardSelection();
+    if (blockUpdates) {
+        m_content->setUpdatesEnabled(true);
+        m_scroll->viewport()->setUpdatesEnabled(true);
+        m_scroll->viewport()->update();
+    }
+    return true;
+}
+
 void MusicExplorerView::setExpandedAlbumRow(int row, bool focusTracks)
 {
     if (row < 0 || row >= m_albums.size()) return;
-    if (!moveExpandedPanelToRow(row)) {
+    if (!placeExpandedPanelAtRow(row)) {
         m_expandedAlbumRow = row;
         m_expandedAlbumTitle = m_albums.at(row).title;
         rebuildLayout();
@@ -1103,6 +1143,9 @@ void MusicExplorerView::setExpandedAlbumRow(int row, bool focusTracks)
 void MusicExplorerView::clearExpandedAlbum()
 {
     if (m_expandedAlbumTitle.isEmpty() && m_expandedAlbumRow < 0) {
+        return;
+    }
+    if (removeExpandedPanelInPlace()) {
         return;
     }
     m_expandedAlbumRow = -1;
