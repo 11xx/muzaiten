@@ -21,6 +21,7 @@ private slots:
     void expandsExactlyOneAlbumAndShowsAllTracks();
     void mouseClickExpandsAndShowsVisibleTracks();
     void selectionMovesExpandedPanel();
+    void switchingExpandedAlbumReusesCardsAndKeepsFocus();
     void currentCardUsesFullActiveHighlight();
     void albumActionsForwardSignals();
 
@@ -279,6 +280,37 @@ void MusicExplorerViewTest::selectionMovesExpandedPanel()
     QCOMPARE(view.expandedAlbumTitle(), QStringLiteral("Three"));
     QCOMPARE(view.expandedPanelCountForTests(), 1);
     QCOMPARE(view.inlineTrackTableForTests()->rowCount(), 1);
+}
+
+void MusicExplorerViewTest::switchingExpandedAlbumReusesCardsAndKeepsFocus()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.columnCountForTests() >= 3);
+
+    view.selectAlbumTitle(QStringLiteral("One"), true);
+    QCOMPARE(view.expandedAlbumTitle(), QStringLiteral("One"));
+    QVERIFY(view.inlineTrackTableForTests()->hasFocus());
+
+    QVector<QWidget *> before;
+    for (int row = 0; row < 3; ++row) {
+        before.push_back(view.cardWidgetForTests(row));
+    }
+
+    view.selectAlbumTitle(QStringLiteral("Three"), false);
+    QCOMPARE(view.expandedAlbumTitle(), QStringLiteral("Three"));
+    QCOMPARE(view.expandedPanelCountForTests(), 1);
+
+    // Switching the expanded album reuses the existing cards instead of tearing
+    // the grid down, and leaves the tracklist's keyboard focus untouched.
+    for (int row = 0; row < 3; ++row) {
+        QCOMPARE(view.cardWidgetForTests(row), before.at(row));
+    }
+    QVERIFY(view.inlineTrackTableForTests()->hasFocus());
 }
 
 void MusicExplorerViewTest::currentCardUsesFullActiveHighlight()

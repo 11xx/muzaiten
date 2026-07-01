@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QDynamicPropertyChangeEvent>
+#include <QFocusEvent>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QJsonDocument>
@@ -237,13 +238,18 @@ protected:
         QStyleOptionViewItem option;
         option.initFrom(this);
         option.widget = this;
+        // Read selection colors from the Active group regardless of the window's
+        // activation state: whether the panel reads as focused is decided by
+        // isActiveMainPanel (mainPanelActive / real focus), not by the OS window
+        // being active, so window (de)activation must not repaint a new color.
+        option.palette.setCurrentColorGroup(QPalette::Active);
         const QRect outer = rect().adjusted(2, 2, -3, -3);
         // The current (selected) card gets a filled highlight; when it is also
         // the expanded one it keeps the softer translucent connector tint that
         // blends into the panel below.
         const bool filledSelection = m_current && !m_expanded;
         if (m_expanded) {
-            QColor fill = palette().color(QPalette::Highlight);
+            QColor fill = option.palette.color(QPalette::Highlight);
             fill.setAlpha(56);
             painter.setPen(Qt::NoPen);
             painter.setBrush(fill);
@@ -255,7 +261,7 @@ protected:
             painter.setBrush(SelectionColors::selectedFill(option));
             painter.drawRoundedRect(outer, 7, 7);
         } else if (underMouse()) {
-            QColor hover = palette().color(QPalette::Highlight);
+            QColor hover = option.palette.color(QPalette::Highlight);
             hover.setAlpha(24);
             painter.setPen(Qt::NoPen);
             painter.setBrush(hover);
@@ -715,10 +721,15 @@ bool MusicExplorerView::event(QEvent *event)
     switch (event->type()) {
     // The current card's highlight follows this panel's active state (see
     // SelectionColors::isActiveMainPanel), so repaint it whenever focus moves
-    // in/out or PanelSearchController toggles the mainPanelActive property.
+    // in/out or PanelSearchController toggles the mainPanelActive property. Skip
+    // focus events caused by the OS window (de)activating — that is idle
+    // behavior that leaves the panel's active state unchanged, so a repaint
+    // would only flash the grid.
     case QEvent::FocusIn:
     case QEvent::FocusOut:
-        refreshActiveHighlight();
+        if (static_cast<QFocusEvent *>(event)->reason() != Qt::ActiveWindowFocusReason) {
+            refreshActiveHighlight();
+        }
         break;
     case QEvent::DynamicPropertyChange:
         if (static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName() == "mainPanelActive") {
@@ -748,6 +759,16 @@ void MusicExplorerView::changeEvent(QEvent *event)
         || event->type() == QEvent::StyleChange) {
         if (m_expandedPanel != nullptr) {
             refreshExpandedPanelBackdrop();
+        }
+    } else if (event->type() == QEvent::ActivationChange && window()->isActiveWindow() && isVisible()) {
+        // Some window managers reactivate the window without restoring keyboard
+        // focus, leaving nothing focused so hjkl stop working until a click.
+        // When we regain activation as the visible screen and no widget holds
+        // focus, put it back on whichever panel widget last had it.
+        if (QApplication::focusWidget() == nullptr) {
+            if (QWidget *target = focusWidget(); target != nullptr) {
+                target->setFocus(Qt::ActiveWindowFocusReason);
+            }
         }
     }
 }
@@ -824,6 +845,13 @@ void MusicExplorerView::rebuildLayout()
     m_rebuildingLayout = true;
     const bool blockUpdates = isVisible();
     const QString expandedTitle = m_expandedAlbumTitle;
+    // Preserve keyboard focus across the teardown: clearContent() reparents and
+    // hides the inline track table, which otherwise drops focus (and repaints)
+    // when it was the focused widget.
+    QWidget *priorFocus = QApplication::focusWidget();
+    const bool tracksHadFocus = priorFocus != nullptr
+        && (priorFocus == m_inlineTrackTable || m_inlineTrackTable->isAncestorOf(priorFocus));
+    const bool viewHadFocus = priorFocus == this;
     if (blockUpdates) {
         m_scroll->viewport()->setUpdatesEnabled(false);
         m_content->setUpdatesEnabled(false);
@@ -852,6 +880,7 @@ void MusicExplorerView::rebuildLayout()
         }
         grid->setColumnStretch(m_columnCount, 1);
         m_rows->addWidget(rowWidget);
+        m_gridRows.push_back(rowWidget);
         if (isVisible()) {
             rowWidget->show();
         }
@@ -885,6 +914,14 @@ void MusicExplorerView::rebuildLayout()
         m_expandedPanel->setUpdatesEnabled(true);
         m_expandedPanel->update();
         m_inlineTrackTable->viewport()->update();
+    }
+    // Restore focus to the inline tracklist if it held it before the teardown
+    // (clearContent() reparents and hides it, dropping focus). The view itself
+    // is never reparented, so a view that had focus keeps it without help —
+    // re-setting it here would fire a spurious FocusIn that re-enters
+    // setActivePanel and fights an in-progress panel transition.
+    if (tracksHadFocus && !viewHadFocus && m_expandedPanel != nullptr) {
+        m_inlineTrackTable->setFocus(Qt::OtherFocusReason);
     }
     if (blockUpdates) {
         m_content->setUpdatesEnabled(true);
@@ -949,6 +986,7 @@ void MusicExplorerView::clearContent()
     m_inlineTrackTable->hide();
     m_expandedPanel = nullptr;
     m_cards.clear();
+    m_gridRows.clear();
     while (QLayoutItem *item = m_rows->takeAt(0)) {
         if (QWidget *widget = item->widget()) {
             widget->hide();
@@ -992,12 +1030,70 @@ void MusicExplorerView::setCurrentRowInternal(int row, bool ensureVisible)
     }
 }
 
+bool MusicExplorerView::moveExpandedPanelToRow(int row)
+{
+    // Fast path for switching which album is expanded while a panel already
+    // exists and the grid structure is intact. Reusing the cards and inline
+    // table (instead of tearing everything down in rebuildLayout) avoids the
+    // flicker and focus loss that a full rebuild causes — especially after the
+    // tracklist has been interacted with.
+    if (m_expandedPanel == nullptr || m_columnCount <= 0 || row < 0 || row >= m_albums.size()
+        || m_cards.size() != m_albums.size() || m_gridRows.isEmpty()) {
+        return false;
+    }
+    const int gridRow = row / m_columnCount;
+    if (gridRow < 0 || gridRow >= m_gridRows.size() || m_gridRows.at(gridRow) == nullptr) {
+        return false;
+    }
+
+    const bool blockUpdates = isVisible();
+    if (blockUpdates) {
+        m_scroll->viewport()->setUpdatesEnabled(false);
+        m_content->setUpdatesEnabled(false);
+        m_expandedPanel->setUpdatesEnabled(false);
+        m_inlineTrackTable->setUpdatesEnabled(false);
+    }
+
+    // Detach the panel from its current slot (without destroying it), then
+    // reinsert it right after the grid row that holds the newly expanded album.
+    m_rows->removeWidget(m_expandedPanel);
+    int insertIndex = m_rows->count();
+    for (int i = 0; i < m_rows->count(); ++i) {
+        if (m_rows->itemAt(i)->widget() == m_gridRows.at(gridRow)) {
+            insertIndex = i + 1;
+            break;
+        }
+    }
+    m_rows->insertWidget(insertIndex, m_expandedPanel);
+
+    m_expandedAlbumRow = row;
+    m_expandedAlbumTitle = m_albums.at(row).title;
+    refreshExpandedTracks();
+    refreshExpandedPanelBackdrop();
+    m_rows->activate();
+    updateCardSelection();
+    updateExpandedPanelGeometry();
+
+    if (blockUpdates) {
+        m_inlineTrackTable->setUpdatesEnabled(true);
+        m_expandedPanel->setUpdatesEnabled(true);
+        m_expandedPanel->update();
+        m_inlineTrackTable->viewport()->update();
+        m_content->setUpdatesEnabled(true);
+        m_scroll->viewport()->setUpdatesEnabled(true);
+        m_scroll->viewport()->update();
+    }
+    return true;
+}
+
 void MusicExplorerView::setExpandedAlbumRow(int row, bool focusTracks)
 {
     if (row < 0 || row >= m_albums.size()) return;
-    m_expandedAlbumRow = row;
-    m_expandedAlbumTitle = m_albums.at(row).title;
-    rebuildLayout();
+    if (!moveExpandedPanelToRow(row)) {
+        m_expandedAlbumRow = row;
+        m_expandedAlbumTitle = m_albums.at(row).title;
+        rebuildLayout();
+    }
     if (focusTracks) {
         m_inlineTrackTable->setFocus(Qt::OtherFocusReason);
     }

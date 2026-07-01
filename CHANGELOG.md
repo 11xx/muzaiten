@@ -54,6 +54,18 @@
 - The selected album in Music Explorer's grid now uses the same full-strength
   highlight as the library album grid when the panel is active, instead of a
   permanently dimmed tint, and dims only when another panel takes focus.
+- Music Explorer's expanded tracklist selection now fills with the full app
+  highlight to match its high-contrast text (it previously read as dimmed under
+  the bright foreground), and its header reuses the even-row zebra shade so it
+  tracks the album art tint instead of standing out as a flat opaque bar.
+- Music Explorer no longer flashes the album grid or drops keyboard focus when
+  the window is (de)activated by the window manager — selection colors are read
+  from the active palette group so idle activation repaints to identical pixels,
+  and keyboard focus is restored to the last-focused panel on reactivation so
+  `hjkl` keep working without a click.
+- Switching the expanded album in Music Explorer now reuses the existing grid
+  cards and inline tracklist instead of rebuilding the whole middle panel, so it
+  no longer flickers after the tracklist has been focused or navigated.
 
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join
