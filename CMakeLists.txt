@@ -51,6 +51,7 @@ set(MUZAITEN_SOURCES
     src/app/AppPaths.cpp
     src/app/DemoScreens.cpp
     src/app/MuzaitenApplication.cpp
+    src/core/GenreTags.cpp
     src/core/HumanQuantity.cpp
     src/core/MetadataBlob.cpp
     src/core/MusicSort.cpp
@@ -162,6 +163,7 @@ set(MUZAITEN_HEADERS
     src/app/MuzaitenApplication.h
     src/core/Album.h
     src/core/Artist.h
+    src/core/GenreTags.h
     src/core/HumanQuantity.h
     src/core/MetadataBlob.h
     src/core/MusicBrainzIds.h
@@ -320,6 +322,7 @@ add_executable(muzaitenctl
     src/app/AppPaths.cpp
     src/ipc/IpcSocket.cpp
     src/db/Database.cpp
+    src/core/GenreTags.cpp
     src/core/MetadataBlob.cpp
     src/core/Rating.cpp
     src/fs/PathResolver.cpp

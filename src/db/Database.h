@@ -110,6 +110,10 @@ public:
     bool updateScannedTrackRating(const QString &trackPath, int rating0To100, Rating::Source source, qint64 fileSize, qint64 fileMtime);
     bool setUserAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     bool clearUserAlbumRating(const QString &albumArtistName, const QString &albumTitle);
+    // Display-form genres for a library track (see track_genres, Schema v10),
+    // ordered by genre_folded; empty when the track is unknown or has no
+    // genre tag.
+    QStringList genresForTrack(const QString &path) const;
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

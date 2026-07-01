@@ -39,6 +39,7 @@ add_test(NAME test_metadata_blob COMMAND test_metadata_blob)
 add_executable(test_schema
     test_schema.cpp
     ../src/app/AppPaths.cpp
+    ../src/core/GenreTags.cpp
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
@@ -56,6 +57,7 @@ add_executable(test_search_cli
     test_search_cli.cpp
     ../src/app/AppPaths.cpp
     ../src/cli/SearchCli.cpp
+    ../src/core/GenreTags.cpp
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
@@ -122,6 +124,7 @@ add_executable(test_scan_pipeline
     ../src/scanner/LibraryScanner.cpp
     ../src/scanner/TagReader.cpp
     ../src/scanner/TagRating.cpp
+    ../src/core/GenreTags.cpp
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
@@ -556,6 +559,7 @@ if(MUZAITEN_BUILD_MATCH_BENCH)
 add_executable(playlist_match_bench
     ../tools/playlist-import/match_bench.cpp
     ../src/app/AppPaths.cpp
+    ../src/core/GenreTags.cpp
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp

@@ -1,3 +1,5 @@
+#include "core/GenreTags.h"
+#include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "search/IndexCache.h"
 #include "search/SearchRecord.h"
@@ -34,6 +36,10 @@ private slots:
     void searchCacheRoundTrips();
     void searchCacheSignatureDetectsChange();
     void databaseCacheMemoryCanBeReleasedAndRestored();
+    void trackGenresPopulatedOnUpsert();
+    void trackGenresBackfillOnceFromBlobs();
+    void trackGenresCascadeOnTrackDelete();
+    void genreTagsSplitsAndFolds();
 };
 
 namespace {
@@ -70,7 +76,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 9);
+    QCOMPARE(query.value(0).toInt(), 10);
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
@@ -652,6 +658,180 @@ void SchemaTest::searchCacheSignatureDetectsChange()
     const Search::IndexCache::Loaded loaded = Search::IndexCache::read(path);
     QVERIFY(loaded.ok);
     QVERIFY(!(loaded.signature == after)); // detected as stale vs current
+}
+
+void SchemaTest::trackGenresPopulatedOnUpsert()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-genre-upsert-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    {
+        MetadataBlob::FullMetadata meta;
+        meta.tags.insert(QStringLiteral("GENRE"), {
+            QStringLiteral("Dream Pop; Shoegaze"),
+            QStringLiteral("dream pop"),
+            QStringLiteral("Rock/Post-Rock"),
+        });
+        const MetadataBlob::Encoded encoded = MetadataBlob::encode(meta);
+        track.fullMetadataBlob = encoded.data;
+        track.fullMetadataRawSize = encoded.rawSize;
+    }
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+
+    QStringList genres = database.genresForTrack(track.path);
+    QCOMPARE(genres.size(), 4);
+    // "Dream Pop" (first-seen casing) wins over the later lowercase duplicate.
+    QVERIFY(genres.contains(QStringLiteral("Dream Pop")));
+    QVERIFY(!genres.contains(QStringLiteral("dream pop")));
+    QVERIFY(genres.contains(QStringLiteral("Shoegaze")));
+    QVERIFY(genres.contains(QStringLiteral("Rock")));
+    QVERIFY(genres.contains(QStringLiteral("Post-Rock")));
+
+    // Re-upserting the same path with a different GENRE tag must replace, not
+    // merge with, the previous genre set (delete-then-insert).
+    {
+        MetadataBlob::FullMetadata meta;
+        meta.tags.insert(QStringLiteral("GENRE"), {QStringLiteral("Ambient")});
+        const MetadataBlob::Encoded encoded = MetadataBlob::encode(meta);
+        track.fullMetadataBlob = encoded.data;
+        track.fullMetadataRawSize = encoded.rawSize;
+    }
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    genres = database.genresForTrack(track.path);
+    QCOMPARE(genres, QStringList{QStringLiteral("Ambient")});
+}
+
+void SchemaTest::trackGenresBackfillOnceFromBlobs()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString dbPath = temp.filePath(QStringLiteral("library.sqlite"));
+    const QString connectionName = QStringLiteral("schema-genre-backfill-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    {
+        MetadataBlob::FullMetadata meta;
+        meta.tags.insert(QStringLiteral("GENRE"), {QStringLiteral("Ambient")});
+        const MetadataBlob::Encoded encoded = MetadataBlob::encode(meta);
+        track.fullMetadataBlob = encoded.data;
+        track.fullMetadataRawSize = encoded.rawSize;
+    }
+
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+        QCOMPARE(database.genresForTrack(track.path), QStringList{QStringLiteral("Ambient")});
+    }
+
+    // Simulate a pre-migration-10 database: wipe the genre rows and the
+    // version-10 marker, then reopen. The backfill guard should fire once
+    // and repopulate track_genres from the blob already stored in the DB.
+    {
+        const QString rawConnection = QStringLiteral("schema-genre-backfill-raw-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), rawConnection);
+            raw.setDatabaseName(dbPath);
+            QVERIFY(raw.open());
+            QSqlQuery q(raw);
+            QVERIFY(q.exec(QStringLiteral("DELETE FROM track_genres")));
+            QVERIFY(q.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version = 10")));
+            raw.close();
+        }
+        QSqlDatabase::removeDatabase(rawConnection);
+    }
+
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QCOMPARE(database.genresForTrack(track.path), QStringList{QStringLiteral("Ambient")});
+    }
+
+    // Now delete only the track_genres rows but leave the version-10 marker in
+    // place: the guard must hold, so reopening must not repopulate.
+    {
+        const QString rawConnection = QStringLiteral("schema-genre-backfill-raw2-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), rawConnection);
+            raw.setDatabaseName(dbPath);
+            QVERIFY(raw.open());
+            QSqlQuery q(raw);
+            QVERIFY(q.exec(QStringLiteral("DELETE FROM track_genres")));
+            raw.close();
+        }
+        QSqlDatabase::removeDatabase(rawConnection);
+    }
+
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QVERIFY(database.genresForTrack(track.path).isEmpty());
+    }
+}
+
+void SchemaTest::trackGenresCascadeOnTrackDelete()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString connectionName = QStringLiteral("schema-genre-cascade-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    Track track = makeTrack(temp, QStringLiteral("01.flac"), 80);
+    {
+        MetadataBlob::FullMetadata meta;
+        meta.tags.insert(QStringLiteral("GENRE"), {QStringLiteral("Ambient")});
+        const MetadataBlob::Encoded encoded = MetadataBlob::encode(meta);
+        track.fullMetadataBlob = encoded.data;
+        track.fullMetadataRawSize = encoded.rawSize;
+    }
+    QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    QCOMPARE(database.genresForTrack(track.path), QStringList{QStringLiteral("Ambient")});
+
+    QSqlQuery deleteTrack(QSqlDatabase::database(connectionName));
+    deleteTrack.prepare(QStringLiteral("DELETE FROM tracks WHERE path = ?"));
+    deleteTrack.addBindValue(track.path);
+    QVERIFY(deleteTrack.exec());
+
+    QVERIFY(database.genresForTrack(track.path).isEmpty());
+
+    QSqlQuery countQuery(QSqlDatabase::database(connectionName));
+    QVERIFY(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM track_genres")));
+    QVERIFY(countQuery.next());
+    QCOMPARE(countQuery.value(0).toInt(), 0);
+}
+
+void SchemaTest::genreTagsSplitsAndFolds()
+{
+    MetadataBlob::FullMetadata meta;
+    meta.tags.insert(QStringLiteral("GENRE"), {
+        QStringLiteral("Dream Pop; Shoegaze"),
+        QStringLiteral("dream pop"),
+        QStringLiteral("Rock/Post-Rock,Ambient"),
+        QStringLiteral("Noise") + QChar(u'\0') + QStringLiteral("Drone"),
+        QStringLiteral("   "),
+    });
+
+    const QStringList genres = GenreTags::fromMetadata(meta);
+    // 7 unique genres: the lowercase "dream pop" duplicate and the
+    // all-whitespace value are both dropped.
+    QCOMPARE(genres.size(), 7);
+    QVERIFY(genres.contains(QStringLiteral("Dream Pop")));
+    QVERIFY(genres.contains(QStringLiteral("Shoegaze")));
+    QVERIFY(genres.contains(QStringLiteral("Rock")));
+    QVERIFY(genres.contains(QStringLiteral("Post-Rock")));
+    QVERIFY(genres.contains(QStringLiteral("Ambient")));
+    QVERIFY(genres.contains(QStringLiteral("Noise")));
+    QVERIFY(genres.contains(QStringLiteral("Drone")));
+
+    QCOMPARE(GenreTags::folded(QStringLiteral("  Dream   Pop ")), QStringLiteral("dream pop"));
+    QVERIFY(GenreTags::folded(QStringLiteral("   ")).isEmpty());
+
+    QVERIFY(GenreTags::fromMetadata(MetadataBlob::FullMetadata{}).isEmpty());
 }
 
 QTEST_MAIN(SchemaTest)
