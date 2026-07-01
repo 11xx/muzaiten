@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [2026.07.01.2]
+
+### Packaging
+
+- Release tarballs now contain the installed prefix tree directly instead of a
+  staging-directory `./` entry, avoiding accidental target-directory permission
+  changes when extracting the prebuilt archive.
+
 ## [2026.07.01.1]
 
 ### Packaging
