@@ -10,6 +10,7 @@
 
 #include <QApplication>
 #include <QContextMenuEvent>
+#include <QDynamicPropertyChangeEvent>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QJsonDocument>
@@ -237,11 +238,21 @@ protected:
         option.initFrom(this);
         option.widget = this;
         const QRect outer = rect().adjusted(2, 2, -3, -3);
-        if (m_current || m_expanded) {
+        // The current (selected) card gets a filled highlight; when it is also
+        // the expanded one it keeps the softer translucent connector tint that
+        // blends into the panel below.
+        const bool filledSelection = m_current && !m_expanded;
+        if (m_expanded) {
             QColor fill = palette().color(QPalette::Highlight);
-            fill.setAlpha(m_expanded ? 56 : 34);
+            fill.setAlpha(56);
             painter.setPen(Qt::NoPen);
             painter.setBrush(fill);
+            painter.drawRoundedRect(outer, 7, 7);
+        } else if (m_current) {
+            // Match the library album grid: the full active highlight when this
+            // panel holds focus, dimmed only when another panel is active.
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(SelectionColors::selectedFill(option));
             painter.drawRoundedRect(outer, 7, 7);
         } else if (underMouse()) {
             QColor hover = palette().color(QPalette::Highlight);
@@ -260,13 +271,15 @@ protected:
         }
 
         const QRect titleRect(left, artRect.bottom() + 8, m_artSize, fontMetrics().height() * 2 + 2);
-        painter.setPen(palette().color(QPalette::Text));
+        painter.setPen(filledSelection ? SelectionColors::selectedText(option)
+                                        : palette().color(QPalette::Text));
         painter.drawText(titleRect, m_textAlignment | Qt::AlignTop | Qt::TextWordWrap,
                          fontMetrics().elidedText(m_album.title, Qt::ElideRight, m_artSize * 2));
 
         const QString year = displayYearFromAlbum(m_album);
         if (!year.isEmpty()) {
-            painter.setPen(palette().color(QPalette::Disabled, QPalette::Text));
+            painter.setPen(filledSelection ? SelectionColors::selectedText(option)
+                                           : palette().color(QPalette::Disabled, QPalette::Text));
             painter.drawText(QRect(left, titleRect.bottom() + 2, m_artSize, fontMetrics().height()),
                              m_textAlignment | Qt::AlignVCenter, year);
         }
@@ -694,6 +707,36 @@ void MusicExplorerView::resizeEvent(QResizeEvent *event)
         rebuildLayoutLater();
     } else {
         updateExpandedPanelGeometry();
+    }
+}
+
+bool MusicExplorerView::event(QEvent *event)
+{
+    switch (event->type()) {
+    // The current card's highlight follows this panel's active state (see
+    // SelectionColors::isActiveMainPanel), so repaint it whenever focus moves
+    // in/out or PanelSearchController toggles the mainPanelActive property.
+    case QEvent::FocusIn:
+    case QEvent::FocusOut:
+        refreshActiveHighlight();
+        break;
+    case QEvent::DynamicPropertyChange:
+        if (static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName() == "mainPanelActive") {
+            refreshActiveHighlight();
+        }
+        break;
+    default:
+        break;
+    }
+    return QWidget::event(event);
+}
+
+void MusicExplorerView::refreshActiveHighlight()
+{
+    for (const int row : {m_currentAlbumRow, m_expandedAlbumRow}) {
+        if (row >= 0 && row < m_cards.size() && m_cards.at(row) != nullptr) {
+            m_cards.at(row)->update();
+        }
     }
 }
 

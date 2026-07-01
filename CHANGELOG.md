@@ -51,6 +51,9 @@
   switching directly between expanded albums no longer flashes the intermediate
   collapsed layout. Albums without artwork now keep a neutral panel background
   instead of falling back to the app highlight color.
+- The selected album in Music Explorer's grid now uses the same full-strength
+  highlight as the library album grid when the panel is active, instead of a
+  permanently dimmed tint, and dims only when another panel takes focus.
 
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join

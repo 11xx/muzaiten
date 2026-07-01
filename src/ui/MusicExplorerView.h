@@ -85,6 +85,7 @@ signals:
     void trackTableViewSettingsChanged();
 
 protected:
+    bool event(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void changeEvent(QEvent *event) override;
@@ -105,6 +106,7 @@ private:
     void setExpandedAlbumRow(int row, bool focusTracks);
     void clearExpandedAlbum();
     void updateCardSelection();
+    void refreshActiveHighlight();
     void updateExpandedPanelGeometry();
     void refreshExpandedPanelBackdrop();
     void applyExpandedTrackPalette(const QColor &tint);
