@@ -12,6 +12,12 @@
   comes later). Imported rows live in their own tables and never re-scrobble;
   re-running is cheap and incremental. The data feeds the upcoming
   recommendation engine.
+- Queryable genres: the GENRE tags already captured in each track's metadata
+  are now mirrored into a `track_genres` table (split on common separators,
+  deduplicated case-insensitively), populated on scan and backfilled once from
+  the existing library without a rescan. Groundwork for genre-based
+  recommendations; the accompanying schema bump triggers a one-time search
+  index rebuild on first launch.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
