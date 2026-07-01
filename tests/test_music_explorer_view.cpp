@@ -24,6 +24,7 @@ private slots:
     void switchingExpandedAlbumReusesCardsAndKeepsFocus();
     void expandAndCollapseReuseCards();
     void redundantSetAlbumsKeepsCards();
+    void albumDoubleClickDoesNotPlay();
     void currentCardUsesFullActiveHighlight();
     void albumActionsForwardSignals();
 
@@ -367,6 +368,24 @@ void MusicExplorerViewTest::redundantSetAlbumsKeepsCards()
     for (int row = 0; row < 3; ++row) {
         QCOMPARE(view.cardWidgetForTests(row), before.at(row));
     }
+}
+
+void MusicExplorerViewTest::albumDoubleClickDoesNotPlay()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.columnCountForTests() >= 3);
+
+    QWidget *card = view.cardWidgetForTests(1);
+    QVERIFY(card != nullptr);
+    QSignalSpy playSpy(&view, &MusicExplorerView::albumPlayReplaceRequested);
+    // Double click must not replace the queue (matching the library album grid).
+    QTest::mouseDClick(card, Qt::LeftButton, Qt::NoModifier, card->rect().center());
+    QCOMPARE(playSpy.count(), 0);
 }
 
 void MusicExplorerViewTest::currentCardUsesFullActiveHighlight()

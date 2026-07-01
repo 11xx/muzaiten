@@ -73,6 +73,13 @@
   (re-selecting the same artist, returning to the view, unrelated rating
   changes): identical album sets are now a no-op, and genuine changes keep the
   cached art for albums that survive instead of clearing every cover.
+- Music Explorer album cards and the expanded panel now paint opaquely, so a
+  repaint during an expand/collapse/switch reflow no longer briefly blanks the
+  album art or text before redrawing it.
+- Double-clicking an album in Music Explorer no longer replaces the queue,
+  matching the library album grid: play actions come from the album's right-click
+  menu or from selecting tracks in the expanded tracklist. Single click still
+  selects and expands the album.
 
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join
