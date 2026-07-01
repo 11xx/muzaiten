@@ -23,6 +23,7 @@ private slots:
     void selectionMovesExpandedPanel();
     void switchingExpandedAlbumReusesCardsAndKeepsFocus();
     void expandAndCollapseReuseCards();
+    void redundantSetAlbumsKeepsCards();
     void currentCardUsesFullActiveHighlight();
     void albumActionsForwardSignals();
 
@@ -340,6 +341,29 @@ void MusicExplorerViewTest::expandAndCollapseReuseCards()
     // Collapsing removes just the panel and keeps the same cards.
     view.collapseExpandedAlbum();
     QCOMPARE(view.expandedPanelCountForTests(), 0);
+    for (int row = 0; row < 3; ++row) {
+        QCOMPARE(view.cardWidgetForTests(row), before.at(row));
+    }
+}
+
+void MusicExplorerViewTest::redundantSetAlbumsKeepsCards()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.columnCountForTests() >= 3);
+
+    QVector<QWidget *> before;
+    for (int row = 0; row < 3; ++row) {
+        before.push_back(view.cardWidgetForTests(row));
+    }
+
+    // Re-applying an identical album set must not rebuild the grid (which would
+    // clear artwork and flash every card).
+    view.setAlbums(makeAlbums());
     for (int row = 0; row < 3; ++row) {
         QCOMPARE(view.cardWidgetForTests(row), before.at(row));
     }
