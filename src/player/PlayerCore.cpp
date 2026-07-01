@@ -187,11 +187,12 @@ void PlayerCore::next()
     if (m_queue.isEmpty()) {
         return;
     }
-    // Shuffle and repeat-all change what "next" means; a manual skip honours the
-    // same policy as auto-advance (a fresh decision, so library shuffle can still
-    // inject and shuffle re-rolls). Repeat-one is intentionally excluded: an
-    // explicit Next moves on rather than re-looping the current track.
-    if (m_shuffleMode != ShuffleMode::Off || m_repeatMode == RepeatMode::All) {
+    // Shuffle, repeat-all and radio change what "next" means; a manual skip
+    // honours the same policy as auto-advance (a fresh decision, so library
+    // shuffle can still inject, shuffle re-rolls, and radio extends past the
+    // queue end). Repeat-one is intentionally excluded: an explicit Next moves on
+    // rather than re-looping the current track.
+    if (m_shuffleMode != ShuffleMode::Off || m_repeatMode == RepeatMode::All || m_radioActive) {
         const AutoNext target = decideAutoNext();
         if (target.index >= 0 || !target.injected.path.isEmpty()) {
             applyAutoNext(target);
@@ -751,6 +752,17 @@ void PlayerCore::setLibraryShufflePercent(int percent)
     emit libraryShufflePercentChanged(m_libraryShufflePercent);
 }
 
+void PlayerCore::setRadioActive(bool active)
+{
+    if (m_radioActive == active) {
+        return;
+    }
+    m_radioActive = active;
+    // Deactivating clears only the flag: the queue, shuffle/repeat state and the
+    // installed radio provider are left as-is for the owner to tear down.
+    emit radioActiveChanged(m_radioActive);
+}
+
 PlayerCore::AutoNext PlayerCore::decideAutoNext()
 {
     if (m_queue.isEmpty() || m_queueIndex < 0) {
@@ -761,6 +773,26 @@ PlayerCore::AutoNext PlayerCore::decideAutoNext()
     // already heard until the trail is spent, then resume fresh randomness.
     if (m_shuffleMode != ShuffleMode::Off && !m_shuffleForward.isEmpty()) {
         return {std::clamp(m_shuffleForward.last(), 0, static_cast<int>(m_queue.size()) - 1), {}};
+    }
+    // Radio session: a scored auto-queue. Queued rows still win — a mid-queue
+    // advance plays the plain next row (play-next / user appends keep priority) —
+    // but past the queue's end we extend with a fresh recommendation pick. This
+    // deliberately precedes the library-shuffle percent roll below: a radio
+    // session must not be diluted by random library pulls. If the provider yields
+    // nothing, fall through to the normal shuffle/end-of-queue/repeat handling.
+    if (m_radioActive && m_radioTracks) {
+        if (m_queueIndex + 1 < m_queue.size()) {
+            return {m_queueIndex + 1, {}};
+        }
+        QSet<QString> exclude;
+        exclude.reserve(m_queue.size());
+        for (const Track &track : m_queue) {
+            exclude.insert(track.path);
+        }
+        const QVector<Track> picks = m_radioTracks(1, exclude);
+        if (!picks.isEmpty() && !picks.first().path.isEmpty()) {
+            return {-1, picks.first()};
+        }
     }
     // Library-wide shuffle: with the configured probability, pull a fresh track
     // from the whole library instead of advancing within the queue.

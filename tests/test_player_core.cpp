@@ -110,6 +110,11 @@ private slots:
     void shuffleAppendAndPlayRefreshesBucket();
     void shuffleBackwardJumpDoesNotBadgePlayNext();
     void libraryShuffleInjectsLibraryTrack();
+    void radioMidQueueAdvancesLinearly();
+    void radioAtEndInjectsProviderPickOnAutoAdvance();
+    void radioAtEndInjectsProviderPickOnManualNext();
+    void radioEmptyProviderFallsBackToEndOfQueue();
+    void radioInactiveLeavesShuffleUntouched();
     void dsdTakeoverDefersThenStartsNatively();
     void declinedDsdSkipsContiguousBlockUntilPlaybackStarts();
     void declinedDsdUnderRepeatAllStopsInsteadOfLooping();
@@ -653,6 +658,110 @@ void PlayerCoreTest::declinedDsdUnderRepeatAllStopsInsteadOfLooping()
 
     QVERIFY(m_backend->playedUrls.isEmpty());
     QVERIFY(m_backend->stopCalls > 0);
+}
+
+void PlayerCoreTest::radioMidQueueAdvancesLinearly()
+{
+    // Radio active but not at the queue end: queued rows keep priority, so a
+    // gapless advance plays the plain next row — no provider pull, no injection.
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    int radioCalls = 0;
+    m_core->setRadioProvider([&radioCalls](int, const QSet<QString> &) {
+        ++radioCalls;
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setRadioActive(true);
+    m_core->playAt(0);
+
+    QSignalSpy injected(m_core.get(), &PlayerCore::aboutToInjectLibraryTrack);
+    emit m_backend->preparedTrackStarted();
+
+    QCOMPARE(m_core->queueIndex(), 1);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+    QCOMPARE(m_core->queue().size(), 3);
+    QCOMPARE(injected.count(), 0);
+    QCOMPARE(radioCalls, 0);
+}
+
+void PlayerCoreTest::radioAtEndInjectsProviderPickOnAutoAdvance()
+{
+    // At the queue end, a natural finish pulls a radio pick and injects it via
+    // aboutToInjectLibraryTrack (queue-only semantics), exactly like shuffle.
+    m_core->resetQueue(makeTracks({"/a"}));
+    m_core->setRadioProvider([](int, const QSet<QString> &) {
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setRadioActive(true);
+    m_core->playAt(0);
+
+    QSignalSpy injected(m_core.get(), &PlayerCore::aboutToInjectLibraryTrack);
+    QSignalSpy userAdd(m_core.get(), &PlayerCore::aboutToAddTracks);
+    emit m_backend->finished();
+
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/radio"));
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/radio"));
+    QCOMPARE(injected.count(), 1);
+    QCOMPARE(injected.first().first().value<Track>().path, QStringLiteral("/radio"));
+    QCOMPARE(userAdd.count(), 0);  // radio picks are never user edits
+}
+
+void PlayerCoreTest::radioAtEndInjectsProviderPickOnManualNext()
+{
+    // Manual Next at the queue end must also route through the radio provider,
+    // even with shuffle off (the branch next() would otherwise clamp on).
+    m_core->resetQueue(makeTracks({"/a"}));
+    m_core->setRadioProvider([](int, const QSet<QString> &) {
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setRadioActive(true);
+    m_core->playAt(0);
+
+    QSignalSpy injected(m_core.get(), &PlayerCore::aboutToInjectLibraryTrack);
+    m_core->next();
+
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/radio"));
+    QCOMPARE(injected.count(), 1);
+}
+
+void PlayerCoreTest::radioEmptyProviderFallsBackToEndOfQueue()
+{
+    // A provider that yields nothing falls through to the normal end-of-queue
+    // behaviour: the pipeline stops, queue position survives.
+    m_core->resetQueue(makeTracks({"/a"}));
+    m_core->setRadioProvider([](int, const QSet<QString> &) { return QVector<Track>{}; });
+    m_core->setRadioActive(true);
+    m_core->playAt(0);
+
+    const int stopsBefore = m_backend->stopCalls;
+    emit m_backend->finished();
+
+    QCOMPARE(m_backend->stopCalls, stopsBefore + 1);
+    QCOMPARE(m_core->queue().size(), 1);
+    QCOMPARE(m_core->queueIndex(), 0);
+}
+
+void PlayerCoreTest::radioInactiveLeavesShuffleUntouched()
+{
+    // With radio inactive, a radio provider installed but idle must not interfere
+    // with the existing library-shuffle injection path.
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    int radioCalls = 0;
+    m_core->setRadioProvider([&radioCalls](int, const QSet<QString> &) {
+        ++radioCalls;
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setRandomTrackProvider([](int, const QSet<QString> &) {
+        return QVector<Track>{makeTrack(QStringLiteral("/lib"))};
+    });
+    m_core->setShuffleMode(ShuffleMode::Library);
+    m_core->setLibraryShufflePercent(100);
+    m_core->playAt(0);
+
+    m_core->next();
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/lib"));
+    QCOMPARE(radioCalls, 0);
 }
 
 QTEST_GUILESS_MAIN(PlayerCoreTest)

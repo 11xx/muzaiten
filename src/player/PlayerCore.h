@@ -60,6 +60,10 @@ public:
     PlaybackBackend *backend() const { return m_backend; }
     void setPathResolver(PathResolver resolver) { m_resolvePath = std::move(resolver); }
     void setRandomTrackProvider(RandomTrackProvider provider) { m_randomTracks = std::move(provider); }
+    // Radio's recommendation-driven provider. Same signature as the random
+    // provider, but consulted only while radio is active — orthogonal to
+    // shuffle/repeat, which keep their own persisted settings untouched.
+    void setRadioProvider(RandomTrackProvider provider) { m_radioTracks = std::move(provider); }
     void setPlaybackStartPlanner(PlaybackStartPlanner planner) { m_playbackStartPlanner = std::move(planner); }
 
     const QVector<Track> &queue() const { return m_queue; }
@@ -76,6 +80,13 @@ public:
     void setShuffleMode(ShuffleMode mode);
     // Chance (0..100) that a library-wide-shuffle advance pulls a fresh track.
     void setLibraryShufflePercent(int percent);
+
+    // -- radio --------------------------------------------------------------
+    // A radio session installs a scored provider (setRadioProvider) and, while
+    // active, extends past the queue's end with recommendation picks instead of
+    // stopping. Orthogonal to shuffle/repeat; deactivating clears nothing else.
+    bool radioActive() const { return m_radioActive; }
+    void setRadioActive(bool active);
 
     // -- transport ---------------------------------------------------------
     void playAt(int index, bool notifyScrobbler = true, bool startPaused = false, bool explicitJump = false);
@@ -119,10 +130,11 @@ signals:
     // Emitted before tracks are added, so the owner can apply its queue
     // identity policy (append to source playlist / mark spontaneous).
     void aboutToAddTracks(const QVector<Track> &tracks);
-    // Emitted before a library-wide-shuffle injection appends a fresh, non-source
-    // track that the player itself chose (never a user edit). Distinct from
-    // aboutToAddTracks: the owner must treat the track as queue-only and must not
-    // mirror it into any backing playlist, since it was never part of that source.
+    // Emitted before a library-wide-shuffle OR radio injection appends a fresh,
+    // non-source track that the player itself chose (never a user edit). Distinct
+    // from aboutToAddTracks: the owner must treat the track as queue-only and must
+    // not mirror it into any backing playlist, since it was never part of that
+    // source — exactly the semantics a radio session wants for its picks.
     void aboutToInjectLibraryTrack(const Track &track);
     // Queue contents/order changed; observers re-derive every queue view.
     void queueChanged();
@@ -152,6 +164,7 @@ signals:
     void repeatModeChanged(RepeatMode mode);
     void shuffleModeChanged(ShuffleMode mode);
     void libraryShufflePercentChanged(int percent);
+    void radioActiveChanged(bool active);
 
 private:
     // A resolved auto-advance target: either an existing queue row (`index`) or
@@ -191,6 +204,7 @@ private:
     PlaybackBackend *m_backend = nullptr;
     PathResolver m_resolvePath;
     RandomTrackProvider m_randomTracks;
+    RandomTrackProvider m_radioTracks;
     PlaybackStartPlanner m_playbackStartPlanner;
     QVector<Track> m_queue;
     int m_queueIndex = -1;
@@ -201,6 +215,7 @@ private:
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
     int m_libraryShufflePercent = 20;
+    bool m_radioActive = false;
     // The advance gaplessly prepared for the current track; committed when the
     // backend reports the prepared track started (so the index lands on the row
     // actually preloaded, not a freshly re-rolled shuffle pick).
