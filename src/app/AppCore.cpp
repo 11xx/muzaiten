@@ -15,6 +15,7 @@
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ListenTracker.h"
+#include "scrobble/PlayEventRecorder.h"
 #include "ui/MainWindow.h"
 
 #include <QApplication>
@@ -134,6 +135,30 @@ AppCore::AppCore(QObject *parent)
         }
     });
 
+    m_playEventRecorder = new PlayEventRecorder(this);
+    connect(m_playEventRecorder, &PlayEventRecorder::playEventReady, this,
+            [this](ListenHistoryStore::PlayEvent event) {
+                m_listenHistory->recordPlayEvent(event);
+            });
+    // Seed the recorder with the current shuffle mode and keep it in sync so the
+    // value at each track start is stamped into that track's play event.
+    m_playEventRecorder->setShuffleMode(shuffleModeToString(m_player->shuffleMode()));
+    connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
+        m_playEventRecorder->setShuffleMode(shuffleModeToString(mode));
+    });
+    connect(m_player, &PlayerCore::currentIndexChanged, this, [this](int, bool userInitiated) {
+        m_nextStartUserInitiated = userInitiated;
+    });
+    connect(m_player, &PlayerCore::aboutToInjectLibraryTrack, this, [this](const Track &) {
+        m_nextStartInjected = true;
+    });
+    connect(m_player, &PlayerCore::trackFinished, m_playEventRecorder,
+            &PlayEventRecorder::trackFinishedNaturally);
+    connect(m_player, &PlayerCore::playbackCleared, m_playEventRecorder,
+            &PlayEventRecorder::playbackCleared);
+    connect(qApp, &QCoreApplication::aboutToQuit, m_playEventRecorder,
+            &PlayEventRecorder::flushSessionEnd);
+
     m_listenBrainzThread = new QThread(this);
     m_listenBrainzScrobbler = new ListenBrainzScrobbler;
     m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
@@ -159,6 +184,11 @@ AppCore::AppCore(QObject *parent)
 
 AppCore::~AppCore()
 {
+    // Finalize any in-flight play event before teardown, defensively: the
+    // aboutToQuit signal may not fire on every exit path.
+    if (m_playEventRecorder != nullptr) {
+        m_playEventRecorder->flushSessionEnd();
+    }
     if (m_listenBrainzThread != nullptr) {
         m_listenBrainzThread->quit();
         m_listenBrainzThread->wait(3000);
@@ -177,6 +207,7 @@ SettingsStore *AppCore::settings() const { return m_state.get(); }
 ArtworkCache *AppCore::artworkCache() const { return m_artworkCache.get(); }
 ListenHistoryStore *AppCore::listenHistory() const { return m_listenHistory.get(); }
 ListenTracker *AppCore::listenTracker() const { return m_listenTracker; }
+PlayEventRecorder *AppCore::playEventRecorder() const { return m_playEventRecorder; }
 MprisService *AppCore::mpris() const { return m_mpris; }
 IpcServer *AppCore::ipc() const { return m_ipc; }
 MainWindow *AppCore::window() const { return m_window; }
@@ -358,6 +389,7 @@ void AppCore::setupMprisWiring()
         const bool playing = state == PlaybackBackend::State::Playing;
         m_mpris->setPlaybackState(state);
         m_listenTracker->playbackStateChanged(playing);
+        m_playEventRecorder->playbackStateChanged(playing);
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
         QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
         updateMprisCapabilities();
@@ -373,9 +405,22 @@ void AppCore::setupMprisWiring()
 void AppCore::setupScrobbleWiring()
 {
     connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool notifyScrobbler) {
-        if (notifyScrobbler) {
-            notifyScrobblersTrackStarted(track);
+        // Consume the attribution set by the preceding currentIndexChanged /
+        // aboutToInjectLibraryTrack regardless of notifyScrobbler, so a silent
+        // present/restore does not leave stale flags for the next real start.
+        const bool userInitiated = m_nextStartUserInitiated;
+        const bool injected = m_nextStartInjected;
+        m_nextStartInjected = false;
+        // A silent present/restore (notifyScrobbler == false) must not open a
+        // play event; only real track starts do.
+        if (!notifyScrobbler) {
+            return;
         }
+        notifyScrobblersTrackStarted(track);
+        const QString source = injected
+            ? QStringLiteral("library_shuffle")
+            : (userInitiated ? QStringLiteral("queue_manual") : QStringLiteral("queue_auto"));
+        m_playEventRecorder->trackStarted(track, userInitiated, source);
     });
 }
 
@@ -480,6 +525,7 @@ void AppCore::notifyScrobblersTrackStarted(const Track &track)
 void AppCore::resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing)
 {
     m_listenTracker->resumeTrack(track, elapsedMs, playing);
+    m_playEventRecorder->resumeTrack(track, elapsedMs, playing, QStringLiteral("resume"));
     QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
                               Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
     QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,

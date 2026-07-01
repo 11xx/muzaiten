@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Local play-event telemetry: every playback now records how it ended
+  (completion, skip, stop, or session end), how much was actually heard, where
+  the track came from, and which listening session it belonged to, stored
+  locally in `history.sqlite`. No network use; groundwork for the upcoming
+  recommendation engine.
+
 ## [2026.07.01.2]
 
 ### Packaging

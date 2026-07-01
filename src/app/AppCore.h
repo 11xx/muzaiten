@@ -14,6 +14,7 @@ class ListenBrainzScrobbler;
 class ListenHistoryStore;
 class ListenTracker;
 class MainWindow;
+class PlayEventRecorder;
 class MprisService;
 class PlaybackBackend;
 class PlayerCore;
@@ -37,6 +38,7 @@ public:
     ArtworkCache        *artworkCache() const;
     ListenHistoryStore  *listenHistory() const;
     ListenTracker       *listenTracker() const;
+    PlayEventRecorder   *playEventRecorder() const;
     MprisService        *mpris() const;
     IpcServer           *ipc() const;
     MainWindow          *window() const;
@@ -85,6 +87,7 @@ private:
     PlayerCore       *m_player = nullptr;
     PlaybackBackend  *m_playback = nullptr;
     ListenTracker    *m_listenTracker = nullptr;
+    PlayEventRecorder *m_playEventRecorder = nullptr;
     QThread          *m_listenBrainzThread = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
     QThread          *m_lastFmThread = nullptr;
@@ -96,4 +99,10 @@ private:
     bool              m_quitting = false;
     bool              m_resumeDone = false;
     bool              m_trayAlwaysVisible = false;
+    // Track-start attribution for play events. currentIndexChanged(index,
+    // userInitiated) always precedes the matching currentTrackChanged, and
+    // aboutToInjectLibraryTrack precedes it for library-shuffle injections, so
+    // these carry the attribution forward to the currentTrackChanged handler.
+    bool              m_nextStartUserInitiated = false;
+    bool              m_nextStartInjected = false;
 };
