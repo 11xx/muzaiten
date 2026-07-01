@@ -2,8 +2,8 @@
 pkgname=muzaiten-bin
 # Date-based, matching the release artifact (YYYY.MM.DD.N.g<sha>).
 # Bump this, _release_tag, and sha256sums for every published release.
-pkgver=2026.07.01.12.gd79d452
-_release_tag=2026.07.01
+pkgver=2026.07.01.15.g4f33d06
+_release_tag=2026.07.01.2
 pkgrel=1
 pkgdesc="Native music player for local libraries, with ratings and scrobbling (prebuilt, bundled Last.fm credentials)"
 arch=('x86_64')
@@ -20,7 +20,7 @@ provides=('muzaiten')
 conflicts=('muzaiten' 'muzaiten-git')
 options=('!strip')  # build-release.sh already strips the binary
 source=("muzaiten-${pkgver}-${CARCH}.tar.zst::https://codeberg.org/11xx/muzaiten/releases/download/${_release_tag}/muzaiten-${pkgver}-${CARCH}.tar.zst")
-sha256sums=('98a9866acc4cd4426f28412bbb1f34edc7fa791e8c5613e3c51a6b37ae6af71b')
+sha256sums=('f1e42094d92b40f71da2b0e151b70002abdca876a96ec233ad394214cc6ed4ed')
 
 package() {
     # The tarball is a prefixed tree (usr/bin, usr/share/...) staged by
