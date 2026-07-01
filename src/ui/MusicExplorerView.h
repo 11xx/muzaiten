@@ -97,6 +97,7 @@ private:
 
     void rebuildLayout();
     void rebuildLayoutLater();
+    bool moveExpandedPanelToRow(int row);
     bool recomputeEffectiveMetrics();
     void applySortedAlbums(const QVector<Album> &albums);
     void clearContent();
@@ -129,6 +130,7 @@ private:
     QVector<Album> m_sourceAlbums;
     QVector<Album> m_albums;
     QVector<AlbumCard *> m_cards;
+    QVector<QWidget *> m_gridRows;
     QHash<QString, QImage> m_artByTitle;
     std::function<QVector<Track>(const Album &album)> m_trackProvider;
     int m_currentAlbumRow = -1;
