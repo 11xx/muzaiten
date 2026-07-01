@@ -26,6 +26,7 @@
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSet>
 #include <QStyleOptionViewItem>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -473,12 +474,30 @@ void MusicExplorerView::setArtworkCache(ArtworkCache *cache)
 
 void MusicExplorerView::setAlbums(const QVector<Album> &albums)
 {
+    // Redundant refreshes (re-selecting the same artist, a rating change
+    // elsewhere, returning to the view) pass the same album set. Rebuilding for
+    // those would clear all artwork and recreate every card, flashing the grid,
+    // so skip when nothing actually changed.
+    if (albums == m_sourceAlbums) {
+        return;
+    }
     const QString currentTitle = m_currentAlbumRow >= 0 && m_currentAlbumRow < m_albums.size()
         ? m_albums.at(m_currentAlbumRow).title
         : QString();
     m_sourceAlbums = albums;
     applySortedAlbums(m_sourceAlbums);
-    m_artByTitle.clear();
+    // Keep cached art for albums that survive the change so their cards don't
+    // blank on refresh; only drop entries for albums that went away. The
+    // generation bump still invalidates in-flight requests indexed against the
+    // old row order.
+    QSet<QString> retainedTitles;
+    retainedTitles.reserve(m_albums.size());
+    for (const Album &album : m_albums) {
+        retainedTitles.insert(album.title);
+    }
+    for (auto it = m_artByTitle.begin(); it != m_artByTitle.end();) {
+        it = retainedTitles.contains(it.key()) ? std::next(it) : m_artByTitle.erase(it);
+    }
     ++m_artworkGeneration;
     const int current = rowForTitle(currentTitle);
     if (current >= 0) {

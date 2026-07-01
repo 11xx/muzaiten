@@ -18,4 +18,6 @@ struct Album {
     int effectiveRating0To100 = Rating::unset;
     bool hasUserRating = false;
     qint64 addedMtime = 0; // MAX(file_mtime) across tracks: proxy for "recently added"
+
+    bool operator==(const Album &) const = default;
 };

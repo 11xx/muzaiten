@@ -69,6 +69,10 @@
   blanked all album art until the async artwork cache reloaded it (a visible
   flash); the grid now only rebuilds when the album set or column count actually
   changes.
+- Music Explorer no longer flashes its album art on redundant refreshes
+  (re-selecting the same artist, returning to the view, unrelated rating
+  changes): identical album sets are now a no-op, and genuine changes keep the
+  cached art for albums that survive instead of clearing every cover.
 
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join
