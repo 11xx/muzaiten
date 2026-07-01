@@ -194,6 +194,9 @@ void MusicExplorerViewTest::expandedTrackTableUsesNeutralPaletteWithoutArtwork()
     QVERIFY(viewportPalette.color(QPalette::Base).rgb() != appPalette.color(QPalette::Highlight).rgb());
     QVERIFY(viewportPalette.color(QPalette::Base) != viewportPalette.color(QPalette::AlternateBase));
     QVERIFY(table->horizontalHeader()->palette().color(QPalette::Button).rgb() != appPalette.color(QPalette::Highlight).rgb());
+    // The header reuses the even-row zebra shade rather than a bespoke color.
+    QCOMPARE(table->horizontalHeader()->palette().color(QPalette::Button).rgb(),
+             viewportPalette.color(QPalette::AlternateBase).rgb());
 }
 
 void MusicExplorerViewTest::expandedPanelSurvivesResizeAndRefocus()

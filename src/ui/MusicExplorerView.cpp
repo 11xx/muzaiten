@@ -1189,9 +1189,9 @@ void MusicExplorerView::applyExpandedTrackPalette(const QColor &tint)
     const QColor rowBase = expandedPanelPrimaryColor(appPalette, tint);
     QColor alternate = expandedPanelAlternateColor(appPalette, tint);
     alternate.setAlpha(rowBase.alpha());
-    const QColor header = tint.isValid()
-        ? blend(rowBase, tint, dark ? 0.12 : 0.08)
-        : blend(rowBase, appPalette.color(QPalette::Window), dark ? 0.18 : 0.08);
+    // Reuse the even-row zebra shade for the header so it tracks the album tint
+    // instead of standing out as a flat opaque bar like the main tracklist's.
+    const QColor header = alternate;
     const QColor highlight = appPalette.color(QPalette::Highlight);
     TrackTableRowStyle rowStyle;
     rowStyle.enabled = true;
@@ -1199,7 +1199,10 @@ void MusicExplorerView::applyExpandedTrackPalette(const QColor &tint)
     rowStyle.alternate = alternate;
     rowStyle.hover = blend(rowBase, highlight, dark ? 0.24 : 0.16);
     rowStyle.playing = blend(rowBase, highlight, dark ? 0.28 : 0.20);
-    rowStyle.selected = blend(rowBase, highlight, dark ? 0.50 : 0.40);
+    // The active selection pairs with full HighlightedText, so use the full
+    // highlight (like the main tracklist) rather than a partial blend that reads
+    // as dimmed under opaque foreground text. Only the inactive selection dims.
+    rowStyle.selected = highlight;
     rowStyle.inactiveSelected = blend(rowBase, highlight, dark ? 0.30 : 0.22);
     rowStyle.text = appPalette.color(QPalette::Text);
     rowStyle.selectedText = appPalette.color(QPalette::HighlightedText);
