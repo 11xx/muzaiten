@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QGridLayout>
+#include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
@@ -102,6 +103,28 @@ QColor blend(const QColor &a, const QColor &b, qreal amountB)
     return QColor(qRound(a.red() * amountA + b.red() * amountB),
                   qRound(a.green() * amountA + b.green() * amountB),
                   qRound(a.blue() * amountA + b.blue() * amountB));
+}
+
+void addRoundedPanelPath(QPainterPath *path, const QRect &panelRect, int pointerX)
+{
+    const int radius = std::min(kPanelRadius, std::min(panelRect.width(), panelRect.height()) / 2);
+    const int px = std::clamp(pointerX, panelRect.left() + radius + 13, panelRect.right() - radius - 13);
+    const int leftBase = px - 13;
+    const int rightBase = px + 13;
+
+    path->moveTo(panelRect.left() + radius, panelRect.top());
+    path->lineTo(leftBase, panelRect.top());
+    path->lineTo(px, 1);
+    path->lineTo(rightBase, panelRect.top());
+    path->lineTo(panelRect.right() - radius, panelRect.top());
+    path->quadTo(panelRect.right(), panelRect.top(), panelRect.right(), panelRect.top() + radius);
+    path->lineTo(panelRect.right(), panelRect.bottom() - radius);
+    path->quadTo(panelRect.right(), panelRect.bottom(), panelRect.right() - radius, panelRect.bottom());
+    path->lineTo(panelRect.left() + radius, panelRect.bottom());
+    path->quadTo(panelRect.left(), panelRect.bottom(), panelRect.left(), panelRect.bottom() - radius);
+    path->lineTo(panelRect.left(), panelRect.top() + radius);
+    path->quadTo(panelRect.left(), panelRect.top(), panelRect.left() + radius, panelRect.top());
+    path->closeSubpath();
 }
 }
 
@@ -274,6 +297,12 @@ public:
         update();
     }
 
+    void setArtwork(const QImage &image)
+    {
+        m_art = image;
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent *) override
     {
@@ -289,13 +318,9 @@ protected:
         body.setAlpha(245);
         body2.setAlpha(238);
 
-        QRect panelRect = rect().adjusted(kPanelMarginX, kPanelPointerHeight, -kPanelMarginX, -1);
+        const QRect panelRect = rect().adjusted(kPanelMarginX, kPanelPointerHeight, -kPanelMarginX, -1);
         QPainterPath path;
-        const int px = std::clamp(m_pointerX, panelRect.left() + 18, panelRect.right() - 18);
-        path.moveTo(px - 13, panelRect.top());
-        path.lineTo(px, 1);
-        path.lineTo(px + 13, panelRect.top());
-        path.addRoundedRect(panelRect, kPanelRadius, kPanelRadius);
+        addRoundedPanelPath(&path, panelRect, m_pointerX);
 
         QLinearGradient gradient(panelRect.topLeft(), panelRect.bottomRight());
         gradient.setColorAt(0.0, body);
@@ -303,7 +328,38 @@ protected:
         gradient.setColorAt(1.0, base);
         painter.fillPath(path, gradient);
 
-        QColor edge = panelSeparatorColor(this);
+        if (!m_art.isNull()) {
+            const QSize tinySize(std::max(12, panelRect.width() / 18), std::max(8, panelRect.height() / 18));
+            QImage wash = m_art.scaled(tinySize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation)
+                              .scaled(panelRect.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            painter.save();
+            painter.setClipPath(path);
+            painter.setOpacity(dark ? 0.28 : 0.22);
+            painter.drawImage(panelRect, wash);
+            painter.restore();
+        }
+
+        QRadialGradient leftGlow(QPointF(panelRect.left() + panelRect.width() * 0.22,
+                                         panelRect.top() + panelRect.height() * 0.18),
+                                 panelRect.width() * 0.68);
+        QColor glow = tint;
+        glow.setAlpha(dark ? 72 : 48);
+        QColor clear = tint;
+        clear.setAlpha(0);
+        leftGlow.setColorAt(0.0, glow);
+        leftGlow.setColorAt(1.0, clear);
+        painter.fillPath(path, leftGlow);
+
+        QRadialGradient rightGlow(QPointF(panelRect.right() - panelRect.width() * 0.18,
+                                          panelRect.bottom() - panelRect.height() * 0.10),
+                                  panelRect.width() * 0.55);
+        QColor right = blend(tint, window, dark ? 0.45 : 0.62);
+        right.setAlpha(dark ? 42 : 34);
+        rightGlow.setColorAt(0.0, right);
+        rightGlow.setColorAt(1.0, clear);
+        painter.fillPath(path, rightGlow);
+
+        QColor edge = blend(palette().color(QPalette::Mid), tint, dark ? 0.18 : 0.12);
         edge.setAlpha(dark ? 150 : 120);
         painter.setPen(QPen(edge, 1));
         painter.drawPath(path);
@@ -312,6 +368,7 @@ protected:
 private:
     int m_pointerX = 40;
     QColor m_tint;
+    QImage m_art;
 };
 
 MusicExplorerView::MusicExplorerView(QWidget *parent)
@@ -371,7 +428,7 @@ void MusicExplorerView::setArtworkCache(ArtworkCache *cache)
                 m_cards.at(row)->setArtwork(image);
             }
             if (row == m_expandedAlbumRow && m_expandedPanel != nullptr) {
-                m_expandedPanel->setTint(averageColor(image));
+                refreshExpandedPanelBackdrop();
             }
         });
     }
@@ -580,12 +637,20 @@ void MusicExplorerView::keyPressEvent(QKeyEvent *event)
             return;
         }
         if (event->key() == Qt::Key_H || event->key() == Qt::Key_Left) {
-            moveCurrentByGrid(-1, 0);
+            if (event->key() == Qt::Key_Left) {
+                moveCurrentByGrid(-1, 0);
+            } else {
+                clearExpandedAlbum();
+            }
             event->accept();
             return;
         }
         if (event->key() == Qt::Key_L || event->key() == Qt::Key_Right) {
-            moveCurrentByGrid(+1, 0);
+            if (event->key() == Qt::Key_Right) {
+                moveCurrentByGrid(+1, 0);
+            } else {
+                expandCurrentAlbum(true);
+            }
             event->accept();
             return;
         }
@@ -667,7 +732,7 @@ void MusicExplorerView::rebuildLayout()
                 m_expandedAlbumRow = expanded;
                 m_expandedAlbumTitle = expandedTitle;
                 refreshExpandedTracks();
-                m_expandedPanel->setTint(artTintForAlbum(m_expandedAlbumTitle));
+                refreshExpandedPanelBackdrop();
             }
         }
     }
@@ -788,6 +853,19 @@ void MusicExplorerView::setExpandedAlbumRow(int row, bool focusTracks)
     }
 }
 
+void MusicExplorerView::clearExpandedAlbum()
+{
+    if (m_expandedAlbumTitle.isEmpty() && m_expandedAlbumRow < 0) {
+        return;
+    }
+    m_expandedAlbumRow = -1;
+    m_expandedAlbumTitle.clear();
+    m_inlineTrackTable->setParent(this);
+    m_inlineTrackTable->hide();
+    setFocus(Qt::OtherFocusReason);
+    rebuildLayout();
+}
+
 void MusicExplorerView::refreshExpandedTracks()
 {
     if (m_inlineTrackTable == nullptr || m_expandedAlbumTitle.isEmpty()) return;
@@ -850,7 +928,11 @@ bool MusicExplorerView::handleInlineTrackKey(QKeyEvent *event)
         case Qt::Key_H:
         case Qt::Key_Left:
         case Qt::Key_Escape:
-            setFocus(Qt::OtherFocusReason);
+            if (event->key() == Qt::Key_H || event->key() == Qt::Key_Left) {
+                clearExpandedAlbum();
+            } else {
+                setFocus(Qt::OtherFocusReason);
+            }
             event->accept();
             return true;
         case Qt::Key_Return:
@@ -924,7 +1006,43 @@ void MusicExplorerView::updateExpandedPanelGeometry()
     if (!card.isEmpty()) {
         m_expandedPanel->setPointerX(card.center().x() - m_expandedPanel->x());
     }
-    m_expandedPanel->setTint(artTintForAlbum(m_expandedAlbumTitle));
+    refreshExpandedPanelBackdrop();
+}
+
+void MusicExplorerView::refreshExpandedPanelBackdrop()
+{
+    const QColor tint = artTintForAlbum(m_expandedAlbumTitle);
+    if (m_expandedPanel != nullptr) {
+        m_expandedPanel->setTint(tint);
+        m_expandedPanel->setArtwork(m_artByTitle.value(m_expandedAlbumTitle));
+    }
+    applyExpandedTrackPalette(tint);
+}
+
+void MusicExplorerView::applyExpandedTrackPalette(const QColor &tint)
+{
+    if (m_inlineTrackTable == nullptr) {
+        return;
+    }
+
+    const QPalette appPalette = palette();
+    const QColor base = appPalette.color(QPalette::Base);
+    const bool dark = appPalette.color(QPalette::Window).lightness() < 128;
+    const QColor rowBase = blend(base, tint, dark ? 0.08 : 0.05);
+    const QColor alternate = blend(base, tint, dark ? 0.15 : 0.10);
+    const QColor header = blend(base, tint, dark ? 0.19 : 0.13);
+    QPalette tablePalette = m_inlineTrackTable->palette();
+    tablePalette.setColor(QPalette::Base, rowBase);
+    tablePalette.setColor(QPalette::AlternateBase, alternate);
+    tablePalette.setColor(QPalette::Window, rowBase);
+    tablePalette.setColor(QPalette::Button, header);
+    m_inlineTrackTable->setPalette(tablePalette);
+    m_inlineTrackTable->viewport()->setPalette(tablePalette);
+    m_inlineTrackTable->viewport()->setAutoFillBackground(true);
+    m_inlineTrackTable->horizontalHeader()->setPalette(tablePalette);
+    m_inlineTrackTable->horizontalHeader()->viewport()->setPalette(tablePalette);
+    m_inlineTrackTable->viewport()->update();
+    m_inlineTrackTable->horizontalHeader()->viewport()->update();
 }
 
 int MusicExplorerView::availableGridWidth() const

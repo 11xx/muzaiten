@@ -14,6 +14,7 @@
 #include <functional>
 
 class ArtworkCache;
+class QColor;
 class QScrollArea;
 class QVBoxLayout;
 
@@ -87,8 +88,11 @@ private:
     void requestArtworkForAlbum(int row);
     void setCurrentRowInternal(int row, bool ensureVisible);
     void setExpandedAlbumRow(int row, bool focusTracks);
+    void clearExpandedAlbum();
     void updateCardSelection();
     void updateExpandedPanelGeometry();
+    void refreshExpandedPanelBackdrop();
+    void applyExpandedTrackPalette(const QColor &tint);
     void showAlbumContextMenu(int row, const QPoint &globalPos);
     bool handleInlineTrackKey(QKeyEvent *event);
     int columnCountForWidth(int width) const;

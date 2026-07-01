@@ -1,6 +1,7 @@
 #include "ui/MusicExplorerView.h"
 
 #include <QApplication>
+#include <QHeaderView>
 #include <QSignalSpy>
 #include <QtTest/QtTest>
 
@@ -12,6 +13,10 @@ class MusicExplorerViewTest final : public QObject {
 private slots:
     void firstShowUsesAlbumGridColumns();
     void albumKeysMoveByAlbumAndNFocusesTracks();
+    void lNarrowsAndHUnnarrows();
+    void arrowsStillMoveAlbumsHorizontally();
+    void expandedTrackTableUsesDynamicPalette();
+    void expandedPanelSurvivesResizeAndRefocus();
     void inlineTrackKeysNavigateAndReturnFocus();
     void expandsExactlyOneAlbumAndShowsAllTracks();
     void mouseClickExpandsAndShowsVisibleTracks();
@@ -107,6 +112,79 @@ void MusicExplorerViewTest::albumKeysMoveByAlbumAndNFocusesTracks()
     QVERIFY(view.inlineTrackTableForTests()->rowCount() > 0);
 }
 
+void MusicExplorerViewTest::lNarrowsAndHUnnarrows()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    QTest::keyClick(&view, Qt::Key_L);
+    QTRY_COMPARE(view.expandedPanelCountForTests(), 1);
+    QVERIFY(view.inlineTrackTableForTests()->hasFocus());
+
+    QTest::keyClick(view.inlineTrackTableForTests(), Qt::Key_H);
+    QTRY_COMPARE(view.expandedPanelCountForTests(), 0);
+    QVERIFY(view.hasFocus());
+}
+
+void MusicExplorerViewTest::arrowsStillMoveAlbumsHorizontally()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    QCOMPARE(view.currentRow(), 0);
+    QTest::keyClick(&view, Qt::Key_Right);
+    QCOMPARE(view.currentRow(), 1);
+    QTest::keyClick(&view, Qt::Key_Left);
+    QCOMPARE(view.currentRow(), 0);
+}
+
+void MusicExplorerViewTest::expandedTrackTableUsesDynamicPalette()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    view.selectAlbumTitle(QStringLiteral("Two"), true);
+    auto *table = view.inlineTrackTableForTests();
+    QVERIFY(table != nullptr);
+    const QPalette appPalette = QApplication::palette();
+    const QPalette viewportPalette = table->viewport()->palette();
+    QVERIFY(viewportPalette.color(QPalette::Base) != appPalette.color(QPalette::Base));
+    QVERIFY(viewportPalette.color(QPalette::Base) != viewportPalette.color(QPalette::AlternateBase));
+    QVERIFY(table->horizontalHeader()->palette().color(QPalette::Button) != appPalette.color(QPalette::Button));
+}
+
+void MusicExplorerViewTest::expandedPanelSurvivesResizeAndRefocus()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    view.selectAlbumTitle(QStringLiteral("Two"), true);
+    QTRY_COMPARE(view.expandedPanelCountForTests(), 1);
+    view.resize(760, 620);
+    QCoreApplication::processEvents();
+    view.clearFocus();
+    QCoreApplication::processEvents();
+    view.setFocus(Qt::OtherFocusReason);
+    QCoreApplication::processEvents();
+
+    QCOMPARE(view.expandedPanelCountForTests(), 1);
+}
+
 void MusicExplorerViewTest::inlineTrackKeysNavigateAndReturnFocus()
 {
     MusicExplorerView view;
@@ -124,6 +202,7 @@ void MusicExplorerViewTest::inlineTrackKeysNavigateAndReturnFocus()
     QCOMPARE(view.inlineTrackTableForTests()->currentRow(), 1);
     QTest::keyClick(view.inlineTrackTableForTests(), Qt::Key_H);
     QVERIFY(view.hasFocus());
+    QCOMPARE(view.expandedPanelCountForTests(), 0);
 }
 
 void MusicExplorerViewTest::mouseClickExpandsAndShowsVisibleTracks()
