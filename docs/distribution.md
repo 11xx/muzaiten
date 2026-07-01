@@ -169,23 +169,97 @@ The realistic options are:
 
 ## Publishing to the AUR
 
-Each package is a self-contained directory under `packaging/aur/`. To publish or
-update one:
+Each package is mirrored in this repo under `packaging/aur/<pkgname>/`, but the
+AUR publication target is a separate Git repository per package base:
+
+- `ssh://aur@aur.archlinux.org/muzaiten-git.git`
+- `ssh://aur@aur.archlinux.org/muzaiten-bin.git`
+
+The AUR repos contain only `PKGBUILD` and `.SRCINFO`. Keep the copies in this
+source repo as the source of truth, then copy those two files into the AUR repos
+when publishing. On first publication, cloning an empty AUR package repo is
+expected; the first successful push creates the package page.
+
+### Publish `muzaiten-git`
+
+`muzaiten-git` can be published or updated as soon as the source branch is pushed
+to Codeberg, because its `source=()` pulls the repository directly.
 
 ```sh
-cd packaging/aur/muzaiten-git      # or muzaiten-bin
-makepkg --printsrcinfo > .SRCINFO  # regenerate after any PKGBUILD edit
-git clone ssh://aur@aur.archlinux.org/muzaiten-git.git aur-repo
-cp PKGBUILD .SRCINFO aur-repo/
-cd aur-repo && git commit -am "update" && git push
+cd "$(git rev-parse --show-toplevel)/packaging/aur/muzaiten-git"
+makepkg --printsrcinfo > .SRCINFO
+namcap PKGBUILD
+
+workdir="$(mktemp -d)"
+git clone ssh://aur@aur.archlinux.org/muzaiten-git.git "$workdir/muzaiten-git"
+cp PKGBUILD .SRCINFO "$workdir/muzaiten-git/"
+cd "$workdir/muzaiten-git"
+git add PKGBUILD .SRCINFO
+git commit -m "update muzaiten-git"
+git push origin master
 ```
 
-For `muzaiten-bin`, before pushing a new release also:
+### Publish `muzaiten-bin`
 
-1. set `_release_tag` to the Codeberg release tag (`YYYY.MM.DD` or same-day
-   iteration),
-2. set `pkgver` to the artifact `<version>` from `build-release.sh`, and
-3. replace `sha256sums=('SKIP')` with the checksum from
-   `dist/muzaiten-<version>-<arch>.tar.zst.sha256`.
+`muzaiten-bin` must not be pushed until the release tarball is uploaded and
+fetchable from Codeberg. AUR users build from the `source=()` URL, so a missing
+release asset makes the package immediately broken.
 
-Validate locally with `namcap PKGBUILD` and a clean `makepkg` build.
+1. Cut and push the release tag.
+2. Build the release artifact with Last.fm credentials supplied from the
+   environment or local `.env`:
+
+   ```sh
+   ./packaging/build-release.sh --dev-pkgbuild
+   ```
+
+3. Upload both generated files to the Codeberg release attached to the tag:
+
+   ```text
+   dist/muzaiten-<version>-<arch>.tar.zst
+   dist/muzaiten-<version>-<arch>.tar.zst.sha256
+   ```
+
+4. Update `packaging/aur/muzaiten-bin/PKGBUILD`:
+
+   - set `_release_tag` to the Codeberg release tag (`YYYY.MM.DD` or same-day
+     iteration),
+   - set `pkgver` to the artifact `<version>` from `build-release.sh`, and
+   - set `sha256sums` to the checksum from the generated `.sha256` file.
+
+5. Regenerate metadata and validate:
+
+   ```sh
+   cd "$(git rev-parse --show-toplevel)/packaging/aur/muzaiten-bin"
+   makepkg --printsrcinfo > .SRCINFO
+   namcap PKGBUILD
+   ```
+
+6. Validate the prebuilt package path locally before publishing. The generated
+   dev package sources the local tarball and catches archive/layout issues
+   before the public AUR recipe is pushed:
+
+   ```sh
+   cd "$(git rev-parse --show-toplevel)/dist/aur-dev/muzaiten-dev"
+   makepkg -f
+   namcap muzaiten-dev-*.pkg.tar.zst
+   ```
+
+7. After the Codeberg release asset is live, verify the public download path from
+   the AUR PKGBUILD:
+
+   ```sh
+   cd "$(git rev-parse --show-toplevel)/packaging/aur/muzaiten-bin"
+   workdir="$(mktemp -d)"
+   git clone ssh://aur@aur.archlinux.org/muzaiten-bin.git "$workdir/muzaiten-bin"
+   cp PKGBUILD .SRCINFO "$workdir/muzaiten-bin/"
+   cd "$workdir/muzaiten-bin"
+   makepkg --verifysource
+   git add PKGBUILD .SRCINFO
+   git commit -m "update muzaiten-bin"
+   git push origin master
+   ```
+
+`makepkg --verifysource` should download the Codeberg tarball and pass the
+recorded `sha256sums` check. If the URL returns 404, upload or fix the Codeberg
+release asset before pushing the AUR repo.
