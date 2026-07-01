@@ -43,6 +43,10 @@
 
 ### Fixed
 
+- Music Explorer's expanded album panel now scrolls with inline track keyboard
+  navigation, keeps `h`/`l` focus behavior aligned with the main library panels,
+  and uses a steadier album-tinted background without flashing raw artwork.
+
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join
   the live queue only and are no longer saved into the playlist — those tracks

@@ -44,6 +44,7 @@ public:
     int expandedPanelCountForTests() const;
     int pointerXForTests() const;
     int columnCountForTests() const { return m_columnCount; }
+    int scrollValueForTests() const;
     QRect cardGeometryForTests(int row) const;
     QWidget *cardWidgetForTests(int row) const;
     QVector<Search::MatchDocument> albumSearchDocuments() const;
@@ -68,6 +69,7 @@ signals:
     void propertiesRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);
     void trackTableViewSettingsChanged();
+    void focusPreviousPanelRequested();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -93,6 +95,8 @@ private:
     void updateExpandedPanelGeometry();
     void refreshExpandedPanelBackdrop();
     void applyExpandedTrackPalette(const QColor &tint);
+    void ensureExpandedPanelVisible();
+    void ensureInlineTrackVisible(int direction);
     void showAlbumContextMenu(int row, const QPoint &globalPos);
     bool handleInlineTrackKey(QKeyEvent *event);
     int columnCountForWidth(int width) const;
