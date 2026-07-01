@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2026.07.01.1]
+
+### Packaging
+
+- Release tarballs now normalize archived file ownership to root, so prebuilt
+  AUR packages do not inherit the maintainer's local user/group ownership.
+
 ## [2026.07.01]
 
 ### Added
