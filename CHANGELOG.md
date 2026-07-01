@@ -43,6 +43,14 @@
 
 ### Fixed
 
+- Releasing an exclusively-held card from bit-perfect output no longer leaves a
+  "ghost" bit-perfect state behind. The Release device action flipped only the
+  profile's mode to shared while keeping bit-perfect's pinned ALSA sink and hw
+  device, so the persisted "shared" profile still opened the card directly —
+  playback errored on a busy device without offering takeover, or silently ran
+  bit-perfect on a free one, until the output dialog was reopened and re-saved.
+  Releasing now materializes the full shared profile from the remembered
+  shared-mode selections.
 - Music Explorer's expanded album panel now scrolls with inline track keyboard
   navigation, uses the same view-wide `j`/`k`/`h`/`l` routing as the main
   library panels, and paints the expanded tracklist rows as a seamless custom

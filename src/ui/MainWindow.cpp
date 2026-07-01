@@ -4733,10 +4733,11 @@ void MainWindow::releaseHeldOutputDevice()
         return;
     }
     // Hand the exclusive card back by switching the output to shared via the shared
-    // transition path, forcing shared so the card isn't immediately re-grabbed.
+    // transition path. Materialize the full shared profile (not just mode=shared)
+    // so the persisted output has no bit-perfect leftovers — sink="alsa"/hw device
+    // behind mode="shared" would be a "ghost" that keeps opening the card directly.
     const PlaybackProfile previous = m_playbackProfile;
-    PlaybackProfile next = m_playbackProfile;
-    next.mode = QStringLiteral("shared");
+    const PlaybackProfile next = m_playbackProfile.toSharedMode();
     applyProfileTransition(previous, next);
 }
 

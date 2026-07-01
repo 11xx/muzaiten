@@ -46,4 +46,24 @@ struct PlaybackProfile {
     // "alsa_card.usb-..."), used to re-resolve the volatile `device` (hw:N) on
     // load — the index drifts across reboots / device launch order.
     QString deviceId;
+
+    // Return a copy forced to shared mode with every shared active field
+    // restored from the cross-mode shadow memory above. Use this whenever an
+    // exclusively-held card is handed back outside the profile dialog (the
+    // Release device action / idle auto-release): flipping only `mode` would
+    // strand bit-perfect's pinned sink ("alsa") and hw `device` behind
+    // mode="shared", a "ghost" that still opens the card directly instead of
+    // routing through the shared graph. Mirrors the shared branch of
+    // PlaybackProfileDialog::profile().
+    PlaybackProfile toSharedMode() const
+    {
+        PlaybackProfile p = *this;
+        p.mode = QStringLiteral("shared");
+        p.sink = sharedSink.isEmpty() ? QStringLiteral("auto") : sharedSink;
+        p.device.clear();
+        p.softwareVolume = sharedSoftwareVolume;
+        p.allowResample = sharedAllowResample;
+        p.releaseSinkOnPause = sharedReleaseSinkOnPause;
+        return p;
+    }
 };
