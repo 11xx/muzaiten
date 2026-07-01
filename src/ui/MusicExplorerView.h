@@ -97,7 +97,8 @@ private:
 
     void rebuildLayout();
     void rebuildLayoutLater();
-    bool moveExpandedPanelToRow(int row);
+    bool placeExpandedPanelAtRow(int row);
+    bool removeExpandedPanelInPlace();
     bool recomputeEffectiveMetrics();
     void applySortedAlbums(const QVector<Album> &albums);
     void clearContent();

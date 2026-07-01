@@ -22,6 +22,7 @@ private slots:
     void mouseClickExpandsAndShowsVisibleTracks();
     void selectionMovesExpandedPanel();
     void switchingExpandedAlbumReusesCardsAndKeepsFocus();
+    void expandAndCollapseReuseCards();
     void currentCardUsesFullActiveHighlight();
     void albumActionsForwardSignals();
 
@@ -311,6 +312,37 @@ void MusicExplorerViewTest::switchingExpandedAlbumReusesCardsAndKeepsFocus()
         QCOMPARE(view.cardWidgetForTests(row), before.at(row));
     }
     QVERIFY(view.inlineTrackTableForTests()->hasFocus());
+}
+
+void MusicExplorerViewTest::expandAndCollapseReuseCards()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.columnCountForTests() >= 3);
+
+    QVector<QWidget *> before;
+    for (int row = 0; row < 3; ++row) {
+        before.push_back(view.cardWidgetForTests(row));
+    }
+
+    // Expanding from the collapsed grid creates the panel in place, reusing the
+    // existing cards (and their artwork) instead of rebuilding the grid.
+    view.selectAlbumTitle(QStringLiteral("Two"), false);
+    QCOMPARE(view.expandedPanelCountForTests(), 1);
+    for (int row = 0; row < 3; ++row) {
+        QCOMPARE(view.cardWidgetForTests(row), before.at(row));
+    }
+
+    // Collapsing removes just the panel and keeps the same cards.
+    view.collapseExpandedAlbum();
+    QCOMPARE(view.expandedPanelCountForTests(), 0);
+    for (int row = 0; row < 3; ++row) {
+        QCOMPARE(view.cardWidgetForTests(row), before.at(row));
+    }
 }
 
 void MusicExplorerViewTest::currentCardUsesFullActiveHighlight()

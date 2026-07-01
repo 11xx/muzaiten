@@ -63,9 +63,12 @@
   from the active palette group so idle activation repaints to identical pixels,
   and keyboard focus is restored to the last-focused panel on reactivation so
   `hjkl` keep working without a click.
-- Switching the expanded album in Music Explorer now reuses the existing grid
-  cards and inline tracklist instead of rebuilding the whole middle panel, so it
-  no longer flickers after the tracklist has been focused or navigated.
+- Expanding, collapsing, and switching the expanded album in Music Explorer now
+  reuse the existing grid cards and inline tracklist instead of rebuilding the
+  whole middle panel. Previously each of these recreated every card, which
+  blanked all album art until the async artwork cache reloaded it (a visible
+  flash); the grid now only rebuilds when the album set or column count actually
+  changes.
 
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join
