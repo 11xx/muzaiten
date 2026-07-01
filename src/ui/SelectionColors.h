@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QAbstractItemView>
+#include <QApplication>
 #include <QColor>
 #include <QPalette>
 #include <QStyleOptionViewItem>
@@ -10,7 +12,14 @@ namespace SelectionColors {
 
 inline bool isActiveMainPanel(const QWidget *widget)
 {
+    const QWidget *focused = QApplication::focusWidget();
     for (const QWidget *current = widget; current != nullptr; current = current->parentWidget()) {
+        const bool focusInsideCurrent = focused != nullptr && current->isAncestorOf(focused);
+        const bool currentInsideFocusedView = focused != nullptr && qobject_cast<const QAbstractItemView *>(focused) != nullptr
+            && focused->isAncestorOf(current);
+        if (current->hasFocus() || focusInsideCurrent || currentInsideFocusedView) {
+            return true;
+        }
         const QVariant active = current->property("mainPanelActive");
         if (active.isValid()) {
             return active.toBool();

@@ -779,7 +779,12 @@ void MusicExplorerView::rebuildLayout()
     }
     m_rebuildQueued = false;
     m_rebuildingLayout = true;
+    const bool blockUpdates = isVisible();
     const QString expandedTitle = m_expandedAlbumTitle;
+    if (blockUpdates) {
+        m_scroll->viewport()->setUpdatesEnabled(false);
+        m_content->setUpdatesEnabled(false);
+    }
     clearContent();
     recomputeEffectiveMetrics();
     m_columnCount = columnCountForWidth(availableGridWidth());
@@ -837,6 +842,11 @@ void MusicExplorerView::rebuildLayout()
         m_expandedPanel->setUpdatesEnabled(true);
         m_expandedPanel->update();
         m_inlineTrackTable->viewport()->update();
+    }
+    if (blockUpdates) {
+        m_content->setUpdatesEnabled(true);
+        m_scroll->viewport()->setUpdatesEnabled(true);
+        m_scroll->viewport()->update();
     }
     requestVisibleArtwork();
 }

@@ -46,8 +46,11 @@
 - Music Explorer's expanded album panel now scrolls with inline track keyboard
   navigation, uses the same view-wide `j`/`k`/`h`/`l` routing as the main
   library panels, and paints the expanded tracklist rows as a seamless custom
-  table. Albums without artwork now keep a neutral panel background instead of
-  falling back to the app highlight color.
+  table. Pressing `h` from the expanded tracklist now collapses back to the
+  album grid as one step before a second `h` moves to the previous panel, and
+  switching directly between expanded albums no longer flashes the intermediate
+  collapsed layout. Albums without artwork now keep a neutral panel background
+  instead of falling back to the app highlight color.
 
 - Library-wide shuffle no longer grows a playlist while playing it. When the
   queue is mirroring a playlist, the fresh library tracks shuffle injects join
