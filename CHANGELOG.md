@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.07.01]
+
 ### Added
 
 - The "/" incremental search now works the same way everywhere. The queue, both

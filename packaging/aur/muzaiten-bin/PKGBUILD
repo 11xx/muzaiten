@@ -1,8 +1,9 @@
 # Maintainer: Lucas Gabriel <g at 11xx dot org>
 pkgname=muzaiten-bin
 # Date-based, matching the release artifact (YYYY.MM.DD.N.g<sha>).
-# Bump this and sha256sums for every published release.
+# Bump this, _release_tag, and sha256sums for every published release.
 pkgver=2026.06.02.000000.g0000000
+_release_tag=2026.06.02
 pkgrel=1
 pkgdesc="Native music player for local libraries, with ratings and scrobbling (prebuilt, bundled Last.fm credentials)"
 arch=('x86_64')
@@ -18,7 +19,7 @@ optdepends=('gst-plugins-good: extra audio decoders and sinks'
 provides=('muzaiten')
 conflicts=('muzaiten' 'muzaiten-git')
 options=('!strip')  # build-release.sh already strips the binary
-source=("muzaiten-${pkgver}-${CARCH}.tar.zst::https://codeberg.org/11xx/muzaiten/releases/download/${pkgver}/muzaiten-${pkgver}-${CARCH}.tar.zst")
+source=("muzaiten-${pkgver}-${CARCH}.tar.zst::https://codeberg.org/11xx/muzaiten/releases/download/${_release_tag}/muzaiten-${pkgver}-${CARCH}.tar.zst")
 # Replace with the checksum from dist/<tarball>.sha256 produced by build-release.sh.
 sha256sums=('SKIP')
 
