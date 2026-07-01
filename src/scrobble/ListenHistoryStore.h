@@ -33,6 +33,27 @@ public:
         bool sentListenBrainz = false;
     };
 
+    // A single track playback ("spin"): how it ended, how much was actually
+    // heard, where it came from, and which listening session it belonged to.
+    // Recorded for every spin regardless of outcome — skips and stops are as
+    // much signal as completed listens. Groundwork for the recommendation
+    // engine; never leaves the machine.
+    struct PlayEvent {
+        qint64 id = 0;
+        qint64 startedAtSecs = 0;
+        qint64 endedAtSecs = 0;
+        qint64 playedMs = 0;
+        qint64 durationMs = 0;
+        double completion = -1.0;   // <0 = unknown, stored as NULL
+        QString outcome;
+        bool userInitiated = false;
+        QString source;
+        QString shuffleMode;
+        Track track;                // persisted as track_path/mb_recording_id/track_json
+        QString previousTrackPath;
+        QString sessionId;
+    };
+
     // Service identifiers for the sent flags.
     static const QString LastFm;
     static const QString ListenBrainz;
@@ -62,6 +83,13 @@ public:
     int clearPending(const QString &service);
     int markOwed(const QString &service, const QList<qint64> &ids);
     QList<HistoryRow> historyRows(int limit, int offset = 0) const;
+
+    // Records one finalized play event. Rejected (returns -1) if the store is
+    // closed, the outcome/sessionId is empty, or the track has no path.
+    qint64 recordPlayEvent(const PlayEvent &event);
+    // Newest-first play events, for inspection and analysis.
+    QList<PlayEvent> recentPlayEvents(int limit, int offset = 0) const;
+    int playEventCount() const;
 
 private:
 

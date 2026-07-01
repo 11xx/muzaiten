@@ -4,12 +4,13 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaType>
 #include <QSqlQuery>
 #include <QVariant>
 
 namespace {
 
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 
 void insertIfPresent(QJsonObject &object, const QString &key, const QString &value)
 {
@@ -158,6 +159,27 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         "CREATE INDEX IF NOT EXISTS idx_listens_unsent_lastfm ON listens(listened_at) WHERE owed_lastfm = 1 AND sent_lastfm = 0"));
     create.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_listens_unsent_listenbrainz ON listens(listened_at) WHERE owed_listenbrainz = 1 AND sent_listenbrainz = 0"));
+    create.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS play_events ("
+        " id INTEGER PRIMARY KEY,"
+        " started_at INTEGER NOT NULL,"        // epoch secs the track started
+        " ended_at INTEGER,"                   // epoch secs the event finalized
+        " played_ms INTEGER NOT NULL,"         // accumulated wall-clock playback time
+        " duration_ms INTEGER,"
+        " completion REAL,"                    // played_ms/duration_ms capped at 1.0; NULL when duration unknown
+        " outcome TEXT NOT NULL,"              // finished | skipped | stopped | session_end
+        " user_initiated INTEGER NOT NULL DEFAULT 0,"  // track start was an explicit user pick
+        " source TEXT NOT NULL,"               // queue_manual | queue_auto | library_shuffle | resume
+        " shuffle_mode TEXT,"
+        " track_path TEXT NOT NULL,"
+        " mb_recording_id TEXT,"
+        " previous_track_path TEXT,"
+        " session_id TEXT NOT NULL,"
+        " track_json TEXT NOT NULL)"));
+    create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_play_events_track ON play_events(track_path, started_at)"));
+    create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_play_events_session ON play_events(session_id)"));
     create.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
 
     QSqlQuery version(m_db);
@@ -358,4 +380,89 @@ QList<ListenHistoryStore::HistoryRow> ListenHistoryStore::historyRows(int limit,
         rows.push_back(row);
     }
     return rows;
+}
+
+qint64 ListenHistoryStore::recordPlayEvent(const PlayEvent &event)
+{
+    if (!m_db.isOpen() || event.outcome.isEmpty() || event.sessionId.isEmpty() || event.track.path.isEmpty()) {
+        return -1;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO play_events(started_at, ended_at, played_ms, duration_ms, completion, outcome, "
+        "user_initiated, source, shuffle_mode, track_path, mb_recording_id, previous_track_path, "
+        "session_id, track_json) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+    query.addBindValue(event.startedAtSecs);
+    // ended_at is nullable; a non-positive value means the event was never
+    // finalized against the clock, so leave it NULL rather than storing 0.
+    query.addBindValue(event.endedAtSecs > 0 ? QVariant(event.endedAtSecs) : QVariant(QMetaType(QMetaType::LongLong)));
+    query.addBindValue(event.playedMs);
+    query.addBindValue(event.durationMs > 0 ? QVariant(event.durationMs) : QVariant(QMetaType(QMetaType::LongLong)));
+    // completion < 0 encodes "duration unknown" and is stored as SQL NULL.
+    query.addBindValue(event.completion >= 0.0 ? QVariant(event.completion) : QVariant(QMetaType(QMetaType::Double)));
+    query.addBindValue(event.outcome);
+    query.addBindValue(event.userInitiated ? 1 : 0);
+    query.addBindValue(event.source);
+    query.addBindValue(event.shuffleMode.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : QVariant(event.shuffleMode));
+    query.addBindValue(event.track.path);
+    query.addBindValue(event.track.musicBrainz.recordingId);
+    query.addBindValue(event.previousTrackPath);
+    query.addBindValue(event.sessionId);
+    query.addBindValue(QString::fromUtf8(QJsonDocument(trackToJson(event.track)).toJson(QJsonDocument::Compact)));
+    if (!query.exec() || query.numRowsAffected() <= 0) {
+        return -1;
+    }
+    return query.lastInsertId().toLongLong();
+}
+
+QList<ListenHistoryStore::PlayEvent> ListenHistoryStore::recentPlayEvents(int limit, int offset) const
+{
+    QList<PlayEvent> events;
+    if (!m_db.isOpen() || limit <= 0 || offset < 0) {
+        return events;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT id, started_at, ended_at, played_ms, duration_ms, completion, outcome, user_initiated, "
+        "source, shuffle_mode, previous_track_path, session_id, track_json "
+        "FROM play_events ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?"));
+    query.addBindValue(limit);
+    query.addBindValue(offset);
+    if (!query.exec()) {
+        return events;
+    }
+    while (query.next()) {
+        PlayEvent event;
+        event.id = query.value(0).toLongLong();
+        event.startedAtSecs = query.value(1).toLongLong();
+        event.endedAtSecs = query.value(2).toLongLong();
+        event.playedMs = query.value(3).toLongLong();
+        event.durationMs = query.value(4).toLongLong();
+        // A NULL completion column round-trips back to the <0 "unknown" sentinel.
+        event.completion = query.value(5).isNull() ? -1.0 : query.value(5).toDouble();
+        event.outcome = query.value(6).toString();
+        event.userInitiated = query.value(7).toInt() != 0;
+        event.source = query.value(8).toString();
+        event.shuffleMode = query.value(9).toString();
+        event.previousTrackPath = query.value(10).toString();
+        event.sessionId = query.value(11).toString();
+        event.track = trackFromJson(QJsonDocument::fromJson(query.value(12).toString().toUtf8()).object());
+        events.push_back(event);
+    }
+    return events;
+}
+
+int ListenHistoryStore::playEventCount() const
+{
+    if (!m_db.isOpen()) {
+        return 0;
+    }
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM play_events")) || !query.next()) {
+        return 0;
+    }
+    return query.value(0).toInt();
 }
