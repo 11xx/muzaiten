@@ -2987,6 +2987,14 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
+    connect(m_musicExplorerView, &MusicExplorerView::focusPreviousPanelRequested, this, [this]() {
+        if (m_panelSearch != nullptr) {
+            m_panelSearch->setActivePanel(MainPanelId::Artists, false);
+        }
+        if (QWidget *artistList = m_artistSidebar->navigationWidget()) {
+            artistList->setFocus(Qt::OtherFocusReason);
+        }
+    });
 
     m_libraryCenterStack->addWidget(m_musicExplorerView);
     if (!m_currentArtist.isEmpty()) {

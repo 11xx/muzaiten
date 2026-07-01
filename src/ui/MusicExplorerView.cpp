@@ -105,6 +105,22 @@ QColor blend(const QColor &a, const QColor &b, qreal amountB)
                   qRound(a.blue() * amountA + b.blue() * amountB));
 }
 
+QColor expandedPanelPrimaryColor(const QPalette &palette, const QColor &tint)
+{
+    const QColor base = palette.color(QPalette::Base);
+    const bool dark = palette.color(QPalette::Window).lightness() < 128;
+    QColor color = blend(base, tint, dark ? 0.09 : 0.055);
+    color.setAlpha(dark ? 248 : 250);
+    return color;
+}
+
+QColor expandedPanelAlternateColor(const QPalette &palette, const QColor &tint)
+{
+    const QColor base = palette.color(QPalette::Base);
+    const bool dark = palette.color(QPalette::Window).lightness() < 128;
+    return blend(base, tint, dark ? 0.16 : 0.10);
+}
+
 void addRoundedPanelPath(QPainterPath *path, const QRect &panelRect, int pointerX)
 {
     const int radius = std::min(kPanelRadius, std::min(panelRect.width(), panelRect.height()) / 2);
@@ -297,12 +313,6 @@ public:
         update();
     }
 
-    void setArtwork(const QImage &image)
-    {
-        m_art = image;
-        update();
-    }
-
 protected:
     void paintEvent(QPaintEvent *) override
     {
@@ -313,10 +323,9 @@ protected:
         const QColor window = palette().color(QPalette::Window);
         const QColor tint = m_tint.isValid() ? m_tint : palette().color(QPalette::Highlight);
         const bool dark = window.lightness() < 128;
-        QColor body = blend(base, tint, dark ? 0.16 : 0.10);
-        QColor body2 = blend(base, tint, dark ? 0.07 : 0.05);
-        body.setAlpha(245);
-        body2.setAlpha(238);
+        const QColor body = expandedPanelPrimaryColor(palette(), tint);
+        QColor body2 = blend(base, tint, dark ? 0.055 : 0.035);
+        body2.setAlpha(dark ? 246 : 249);
 
         const QRect panelRect = rect().adjusted(kPanelMarginX, kPanelPointerHeight, -kPanelMarginX, -1);
         QPainterPath path;
@@ -324,26 +333,15 @@ protected:
 
         QLinearGradient gradient(panelRect.topLeft(), panelRect.bottomRight());
         gradient.setColorAt(0.0, body);
-        gradient.setColorAt(0.62, body2);
-        gradient.setColorAt(1.0, base);
+        gradient.setColorAt(0.72, body2);
+        gradient.setColorAt(1.0, blend(body2, window, dark ? 0.10 : 0.05));
         painter.fillPath(path, gradient);
-
-        if (!m_art.isNull()) {
-            const QSize tinySize(std::max(12, panelRect.width() / 18), std::max(8, panelRect.height() / 18));
-            QImage wash = m_art.scaled(tinySize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation)
-                              .scaled(panelRect.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-            painter.save();
-            painter.setClipPath(path);
-            painter.setOpacity(dark ? 0.28 : 0.22);
-            painter.drawImage(panelRect, wash);
-            painter.restore();
-        }
 
         QRadialGradient leftGlow(QPointF(panelRect.left() + panelRect.width() * 0.22,
                                          panelRect.top() + panelRect.height() * 0.18),
                                  panelRect.width() * 0.68);
         QColor glow = tint;
-        glow.setAlpha(dark ? 72 : 48);
+        glow.setAlpha(dark ? 42 : 30);
         QColor clear = tint;
         clear.setAlpha(0);
         leftGlow.setColorAt(0.0, glow);
@@ -354,7 +352,7 @@ protected:
                                           panelRect.bottom() - panelRect.height() * 0.10),
                                   panelRect.width() * 0.55);
         QColor right = blend(tint, window, dark ? 0.45 : 0.62);
-        right.setAlpha(dark ? 42 : 34);
+        right.setAlpha(dark ? 24 : 20);
         rightGlow.setColorAt(0.0, right);
         rightGlow.setColorAt(1.0, clear);
         painter.fillPath(path, rightGlow);
@@ -368,7 +366,6 @@ protected:
 private:
     int m_pointerX = 40;
     QColor m_tint;
-    QImage m_art;
 };
 
 MusicExplorerView::MusicExplorerView(QWidget *parent)
@@ -639,8 +636,10 @@ void MusicExplorerView::keyPressEvent(QKeyEvent *event)
         if (event->key() == Qt::Key_H || event->key() == Qt::Key_Left) {
             if (event->key() == Qt::Key_Left) {
                 moveCurrentByGrid(-1, 0);
-            } else {
+            } else if (m_expandedPanel != nullptr) {
                 clearExpandedAlbum();
+            } else {
+                emit focusPreviousPanelRequested();
             }
             event->accept();
             return;
@@ -851,6 +850,7 @@ void MusicExplorerView::setExpandedAlbumRow(int row, bool focusTracks)
     if (focusTracks) {
         m_inlineTrackTable->setFocus(Qt::OtherFocusReason);
     }
+    ensureExpandedPanelVisible();
 }
 
 void MusicExplorerView::clearExpandedAlbum()
@@ -917,12 +917,14 @@ bool MusicExplorerView::handleInlineTrackKey(QKeyEvent *event)
         case Qt::Key_N:
         case Qt::Key_Down:
             m_inlineTrackTable->moveCurrentRow(+1);
+            ensureInlineTrackVisible(+1);
             event->accept();
             return true;
         case Qt::Key_K:
         case Qt::Key_P:
         case Qt::Key_Up:
             m_inlineTrackTable->moveCurrentRow(-1);
+            ensureInlineTrackVisible(-1);
             event->accept();
             return true;
         case Qt::Key_H:
@@ -990,6 +992,13 @@ QWidget *MusicExplorerView::cardWidgetForTests(int row) const
     return row >= 0 && row < m_cards.size() ? m_cards.at(row) : nullptr;
 }
 
+int MusicExplorerView::scrollValueForTests() const
+{
+    return m_scroll != nullptr && m_scroll->verticalScrollBar() != nullptr
+        ? m_scroll->verticalScrollBar()->value()
+        : 0;
+}
+
 QColor MusicExplorerView::artTintForAlbum(const QString &albumTitle) const
 {
     const QColor art = averageColor(m_artByTitle.value(albumTitle));
@@ -1014,7 +1023,6 @@ void MusicExplorerView::refreshExpandedPanelBackdrop()
     const QColor tint = artTintForAlbum(m_expandedAlbumTitle);
     if (m_expandedPanel != nullptr) {
         m_expandedPanel->setTint(tint);
-        m_expandedPanel->setArtwork(m_artByTitle.value(m_expandedAlbumTitle));
     }
     applyExpandedTrackPalette(tint);
 }
@@ -1026,11 +1034,11 @@ void MusicExplorerView::applyExpandedTrackPalette(const QColor &tint)
     }
 
     const QPalette appPalette = palette();
-    const QColor base = appPalette.color(QPalette::Base);
     const bool dark = appPalette.color(QPalette::Window).lightness() < 128;
-    const QColor rowBase = blend(base, tint, dark ? 0.08 : 0.05);
-    const QColor alternate = blend(base, tint, dark ? 0.15 : 0.10);
-    const QColor header = blend(base, tint, dark ? 0.19 : 0.13);
+    const QColor rowBase = expandedPanelPrimaryColor(appPalette, tint);
+    QColor alternate = expandedPanelAlternateColor(appPalette, tint);
+    alternate.setAlpha(rowBase.alpha());
+    const QColor header = blend(rowBase, tint, dark ? 0.12 : 0.08);
     QPalette tablePalette = m_inlineTrackTable->palette();
     tablePalette.setColor(QPalette::Base, rowBase);
     tablePalette.setColor(QPalette::AlternateBase, alternate);
@@ -1043,6 +1051,86 @@ void MusicExplorerView::applyExpandedTrackPalette(const QColor &tint)
     m_inlineTrackTable->horizontalHeader()->viewport()->setPalette(tablePalette);
     m_inlineTrackTable->viewport()->update();
     m_inlineTrackTable->horizontalHeader()->viewport()->update();
+}
+
+void MusicExplorerView::ensureExpandedPanelVisible()
+{
+    if (m_scroll == nullptr || m_expandedPanel == nullptr || m_scroll->verticalScrollBar() == nullptr) {
+        return;
+    }
+
+    m_rows->activate();
+    QScrollBar *bar = m_scroll->verticalScrollBar();
+    const QRect panelRect(m_expandedPanel->mapTo(m_content, QPoint(0, 0)), m_expandedPanel->size());
+    if (panelRect.isEmpty()) {
+        return;
+    }
+
+    constexpr int margin = 8;
+    const int viewportHeight = std::max(1, m_scroll->viewport()->height());
+    const int viewportTop = bar->value();
+    const int viewportBottom = viewportTop + viewportHeight;
+    int desired = viewportTop;
+
+    if (panelRect.height() + margin * 2 >= viewportHeight) {
+        if (panelRect.top() < viewportTop || panelRect.bottom() > viewportBottom) {
+            desired = panelRect.top() - margin;
+        }
+    } else if (panelRect.top() - margin < viewportTop) {
+        desired = panelRect.top() - margin;
+    } else if (panelRect.bottom() + margin > viewportBottom) {
+        desired = panelRect.bottom() + margin - viewportHeight;
+    }
+
+    desired = std::clamp(desired, bar->minimum(), bar->maximum());
+    if (desired != bar->value()) {
+        bar->setValue(desired);
+    }
+}
+
+void MusicExplorerView::ensureInlineTrackVisible(int direction)
+{
+    if (m_scroll == nullptr || m_inlineTrackTable == nullptr || m_scroll->verticalScrollBar() == nullptr) {
+        return;
+    }
+    if (m_inlineTrackTable->model() == nullptr || m_inlineTrackTable->currentRow() < 0) {
+        return;
+    }
+
+    QScrollBar *bar = m_scroll->verticalScrollBar();
+    const int row = m_inlineTrackTable->currentRow();
+    int y = m_inlineTrackTable->horizontalHeader() != nullptr && !m_inlineTrackTable->horizontalHeader()->isHidden()
+        ? m_inlineTrackTable->horizontalHeader()->height()
+        : 0;
+    for (int i = 0; i < row; ++i) {
+        y += std::max(1, m_inlineTrackTable->rowHeight(i));
+    }
+    const int selectedRowHeight = std::max(1, m_inlineTrackTable->rowHeight(row));
+    const QPoint rowTopLeft = m_inlineTrackTable->mapTo(m_content, QPoint(0, y));
+    const QRect contentRow(rowTopLeft, QSize(m_inlineTrackTable->viewport()->width(), selectedRowHeight));
+    const int rowHeight = std::max(1, contentRow.height());
+    const int padding = std::max(0, m_inlineTrackTable->navigationScrollPadding()) * rowHeight;
+    const int viewportHeight = std::max(1, m_scroll->viewport()->height());
+    const int viewportTop = bar->value();
+    const int viewportBottom = viewportTop + viewportHeight;
+    int desired = viewportTop;
+
+    if (direction > 0 && contentRow.bottom() + padding > viewportBottom) {
+        desired = contentRow.bottom() + padding - viewportHeight + 1;
+    } else if (direction < 0 && contentRow.top() - padding < viewportTop) {
+        desired = contentRow.top() - padding;
+    } else if (direction == 0) {
+        if (contentRow.top() < viewportTop) {
+            desired = contentRow.top();
+        } else if (contentRow.bottom() > viewportBottom) {
+            desired = contentRow.bottom() - viewportHeight + 1;
+        }
+    }
+
+    desired = std::clamp(desired, bar->minimum(), bar->maximum());
+    if (desired != bar->value()) {
+        bar->setValue(desired);
+    }
 }
 
 int MusicExplorerView::availableGridWidth() const

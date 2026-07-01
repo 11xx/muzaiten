@@ -15,6 +15,8 @@ private slots:
     void albumKeysMoveByAlbumAndNFocusesTracks();
     void lNarrowsAndHUnnarrows();
     void arrowsStillMoveAlbumsHorizontally();
+    void albumGridHRequestsPreviousPanel();
+    void inlineTrackKeysScrollParentArea();
     void expandedTrackTableUsesDynamicPalette();
     void expandedPanelSurvivesResizeAndRefocus();
     void inlineTrackKeysNavigateAndReturnFocus();
@@ -25,7 +27,7 @@ private slots:
 
 private:
     static QVector<Album> makeAlbums();
-    static QVector<Track> makeTracks(const QString &album);
+    static QVector<Track> makeTracks(const QString &album, int count = -1);
 };
 
 QVector<Album> MusicExplorerViewTest::makeAlbums()
@@ -37,9 +39,11 @@ QVector<Album> MusicExplorerViewTest::makeAlbums()
     };
 }
 
-QVector<Track> MusicExplorerViewTest::makeTracks(const QString &album)
+QVector<Track> MusicExplorerViewTest::makeTracks(const QString &album, int count)
 {
-    const int count = album == QStringLiteral("Two") ? 3 : album == QStringLiteral("Three") ? 1 : 2;
+    if (count < 0) {
+        count = album == QStringLiteral("Two") ? 3 : album == QStringLiteral("Three") ? 1 : 2;
+    }
     QVector<Track> tracks;
     tracks.reserve(count);
     for (int i = 0; i < count; ++i) {
@@ -128,6 +132,48 @@ void MusicExplorerViewTest::lNarrowsAndHUnnarrows()
     QTest::keyClick(view.inlineTrackTableForTests(), Qt::Key_H);
     QTRY_COMPARE(view.expandedPanelCountForTests(), 0);
     QVERIFY(view.hasFocus());
+}
+
+void MusicExplorerViewTest::albumGridHRequestsPreviousPanel()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QSignalSpy previousSpy(&view, &MusicExplorerView::focusPreviousPanelRequested);
+
+    QTest::keyClick(&view, Qt::Key_H);
+
+    QCOMPARE(previousSpy.count(), 1);
+}
+
+void MusicExplorerViewTest::inlineTrackKeysScrollParentArea()
+{
+    MusicExplorerView view;
+    view.resize(520, 320);
+    view.setNavigationScrollPadding(2);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title, 36); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    view.selectAlbumTitle(QStringLiteral("One"), true);
+    QTRY_COMPARE(view.expandedPanelCountForTests(), 1);
+    auto *table = view.inlineTrackTableForTests();
+    QVERIFY(table != nullptr);
+    QVERIFY(table->hasFocus());
+    const int startScroll = view.scrollValueForTests();
+
+    for (int i = 0; i < 30; ++i) {
+        QTest::keyClick(table, Qt::Key_J);
+    }
+
+    QCOMPARE(table->currentRow(), 30);
+    QVERIFY2(view.scrollValueForTests() > startScroll,
+             qPrintable(QStringLiteral("scroll did not advance: start=%1 end=%2")
+                            .arg(startScroll)
+                            .arg(view.scrollValueForTests())));
 }
 
 void MusicExplorerViewTest::arrowsStillMoveAlbumsHorizontally()

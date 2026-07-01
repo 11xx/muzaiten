@@ -707,6 +707,14 @@ void TrackTable::setCurrentRow(int row)
 void TrackTable::setCurrentRow(int row, int scrollDirection)
 {
     setCurrentNavigationRow(row, scrollDirection);
+    if (m_autoHeightToRows) {
+        if (verticalScrollBar() != nullptr) {
+            verticalScrollBar()->setValue(0);
+        }
+        if (horizontalScrollBar() != nullptr) {
+            horizontalScrollBar()->setValue(0);
+        }
+    }
     reselectMarkedRows();
 }
 
