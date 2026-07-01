@@ -626,11 +626,15 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
         // other narrowing — a single album (n / click) or a mouse-made
         // multi-selection — counts as a finished interaction, so returning to the
         // grid restarts fresh and we clear it. Escape (below) always clears.
-        if (m_activePanel == MainPanelId::Tracks) {
+        const MainPanelId panelBeforeClear = m_activePanel;
+        if (panelBeforeClear == MainPanelId::Tracks) {
             if (const MainPanelTarget *grid = targetForId(MainPanelId::Albums);
                 grid != nullptr && grid->clearNarrowing
                 && (!grid->narrowingPersistsOnReturn || !grid->narrowingPersistsOnReturn())) {
                 grid->clearNarrowing();
+                if (m_activePanel != panelBeforeClear) {
+                    return true;
+                }
             }
         }
         focusRelative(-1);
