@@ -160,6 +160,11 @@ public:
     {
         setFocusPolicy(Qt::NoFocus);
         setMouseTracking(true);
+        // Paint every pixel ourselves (background included) so a repaint is a
+        // single atomic frame. Without this the non-opaque card is composited
+        // over the parent, and a repaint during a layout reflow (expand/collapse)
+        // can briefly show the art blank before it is redrawn.
+        setAttribute(Qt::WA_OpaquePaintEvent, true);
     }
 
     void setAlbum(const Album &album)
@@ -217,8 +222,11 @@ protected:
 
     void mouseDoubleClickEvent(QMouseEvent *event) override
     {
+        // No double-click-to-play: mirror the library album grid, where a
+        // double click must not replace the queue. Playing an album goes through
+        // the right-click menu (or selecting tracks in the expanded tracklist).
+        // Absorb the left double click so it neither plays nor re-expands.
         if (event->button() == Qt::LeftButton) {
-            emit m_owner->albumPlayReplaceRequested(QStringList{m_album.title});
             event->accept();
             return;
         }
@@ -244,6 +252,9 @@ protected:
         // isActiveMainPanel (mainPanelActive / real focus), not by the OS window
         // being active, so window (de)activation must not repaint a new color.
         option.palette.setCurrentColorGroup(QPalette::Active);
+        // Opaque background fill (WA_OpaquePaintEvent): matches the grid's Window
+        // color so the card blends into the surrounding spacing.
+        painter.fillRect(rect(), option.palette.color(QPalette::Window));
         const QRect outer = rect().adjusted(2, 2, -3, -3);
         // The current (selected) card gets a filled highlight; when it is also
         // the expanded one it keeps the softer translucent connector tint that
@@ -317,6 +328,9 @@ public:
         : QWidget(parent)
     {
         setAutoFillBackground(false);
+        // Paint every pixel (the Window margins around the rounded body included)
+        // so a repaint is atomic and does not flash during expand/collapse.
+        setAttribute(Qt::WA_OpaquePaintEvent, true);
         auto *layout = new QVBoxLayout(this);
         layout->setContentsMargins(12, kPanelTopPadding, 12, kPanelBottomPadding);
         layout->setSpacing(0);
@@ -345,6 +359,7 @@ protected:
 
         const QColor base = palette().color(QPalette::Base);
         const QColor window = palette().color(QPalette::Window);
+        painter.fillRect(rect(), window);
         const QColor tint = m_tint;
         const bool dark = window.lightness() < 128;
         const QColor body = expandedPanelPrimaryColor(palette(), tint);
