@@ -20,6 +20,7 @@ class MprisService;
 class PlaybackBackend;
 class PlayerCore;
 class PlaylistDatabase;
+class RadioSession;
 class QSystemTrayIcon;
 class QThread;
 class SettingsStore;
@@ -48,6 +49,15 @@ public:
     LastFmScrobbler       *lastFmScrobbler() const;
     QThread               *listenBrainzThread() const;
     QThread               *lastFmThread() const;
+
+    // Start a rule-based radio session seeded from a library track: clears the
+    // queue, plays the seed, and installs a scored provider that extends the
+    // queue with recommendations. Returns false (no state change) when the seed
+    // path is not a known library track.
+    bool startRadio(const QString &seedPath);
+    // End the session: deactivates radio and tears down the provider/session.
+    // Queue contents stay as they are.
+    void stopRadio();
 
     QString databasePath() const;
     QString playlistDatabasePath() const;
@@ -88,6 +98,7 @@ private:
     std::unique_ptr<SettingsStore>     m_state;
     std::unique_ptr<ArtworkCache>      m_artworkCache;
     std::unique_ptr<ListenHistoryStore> m_listenHistory;
+    std::unique_ptr<RadioSession>      m_radioSession;
     PlayerCore       *m_player = nullptr;
     PlaybackBackend  *m_playback = nullptr;
     ListenTracker    *m_listenTracker = nullptr;

@@ -4,6 +4,13 @@
 
 ### Added
 
+- Start Radio: seed a radio session from any library track
+  (`muzaitenctl start-radio <path>` / `stop-radio` for now; a UI entry comes
+  later). Picks are scored by genre, era, rating and listening affinity, with a
+  novelty bonus for the unheard and artist/album throttling so a session never
+  stalls on one artist or album — and every pick records why it was chosen.
+  Powered by the play history, imported scrobbles, and genre data added in the
+  previous slices.
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

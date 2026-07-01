@@ -1,6 +1,8 @@
 #include "app/AppCore.h"
 
 #include "app/AppPaths.h"
+#include "core/FoldKey.h"
+#include "core/GenreTags.h"
 #include "db/Database.h"
 #include "db/PlaylistDatabase.h"
 #include "db/SettingsStore.h"
@@ -10,6 +12,8 @@
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
+#include "reco/RadioSession.h"
+#include "reco/TrackScorer.h"
 #include "scanner/ArtworkCache.h"
 #include "scrobble/LastFmCredentials.h"
 #include "scrobble/LastFmScrobbler.h"
@@ -21,6 +25,7 @@
 #include "ui/MainWindow.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -64,6 +69,44 @@ QString shuffleModeToString(ShuffleMode mode)
         break;
     }
     return QStringLiteral("off");
+}
+
+// Leading 4-digit release year from a track's date fields (original date wins);
+// 0 when neither carries a parseable year.
+int trackYear(const Track &track)
+{
+    const QString date = !track.originalDate.isEmpty() ? track.originalDate : track.date;
+    if (date.size() < 4) {
+        return 0;
+    }
+    bool ok = false;
+    const int year = QStringView(date).left(4).toInt(&ok);
+    return ok ? year : 0;
+}
+
+TrackScorer::Candidate candidateFromRow(const RadioCandidateRow &row)
+{
+    TrackScorer::Candidate candidate;
+    candidate.path = row.path;
+    candidate.artistFolded = FoldKey::fold(row.artistName);
+    candidate.albumKey = FoldKey::albumKey(row.albumArtistName, row.albumTitle);
+    candidate.genresFolded = row.genresFolded;   // already GenreTags::folded (genre_folded column)
+    candidate.year = row.year;
+    candidate.effectiveRating0To100 = row.effectiveRating0To100;
+    candidate.hasUserRating = row.hasUserRating;
+    return candidate;
+}
+
+TrackScorer::Affinity affinityFromRow(const ListenHistoryStore::TrackAffinityRow &row)
+{
+    TrackScorer::Affinity affinity;
+    affinity.playEvents = row.playEvents;
+    affinity.finished = row.finished;
+    affinity.skipped = row.skipped;
+    affinity.lastPlayedAtSecs = row.lastPlayedAtSecs;
+    affinity.listenCount = row.listenCount;
+    affinity.baselineMax = row.baselineMax;
+    return affinity;
 }
 
 QJsonObject trackJson(const Track &track, int index = -1)
@@ -450,6 +493,12 @@ void AppCore::setupScrobbleWiring()
             ? QStringLiteral("library_shuffle")
             : (userInitiated ? QStringLiteral("queue_manual") : QStringLiteral("queue_auto"));
         m_playEventRecorder->trackStarted(track, userInitiated, source);
+        // Advance the radio rolling context with every real track start while a
+        // session is active — the seed, radio picks, and user-queued
+        // interruptions alike (they all shape mood continuity).
+        if (m_radioSession && m_player->radioActive()) {
+            m_radioSession->notePlayed(track);
+        }
     });
 }
 
@@ -563,7 +612,89 @@ void AppCore::resumeScrobblers(const Track &track, qint64 elapsedMs, bool playin
 
 QJsonObject AppCore::ipcStatus() const
 {
-    return QJsonDocument::fromJson(m_mpris->currentTrackJson().toUtf8()).object();
+    QJsonObject status = QJsonDocument::fromJson(m_mpris->currentTrackJson().toUtf8()).object();
+    status.insert(QStringLiteral("radio"),
+                  (m_player != nullptr && m_player->radioActive()) ? QStringLiteral("active")
+                                                                   : QStringLiteral("inactive"));
+    return status;
+}
+
+bool AppCore::startRadio(const QString &seedPath)
+{
+    if (m_database == nullptr || m_player == nullptr) {
+        return false;
+    }
+    const Track seed = m_database->trackForPath(seedPath);
+    if (seed.path.isEmpty()) {
+        return false;
+    }
+
+    // Seed genres drive candidate generation and anchor the mood window.
+    QStringList seedGenresFolded;
+    for (const QString &genre : m_database->genresForTrack(seed.path)) {
+        seedGenresFolded.push_back(GenreTags::folded(genre));
+    }
+    seedGenresFolded.removeDuplicates();
+
+    const QVector<RadioCandidateRow> rows = seedGenresFolded.isEmpty()
+        ? m_database->radioFallbackCandidates()
+        : m_database->radioCandidates(seedGenresFolded);
+
+    QVector<TrackScorer::Candidate> pool;
+    pool.reserve(rows.size());
+    for (const RadioCandidateRow &row : rows) {
+        pool.push_back(candidateFromRow(row));
+    }
+
+    QHash<QString, TrackScorer::Affinity> affinities;
+    if (m_listenHistory != nullptr) {
+        const QHash<QString, ListenHistoryStore::TrackAffinityRow> affinityRows = m_listenHistory->trackAffinities();
+        affinities.reserve(affinityRows.size());
+        for (auto it = affinityRows.cbegin(); it != affinityRows.cend(); ++it) {
+            affinities.insert(it.key(), affinityFromRow(it.value()));
+        }
+    }
+
+    TrackScorer::Candidate seedCandidate;
+    seedCandidate.path = seed.path;
+    seedCandidate.artistFolded = FoldKey::fold(seed.artistName);
+    seedCandidate.albumKey = FoldKey::albumKey(seed.albumArtistName, seed.albumTitle);
+    seedCandidate.genresFolded = seedGenresFolded;
+    seedCandidate.year = trackYear(seed);
+    seedCandidate.effectiveRating0To100 = seed.effectiveRating0To100;
+    seedCandidate.hasUserRating = seed.hasUserRating;
+
+    // Dedicated exploration knob so radio never touches the shuffle settings.
+    const int exploration = std::clamp(
+        m_database->setting(QStringLiteral("radio.exploration"), QStringLiteral("30")).toInt(), 0, 100);
+
+    m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), seedCandidate,
+                                                    exploration, QDateTime::currentSecsSinceEpoch());
+    // Install the scored provider; it resolves each pick to a full Track by path.
+    m_player->setRadioProvider([this](int count, const QSet<QString> &excludePaths) -> QVector<Track> {
+        if (!m_radioSession) {
+            return {};
+        }
+        return m_radioSession->nextTracks(count, excludePaths, [this](const QString &path) {
+            return m_database ? m_database->trackForPath(path) : Track{};
+        });
+    });
+    m_player->setRadioActive(true);
+    // Clear the queue and start the seed; the currentTrackChanged handler feeds
+    // the seed into the session's rolling context, and auto-advance past the seed
+    // pulls the first recommendation through the radio provider.
+    m_player->clearAll();
+    m_player->appendAndPlay(seed);
+    return true;
+}
+
+void AppCore::stopRadio()
+{
+    if (m_player != nullptr) {
+        m_player->setRadioActive(false);
+        m_player->setRadioProvider({});
+    }
+    m_radioSession.reset();
 }
 
 ScrobbleBackfill::LibraryIndex AppCore::buildLibraryIndex() const
@@ -807,6 +938,19 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         }
         return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("started")},
                            {QStringLiteral("service"), service}};
+    }
+    if (command == QLatin1String("start-radio")) {
+        const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();
+        if (path.isEmpty()) {
+            return error(QStringLiteral("start-radio needs a \"path\""));
+        }
+        const bool started = startRadio(path);
+        return QJsonObject{{QStringLiteral("radio"),
+                            started ? QStringLiteral("started") : QStringLiteral("unknown-track")}};
+    }
+    if (command == QLatin1String("stop-radio")) {
+        stopRadio();
+        return QJsonObject{{QStringLiteral("radio"), QStringLiteral("stopped")}};
     }
     return error(QStringLiteral("unknown command \"%1\"").arg(command));
 }

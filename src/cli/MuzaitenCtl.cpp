@@ -61,6 +61,8 @@ void printUsage()
         "  enqueue [--play|--next] <path...>  add files to the queue\n"
         "  raise                   show and focus the running instance's window\n"
         "  scrobble-backfill <listenbrainz|lastfm>  import listening history / sync play counts\n"
+        "  start-radio <path>      start a radio session seeded from a library track\n"
+        "  stop-radio              stop the current radio session\n"
         "\n"
         "Options:\n"
         "  --json                  print the raw JSON reply\n",
@@ -560,6 +562,12 @@ int main(int argc, char **argv)
             return fail(QStringLiteral("scrobble-backfill service must be listenbrainz or lastfm"));
         }
         args.insert(QStringLiteral("service"), service);
+    } else if (command == QLatin1String("start-radio")) {
+        if (arguments.isEmpty()) {
+            return fail(QStringLiteral("start-radio needs a library track path"));
+        }
+        // Resolve against the client's cwd; the server has its own.
+        args.insert(QStringLiteral("path"), QFileInfo(arguments.first()).absoluteFilePath());
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
@@ -653,6 +661,10 @@ int main(int argc, char **argv)
         std::printf("%s: %s\n",
                     qPrintable(response.value(QStringLiteral("service")).toString()),
                     qPrintable(response.value(QStringLiteral("backfill")).toString(QStringLiteral("started"))));
+        return 0;
+    }
+    if (command == QLatin1String("start-radio") || command == QLatin1String("stop-radio")) {
+        std::printf("radio: %s\n", qPrintable(response.value(QStringLiteral("radio")).toString()));
         return 0;
     }
     // Plain "status" replies carry the canonical track JSON at the top level,
