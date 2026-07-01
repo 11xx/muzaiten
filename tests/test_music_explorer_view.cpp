@@ -2,7 +2,6 @@
 
 #include <QApplication>
 #include <QHeaderView>
-#include <QSignalSpy>
 #include <QtTest/QtTest>
 
 #include <memory>
@@ -15,9 +14,8 @@ private slots:
     void albumKeysMoveByAlbumAndNFocusesTracks();
     void lNarrowsAndHUnnarrows();
     void arrowsStillMoveAlbumsHorizontally();
-    void albumGridHRequestsPreviousPanel();
     void inlineTrackKeysScrollParentArea();
-    void expandedTrackTableUsesDynamicPalette();
+    void expandedTrackTableUsesNeutralPaletteWithoutArtwork();
     void expandedPanelSurvivesResizeAndRefocus();
     void inlineTrackKeysNavigateAndReturnFocus();
     void expandsExactlyOneAlbumAndShowsAllTracks();
@@ -134,20 +132,6 @@ void MusicExplorerViewTest::lNarrowsAndHUnnarrows()
     QVERIFY(view.hasFocus());
 }
 
-void MusicExplorerViewTest::albumGridHRequestsPreviousPanel()
-{
-    MusicExplorerView view;
-    view.resize(720, 640);
-    view.setAlbums(makeAlbums());
-    view.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&view));
-    QSignalSpy previousSpy(&view, &MusicExplorerView::focusPreviousPanelRequested);
-
-    QTest::keyClick(&view, Qt::Key_H);
-
-    QCOMPARE(previousSpy.count(), 1);
-}
-
 void MusicExplorerViewTest::inlineTrackKeysScrollParentArea()
 {
     MusicExplorerView view;
@@ -191,7 +175,7 @@ void MusicExplorerViewTest::arrowsStillMoveAlbumsHorizontally()
     QCOMPARE(view.currentRow(), 0);
 }
 
-void MusicExplorerViewTest::expandedTrackTableUsesDynamicPalette()
+void MusicExplorerViewTest::expandedTrackTableUsesNeutralPaletteWithoutArtwork()
 {
     MusicExplorerView view;
     view.resize(720, 640);
@@ -205,9 +189,10 @@ void MusicExplorerViewTest::expandedTrackTableUsesDynamicPalette()
     QVERIFY(table != nullptr);
     const QPalette appPalette = QApplication::palette();
     const QPalette viewportPalette = table->viewport()->palette();
-    QVERIFY(viewportPalette.color(QPalette::Base) != appPalette.color(QPalette::Base));
+    QCOMPARE(viewportPalette.color(QPalette::Base).rgb(), appPalette.color(QPalette::Base).rgb());
+    QVERIFY(viewportPalette.color(QPalette::Base).rgb() != appPalette.color(QPalette::Highlight).rgb());
     QVERIFY(viewportPalette.color(QPalette::Base) != viewportPalette.color(QPalette::AlternateBase));
-    QVERIFY(table->horizontalHeader()->palette().color(QPalette::Button) != appPalette.color(QPalette::Button));
+    QVERIFY(table->horizontalHeader()->palette().color(QPalette::Button).rgb() != appPalette.color(QPalette::Highlight).rgb());
 }
 
 void MusicExplorerViewTest::expandedPanelSurvivesResizeAndRefocus()

@@ -109,15 +109,19 @@ QColor expandedPanelPrimaryColor(const QPalette &palette, const QColor &tint)
 {
     const QColor base = palette.color(QPalette::Base);
     const bool dark = palette.color(QPalette::Window).lightness() < 128;
-    QColor color = blend(base, tint, dark ? 0.09 : 0.055);
-    color.setAlpha(dark ? 248 : 250);
+    QColor color = tint.isValid() ? blend(base, tint, dark ? 0.09 : 0.055) : base;
+    color.setAlpha(255);
     return color;
 }
 
 QColor expandedPanelAlternateColor(const QPalette &palette, const QColor &tint)
 {
     const QColor base = palette.color(QPalette::Base);
+    const QColor alternate = palette.color(QPalette::AlternateBase);
     const bool dark = palette.color(QPalette::Window).lightness() < 128;
+    if (!tint.isValid()) {
+        return alternate == base ? blend(base, palette.color(QPalette::Window), dark ? 0.18 : 0.07) : alternate;
+    }
     return blend(base, tint, dark ? 0.16 : 0.10);
 }
 
@@ -321,11 +325,14 @@ protected:
 
         const QColor base = palette().color(QPalette::Base);
         const QColor window = palette().color(QPalette::Window);
-        const QColor tint = m_tint.isValid() ? m_tint : palette().color(QPalette::Highlight);
+        const QColor tint = m_tint;
         const bool dark = window.lightness() < 128;
         const QColor body = expandedPanelPrimaryColor(palette(), tint);
         QColor body2 = blend(base, tint, dark ? 0.055 : 0.035);
-        body2.setAlpha(dark ? 246 : 249);
+        if (!tint.isValid()) {
+            body2 = blend(base, window, dark ? 0.10 : 0.04);
+        }
+        body2.setAlpha(255);
 
         const QRect panelRect = rect().adjusted(kPanelMarginX, kPanelPointerHeight, -kPanelMarginX, -1);
         QPainterPath path;
@@ -337,27 +344,31 @@ protected:
         gradient.setColorAt(1.0, blend(body2, window, dark ? 0.10 : 0.05));
         painter.fillPath(path, gradient);
 
-        QRadialGradient leftGlow(QPointF(panelRect.left() + panelRect.width() * 0.22,
-                                         panelRect.top() + panelRect.height() * 0.18),
-                                 panelRect.width() * 0.68);
-        QColor glow = tint;
-        glow.setAlpha(dark ? 42 : 30);
-        QColor clear = tint;
-        clear.setAlpha(0);
-        leftGlow.setColorAt(0.0, glow);
-        leftGlow.setColorAt(1.0, clear);
-        painter.fillPath(path, leftGlow);
+        if (tint.isValid()) {
+            QRadialGradient leftGlow(QPointF(panelRect.left() + panelRect.width() * 0.22,
+                                             panelRect.top() + panelRect.height() * 0.18),
+                                     panelRect.width() * 0.68);
+            QColor glow = tint;
+            glow.setAlpha(dark ? 42 : 30);
+            QColor clear = tint;
+            clear.setAlpha(0);
+            leftGlow.setColorAt(0.0, glow);
+            leftGlow.setColorAt(1.0, clear);
+            painter.fillPath(path, leftGlow);
 
-        QRadialGradient rightGlow(QPointF(panelRect.right() - panelRect.width() * 0.18,
-                                          panelRect.bottom() - panelRect.height() * 0.10),
-                                  panelRect.width() * 0.55);
-        QColor right = blend(tint, window, dark ? 0.45 : 0.62);
-        right.setAlpha(dark ? 24 : 20);
-        rightGlow.setColorAt(0.0, right);
-        rightGlow.setColorAt(1.0, clear);
-        painter.fillPath(path, rightGlow);
+            QRadialGradient rightGlow(QPointF(panelRect.right() - panelRect.width() * 0.18,
+                                              panelRect.bottom() - panelRect.height() * 0.10),
+                                      panelRect.width() * 0.55);
+            QColor right = blend(tint, window, dark ? 0.45 : 0.62);
+            right.setAlpha(dark ? 24 : 20);
+            rightGlow.setColorAt(0.0, right);
+            rightGlow.setColorAt(1.0, clear);
+            painter.fillPath(path, rightGlow);
+        }
 
-        QColor edge = blend(palette().color(QPalette::Mid), tint, dark ? 0.18 : 0.12);
+        QColor edge = tint.isValid()
+            ? blend(palette().color(QPalette::Mid), tint, dark ? 0.18 : 0.12)
+            : palette().color(QPalette::Mid);
         edge.setAlpha(dark ? 150 : 120);
         painter.setPen(QPen(edge, 1));
         painter.drawPath(path);
@@ -424,6 +435,15 @@ void MusicExplorerView::setArtworkCache(ArtworkCache *cache)
             if (row < m_cards.size() && m_cards.at(row) != nullptr) {
                 m_cards.at(row)->setArtwork(image);
             }
+            if (row == m_expandedAlbumRow && m_expandedPanel != nullptr) {
+                refreshExpandedPanelBackdrop();
+            }
+        });
+        connect(m_artworkCache, &ArtworkCache::artworkMissing, this, [this](const QString &token, quint64 generation) {
+            if (generation != quint64(m_artworkGeneration) || !token.startsWith(QStringLiteral("musicExplorer:"))) return;
+            bool ok = false;
+            const int row = token.mid(QStringLiteral("musicExplorer:").size()).toInt(&ok) - kAlbumBatchTokenBase;
+            if (!ok || row < 0 || row >= m_albums.size()) return;
             if (row == m_expandedAlbumRow && m_expandedPanel != nullptr) {
                 refreshExpandedPanelBackdrop();
             }
@@ -522,6 +542,48 @@ void MusicExplorerView::expandCurrentAlbum(bool focusTracks)
     setExpandedAlbumRow(m_currentAlbumRow, focusTracks);
 }
 
+void MusicExplorerView::collapseExpandedAlbum()
+{
+    clearExpandedAlbum();
+}
+
+void MusicExplorerView::activateCurrentAlbum()
+{
+    expandCurrentAlbum(false);
+}
+
+QString MusicExplorerView::currentAlbumTitle() const
+{
+    return m_currentAlbumRow >= 0 && m_currentAlbumRow < m_albums.size()
+        ? m_albums.at(m_currentAlbumRow).title
+        : QString();
+}
+
+QStringList MusicExplorerView::albumTitlesForAction() const
+{
+    const QString title = currentAlbumTitle();
+    return title.isEmpty() ? QStringList{} : QStringList{title};
+}
+
+void MusicExplorerView::addCurrentAlbumToQueue()
+{
+    for (const QString &title : albumTitlesForAction()) {
+        emit albumAddToQueueRequested(title);
+    }
+}
+
+void MusicExplorerView::addCurrentAlbumToPlaylist()
+{
+    emit albumAddToPlaylistRequested(albumTitlesForAction());
+}
+
+void MusicExplorerView::playNextCurrentAlbum()
+{
+    for (const QString &title : albumTitlesForAction()) {
+        emit albumPlayNextRequested(title);
+    }
+}
+
 void MusicExplorerView::selectAlbumTitle(const QString &albumTitle, bool focusTracks)
 {
     const int row = rowForTitle(albumTitle);
@@ -536,6 +598,33 @@ void MusicExplorerView::selectTrackByPath(const QString &path)
         m_inlineTrackTable->selectTrackByPath(path);
         m_inlineTrackTable->setFocus(Qt::OtherFocusReason);
     }
+}
+
+int MusicExplorerView::trackRowCount() const
+{
+    return m_inlineTrackTable != nullptr ? m_inlineTrackTable->rowCount() : 0;
+}
+
+int MusicExplorerView::currentTrackRow() const
+{
+    return m_inlineTrackTable != nullptr ? m_inlineTrackTable->currentRow() : -1;
+}
+
+void MusicExplorerView::setCurrentTrackRow(int row)
+{
+    setCurrentTrackRow(row, 0);
+}
+
+void MusicExplorerView::setCurrentTrackRow(int row, int scrollDirection)
+{
+    if (m_inlineTrackTable == nullptr) {
+        return;
+    }
+    if (m_expandedAlbumTitle.isEmpty()) {
+        expandCurrentAlbum(false);
+    }
+    m_inlineTrackTable->setCurrentRow(row, scrollDirection);
+    ensureInlineTrackVisible(scrollDirection);
 }
 
 int MusicExplorerView::expandedPanelCountForTests() const
@@ -615,7 +704,7 @@ void MusicExplorerView::changeEvent(QEvent *event)
         || event->type() == QEvent::ApplicationPaletteChange
         || event->type() == QEvent::StyleChange) {
         if (m_expandedPanel != nullptr) {
-            m_expandedPanel->setTint(artTintForAlbum(m_expandedAlbumTitle));
+            refreshExpandedPanelBackdrop();
         }
     }
 }
@@ -639,7 +728,8 @@ void MusicExplorerView::keyPressEvent(QKeyEvent *event)
             } else if (m_expandedPanel != nullptr) {
                 clearExpandedAlbum();
             } else {
-                emit focusPreviousPanelRequested();
+                QWidget::keyPressEvent(event);
+                return;
             }
             event->accept();
             return;
@@ -722,16 +812,18 @@ void MusicExplorerView::rebuildLayout()
             const int expanded = rowForTitle(expandedTitle);
             if (expanded >= first && expanded < first + m_columnCount) {
                 m_expandedPanel = new ExpandedPanel(m_content);
+                m_expandedPanel->setUpdatesEnabled(false);
+                m_inlineTrackTable->setUpdatesEnabled(false);
                 m_expandedPanel->layout()->addWidget(m_inlineTrackTable);
                 m_inlineTrackTable->show();
                 m_rows->addWidget(m_expandedPanel);
-                if (isVisible()) {
-                    m_expandedPanel->show();
-                }
                 m_expandedAlbumRow = expanded;
                 m_expandedAlbumTitle = expandedTitle;
                 refreshExpandedTracks();
                 refreshExpandedPanelBackdrop();
+                if (isVisible()) {
+                    m_expandedPanel->show();
+                }
             }
         }
     }
@@ -740,6 +832,12 @@ void MusicExplorerView::rebuildLayout()
     m_rebuildingLayout = false;
     updateCardSelection();
     updateExpandedPanelGeometry();
+    if (m_expandedPanel != nullptr) {
+        m_inlineTrackTable->setUpdatesEnabled(true);
+        m_expandedPanel->setUpdatesEnabled(true);
+        m_expandedPanel->update();
+        m_inlineTrackTable->viewport()->update();
+    }
     requestVisibleArtwork();
 }
 
@@ -1002,7 +1100,7 @@ int MusicExplorerView::scrollValueForTests() const
 QColor MusicExplorerView::artTintForAlbum(const QString &albumTitle) const
 {
     const QColor art = averageColor(m_artByTitle.value(albumTitle));
-    return art.isValid() ? art : palette().color(QPalette::Highlight);
+    return art.isValid() ? art : QColor();
 }
 
 void MusicExplorerView::updateExpandedPanelGeometry()
@@ -1038,13 +1136,27 @@ void MusicExplorerView::applyExpandedTrackPalette(const QColor &tint)
     const QColor rowBase = expandedPanelPrimaryColor(appPalette, tint);
     QColor alternate = expandedPanelAlternateColor(appPalette, tint);
     alternate.setAlpha(rowBase.alpha());
-    const QColor header = blend(rowBase, tint, dark ? 0.12 : 0.08);
+    const QColor header = tint.isValid()
+        ? blend(rowBase, tint, dark ? 0.12 : 0.08)
+        : blend(rowBase, appPalette.color(QPalette::Window), dark ? 0.18 : 0.08);
+    const QColor highlight = appPalette.color(QPalette::Highlight);
+    TrackTableRowStyle rowStyle;
+    rowStyle.enabled = true;
+    rowStyle.primary = rowBase;
+    rowStyle.alternate = alternate;
+    rowStyle.hover = blend(rowBase, highlight, dark ? 0.24 : 0.16);
+    rowStyle.playing = blend(rowBase, highlight, dark ? 0.28 : 0.20);
+    rowStyle.selected = blend(rowBase, highlight, dark ? 0.50 : 0.40);
+    rowStyle.inactiveSelected = blend(rowBase, highlight, dark ? 0.30 : 0.22);
+    rowStyle.text = appPalette.color(QPalette::Text);
+    rowStyle.selectedText = appPalette.color(QPalette::HighlightedText);
     QPalette tablePalette = m_inlineTrackTable->palette();
     tablePalette.setColor(QPalette::Base, rowBase);
     tablePalette.setColor(QPalette::AlternateBase, alternate);
     tablePalette.setColor(QPalette::Window, rowBase);
     tablePalette.setColor(QPalette::Button, header);
     m_inlineTrackTable->setPalette(tablePalette);
+    m_inlineTrackTable->setRowStyle(rowStyle);
     m_inlineTrackTable->viewport()->setPalette(tablePalette);
     m_inlineTrackTable->viewport()->setAutoFillBackground(true);
     m_inlineTrackTable->horizontalHeader()->setPalette(tablePalette);

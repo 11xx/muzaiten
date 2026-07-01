@@ -7,6 +7,7 @@
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/NavigableTableView.h"
+#include "ui/TrackTableRowStyle.h"
 
 class QEvent;
 class QMouseEvent;
@@ -27,6 +28,7 @@ public:
     void setTracks(const QVector<Track> &tracks);
     void setChrome(TrackTableChrome chrome);
     TrackTableChrome chrome() const { return m_chrome; }
+    void setRowStyle(const TrackTableRowStyle &style);
     void setAutoHeightToRows(bool autoHeight);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);

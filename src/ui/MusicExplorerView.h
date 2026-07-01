@@ -8,6 +8,7 @@
 
 #include <QHash>
 #include <QImage>
+#include <QStringList>
 #include <QVector>
 #include <QWidget>
 
@@ -33,13 +34,26 @@ public:
     void applyTrackTableViewSettingsJson(const QString &json);
     QString trackTableViewSettingsJson() const;
     void setNavigationScrollPadding(int rows);
+    QWidget *albumNavigationWidget() { return this; }
+    TrackTable *trackNavigationWidget() const { return m_inlineTrackTable; }
     int rowCount() const;
     int currentRow() const { return m_currentAlbumRow; }
     void setCurrentRow(int row);
     void moveCurrentByGrid(int horizontal, int vertical);
     void expandCurrentAlbum(bool focusTracks = false);
+    void collapseExpandedAlbum();
+    void activateCurrentAlbum();
+    QString currentAlbumTitle() const;
+    QStringList albumTitlesForAction() const;
+    void addCurrentAlbumToQueue();
+    void addCurrentAlbumToPlaylist();
+    void playNextCurrentAlbum();
     void selectAlbumTitle(const QString &albumTitle, bool focusTracks = false);
     void selectTrackByPath(const QString &path);
+    int trackRowCount() const;
+    int currentTrackRow() const;
+    void setCurrentTrackRow(int row);
+    void setCurrentTrackRow(int row, int scrollDirection);
     QString expandedAlbumTitle() const { return m_expandedAlbumTitle; }
     int expandedPanelCountForTests() const;
     int pointerXForTests() const;
@@ -69,7 +83,6 @@ signals:
     void propertiesRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);
     void trackTableViewSettingsChanged();
-    void focusPreviousPanelRequested();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

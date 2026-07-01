@@ -59,15 +59,36 @@ void PanelSearchController::registerTarget(MainPanelTarget target)
     if (target.focusWidget == nullptr) {
         return;
     }
-    target.focusWidget->installEventFilter(this);
-    m_widgetToPanel.insert(target.focusWidget, target.id);
-    if (auto *view = qobject_cast<QAbstractItemView *>(target.focusWidget)) {
-        view->viewport()->installEventFilter(this);
-        m_widgetToPanel.insert(view->viewport(), target.id);
+    installTargetMappings(target);
+    if (!m_state.contains(target.id)) {
+        m_state.insert(target.id, {});
     }
-    m_state.insert(target.id, {});
     m_targets.push_back(std::move(target));
     updatePanelActiveProperties();
+}
+
+void PanelSearchController::replaceTarget(MainPanelTarget target)
+{
+    if (target.focusWidget == nullptr) {
+        return;
+    }
+
+    for (MainPanelTarget &registered : m_targets) {
+        if (registered.id != target.id) {
+            continue;
+        }
+        removeTargetMappings(registered);
+        registered = std::move(target);
+        installTargetMappings(registered);
+        if (!m_state.contains(registered.id)) {
+            m_state.insert(registered.id, {});
+        }
+        updatePanelActiveProperties();
+        updateSearchUi();
+        return;
+    }
+
+    registerTarget(std::move(target));
 }
 
 void PanelSearchController::setKeyBindingProfileName(const QString &name)
@@ -183,6 +204,30 @@ bool PanelSearchController::eventFilter(QObject *watched, QEvent *event)
 QWidget *PanelSearchController::eventWidgetFor(QObject *watched) const
 {
     return qobject_cast<QWidget *>(watched);
+}
+
+void PanelSearchController::installTargetMappings(const MainPanelTarget &target)
+{
+    target.focusWidget->installEventFilter(this);
+    m_widgetToPanel.insert(target.focusWidget, target.id);
+    if (auto *view = qobject_cast<QAbstractItemView *>(target.focusWidget)) {
+        view->viewport()->installEventFilter(this);
+        m_widgetToPanel.insert(view->viewport(), target.id);
+    }
+}
+
+void PanelSearchController::removeTargetMappings(const MainPanelTarget &target)
+{
+    if (target.focusWidget == nullptr) {
+        return;
+    }
+
+    target.focusWidget->removeEventFilter(this);
+    m_widgetToPanel.remove(target.focusWidget);
+    if (auto *view = qobject_cast<QAbstractItemView *>(target.focusWidget)) {
+        view->viewport()->removeEventFilter(this);
+        m_widgetToPanel.remove(view->viewport());
+    }
 }
 
 MainPanelTarget *PanelSearchController::targetForId(MainPanelId id)

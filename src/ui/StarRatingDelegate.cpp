@@ -24,6 +24,11 @@ void StarRatingDelegate::setPlayingRow(int row)
     m_playingRow = row;
 }
 
+void StarRatingDelegate::setRowStyle(const TrackTableRowStyle &style)
+{
+    m_rowStyle = style;
+}
+
 bool StarRatingDelegate::editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index)
 {
     if (!index.isValid() || model == nullptr) {
@@ -63,19 +68,40 @@ void StarRatingDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     // never the lone cell under the pointer.
     const bool hovered = (m_hoveredRow == index.row());
     const bool playing = (m_playingRow == index.row());
+    const QColor baseFill = trackTableRowBaseFill(m_rowStyle, opt, index.row());
+    if (baseFill.isValid()) {
+        painter->fillRect(opt.rect, baseFill);
+    }
     if (selected) {
-        painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
-        SelectionColors::applySelectedPalette(&opt);
+        painter->fillRect(opt.rect, m_rowStyle.enabled
+                                        ? (SelectionColors::isActiveMainPanel(opt.widget) ? m_rowStyle.selected : m_rowStyle.inactiveSelected)
+                                        : SelectionColors::selectedFill(opt));
+        if (m_rowStyle.enabled) {
+            const QColor text = SelectionColors::isActiveMainPanel(opt.widget) ? m_rowStyle.selectedText : m_rowStyle.text;
+            for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+                opt.palette.setColor(group, QPalette::HighlightedText, text);
+                opt.palette.setColor(group, QPalette::Text, text);
+            }
+        } else {
+            SelectionColors::applySelectedPalette(&opt);
+        }
     } else if (hovered) {
-        QColor hover = opt.palette.color(QPalette::Highlight);
-        hover.setAlpha(34);
+        QColor hover = m_rowStyle.enabled ? m_rowStyle.hover : opt.palette.color(QPalette::Highlight);
+        if (!m_rowStyle.enabled) {
+            hover.setAlpha(34);
+        }
         painter->fillRect(opt.rect, hover);
     } else if (playing) {
-        QColor tint = QApplication::palette().color(QPalette::Highlight);
-        tint.setAlpha(48);
+        QColor tint = m_rowStyle.enabled ? m_rowStyle.playing : QApplication::palette().color(QPalette::Highlight);
+        if (!m_rowStyle.enabled) {
+            tint.setAlpha(48);
+        }
         painter->fillRect(opt.rect, tint);
-    } else if (index.row() % 2 == 1) {
-        painter->fillRect(opt.rect, opt.palette.color(QPalette::AlternateBase));
+    }
+    if (!selected && m_rowStyle.enabled) {
+        for (const QPalette::ColorGroup group : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+            opt.palette.setColor(group, QPalette::Text, m_rowStyle.text);
+        }
     }
     opt.state &= ~QStyle::State_MouseOver;
     opt.state &= ~QStyle::State_Selected;

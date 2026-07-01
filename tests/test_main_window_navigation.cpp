@@ -1,4 +1,8 @@
 #include "app/AppCore.h"
+#include "core/Artist.h"
+#include "ui/ArtistSidebar.h"
+#include "ui/MusicExplorerView.h"
+#include "ui/PanelSearchController.h"
 
 #define private public
 #include "ui/MainWindow.h"
@@ -73,6 +77,37 @@ private slots:
         bar.setVolumeControlEnabled(true);
         QVERIFY(bar.m_volumeButton->isEnabled());
         QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
+    }
+
+    void musicExplorerKeepsMainPanelNavigationActive()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.resize(900, 640);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.m_artistSidebar->setArtists({
+            {.name = QStringLiteral("Artist One"), .albumCount = 1},
+            {.name = QStringLiteral("Artist Two"), .albumCount = 1},
+        });
+        window.switchMainView(MainView::LibraryMusicExplorer);
+        QVERIFY(window.m_musicExplorerView != nullptr);
+
+        window.m_panelSearch->setActivePanel(MainPanelId::Artists, true);
+        auto *artistList = window.m_artistSidebar->navigationWidget();
+        QVERIFY(artistList->hasFocus());
+        QCOMPARE(window.m_artistSidebar->currentRow(), 0);
+
+        QTest::keyClick(artistList, Qt::Key_J);
+        QCOMPARE(window.m_artistSidebar->currentRow(), 1);
+
+        QTest::keyClick(artistList, Qt::Key_L);
+        QCOMPARE(window.m_panelSearch->activePanel(), MainPanelId::Albums);
+        QVERIFY(window.m_musicExplorerView->hasFocus());
+
+        QTest::keyClick(window.m_musicExplorerView, Qt::Key_H);
+        QCOMPARE(window.m_panelSearch->activePanel(), MainPanelId::Artists);
+        QVERIFY(artistList->hasFocus());
     }
 
 private:
