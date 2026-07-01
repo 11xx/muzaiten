@@ -54,10 +54,11 @@ Reserve all three names — `muzaiten`, `muzaiten-bin`, `muzaiten-git` — but
 - **`muzaiten-bin`** — the maintainer-built prebuilt binary, with the embedded
   Last.fm key. Best for people who do not want to compile a Qt app.
 - **`muzaiten`** (no suffix) — by AUR convention this is a *versioned source
-  release* (a build of a tagged tarball). muzaiten currently ships rolling,
-  date-based versions with no release tags, so this name has no distinct meaning
-  yet. Adopt it only once you start cutting tagged source releases; until then it
-  would just duplicate `-git`.
+  release* (a build of a tagged source tarball). muzaiten now has date-tagged
+  releases, but no separate source-release AUR package is maintained yet. Adopt
+  this name only when you want a stable source package distinct from both the
+  prebuilt artifact and the VCS build; until then it would mostly duplicate
+  `-git`.
 
 So: use the two suffixed names now, and keep the bare `muzaiten` reserved for a
 future tagged-release source package. The three packages `provides`/`conflicts`
@@ -113,8 +114,12 @@ This produces, under `dist/`:
 - `muzaiten-<version>-<arch>.tar.zst.sha256`.
 
 `<version>` is the date-based `YYYY.MM.DD.N.g<sha>` derived from `HEAD`, where
-`N` is the number of commits made on HEAD's UTC calendar day.
-Upload both files to a Codeberg release whose tag is exactly `<version>`.
+`N` is the number of commits made on HEAD's UTC calendar day. The release tag is
+the shorter UTC date, `YYYY.MM.DD`, or the next same-day iteration if that date
+already exists (`YYYY.MM.DD.1`, then `.2`, and so on). Build the artifact from
+the tested, tagged release commit, then upload both files to the Codeberg release
+attached to that tag. The tarball name still uses `<version>`, not the shorter
+tag name.
 
 ### Dry-running the prebuilt-dist packaging (dev)
 
@@ -177,8 +182,10 @@ cd aur-repo && git commit -am "update" && git push
 
 For `muzaiten-bin`, before pushing a new release also:
 
-1. set `pkgver` to the release `<version>`, and
-2. replace `sha256sums=('SKIP')` with the checksum from
+1. set `_release_tag` to the Codeberg release tag (`YYYY.MM.DD` or same-day
+   iteration),
+2. set `pkgver` to the artifact `<version>` from `build-release.sh`, and
+3. replace `sha256sums=('SKIP')` with the checksum from
    `dist/muzaiten-<version>-<arch>.tar.zst.sha256`.
 
 Validate locally with `namcap PKGBUILD` and a clean `makepkg` build.
