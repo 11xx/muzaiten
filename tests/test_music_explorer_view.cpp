@@ -21,6 +21,7 @@ private slots:
     void expandsExactlyOneAlbumAndShowsAllTracks();
     void mouseClickExpandsAndShowsVisibleTracks();
     void selectionMovesExpandedPanel();
+    void currentCardUsesFullActiveHighlight();
     void albumActionsForwardSignals();
 
 private:
@@ -275,6 +276,31 @@ void MusicExplorerViewTest::selectionMovesExpandedPanel()
     QCOMPARE(view.expandedAlbumTitle(), QStringLiteral("Three"));
     QCOMPARE(view.expandedPanelCountForTests(), 1);
     QCOMPARE(view.inlineTrackTableForTests()->rowCount(), 1);
+}
+
+void MusicExplorerViewTest::currentCardUsesFullActiveHighlight()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QTRY_VERIFY(view.columnCountForTests() >= 3);
+
+    // A plain selection (no expansion) is the "filled" case that must match the
+    // library album grid's selected item rather than a dimmed translucent tint.
+    view.setCurrentRow(1);
+    QCOMPARE(view.expandedPanelCountForTests(), 0);
+    // Marking the panel active drives isActiveMainPanel() and repaints the card.
+    view.setProperty("mainPanelActive", true);
+
+    QWidget *card = view.cardWidgetForTests(1);
+    QVERIFY(card != nullptr);
+    const QImage rendered = card->grab().toImage();
+    // Sample the selection fill above the artwork (art starts at y=10).
+    const QColor sampled = rendered.pixelColor(card->width() / 2, 5);
+    QCOMPARE(sampled.rgb(), view.palette().color(QPalette::Highlight).rgb());
 }
 
 void MusicExplorerViewTest::albumActionsForwardSignals()
