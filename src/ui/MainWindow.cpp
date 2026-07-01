@@ -1066,65 +1066,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         {},
         [this]() { return m_artistSidebar->searchDocuments(); },
     });
-    m_panelSearch->registerTarget({
-        MainPanelId::Albums,
-        QStringLiteral("Albums"),
-        m_albumGrid,
-        [this]() { return m_albumGrid->rowCount(); },
-        [this]() { return m_albumGrid->currentRow(); },
-        [this](int row) { m_albumGrid->setCurrentRow(row); },
-        {},
-        [this]() { narrowAlbumFilters(m_albumGrid->albumTitlesForAction()); },
-        [this]() { playAlbumsNow(m_albumGrid->albumTitlesForAction()); },
-        [this]() { m_albumGrid->addCurrentAlbumToQueue(); },
-        [this]() { m_albumGrid->playNextCurrentAlbum(); },
-        [this]() { m_albumGrid->markCurrentAlbum(); },
-        [this]() { m_albumGrid->markAllAlbums(); },
-        [this]() { m_albumGrid->unmarkCurrentAlbum(); },
-        [this]() { m_albumGrid->unmarkAllAlbums(); },
-        [this](bool explicitNavigation) {
-            m_albumGrid->setRememberedOutlineVisible(false);
-            // Open the highlighted artist only when the user navigated here on
-            // purpose (l from the artist list); a passive focus (clicking the
-            // grid) leaves the currently shown artist untouched.
-            if (explicitNavigation) {
-                m_artistSidebar->activateCurrentArtist();
-            }
-        },
-        [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
-        [this]() { clearAlbumFilter(); },
-        [this]() { return m_albumGrid->searchDocuments(); },
-        [this]() { m_albumGrid->addCurrentAlbumToPlaylist(); },
-        [this]() { return m_albumGrid->narrowingPersistsOnReturn(); },
-    });
-    m_panelSearch->registerTarget({
-        MainPanelId::Tracks,
-        QStringLiteral("Tracks"),
-        m_trackTable,
-        [this]() { return m_trackTable->rowCount(); },
-        [this]() { return m_trackTable->currentRow(); },
-        [this](int row) { m_trackTable->setCurrentRow(row); },
-        [this](int row, int direction) { m_trackTable->setCurrentRow(row, direction); },
-        [this]() { m_trackTable->activateCurrentTrack(); },
-        [this]() { m_trackTable->activateCurrentTrack(); },
-        [this]() { m_trackTable->addCurrentTrackToQueue(); },
-        [this]() { m_trackTable->playNextCurrentTrack(); },
-        [this]() { m_trackTable->markCurrentTrack(); },
-        [this]() { m_trackTable->markAllTracks(); },
-        [this]() { m_trackTable->unmarkCurrentTrack(); },
-        [this]() { m_trackTable->unmarkAllTracks(); },
-        [this](bool explicitNavigation) {
-            // Same as the album grid: only re-open the highlighted artist when the
-            // user explicitly navigated into the tracklist, never on a stray focus.
-            if (explicitNavigation) {
-                m_artistSidebar->activateCurrentArtist();
-            }
-        },
-        {},
-        [this]() { clearAlbumFilter(); },
-        [this]() { return m_trackTable->searchDocuments(); },
-        [this]() { m_trackTable->addCurrentTrackToPlaylist(); },
-    });
+    m_panelSearch->registerTarget(libraryAlbumsPanelTarget());
+    m_panelSearch->registerTarget(libraryTracksPanelTarget());
     connect(m_panelSearch, &PanelSearchController::statusMessage, this, [this](const QString &message, int timeoutMs) {
         statusBar()->showMessage(message, timeoutMs);
     });
@@ -2987,14 +2930,6 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
-    connect(m_musicExplorerView, &MusicExplorerView::focusPreviousPanelRequested, this, [this]() {
-        if (m_panelSearch != nullptr) {
-            m_panelSearch->setActivePanel(MainPanelId::Artists, false);
-        }
-        if (QWidget *artistList = m_artistSidebar->navigationWidget()) {
-            artistList->setFocus(Qt::OtherFocusReason);
-        }
-    });
 
     m_libraryCenterStack->addWidget(m_musicExplorerView);
     if (!m_currentArtist.isEmpty()) {
@@ -3003,6 +2938,154 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
                                            : m_database->albumsForArtist(m_currentArtist));
     }
     return m_musicExplorerView;
+}
+
+MainPanelTarget MainWindow::libraryAlbumsPanelTarget()
+{
+    return {
+        MainPanelId::Albums,
+        QStringLiteral("Albums"),
+        m_albumGrid,
+        [this]() { return m_albumGrid->rowCount(); },
+        [this]() { return m_albumGrid->currentRow(); },
+        [this](int row) { m_albumGrid->setCurrentRow(row); },
+        {},
+        [this]() { narrowAlbumFilters(m_albumGrid->albumTitlesForAction()); },
+        [this]() { playAlbumsNow(m_albumGrid->albumTitlesForAction()); },
+        [this]() { m_albumGrid->addCurrentAlbumToQueue(); },
+        [this]() { m_albumGrid->playNextCurrentAlbum(); },
+        [this]() { m_albumGrid->markCurrentAlbum(); },
+        [this]() { m_albumGrid->markAllAlbums(); },
+        [this]() { m_albumGrid->unmarkCurrentAlbum(); },
+        [this]() { m_albumGrid->unmarkAllAlbums(); },
+        [this](bool explicitNavigation) {
+            m_albumGrid->setRememberedOutlineVisible(false);
+            // Open the highlighted artist only when the user navigated here on
+            // purpose (l from the artist list); a passive focus (clicking the
+            // grid) leaves the currently shown artist untouched.
+            if (explicitNavigation) {
+                m_artistSidebar->activateCurrentArtist();
+            }
+        },
+        [this](int horizontal, int vertical) { m_albumGrid->moveCurrentByGrid(horizontal, vertical); },
+        [this]() { clearAlbumFilter(); },
+        [this]() { return m_albumGrid->searchDocuments(); },
+        [this]() { m_albumGrid->addCurrentAlbumToPlaylist(); },
+        [this]() { return m_albumGrid->narrowingPersistsOnReturn(); },
+    };
+}
+
+MainPanelTarget MainWindow::libraryTracksPanelTarget()
+{
+    return {
+        MainPanelId::Tracks,
+        QStringLiteral("Tracks"),
+        m_trackTable,
+        [this]() { return m_trackTable->rowCount(); },
+        [this]() { return m_trackTable->currentRow(); },
+        [this](int row) { m_trackTable->setCurrentRow(row); },
+        [this](int row, int direction) { m_trackTable->setCurrentRow(row, direction); },
+        [this]() { m_trackTable->activateCurrentTrack(); },
+        [this]() { m_trackTable->activateCurrentTrack(); },
+        [this]() { m_trackTable->addCurrentTrackToQueue(); },
+        [this]() { m_trackTable->playNextCurrentTrack(); },
+        [this]() { m_trackTable->markCurrentTrack(); },
+        [this]() { m_trackTable->markAllTracks(); },
+        [this]() { m_trackTable->unmarkCurrentTrack(); },
+        [this]() { m_trackTable->unmarkAllTracks(); },
+        [this](bool explicitNavigation) {
+            // Same as the album grid: only re-open the highlighted artist when the
+            // user explicitly navigated into the tracklist, never on a stray focus.
+            if (explicitNavigation) {
+                m_artistSidebar->activateCurrentArtist();
+            }
+        },
+        {},
+        [this]() { clearAlbumFilter(); },
+        [this]() { return m_trackTable->searchDocuments(); },
+        [this]() { m_trackTable->addCurrentTrackToPlaylist(); },
+    };
+}
+
+MainPanelTarget MainWindow::musicExplorerAlbumsPanelTarget(MusicExplorerView *musicExplorer)
+{
+    return {
+        MainPanelId::Albums,
+        QStringLiteral("Albums"),
+        musicExplorer->albumNavigationWidget(),
+        [musicExplorer]() { return musicExplorer->rowCount(); },
+        [musicExplorer]() { return musicExplorer->currentRow(); },
+        [musicExplorer](int row) { musicExplorer->setCurrentRow(row); },
+        {},
+        [musicExplorer]() { musicExplorer->activateCurrentAlbum(); },
+        [this, musicExplorer]() { playAlbumsNow(musicExplorer->albumTitlesForAction()); },
+        [musicExplorer]() { musicExplorer->addCurrentAlbumToQueue(); },
+        [musicExplorer]() { musicExplorer->playNextCurrentAlbum(); },
+        {},
+        {},
+        {},
+        {},
+        [this](bool explicitNavigation) {
+            if (explicitNavigation) {
+                m_artistSidebar->activateCurrentArtist();
+            }
+        },
+        [musicExplorer](int horizontal, int vertical) { musicExplorer->moveCurrentByGrid(horizontal, vertical); },
+        [musicExplorer]() { musicExplorer->collapseExpandedAlbum(); },
+        [musicExplorer]() { return musicExplorer->albumSearchDocuments(); },
+        [musicExplorer]() { musicExplorer->addCurrentAlbumToPlaylist(); },
+        []() { return false; },
+    };
+}
+
+MainPanelTarget MainWindow::musicExplorerTracksPanelTarget(MusicExplorerView *musicExplorer)
+{
+    TrackTable *trackTable = musicExplorer->trackNavigationWidget();
+    return {
+        MainPanelId::Tracks,
+        QStringLiteral("Tracks"),
+        trackTable,
+        [musicExplorer]() { return musicExplorer->trackRowCount(); },
+        [musicExplorer]() { return musicExplorer->currentTrackRow(); },
+        [musicExplorer](int row) { musicExplorer->setCurrentTrackRow(row); },
+        [musicExplorer](int row, int direction) { musicExplorer->setCurrentTrackRow(row, direction); },
+        [trackTable]() { trackTable->activateCurrentTrack(); },
+        [trackTable]() { trackTable->activateCurrentTrack(); },
+        [trackTable]() { trackTable->addCurrentTrackToQueue(); },
+        [trackTable]() { trackTable->playNextCurrentTrack(); },
+        [trackTable]() { trackTable->markCurrentTrack(); },
+        [trackTable]() { trackTable->markAllTracks(); },
+        [trackTable]() { trackTable->unmarkCurrentTrack(); },
+        [trackTable]() { trackTable->unmarkAllTracks(); },
+        [this, musicExplorer](bool explicitNavigation) {
+            if (explicitNavigation) {
+                m_artistSidebar->activateCurrentArtist();
+            }
+            musicExplorer->expandCurrentAlbum(false);
+        },
+        {},
+        [musicExplorer]() { musicExplorer->collapseExpandedAlbum(); },
+        [musicExplorer]() { return musicExplorer->trackSearchDocuments(); },
+        [trackTable]() { trackTable->addCurrentTrackToPlaylist(); },
+    };
+}
+
+void MainWindow::installLibraryMainPanelTargets()
+{
+    if (m_panelSearch == nullptr) {
+        return;
+    }
+    m_panelSearch->replaceTarget(libraryAlbumsPanelTarget());
+    m_panelSearch->replaceTarget(libraryTracksPanelTarget());
+}
+
+void MainWindow::installMusicExplorerMainPanelTargets(MusicExplorerView *musicExplorer)
+{
+    if (m_panelSearch == nullptr || musicExplorer == nullptr) {
+        return;
+    }
+    m_panelSearch->replaceTarget(musicExplorerAlbumsPanelTarget(musicExplorer));
+    m_panelSearch->replaceTarget(musicExplorerTracksPanelTarget(musicExplorer));
 }
 
 PlaylistView *MainWindow::ensurePlaylistView()
@@ -3103,12 +3186,10 @@ void MainWindow::switchMainView(MainView view)
         m_libraryCenterStack->setCurrentWidget(m_centerSplitter);
         m_mainStack->setCurrentWidget(m_rootSplitter);
         if (m_panelSearch != nullptr) {
+            installLibraryMainPanelTargets();
             m_panelSearch->activateForMainView();
         }
     } else if (view == MainView::LibraryMusicExplorer) {
-        if (m_panelSearch != nullptr) {
-            m_panelSearch->deactivateForNonMainView();
-        }
         MusicExplorerView *musicExplorer = ensureMusicExplorerView();
         if (!m_currentArtist.isEmpty()) {
             musicExplorer->setAlbums(m_librarySource == LibrarySource::Mpd
@@ -3117,7 +3198,12 @@ void MainWindow::switchMainView(MainView view)
         }
         m_libraryCenterStack->setCurrentWidget(musicExplorer);
         m_mainStack->setCurrentWidget(m_rootSplitter);
-        musicExplorer->setFocus(Qt::OtherFocusReason);
+        if (m_panelSearch != nullptr) {
+            installMusicExplorerMainPanelTargets(musicExplorer);
+            m_panelSearch->activateForMainView();
+            m_panelSearch->setActivePanel(MainPanelId::Albums, false);
+        }
+        musicExplorer->albumNavigationWidget()->setFocus(Qt::OtherFocusReason);
     } else if (view == MainView::LibraryFileExplorer) {
         if (m_panelSearch != nullptr) {
             m_panelSearch->deactivateForNonMainView();

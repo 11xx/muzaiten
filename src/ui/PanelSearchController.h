@@ -51,6 +51,7 @@ public:
     explicit PanelSearchController(QWidget *parent = nullptr);
 
     void registerTarget(MainPanelTarget target);
+    void replaceTarget(MainPanelTarget target);
     void setKeyBindingProfileName(const QString &name);
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }
     void setFocusOrder(const QVector<MainPanelId> &order);
@@ -78,6 +79,8 @@ private:
     };
 
     QWidget *eventWidgetFor(QObject *watched) const;
+    void installTargetMappings(const MainPanelTarget &target);
+    void removeTargetMappings(const MainPanelTarget &target);
     MainPanelTarget *targetForId(MainPanelId id);
     const MainPanelTarget *targetForId(MainPanelId id) const;
     MainPanelTarget *targetForWidget(QWidget *widget);

@@ -491,6 +491,17 @@ void TrackTable::setChrome(TrackTableChrome chrome)
     viewport()->update();
 }
 
+void TrackTable::setRowStyle(const TrackTableRowStyle &style)
+{
+    if (auto *denseDelegate = qobject_cast<DenseTableDelegate *>(itemDelegate())) {
+        denseDelegate->setRowStyle(style);
+    }
+    if (auto *ratingDelegate = qobject_cast<StarRatingDelegate *>(itemDelegateForColumn(0))) {
+        ratingDelegate->setRowStyle(style);
+    }
+    viewport()->update();
+}
+
 void TrackTable::setAutoHeightToRows(bool autoHeight)
 {
     if (m_autoHeightToRows == autoHeight) {
