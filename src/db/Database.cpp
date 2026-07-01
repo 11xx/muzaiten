@@ -923,6 +923,21 @@ QStringList Database::missingTrackPaths() const
     return paths;
 }
 
+QList<std::tuple<QString, QString, QString, QString>> Database::trackMatchRows() const
+{
+    QList<std::tuple<QString, QString, QString, QString>> rows;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral(
+            "SELECT path, artist_name, title, musicbrainz_recording_id FROM tracks WHERE missing = 0"))) {
+        return rows;
+    }
+    while (query.next()) {
+        rows.emplaceBack(query.value(0).toString(), query.value(1).toString(),
+                         query.value(2).toString(), query.value(3).toString());
+    }
+    return rows;
+}
+
 int Database::removeMissingTracks()
 {
     QSqlQuery query(m_db);

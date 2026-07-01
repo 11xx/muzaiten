@@ -4,6 +4,14 @@
 
 ### Added
 
+- Scrobbler history backfill: muzaiten can now import your historical listening
+  data — full timestamped listens from ListenBrainz and per-track play counts
+  from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library
+  tracks by recording MBID or folded artist+title. Trigger it with
+  `muzaitenctl scrobble-backfill <listenbrainz|lastfm>` for now (a widget UI
+  comes later). Imported rows live in their own tables and never re-scrobble;
+  re-running is cheap and incremental. The data feeds the upcoming
+  recommendation engine.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

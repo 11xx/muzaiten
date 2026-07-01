@@ -60,6 +60,7 @@ void printUsage()
         "  play-file <path>        append a file to the queue and play it\n"
         "  enqueue [--play|--next] <path...>  add files to the queue\n"
         "  raise                   show and focus the running instance's window\n"
+        "  scrobble-backfill <listenbrainz|lastfm>  import listening history / sync play counts\n"
         "\n"
         "Options:\n"
         "  --json                  print the raw JSON reply\n",
@@ -550,6 +551,15 @@ int main(int argc, char **argv)
         if (next) {
             args.insert(QStringLiteral("next"), true);
         }
+    } else if (command == QLatin1String("scrobble-backfill")) {
+        if (arguments.isEmpty()) {
+            return fail(QStringLiteral("scrobble-backfill needs a service: listenbrainz or lastfm"));
+        }
+        const QString service = arguments.first().toLower();
+        if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")) {
+            return fail(QStringLiteral("scrobble-backfill service must be listenbrainz or lastfm"));
+        }
+        args.insert(QStringLiteral("service"), service);
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
@@ -637,6 +647,12 @@ int main(int argc, char **argv)
         if (tracks.isEmpty()) {
             std::printf("queue is empty\n");
         }
+        return 0;
+    }
+    if (command == QLatin1String("scrobble-backfill")) {
+        std::printf("%s: %s\n",
+                    qPrintable(response.value(QStringLiteral("service")).toString()),
+                    qPrintable(response.value(QStringLiteral("backfill")).toString(QStringLiteral("started"))));
         return 0;
     }
     // Plain "status" replies carry the canonical track JSON at the top level,

@@ -11,11 +11,13 @@
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "scanner/ArtworkCache.h"
+#include "scrobble/LastFmCredentials.h"
 #include "scrobble/LastFmScrobbler.h"
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ListenTracker.h"
 #include "scrobble/PlayEventRecorder.h"
+#include "scrobble/ScrobbleBackfill.h"
 #include "ui/MainWindow.h"
 
 #include <QApplication>
@@ -171,6 +173,29 @@ AppCore::AppCore(QObject *parent)
     connect(m_lastFmThread, &QThread::finished, m_lastFmScrobbler, &QObject::deleteLater);
     m_lastFmThread->start();
 
+    // LibraryIndex crosses the thread boundary via QueuedConnection.
+    qRegisterMetaType<ScrobbleBackfill::LibraryIndex>();
+    m_scrobbleBackfillThread = new QThread(this);
+    m_scrobbleBackfill = new ScrobbleBackfill;
+    m_scrobbleBackfill->moveToThread(m_scrobbleBackfillThread);
+    connect(m_scrobbleBackfillThread, &QThread::finished, m_scrobbleBackfill, &QObject::deleteLater);
+    connect(m_scrobbleBackfill, &ScrobbleBackfill::progress, this,
+            [](const QString &source, int processed, int inserted) {
+                qInfo("scrobble-backfill[%s]: processed %d, stored %d", qPrintable(source), processed, inserted);
+            });
+    connect(m_scrobbleBackfill, &ScrobbleBackfill::finished, this,
+            [this](const QString &source, int processed, int inserted, const QString &message) {
+                m_backfillRunning = false;
+                qInfo("scrobble-backfill[%s]: done — %s (processed %d, stored %d)",
+                      qPrintable(source), qPrintable(message), processed, inserted);
+            });
+    connect(m_scrobbleBackfill, &ScrobbleBackfill::failed, this,
+            [this](const QString &source, const QString &message) {
+                m_backfillRunning = false;
+                qWarning("scrobble-backfill[%s]: failed — %s", qPrintable(source), qPrintable(message));
+            });
+    m_scrobbleBackfillThread->start();
+
     m_ipc = new IpcServer(this);
 
     setupMprisWiring();
@@ -196,6 +221,10 @@ AppCore::~AppCore()
     if (m_lastFmThread != nullptr) {
         m_lastFmThread->quit();
         m_lastFmThread->wait(3000);
+    }
+    if (m_scrobbleBackfillThread != nullptr) {
+        m_scrobbleBackfillThread->quit();
+        m_scrobbleBackfillThread->wait(3000);
     }
 }
 
@@ -537,6 +566,24 @@ QJsonObject AppCore::ipcStatus() const
     return QJsonDocument::fromJson(m_mpris->currentTrackJson().toUtf8()).object();
 }
 
+ScrobbleBackfill::LibraryIndex AppCore::buildLibraryIndex() const
+{
+    ScrobbleBackfill::LibraryIndex index;
+    if (m_database == nullptr) {
+        return index;
+    }
+    const auto rows = m_database->trackMatchRows();
+    index.byRecordingMbid.reserve(rows.size());
+    index.byArtistTitle.reserve(rows.size());
+    for (const auto &[path, artist, title, recordingMbid] : rows) {
+        if (!recordingMbid.isEmpty()) {
+            index.byRecordingMbid.insert(recordingMbid, path);
+        }
+        index.byArtistTitle.insert(ScrobbleBackfill::foldedArtistTitleKey(artist, title), path);
+    }
+    return index;
+}
+
 QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject &args)
 {
     const auto error = [](const QString &message) {
@@ -715,6 +762,51 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         }
         m_player->updateTrackRating(rated.path, rating >= 0 ? rating : rated.rating0To100, rating >= 0);
         return status();
+    }
+    if (command == QLatin1String("scrobble-backfill")) {
+        const QString service = args.value(QStringLiteral("service")).toString().trimmed().toLower();
+        if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")) {
+            return error(QStringLiteral("scrobble-backfill needs \"service\": \"listenbrainz\" or \"lastfm\""));
+        }
+        if (m_backfillRunning) {
+            return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("already-running")},
+                               {QStringLiteral("service"), service}};
+        }
+
+        const ScrobbleBackfill::LibraryIndex index = buildLibraryIndex();
+        const QString historyPath = listenHistoryPath();
+        if (service == QLatin1String("listenbrainz")) {
+            const QString token = m_database->setting(QStringLiteral("listenbrainz.token")).trimmed();
+            if (token.isEmpty()) {
+                return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("missing-credentials")},
+                                   {QStringLiteral("service"), service}};
+            }
+            m_backfillRunning = true;
+            QMetaObject::invokeMethod(m_scrobbleBackfill, "startListenBrainzImport", Qt::QueuedConnection,
+                                      Q_ARG(QString, token), Q_ARG(QString, historyPath),
+                                      Q_ARG(ScrobbleBackfill::LibraryIndex, index));
+        } else {
+            const QString username = m_database->setting(QStringLiteral("lastfm.username")).trimmed();
+            // API key fallback chain, mirroring MainWindow::lastFmApiKey().
+            QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey")).trimmed();
+            if (apiKey.isEmpty()) {
+                apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
+            }
+            if (apiKey.isEmpty()) {
+                apiKey = QString::fromStdString(LastFmCredentials::defaultApiKey()).trimmed();
+            }
+            if (username.isEmpty() || apiKey.isEmpty()) {
+                return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("missing-credentials")},
+                                   {QStringLiteral("service"), service}};
+            }
+            m_backfillRunning = true;
+            QMetaObject::invokeMethod(m_scrobbleBackfill, "startLastFmCountSync", Qt::QueuedConnection,
+                                      Q_ARG(QString, apiKey), Q_ARG(QString, username),
+                                      Q_ARG(QString, historyPath),
+                                      Q_ARG(ScrobbleBackfill::LibraryIndex, index));
+        }
+        return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("started")},
+                           {QStringLiteral("service"), service}};
     }
     return error(QStringLiteral("unknown command \"%1\"").arg(command));
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Track.h"
+#include "scrobble/ScrobbleBackfill.h"
 
 #include <QJsonObject>
 #include <QObject>
@@ -78,6 +79,9 @@ private:
     void notifyScrobblersTrackStarted(const Track &track);
     QJsonObject handleIpcCommand(const QString &command, const QJsonObject &args);
     QJsonObject ipcStatus() const;
+    // Build the scrobbler-backfill match index from the library DB (folded
+    // artist+title and recording MBID -> track path).
+    ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
 
     std::unique_ptr<Database>          m_database;
     std::unique_ptr<PlaylistDatabase>  m_playlistDb;
@@ -92,6 +96,11 @@ private:
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
     QThread          *m_lastFmThread = nullptr;
     LastFmScrobbler  *m_lastFmScrobbler = nullptr;
+    QThread          *m_scrobbleBackfillThread = nullptr;
+    ScrobbleBackfill *m_scrobbleBackfill = nullptr;
+    // Main-thread mirror of the worker's busy state, so the IPC trigger can
+    // report "already running" without a cross-thread query.
+    bool              m_backfillRunning = false;
     MprisService     *m_mpris = nullptr;
     IpcServer        *m_ipc = nullptr;
     QSystemTrayIcon  *m_tray = nullptr;
