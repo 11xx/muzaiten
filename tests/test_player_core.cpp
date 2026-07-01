@@ -94,6 +94,8 @@ private slots:
     void removingLastTrackClearsPlayback();
     void gaplessAdvanceMovesIndexWithoutReveal();
     void finishedAtEndOfQueueStops();
+    void trackFinishedEmittedOnBackendFinish();
+    void trackFinishedEmittedOnGaplessAdvance();
     void explicitJumpCollapsesPlayNext();
     void clearKeepingCurrentKeepsOnlyCurrent();
     void metadataPatchUpdatesRowsWithoutQueueReset();
@@ -257,6 +259,38 @@ void PlayerCoreTest::finishedAtEndOfQueueStops()
     emit m_backend->finished();
     QCOMPARE(m_core->queueIndex(), 1);
     QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/b"));
+}
+
+void PlayerCoreTest::trackFinishedEmittedOnBackendFinish()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}), 0, 1);
+    m_core->playAt(0);
+
+    QSignalSpy finished(m_core.get(), &PlayerCore::trackFinished);
+    emit m_backend->finished();   // /a played out; auto-advance to /b
+
+    QCOMPARE(finished.count(), 1);
+    QCOMPARE(finished.last().at(0).value<Track>().path, QStringLiteral("/a"));
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+
+    // End-of-queue finish (no successor) still reports the outgoing track ended.
+    finished.clear();
+    emit m_backend->finished();
+    QCOMPARE(finished.count(), 1);
+    QCOMPARE(finished.last().at(0).value<Track>().path, QStringLiteral("/b"));
+}
+
+void PlayerCoreTest::trackFinishedEmittedOnGaplessAdvance()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->playAt(0);
+
+    QSignalSpy finished(m_core.get(), &PlayerCore::trackFinished);
+    emit m_backend->preparedTrackStarted();   // gapless takeover; finished() never fires
+
+    QCOMPARE(finished.count(), 1);
+    QCOMPARE(finished.last().at(0).value<Track>().path, QStringLiteral("/a"));
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
 }
 
 void PlayerCoreTest::explicitJumpCollapsesPlayNext()

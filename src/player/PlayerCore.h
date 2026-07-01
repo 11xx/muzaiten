@@ -137,6 +137,12 @@ signals:
     // The current track object changed in place (metadata/rating refresh);
     // update displays without resetting playback position or scrobble state.
     void currentTrackUpdated(const Track &track);
+    // The playing track reached its natural end (backend-finished or gapless
+    // advance). Telemetry-only: observers must not drive transport from it —
+    // auto-advance is already handled internally. Covers both the
+    // backend-finished path (onFinished) and the gapless-advance path
+    // (onPreparedTrackStarted, where PlaybackBackend::finished never fires).
+    void trackFinished(const Track &track);
     // Nothing is current anymore (queue emptied / current removed).
     void playbackCleared();
     void volumeChanged(double volume0To1);

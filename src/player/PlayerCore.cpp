@@ -924,6 +924,13 @@ void PlayerCore::onPreparedTrackStarted()
         return;
     }
 
+    // The outgoing track reached its natural end: the backend never emits
+    // finished() when a gaplessly-preloaded track takes over, so signal it here
+    // before any state mutation swaps m_currentTrack out.
+    if (!m_currentTrack.path.isEmpty()) {
+        emit trackFinished(m_currentTrack);
+    }
+
     m_backend->onGaplessTrackAdvanced();
     // Mirror applyAutoNext: only a plain non-shuffle step to the next row consumes
     // the play-next region; a shuffle pick, remembered retrace or repeat-all wrap
@@ -949,6 +956,10 @@ void PlayerCore::onFinished()
     if (m_queue.isEmpty() || m_queueIndex < 0) {
         m_backend->stop();
         return;
+    }
+    // The backend reported the current track played out to its natural end.
+    if (!m_currentTrack.path.isEmpty()) {
+        emit trackFinished(m_currentTrack);
     }
     if (m_repeatMode == RepeatMode::One) {
         // Re-play the current track from the top.
