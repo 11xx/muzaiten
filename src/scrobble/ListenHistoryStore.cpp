@@ -10,7 +10,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 
 void insertIfPresent(QJsonObject &object, const QString &key, const QString &value)
 {
@@ -181,6 +181,37 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
     create.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_play_events_session ON play_events(session_id)"));
     create.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
+
+    // Scrobbler backfill (Stage 0b). Historical listens pulled from a service
+    // (ListenBrainz full export, Last.fm import) land here, NOT in `listens`.
+    // Being a separate table is load-bearing: these rows have no `owed_*`/
+    // `sent_*` flags, so the scrobble-backlog drain can never pick them up and
+    // re-scrobble history muzaiten only mirrored back from the service.
+    create.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS imported_listens ("
+        " id INTEGER PRIMARY KEY,"
+        " source TEXT NOT NULL,"              // 'listenbrainz' | 'lastfm'
+        " listened_at INTEGER NOT NULL,"      // epoch secs
+        " title TEXT NOT NULL,"
+        " artist TEXT NOT NULL,"
+        " album TEXT,"
+        " mb_recording_id TEXT,"
+        " matched_track_path TEXT,"           // resolved library track; NULL when unmatched
+        " UNIQUE(source, listened_at, artist, title))"));
+    create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_imported_listens_track ON imported_listens(matched_track_path, listened_at)"));
+    // Per-service, per-track playcount snapshots (MusicBee-style count sync).
+    // artist/title are the service-side identity, kept verbatim for re-matching.
+    create.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS playcount_baselines ("
+        " source TEXT NOT NULL,"
+        " artist TEXT NOT NULL,"              // service-side identity, verbatim
+        " title TEXT NOT NULL,"
+        " mb_recording_id TEXT,"
+        " matched_track_path TEXT,"
+        " count INTEGER NOT NULL,"
+        " synced_at INTEGER NOT NULL,"
+        " PRIMARY KEY(source, artist, title))"));
 
     QSqlQuery version(m_db);
     version.prepare(QStringLiteral(
@@ -465,4 +496,161 @@ int ListenHistoryStore::playEventCount() const
         return 0;
     }
     return query.value(0).toInt();
+}
+
+int ListenHistoryStore::recordImportedListens(const QList<ImportedListen> &rows)
+{
+    if (!m_db.isOpen() || rows.isEmpty()) {
+        return 0;
+    }
+
+    // Cross-dedup lookup: does an identical (listened_at, artist, title) row
+    // already exist in `listens`? Those are the user's own scrobbles muzaiten
+    // submitted, so importing the service's echo of them would double-count.
+    QSqlQuery existing(m_db);
+    existing.prepare(QStringLiteral(
+        "SELECT 1 FROM listens WHERE listened_at = ? AND artist = ? AND title = ? LIMIT 1"));
+
+    QSqlQuery insert(m_db);
+    insert.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO imported_listens"
+        "(source, listened_at, title, artist, album, mb_recording_id, matched_track_path) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?)"));
+
+    int inserted = 0;
+    m_db.transaction();
+    for (const ImportedListen &row : rows) {
+        const QString title = row.title.trimmed();
+        const QString artist = row.artist.trimmed();
+        if (row.source.isEmpty() || row.listenedAtSecs <= 0 || title.isEmpty() || artist.isEmpty()) {
+            continue;
+        }
+
+        existing.addBindValue(row.listenedAtSecs);
+        existing.addBindValue(artist);
+        existing.addBindValue(title);
+        const bool ownScrobble = existing.exec() && existing.next();
+        existing.finish();
+        if (ownScrobble) {
+            continue;
+        }
+
+        insert.addBindValue(row.source);
+        insert.addBindValue(row.listenedAtSecs);
+        insert.addBindValue(title);
+        insert.addBindValue(artist);
+        insert.addBindValue(row.album.trimmed().isEmpty() ? QVariant(QMetaType(QMetaType::QString))
+                                                          : QVariant(row.album.trimmed()));
+        insert.addBindValue(row.mbRecordingId.trimmed().isEmpty()
+                                ? QVariant(QMetaType(QMetaType::QString))
+                                : QVariant(row.mbRecordingId.trimmed()));
+        insert.addBindValue(row.matchedTrackPath.isEmpty()
+                                ? QVariant(QMetaType(QMetaType::QString))
+                                : QVariant(row.matchedTrackPath));
+        if (insert.exec() && insert.numRowsAffected() > 0) {
+            ++inserted;
+        }
+    }
+    m_db.commit();
+    return inserted;
+}
+
+bool ListenHistoryStore::upsertPlaycountBaseline(const PlaycountBaseline &row)
+{
+    const QString artist = row.artist.trimmed();
+    const QString title = row.title.trimmed();
+    if (!m_db.isOpen() || row.source.isEmpty() || artist.isEmpty() || title.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO playcount_baselines"
+        "(source, artist, title, mb_recording_id, matched_track_path, count, synced_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(source, artist, title) DO UPDATE SET "
+        "count = excluded.count, synced_at = excluded.synced_at, "
+        "mb_recording_id = excluded.mb_recording_id, matched_track_path = excluded.matched_track_path"));
+    query.addBindValue(row.source);
+    query.addBindValue(artist);
+    query.addBindValue(title);
+    query.addBindValue(row.mbRecordingId.trimmed().isEmpty()
+                           ? QVariant(QMetaType(QMetaType::QString))
+                           : QVariant(row.mbRecordingId.trimmed()));
+    query.addBindValue(row.matchedTrackPath.isEmpty()
+                           ? QVariant(QMetaType(QMetaType::QString))
+                           : QVariant(row.matchedTrackPath));
+    query.addBindValue(row.count);
+    query.addBindValue(row.syncedAtSecs);
+    return query.exec();
+}
+
+QList<ListenHistoryStore::PlaycountBaseline> ListenHistoryStore::playcountBaselines(const QString &source) const
+{
+    QList<PlaycountBaseline> rows;
+    if (!m_db.isOpen()) {
+        return rows;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT source, artist, title, mb_recording_id, matched_track_path, count, synced_at "
+        "FROM playcount_baselines WHERE source = ? ORDER BY count DESC"));
+    query.addBindValue(source);
+    if (!query.exec()) {
+        return rows;
+    }
+    while (query.next()) {
+        PlaycountBaseline row;
+        row.source = query.value(0).toString();
+        row.artist = query.value(1).toString();
+        row.title = query.value(2).toString();
+        row.mbRecordingId = query.value(3).toString();
+        row.matchedTrackPath = query.value(4).toString();
+        row.count = query.value(5).toLongLong();
+        row.syncedAtSecs = query.value(6).toLongLong();
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+int ListenHistoryStore::importedListenCount(const QString &source) const
+{
+    if (!m_db.isOpen()) {
+        return 0;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT COUNT(*) FROM imported_listens WHERE source = ?"));
+    query.addBindValue(source);
+    if (!query.exec() || !query.next()) {
+        return 0;
+    }
+    return query.value(0).toInt();
+}
+
+QString ListenHistoryStore::metaValue(const QString &key) const
+{
+    if (!m_db.isOpen()) {
+        return {};
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT value FROM meta WHERE key = ?"));
+    query.addBindValue(key);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+    return query.value(0).toString();
+}
+
+void ListenHistoryStore::setMetaValue(const QString &key, const QString &value)
+{
+    if (!m_db.isOpen()) {
+        return;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO meta(key, value) VALUES(?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
+    query.addBindValue(key);
+    query.addBindValue(value);
+    query.exec();
 }

@@ -80,12 +80,14 @@ set(MUZAITEN_SOURCES
     src/scanner/TagRating.cpp
     src/scanner/TagReader.cpp
     src/scanner/TagRatingWriter.cpp
+    src/scrobble/BackfillParse.cpp
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
     src/scrobble/ListenHistoryStore.cpp
     src/scrobble/ListenTracker.cpp
     src/scrobble/PlayEventRecorder.cpp
+    src/scrobble/ScrobbleBackfill.cpp
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
     src/search/FuzzyMatch.cpp
@@ -203,12 +205,14 @@ set(MUZAITEN_HEADERS
     src/playlist/PlaylistImportWorker.h
     src/playlist/PlaylistMatcher.h
     src/playlist/import/YouTubeImport.h
+    src/scrobble/BackfillParse.h
     src/scrobble/LastFmApi.h
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
     src/scrobble/ListenBrainzScrobbler.h
     src/scrobble/ListenHistoryStore.h
     src/scrobble/ListenTracker.h
+    src/scrobble/ScrobbleBackfill.h
     src/search/Exclusion.h
     src/search/FuzzyMatch.h
     src/search/IndexCache.h

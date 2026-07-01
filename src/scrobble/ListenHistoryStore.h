@@ -54,6 +54,34 @@ public:
         QString sessionId;
     };
 
+    // One historical listen pulled from a scrobbler service (ListenBrainz's
+    // full listen export, or a Last.fm import), destined for `imported_listens`.
+    // Deliberately a separate table from `listens`: imported rows carry no
+    // `owed_*`/`sent_*` flags and so can never enter the scrobble-backlog drain
+    // — muzaiten must never re-scrobble history it merely mirrored back.
+    struct ImportedListen {
+        QString source;              // 'listenbrainz' | 'lastfm'
+        qint64 listenedAtSecs = 0;
+        QString title;
+        QString artist;
+        QString album;
+        QString mbRecordingId;
+        QString matchedTrackPath;    // resolved library track; empty when unmatched
+    };
+
+    // One per-service, per-track playcount snapshot (MusicBee-style count sync),
+    // stored in `playcount_baselines`. Artist/title are the service-side identity
+    // kept verbatim so the row can be re-matched after later library rescans.
+    struct PlaycountBaseline {
+        QString source;
+        QString artist;
+        QString title;
+        QString mbRecordingId;
+        QString matchedTrackPath;
+        qint64 count = 0;
+        qint64 syncedAtSecs = 0;
+    };
+
     // Service identifiers for the sent flags.
     static const QString LastFm;
     static const QString ListenBrainz;
@@ -90,6 +118,29 @@ public:
     // Newest-first play events, for inspection and analysis.
     QList<PlayEvent> recentPlayEvents(int limit, int offset = 0) const;
     int playEventCount() const;
+
+    // Scrobbler backfill (Stage 0b). Imported history and per-service playcount
+    // baselines live in their own tables and never touch the scrobble backlog.
+
+    // Insert imported listens in a single transaction (INSERT OR IGNORE against
+    // the UNIQUE(source, listened_at, artist, title) key). Rows whose identical
+    // (listened_at, artist, title) already exists in `listens` are skipped:
+    // those are the user's own scrobbles that muzaiten itself submitted to the
+    // service, so re-importing them would double-count. The cross-dedup is a
+    // best-effort exact match on those three columns. Returns rows inserted.
+    int recordImportedListens(const QList<ImportedListen> &rows);
+
+    // Upsert one playcount baseline keyed by (source, artist, title); an
+    // existing row's count/synced_at/mbid/matched path are overwritten.
+    bool upsertPlaycountBaseline(const PlaycountBaseline &row);
+
+    QList<PlaycountBaseline> playcountBaselines(const QString &source) const;
+    int importedListenCount(const QString &source) const;
+
+    // Backfill cursor persistence, stored in the existing `meta` table (see the
+    // constructor). Empty string when the key is absent.
+    QString metaValue(const QString &key) const;
+    void setMetaValue(const QString &key, const QString &value);
 
 private:
 

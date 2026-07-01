@@ -107,6 +107,18 @@ target_compile_features(test_play_events PRIVATE cxx_std_26)
 add_test(NAME test_play_events COMMAND test_play_events)
 set_tests_properties(test_play_events PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_scrobble_backfill
+    test_scrobble_backfill.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/scrobble/BackfillParse.cpp
+    ../src/scrobble/ScrobbleBackfill.cpp
+)
+target_include_directories(test_scrobble_backfill PRIVATE ../src)
+target_link_libraries(test_scrobble_backfill PRIVATE Qt6::Core Qt6::Network Qt6::Sql Qt6::Test)
+target_compile_features(test_scrobble_backfill PRIVATE cxx_std_26)
+add_test(NAME test_scrobble_backfill COMMAND test_scrobble_backfill)
+set_tests_properties(test_scrobble_backfill PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_path_guesser
     test_path_guesser.cpp
     ../src/scanner/PathMetadataGuesser.cpp
