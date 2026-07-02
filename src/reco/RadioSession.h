@@ -51,9 +51,24 @@ public:
     // per-session album counts.
     void notePlayed(const Track &track);
 
+    // Live-updates the exploration knob (e.g. the player-bar "Adventurous" boost
+    // or a persisted-setting change). SeedContext::exploration0To100 is rebuilt
+    // fresh from m_exploration inside nextTracks() on every call, so this takes
+    // effect starting with the NEXT pick — never retroactively rescoring picks
+    // already handed out.
+    void setExploration(int exploration0To100);
+
     // Terse, data-driven explanation for a pick made this session (component
     // names + rounded contributions). Empty when the path was never picked here.
     QString reasonFor(const QString &path) const;
+
+    // Pure classifier for AppCore's radio re-roll heuristic: true when a play
+    // ended before crossing the scrobble threshold (half the track's duration,
+    // capped at 4 minutes) -- the same rule ListenTracker and
+    // ListenHistoryStore::trackAffinities use to separate "listened" from
+    // "rejected". Callers are responsible for checking outcome == "skipped" and
+    // source == "radio" themselves; this only judges the timing.
+    static bool isEarlySkip(qint64 playedMs, qint64 durationMs);
 
 private:
     // Rolling genre window: seed genres unioned with the last few played tracks'

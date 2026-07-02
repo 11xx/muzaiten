@@ -917,6 +917,14 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_player, &PlayerCore::radioActiveChanged, this, [this](bool active) {
         m_playerBar->setRadioActive(active);
+        // Radio replaces the queue with its own session. Sever any playlist
+        // backing BEFORE the seed lands: radioActiveChanged fires ahead of the
+        // clearAll/appendAndPlay sequence in AppCore::startRadio, and with a
+        // playlist-sourced queue still marked, prepareQueueForTrackAddition
+        // would mirror the radio seed into that playlist.
+        if (active) {
+            markQueueAsSpontaneous();
+        }
     });
     // libraryShufflePercentChanged is handled by AppCore (state + MPRIS).
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
@@ -1287,6 +1295,32 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::stopRadioRequested, this, [this]() {
         m_core->stopRadio();
         statusBar()->showMessage(QStringLiteral("Radio stopped — queue kept"), 4000);
+    });
+    connect(m_playerBar, &PlayerBar::radioMenuAboutToShow, this, [this]() {
+        m_playerBar->setRadioAdventurous(m_core->radioAdventurous());
+    });
+    connect(m_playerBar, &PlayerBar::radioAdventurousChanged, this, [this](bool on) {
+        m_core->setRadioAdventurous(on);
+    });
+    connect(m_playerBar, &PlayerBar::radioExplorationSettingsRequested, this, [this]() {
+        bool ok = false;
+        const int percent = QInputDialog::getInt(
+            this, QStringLiteral("Radio exploration"),
+            QStringLiteral("How far radio strays from the seed's mood (0 = conservative, 100 = adventurous):"),
+            m_core->radioExploration(), 0, 100, 5, &ok);
+        if (ok) {
+            m_core->setRadioExploration(percent, /*persist=*/true);
+        }
+    });
+    connect(m_playerBar, &PlayerBar::radioBatchSizeSettingsRequested, this, [this]() {
+        bool ok = false;
+        const int size = QInputDialog::getInt(
+            this, QStringLiteral("Radio batch size"),
+            QStringLiteral("Picks to queue ahead at a time (1 = generate one at a time, as needed):"),
+            m_core->radioBatchSize(), 1, 100, 1, &ok);
+        if (ok) {
+            m_core->setRadioBatchSize(size);
+        }
     });
     connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
     connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {

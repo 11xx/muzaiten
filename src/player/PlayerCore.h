@@ -104,6 +104,14 @@ public:
     void appendAndPlay(const Track &track);
     void playTracksNext(const QVector<Track> &tracks);
     void appendTracks(const QVector<Track> &tracks);
+    // Radio's batch-append path: appends each track through the SAME
+    // aboutToInjectLibraryTrack signal a single JIT pick uses, one emission per
+    // track, then updates the queue once. Deliberately distinct from
+    // appendTracks()/aboutToAddTracks: for a playlist-sourced queue,
+    // aboutToAddTracks tells the owner to mirror the tracks into that playlist
+    // (see MainWindow::prepareQueueForTrackAddition) -- exactly what a batch of
+    // radio picks must NOT do, since they were never part of that playlist.
+    void injectTracks(const QVector<Track> &tracks);
     void moveRows(const QVector<int> &rows, int destinationRow);
     void removeRows(const QVector<int> &rows);
     // Queue clearing; user confirmation and snapshot/backlog policy stay with

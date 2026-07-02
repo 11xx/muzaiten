@@ -347,6 +347,25 @@ void PlayerCore::appendTracks(const QVector<Track> &tracks)
     emit queueChanged();
 }
 
+void PlayerCore::injectTracks(const QVector<Track> &tracks)
+{
+    bool appended = false;
+    for (const Track &track : tracks) {
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        emit aboutToInjectLibraryTrack(track);
+        m_queue.push_back(track);
+        appended = true;
+    }
+    if (!appended) {
+        return;
+    }
+    collapsePlayNextIfStale();
+    prepareNext();
+    emit queueChanged();
+}
+
 void PlayerCore::moveRows(const QVector<int> &rows, int destinationRow)
 {
     if (rows.isEmpty() || m_queue.isEmpty()) {

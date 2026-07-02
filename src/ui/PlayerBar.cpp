@@ -781,10 +781,21 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_radio->setAutoRaise(true);
     m_radio->setFixedSize(34, 34);
     m_radio->setCheckable(true);
-    m_radio->setToolTip(QStringLiteral("Radio session active — click to stop"));
+    m_radio->setToolTip(QStringLiteral("Radio session active — click to stop, right-click for options"));
     m_radio->setVisible(false);
+    m_radio->setContextMenuPolicy(Qt::CustomContextMenu);
     updateRadioIcon();
     controls->addWidget(m_radio);
+
+    m_radioMenu = new QMenu(this);
+    m_radioAdventurousAction = m_radioMenu->addAction(QStringLiteral("Adventurous (this session)"));
+    m_radioAdventurousAction->setCheckable(true);
+    connect(m_radioAdventurousAction, &QAction::toggled, this, &PlayerBar::radioAdventurousChanged);
+    QAction *radioExploration = m_radioMenu->addAction(QStringLiteral("Exploration…"));
+    connect(radioExploration, &QAction::triggered, this, &PlayerBar::radioExplorationSettingsRequested);
+    QAction *radioBatchSize = m_radioMenu->addAction(QStringLiteral("Radio batch size…"));
+    connect(radioBatchSize, &QAction::triggered, this, &PlayerBar::radioBatchSizeSettingsRequested);
+    connect(m_radioMenu, &QMenu::aboutToShow, this, &PlayerBar::radioMenuAboutToShow);
     root->addLayout(controls);
 
     connect(m_repeat, &QToolButton::clicked, this, &PlayerBar::cycleRepeatMode);
@@ -803,6 +814,9 @@ PlayerBar::PlayerBar(QWidget *parent)
         }
     });
     connect(m_radio, &QToolButton::clicked, this, &PlayerBar::stopRadioRequested);
+    connect(m_radio, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        m_radioMenu->exec(m_radio->mapToGlobal(pos));
+    });
 
     connect(m_previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
@@ -1355,6 +1369,15 @@ void PlayerBar::setRadioActive(bool active)
     }
     m_radio->setVisible(active);
     m_radio->setChecked(active);
+}
+
+void PlayerBar::setRadioAdventurous(bool on)
+{
+    if (m_radioAdventurousAction == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_radioAdventurousAction);
+    m_radioAdventurousAction->setChecked(on);
 }
 
 void PlayerBar::setRepeatMode(RepeatMode mode)

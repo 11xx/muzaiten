@@ -33,7 +33,15 @@
   Skips are only held against a track when they happen before the scrobble
   threshold (half the duration, capped at 4 minutes) — skipping near the end
   is a listen, not a dislike — and a lone skip on a barely-played track is a
-  light penalty rather than a maximal one.
+  light penalty rather than a maximal one. Radio now fills the queue in
+  batches (default 15, configurable) instead of generating one pick at a time,
+  so upcoming picks are visible in the queue and can be pruned like any other
+  row; a run of three early skips in a row regenerates the not-yet-played
+  picks from the drifted mood. The player bar's radio indicator button gained
+  a right-click menu exposing exploration (a persistent 0–100 setting plus a
+  per-session "Adventurous" boost to 85) and the batch size. Play events
+  originating from radio picks are now attributed source "radio" instead of
+  riding along as "library_shuffle"/"queue_auto".
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

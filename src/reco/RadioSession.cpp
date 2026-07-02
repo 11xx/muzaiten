@@ -18,6 +18,10 @@ constexpr int kTopK = 5;
 // Hard sequencing throttles (enforced before scoring, not as score terms).
 constexpr int kThrottleArtists = 3;   // no artist within the last 3 picks/plays
 constexpr int kAlbumCap = 2;          // at most 2 tracks per album per session
+// Mirrors ListenTracker::maxRequiredListenMs / the CASE in
+// ListenHistoryStore::trackAffinities: the scrobble threshold is half a
+// track's duration, capped at 4 minutes for very long tracks.
+constexpr qint64 kMaxScrobbleThresholdMs = 4 * 60 * 1000;
 
 // Keep only the most recent `limit` entries of a consecutive-deduped artist list.
 void pushRecentArtist(QStringList &artists, const QString &folded, int limit)
@@ -165,6 +169,18 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         }
     }
     return result;
+}
+
+void RadioSession::setExploration(int exploration0To100)
+{
+    m_exploration = std::clamp(exploration0To100, 0, 100);
+}
+
+bool RadioSession::isEarlySkip(qint64 playedMs, qint64 durationMs)
+{
+    const qint64 threshold = durationMs > 0 ? std::min(durationMs / 2, kMaxScrobbleThresholdMs)
+                                             : kMaxScrobbleThresholdMs;
+    return playedMs < threshold;
 }
 
 void RadioSession::notePlayed(const Track &track)

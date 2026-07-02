@@ -57,6 +57,10 @@ public:
     // Hidden while no radio session is running; shown (checked) while one is
     // active. Driven by PlayerCore::radioActiveChanged via MainWindow.
     void setRadioActive(bool active);
+    // Reflects AppCore::radioAdventurous() on the right-click menu's checkable
+    // action; synced by MainWindow on radioMenuAboutToShow. Signal-blocked while
+    // set so this never re-emits radioAdventurousChanged.
+    void setRadioAdventurous(bool on);
     // Cycle the modes as a left-click would; lets keyboard shortcuts share the
     // exact same behaviour as the buttons.
     void cycleRepeatMode();
@@ -142,6 +146,13 @@ signals:
     void shuffleModeChangeRequested(ShuffleMode mode);
     void libraryShuffleSettingsRequested();
     void stopRadioRequested();
+    // The radio button's right-click menu is opening; MainWindow refreshes the
+    // "Adventurous" checked state (it depends on live AppCore state) via
+    // setRadioAdventurous before it's shown.
+    void radioMenuAboutToShow();
+    void radioAdventurousChanged(bool on);
+    void radioExplorationSettingsRequested();
+    void radioBatchSizeSettingsRequested();
 
 private:
     void refreshTheme();
@@ -163,6 +174,8 @@ private:
     class QToolButton *m_shuffle = nullptr;
     class QToolButton *m_repeat = nullptr;
     class QToolButton *m_radio = nullptr;
+    class QMenu *m_radioMenu = nullptr;
+    class QAction *m_radioAdventurousAction = nullptr;
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
     bool m_radioActive = false;

@@ -85,6 +85,9 @@ private slots:
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
     void reasonForNonEmptyOnPick();
+    void setExplorationTakesEffectOnSubsequentPicks();
+    void batchOfFifteenRespectsThrottlesAndIsDistinct();
+    void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
@@ -462,6 +465,90 @@ void RadioTest::reasonForNonEmptyOnPick()
     QCOMPARE(picks.size(), 1);
     QVERIFY(!session.reasonFor(picks.first().path).isEmpty());
     QVERIFY(session.reasonFor(QStringLiteral("/never")).isEmpty());
+}
+
+void RadioTest::setExplorationTakesEffectOnSubsequentPicks()
+{
+    // Two candidates, no genre/year/rating overlap with the seed and no
+    // affinity history: the only component in play is novelty, which scales
+    // directly with the exploration knob (see
+    // RadioTest::noveltyAtZeroHistoryScalesWithExploration for the same math
+    // against TrackScorer directly).
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/a"), QStringLiteral("artist-a"), {}),
+        makeCandidate(QStringLiteral("/b"), QStringLiteral("artist-b"), {}),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"), {});
+    QRandomGenerator rng(1u);
+    RadioSession session(pool, {}, {}, seed, /*exploration=*/0, 1'000'000'000, &rng);
+
+    const QVector<Track> first = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(first.size(), 1);
+    // kNoveltyWeight(0.8) * noveltyRatio(1.0) * explorationScale(0.5 + 0/100).
+    QVERIFY2(session.reasonFor(first.first().path).contains(QStringLiteral("novelty +0.4")),
+             qPrintable(session.reasonFor(first.first().path)));
+
+    session.setExploration(100);
+    const QVector<Track> second = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(second.size(), 1);
+    // kNoveltyWeight(0.8) * noveltyRatio(1.0) * explorationScale(0.5 + 100/100).
+    QVERIFY2(session.reasonFor(second.first().path).contains(QStringLiteral("novelty +1.2")),
+             qPrintable(session.reasonFor(second.first().path)));
+}
+
+void RadioTest::batchOfFifteenRespectsThrottlesAndIsDistinct()
+{
+    // A single-pick call already can't repeat a path or an artist within the
+    // throttle window (see artistThrottleNeverPicksSameArtistConsecutively /
+    // noRepeatsWithinSession); this pins the same guarantees for the actual
+    // YT-Music-style batch size AppCore now requests at once (15).
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 5; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/hot%1").arg(i), QStringLiteral("hot"),
+                                     {QStringLiteral("rock")}, 2000, 100, true,
+                                     QStringLiteral("hot\nalbum%1").arg(i)));
+    }
+    for (int i = 0; i < 15; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/f%1").arg(i), QStringLiteral("filler%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000, 40, false));
+    }
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(2024u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(15, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 15);
+
+    const auto artistOf = [](const QString &path) {
+        return path.startsWith(QStringLiteral("/hot")) ? QStringLiteral("hot") : path.mid(2);
+    };
+    QSet<QString> seen;
+    for (int i = 0; i < picks.size(); ++i) {
+        QVERIFY2(!seen.contains(picks.at(i).path), "a path repeated within a 15-pick batch");
+        seen.insert(picks.at(i).path);
+        if (i > 0) {
+            QVERIFY2(artistOf(picks.at(i - 1).path) != artistOf(picks.at(i).path),
+                     "same artist picked back-to-back in a 15-pick batch");
+        }
+    }
+}
+
+void RadioTest::isEarlySkipUsesHalfDurationCappedAtFourMinutes()
+{
+    // Half-duration rule for a short track (mirrors the ListenHistoryStore /
+    // ListenTracker examples: a 4-minute track's threshold is 120 s).
+    QVERIFY(RadioSession::isEarlySkip(30000, 240000));
+    QVERIFY(!RadioSession::isEarlySkip(200000, 240000));
+
+    // The 4-minute cap kicks in for a long track (here ~16.7 min): half the
+    // duration would be 500 s, but the threshold caps at 240 s.
+    QVERIFY(RadioSession::isEarlySkip(200000, 1000000));
+    QVERIFY(!RadioSession::isEarlySkip(250000, 1000000));
+
+    // Unknown duration (<= 0) falls back to the 4-minute cap outright.
+    QVERIFY(RadioSession::isEarlySkip(200000, 0));
+    QVERIFY(!RadioSession::isEarlySkip(250000, 0));
 }
 
 // ---- Database + ListenHistoryStore -----------------------------------------

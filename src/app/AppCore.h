@@ -5,6 +5,8 @@
 
 #include <QJsonObject>
 #include <QObject>
+#include <QSet>
+#include <QString>
 #include <memory>
 
 class ArtworkCache;
@@ -73,6 +75,23 @@ public:
     // Queue contents stay as they are.
     void stopRadio();
 
+    // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
+    // "Batch radio queue"). Backed by the library-DB settings
+    // "radio.exploration"/"radio.batchSize" so a fresh session reads them as
+    // today; PlayerBar's radio right-click menu drives these through
+    // MainWindow. radioExploration() reports the PERSISTED value -- a live
+    // session's actual exploration can be higher while "adventurous" is armed.
+    int radioExploration() const;
+    void setRadioExploration(int value0To100, bool persist);
+    int radioBatchSize() const;
+    void setRadioBatchSize(int value1To100);
+    // The "Adventurous (this session)" boost: while a session is active, toggles
+    // the LIVE session exploration between 85 and the persisted value; with no
+    // session active it arms the next startRadio to begin at 85 (one-shot --
+    // consumed and reset by startRadio). Reset on stopRadio too.
+    bool radioAdventurous() const;
+    void setRadioAdventurous(bool on);
+
     QString databasePath() const;
     QString playlistDatabasePath() const;
     QString listenHistoryPath() const;
@@ -127,6 +146,26 @@ private:
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
 
+    // Generates up to `count` fresh radio picks from the current rolling
+    // context and queues them via PlayerCore::injectTracks (queue-only; see its
+    // doc comment for why appendTracks is unsafe here). Tracks every resolved
+    // path in m_radioPickPaths for telemetry (AppCore::setupScrobbleWiring) and
+    // for rerollRadioQueue() to identify which queued rows are radio picks.
+    void appendRadioBatch(int count);
+    // Hooked off PlayerCore::currentIndexChanged: while radio is active and
+    // batching (batchSize > 1), keeps at least 5 rows queued ahead of the
+    // current index so the recommendation stream never visibly runs dry.
+    void maybeTopUpRadioQueue();
+    // Stage 1 follow-up "re-roll on drift": discards the not-yet-played radio
+    // rows after the current index and appends a fresh batch scored against the
+    // now-updated rolling context. No-op in pure-JIT mode (batchSize == 1, see
+    // appendRadioBatch) or when there is nothing stale to discard.
+    void rerollRadioQueue();
+    // Consecutive-early-skip bookkeeping for rerollRadioQueue(), fed by every
+    // finalized play event (PlayEventRecorder::playEventReady).
+    void handleRadioPlayEvent(const QString &source, const QString &outcome, qint64 playedMs,
+                              qint64 durationMs);
+
     std::unique_ptr<Database>          m_database;
     std::unique_ptr<PlaylistDatabase>  m_playlistDb;
     std::unique_ptr<SettingsStore>     m_state;
@@ -160,4 +199,23 @@ private:
     // these carry the attribution forward to the currentTrackChanged handler.
     bool              m_nextStartUserInitiated = false;
     bool              m_nextStartInjected = false;
+    // Paths this radio session has handed out (batch appends + JIT provider
+    // picks alike), for telemetry (source "radio") and for rerollRadioQueue()
+    // to find not-yet-played radio rows. Cleared on startRadio/stopRadio.
+    QSet<QString>     m_radioPickPaths;
+    // Cached "radio.batchSize" setting (1 = pure JIT, matching pre-batch
+    // behaviour exactly); reloaded at each startRadio, otherwise updated live by
+    // setRadioBatchSize.
+    int               m_radioBatchSize = 15;
+    // Re-entrancy / setup guard for the batch-append paths. Also held across
+    // startRadio's own initial clearAll()+appendAndPlay(seed)+appendRadioBatch
+    // sequence: appendAndPlay(seed) fires currentIndexChanged synchronously
+    // with a 1-row queue, which would otherwise trip maybeTopUpRadioQueue and
+    // double-append ahead of the deliberate initial batch.
+    bool              m_radioTopUpInProgress = false;
+    // Consecutive early-skip streak for the current radio session (see
+    // handleRadioPlayEvent / rerollRadioQueue).
+    int               m_radioConsecutiveEarlySkips = 0;
+    // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
+    bool              m_radioAdventurous = false;
 };
