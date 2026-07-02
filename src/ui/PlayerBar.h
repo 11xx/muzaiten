@@ -54,6 +54,9 @@ public:
     // transport buttons without re-emitting a change request.
     void setRepeatMode(RepeatMode mode);
     void setShuffleMode(ShuffleMode mode);
+    // Hidden while no radio session is running; shown (checked) while one is
+    // active. Driven by PlayerCore::radioActiveChanged via MainWindow.
+    void setRadioActive(bool active);
     // Cycle the modes as a left-click would; lets keyboard shortcuts share the
     // exact same behaviour as the buttons.
     void cycleRepeatMode();
@@ -138,6 +141,7 @@ signals:
     void repeatModeChangeRequested(RepeatMode mode);
     void shuffleModeChangeRequested(ShuffleMode mode);
     void libraryShuffleSettingsRequested();
+    void stopRadioRequested();
 
 private:
     void refreshTheme();
@@ -146,6 +150,7 @@ private:
     void updateTransportIcons();
     void updateShuffleIcon();
     void updateRepeatIcon();
+    void updateRadioIcon();
     bool shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs);
 
     class QToolButton *m_menuButton = nullptr;
@@ -157,8 +162,10 @@ private:
     class QToolButton *m_next = nullptr;
     class QToolButton *m_shuffle = nullptr;
     class QToolButton *m_repeat = nullptr;
+    class QToolButton *m_radio = nullptr;
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
+    bool m_radioActive = false;
     class QAction *m_compactMenu = nullptr;
     class QAction *m_alwaysShowTray = nullptr;
     class QAction *m_listUnsupportedFiles = nullptr;

@@ -38,6 +38,7 @@ signals:
     void findFileRequested(const Track &track);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void propertiesRequested(const Track &track);
+    void startRadioRequested(const Track &track);
     void trackLibraryRequested(const Track &track);
     void viewSettingsChanged();
 

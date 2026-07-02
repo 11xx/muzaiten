@@ -70,6 +70,7 @@ signals:
     void playNextTemporaryRequested(const QVector<Track> &tracks);
     void addToQueueTemporaryRequested(const QVector<Track> &tracks);
     void addToPlaylistRequested(const QVector<Track> &tracks);
+    void startRadioRequested(const Track &track);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);

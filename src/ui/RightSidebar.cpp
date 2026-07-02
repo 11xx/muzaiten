@@ -62,6 +62,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable, &QueueTable::unlinkFromPlaylistRequested, this, &RightSidebar::unlinkQueueFromPlaylistRequested);
     connect(m_queueTable, &QueueTable::findFileRequested, this, &RightSidebar::findFileRequested);
     connect(m_queueTable, &QueueTable::propertiesRequested, this, &RightSidebar::propertiesRequested);
+    connect(m_queueTable, &QueueTable::startRadioRequested, this, &RightSidebar::startRadioRequested);
     connect(m_queueTable, &QueueTable::trackLibraryRequested, this, &RightSidebar::trackLibraryRequested);
     connect(m_queueTable, &QueueTable::viewSettingsChanged, this, &RightSidebar::viewSettingsChanged);
 

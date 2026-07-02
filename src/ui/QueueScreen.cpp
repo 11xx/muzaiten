@@ -28,6 +28,7 @@ QueueScreen::QueueScreen(QWidget *parent)
     connect(m_table, &QueueTable::findFileRequested, this, &QueueScreen::findFileRequested);
     connect(m_table, &QueueTable::addToPlaylistRequested, this, &QueueScreen::addToPlaylistRequested);
     connect(m_table, &QueueTable::propertiesRequested, this, &QueueScreen::propertiesRequested);
+    connect(m_table, &QueueTable::startRadioRequested, this, &QueueScreen::startRadioRequested);
     connect(m_table, &QueueTable::trackLibraryRequested, this, &QueueScreen::trackLibraryRequested);
     connect(m_table, &QueueTable::viewSettingsChanged, this, &QueueScreen::viewSettingsChanged);
 }

@@ -830,6 +830,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
         m_playerBar->setShuffleMode(mode);
     });
+    connect(m_player, &PlayerCore::radioActiveChanged, this, [this](bool active) {
+        m_playerBar->setRadioActive(active);
+    });
     // libraryShufflePercentChanged is handled by AppCore (state + MPRIS).
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
@@ -1196,6 +1199,10 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::queueRestorePreviousRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_playerBar, &PlayerBar::queueMergeSavedRequested, this, &MainWindow::mergeSavedQueueViaPlayNext);
     connect(m_playerBar, &PlayerBar::queueSavedLimitRequested, this, &MainWindow::configureSavedQueueLimit);
+    connect(m_playerBar, &PlayerBar::stopRadioRequested, this, [this]() {
+        m_core->stopRadio();
+        statusBar()->showMessage(QStringLiteral("Radio stopped — queue kept"), 4000);
+    });
     connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
     connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {
         switchMainView(MainView::Playlist);
@@ -1239,8 +1246,14 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_trackTable, &TrackTable::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_trackTable, &TrackTable::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_trackTable, &TrackTable::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_rightSidebar, &RightSidebar::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
     connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_rightSidebar, &RightSidebar::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_rightSidebar, &RightSidebar::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
@@ -2715,6 +2728,9 @@ QueueScreen *MainWindow::ensureQueueScreen()
     connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_queueScreen, &QueueScreen::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
     connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
@@ -2830,6 +2846,9 @@ void MainWindow::ensureFileExplorers()
     });
     connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_libraryFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_libraryFileExplorer, &FileExplorerView::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
     connect(m_libraryFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackActivated, this, &MainWindow::appendAndPlayTrack);
@@ -2850,6 +2869,9 @@ void MainWindow::ensureFileExplorers()
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_freeRoamFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
     connect(m_freeRoamFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
     connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
@@ -2961,6 +2983,9 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::trackAddToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_musicExplorerView, &MusicExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_musicExplorerView, &MusicExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
+    connect(m_musicExplorerView, &MusicExplorerView::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
     connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, &MainWindow::applyTrackRating);
     connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
 
@@ -3179,6 +3204,7 @@ PlaylistView *MainWindow::ensurePlaylistView()
     connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
         showTrackProperties(m_database->trackForPath(path));
     });
+    connect(m_playlistView, &PlaylistView::startRadioRequested, this, &MainWindow::startRadioFromSeed);
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
     connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
     connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
@@ -5871,6 +5897,19 @@ void MainWindow::clearPlayNextPriority()
 {
     m_player->collapsePlayNext();
     scheduleQueueStateSave();
+}
+
+void MainWindow::startRadioFromSeed(const QString &path)
+{
+    if (path.isEmpty()) {
+        return;
+    }
+    // Same snapshot call Clear queue uses before wiping the queue, so a radio
+    // start can be undone via "Restore previous queue".
+    snapshotCurrentQueueAsPrevious();
+    if (!m_core->startRadio(path)) {
+        statusBar()->showMessage(QStringLiteral("Start Radio: track not found in library"), 4000);
+    }
 }
 
 void MainWindow::patchQueueTracksFromMetadata(const QVector<Track> &tracks)

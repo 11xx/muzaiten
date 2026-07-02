@@ -123,6 +123,7 @@ signals:
     void addPathsToQueueTemporaryRequested(const QStringList &paths);
     void playNextPathsTemporaryRequested(const QStringList &paths);
     void propertiesForPathRequested(const QString &path);
+    void startRadioRequested(const QString &path);
     // Open the add-song modal for the given playlist (RET-driven, task 9).
     void addSongRequested(qint64 playlistId);
     // Open the bulk import dialog (paste/m3u/csv → matcher) for this playlist.

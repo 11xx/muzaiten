@@ -569,6 +569,10 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         ? menu.addAction(QStringLiteral("Play next (don't save to playlist)")) : nullptr;
     QAction *addQueueTemp = m_queueIsPlaylistSourced
         ? menu.addAction(QStringLiteral("Add to queue (don't save to playlist)")) : nullptr;
+    // Only offer a seed when the clicked file resolves to a scanned library
+    // track — FreeRoam rows can be tag-read-only files that were never indexed.
+    const bool seedIsLibraryTrack = m_trackResolver && !m_trackResolver(tracks.first().path).path.isEmpty();
+    QAction *startRadio = seedIsLibraryTrack ? menu.addAction(QStringLiteral("Start Radio")) : nullptr;
     QAction *addPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
     QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
     QAction *properties = menu.addAction(QStringLiteral("Properties"));
@@ -609,6 +613,8 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         emit playNextTemporaryRequested(tracks);
     } else if (addQueueTemp != nullptr && selected == addQueueTemp) {
         emit addToQueueTemporaryRequested(tracks);
+    } else if (startRadio != nullptr && selected == startRadio) {
+        emit startRadioRequested(tracks.first());
     } else if (selected == addPlaylist) {
         emit addToPlaylistRequested(tracks);
     } else if (selected == findFile) {

@@ -1688,6 +1688,30 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
         connect(addToQueueTemp, &QAction::triggered, this, [this]() { enqueueCurrentPlaylist(false, true); });
     }
 
+    // Seed from the same track "Play" would start at: the first playable entry
+    // in the selected playlist/saved queue. Omit entirely when nothing in the
+    // collection resolves to a local library track.
+    QString radioSeedPath;
+    if (savedQueue) {
+        const QStringList paths = pathsForSavedQueue(m_currentQueueSnapshotId, nullptr);
+        if (!paths.isEmpty()) {
+            radioSeedPath = paths.first();
+        }
+    } else if (m_db != nullptr && m_currentPlaylistId > 0) {
+        for (const PlaylistItem &playlistItem : m_db->items(m_currentPlaylistId)) {
+            if (isPlayablePlaylistItem(playlistItem)) {
+                radioSeedPath = playlistItem.trackPath;
+                break;
+            }
+        }
+    }
+    if (!radioSeedPath.isEmpty()) {
+        QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
+        connect(startRadio, &QAction::triggered, this, [this, radioSeedPath]() {
+            emit startRadioRequested(radioSeedPath);
+        });
+    }
+
     menu.addSeparator();
     QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
     addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
@@ -1765,6 +1789,16 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist..."));
     addToPlaylist->setEnabled(hasPlayableSelection);
     connect(addToPlaylist, &QAction::triggered, this, &PlaylistView::addSelectedItemsToPlaylist);
+
+    // Only offer a seed when this row resolves to a local library track path
+    // (Missing/MultiMatch rows have none).
+    if (item != nullptr && isPlayablePlaylistItem(*item)) {
+        QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
+        const QString seedPath = item->trackPath;
+        connect(startRadio, &QAction::triggered, this, [this, seedPath]() {
+            emit startRadioRequested(seedPath);
+        });
+    }
 
     menu.addSeparator();
     QAction *edit = menu.addAction(QStringLiteral("Edit match"));

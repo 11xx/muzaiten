@@ -408,6 +408,29 @@ QIcon repeatIcon(const QPalette &palette, RepeatMode mode)
     return QIcon(pixmap);
 }
 
+QIcon radioIcon(const QPalette &palette)
+{
+    QPixmap pixmap(24, 24);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    // The button is only ever shown while a radio session is active, so the
+    // glyph is always drawn in the accent color (no "off" variant needed).
+    const QColor color = palette.color(QPalette::Highlight);
+    QPen pen(color, 1.8);
+    pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(pen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(12, 18), 2.0, 2.0);
+    painter.setBrush(Qt::NoBrush);
+    for (int i = 0; i < 3; ++i) {
+        const qreal radius = 4.0 + i * 4.0;
+        const QRectF rect(12 - radius, 18 - radius, radius * 2, radius * 2);
+        painter.drawArc(rect, 35 * 16, 110 * 16);
+    }
+    return QIcon(pixmap);
+}
+
 QString formatTime(qint64 milliseconds)
 {
     if (milliseconds <= 0) {
@@ -753,6 +776,15 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_shuffle->setContextMenuPolicy(Qt::CustomContextMenu);
     updateShuffleIcon();
     controls->addWidget(m_shuffle);
+
+    m_radio = new QToolButton(this);
+    m_radio->setAutoRaise(true);
+    m_radio->setFixedSize(34, 34);
+    m_radio->setCheckable(true);
+    m_radio->setToolTip(QStringLiteral("Radio session active — click to stop"));
+    m_radio->setVisible(false);
+    updateRadioIcon();
+    controls->addWidget(m_radio);
     root->addLayout(controls);
 
     connect(m_repeat, &QToolButton::clicked, this, &PlayerBar::cycleRepeatMode);
@@ -770,6 +802,7 @@ PlayerBar::PlayerBar(QWidget *parent)
             emit shuffleModeChangeRequested(ShuffleMode::Off);
         }
     });
+    connect(m_radio, &QToolButton::clicked, this, &PlayerBar::stopRadioRequested);
 
     connect(m_previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
@@ -1150,6 +1183,7 @@ void PlayerBar::refreshTheme()
     }
     updateShuffleIcon();
     updateRepeatIcon();
+    updateRadioIcon();
     if (m_usingArtFallback) {
         setAlbumArt(QString());
     }
@@ -1303,6 +1337,24 @@ void PlayerBar::updateRepeatIcon()
         m_repeat->setToolTip(QStringLiteral("Repeat: one"));
         break;
     }
+}
+
+void PlayerBar::updateRadioIcon()
+{
+    if (m_radio == nullptr) {
+        return;
+    }
+    m_radio->setIcon(radioIcon(palette()));
+}
+
+void PlayerBar::setRadioActive(bool active)
+{
+    m_radioActive = active;
+    if (m_radio == nullptr) {
+        return;
+    }
+    m_radio->setVisible(active);
+    m_radio->setChecked(active);
 }
 
 void PlayerBar::setRepeatMode(RepeatMode mode)

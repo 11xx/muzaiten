@@ -5,12 +5,21 @@
 ### Added
 
 - Start Radio: seed a radio session from any library track
-  (`muzaitenctl start-radio <path>` / `stop-radio` for now; a UI entry comes
-  later). Picks are scored by genre, era, rating and listening affinity, with a
-  novelty bonus for the unheard and artist/album throttling so a session never
-  stalls on one artist or album — and every pick records why it was chosen.
-  Powered by the play history, imported scrobbles, and genre data added in the
-  previous slices.
+  (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
+  scored by genre, era, rating and listening affinity, with a novelty bonus for
+  the unheard and artist/album throttling so a session never stalls on one
+  artist or album — and every pick records why it was chosen. Powered by the
+  play history, imported scrobbles, and genre data added in the previous
+  slices. A "Start Radio" context-menu action, seeded from the clicked track,
+  is now available in the library track table, the queue (sidebar and
+  full-screen), the playlist view (per-item and per-playlist/saved-queue,
+  seeded from its first resolvable track), the library/free-roam file
+  explorers (only for files that resolve to a scanned library track), and the
+  music explorer's expanded-album track list. Starting radio snapshots the
+  current queue to the backlog first, the same way Clear queue does, so
+  "Restore previous queue" can undo it. The player bar shows a radio indicator
+  button next to shuffle/repeat while a session is active; clicking it stops
+  the radio and keeps the queue.
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

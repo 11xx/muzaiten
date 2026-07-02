@@ -448,6 +448,7 @@ MusicExplorerView::MusicExplorerView(QWidget *parent)
     connect(m_inlineTrackTable, &TrackTable::addToPlaylistRequested, this, &MusicExplorerView::trackAddToPlaylistRequested);
     connect(m_inlineTrackTable, &TrackTable::findFileRequested, this, &MusicExplorerView::findFileRequested);
     connect(m_inlineTrackTable, &TrackTable::propertiesRequested, this, &MusicExplorerView::propertiesRequested);
+    connect(m_inlineTrackTable, &TrackTable::startRadioRequested, this, &MusicExplorerView::startRadioRequested);
     connect(m_inlineTrackTable, &TrackTable::trackRatingChanged, this, &MusicExplorerView::trackRatingChanged);
     connect(m_inlineTrackTable, &TrackTable::viewSettingsChanged, this, &MusicExplorerView::trackTableViewSettingsChanged);
 }

@@ -81,6 +81,7 @@ signals:
     void trackAddToPlaylistRequested(const QVector<Track> &tracks);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
+    void startRadioRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);
     void trackTableViewSettingsChanged();
 

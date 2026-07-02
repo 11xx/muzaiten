@@ -1048,6 +1048,10 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     connect(play, &QAction::triggered, this, [this, row]() {
         emit trackActivated(row);
     });
+    QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
+    connect(startRadio, &QAction::triggered, this, [this, track]() {
+        emit startRadioRequested(track);
+    });
     menu.addSeparator();
     QAction *findInLibrary = menu.addAction(QStringLiteral("Find in library"));
     connect(findInLibrary, &QAction::triggered, this, [this, track]() {

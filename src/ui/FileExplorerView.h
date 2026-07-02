@@ -76,6 +76,7 @@ signals:
     void importDirectoryRequested(const QString &path);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
+    void startRadioRequested(const Track &track);
     void trackRatingChangeRequested(const Track &track, int rating0To100);
     void startDirectoryChanged(const QString &path);
     void rowHeightChanged(int height);
