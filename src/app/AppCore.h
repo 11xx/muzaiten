@@ -75,6 +75,10 @@ public:
     // queue with recommendations. Returns false (no state change) when the seed
     // path is not a known library track.
     bool startRadio(const QString &seedPath);
+    // Start a seedless, radio-backed library mix. Returns false without state
+    // change when the mode is unknown or filtering cannot produce playable
+    // candidates.
+    bool startMix(const QString &mode);
     // End the session: deactivates radio and tears down the provider/session.
     // Queue contents stay as they are.
     void stopRadio();
@@ -151,6 +155,7 @@ private:
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres) const;
+    QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit) const;
     QHash<QString, double> buildRadioGenreIdf() const;
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
     void installRadioProvider(bool markPicksAsRadio);

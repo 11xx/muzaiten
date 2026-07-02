@@ -1328,6 +1328,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_core->setRadioBatchSize(size);
         }
     });
+    connect(m_playerBar, &PlayerBar::rediscoveryMixRequested, this, [this]() {
+        startMix(QStringLiteral("rediscovery"));
+    });
+    connect(m_playerBar, &PlayerBar::deepCutsMixRequested, this, [this]() {
+        startMix(QStringLiteral("deepcuts"));
+    });
     connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
     connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {
         switchMainView(MainView::Playlist);
@@ -6086,6 +6092,14 @@ void MainWindow::startRadioFromSeed(const QString &path)
     snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
     if (!m_core->startRadio(path)) {
         statusBar()->showMessage(QStringLiteral("Start Radio: track not found in library"), 4000);
+    }
+}
+
+void MainWindow::startMix(const QString &mode)
+{
+    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+    if (!m_core->startMix(mode)) {
+        statusBar()->showMessage(QStringLiteral("Not enough listening data for this mix yet"), 4000);
     }
 }
 

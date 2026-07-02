@@ -53,6 +53,11 @@
   per-session "Adventurous" boost to 85) and the batch size. Play events
   originating from radio picks are now attributed source "radio" instead of
   riding along as "library_shuffle"/"queue_auto".
+- Rediscovery and Deep cuts mixes: the Mixes menu and
+  `muzaitenctl start-mix <rediscovery|deepcuts>` can now start seedless,
+  radio-backed sessions over long-unheard favorites or rarely played tracks by
+  artists with strong listening history. Mixes reuse the normal radio queue,
+  reasons, indicator, stop control, exploration, and batch-size behavior.
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

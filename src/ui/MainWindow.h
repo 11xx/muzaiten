@@ -282,6 +282,9 @@ private:
     // "Restore previous queue" can undo a radio start, then hands the seed
     // path to AppCore::startRadio(). Shows a status message on an unknown seed.
     void startRadioFromSeed(const QString &path);
+    // Same queue-snapshot policy as Start Radio, but starts a seedless mix over
+    // the user's listening history.
+    void startMix(const QString &mode);
     void patchQueueTracksFromMetadata(const QVector<Track> &tracks);
     void patchQueueRows(const QVector<int> &rows);
     void refreshPlayNextRange();

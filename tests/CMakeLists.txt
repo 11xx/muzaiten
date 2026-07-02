@@ -116,6 +116,7 @@ add_executable(test_radio
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
     ../src/reco/AffinityPool.cpp
+    ../src/reco/RadioMix.cpp
     ../src/reco/RadioSession.cpp
     ../src/reco/ReasonText.cpp
     ../src/reco/TrackScorer.cpp

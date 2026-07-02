@@ -3,6 +3,7 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "reco/AffinityPool.h"
+#include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -86,6 +87,16 @@ void QCOMPARE_AFFINITY(const TrackScorer::Affinity &actual, const TrackScorer::A
     QCOMPARE(actual.baselineMax, expected.baselineMax);
 }
 
+bool containsCandidatePath(const QVector<TrackScorer::Candidate> &candidates, const QString &path)
+{
+    for (const TrackScorer::Candidate &candidate : candidates) {
+        if (candidate.path == path) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 class RadioTest final : public QObject {
@@ -101,6 +112,15 @@ private slots:
     void affinityPoolSumsDuplicateSongHistory();
     void affinityPoolLeavesUnmappedPathsUnchanged();
     void affinityPoolEmptyMapIsNoOp();
+
+    // RadioMix
+    void rediscoveryLovedOldPasses();
+    void rediscoveryRecentFails();
+    void rediscoveryUnlovedFails();
+    void rediscoveryRelaxationKicksIn();
+    void deepCutsLikedArtistRarePasses();
+    void deepCutsOverplayedFails();
+    void deepCutsSkipStainedFails();
 
     // TrackScorer
     void genreOverlapDominates();
@@ -220,6 +240,118 @@ void RadioTest::affinityPoolEmptyMapIsNoOp()
 
     QCOMPARE(pooled.size(), 1);
     QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/song.flac")), original);
+}
+
+// ---- RadioMix --------------------------------------------------------------
+
+void RadioTest::rediscoveryLovedOldPasses()
+{
+    constexpr qint64 now = 1'000'000'000;
+    const QVector<TrackScorer::Candidate> filtered = RadioMix::filterCandidates(
+        RadioMix::Mode::Rediscovery,
+        {makeCandidate(QStringLiteral("/old-loved"), QStringLiteral("artist"), {}, 0, 80, true)},
+        {{QStringLiteral("/old-loved"), makeAffinity(0, 0, 0, now - 181 * 86400, 0, 0)}},
+        now);
+
+    QCOMPARE(filtered.size(), 1);
+    QCOMPARE(filtered.first().path, QStringLiteral("/old-loved"));
+}
+
+void RadioTest::rediscoveryRecentFails()
+{
+    constexpr qint64 now = 1'000'000'000;
+    const QVector<TrackScorer::Candidate> filtered = RadioMix::filterCandidates(
+        RadioMix::Mode::Rediscovery,
+        {makeCandidate(QStringLiteral("/recent-loved"), QStringLiteral("artist"), {}, 0, 90, true)},
+        {{QStringLiteral("/recent-loved"), makeAffinity(0, 0, 0, now - 30 * 86400, 0, 0)}},
+        now);
+
+    QVERIFY(filtered.isEmpty());
+}
+
+void RadioTest::rediscoveryUnlovedFails()
+{
+    constexpr qint64 now = 1'000'000'000;
+    const QVector<TrackScorer::Candidate> filtered = RadioMix::filterCandidates(
+        RadioMix::Mode::Rediscovery,
+        {makeCandidate(QStringLiteral("/old-unloved"), QStringLiteral("artist"), {}, 0, 40, true)},
+        {{QStringLiteral("/old-unloved"), makeAffinity(0, 4, 0, now - 220 * 86400, 0, 0)}},
+        now);
+
+    QVERIFY(filtered.isEmpty());
+}
+
+void RadioTest::rediscoveryRelaxationKicksIn()
+{
+    constexpr qint64 now = 1'000'000'000;
+    QVector<TrackScorer::Candidate> candidates;
+    QHash<QString, TrackScorer::Affinity> affinities;
+    for (int i = 0; i < 49; ++i) {
+        const QString path = QStringLiteral("/strict%1").arg(i);
+        candidates.push_back(makeCandidate(path, QStringLiteral("artist%1").arg(i), {}, 0, 75, true));
+        affinities.insert(path, makeAffinity(0, 0, 0, now - 220 * 86400, 0, 0));
+    }
+    candidates.push_back(makeCandidate(QStringLiteral("/relaxed"), QStringLiteral("artist-relaxed"),
+                                       {}, 0, 80, true));
+    affinities.insert(QStringLiteral("/relaxed"), makeAffinity(0, 0, 0, now - 120 * 86400, 0, 0));
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::Rediscovery, candidates, affinities, now);
+
+    QCOMPARE(filtered.size(), 50);
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/relaxed")));
+}
+
+void RadioTest::deepCutsLikedArtistRarePasses()
+{
+    const QVector<TrackScorer::Candidate> candidates{
+        makeCandidate(QStringLiteral("/hit"), QStringLiteral("liked-artist"), {}),
+        makeCandidate(QStringLiteral("/rare"), QStringLiteral("liked-artist"), {}),
+    };
+    const QHash<QString, TrackScorer::Affinity> affinities{
+        {QStringLiteral("/hit"), makeAffinity(0, 0, 0, 100, 20, 0)},
+        {QStringLiteral("/rare"), makeAffinity(0, 0, 0, 100, 1, 0)},
+    };
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
+
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/rare")));
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/hit")));
+}
+
+void RadioTest::deepCutsOverplayedFails()
+{
+    const QVector<TrackScorer::Candidate> candidates{
+        makeCandidate(QStringLiteral("/hit"), QStringLiteral("liked-artist"), {}),
+        makeCandidate(QStringLiteral("/overplayed"), QStringLiteral("liked-artist"), {}),
+    };
+    const QHash<QString, TrackScorer::Affinity> affinities{
+        {QStringLiteral("/hit"), makeAffinity(0, 0, 0, 100, 20, 0)},
+        {QStringLiteral("/overplayed"), makeAffinity(0, 0, 0, 100, 3, 0)},
+    };
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
+
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/overplayed")));
+}
+
+void RadioTest::deepCutsSkipStainedFails()
+{
+    const QVector<TrackScorer::Candidate> candidates{
+        makeCandidate(QStringLiteral("/hit"), QStringLiteral("liked-artist"), {}),
+        makeCandidate(QStringLiteral("/skipped"), QStringLiteral("liked-artist"), {}),
+    };
+    const QHash<QString, TrackScorer::Affinity> affinities{
+        {QStringLiteral("/hit"), makeAffinity(0, 0, 0, 100, 20, 0)},
+        {QStringLiteral("/skipped"), makeAffinity(0, 0, 1, 100, 1, 0)},
+    };
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
+
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/skipped")));
 }
 
 // ---- TrackScorer -----------------------------------------------------------

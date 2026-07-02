@@ -13,6 +13,7 @@
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "reco/AffinityPool.h"
+#include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -702,9 +703,8 @@ QJsonObject AppCore::ipcStatus() const
 
 QVector<TrackScorer::Candidate> AppCore::buildRadioCandidatePool(const QStringList &informativeGenres) const
 {
-    QVector<TrackScorer::Candidate> pool;
     if (m_database == nullptr) {
-        return pool;
+        return {};
     }
 
     QVector<RadioCandidateRow> rows;
@@ -734,6 +734,22 @@ QVector<TrackScorer::Candidate> AppCore::buildRadioCandidatePool(const QStringLi
         }
     }
 
+    QVector<TrackScorer::Candidate> pool;
+    pool.reserve(rows.size());
+    for (const RadioCandidateRow &row : rows) {
+        pool.push_back(candidateFromRow(row));
+    }
+    return pool;
+}
+
+QVector<TrackScorer::Candidate> AppCore::buildRadioFallbackPool(int limit) const
+{
+    QVector<TrackScorer::Candidate> pool;
+    if (m_database == nullptr) {
+        return pool;
+    }
+
+    const QVector<RadioCandidateRow> rows = m_database->radioFallbackCandidates(limit);
     pool.reserve(rows.size());
     for (const RadioCandidateRow &row : rows) {
         pool.push_back(candidateFromRow(row));
@@ -915,6 +931,60 @@ bool AppCore::startRadio(const QString &seedPath)
     if (m_radioBatchSize > 1) {
         appendRadioBatch(m_radioBatchSize - 1);
     }
+    m_radioTopUpInProgress = false;
+    return true;
+}
+
+bool AppCore::startMix(const QString &mode)
+{
+    const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(mode);
+    if (!mixMode || m_database == nullptr || m_player == nullptr) {
+        return false;
+    }
+
+    QVector<TrackScorer::Candidate> pool = buildRadioFallbackPool(5000);
+    QHash<QString, TrackScorer::Affinity> affinities = buildRadioAffinities();
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+    pool = RadioMix::filterCandidates(*mixMode, pool, affinities, nowSecs);
+    if (pool.isEmpty()) {
+        return false;
+    }
+
+    const int persistedExploration = std::clamp(
+        m_database->setting(QStringLiteral("radio.exploration"), QString::number(kDefaultRadioExploration)).toInt(),
+        0, 100);
+    const int exploration = m_radioAdventurous ? kAdventurousExploration : persistedExploration;
+
+    m_radioBatchSize = std::clamp(
+        m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
+        1, 100);
+
+    auto session = std::make_unique<RadioSession>(std::move(pool), affinities, buildRadioGenreIdf(),
+                                                  exploration, nowSecs);
+    QVector<Track> picks = session->nextTracks(m_radioBatchSize, {}, [this](const QString &path) {
+        return m_database ? m_database->trackForPath(path) : Track{};
+    });
+    if (picks.isEmpty()) {
+        return false;
+    }
+
+    m_radioAdventurous = false;
+    m_radioPickPaths.clear();
+    m_radioConsecutiveEarlySkips = 0;
+    m_radioShuffleSessionActive = false;
+    m_radioSession = std::move(session);
+    for (const Track &track : picks) {
+        if (!track.path.isEmpty()) {
+            m_radioPickPaths.insert(track.path);
+        }
+    }
+
+    installRadioProvider(/*markPicksAsRadio=*/true);
+    m_player->setRadioActive(true);
+    m_radioTopUpInProgress = true;
+    m_player->clearAll();
+    m_player->injectTracks(picks);
+    m_player->playAt(0, true, false, /*explicitJump=*/true);
     m_radioTopUpInProgress = false;
     return true;
 }
@@ -1419,6 +1489,15 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         const bool started = startRadio(path);
         return QJsonObject{{QStringLiteral("radio"),
                             started ? QStringLiteral("started") : QStringLiteral("unknown-track")}};
+    }
+    if (command == QLatin1String("start-mix")) {
+        const QString mode = args.value(QStringLiteral("mode")).toString().trimmed().toLower();
+        if (!RadioMix::modeFromString(mode)) {
+            return QJsonObject{{QStringLiteral("mix"), QStringLiteral("unknown-mode")}};
+        }
+        const bool started = startMix(mode);
+        return QJsonObject{{QStringLiteral("mix"),
+                            started ? QStringLiteral("started") : QStringLiteral("empty-pool")}};
     }
     if (command == QLatin1String("stop-radio")) {
         stopRadio();
