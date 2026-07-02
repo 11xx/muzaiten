@@ -236,3 +236,8 @@ QString RadioSession::reasonFor(const QString &path) const
     }
     return parts.join(QStringLiteral("; "));
 }
+
+QList<TrackScorer::Component> RadioSession::reasonComponentsFor(const QString &path) const
+{
+    return m_pickReasons.value(path);
+}
