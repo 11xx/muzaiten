@@ -3,6 +3,8 @@
 #include "core/FoldKey.h"
 #include "core/GenreTags.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QRandomGenerator>
 
 #include <algorithm>
@@ -35,6 +37,46 @@ void pushRecentArtist(QStringList &artists, const QString &folded, int limit)
     while (artists.size() > limit) {
         artists.removeFirst();
     }
+}
+
+QJsonArray stringListToJson(const QStringList &strings)
+{
+    QJsonArray json;
+    for (const QString &value : strings) {
+        json.append(value);
+    }
+    return json;
+}
+
+QJsonArray stringSetToJson(const QSet<QString> &strings)
+{
+    QStringList sorted;
+    sorted.reserve(strings.size());
+    for (const QString &value : strings) {
+        sorted.push_back(value);
+    }
+    sorted.sort();
+    return stringListToJson(sorted);
+}
+
+QStringList stringListFromJson(const QJsonValue &value)
+{
+    QStringList strings;
+    const QJsonArray array = value.toArray();
+    strings.reserve(array.size());
+    for (const QJsonValue &item : array) {
+        const QString text = item.toString();
+        if (!text.isEmpty()) {
+            strings.push_back(text);
+        }
+    }
+    return strings;
+}
+
+QSet<QString> stringSetFromJson(const QJsonValue &value)
+{
+    const QStringList strings = stringListFromJson(value);
+    return QSet<QString>(strings.cbegin(), strings.cend());
 }
 
 } // namespace
@@ -273,4 +315,64 @@ QString RadioSession::reasonFor(const QString &path) const
 QList<TrackScorer::Component> RadioSession::reasonComponentsFor(const QString &path) const
 {
     return m_pickReasons.value(path);
+}
+
+QJsonObject RadioSession::constraintState() const
+{
+    QJsonObject albumCounts;
+    QStringList albumKeys = m_albumCounts.keys();
+    albumKeys.sort();
+    for (const QString &albumKey : albumKeys) {
+        albumCounts.insert(albumKey, m_albumCounts.value(albumKey));
+    }
+
+    QJsonArray playedGenres;
+    for (const QStringList &genres : m_playedGenres) {
+        playedGenres.append(stringListToJson(genres));
+    }
+
+    return QJsonObject{
+        {QStringLiteral("usedSongKeys"), stringSetToJson(m_usedSongKeys)},
+        {QStringLiteral("usedPaths"), stringSetToJson(m_usedPaths)},
+        {QStringLiteral("albumGroupCounts"), albumCounts},
+        {QStringLiteral("recentArtists"), stringListToJson(m_recentArtists)},
+        {QStringLiteral("playedGenres"), playedGenres},
+    };
+}
+
+void RadioSession::restoreConstraintState(const QJsonObject &state)
+{
+    if (state.contains(QStringLiteral("usedSongKeys"))) {
+        m_usedSongKeys = stringSetFromJson(state.value(QStringLiteral("usedSongKeys")));
+    }
+    if (state.contains(QStringLiteral("usedPaths"))) {
+        m_usedPaths = stringSetFromJson(state.value(QStringLiteral("usedPaths")));
+    }
+    if (state.contains(QStringLiteral("albumGroupCounts"))) {
+        m_albumCounts.clear();
+        const QJsonObject counts = state.value(QStringLiteral("albumGroupCounts")).toObject();
+        for (auto it = counts.constBegin(); it != counts.constEnd(); ++it) {
+            const int count = it.value().toInt(0);
+            if (!it.key().isEmpty() && count > 0) {
+                m_albumCounts.insert(it.key(), count);
+            }
+        }
+    }
+    if (state.contains(QStringLiteral("recentArtists"))) {
+        m_recentArtists = stringListFromJson(state.value(QStringLiteral("recentArtists")));
+        while (m_recentArtists.size() > kThrottleArtists) {
+            m_recentArtists.removeFirst();
+        }
+    }
+    if (state.contains(QStringLiteral("playedGenres"))) {
+        m_playedGenres.clear();
+        const QJsonArray groups = state.value(QStringLiteral("playedGenres")).toArray();
+        for (const QJsonValue &group : groups) {
+            m_playedGenres.push_back(stringListFromJson(group));
+        }
+        while (m_playedGenres.size() > kThrottleArtists) {
+            m_playedGenres.removeFirst();
+        }
+    }
+    m_pickReasons.clear();
 }

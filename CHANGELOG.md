@@ -52,7 +52,10 @@
   a right-click menu exposing exploration (a persistent 0–100 setting plus a
   per-session "Adventurous" boost to 85) and the batch size. Play events
   originating from radio picks are now attributed source "radio" instead of
-  riding along as "library_shuffle"/"queue_auto".
+  riding along as "library_shuffle"/"queue_auto". Active radio and mix
+  sessions now survive app restarts: the visible queue resumes from the saved
+  queue state, while the radio brain restores its sequencing constraints and
+  rolling mood but rebuilds candidates and listening affinity from fresh data.
 - Rediscovery and Deep cuts mixes: the Mixes menu and
   `muzaitenctl start-mix <rediscovery|deepcuts>` can now start seedless,
   radio-backed sessions over long-unheard favorites or rarely played tracks by

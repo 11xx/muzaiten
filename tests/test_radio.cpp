@@ -64,6 +64,13 @@ Track resolvePathToTrack(const QString &path)
     return track;
 }
 
+Track playedTrack(const QString &path, const QString &artistName)
+{
+    Track track = resolvePathToTrack(path);
+    track.artistName = artistName;
+    return track;
+}
+
 TrackScorer::Affinity makeAffinity(int playEvents, int finished, int skipped,
                                    qint64 lastPlayedAtSecs, int listenCount, int baselineMax)
 {
@@ -154,6 +161,7 @@ private slots:
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
     void anchorlessSessionDriftsFromPlayedContext();
+    void constraintStateRoundTripPreservesSequencing();
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
@@ -957,6 +965,49 @@ void RadioTest::anchorlessSessionDriftsFromPlayedContext()
     QCOMPARE(after.first().path, QStringLiteral("/rock"));
     QVERIFY2(drifted.reasonFor(after.first().path).contains(QStringLiteral("genre")),
              "anchorless session did not use notePlayed genre context");
+}
+
+void RadioTest::constraintStateRoundTripPreservesSequencing()
+{
+    const QString usedSongKey = QStringLiteral("song:already-used");
+    const QString cappedAlbum = QStringLiteral("album:already-capped");
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/used-a"), QStringLiteral("used-a"), {}, 0, -1, false,
+                      QStringLiteral("album:used-a"), usedSongKey),
+        makeCandidate(QStringLiteral("/used-b"), QStringLiteral("used-b"), {}, 0, -1, false,
+                      QStringLiteral("album:used-b"), usedSongKey),
+        makeCandidate(QStringLiteral("/album-a"), QStringLiteral("album-a"), {}, 0, -1, false,
+                      cappedAlbum, QStringLiteral("song:album-a")),
+        makeCandidate(QStringLiteral("/album-b"), QStringLiteral("album-b"), {}, 0, -1, false,
+                      cappedAlbum, QStringLiteral("song:album-b")),
+        makeCandidate(QStringLiteral("/album-c"), QStringLiteral("album-c"), {}, 0, -1, false,
+                      cappedAlbum, QStringLiteral("song:album-c")),
+        makeCandidate(QStringLiteral("/recent-feed"), QStringLiteral("recent"), {}, 0, -1, false,
+                      QStringLiteral("album:recent-feed"), QStringLiteral("song:recent-feed")),
+        makeCandidate(QStringLiteral("/recent-c"), QStringLiteral("recent"), {}, 0, -1, false,
+                      QStringLiteral("album:recent-c"), QStringLiteral("song:recent-c")),
+        makeCandidate(QStringLiteral("/allowed"), QStringLiteral("allowed"), {}, 0, -1, false,
+                      QStringLiteral("album:allowed"), QStringLiteral("song:allowed")),
+    };
+
+    RadioSession original(pool, {}, {}, 30, 1'000'000'000);
+    original.notePlayed(playedTrack(QStringLiteral("/used-a"), QStringLiteral("Used A")));
+    original.notePlayed(playedTrack(QStringLiteral("/album-a"), QStringLiteral("Album A")));
+    original.notePlayed(playedTrack(QStringLiteral("/album-b"), QStringLiteral("Album B")));
+    original.notePlayed(playedTrack(QStringLiteral("/recent-feed"), QStringLiteral("Recent")));
+
+    RadioSession restored(pool, {}, {}, 30, 1'000'000'000);
+    restored.restoreConstraintState(original.constraintState());
+    const QVector<Track> picks = restored.nextTracks(10, {}, resolvePathToTrack);
+
+    QSet<QString> pickedPaths;
+    for (const Track &track : picks) {
+        pickedPaths.insert(track.path);
+    }
+    QVERIFY(pickedPaths.contains(QStringLiteral("/allowed")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/used-b")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/album-c")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/recent-c")));
 }
 
 // ---- Database + ListenHistoryStore -----------------------------------------

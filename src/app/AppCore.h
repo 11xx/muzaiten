@@ -154,11 +154,16 @@ private:
     // Build the scrobbler-backfill match index from the library DB (folded
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
+    QStringList radioFoldedGenresForTrack(const QString &path) const;
+    TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit) const;
     QHash<QString, double> buildRadioGenreIdf() const;
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
     void installRadioProvider(bool markPicksAsRadio);
+    void saveRadioSessionState();
+    void clearRadioSessionState();
+    void maybeRestoreRadioSession();
     // Maintains the ambient, anchorless radio provider used only by
     // ShuffleMode::Radio. Explicit Start Radio owns m_radioSession while
     // PlayerCore::radioActive() is true and takes precedence.
@@ -237,4 +242,8 @@ private:
     // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
     bool              m_radioAdventurous = false;
     bool              m_radioShuffleSessionActive = false;
+    bool              m_radioRestoreDone = false;
+    QString           m_radioSessionKind;
+    QString           m_radioSessionSeedPath;
+    int               m_radioSessionExploration = 30;
 };

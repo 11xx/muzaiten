@@ -4,6 +4,7 @@
 #include "reco/TrackScorer.h"
 
 #include <QHash>
+#include <QJsonObject>
 #include <QList>
 #include <QSet>
 #include <QString>
@@ -75,6 +76,12 @@ public:
 
     // Stored scorer components for a pick made this session. Empty when unknown.
     QList<TrackScorer::Component> reasonComponentsFor(const QString &path) const;
+
+    // Constraint-only session persistence. Pick reasons are deliberately not
+    // included: restored pre-restart rows can continue sequencing correctly, but
+    // only new picks have freshly computed explanations.
+    QJsonObject constraintState() const;
+    void restoreConstraintState(const QJsonObject &state);
 
     // Pure classifier for AppCore's radio re-roll heuristic: true when a play
     // ended before crossing the scrobble threshold (half the track's duration,
