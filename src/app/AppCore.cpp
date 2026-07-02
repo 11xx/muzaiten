@@ -89,8 +89,9 @@ TrackScorer::Candidate candidateFromRow(const RadioCandidateRow &row)
 {
     TrackScorer::Candidate candidate;
     candidate.path = row.path;
+    candidate.songKey = FoldKey::songKey(row.mbRecordingId, row.artistName, row.title);
     candidate.artistFolded = FoldKey::fold(row.artistName);
-    candidate.albumKey = FoldKey::albumKey(row.albumArtistName, row.albumTitle);
+    candidate.albumKey = FoldKey::albumGroupKey(row.releaseGroupId, row.albumArtistName, row.albumTitle);
     candidate.genresFolded = row.genresFolded;   // already GenreTags::folded (genre_folded column)
     candidate.year = row.year;
     candidate.effectiveRating0To100 = row.effectiveRating0To100;
@@ -770,6 +771,7 @@ bool AppCore::startRadio(const QString &seedPath)
 
     TrackScorer::Candidate seedCandidate;
     seedCandidate.path = seed.path;
+    seedCandidate.songKey = FoldKey::songKey(seed.musicBrainz.recordingId, seed.artistName, seed.title);
     seedCandidate.artistFolded = FoldKey::fold(seed.artistName);
     seedCandidate.albumKey = FoldKey::albumKey(seed.albumArtistName, seed.albumTitle);
     seedCandidate.genresFolded = seedGenresFolded;

@@ -8,7 +8,10 @@
   (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
   scored by genre, era, rating and listening affinity, with a novelty bonus for
   the unheard and artist/album throttling so a session never stalls on one
-  artist or album — and every pick records why it was chosen. Hovering a radio
+  artist or album — and every pick records why it was chosen. Song no-repeat
+  now follows MusicBrainz recording IDs when available, falling back to folded
+  artist+title, and the album cap follows MusicBrainz release groups so
+  remasters/deluxe editions count as the same album. Hovering a radio
   pick in the queue now explains the choice with a human-readable summary and
   the numeric scorer breakdown. Powered by the play history, imported scrobbles,
   and genre data added in the previous

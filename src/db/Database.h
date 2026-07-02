@@ -36,8 +36,11 @@ class Database;
 struct RadioCandidateRow {
     QString path;
     QString artistName;
+    QString title;
     QString albumArtistName;
     QString albumTitle;
+    QString mbRecordingId;
+    QString releaseGroupId;
     QStringList genresFolded;
     int year = 0;                   // 0 = unknown
     int effectiveRating0To100 = -1; // -1 = unrated

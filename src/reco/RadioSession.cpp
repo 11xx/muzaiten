@@ -66,6 +66,9 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
     if (!m_seed.path.isEmpty()) {
         m_byPath.insert(m_seed.path, m_seed);
     }
+    if (!m_seed.songKey.isEmpty()) {
+        m_usedSongKeys.insert(m_seed.songKey);
+    }
 }
 
 QStringList RadioSession::rollingGenres() const
@@ -87,6 +90,9 @@ QStringList RadioSession::rollingGenres() const
 void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored)
 {
     m_usedPaths.insert(candidate.path);
+    if (!candidate.songKey.isEmpty()) {
+        m_usedSongKeys.insert(candidate.songKey);
+    }
     m_albumCounts[candidate.albumKey] += 1;
     m_pickReasons.insert(candidate.path, scored.components);
 }
@@ -112,12 +118,23 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         context.exploration0To100 = m_exploration;
 
         const QSet<QString> throttled = context.recentArtistsFolded;
+        QSet<QString> excludedSongKeys;
+        for (const QString &path : excludePaths) {
+            const auto it = m_byPath.constFind(path);
+            if (it != m_byPath.constEnd() && !it->songKey.isEmpty()) {
+                excludedSongKeys.insert(it->songKey);
+            }
+        }
 
         QList<std::pair<TrackScorer::Scored, const TrackScorer::Candidate *>> scored;
         scored.reserve(m_pool.size());
         for (const TrackScorer::Candidate &candidate : m_pool) {
             if (candidate.path.isEmpty() || m_usedPaths.contains(candidate.path)
                 || excludePaths.contains(candidate.path)) {
+                continue;
+            }
+            if (!candidate.songKey.isEmpty()
+                && (m_usedSongKeys.contains(candidate.songKey) || excludedSongKeys.contains(candidate.songKey))) {
                 continue;
             }
             if (!candidate.artistFolded.isEmpty() && throttled.contains(candidate.artistFolded)) {
@@ -192,6 +209,7 @@ void RadioSession::notePlayed(const Track &track)
 
     QStringList genres;
     QString albumKey = FoldKey::albumKey(track.albumArtistName, track.albumTitle);
+    QString songKey = FoldKey::songKey(track.musicBrainz.recordingId, track.artistName, track.title);
     const auto it = m_byPath.constFind(track.path);
     if (it != m_byPath.constEnd()) {
         // Filter here too: pool candidates carry their raw (unfiltered) genre
@@ -199,6 +217,7 @@ void RadioSession::notePlayed(const Track &track)
         // context through.
         genres = GenreTags::informative(it->genresFolded);
         albumKey = it->albumKey;
+        songKey = it->songKey;
     }
     m_playedGenres.push_back(genres);
     while (m_playedGenres.size() > kThrottleArtists) {
@@ -210,6 +229,9 @@ void RadioSession::notePlayed(const Track &track)
     if (!m_usedPaths.contains(track.path)) {
         m_usedPaths.insert(track.path);
         m_albumCounts[albumKey] += 1;
+    }
+    if (!songKey.isEmpty()) {
+        m_usedSongKeys.insert(songKey);
     }
 }
 

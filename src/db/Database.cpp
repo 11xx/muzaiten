@@ -262,23 +262,26 @@ RadioCandidateRow readRadioCandidateRow(const QSqlQuery &query)
     RadioCandidateRow row;
     row.path            = query.value(0).toString();
     row.artistName      = query.value(1).toString();
-    row.albumArtistName = query.value(2).toString();
-    row.albumTitle      = query.value(3).toString();
-    const QString genres = query.value(4).toString();
+    row.title           = query.value(2).toString();
+    row.albumArtistName = query.value(3).toString();
+    row.albumTitle      = query.value(4).toString();
+    row.mbRecordingId   = query.value(5).toString();
+    row.releaseGroupId  = query.value(6).toString();
+    const QString genres = query.value(7).toString();
     if (!genres.isEmpty()) {
         row.genresFolded = genres.split(kGenreSeparator, Qt::SkipEmptyParts);
     }
-    const QString original = query.value(5).toString();
-    row.year = parseLeadingYear(!original.isEmpty() ? original : query.value(6).toString());
-    const int scannedRating = query.value(7).isNull() ? Rating::unset : query.value(7).toInt();
-    row.hasUserRating = !query.value(8).isNull();
-    const QString status = query.value(9).toString();
+    const QString original = query.value(8).toString();
+    row.year = parseLeadingYear(!original.isEmpty() ? original : query.value(9).toString());
+    const int scannedRating = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
+    row.hasUserRating = !query.value(11).isNull();
+    const QString status = query.value(12).toString();
     const bool pendingDbRating = status == QStringLiteral("pending")
         || status == QStringLiteral("failed")
         || status == QStringLiteral("blocked_no_writable_path");
     row.effectiveRating0To100 = pendingDbRating && row.hasUserRating
-        ? query.value(8).toInt()
-        : (scannedRating >= 0 ? scannedRating : (row.hasUserRating ? query.value(8).toInt() : Rating::unset));
+        ? query.value(11).toInt()
+        : (scannedRating >= 0 ? scannedRating : (row.hasUserRating ? query.value(11).toInt() : Rating::unset));
     return row;
 }
 
@@ -1722,11 +1725,13 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
     // shares ANY seed genre, while the outer GROUP_CONCAT still returns ALL of
     // that track's folded genres (not just the matched ones).
     QString sql = QStringLiteral(
-        "SELECT t.path, t.artist_name, t.album_artist_name, t.album_title, "
+        "SELECT t.path, t.artist_name, t.title, t.album_artist_name, t.album_title, "
+        "t.musicbrainz_recording_id, a.musicbrainz_release_group_id, "
         "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
         "t.rating_0_100, utr.rating_0_100, p.status "
         "FROM tracks t "
         "JOIN track_genres g ON g.track_id = t.id "
+        "LEFT JOIN albums a ON a.id = t.album_id "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
@@ -1761,11 +1766,13 @@ QVector<RadioCandidateRow> Database::radioFallbackCandidates(int limit) const
     // No genre to match on (seed had none): a random sample of the library, with
     // whatever genres each track does carry still folded in.
     QString sql = QStringLiteral(
-        "SELECT t.path, t.artist_name, t.album_artist_name, t.album_title, "
+        "SELECT t.path, t.artist_name, t.title, t.album_artist_name, t.album_title, "
+        "t.musicbrainz_recording_id, a.musicbrainz_release_group_id, "
         "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
         "t.rating_0_100, utr.rating_0_100, p.status "
         "FROM tracks t "
         "LEFT JOIN track_genres g ON g.track_id = t.id "
+        "LEFT JOIN albums a ON a.id = t.album_id "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1");

@@ -94,5 +94,6 @@ private:
     QList<QStringList> m_playedGenres;        // last 3 played tracks' folded genres
     QHash<QString, int> m_albumCounts;        // albumKey -> tracks committed this session
     QSet<QString> m_usedPaths;                // never pick/repeat a path twice
+    QSet<QString> m_usedSongKeys;             // never pick/repeat a song twice through duplicate files
     QHash<QString, QList<TrackScorer::Component>> m_pickReasons;
 };

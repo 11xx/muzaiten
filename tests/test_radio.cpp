@@ -1,3 +1,4 @@
+#include "core/FoldKey.h"
 #include "core/GenreTags.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
@@ -19,10 +20,11 @@ namespace {
 TrackScorer::Candidate makeCandidate(const QString &path, const QString &artistFolded,
                                      const QStringList &genresFolded, int year = 0,
                                      int rating = -1, bool hasUserRating = false,
-                                     const QString &albumKey = {})
+                                     const QString &albumKey = {}, const QString &songKey = {})
 {
     TrackScorer::Candidate candidate;
     candidate.path = path;
+    candidate.songKey = songKey.isEmpty() ? (QStringLiteral("path:") + path) : songKey;
     candidate.artistFolded = artistFolded;
     candidate.albumKey = albumKey.isEmpty() ? (artistFolded + QLatin1String("\nalbum")) : albumKey;
     candidate.genresFolded = genresFolded;
@@ -66,6 +68,11 @@ class RadioTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    // FoldKey
+    void songKeyPrefersRecordingMbid();
+    void songKeyFallsBackToFoldedArtistTitle();
+    void albumGroupKeyPrefersReleaseGroupMbid();
+
     // TrackScorer
     void genreOverlapDominates();
     void genreIdfSaturatesOnRareSharedGenre();
@@ -82,6 +89,9 @@ private slots:
     // RadioSession
     void artistThrottleNeverPicksSameArtistConsecutively();
     void albumCapLimitsTracksPerAlbum();
+    void songKeyDedupUsesRecordingMbid();
+    void songKeyDedupFallsBackToArtistTitle();
+    void albumCapUsesReleaseGroupKey();
     void noRepeatsWithinSession();
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
@@ -104,6 +114,29 @@ private slots:
     void nonGenrePlaceholdersAreStoplisted();
     void informativeFiltersStoplistedGenres();
 };
+
+// ---- FoldKey ---------------------------------------------------------------
+
+void RadioTest::songKeyPrefersRecordingMbid()
+{
+    QCOMPARE(FoldKey::songKey(QStringLiteral("recording-1"), QStringLiteral("Artist"), QStringLiteral("Title")),
+             QStringLiteral("mbid:recording-1"));
+}
+
+void RadioTest::songKeyFallsBackToFoldedArtistTitle()
+{
+    QCOMPARE(FoldKey::songKey({}, QStringLiteral("  The  Artist  "), QStringLiteral("  The  Title  ")),
+             QStringLiteral("at:the artist\nthe title"));
+}
+
+void RadioTest::albumGroupKeyPrefersReleaseGroupMbid()
+{
+    QCOMPARE(FoldKey::albumGroupKey(QStringLiteral("release-group-1"), QStringLiteral("Artist"),
+                                    QStringLiteral("Album")),
+             QStringLiteral("rg:release-group-1"));
+    QCOMPARE(FoldKey::albumGroupKey({}, QStringLiteral("  Album  Artist  "), QStringLiteral("  Album  ")),
+             QStringLiteral("album artist\nalbum"));
+}
 
 // ---- TrackScorer -----------------------------------------------------------
 
@@ -373,6 +406,77 @@ void RadioTest::albumCapLimitsTracksPerAlbum()
     QVERIFY2(albumCount <= 2, "more than two tracks from one album in a session");
 }
 
+void RadioTest::songKeyDedupUsesRecordingMbid()
+{
+    const QString sharedSong = FoldKey::songKey(QStringLiteral("recording-1"), {}, {});
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/copy-a"), QStringLiteral("artist-a"), {QStringLiteral("rock")}, 2000,
+                      100, true, QStringLiteral("album-a"), sharedSong),
+        makeCandidate(QStringLiteral("/copy-b"), QStringLiteral("artist-b"), {QStringLiteral("rock")}, 2000,
+                      100, true, QStringLiteral("album-b"), sharedSong),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(11u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QVERIFY(picks.first().path == QStringLiteral("/copy-a") || picks.first().path == QStringLiteral("/copy-b"));
+}
+
+void RadioTest::songKeyDedupFallsBackToArtistTitle()
+{
+    const QString sharedSong = FoldKey::songKey({}, QStringLiteral("  The Artist  "),
+                                                QStringLiteral("  The Song  "));
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/lossless.flac"), QStringLiteral("artist-a"), {QStringLiteral("rock")},
+                      2000, 100, true, QStringLiteral("album-a"), sharedSong),
+        makeCandidate(QStringLiteral("/portable.opus"), QStringLiteral("artist-b"), {QStringLiteral("rock")},
+                      2000, 100, true, QStringLiteral("album-b"), sharedSong),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(12u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QVERIFY(picks.first().path == QStringLiteral("/lossless.flac")
+            || picks.first().path == QStringLiteral("/portable.opus"));
+}
+
+void RadioTest::albumCapUsesReleaseGroupKey()
+{
+    const QString sharedAlbum = FoldKey::albumGroupKey(QStringLiteral("release-group-1"),
+                                                       QStringLiteral("Album Artist"),
+                                                       QStringLiteral("Original Edition"));
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 3; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/rg%1").arg(i), QStringLiteral("rg-artist%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000, 100, true, sharedAlbum));
+    }
+    for (int i = 0; i < 6; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/other%1").arg(i), QStringLiteral("other%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000, 30, false,
+                                     QStringLiteral("other%1\nalbum").arg(i)));
+    }
+
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(13u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(9, {}, resolvePathToTrack);
+    int albumCount = 0;
+    for (const Track &pick : picks) {
+        if (pick.path.startsWith(QStringLiteral("/rg"))) {
+            ++albumCount;
+        }
+    }
+    QVERIFY2(albumCount <= 2, "more than two tracks from one release group in a session");
+}
+
 void RadioTest::noRepeatsWithinSession()
 {
     QVector<TrackScorer::Candidate> pool;
@@ -617,7 +721,8 @@ void RadioTest::isEarlySkipUsesHalfDurationCappedAtFourMinutes()
 namespace {
 
 Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStringList &genres,
-                  const QString &originalDate)
+                  const QString &originalDate, const QString &recordingId = {},
+                  const QString &releaseGroupId = {})
 {
     Track track;
     track.path = dir.filePath(QStringLiteral("Artist/Album/%1").arg(filename));
@@ -628,6 +733,8 @@ Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStri
     track.albumArtistName = QStringLiteral("Album Artist");
     track.albumTitle = QStringLiteral("Album");
     track.originalDate = originalDate;
+    track.musicBrainz.recordingId = recordingId;
+    track.musicBrainz.releaseGroupId = releaseGroupId;
     track.fileSize = 10;
     track.fileMtime = 20;
     if (!genres.isEmpty()) {
@@ -651,7 +758,8 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
 
     const Track rockPop = makeDbTrack(dir, QStringLiteral("01.flac"),
                                       {QStringLiteral("Rock"), QStringLiteral("Pop")},
-                                      QStringLiteral("2004-05-06"));
+                                      QStringLiteral("2004-05-06"), QStringLiteral("recording-1"),
+                                      QStringLiteral("release-group-1"));
     const Track jazz = makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Jazz")},
                                    QStringLiteral("1999"));
     const Track noGenre = makeDbTrack(dir, QStringLiteral("03.flac"), {}, QStringLiteral("2010-01-01"));
@@ -664,6 +772,9 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
         db.radioCandidates({GenreTags::folded(QStringLiteral("Rock"))});
     QCOMPARE(rockRows.size(), 1);
     QCOMPARE(rockRows.first().path, rockPop.path);
+    QCOMPARE(rockRows.first().title, rockPop.title);
+    QCOMPARE(rockRows.first().mbRecordingId, QStringLiteral("recording-1"));
+    QCOMPARE(rockRows.first().releaseGroupId, QStringLiteral("release-group-1"));
     QCOMPARE(rockRows.first().year, 2004);
     QVERIFY(rockRows.first().hasUserRating);
     QCOMPARE(rockRows.first().effectiveRating0To100, 80);
