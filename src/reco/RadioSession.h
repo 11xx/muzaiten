@@ -24,11 +24,16 @@ class QRandomGenerator;
 class RadioSession final {
 public:
     // The seed candidate anchors the mood: its genres are always part of the
-    // rolling genre window. `nowSecs` fixes "now" for recency scoring (injected
-    // so tests are deterministic). `rng` defaults to the global generator; tests
-    // pass a privately-seeded one for reproducible picks.
+    // rolling genre window (stoplisted placeholder genres are filtered out
+    // first — see GenreTags::informative). `genreIdf` is the library-wide
+    // folded-genre -> IDF map (see TrackScorer::SeedContext::genreIdf); an
+    // empty map makes every genre score as IDF 0. `nowSecs` fixes "now" for
+    // recency scoring (injected so tests are deterministic). `rng` defaults to
+    // the global generator; tests pass a privately-seeded one for reproducible
+    // picks.
     RadioSession(QVector<TrackScorer::Candidate> pool,
                  QHash<QString, TrackScorer::Affinity> affinities,
+                 QHash<QString, double> genreIdf,
                  TrackScorer::Candidate seed,
                  int exploration0To100,
                  qint64 nowSecs,
@@ -61,6 +66,7 @@ private:
     QVector<TrackScorer::Candidate> m_pool;
     QHash<QString, TrackScorer::Affinity> m_affinities;
     QHash<QString, TrackScorer::Candidate> m_byPath; // pool + seed, for notePlayed lookups
+    QHash<QString, double> m_genreIdf;
     TrackScorer::Candidate m_seed;
     int m_exploration = 30;
     qint64 m_nowSecs = 0;

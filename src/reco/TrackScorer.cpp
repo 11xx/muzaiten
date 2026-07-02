@@ -14,6 +14,18 @@ namespace {
 // These are the knobs to turn when the radio "feels" wrong — nothing else here
 // encodes taste.
 constexpr double kGenreWeight = 3.0;      // + up to this for a full genre overlap
+// The genre component is an ABSOLUTE sum of shared-genre IDF weights, not a
+// ratio normalized by the seed's own genre count — normalizing by the seed
+// would let a single-genre seed cancel its own weighting (idf/idf == 1.0
+// regardless of how broad or junky that one genre is), which is exactly the
+// "Other" bug this scale replaces. kGenreIdfSaturation is the IDF-sum at which
+// the component reaches 1.0: one shared genre covering ~2% of the tagged
+// library (idf ~= 3.9) roughly saturates it on its own; a broad genre like
+// "rock" (idf ~= 1.8) contributes ~0.45 alone — real, but weak. Stoplisted
+// placeholder genres ("Other", "Unknown", ...) never appear in the sum because
+// they are filtered out of the rolling context upstream (GenreTags::informative,
+// applied in AppCore::startRadio and RadioSession).
+constexpr double kGenreIdfSaturation = 4.0;
 constexpr double kEraWeight = 1.0;        // + up to this for a same-year candidate
 constexpr double kEraSpanYears = 30.0;    // beyond this year gap, era stops mattering
 constexpr double kRatingWeight = 1.5;     // + up to this at a 100/100 effective rating
@@ -46,20 +58,22 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
 
     const double exploration = std::clamp(seed.exploration0To100, 0, 100);
 
-    // genre: overlap ratio against the rolling seed genres. Exploration softens
-    // the pull toward similarity (conservative leans similar, exploratory drifts).
+    // genre: sum of IDF weights of the genres shared with the rolling context,
+    // on an absolute scale (see kGenreIdfSaturation) rather than a ratio of the
+    // seed's own genre count. Exploration softens the pull toward similarity
+    // (conservative leans similar, exploratory drifts). A genre missing from
+    // seed.genreIdf (including an entirely empty map) contributes IDF 0.
     if (!seed.genresFolded.isEmpty() && !candidate.genresFolded.isEmpty()) {
         const QSet<QString> seedGenres(seed.genresFolded.cbegin(), seed.genresFolded.cend());
-        int overlap = 0;
+        double idfSum = 0.0;
         for (const QString &genre : candidate.genresFolded) {
             if (seedGenres.contains(genre)) {
-                ++overlap;
+                idfSum += seed.genreIdf.value(genre, 0.0);
             }
         }
-        const double ratio = std::min(1.0, static_cast<double>(overlap)
-                                               / std::max(1, static_cast<int>(seedGenres.size())));
+        const double genreScore = std::min(1.0, idfSum / kGenreIdfSaturation);
         const double explorationScale = 1.25 - exploration / 200.0;
-        pushIfNonZero(scored, QStringLiteral("genre"), kGenreWeight * ratio * explorationScale);
+        pushIfNonZero(scored, QStringLiteral("genre"), kGenreWeight * genreScore * explorationScale);
     }
 
     // era: linear proximity in years, both years known.

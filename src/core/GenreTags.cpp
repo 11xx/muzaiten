@@ -42,4 +42,36 @@ QStringList fromMetadata(const MetadataBlob::FullMetadata &metadata)
     return genres;
 }
 
+bool isNonGenre(const QString &folded)
+{
+    // Tagger placeholders, not genres: seen in the wild standing in for an
+    // absent GENRE tag rather than the tag being left empty. Keeping this list
+    // here (instead of, say, an empty-string check) is deliberate — it is the
+    // one place the "junk genre" vocabulary is allowed to grow.
+    static const QSet<QString> nonGenres = {
+        QStringLiteral("other"),
+        QStringLiteral("unknown"),
+        QStringLiteral("misc"),
+        QStringLiteral("none"),
+        QStringLiteral("undefined"),
+        QStringLiteral("no genre"),
+        QStringLiteral("unclassifiable"),
+        QStringLiteral("various"),
+        QStringLiteral("genre"),
+    };
+    return nonGenres.contains(folded);
+}
+
+QStringList informative(const QStringList &foldedGenres)
+{
+    QStringList result;
+    result.reserve(foldedGenres.size());
+    for (const QString &genre : foldedGenres) {
+        if (!isNonGenre(genre)) {
+            result.push_back(genre);
+        }
+    }
+    return result;
+}
+
 } // namespace GenreTags

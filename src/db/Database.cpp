@@ -1032,6 +1032,27 @@ QStringList Database::genresForTrack(const QString &path) const
     return genres;
 }
 
+QHash<QString, int> Database::genreTrackCounts(int *taggedTrackTotal) const
+{
+    QHash<QString, int> counts;
+    // track_genres' primary key is (track_id, genre_folded), so COUNT(*) per
+    // genre_folded is already a distinct-track count — no DISTINCT needed.
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT genre_folded, COUNT(*) FROM track_genres GROUP BY genre_folded"))) {
+        while (query.next()) {
+            counts.insert(query.value(0).toString(), query.value(1).toInt());
+        }
+    }
+    if (taggedTrackTotal != nullptr) {
+        *taggedTrackTotal = 0;
+        QSqlQuery totalQuery(m_db);
+        if (totalQuery.exec(QStringLiteral("SELECT COUNT(DISTINCT track_id) FROM track_genres")) && totalQuery.next()) {
+            *taggedTrackTotal = totalQuery.value(0).toInt();
+        }
+    }
+    return counts;
+}
+
 QVector<Artist> Database::albumArtists() const
 {
     QVector<Artist> artists;

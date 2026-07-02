@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QSet>
 #include <QString>
@@ -35,6 +36,13 @@ struct Affinity {
 // The rolling mood context a candidate is scored against.
 struct SeedContext {
     QStringList genresFolded;          // seed + last few played tracks (folded)
+    // Folded genre -> IDF weight (log(taggedLibraryTracks / trackCount(genre))),
+    // covering the full library vocabulary so rolling-context genres picked up
+    // from played tracks (not just the seed's) resolve too. A genre absent from
+    // this map (including an empty map altogether) scores as IDF 0 — it
+    // contributes nothing to the genre component. See TrackScorer.cpp for how
+    // this is turned into the genre score.
+    QHash<QString, double> genreIdf;
     QSet<QString> recentArtistsFolded; // for the soft same-artist term (not the hard constraint)
     int year = 0;
     qint64 nowSecs = 0;

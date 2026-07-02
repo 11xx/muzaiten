@@ -19,4 +19,15 @@ QString folded(const QString &genre);
 // deduped case-insensitively (first-seen casing wins). Order preserved.
 QStringList fromMetadata(const MetadataBlob::FullMetadata &metadata);
 
+// True for tagger placeholders that are not real genres ("Other", "Unknown",
+// ...): junk co-tags that some taggers write in lieu of leaving GENRE empty.
+// They must never seed a radio candidate pool nor count as a genre match —
+// callers should filter with `informative()` before either. `folded` must
+// already be case/whitespace-folded (see `folded()` above).
+bool isNonGenre(const QString &folded);
+
+// `foldedGenres` with every `isNonGenre()` placeholder removed, order
+// preserved.
+QStringList informative(const QStringList &foldedGenres);
+
 } // namespace GenreTags

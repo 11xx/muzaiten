@@ -67,6 +67,10 @@ class RadioTest final : public QObject {
 private slots:
     // TrackScorer
     void genreOverlapDominates();
+    void genreIdfSaturatesOnRareSharedGenre();
+    void genreIdfPartialOnBroadSharedGenre();
+    void genreAbsentWithNoSharedGenres();
+    void genreAbsentWithEmptyIdfMap();
     void eraDecaysWithYearGap();
     void skipPenaltyScalesWithSkipRate();
     void recencyPenaltyDecaysWithTime();
@@ -84,7 +88,12 @@ private slots:
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
+    void genreTrackCountsAggregatesAcrossLibrary();
     void trackAffinitiesAggregateAllSources();
+
+    // GenreTags
+    void nonGenrePlaceholdersAreStoplisted();
+    void informativeFiltersStoplistedGenres();
 };
 
 // ---- TrackScorer -----------------------------------------------------------
@@ -93,6 +102,7 @@ void RadioTest::genreOverlapDominates()
 {
     TrackScorer::SeedContext seed;
     seed.genresFolded = {QStringLiteral("dream pop"), QStringLiteral("shoegaze")};
+    seed.genreIdf = {{QStringLiteral("dream pop"), 2.0}, {QStringLiteral("shoegaze"), 2.5}};
 
     const TrackScorer::Scored match = TrackScorer::score(
         makeCandidate(QStringLiteral("/m"), QStringLiteral("a"),
@@ -106,6 +116,61 @@ void RadioTest::genreOverlapDominates()
     QVERIFY(!hasComponent(miss, QStringLiteral("genre")));  // no overlap, no floor
     QVERIFY(componentValue(match, QStringLiteral("genre")) > 0.0);
     QVERIFY(match.score > miss.score);
+}
+
+void RadioTest::genreIdfSaturatesOnRareSharedGenre()
+{
+    // A single very rare shared genre (idf well past the 4.0 saturation point)
+    // should saturate the genre component to 1.0 pre-weight: 3.0 (weight) *
+    // 1.0 * 1.10 (exploration scale at the default exploration=30).
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("noise")};
+    seed.genreIdf = {{QStringLiteral("noise"), 6.0}};  // far above the 4.0 saturation point
+
+    const TrackScorer::Scored scored = TrackScorer::score(
+        makeCandidate(QStringLiteral("/m"), QStringLiteral("a"), {QStringLiteral("noise")}), {}, seed);
+
+    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("genre")), 3.0 * 1.0 * 1.10));
+}
+
+void RadioTest::genreIdfPartialOnBroadSharedGenre()
+{
+    // A single broad shared genre (idf ~= 1.8, e.g. "rock") should land well
+    // short of saturation: genreScore = 1.8 / 4.0 = 0.45, real but weak.
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("rock")};
+    seed.genreIdf = {{QStringLiteral("rock"), 1.8}};
+
+    const TrackScorer::Scored scored = TrackScorer::score(
+        makeCandidate(QStringLiteral("/m"), QStringLiteral("a"), {QStringLiteral("rock")}), {}, seed);
+
+    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("genre")), 3.0 * 0.45 * 1.10));
+}
+
+void RadioTest::genreAbsentWithNoSharedGenres()
+{
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("rock")};
+    seed.genreIdf = {{QStringLiteral("rock"), 2.0}};
+
+    const TrackScorer::Scored scored = TrackScorer::score(
+        makeCandidate(QStringLiteral("/m"), QStringLiteral("a"), {QStringLiteral("jazz")}), {}, seed);
+
+    QVERIFY(!hasComponent(scored, QStringLiteral("genre")));
+}
+
+void RadioTest::genreAbsentWithEmptyIdfMap()
+{
+    // Full genre overlap, but an empty idf map (the SeedContext default) means
+    // every genre resolves to IDF 0 — the component must not appear.
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("rock")};
+    QVERIFY(seed.genreIdf.isEmpty());
+
+    const TrackScorer::Scored scored = TrackScorer::score(
+        makeCandidate(QStringLiteral("/m"), QStringLiteral("a"), {QStringLiteral("rock")}), {}, seed);
+
+    QVERIFY(!hasComponent(scored, QStringLiteral("genre")));
 }
 
 void RadioTest::eraDecaysWithYearGap()
@@ -192,6 +257,7 @@ void RadioTest::componentsSumAndSignsMatchScore()
 {
     TrackScorer::SeedContext seed;
     seed.genresFolded = {QStringLiteral("rock")};
+    seed.genreIdf = {{QStringLiteral("rock"), 1.8}};
     seed.recentArtistsFolded = {QStringLiteral("a")};
     TrackScorer::Affinity affinity;
     affinity.playEvents = 4;
@@ -243,7 +309,7 @@ void RadioTest::artistThrottleNeverPicksSameArtistConsecutively()
     TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
                                                 {QStringLiteral("rock")}, 2000);
     QRandomGenerator rng(12345u);
-    RadioSession session(pool, {}, seed, 30, 1'000'000'000, &rng);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
 
     const QVector<Track> picks = session.nextTracks(8, {}, resolvePathToTrack);
     QVERIFY(picks.size() >= 4);
@@ -276,7 +342,7 @@ void RadioTest::albumCapLimitsTracksPerAlbum()
     TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
                                                 {QStringLiteral("rock")}, 2000);
     QRandomGenerator rng(999u);
-    RadioSession session(pool, {}, seed, 30, 1'000'000'000, &rng);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
 
     const QVector<Track> picks = session.nextTracks(9, {}, resolvePathToTrack);
     int albumCount = 0;
@@ -298,7 +364,7 @@ void RadioTest::noRepeatsWithinSession()
     TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
                                                 {QStringLiteral("rock")}, 2000);
     QRandomGenerator rng(7u);
-    RadioSession session(pool, {}, seed, 30, 1'000'000'000, &rng);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
 
     const QVector<Track> picks = session.nextTracks(20, {}, resolvePathToTrack);  // more than the pool
     QSet<QString> seen;
@@ -319,7 +385,7 @@ void RadioTest::excludePathsAreRespected()
     TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
                                                 {QStringLiteral("rock")}, 2000);
     QRandomGenerator rng(3u);
-    RadioSession session(pool, {}, seed, 30, 1'000'000'000, &rng);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
 
     const QSet<QString> exclude{QStringLiteral("/t0"), QStringLiteral("/t3")};
     const QVector<Track> picks = session.nextTracks(20, exclude, resolvePathToTrack);
@@ -349,15 +415,19 @@ void RadioTest::rollingContextDriftsGenreWindow()
     TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
                                                 {QStringLiteral("pop")}, 2000);
 
+    // A non-empty IDF map is needed so a genre match actually contributes: an
+    // empty map (the default) makes every genre score as IDF 0.
+    const QHash<QString, double> genreIdf{{QStringLiteral("pop"), 2.0}, {QStringLiteral("rock"), 2.0}};
+
     QRandomGenerator rngA(42u);
-    RadioSession noDrift(buildPool(), {}, seed, 30, 1'000'000'000, &rngA);
+    RadioSession noDrift(buildPool(), {}, genreIdf, seed, 30, 1'000'000'000, &rngA);
     const QVector<Track> before = noDrift.nextTracks(1, {}, resolvePathToTrack);
     QCOMPARE(before.size(), 1);
     QVERIFY2(!noDrift.reasonFor(before.first().path).contains(QStringLiteral("genre")),
              "genre matched before any rock was played");
 
     QRandomGenerator rngB(42u);
-    RadioSession drifted(buildPool(), {}, seed, 30, 1'000'000'000, &rngB);
+    RadioSession drifted(buildPool(), {}, genreIdf, seed, 30, 1'000'000'000, &rngB);
     for (int i = 0; i < 3; ++i) {
         drifted.notePlayed(resolvePathToTrack(QStringLiteral("/r%1").arg(i)));
     }
@@ -376,7 +446,7 @@ void RadioTest::reasonForNonEmptyOnPick()
     TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
                                                 {QStringLiteral("rock")}, 2000);
     QRandomGenerator rng(1u);
-    RadioSession session(pool, {}, seed, 30, 1'000'000'000, &rng);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
 
     const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
     QCOMPARE(picks.size(), 1);
@@ -451,6 +521,33 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
     QCOMPARE(fallback.size(), 3);
 }
 
+void RadioTest::genreTrackCountsAggregatesAcrossLibrary()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("genre-counts-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    // rock+pop, jazz, and a genre-less track: df(rock)=1, df(pop)=1, df(jazz)=1,
+    // taggedTrackTotal=2 (the genre-less track does not count).
+    const Track rockPop = makeDbTrack(dir, QStringLiteral("01.flac"),
+                                      {QStringLiteral("Rock"), QStringLiteral("Pop")},
+                                      QStringLiteral("2004-05-06"));
+    const Track jazz = makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Jazz")},
+                                   QStringLiteral("1999"));
+    const Track noGenre = makeDbTrack(dir, QStringLiteral("03.flac"), {}, QStringLiteral("2010-01-01"));
+    QVERIFY2(db.upsertTrack(rockPop), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(jazz), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(noGenre), qPrintable(db.lastError()));
+
+    int taggedTrackTotal = 0;
+    const QHash<QString, int> counts = db.genreTrackCounts(&taggedTrackTotal);
+    QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Rock"))), 1);
+    QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Pop"))), 1);
+    QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Jazz"))), 1);
+    QCOMPARE(taggedTrackTotal, 2);
+}
+
 void RadioTest::trackAffinitiesAggregateAllSources()
 {
     QTemporaryDir dir;
@@ -516,6 +613,40 @@ void RadioTest::trackAffinitiesAggregateAllSources()
     QCOMPARE(row.lastPlayedAtSecs, qint64(1003));
     QCOMPARE(row.listenCount, 5);      // 2 local + 3 imported
     QCOMPARE(row.baselineMax, 42);     // max(42, 30), never 72
+}
+
+// ---- GenreTags --------------------------------------------------------------
+
+void RadioTest::nonGenrePlaceholdersAreStoplisted()
+{
+    const QStringList placeholders = {
+        QStringLiteral("other"),      QStringLiteral("unknown"), QStringLiteral("misc"),
+        QStringLiteral("none"),       QStringLiteral("undefined"), QStringLiteral("no genre"),
+        QStringLiteral("unclassifiable"), QStringLiteral("various"), QStringLiteral("genre"),
+    };
+    for (const QString &placeholder : placeholders) {
+        QVERIFY2(GenreTags::isNonGenre(placeholder), qPrintable(placeholder));
+    }
+    // Case/whitespace variation is handled by folding upstream (see folded());
+    // isNonGenre itself compares already-folded input.
+    QVERIFY(GenreTags::isNonGenre(GenreTags::folded(QStringLiteral("  Other  "))));
+
+    QVERIFY(!GenreTags::isNonGenre(QStringLiteral("rock")));
+    QVERIFY(!GenreTags::isNonGenre(QStringLiteral("dream pop")));
+    QVERIFY(!GenreTags::isNonGenre(QStringLiteral("")));
+}
+
+void RadioTest::informativeFiltersStoplistedGenres()
+{
+    const QStringList mixed = {QStringLiteral("rock"), QStringLiteral("other"), QStringLiteral("shoegaze"),
+                               QStringLiteral("unknown")};
+    QCOMPARE(GenreTags::informative(mixed), QStringList({QStringLiteral("rock"), QStringLiteral("shoegaze")}));
+
+    // Junk-only input filters down to nothing (the seed's whole genre list, in
+    // the bug this fix addresses).
+    QVERIFY(GenreTags::informative({QStringLiteral("other")}).isEmpty());
+
+    QVERIFY(GenreTags::informative({}).isEmpty());
 }
 
 QTEST_GUILESS_MAIN(RadioTest)

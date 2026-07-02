@@ -676,15 +676,55 @@ bool AppCore::startRadio(const QString &seedPath)
         seedGenresFolded.push_back(GenreTags::folded(genre));
     }
     seedGenresFolded.removeDuplicates();
+    // Tagger placeholders ("Other", "Unknown", ...) are not real genres: a seed
+    // whose only tag is one of these must not have the whole junk cohort
+    // become its candidate pool (see plans/music-recommendation-plan.md, Trial
+    // findings — first radio session).
+    const QStringList informativeGenres = GenreTags::informative(seedGenresFolded);
 
-    const QVector<RadioCandidateRow> rows = seedGenresFolded.isEmpty()
-        ? m_database->radioFallbackCandidates()
-        : m_database->radioCandidates(seedGenresFolded);
+    QVector<RadioCandidateRow> rows;
+    if (informativeGenres.isEmpty()) {
+        // No informative genre to match on (no genres at all, or only junk
+        // placeholders): fall back to a random slice of the whole library.
+        rows = m_database->radioFallbackCandidates(2000);
+    } else {
+        // Genre-matched candidates, plus a random slice of the library blended
+        // in unconditionally: no session may be trapped inside one genre
+        // cohort. The random slice gives novelty and the rolling context an
+        // escape route; IDF-weighted scoring (TrackScorer) keeps it honest by
+        // still favoring genuine genre matches over the noise.
+        rows = m_database->radioCandidates(informativeGenres, 2000);
+        const QVector<RadioCandidateRow> randomSlice = m_database->radioFallbackCandidates(500);
+        QSet<QString> seenPaths;
+        seenPaths.reserve(rows.size());
+        for (const RadioCandidateRow &row : rows) {
+            seenPaths.insert(row.path);
+        }
+        for (const RadioCandidateRow &row : randomSlice) {
+            if (!seenPaths.contains(row.path)) {
+                seenPaths.insert(row.path);
+                rows.push_back(row);
+            }
+        }
+    }
 
     QVector<TrackScorer::Candidate> pool;
     pool.reserve(rows.size());
     for (const RadioCandidateRow &row : rows) {
         pool.push_back(candidateFromRow(row));
+    }
+
+    // Library-wide genre IDF map: broad/junk genres self-discount, rare genres
+    // carry real weight. Built over the FULL genre vocabulary (not just the
+    // seed's genres) because the rolling context drifts to played tracks'
+    // genres as the session goes on, and those need lookups too.
+    int taggedTrackTotal = 0;
+    const QHash<QString, int> genreDf = m_database->genreTrackCounts(&taggedTrackTotal);
+    QHash<QString, double> genreIdf;
+    genreIdf.reserve(genreDf.size());
+    for (auto it = genreDf.cbegin(); it != genreDf.cend(); ++it) {
+        const int df = std::max(1, it.value());
+        genreIdf.insert(it.key(), std::log(std::max(2.0, static_cast<double>(taggedTrackTotal) / df)));
     }
 
     QHash<QString, TrackScorer::Affinity> affinities;
@@ -709,8 +749,8 @@ bool AppCore::startRadio(const QString &seedPath)
     const int exploration = std::clamp(
         m_database->setting(QStringLiteral("radio.exploration"), QStringLiteral("30")).toInt(), 0, 100);
 
-    m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), seedCandidate,
-                                                    exploration, QDateTime::currentSecsSinceEpoch());
+    m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
+                                                    seedCandidate, exploration, QDateTime::currentSecsSinceEpoch());
     // Install the scored provider; it resolves each pick to a full Track by path.
     m_player->setRadioProvider([this](int count, const QSet<QString> &excludePaths) -> QVector<Track> {
         if (!m_radioSession) {

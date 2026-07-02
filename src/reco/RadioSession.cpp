@@ -1,6 +1,7 @@
 #include "reco/RadioSession.h"
 
 #include "core/FoldKey.h"
+#include "core/GenreTags.h"
 
 #include <QRandomGenerator>
 
@@ -36,17 +37,24 @@ void pushRecentArtist(QStringList &artists, const QString &folded, int limit)
 
 RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            QHash<QString, TrackScorer::Affinity> affinities,
+                           QHash<QString, double> genreIdf,
                            TrackScorer::Candidate seed,
                            int exploration0To100,
                            qint64 nowSecs,
                            QRandomGenerator *rng)
     : m_pool(std::move(pool))
     , m_affinities(std::move(affinities))
+    , m_genreIdf(std::move(genreIdf))
     , m_seed(std::move(seed))
     , m_exploration(std::clamp(exploration0To100, 0, 100))
     , m_nowSecs(nowSecs)
     , m_rng(rng != nullptr ? rng : QRandomGenerator::global())
 {
+    // Stoplisted placeholder genres ("Other", "Unknown", ...) must never anchor
+    // the rolling mood window — filter at the chokepoint where the seed's
+    // genres enter it (notePlayed() filters the other entry point).
+    m_seed.genresFolded = GenreTags::informative(m_seed.genresFolded);
+
     m_byPath.reserve(m_pool.size() + 1);
     for (const TrackScorer::Candidate &candidate : m_pool) {
         m_byPath.insert(candidate.path, candidate);
@@ -93,6 +101,7 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
     for (int picked = 0; picked < count; ++picked) {
         TrackScorer::SeedContext context;
         context.genresFolded = rollingGenres();
+        context.genreIdf = m_genreIdf;
         context.recentArtistsFolded = QSet<QString>(batchArtists.cbegin(), batchArtists.cend());
         context.year = m_seed.year;
         context.nowSecs = m_nowSecs;
@@ -169,7 +178,10 @@ void RadioSession::notePlayed(const Track &track)
     QString albumKey = FoldKey::albumKey(track.albumArtistName, track.albumTitle);
     const auto it = m_byPath.constFind(track.path);
     if (it != m_byPath.constEnd()) {
-        genres = it->genresFolded;
+        // Filter here too: pool candidates carry their raw (unfiltered) genre
+        // set, and this is the other chokepoint genres enter the rolling
+        // context through.
+        genres = GenreTags::informative(it->genresFolded);
         albumKey = it->albumKey;
     }
     m_playedGenres.push_back(genres);

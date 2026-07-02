@@ -134,6 +134,12 @@ public:
     // ordered by genre_folded; empty when the track is unknown or has no
     // genre tag.
     QStringList genresForTrack(const QString &path) const;
+    // Folded-genre -> distinct-track count across the whole library (the
+    // radio engine's IDF denominator per genre). The vocabulary is small
+    // (~400 entries) so this is cheap to call once and cache per session.
+    // `taggedTrackTotal`, if non-null, receives the count of distinct tracks
+    // carrying at least one genre (the IDF numerator base).
+    QHash<QString, int> genreTrackCounts(int *taggedTrackTotal = nullptr) const;
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);
