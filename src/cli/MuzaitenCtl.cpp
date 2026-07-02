@@ -65,6 +65,7 @@ void printUsage()
         "  scrobble-backfill status                 show progress of the current/last backfill\n"
         "  scrobble-backfill cancel                 cancel a running backfill (stops auto-resume)\n"
         "  start-radio <path>      start a radio session seeded from a library track\n"
+        "  start-mix <mode>        start rediscovery or deepcuts radio mix\n"
         "  stop-radio              stop the current radio session\n"
         "\n"
         "Options:\n"
@@ -572,6 +573,11 @@ int main(int argc, char **argv)
         }
         // Resolve against the client's cwd; the server has its own.
         args.insert(QStringLiteral("path"), QFileInfo(arguments.first()).absoluteFilePath());
+    } else if (command == QLatin1String("start-mix")) {
+        if (arguments.isEmpty()) {
+            return fail(QStringLiteral("start-mix needs a mode: rediscovery or deepcuts"));
+        }
+        args.insert(QStringLiteral("mode"), arguments.first().toLower());
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
@@ -696,6 +702,10 @@ int main(int argc, char **argv)
     }
     if (command == QLatin1String("start-radio") || command == QLatin1String("stop-radio")) {
         std::printf("radio: %s\n", qPrintable(response.value(QStringLiteral("radio")).toString()));
+        return 0;
+    }
+    if (command == QLatin1String("start-mix")) {
+        std::printf("mix: %s\n", qPrintable(response.value(QStringLiteral("mix")).toString()));
         return 0;
     }
     // Plain "status" replies carry the canonical track JSON at the top level,

@@ -15,6 +15,7 @@ namespace TrackScorer {
 // One library track under consideration, reduced to the fields scoring needs.
 struct Candidate {
     QString path;
+    QString songKey;
     QString artistFolded;
     QString albumKey;              // folded "albumartist\nalbum"
     QStringList genresFolded;

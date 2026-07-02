@@ -4,6 +4,7 @@
 #include "reco/TrackScorer.h"
 
 #include <QHash>
+#include <QJsonObject>
 #include <QList>
 #include <QSet>
 #include <QString>
@@ -14,13 +15,15 @@
 
 class QRandomGenerator;
 
-// A single Start Radio session: turns a scored candidate pool into a
-// constraint-sequenced stream of picks. Sequencing is the hard part — a
-// deterministic top-1 queue feels dead — so picks are a weighted-random draw
-// among the top-scoring candidates, subject to hard constraints (artist/album
-// throttling, no repeats) that are enforced before scoring rather than as score
-// terms. Not a QObject: PlayerCore's provider closure calls it on the main
-// thread. Not thread-safe.
+// A radio recommendation session: turns a scored candidate pool into a
+// constraint-sequenced stream of picks. Seeded Start Radio sessions keep the
+// seed's genres as a mood anchor; anchorless sessions start without a seed and
+// let notePlayed() build the mood solely from the rolling listening context.
+// Sequencing is the hard part — a deterministic top-1 queue feels dead — so
+// picks are a weighted-random draw among the top-scoring candidates, subject to
+// hard constraints (artist/album throttling, no repeats) that are enforced
+// before scoring rather than as score terms. Not a QObject: PlayerCore's
+// provider closure calls it on the main thread. Not thread-safe.
 class RadioSession final {
 public:
     // The seed candidate anchors the mood: its genres are always part of the
@@ -35,6 +38,15 @@ public:
                  QHash<QString, TrackScorer::Affinity> affinities,
                  QHash<QString, double> genreIdf,
                  TrackScorer::Candidate seed,
+                 int exploration0To100,
+                 qint64 nowSecs,
+                 QRandomGenerator *rng = nullptr);
+
+    // Anchorless ambient-radio mode: no fixed seed, so rollingGenres() starts
+    // empty and becomes the last few notePlayed() tracks.
+    RadioSession(QVector<TrackScorer::Candidate> pool,
+                 QHash<QString, TrackScorer::Affinity> affinities,
+                 QHash<QString, double> genreIdf,
                  int exploration0To100,
                  qint64 nowSecs,
                  QRandomGenerator *rng = nullptr);
@@ -65,6 +77,12 @@ public:
     // Stored scorer components for a pick made this session. Empty when unknown.
     QList<TrackScorer::Component> reasonComponentsFor(const QString &path) const;
 
+    // Constraint-only session persistence. Pick reasons are deliberately not
+    // included: restored pre-restart rows can continue sequencing correctly, but
+    // only new picks have freshly computed explanations.
+    QJsonObject constraintState() const;
+    void restoreConstraintState(const QJsonObject &state);
+
     // Pure classifier for AppCore's radio re-roll heuristic: true when a play
     // ended before crossing the scrobble threshold (half the track's duration,
     // capped at 4 minutes) -- the same rule ListenTracker and
@@ -94,5 +112,6 @@ private:
     QList<QStringList> m_playedGenres;        // last 3 played tracks' folded genres
     QHash<QString, int> m_albumCounts;        // albumKey -> tracks committed this session
     QSet<QString> m_usedPaths;                // never pick/repeat a path twice
+    QSet<QString> m_usedSongKeys;             // never pick/repeat a song twice through duplicate files
     QHash<QString, QList<TrackScorer::Component>> m_pickReasons;
 };

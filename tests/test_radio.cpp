@@ -1,6 +1,10 @@
+#include "core/FoldKey.h"
 #include "core/GenreTags.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
+#include "reco/AffinityPool.h"
+#include "reco/RadioFilters.h"
+#include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -19,10 +23,11 @@ namespace {
 TrackScorer::Candidate makeCandidate(const QString &path, const QString &artistFolded,
                                      const QStringList &genresFolded, int year = 0,
                                      int rating = -1, bool hasUserRating = false,
-                                     const QString &albumKey = {})
+                                     const QString &albumKey = {}, const QString &songKey = {})
 {
     TrackScorer::Candidate candidate;
     candidate.path = path;
+    candidate.songKey = songKey.isEmpty() ? (QStringLiteral("path:") + path) : songKey;
     candidate.artistFolded = artistFolded;
     candidate.albumKey = albumKey.isEmpty() ? (artistFolded + QLatin1String("\nalbum")) : albumKey;
     candidate.genresFolded = genresFolded;
@@ -60,12 +65,75 @@ Track resolvePathToTrack(const QString &path)
     return track;
 }
 
+Track playedTrack(const QString &path, const QString &artistName)
+{
+    Track track = resolvePathToTrack(path);
+    track.artistName = artistName;
+    return track;
+}
+
+TrackScorer::Affinity makeAffinity(int playEvents, int finished, int skipped,
+                                   qint64 lastPlayedAtSecs, int listenCount, int baselineMax)
+{
+    TrackScorer::Affinity affinity;
+    affinity.playEvents = playEvents;
+    affinity.finished = finished;
+    affinity.skipped = skipped;
+    affinity.lastPlayedAtSecs = lastPlayedAtSecs;
+    affinity.listenCount = listenCount;
+    affinity.baselineMax = baselineMax;
+    return affinity;
+}
+
+void QCOMPARE_AFFINITY(const TrackScorer::Affinity &actual, const TrackScorer::Affinity &expected)
+{
+    QCOMPARE(actual.playEvents, expected.playEvents);
+    QCOMPARE(actual.finished, expected.finished);
+    QCOMPARE(actual.skipped, expected.skipped);
+    QCOMPARE(actual.lastPlayedAtSecs, expected.lastPlayedAtSecs);
+    QCOMPARE(actual.listenCount, expected.listenCount);
+    QCOMPARE(actual.baselineMax, expected.baselineMax);
+}
+
+bool containsCandidatePath(const QVector<TrackScorer::Candidate> &candidates, const QString &path)
+{
+    for (const TrackScorer::Candidate &candidate : candidates) {
+        if (candidate.path == path) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 class RadioTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    // FoldKey
+    void songKeyPrefersRecordingMbid();
+    void songKeyFallsBackToFoldedArtistTitle();
+    void albumGroupKeyPrefersReleaseGroupMbid();
+
+    // AffinityPool
+    void affinityPoolSumsDuplicateSongHistory();
+    void affinityPoolLeavesUnmappedPathsUnchanged();
+    void affinityPoolEmptyMapIsNoOp();
+
+    // RadioMix
+    void rediscoveryLovedOldPasses();
+    void rediscoveryRecentFails();
+    void rediscoveryUnlovedFails();
+    void rediscoveryRelaxationKicksIn();
+    void deepCutsLikedArtistRarePasses();
+    void deepCutsOverplayedFails();
+    void deepCutsSkipStainedFails();
+
+    // RadioFilters
+    void radioFiltersExcludeFlaggedCandidates();
+    void radioFiltersDropNoLearnBeforeSongPooling();
+
     // TrackScorer
     void genreOverlapDominates();
     void genreIdfSaturatesOnRareSharedGenre();
@@ -82,6 +150,9 @@ private slots:
     // RadioSession
     void artistThrottleNeverPicksSameArtistConsecutively();
     void albumCapLimitsTracksPerAlbum();
+    void songKeyDedupUsesRecordingMbid();
+    void songKeyDedupFallsBackToArtistTitle();
+    void albumCapUsesReleaseGroupKey();
     void noRepeatsWithinSession();
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
@@ -94,16 +165,257 @@ private slots:
     void setExplorationTakesEffectOnSubsequentPicks();
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
+    void anchorlessSessionDriftsFromPlayedContext();
+    void constraintStateRoundTripPreservesSequencing();
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
+    void genreAliasesExpandCandidatesAndMergeCounts();
     void genreTrackCountsAggregatesAcrossLibrary();
     void trackAffinitiesAggregateAllSources();
 
     // GenreTags
+    void genreCanonicalIdentityAndMapping();
+    void genreCanonicalStoplistAfterMapping();
     void nonGenrePlaceholdersAreStoplisted();
     void informativeFiltersStoplistedGenres();
 };
+
+// ---- FoldKey ---------------------------------------------------------------
+
+void RadioTest::songKeyPrefersRecordingMbid()
+{
+    QCOMPARE(FoldKey::songKey(QStringLiteral("recording-1"), QStringLiteral("Artist"), QStringLiteral("Title")),
+             QStringLiteral("mbid:recording-1"));
+}
+
+void RadioTest::songKeyFallsBackToFoldedArtistTitle()
+{
+    QCOMPARE(FoldKey::songKey({}, QStringLiteral("  The  Artist  "), QStringLiteral("  The  Title  ")),
+             QStringLiteral("at:the artist\nthe title"));
+}
+
+void RadioTest::albumGroupKeyPrefersReleaseGroupMbid()
+{
+    QCOMPARE(FoldKey::albumGroupKey(QStringLiteral("release-group-1"), QStringLiteral("Artist"),
+                                    QStringLiteral("Album")),
+             QStringLiteral("rg:release-group-1"));
+    QCOMPARE(FoldKey::albumGroupKey({}, QStringLiteral("  Album  Artist  "), QStringLiteral("  Album  ")),
+             QStringLiteral("album artist\nalbum"));
+}
+
+// ---- AffinityPool ----------------------------------------------------------
+
+void RadioTest::affinityPoolSumsDuplicateSongHistory()
+{
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/album.flac"), makeAffinity(2, 1, 1, 100, 3, 12)},
+        {QStringLiteral("/compilation.opus"), makeAffinity(4, 3, 0, 250, 5, 9)},
+    };
+    const QHash<QString, QString> pathToSongKey{
+        {QStringLiteral("/album.flac"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/compilation.opus"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/portable.mp3"), QStringLiteral("mbid:shared")},
+    };
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(byPath, pathToSongKey);
+    const TrackScorer::Affinity expected = makeAffinity(6, 4, 1, 250, 8, 12);
+
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/album.flac")), expected);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/compilation.opus")), expected);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/portable.mp3")), expected);
+}
+
+void RadioTest::affinityPoolLeavesUnmappedPathsUnchanged()
+{
+    const TrackScorer::Affinity original = makeAffinity(1, 1, 0, 42, 2, 7);
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/unmapped.flac"), original},
+    };
+    const QHash<QString, QString> pathToSongKey{
+        {QStringLiteral("/other.flac"), QStringLiteral("mbid:other")},
+    };
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(byPath, pathToSongKey);
+
+    QCOMPARE(pooled.size(), 1);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/unmapped.flac")), original);
+}
+
+void RadioTest::affinityPoolEmptyMapIsNoOp()
+{
+    const TrackScorer::Affinity original = makeAffinity(3, 2, 1, 123, 5, 11);
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/song.flac"), original},
+    };
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(byPath, {});
+
+    QCOMPARE(pooled.size(), 1);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/song.flac")), original);
+}
+
+// ---- RadioMix --------------------------------------------------------------
+
+void RadioTest::rediscoveryLovedOldPasses()
+{
+    constexpr qint64 now = 1'000'000'000;
+    const QVector<TrackScorer::Candidate> filtered = RadioMix::filterCandidates(
+        RadioMix::Mode::Rediscovery,
+        {makeCandidate(QStringLiteral("/old-loved"), QStringLiteral("artist"), {}, 0, 80, true)},
+        {{QStringLiteral("/old-loved"), makeAffinity(0, 0, 0, now - 181 * 86400, 0, 0)}},
+        now);
+
+    QCOMPARE(filtered.size(), 1);
+    QCOMPARE(filtered.first().path, QStringLiteral("/old-loved"));
+}
+
+void RadioTest::rediscoveryRecentFails()
+{
+    constexpr qint64 now = 1'000'000'000;
+    const QVector<TrackScorer::Candidate> filtered = RadioMix::filterCandidates(
+        RadioMix::Mode::Rediscovery,
+        {makeCandidate(QStringLiteral("/recent-loved"), QStringLiteral("artist"), {}, 0, 90, true)},
+        {{QStringLiteral("/recent-loved"), makeAffinity(0, 0, 0, now - 30 * 86400, 0, 0)}},
+        now);
+
+    QVERIFY(filtered.isEmpty());
+}
+
+void RadioTest::rediscoveryUnlovedFails()
+{
+    constexpr qint64 now = 1'000'000'000;
+    const QVector<TrackScorer::Candidate> filtered = RadioMix::filterCandidates(
+        RadioMix::Mode::Rediscovery,
+        {makeCandidate(QStringLiteral("/old-unloved"), QStringLiteral("artist"), {}, 0, 40, true)},
+        {{QStringLiteral("/old-unloved"), makeAffinity(0, 4, 0, now - 220 * 86400, 0, 0)}},
+        now);
+
+    QVERIFY(filtered.isEmpty());
+}
+
+void RadioTest::rediscoveryRelaxationKicksIn()
+{
+    constexpr qint64 now = 1'000'000'000;
+    QVector<TrackScorer::Candidate> candidates;
+    QHash<QString, TrackScorer::Affinity> affinities;
+    for (int i = 0; i < 49; ++i) {
+        const QString path = QStringLiteral("/strict%1").arg(i);
+        candidates.push_back(makeCandidate(path, QStringLiteral("artist%1").arg(i), {}, 0, 75, true));
+        affinities.insert(path, makeAffinity(0, 0, 0, now - 220 * 86400, 0, 0));
+    }
+    candidates.push_back(makeCandidate(QStringLiteral("/relaxed"), QStringLiteral("artist-relaxed"),
+                                       {}, 0, 80, true));
+    affinities.insert(QStringLiteral("/relaxed"), makeAffinity(0, 0, 0, now - 120 * 86400, 0, 0));
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::Rediscovery, candidates, affinities, now);
+
+    QCOMPARE(filtered.size(), 50);
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/relaxed")));
+}
+
+void RadioTest::deepCutsLikedArtistRarePasses()
+{
+    const QVector<TrackScorer::Candidate> candidates{
+        makeCandidate(QStringLiteral("/hit"), QStringLiteral("liked-artist"), {}),
+        makeCandidate(QStringLiteral("/rare"), QStringLiteral("liked-artist"), {}),
+    };
+    const QHash<QString, TrackScorer::Affinity> affinities{
+        {QStringLiteral("/hit"), makeAffinity(0, 0, 0, 100, 20, 0)},
+        {QStringLiteral("/rare"), makeAffinity(0, 0, 0, 100, 1, 0)},
+    };
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
+
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/rare")));
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/hit")));
+}
+
+void RadioTest::deepCutsOverplayedFails()
+{
+    const QVector<TrackScorer::Candidate> candidates{
+        makeCandidate(QStringLiteral("/hit"), QStringLiteral("liked-artist"), {}),
+        makeCandidate(QStringLiteral("/overplayed"), QStringLiteral("liked-artist"), {}),
+    };
+    const QHash<QString, TrackScorer::Affinity> affinities{
+        {QStringLiteral("/hit"), makeAffinity(0, 0, 0, 100, 20, 0)},
+        {QStringLiteral("/overplayed"), makeAffinity(0, 0, 0, 100, 3, 0)},
+    };
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
+
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/overplayed")));
+}
+
+void RadioTest::deepCutsSkipStainedFails()
+{
+    const QVector<TrackScorer::Candidate> candidates{
+        makeCandidate(QStringLiteral("/hit"), QStringLiteral("liked-artist"), {}),
+        makeCandidate(QStringLiteral("/skipped"), QStringLiteral("liked-artist"), {}),
+    };
+    const QHash<QString, TrackScorer::Affinity> affinities{
+        {QStringLiteral("/hit"), makeAffinity(0, 0, 0, 100, 20, 0)},
+        {QStringLiteral("/skipped"), makeAffinity(0, 0, 1, 100, 1, 0)},
+    };
+
+    const QVector<TrackScorer::Candidate> filtered =
+        RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
+
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/skipped")));
+}
+
+// ---- RadioFilters ----------------------------------------------------------
+
+void RadioTest::radioFiltersExcludeFlaggedCandidates()
+{
+    const QVector<TrackScorer::Candidate> candidates = {
+        makeCandidate(QStringLiteral("/music/a.flac"), QStringLiteral("artist"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/music/b.flac"), QStringLiteral("artist"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/music/c.flac"), QStringLiteral("artist"), {QStringLiteral("rock")}),
+    };
+
+    const QVector<TrackScorer::Candidate> filtered = RadioFilters::excludeFlaggedCandidates(
+        candidates, QSet<QString>({QStringLiteral("/music/b.flac")}));
+
+    QCOMPARE(filtered.size(), 2);
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/music/a.flac")));
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/music/b.flac")));
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/music/c.flac")));
+}
+
+void RadioTest::radioFiltersDropNoLearnBeforeSongPooling()
+{
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/music/album.flac"), makeAffinity(2, 1, 0, 100, 3, 10)},
+        {QStringLiteral("/music/compilation.flac"), makeAffinity(5, 4, 1, 200, 8, 20)},
+        {QStringLiteral("/music/other.flac"), makeAffinity(1, 1, 0, 50, 1, 0)},
+    };
+    const QHash<QString, QString> pathToSongKey{
+        {QStringLiteral("/music/album.flac"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/music/compilation.flac"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/music/other.flac"), QStringLiteral("mbid:other")},
+    };
+    const QSet<QString> noLearn{QStringLiteral("/music/compilation.flac")};
+
+    const QHash<QString, TrackScorer::Affinity> filteredAffinities =
+        RadioFilters::excludeFlaggedAffinities(byPath, noLearn);
+    const QHash<QString, QString> filteredMappings =
+        RadioFilters::excludeFlaggedPathMappings(pathToSongKey, noLearn);
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(filteredAffinities, filteredMappings);
+
+    QVERIFY(!pooled.contains(QStringLiteral("/music/compilation.flac")));
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/music/album.flac")),
+                      makeAffinity(2, 1, 0, 100, 3, 10));
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/music/other.flac")),
+                      makeAffinity(1, 1, 0, 50, 1, 0));
+}
 
 // ---- TrackScorer -----------------------------------------------------------
 
@@ -373,6 +685,77 @@ void RadioTest::albumCapLimitsTracksPerAlbum()
     QVERIFY2(albumCount <= 2, "more than two tracks from one album in a session");
 }
 
+void RadioTest::songKeyDedupUsesRecordingMbid()
+{
+    const QString sharedSong = FoldKey::songKey(QStringLiteral("recording-1"), {}, {});
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/copy-a"), QStringLiteral("artist-a"), {QStringLiteral("rock")}, 2000,
+                      100, true, QStringLiteral("album-a"), sharedSong),
+        makeCandidate(QStringLiteral("/copy-b"), QStringLiteral("artist-b"), {QStringLiteral("rock")}, 2000,
+                      100, true, QStringLiteral("album-b"), sharedSong),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(11u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QVERIFY(picks.first().path == QStringLiteral("/copy-a") || picks.first().path == QStringLiteral("/copy-b"));
+}
+
+void RadioTest::songKeyDedupFallsBackToArtistTitle()
+{
+    const QString sharedSong = FoldKey::songKey({}, QStringLiteral("  The Artist  "),
+                                                QStringLiteral("  The Song  "));
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/lossless.flac"), QStringLiteral("artist-a"), {QStringLiteral("rock")},
+                      2000, 100, true, QStringLiteral("album-a"), sharedSong),
+        makeCandidate(QStringLiteral("/portable.opus"), QStringLiteral("artist-b"), {QStringLiteral("rock")},
+                      2000, 100, true, QStringLiteral("album-b"), sharedSong),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(12u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QVERIFY(picks.first().path == QStringLiteral("/lossless.flac")
+            || picks.first().path == QStringLiteral("/portable.opus"));
+}
+
+void RadioTest::albumCapUsesReleaseGroupKey()
+{
+    const QString sharedAlbum = FoldKey::albumGroupKey(QStringLiteral("release-group-1"),
+                                                       QStringLiteral("Album Artist"),
+                                                       QStringLiteral("Original Edition"));
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 3; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/rg%1").arg(i), QStringLiteral("rg-artist%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000, 100, true, sharedAlbum));
+    }
+    for (int i = 0; i < 6; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/other%1").arg(i), QStringLiteral("other%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000, 30, false,
+                                     QStringLiteral("other%1\nalbum").arg(i)));
+    }
+
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(13u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(9, {}, resolvePathToTrack);
+    int albumCount = 0;
+    for (const Track &pick : picks) {
+        if (pick.path.startsWith(QStringLiteral("/rg"))) {
+            ++albumCount;
+        }
+    }
+    QVERIFY2(albumCount <= 2, "more than two tracks from one release group in a session");
+}
+
 void RadioTest::noRepeatsWithinSession()
 {
     QVector<TrackScorer::Candidate> pool;
@@ -612,12 +995,83 @@ void RadioTest::isEarlySkipUsesHalfDurationCappedAtFourMinutes()
     QVERIFY(!RadioSession::isEarlySkip(250000, 0));
 }
 
+void RadioTest::anchorlessSessionDriftsFromPlayedContext()
+{
+    const auto buildPool = []() {
+        return QVector<TrackScorer::Candidate>{
+            makeCandidate(QStringLiteral("/feed"), QStringLiteral("feed"), {QStringLiteral("rock")}, 2000),
+            makeCandidate(QStringLiteral("/rock"), QStringLiteral("rock"), {QStringLiteral("rock")}, 2000),
+        };
+    };
+    const QHash<QString, double> genreIdf{{QStringLiteral("rock"), 2.0}};
+
+    QRandomGenerator rngA(44u);
+    RadioSession noContext(buildPool(), {}, genreIdf, 30, 1'000'000'000, &rngA);
+    const QVector<Track> before = noContext.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(before.size(), 1);
+    QVERIFY2(!noContext.reasonFor(before.first().path).contains(QStringLiteral("genre")),
+             "anchorless session had genre context before notePlayed");
+
+    QRandomGenerator rngB(44u);
+    RadioSession drifted(buildPool(), {}, genreIdf, 30, 1'000'000'000, &rngB);
+    drifted.notePlayed(resolvePathToTrack(QStringLiteral("/feed")));
+    const QVector<Track> after = drifted.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(after.size(), 1);
+    QCOMPARE(after.first().path, QStringLiteral("/rock"));
+    QVERIFY2(drifted.reasonFor(after.first().path).contains(QStringLiteral("genre")),
+             "anchorless session did not use notePlayed genre context");
+}
+
+void RadioTest::constraintStateRoundTripPreservesSequencing()
+{
+    const QString usedSongKey = QStringLiteral("song:already-used");
+    const QString cappedAlbum = QStringLiteral("album:already-capped");
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/used-a"), QStringLiteral("used-a"), {}, 0, -1, false,
+                      QStringLiteral("album:used-a"), usedSongKey),
+        makeCandidate(QStringLiteral("/used-b"), QStringLiteral("used-b"), {}, 0, -1, false,
+                      QStringLiteral("album:used-b"), usedSongKey),
+        makeCandidate(QStringLiteral("/album-a"), QStringLiteral("album-a"), {}, 0, -1, false,
+                      cappedAlbum, QStringLiteral("song:album-a")),
+        makeCandidate(QStringLiteral("/album-b"), QStringLiteral("album-b"), {}, 0, -1, false,
+                      cappedAlbum, QStringLiteral("song:album-b")),
+        makeCandidate(QStringLiteral("/album-c"), QStringLiteral("album-c"), {}, 0, -1, false,
+                      cappedAlbum, QStringLiteral("song:album-c")),
+        makeCandidate(QStringLiteral("/recent-feed"), QStringLiteral("recent"), {}, 0, -1, false,
+                      QStringLiteral("album:recent-feed"), QStringLiteral("song:recent-feed")),
+        makeCandidate(QStringLiteral("/recent-c"), QStringLiteral("recent"), {}, 0, -1, false,
+                      QStringLiteral("album:recent-c"), QStringLiteral("song:recent-c")),
+        makeCandidate(QStringLiteral("/allowed"), QStringLiteral("allowed"), {}, 0, -1, false,
+                      QStringLiteral("album:allowed"), QStringLiteral("song:allowed")),
+    };
+
+    RadioSession original(pool, {}, {}, 30, 1'000'000'000);
+    original.notePlayed(playedTrack(QStringLiteral("/used-a"), QStringLiteral("Used A")));
+    original.notePlayed(playedTrack(QStringLiteral("/album-a"), QStringLiteral("Album A")));
+    original.notePlayed(playedTrack(QStringLiteral("/album-b"), QStringLiteral("Album B")));
+    original.notePlayed(playedTrack(QStringLiteral("/recent-feed"), QStringLiteral("Recent")));
+
+    RadioSession restored(pool, {}, {}, 30, 1'000'000'000);
+    restored.restoreConstraintState(original.constraintState());
+    const QVector<Track> picks = restored.nextTracks(10, {}, resolvePathToTrack);
+
+    QSet<QString> pickedPaths;
+    for (const Track &track : picks) {
+        pickedPaths.insert(track.path);
+    }
+    QVERIFY(pickedPaths.contains(QStringLiteral("/allowed")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/used-b")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/album-c")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/recent-c")));
+}
+
 // ---- Database + ListenHistoryStore -----------------------------------------
 
 namespace {
 
 Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStringList &genres,
-                  const QString &originalDate)
+                  const QString &originalDate, const QString &recordingId = {},
+                  const QString &releaseGroupId = {})
 {
     Track track;
     track.path = dir.filePath(QStringLiteral("Artist/Album/%1").arg(filename));
@@ -628,6 +1082,8 @@ Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStri
     track.albumArtistName = QStringLiteral("Album Artist");
     track.albumTitle = QStringLiteral("Album");
     track.originalDate = originalDate;
+    track.musicBrainz.recordingId = recordingId;
+    track.musicBrainz.releaseGroupId = releaseGroupId;
     track.fileSize = 10;
     track.fileMtime = 20;
     if (!genres.isEmpty()) {
@@ -651,7 +1107,8 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
 
     const Track rockPop = makeDbTrack(dir, QStringLiteral("01.flac"),
                                       {QStringLiteral("Rock"), QStringLiteral("Pop")},
-                                      QStringLiteral("2004-05-06"));
+                                      QStringLiteral("2004-05-06"), QStringLiteral("recording-1"),
+                                      QStringLiteral("release-group-1"));
     const Track jazz = makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Jazz")},
                                    QStringLiteral("1999"));
     const Track noGenre = makeDbTrack(dir, QStringLiteral("03.flac"), {}, QStringLiteral("2010-01-01"));
@@ -664,6 +1121,9 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
         db.radioCandidates({GenreTags::folded(QStringLiteral("Rock"))});
     QCOMPARE(rockRows.size(), 1);
     QCOMPARE(rockRows.first().path, rockPop.path);
+    QCOMPARE(rockRows.first().title, rockPop.title);
+    QCOMPARE(rockRows.first().mbRecordingId, QStringLiteral("recording-1"));
+    QCOMPARE(rockRows.first().releaseGroupId, QStringLiteral("release-group-1"));
     QCOMPARE(rockRows.first().year, 2004);
     QVERIFY(rockRows.first().hasUserRating);
     QCOMPARE(rockRows.first().effectiveRating0To100, 80);
@@ -677,6 +1137,39 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
     // Fallback samples every scanned track regardless of genre.
     const QVector<RadioCandidateRow> fallback = db.radioFallbackCandidates();
     QCOMPARE(fallback.size(), 3);
+}
+
+void RadioTest::genreAliasesExpandCandidatesAndMergeCounts()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("genre-alias-radio-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track canonical = makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Classical")},
+                                        QStringLiteral("2004-05-06"));
+    const Track portuguese = makeDbTrack(dir, QStringLiteral("02.flac"), {QString::fromUtf8("Clássica")},
+                                         QStringLiteral("1999"));
+    QVERIFY2(db.upsertTrack(canonical), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(portuguese), qPrintable(db.lastError()));
+
+    const QVector<RadioCandidateRow> rows = db.radioCandidates({QStringLiteral("classical")});
+    QCOMPARE(rows.size(), 2);
+    QVERIFY(containsCandidatePath(QVector<TrackScorer::Candidate>{
+                                      makeCandidate(rows.at(0).path, QStringLiteral("artist"), {}),
+                                      makeCandidate(rows.at(1).path, QStringLiteral("artist"), {}),
+                                  },
+                                  portuguese.path));
+
+    int taggedTrackTotal = 0;
+    const QHash<QString, int> rawCounts = db.genreTrackCounts(&taggedTrackTotal);
+    const QHash<QString, QString> aliases = db.genreAliases();
+    QHash<QString, int> canonicalCounts;
+    for (auto it = rawCounts.cbegin(); it != rawCounts.cend(); ++it) {
+        canonicalCounts[GenreTags::canonical(it.key(), aliases)] += it.value();
+    }
+    QCOMPARE(canonicalCounts.value(QStringLiteral("classical")), 2);
+    QCOMPARE(taggedTrackTotal, 2);
 }
 
 void RadioTest::genreTrackCountsAggregatesAcrossLibrary()
@@ -786,6 +1279,27 @@ void RadioTest::trackAffinitiesAggregateAllSources()
 }
 
 // ---- GenreTags --------------------------------------------------------------
+
+void RadioTest::genreCanonicalIdentityAndMapping()
+{
+    const QHash<QString, QString> aliases{
+        {QString::fromUtf8("clássica"), QStringLiteral("classical")},
+    };
+
+    QCOMPARE(GenreTags::canonical(QStringLiteral("rock"), aliases), QStringLiteral("rock"));
+    QCOMPARE(GenreTags::canonical(QString::fromUtf8("clássica"), aliases), QStringLiteral("classical"));
+}
+
+void RadioTest::genreCanonicalStoplistAfterMapping()
+{
+    const QHash<QString, QString> aliases{
+        {QStringLiteral("miscellaneous"), QStringLiteral("misc")},
+    };
+
+    const QString canonical = GenreTags::canonical(QStringLiteral("miscellaneous"), aliases);
+    QCOMPARE(canonical, QStringLiteral("misc"));
+    QVERIFY(GenreTags::isNonGenre(canonical));
+}
 
 void RadioTest::nonGenrePlaceholdersAreStoplisted()
 {

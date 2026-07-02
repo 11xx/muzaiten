@@ -48,8 +48,8 @@ public slots:
     void playbackCleared();
     // App exit: finalize any open event as "session_end". Safe to call twice.
     void flushSessionEnd();
-    // The current shuffle mode ("off" | "queue" | "library"); the value at track
-    // start is stamped into that track's event.
+    // The current shuffle mode ("off" | "queue" | "library" | "radio"); the
+    // value at track start is stamped into that track's event.
     void setShuffleMode(const QString &mode);
 
 signals:

@@ -3,6 +3,8 @@
 #include "core/FoldKey.h"
 #include "core/GenreTags.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QRandomGenerator>
 
 #include <algorithm>
@@ -37,6 +39,46 @@ void pushRecentArtist(QStringList &artists, const QString &folded, int limit)
     }
 }
 
+QJsonArray stringListToJson(const QStringList &strings)
+{
+    QJsonArray json;
+    for (const QString &value : strings) {
+        json.append(value);
+    }
+    return json;
+}
+
+QJsonArray stringSetToJson(const QSet<QString> &strings)
+{
+    QStringList sorted;
+    sorted.reserve(strings.size());
+    for (const QString &value : strings) {
+        sorted.push_back(value);
+    }
+    sorted.sort();
+    return stringListToJson(sorted);
+}
+
+QStringList stringListFromJson(const QJsonValue &value)
+{
+    QStringList strings;
+    const QJsonArray array = value.toArray();
+    strings.reserve(array.size());
+    for (const QJsonValue &item : array) {
+        const QString text = item.toString();
+        if (!text.isEmpty()) {
+            strings.push_back(text);
+        }
+    }
+    return strings;
+}
+
+QSet<QString> stringSetFromJson(const QJsonValue &value)
+{
+    const QStringList strings = stringListFromJson(value);
+    return QSet<QString>(strings.cbegin(), strings.cend());
+}
+
 } // namespace
 
 RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
@@ -66,6 +108,20 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
     if (!m_seed.path.isEmpty()) {
         m_byPath.insert(m_seed.path, m_seed);
     }
+    if (!m_seed.songKey.isEmpty()) {
+        m_usedSongKeys.insert(m_seed.songKey);
+    }
+}
+
+RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
+                           QHash<QString, TrackScorer::Affinity> affinities,
+                           QHash<QString, double> genreIdf,
+                           int exploration0To100,
+                           qint64 nowSecs,
+                           QRandomGenerator *rng)
+    : RadioSession(std::move(pool), std::move(affinities), std::move(genreIdf),
+                   TrackScorer::Candidate{}, exploration0To100, nowSecs, rng)
+{
 }
 
 QStringList RadioSession::rollingGenres() const
@@ -87,6 +143,9 @@ QStringList RadioSession::rollingGenres() const
 void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored)
 {
     m_usedPaths.insert(candidate.path);
+    if (!candidate.songKey.isEmpty()) {
+        m_usedSongKeys.insert(candidate.songKey);
+    }
     m_albumCounts[candidate.albumKey] += 1;
     m_pickReasons.insert(candidate.path, scored.components);
 }
@@ -112,12 +171,23 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         context.exploration0To100 = m_exploration;
 
         const QSet<QString> throttled = context.recentArtistsFolded;
+        QSet<QString> excludedSongKeys;
+        for (const QString &path : excludePaths) {
+            const auto it = m_byPath.constFind(path);
+            if (it != m_byPath.constEnd() && !it->songKey.isEmpty()) {
+                excludedSongKeys.insert(it->songKey);
+            }
+        }
 
         QList<std::pair<TrackScorer::Scored, const TrackScorer::Candidate *>> scored;
         scored.reserve(m_pool.size());
         for (const TrackScorer::Candidate &candidate : m_pool) {
             if (candidate.path.isEmpty() || m_usedPaths.contains(candidate.path)
                 || excludePaths.contains(candidate.path)) {
+                continue;
+            }
+            if (!candidate.songKey.isEmpty()
+                && (m_usedSongKeys.contains(candidate.songKey) || excludedSongKeys.contains(candidate.songKey))) {
                 continue;
             }
             if (!candidate.artistFolded.isEmpty() && throttled.contains(candidate.artistFolded)) {
@@ -192,13 +262,15 @@ void RadioSession::notePlayed(const Track &track)
 
     QStringList genres;
     QString albumKey = FoldKey::albumKey(track.albumArtistName, track.albumTitle);
+    QString songKey = FoldKey::songKey(track.musicBrainz.recordingId, track.artistName, track.title);
     const auto it = m_byPath.constFind(track.path);
     if (it != m_byPath.constEnd()) {
-        // Filter here too: pool candidates carry their raw (unfiltered) genre
-        // set, and this is the other chokepoint genres enter the rolling
-        // context through.
+        // Filter here too: pool candidates already carry canonical genre keys,
+        // and this is the other chokepoint genres enter the rolling context
+        // through.
         genres = GenreTags::informative(it->genresFolded);
         albumKey = it->albumKey;
+        songKey = it->songKey;
     }
     m_playedGenres.push_back(genres);
     while (m_playedGenres.size() > kThrottleArtists) {
@@ -210,6 +282,9 @@ void RadioSession::notePlayed(const Track &track)
     if (!m_usedPaths.contains(track.path)) {
         m_usedPaths.insert(track.path);
         m_albumCounts[albumKey] += 1;
+    }
+    if (!songKey.isEmpty()) {
+        m_usedSongKeys.insert(songKey);
     }
 }
 
@@ -240,4 +315,64 @@ QString RadioSession::reasonFor(const QString &path) const
 QList<TrackScorer::Component> RadioSession::reasonComponentsFor(const QString &path) const
 {
     return m_pickReasons.value(path);
+}
+
+QJsonObject RadioSession::constraintState() const
+{
+    QJsonObject albumCounts;
+    QStringList albumKeys = m_albumCounts.keys();
+    albumKeys.sort();
+    for (const QString &albumKey : albumKeys) {
+        albumCounts.insert(albumKey, m_albumCounts.value(albumKey));
+    }
+
+    QJsonArray playedGenres;
+    for (const QStringList &genres : m_playedGenres) {
+        playedGenres.append(stringListToJson(genres));
+    }
+
+    return QJsonObject{
+        {QStringLiteral("usedSongKeys"), stringSetToJson(m_usedSongKeys)},
+        {QStringLiteral("usedPaths"), stringSetToJson(m_usedPaths)},
+        {QStringLiteral("albumGroupCounts"), albumCounts},
+        {QStringLiteral("recentArtists"), stringListToJson(m_recentArtists)},
+        {QStringLiteral("playedGenres"), playedGenres},
+    };
+}
+
+void RadioSession::restoreConstraintState(const QJsonObject &state)
+{
+    if (state.contains(QStringLiteral("usedSongKeys"))) {
+        m_usedSongKeys = stringSetFromJson(state.value(QStringLiteral("usedSongKeys")));
+    }
+    if (state.contains(QStringLiteral("usedPaths"))) {
+        m_usedPaths = stringSetFromJson(state.value(QStringLiteral("usedPaths")));
+    }
+    if (state.contains(QStringLiteral("albumGroupCounts"))) {
+        m_albumCounts.clear();
+        const QJsonObject counts = state.value(QStringLiteral("albumGroupCounts")).toObject();
+        for (auto it = counts.constBegin(); it != counts.constEnd(); ++it) {
+            const int count = it.value().toInt(0);
+            if (!it.key().isEmpty() && count > 0) {
+                m_albumCounts.insert(it.key(), count);
+            }
+        }
+    }
+    if (state.contains(QStringLiteral("recentArtists"))) {
+        m_recentArtists = stringListFromJson(state.value(QStringLiteral("recentArtists")));
+        while (m_recentArtists.size() > kThrottleArtists) {
+            m_recentArtists.removeFirst();
+        }
+    }
+    if (state.contains(QStringLiteral("playedGenres"))) {
+        m_playedGenres.clear();
+        const QJsonArray groups = state.value(QStringLiteral("playedGenres")).toArray();
+        for (const QJsonValue &group : groups) {
+            m_playedGenres.push_back(stringListFromJson(group));
+        }
+        while (m_playedGenres.size() > kThrottleArtists) {
+            m_playedGenres.removeFirst();
+        }
+    }
+    m_pickReasons.clear();
 }

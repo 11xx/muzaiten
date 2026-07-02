@@ -12,6 +12,9 @@
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
+#include "reco/AffinityPool.h"
+#include "reco/RadioFilters.h"
+#include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -31,6 +34,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonParseError>
 #include <QMenu>
 #include <QSystemTrayIcon>
 #include <QThread>
@@ -39,6 +43,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -66,10 +71,23 @@ QString shuffleModeToString(ShuffleMode mode)
         return QStringLiteral("queue");
     case ShuffleMode::Library:
         return QStringLiteral("library");
+    case ShuffleMode::Radio:
+        return QStringLiteral("radio");
     case ShuffleMode::Off:
         break;
     }
     return QStringLiteral("off");
+}
+
+std::optional<Database::TrackFlag> trackFlagFromName(const QString &flag)
+{
+    if (flag == QStringLiteral("never_radio")) {
+        return Database::TrackFlag::NeverRadio;
+    }
+    if (flag == QStringLiteral("no_learn")) {
+        return Database::TrackFlag::NoLearn;
+    }
+    return std::nullopt;
 }
 
 // Leading 4-digit release year from a track's date fields (original date wins);
@@ -85,13 +103,30 @@ int trackYear(const Track &track)
     return ok ? year : 0;
 }
 
-TrackScorer::Candidate candidateFromRow(const RadioCandidateRow &row)
+QStringList canonicalRadioGenres(const QStringList &foldedGenres, const QHash<QString, QString> &aliases)
+{
+    QStringList genres;
+    QSet<QString> seen;
+    genres.reserve(foldedGenres.size());
+    for (const QString &genre : foldedGenres) {
+        const QString canonical = GenreTags::canonical(genre, aliases);
+        if (canonical.isEmpty() || GenreTags::isNonGenre(canonical) || seen.contains(canonical)) {
+            continue;
+        }
+        seen.insert(canonical);
+        genres.push_back(canonical);
+    }
+    return genres;
+}
+
+TrackScorer::Candidate candidateFromRow(const RadioCandidateRow &row, const QHash<QString, QString> &genreAliases)
 {
     TrackScorer::Candidate candidate;
     candidate.path = row.path;
+    candidate.songKey = FoldKey::songKey(row.mbRecordingId, row.artistName, row.title);
     candidate.artistFolded = FoldKey::fold(row.artistName);
-    candidate.albumKey = FoldKey::albumKey(row.albumArtistName, row.albumTitle);
-    candidate.genresFolded = row.genresFolded;   // already GenreTags::folded (genre_folded column)
+    candidate.albumKey = FoldKey::albumGroupKey(row.releaseGroupId, row.albumArtistName, row.albumTitle);
+    candidate.genresFolded = canonicalRadioGenres(row.genresFolded, genreAliases);
     candidate.year = row.year;
     candidate.effectiveRating0To100 = row.effectiveRating0To100;
     candidate.hasUserRating = row.hasUserRating;
@@ -110,6 +145,20 @@ constexpr int kRadioTopUpThreshold = 5;
 // A run of this many consecutive early radio skips means generation-time
 // context (mood) has likely drifted; see AppCore::rerollRadioQueue.
 constexpr int kRerollAfterConsecutiveSkips = 3;
+
+QSet<QString> stringSetFromJson(const QJsonValue &value)
+{
+    QSet<QString> strings;
+    const QJsonArray array = value.toArray();
+    strings.reserve(array.size());
+    for (const QJsonValue &item : array) {
+        const QString text = item.toString();
+        if (!text.isEmpty()) {
+            strings.insert(text);
+        }
+    }
+    return strings;
+}
 
 TrackScorer::Affinity affinityFromRow(const ListenHistoryStore::TrackAffinityRow &row)
 {
@@ -208,6 +257,7 @@ AppCore::AppCore(QObject *parent)
     m_playEventRecorder->setShuffleMode(shuffleModeToString(m_player->shuffleMode()));
     connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
         m_playEventRecorder->setShuffleMode(shuffleModeToString(mode));
+        syncRadioShuffleSession();
     });
     connect(m_player, &PlayerCore::currentIndexChanged, this, [this](int, bool userInitiated) {
         m_nextStartUserInitiated = userInitiated;
@@ -222,6 +272,9 @@ AppCore::AppCore(QObject *parent)
             &PlayEventRecorder::playbackCleared);
     connect(qApp, &QCoreApplication::aboutToQuit, m_playEventRecorder,
             &PlayEventRecorder::flushSessionEnd);
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
+        saveRadioSessionState();
+    });
 
     m_listenBrainzThread = new QThread(this);
     m_listenBrainzScrobbler = new ListenBrainzScrobbler;
@@ -312,6 +365,7 @@ AppCore::AppCore(QObject *parent)
 
 AppCore::~AppCore()
 {
+    saveRadioSessionState();
     // Finalize any in-flight play event before teardown, defensively: the
     // aboutToQuit signal may not fire on every exit path.
     if (m_playEventRecorder != nullptr) {
@@ -395,6 +449,7 @@ void AppCore::showWindow()
         // First window of the process: its constructor loaded the saved queue,
         // so the player now has tracks to resume into. Guarded to run once.
         restoreSavedPlayback();
+        maybeRestoreRadioSession();
     }
     m_window->show();
     m_window->raise();
@@ -503,6 +558,9 @@ void AppCore::setupMprisWiring()
     connect(m_player, &PlayerCore::libraryShufflePercentChanged, this, [this](int percent) {
         m_state->setSetting(QStringLiteral("playback.libraryShufflePercent"), QString::number(percent));
     });
+    connect(m_player, &PlayerCore::radioShufflePercentChanged, this, [this](int percent) {
+        m_state->setSetting(QStringLiteral("playback.radioShufflePercent"), QString::number(percent));
+    });
     connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool) {
         m_mpris->setTrack(track);
         m_mpris->setDurationMs(track.durationMs);
@@ -563,7 +621,7 @@ void AppCore::setupScrobbleWiring()
         // Advance the radio rolling context with every real track start while a
         // session is active — the seed, radio picks, and user-queued
         // interruptions alike (they all shape mood continuity).
-        if (m_radioSession && m_player->radioActive()) {
+        if (m_radioSession && (m_player->radioActive() || m_radioShuffleSessionActive)) {
             m_radioSession->notePlayed(track);
         }
         // A non-radio track breaks the consecutive-early-skip streak the moment
@@ -692,32 +750,79 @@ QJsonObject AppCore::ipcStatus() const
     return status;
 }
 
-bool AppCore::startRadio(const QString &seedPath)
+QStringList AppCore::radioFoldedGenresForTrack(const QString &path,
+                                               const QHash<QString, QString> &genreAliases) const
 {
-    if (m_database == nullptr || m_player == nullptr) {
-        return false;
+    QStringList genresFolded;
+    if (m_database == nullptr) {
+        return genresFolded;
     }
-    const Track seed = m_database->trackForPath(seedPath);
-    if (seed.path.isEmpty()) {
-        return false;
+    for (const QString &genre : m_database->genresForTrack(path)) {
+        genresFolded.push_back(GenreTags::folded(genre));
+    }
+    return canonicalRadioGenres(genresFolded, genreAliases);
+}
+
+QStringList AppCore::pathsForSongKeyOfTrack(const QString &trackPath) const
+{
+    if (m_database == nullptr || trackPath.isEmpty()) {
+        return {};
     }
 
-    // Seed genres drive candidate generation and anchor the mood window.
-    QStringList seedGenresFolded;
-    for (const QString &genre : m_database->genresForTrack(seed.path)) {
-        seedGenresFolded.push_back(GenreTags::folded(genre));
+    const auto rows = m_database->trackMatchRows();
+    QString targetSongKey;
+    QList<std::tuple<QString, QString, QString, QString>> cachedRows;
+    cachedRows.reserve(rows.size());
+    for (const auto &[path, artist, title, recordingMbid] : rows) {
+        cachedRows.push_back({path, artist, title, recordingMbid});
+        if (path == trackPath) {
+            targetSongKey = FoldKey::songKey(recordingMbid, artist, title);
+        }
     }
-    seedGenresFolded.removeDuplicates();
-    // Tagger placeholders ("Other", "Unknown", ...) are not real genres: a seed
-    // whose only tag is one of these must not have the whole junk cohort
-    // become its candidate pool (see plans/music-recommendation-plan.md, Trial
-    // findings — first radio session).
-    const QStringList informativeGenres = GenreTags::informative(seedGenresFolded);
+    if (targetSongKey.isEmpty()) {
+        return {trackPath};
+    }
+
+    QStringList paths;
+    for (const auto &[path, artist, title, recordingMbid] : cachedRows) {
+        if (FoldKey::songKey(recordingMbid, artist, title) == targetSongKey) {
+            paths.push_back(path);
+        }
+    }
+    if (paths.isEmpty()) {
+        paths.push_back(trackPath);
+    }
+    paths.removeDuplicates();
+    return paths;
+}
+
+TrackScorer::Candidate AppCore::buildRadioSeedCandidate(const Track &seed,
+                                                        const QStringList &seedGenresFolded) const
+{
+    TrackScorer::Candidate seedCandidate;
+    seedCandidate.path = seed.path;
+    seedCandidate.songKey = FoldKey::songKey(seed.musicBrainz.recordingId, seed.artistName, seed.title);
+    seedCandidate.artistFolded = FoldKey::fold(seed.artistName);
+    seedCandidate.albumKey = FoldKey::albumKey(seed.albumArtistName, seed.albumTitle);
+    seedCandidate.genresFolded = seedGenresFolded;
+    seedCandidate.year = trackYear(seed);
+    seedCandidate.effectiveRating0To100 = seed.effectiveRating0To100;
+    seedCandidate.hasUserRating = seed.hasUserRating;
+    return seedCandidate;
+}
+
+QVector<TrackScorer::Candidate> AppCore::buildRadioCandidatePool(const QStringList &informativeGenres,
+                                                                 const QHash<QString, QString> &genreAliases) const
+{
+    if (m_database == nullptr) {
+        return {};
+    }
 
     QVector<RadioCandidateRow> rows;
     if (informativeGenres.isEmpty()) {
-        // No informative genre to match on (no genres at all, or only junk
-        // placeholders): fall back to a random slice of the whole library.
+        // No informative genre to match on (no genres at all, only junk
+        // placeholders, or anchorless Radio shuffle): fall back to a random
+        // slice of the whole library.
         rows = m_database->radioFallbackCandidates(2000);
     } else {
         // Genre-matched candidates, plus a random slice of the library blended
@@ -743,7 +848,36 @@ bool AppCore::startRadio(const QString &seedPath)
     QVector<TrackScorer::Candidate> pool;
     pool.reserve(rows.size());
     for (const RadioCandidateRow &row : rows) {
-        pool.push_back(candidateFromRow(row));
+        pool.push_back(candidateFromRow(row, genreAliases));
+    }
+    // User taste flags are path-scoped storage but AppCore applies them at the
+    // recommender boundary, after every SQL candidate source has been merged.
+    return RadioFilters::excludeFlaggedCandidates(
+        pool, m_database->flaggedPaths(Database::TrackFlag::NeverRadio));
+}
+
+QVector<TrackScorer::Candidate> AppCore::buildRadioFallbackPool(int limit,
+                                                                const QHash<QString, QString> &genreAliases) const
+{
+    QVector<TrackScorer::Candidate> pool;
+    if (m_database == nullptr) {
+        return pool;
+    }
+
+    const QVector<RadioCandidateRow> rows = m_database->radioFallbackCandidates(limit);
+    pool.reserve(rows.size());
+    for (const RadioCandidateRow &row : rows) {
+        pool.push_back(candidateFromRow(row, genreAliases));
+    }
+    return RadioFilters::excludeFlaggedCandidates(
+        pool, m_database->flaggedPaths(Database::TrackFlag::NeverRadio));
+}
+
+QHash<QString, double> AppCore::buildRadioGenreIdf(const QHash<QString, QString> &genreAliases) const
+{
+    QHash<QString, double> genreIdf;
+    if (m_database == nullptr) {
+        return genreIdf;
     }
 
     // Library-wide genre IDF map: broad/junk genres self-discount, rare genres
@@ -752,30 +886,259 @@ bool AppCore::startRadio(const QString &seedPath)
     // genres as the session goes on, and those need lookups too.
     int taggedTrackTotal = 0;
     const QHash<QString, int> genreDf = m_database->genreTrackCounts(&taggedTrackTotal);
-    QHash<QString, double> genreIdf;
-    genreIdf.reserve(genreDf.size());
+    QHash<QString, int> canonicalDf;
     for (auto it = genreDf.cbegin(); it != genreDf.cend(); ++it) {
+        const QString canonical = GenreTags::canonical(it.key(), genreAliases);
+        if (canonical.isEmpty() || GenreTags::isNonGenre(canonical)) {
+            continue;
+        }
+        canonicalDf[canonical] += it.value();
+    }
+    genreIdf.reserve(canonicalDf.size());
+    for (auto it = canonicalDf.cbegin(); it != canonicalDf.cend(); ++it) {
         const int df = std::max(1, it.value());
         genreIdf.insert(it.key(), std::log(std::max(2.0, static_cast<double>(taggedTrackTotal) / df)));
     }
+    return genreIdf;
+}
 
+QHash<QString, TrackScorer::Affinity> AppCore::buildRadioAffinities() const
+{
     QHash<QString, TrackScorer::Affinity> affinities;
-    if (m_listenHistory != nullptr) {
-        const QHash<QString, ListenHistoryStore::TrackAffinityRow> affinityRows = m_listenHistory->trackAffinities();
-        affinities.reserve(affinityRows.size());
-        for (auto it = affinityRows.cbegin(); it != affinityRows.cend(); ++it) {
-            affinities.insert(it.key(), affinityFromRow(it.value()));
+    if (m_database == nullptr || m_listenHistory == nullptr) {
+        return affinities;
+    }
+
+    const QSet<QString> noLearnPaths = m_database->flaggedPaths(Database::TrackFlag::NoLearn);
+    const QHash<QString, ListenHistoryStore::TrackAffinityRow> affinityRows = m_listenHistory->trackAffinities();
+    affinities.reserve(affinityRows.size());
+    for (auto it = affinityRows.cbegin(); it != affinityRows.cend(); ++it) {
+        if (noLearnPaths.contains(it.key())) {
+            continue;
+        }
+        affinities.insert(it.key(), affinityFromRow(it.value()));
+    }
+
+    QHash<QString, QString> pathToSongKey;
+    const auto matchRows = m_database->trackMatchRows();
+    pathToSongKey.reserve(matchRows.size());
+    for (const auto &[path, artist, title, recordingMbid] : matchRows) {
+        pathToSongKey.insert(path, FoldKey::songKey(recordingMbid, artist, title));
+    }
+    pathToSongKey = RadioFilters::excludeFlaggedPathMappings(pathToSongKey, noLearnPaths);
+    return RadioFilters::excludeFlaggedAffinities(
+        AffinityPool::poolBySongKey(affinities, pathToSongKey), noLearnPaths);
+}
+
+void AppCore::saveRadioSessionState()
+{
+    if (m_state == nullptr || m_player == nullptr || !m_player->radioActive() || !m_radioSession) {
+        return;
+    }
+
+    QJsonObject root = m_radioSession->constraintState();
+    root.insert(QStringLiteral("active"), true);
+    root.insert(QStringLiteral("kind"), m_radioSessionKind.isEmpty() ? QStringLiteral("anchorless")
+                                                                     : m_radioSessionKind);
+    root.insert(QStringLiteral("seedPath"), m_radioSessionSeedPath);
+    root.insert(QStringLiteral("exploration"), m_radioSessionExploration);
+    root.insert(QStringLiteral("consecutiveEarlySkips"), m_radioConsecutiveEarlySkips);
+    m_state->setSetting(QStringLiteral("radio.session.state"),
+                        QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void AppCore::clearRadioSessionState()
+{
+    if (m_state != nullptr) {
+        m_state->removeSetting(QStringLiteral("radio.session.state"));
+    }
+}
+
+void AppCore::maybeRestoreRadioSession()
+{
+    if (m_radioRestoreDone) {
+        return;
+    }
+    m_radioRestoreDone = true;
+    if (m_state == nullptr || m_database == nullptr || m_player == nullptr) {
+        return;
+    }
+
+    const QString rawState = m_state->setting(QStringLiteral("radio.session.state"));
+    if (rawState.isEmpty()) {
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(rawState.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        qInfo("radio-restore: clearing malformed session state JSON");
+        clearRadioSessionState();
+        return;
+    }
+    const QJsonObject root = document.object();
+    if (!root.value(QStringLiteral("active")).toBool(false)) {
+        clearRadioSessionState();
+        return;
+    }
+
+    const QString kind = root.value(QStringLiteral("kind")).toString();
+    const int exploration = std::clamp(root.value(QStringLiteral("exploration")).toInt(kDefaultRadioExploration),
+                                       0, 100);
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+    const QHash<QString, QString> genreAliases = m_database->genreAliases();
+    std::unique_ptr<RadioSession> restored;
+    QString seedPath;
+
+    if (kind == QLatin1String("seeded")) {
+        seedPath = root.value(QStringLiteral("seedPath")).toString();
+        const Track seed = m_database->trackForPath(seedPath);
+        if (seed.path.isEmpty()) {
+            qInfo("radio-restore: clearing stale seeded session; seed is no longer in the library");
+            clearRadioSessionState();
+            return;
+        }
+        const QStringList seedGenresFolded = radioFoldedGenresForTrack(seed.path, genreAliases);
+        QVector<TrackScorer::Candidate> pool =
+            buildRadioCandidatePool(GenreTags::informative(seedGenresFolded), genreAliases);
+        restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
+                                                  buildRadioGenreIdf(genreAliases),
+                                                  buildRadioSeedCandidate(seed, seedGenresFolded),
+                                                  exploration, nowSecs);
+    } else if (kind == QLatin1String("anchorless")) {
+        QVector<TrackScorer::Candidate> pool = buildRadioCandidatePool({}, genreAliases);
+        if (pool.isEmpty()) {
+            qInfo("radio-restore: clearing stale anchorless session; candidate pool is empty");
+            clearRadioSessionState();
+            return;
+        }
+        restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
+                                                  buildRadioGenreIdf(genreAliases), exploration, nowSecs);
+    } else if (const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(kind)) {
+        QVector<TrackScorer::Candidate> pool = buildRadioFallbackPool(5000, genreAliases);
+        QHash<QString, TrackScorer::Affinity> affinities = buildRadioAffinities();
+        pool = RadioMix::filterCandidates(*mixMode, pool, affinities, nowSecs);
+        if (pool.isEmpty()) {
+            qInfo("radio-restore: clearing stale mix session; filtered pool is empty");
+            clearRadioSessionState();
+            return;
+        }
+        restored = std::make_unique<RadioSession>(std::move(pool), std::move(affinities),
+                                                  buildRadioGenreIdf(genreAliases), exploration, nowSecs);
+    } else {
+        qInfo("radio-restore: clearing malformed session state with unknown kind");
+        clearRadioSessionState();
+        return;
+    }
+
+    restored->restoreConstraintState(root);
+    m_radioSession = std::move(restored);
+    m_radioSessionKind = kind;
+    m_radioSessionSeedPath = seedPath;
+    m_radioSessionExploration = exploration;
+    m_radioConsecutiveEarlySkips = std::max(0, root.value(QStringLiteral("consecutiveEarlySkips")).toInt(0));
+    m_radioAdventurous = false;
+    m_radioShuffleSessionActive = false;
+    m_radioPickPaths.clear();
+    const QSet<QString> usedPaths = stringSetFromJson(root.value(QStringLiteral("usedPaths")));
+    for (const Track &track : m_player->queue()) {
+        if (track.path != seedPath && usedPaths.contains(track.path)) {
+            m_radioPickPaths.insert(track.path);
         }
     }
 
-    TrackScorer::Candidate seedCandidate;
-    seedCandidate.path = seed.path;
-    seedCandidate.artistFolded = FoldKey::fold(seed.artistName);
-    seedCandidate.albumKey = FoldKey::albumKey(seed.albumArtistName, seed.albumTitle);
-    seedCandidate.genresFolded = seedGenresFolded;
-    seedCandidate.year = trackYear(seed);
-    seedCandidate.effectiveRating0To100 = seed.effectiveRating0To100;
-    seedCandidate.hasUserRating = seed.hasUserRating;
+    installRadioProvider(/*markPicksAsRadio=*/true);
+    m_player->setRadioActive(true);
+}
+
+void AppCore::installRadioProvider(bool markPicksAsRadio)
+{
+    if (m_player == nullptr) {
+        return;
+    }
+    m_player->setRadioProvider([this, markPicksAsRadio](int count, const QSet<QString> &excludePaths) -> QVector<Track> {
+        if (!m_radioSession) {
+            return {};
+        }
+        const QVector<Track> picks = m_radioSession->nextTracks(count, excludePaths, [this](const QString &path) {
+            return m_database ? m_database->trackForPath(path) : Track{};
+        });
+        if (markPicksAsRadio) {
+            for (const Track &track : picks) {
+                if (!track.path.isEmpty()) {
+                    m_radioPickPaths.insert(track.path);
+                }
+            }
+        }
+        return picks;
+    });
+}
+
+void AppCore::syncRadioShuffleSession()
+{
+    if (m_player == nullptr || m_database == nullptr) {
+        return;
+    }
+    if (m_player->shuffleMode() != ShuffleMode::Radio || m_player->radioActive()) {
+        if (m_radioShuffleSessionActive) {
+            m_radioShuffleSessionActive = false;
+            m_radioSession.reset();
+            m_radioSessionKind.clear();
+            m_radioSessionSeedPath.clear();
+            m_player->setRadioProvider({});
+        }
+        return;
+    }
+
+    const QHash<QString, QString> genreAliases = m_database->genreAliases();
+    QVector<TrackScorer::Candidate> pool = buildRadioCandidatePool({}, genreAliases);
+    if (pool.isEmpty()) {
+        m_radioShuffleSessionActive = false;
+        m_radioSession.reset();
+        m_radioSessionKind.clear();
+        m_radioSessionSeedPath.clear();
+        m_player->setRadioProvider({});
+        return;
+    }
+
+    m_radioSession = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
+                                                    buildRadioGenreIdf(genreAliases),
+                                                    radioExploration(), QDateTime::currentSecsSinceEpoch());
+    m_radioSessionKind = QStringLiteral("anchorless");
+    m_radioSessionSeedPath.clear();
+    m_radioSessionExploration = radioExploration();
+    m_radioShuffleSessionActive = true;
+    installRadioProvider(/*markPicksAsRadio=*/false);
+    const Track current = m_player->currentTrack();
+    if (!current.path.isEmpty()) {
+        m_radioSession->notePlayed(current);
+    }
+}
+
+bool AppCore::startRadio(const QString &seedPath)
+{
+    if (m_database == nullptr || m_player == nullptr) {
+        return false;
+    }
+    const Track seed = m_database->trackForPath(seedPath);
+    if (seed.path.isEmpty()) {
+        return false;
+    }
+
+    const QHash<QString, QString> genreAliases = m_database->genreAliases();
+    // Seed genres drive candidate generation and anchor the mood window. Genre
+    // aliases are canonicalized here; raw track_genres rows stay unchanged.
+    const QStringList seedGenresFolded = radioFoldedGenresForTrack(seed.path, genreAliases);
+    // Tagger placeholders ("Other", "Unknown", ...) are not real genres: a seed
+    // whose only tag is one of these must not have the whole junk cohort
+    // become its candidate pool (see plans/music-recommendation-plan.md, Trial
+    // findings — first radio session).
+    const QStringList informativeGenres = GenreTags::informative(seedGenresFolded);
+
+    QVector<TrackScorer::Candidate> pool = buildRadioCandidatePool(informativeGenres, genreAliases);
+    QHash<QString, double> genreIdf = buildRadioGenreIdf(genreAliases);
+    QHash<QString, TrackScorer::Affinity> affinities = buildRadioAffinities();
+
+    TrackScorer::Candidate seedCandidate = buildRadioSeedCandidate(seed, seedGenresFolded);
 
     // Dedicated exploration knob so radio never touches the shuffle settings.
     // An armed "adventurous" boost wins over the persisted value for this
@@ -791,26 +1154,17 @@ bool AppCore::startRadio(const QString &seedPath)
         1, 100);
     m_radioPickPaths.clear();
     m_radioConsecutiveEarlySkips = 0;
+    m_radioShuffleSessionActive = false;
+    m_radioSessionKind = QStringLiteral("seeded");
+    m_radioSessionSeedPath = seed.path;
+    m_radioSessionExploration = exploration;
 
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
                                                     seedCandidate, exploration, QDateTime::currentSecsSinceEpoch());
     // Install the scored provider; it resolves each pick to a full Track by
     // path. Stays installed regardless of batch size: it is the safety net for
     // when the queue runs dry (e.g. the user deleted rows ahead of playback).
-    m_player->setRadioProvider([this](int count, const QSet<QString> &excludePaths) -> QVector<Track> {
-        if (!m_radioSession) {
-            return {};
-        }
-        const QVector<Track> picks = m_radioSession->nextTracks(count, excludePaths, [this](const QString &path) {
-            return m_database ? m_database->trackForPath(path) : Track{};
-        });
-        for (const Track &track : picks) {
-            if (!track.path.isEmpty()) {
-                m_radioPickPaths.insert(track.path);
-            }
-        }
-        return picks;
-    });
+    installRadioProvider(/*markPicksAsRadio=*/true);
     m_player->setRadioActive(true);
     // Guard the setup sequence against maybeTopUpRadioQueue: appendAndPlay(seed)
     // below fires currentIndexChanged synchronously with a 1-row queue (well
@@ -830,6 +1184,66 @@ bool AppCore::startRadio(const QString &seedPath)
         appendRadioBatch(m_radioBatchSize - 1);
     }
     m_radioTopUpInProgress = false;
+    saveRadioSessionState();
+    return true;
+}
+
+bool AppCore::startMix(const QString &mode)
+{
+    const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(mode);
+    if (!mixMode || m_database == nullptr || m_player == nullptr) {
+        return false;
+    }
+
+    const QHash<QString, QString> genreAliases = m_database->genreAliases();
+    QVector<TrackScorer::Candidate> pool = buildRadioFallbackPool(5000, genreAliases);
+    QHash<QString, TrackScorer::Affinity> affinities = buildRadioAffinities();
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+    pool = RadioMix::filterCandidates(*mixMode, pool, affinities, nowSecs);
+    if (pool.isEmpty()) {
+        return false;
+    }
+
+    const int persistedExploration = std::clamp(
+        m_database->setting(QStringLiteral("radio.exploration"), QString::number(kDefaultRadioExploration)).toInt(),
+        0, 100);
+    const int exploration = m_radioAdventurous ? kAdventurousExploration : persistedExploration;
+
+    m_radioBatchSize = std::clamp(
+        m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
+        1, 100);
+
+    auto session = std::make_unique<RadioSession>(std::move(pool), affinities, buildRadioGenreIdf(genreAliases),
+                                                  exploration, nowSecs);
+    QVector<Track> picks = session->nextTracks(m_radioBatchSize, {}, [this](const QString &path) {
+        return m_database ? m_database->trackForPath(path) : Track{};
+    });
+    if (picks.isEmpty()) {
+        return false;
+    }
+
+    m_radioAdventurous = false;
+    m_radioPickPaths.clear();
+    m_radioConsecutiveEarlySkips = 0;
+    m_radioShuffleSessionActive = false;
+    m_radioSessionKind = mode.trimmed().toLower();
+    m_radioSessionSeedPath.clear();
+    m_radioSessionExploration = exploration;
+    m_radioSession = std::move(session);
+    for (const Track &track : picks) {
+        if (!track.path.isEmpty()) {
+            m_radioPickPaths.insert(track.path);
+        }
+    }
+
+    installRadioProvider(/*markPicksAsRadio=*/true);
+    m_player->setRadioActive(true);
+    m_radioTopUpInProgress = true;
+    m_player->clearAll();
+    m_player->injectTracks(picks);
+    m_player->playAt(0, true, false, /*explicitJump=*/true);
+    m_radioTopUpInProgress = false;
+    saveRadioSessionState();
     return true;
 }
 
@@ -842,8 +1256,12 @@ void AppCore::stopRadio()
     m_radioSession.reset();
     m_radioPickPaths.clear();
     m_radioConsecutiveEarlySkips = 0;
+    m_radioSessionKind.clear();
+    m_radioSessionSeedPath.clear();
     // "Resets when a session ends" -- see setRadioAdventurous's doc comment.
     m_radioAdventurous = false;
+    clearRadioSessionState();
+    syncRadioShuffleSession();
 }
 
 QString AppCore::radioPickReason(const QString &path) const
@@ -868,6 +1286,52 @@ QString AppCore::radioPickReason(const QString &path) const
     return sentence + QLatin1Char('\n') + breakdown;
 }
 
+bool AppCore::trackFlag(const QString &trackPath, const QString &flag) const
+{
+    if (m_database == nullptr) {
+        return false;
+    }
+    const std::optional<Database::TrackFlag> parsed = trackFlagFromName(flag);
+    if (!parsed.has_value()) {
+        return false;
+    }
+    return m_database->trackFlag(trackPath, parsed.value());
+}
+
+bool AppCore::setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on)
+{
+    if (m_database == nullptr) {
+        return false;
+    }
+    const std::optional<Database::TrackFlag> parsed = trackFlagFromName(flag);
+    if (!parsed.has_value()) {
+        return false;
+    }
+
+    const QStringList paths = pathsForSongKeyOfTrack(trackPath);
+    if (paths.isEmpty()) {
+        return false;
+    }
+    for (const QString &path : paths) {
+        if (!m_database->setTrackFlag(path, parsed.value(), on)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int AppCore::forgetTrackBehaviorForSong(const QString &trackPath, bool includeImportedListens)
+{
+    if (m_listenHistory == nullptr) {
+        return 0;
+    }
+    const QStringList paths = pathsForSongKeyOfTrack(trackPath);
+    if (paths.isEmpty()) {
+        return 0;
+    }
+    return m_listenHistory->forgetTrackBehavior(paths, includeImportedListens);
+}
+
 int AppCore::radioExploration() const
 {
     return m_database
@@ -881,6 +1345,8 @@ void AppCore::setRadioExploration(int value0To100, bool persist)
     const int clamped = std::clamp(value0To100, 0, 100);
     if (m_radioSession) {
         m_radioSession->setExploration(clamped);
+        m_radioSessionExploration = clamped;
+        saveRadioSessionState();
     }
     if (persist && m_database != nullptr) {
         m_database->setSetting(QStringLiteral("radio.exploration"), QString::number(clamped));
@@ -911,7 +1377,9 @@ void AppCore::setRadioAdventurous(bool on)
     if (m_radioSession) {
         // Live session: reflect the toggle immediately. Turning it off falls
         // back to the persisted setting, not whatever the session started at.
-        m_radioSession->setExploration(on ? kAdventurousExploration : radioExploration());
+        m_radioSessionExploration = on ? kAdventurousExploration : radioExploration();
+        m_radioSession->setExploration(m_radioSessionExploration);
+        saveRadioSessionState();
     }
     // No session yet: just arms the next startRadio (consumed + reset there).
 }
@@ -948,6 +1416,7 @@ void AppCore::appendRadioBatch(int count)
     // PlayerCore) -- a radio session started while a playlist-backed queue was
     // playing would otherwise silently mirror every batch pick into it.
     m_player->injectTracks(picks);
+    saveRadioSessionState();
 }
 
 void AppCore::maybeTopUpRadioQueue()
@@ -965,6 +1434,7 @@ void AppCore::maybeTopUpRadioQueue()
     m_radioTopUpInProgress = true;
     appendRadioBatch(m_radioBatchSize);
     m_radioTopUpInProgress = false;
+    saveRadioSessionState();
 }
 
 void AppCore::rerollRadioQueue()
@@ -990,6 +1460,7 @@ void AppCore::rerollRadioQueue()
     }
     m_player->removeRows(staleRows);
     appendRadioBatch(m_radioBatchSize);
+    saveRadioSessionState();
 }
 
 void AppCore::handleRadioPlayEvent(const QString &source, const QString &outcome, qint64 playedMs,
@@ -1332,6 +1803,15 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         const bool started = startRadio(path);
         return QJsonObject{{QStringLiteral("radio"),
                             started ? QStringLiteral("started") : QStringLiteral("unknown-track")}};
+    }
+    if (command == QLatin1String("start-mix")) {
+        const QString mode = args.value(QStringLiteral("mode")).toString().trimmed().toLower();
+        if (!RadioMix::modeFromString(mode)) {
+            return QJsonObject{{QStringLiteral("mix"), QStringLiteral("unknown-mode")}};
+        }
+        const bool started = startMix(mode);
+        return QJsonObject{{QStringLiteral("mix"),
+                            started ? QStringLiteral("started") : QStringLiteral("empty-pool")}};
     }
     if (command == QLatin1String("stop-radio")) {
         stopRadio();

@@ -5,6 +5,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <QHash>
+
 // Genre normalization shared between the scan-time track_genres population and
 // the one-time blob backfill (see Database::migrate, v10). Keeps "grouping"
 // (folded) and "display" (as tagged) genre forms consistent everywhere genres
@@ -13,6 +15,10 @@ namespace GenreTags {
 
 // Case-fold + whitespace-normalize a genre for grouping/joins.
 QString folded(const QString &genre);
+
+// Alias canonicalization for engine-side genre matching. `folded` must already
+// be normalized with folded(); unmapped genres pass through unchanged.
+QString canonical(const QString &folded, const QHash<QString, QString> &aliases);
 
 // Display-form genres from a decoded metadata blob: all values of the GENRE
 // tag, split on ';' ',' '/' and NUL, trimmed/simplified, empties dropped,

@@ -8,6 +8,7 @@
 
 #include <QAbstractTableModel>
 #include <QAbstractItemView>
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QEvent>
@@ -15,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSet>
 #include <QTableView>
@@ -22,6 +24,7 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <optional>
 
 namespace {
 
@@ -181,6 +184,14 @@ public:
         return !idsQueueableForService(indexes, service).isEmpty();
     }
 
+    std::optional<ListenHistoryStore::HistoryRow> rowAt(int row) const
+    {
+        if (row < 0 || row >= m_rows.size()) {
+            return std::nullopt;
+        }
+        return m_rows.at(row);
+    }
+
 private:
     QList<ListenHistoryStore::HistoryRow> m_rows;
 };
@@ -230,11 +241,13 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     auto *actions = new QHBoxLayout;
     m_queueLastFm = new QPushButton(QStringLiteral("Scrobble to Last.fm"), this);
     m_queueListenBrainz = new QPushButton(QStringLiteral("Scrobble to ListenBrainz"), this);
+    m_forgetBehavior = new QPushButton(QStringLiteral("Forget track's listening behavior…"), this);
     m_clearLastFm = new QPushButton(QStringLiteral("Clear Last.fm backlog"), this);
     m_clearListenBrainz = new QPushButton(QStringLiteral("Clear ListenBrainz backlog"), this);
     auto *refresh = new QPushButton(QStringLiteral("Refresh"), this);
     actions->addWidget(m_queueLastFm);
     actions->addWidget(m_queueListenBrainz);
+    actions->addWidget(m_forgetBehavior);
     actions->addStretch();
     actions->addWidget(m_clearLastFm);
     actions->addWidget(m_clearListenBrainz);
@@ -248,6 +261,7 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     connect(refresh, &QPushButton::clicked, this, &ListeningHistoryDialog::reload);
     connect(m_queueLastFm, &QPushButton::clicked, this, [this]() { queueSelected(ListenHistoryStore::LastFm); });
     connect(m_queueListenBrainz, &QPushButton::clicked, this, [this]() { queueSelected(ListenHistoryStore::ListenBrainz); });
+    connect(m_forgetBehavior, &QPushButton::clicked, this, &ListeningHistoryDialog::forgetSelectedBehavior);
     connect(m_clearLastFm, &QPushButton::clicked, this, [this]() { clearPending(ListenHistoryStore::LastFm); });
     connect(m_clearListenBrainz, &QPushButton::clicked, this, [this]() { clearPending(ListenHistoryStore::ListenBrainz); });
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { updateActions(); });
@@ -316,6 +330,18 @@ QList<qint64> ListeningHistoryDialog::selectedIds() const
     return ids;
 }
 
+std::optional<ListenHistoryStore::HistoryRow> ListeningHistoryDialog::selectedHistoryRow() const
+{
+    if (m_view == nullptr || m_view->selectionModel() == nullptr || m_model == nullptr) {
+        return std::nullopt;
+    }
+    const QModelIndexList rows = m_view->selectionModel()->selectedRows();
+    if (rows.isEmpty()) {
+        return std::nullopt;
+    }
+    return static_cast<ListeningHistoryModel *>(m_model)->rowAt(rows.first().row());
+}
+
 void ListeningHistoryDialog::queueSelected(const QString &service)
 {
     if (m_store == nullptr || m_view == nullptr || m_view->selectionModel() == nullptr) {
@@ -345,13 +371,43 @@ void ListeningHistoryDialog::clearPending(const QString &service)
                                 5000);
 }
 
+void ListeningHistoryDialog::forgetSelectedBehavior()
+{
+    const std::optional<ListenHistoryStore::HistoryRow> row = selectedHistoryRow();
+    if (!row.has_value() || row->track.path.isEmpty()) {
+        return;
+    }
+
+    const QString title = row->track.title.trimmed().isEmpty() ? row->track.filename : row->track.title.trimmed();
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Forget listening behavior"));
+    box.setText(QStringLiteral("Forget listening behavior for \"%1\"?").arg(title));
+    box.setInformativeText(QStringLiteral(
+        "This deletes local recommendation behavior for every library copy of this song. Scrobble history is not deleted."));
+    auto *includeImported = new QCheckBox(QStringLiteral("Also remove imported listens matched to this song"), &box);
+    box.setCheckBox(includeImported);
+    QPushButton *forgetButton = box.addButton(QStringLiteral("Forget"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != forgetButton) {
+        return;
+    }
+
+    emit forgetBehaviorRequested(row->track, includeImported->isChecked());
+    reload();
+}
+
 void ListeningHistoryDialog::updateActions()
 {
     const bool hasSelection = !selectedIds().isEmpty();
+    const std::optional<ListenHistoryStore::HistoryRow> selectedRow = selectedHistoryRow();
     const QModelIndexList selectedRows = m_view->selectionModel() == nullptr ? QModelIndexList{} : m_view->selectionModel()->selectedRows();
     auto *model = static_cast<ListeningHistoryModel *>(m_model);
     m_queueLastFm->setEnabled(hasSelection && model->hasQueueableForService(selectedRows, ListenHistoryStore::LastFm));
     m_queueListenBrainz->setEnabled(hasSelection && model->hasQueueableForService(selectedRows, ListenHistoryStore::ListenBrainz));
+    m_forgetBehavior->setEnabled(selectedRow.has_value() && !selectedRow->track.path.isEmpty());
     // The clear-backlog buttons are selection-independent; reload() sets them
     // from the pending counts it already fetches.
 }

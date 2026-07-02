@@ -32,6 +32,7 @@ public:
 
     void setQueueStore(QueueStore *store);
     void setPickReasonResolver(std::function<QString(const QString &)> resolver);
+    void setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();
@@ -55,6 +56,7 @@ public:
 signals:
     void trackActivated(int index);
     void startRadioRequested(const Track &track);
+    void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void trackRatingChanged(const Track &track, int rating0To100);
     void rowsMoveRequested(const QVector<int> &rows, int destinationRow);
     void rowsRemoveRequested(const QVector<int> &rows);
@@ -103,6 +105,7 @@ private:
     bool m_showPlayNextBadge = true;
     bool m_showPlayNextTitleAccent = false;
     PanelBorderEdges m_tableBorders;
+    std::function<bool(const Track &, const QString &)> m_trackFlagResolver;
     bool m_restoreScrollPending = false;
     bool m_restoreScrollScheduled = false;
     bool m_queueIsPlaylistSourced = false;

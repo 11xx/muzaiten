@@ -36,8 +36,11 @@ class Database;
 struct RadioCandidateRow {
     QString path;
     QString artistName;
+    QString title;
     QString albumArtistName;
     QString albumTitle;
+    QString mbRecordingId;
+    QString releaseGroupId;
     QStringList genresFolded;
     int year = 0;                   // 0 = unknown
     int effectiveRating0To100 = -1; // -1 = unrated
@@ -77,6 +80,11 @@ private:
 
 class Database final {
 public:
+    enum class TrackFlag {
+        NeverRadio,
+        NoLearn,
+    };
+
     explicit Database(QString connectionName);
     ~Database();
 
@@ -123,6 +131,9 @@ public:
     MetadataBlob::FullMetadata fullMetadata(const QString &path) const;
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
+    bool setTrackFlag(const QString &trackPath, TrackFlag flag, bool on);
+    bool trackFlag(const QString &trackPath, TrackFlag flag) const;
+    QSet<QString> flaggedPaths(TrackFlag flag) const;
     bool setPendingTrackRatingWrite(const QString &trackPath, int rating0To100, const QString &status, const QString &lastError = {});
     bool clearPendingTrackRatingWrite(const QString &trackPath);
     QVector<Track> tracksWithUserRatings() const;
@@ -140,6 +151,9 @@ public:
     // `taggedTrackTotal`, if non-null, receives the count of distinct tracks
     // carrying at least one genre (the IDF numerator base).
     QHash<QString, int> genreTrackCounts(int *taggedTrackTotal = nullptr) const;
+    QHash<QString, QString> genreAliases() const;
+    bool setGenreAlias(const QString &alias, const QString &canonical);
+    bool removeGenreAlias(const QString &alias);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

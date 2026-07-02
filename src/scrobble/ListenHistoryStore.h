@@ -6,6 +6,7 @@
 #include <QList>
 #include <QSqlDatabase>
 #include <QString>
+#include <QStringList>
 
 // Always-on local listening history, independent of any scrobbling service.
 // Every completed listen is recorded here (full track snapshot, timestamped to
@@ -131,6 +132,7 @@ public:
     // Newest-first play events, for inspection and analysis.
     QList<PlayEvent> recentPlayEvents(int limit, int offset = 0) const;
     int playEventCount() const;
+    int forgetTrackBehavior(const QStringList &paths, bool includeImportedListens = false);
 
     // Scrobbler backfill (Stage 0b). Imported history and per-service playcount
     // baselines live in their own tables and never touch the scrobble backlog.

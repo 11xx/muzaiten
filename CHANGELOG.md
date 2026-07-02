@@ -8,7 +8,16 @@
   (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
   scored by genre, era, rating and listening affinity, with a novelty bonus for
   the unheard and artist/album throttling so a session never stalls on one
-  artist or album — and every pick records why it was chosen. Hovering a radio
+  artist or album — and every pick records why it was chosen. Song no-repeat
+  now follows MusicBrainz recording IDs when available, falling back to folded
+  artist+title, and the album cap follows MusicBrainz release groups so
+  remasters/deluxe editions count as the same album. Listening affinity is
+  pooled across every library path with the same song key, so a FLAC album copy
+  and a compilation/portable copy strengthen the same recommendation signal
+  instead of diluting each other. The shuffle button now includes Radio shuffle,
+  an ambient taste-aware shuffle mode that uses the radio engine for library
+  pulls without starting a visible Start Radio session; its pull chance defaults
+  to 80% and is configurable from the Playback menu. Hovering a radio
   pick in the queue now explains the choice with a human-readable summary and
   the numeric scorer breakdown. Powered by the play history, imported scrobbles,
   and genre data added in the previous
@@ -26,9 +35,13 @@
   either bucket can be switched to unlimited from Saved queue limits. The player
   bar shows a radio indicator button next to shuffle/repeat while a session is
   active; clicking it stops the radio and keeps the queue. Genre matching now
-  weights shared genres by rarity (IDF) instead of a plain overlap ratio, so a
-  broad or junk genre like "Other" can no longer dominate a session by itself;
-  tagger placeholder genres ("Other", "Unknown", "Various", ...) are ignored entirely — they
+  canonicalizes engine-side aliases before matching and weights shared genres
+  by rarity (IDF) instead of a plain overlap ratio, so multilingual variants
+  like "clássica"/"classique" can count as "classical" while the raw scanned
+  genre tags remain untouched; the starter alias set is intentionally small and
+  will grow through user curation. A broad or junk genre like "Other" can no
+  longer dominate a session by itself; tagger placeholder genres ("Other",
+  "Unknown", "Various", ...) are ignored entirely — they
   never seed a candidate pool or count as a genre match — and every session's
   candidate pool always blends in a random library slice so radio can escape
   a single genre cohort even when the seed's only genre is uninformative.
@@ -43,7 +56,20 @@
   a right-click menu exposing exploration (a persistent 0–100 setting plus a
   per-session "Adventurous" boost to 85) and the batch size. Play events
   originating from radio picks are now attributed source "radio" instead of
-  riding along as "library_shuffle"/"queue_auto".
+  riding along as "library_shuffle"/"queue_auto". Active radio and mix
+  sessions now survive app restarts: the visible queue resumes from the saved
+  queue state, while the radio brain restores its sequencing constraints and
+  rolling mood but rebuilds candidates and listening affinity from fresh data.
+- Rediscovery and Deep cuts mixes: the Mixes menu and
+  `muzaitenctl start-mix <rediscovery|deepcuts>` can now start seedless,
+  radio-backed sessions over long-unheard favorites or rarely played tracks by
+  artists with strong listening history. Mixes reuse the normal radio queue,
+  reasons, indicator, stop control, exploration, and batch-size behavior.
+- Taste controls: tracks can be marked "Never play on radio" or "Don't learn
+  from this", applying to every library copy of the same song; Listening
+  History can also forget a song's local recommendation behavior without
+  deleting the user's scrobble history, with imported listens removed only when
+  explicitly requested.
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

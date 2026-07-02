@@ -1,12 +1,16 @@
 #pragma once
 
 #include "core/Track.h"
+#include "reco/TrackScorer.h"
 #include "scrobble/ScrobbleBackfill.h"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 #include <memory>
 
 class ArtworkCache;
@@ -71,10 +75,17 @@ public:
     // queue with recommendations. Returns false (no state change) when the seed
     // path is not a known library track.
     bool startRadio(const QString &seedPath);
+    // Start a seedless, radio-backed library mix. Returns false without state
+    // change when the mode is unknown or filtering cannot produce playable
+    // candidates.
+    bool startMix(const QString &mode);
     // End the session: deactivates radio and tears down the provider/session.
     // Queue contents stay as they are.
     void stopRadio();
     QString radioPickReason(const QString &path) const;
+    bool trackFlag(const QString &trackPath, const QString &flag) const;
+    bool setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on);
+    int forgetTrackBehaviorForSong(const QString &trackPath, bool includeImportedListens);
 
     // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
     // "Batch radio queue"). Backed by the library-DB settings
@@ -146,6 +157,23 @@ private:
     // Build the scrobbler-backfill match index from the library DB (folded
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
+    QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases) const;
+    QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
+    TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
+    QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
+                                                            const QHash<QString, QString> &genreAliases) const;
+    QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
+                                                           const QHash<QString, QString> &genreAliases) const;
+    QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases) const;
+    QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
+    void installRadioProvider(bool markPicksAsRadio);
+    void saveRadioSessionState();
+    void clearRadioSessionState();
+    void maybeRestoreRadioSession();
+    // Maintains the ambient, anchorless radio provider used only by
+    // ShuffleMode::Radio. Explicit Start Radio owns m_radioSession while
+    // PlayerCore::radioActive() is true and takes precedence.
+    void syncRadioShuffleSession();
 
     // Generates up to `count` fresh radio picks from the current rolling
     // context and queues them via PlayerCore::injectTracks (queue-only; see its
@@ -219,4 +247,9 @@ private:
     int               m_radioConsecutiveEarlySkips = 0;
     // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
     bool              m_radioAdventurous = false;
+    bool              m_radioShuffleSessionActive = false;
+    bool              m_radioRestoreDone = false;
+    QString           m_radioSessionKind;
+    QString           m_radioSessionSeedPath;
+    int               m_radioSessionExploration = 30;
 };

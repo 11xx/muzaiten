@@ -22,4 +22,21 @@ inline QString albumKey(const QString &albumArtist, const QString &album)
     return fold(albumArtist) + QLatin1Char('\n') + fold(album);
 }
 
+inline QString songKey(const QString &mbRecordingId, const QString &artist, const QString &title)
+{
+    if (!mbRecordingId.isEmpty()) {
+        return QStringLiteral("mbid:") + mbRecordingId;
+    }
+    return QStringLiteral("at:") + fold(artist) + QLatin1Char('\n') + fold(title);
+}
+
+inline QString albumGroupKey(const QString &releaseGroupMbid, const QString &albumArtist,
+                             const QString &album)
+{
+    if (!releaseGroupMbid.isEmpty()) {
+        return QStringLiteral("rg:") + releaseGroupMbid;
+    }
+    return albumKey(albumArtist, album);
+}
+
 } // namespace FoldKey

@@ -193,6 +193,9 @@ ShuffleMode shuffleModeFromString(const QString &value)
     if (value == QStringLiteral("library")) {
         return ShuffleMode::Library;
     }
+    if (value == QStringLiteral("radio")) {
+        return ShuffleMode::Radio;
+    }
     return ShuffleMode::Off;
 }
 
@@ -801,6 +804,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_albumGrid->setMinimumHeight(kPanelMinimumHeight);
     m_trackTable = new TrackTable(m_centerSplitter);
     m_trackTable->setMinimumHeight(kPanelMinimumHeight);
+    m_trackTable->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
+    });
     m_centerSplitter->setStretchFactor(0, 55);
     m_centerSplitter->setStretchFactor(1, 45);
     m_centerSplitter->setSizes({540, 430});
@@ -812,6 +818,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rightSidebar->setQueueStore(m_queueStore);
     m_rightSidebar->setPickReasonResolver([this](const QString &path) {
         return m_core->radioPickReason(path);
+    });
+    m_rightSidebar->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
     });
 
     m_rootSplitter->addWidget(m_artistSidebar);
@@ -929,7 +938,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             markQueueAsSpontaneous();
         }
     });
-    // libraryShufflePercentChanged is handled by AppCore (state + MPRIS).
+    // Shuffle-percent persistence is handled by AppCore (state + MPRIS).
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
@@ -1101,6 +1110,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
     });
     connect(m_trackTable, &TrackTable::trackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_trackTable, &TrackTable::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
     connect(m_albumGrid, &AlbumGrid::albumSelectionCleared, this, &MainWindow::clearAlbumFilter);
@@ -1325,6 +1335,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_core->setRadioBatchSize(size);
         }
     });
+    connect(m_playerBar, &PlayerBar::rediscoveryMixRequested, this, [this]() {
+        startMix(QStringLiteral("rediscovery"));
+    });
+    connect(m_playerBar, &PlayerBar::deepCutsMixRequested, this, [this]() {
+        startMix(QStringLiteral("deepcuts"));
+    });
     connect(m_playerBar, &PlayerBar::playlistViewRequested, this, [this]() { switchMainView(MainView::Playlist); });
     connect(m_playerBar, &PlayerBar::playlistNewRequested, this, [this]() {
         switchMainView(MainView::Playlist);
@@ -1354,6 +1370,16 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_player->setLibraryShufflePercent(percent);
         }
     });
+    connect(m_playerBar, &PlayerBar::radioShuffleSettingsRequested, this, [this]() {
+        bool ok = false;
+        const int percent = QInputDialog::getInt(
+            this, QStringLiteral("Radio shuffle"),
+            QStringLiteral("Chance to pull a radio pick from the library on each advance (%):"),
+            m_player->radioShufflePercent(), 0, 100, 5, &ok);
+        if (ok) {
+            m_player->setRadioShufflePercent(percent);
+        }
+    });
     connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
@@ -1376,6 +1402,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
+    connect(m_rightSidebar, &RightSidebar::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_rightSidebar, &RightSidebar::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
     connect(m_rightSidebar, &RightSidebar::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
@@ -2833,6 +2860,9 @@ QueueScreen *MainWindow::ensureQueueScreen()
     m_queueScreen->setPickReasonResolver([this](const QString &path) {
         return m_core->radioPickReason(path);
     });
+    m_queueScreen->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
+    });
     m_queueScreen->applyViewSettingsJson(m_state->setting(QStringLiteral("queueScreen.view")));
     m_queueScreen->setKeyBindingProfileName(m_state->setting(QStringLiteral("queueScreen.keyBindingProfile"),
                                                              defaultQueueKeyBindingProfileName()));
@@ -2856,6 +2886,7 @@ QueueScreen *MainWindow::ensureQueueScreen()
     connect(m_queueScreen, &QueueScreen::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
+    connect(m_queueScreen, &QueueScreen::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
@@ -5037,12 +5068,15 @@ void MainWindow::loadPlaybackModes()
 {
     const RepeatMode repeat = repeatModeFromString(m_state->setting(QStringLiteral("playback.repeatMode")));
     const ShuffleMode shuffle = shuffleModeFromString(m_state->setting(QStringLiteral("playback.shuffleMode")));
-    const int percent = std::clamp(
+    const int libraryPercent = std::clamp(
         m_state->setting(QStringLiteral("playback.libraryShufflePercent"), QStringLiteral("20")).toInt(), 0, 100);
-    // Percent first so a restored library-shuffle uses the saved chance. The
+    const int radioPercent = std::clamp(
+        m_state->setting(QStringLiteral("playback.radioShufflePercent"), QStringLiteral("80")).toInt(), 0, 100);
+    // Percents first so restored shuffle modes use their saved chances. The
     // PlayerCore setters only emit on a change, so push the player bar
     // explicitly to cover restoring the default (off) modes too.
-    m_player->setLibraryShufflePercent(percent);
+    m_player->setLibraryShufflePercent(libraryPercent);
+    m_player->setRadioShufflePercent(radioPercent);
     m_player->setRepeatMode(repeat);
     m_player->setShuffleMode(shuffle);
     m_playerBar->setRepeatMode(repeat);
@@ -5536,6 +5570,13 @@ void MainWindow::showListeningHistory()
     connect(&dialog, &ListeningHistoryDialog::statusMessageRequested, this, [this](const QString &message, int timeoutMs) {
         statusBar()->showMessage(message, timeoutMs);
     });
+    connect(&dialog, &ListeningHistoryDialog::forgetBehaviorRequested, this,
+            [this](const Track &track, bool includeImportedListens) {
+                const int removed = m_core->forgetTrackBehaviorForSong(track.path, includeImportedListens);
+                const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
+                statusBar()->showMessage(QStringLiteral("Forgot %1 listening behavior rows for \"%2\"").arg(removed).arg(title),
+                                         5000);
+            });
     dialog.exec();
 }
 
@@ -6070,6 +6111,33 @@ void MainWindow::startRadioFromSeed(const QString &path)
     snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
     if (!m_core->startRadio(path)) {
         statusBar()->showMessage(QStringLiteral("Start Radio: track not found in library"), 4000);
+    }
+}
+
+void MainWindow::applyTrackFlag(const Track &track, const QString &flag, bool on)
+{
+    if (track.path.isEmpty()) {
+        return;
+    }
+    if (!m_core->setTrackFlagForSong(track.path, flag, on)) {
+        statusBar()->showMessage(QStringLiteral("Could not update taste control"), 4000);
+        return;
+    }
+
+    const QString label = flag == QStringLiteral("never_radio")
+        ? QStringLiteral("Never play on radio")
+        : QStringLiteral("Don't learn from this");
+    const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
+    statusBar()->showMessage(QStringLiteral("%1 %2 for \"%3\"")
+                                 .arg(label, on ? QStringLiteral("enabled") : QStringLiteral("disabled"), title),
+                             4000);
+}
+
+void MainWindow::startMix(const QString &mode)
+{
+    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+    if (!m_core->startMix(mode)) {
+        statusBar()->showMessage(QStringLiteral("Not enough listening data for this mix yet"), 4000);
     }
 }
 

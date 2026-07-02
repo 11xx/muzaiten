@@ -145,6 +145,9 @@ signals:
     void repeatModeChangeRequested(RepeatMode mode);
     void shuffleModeChangeRequested(ShuffleMode mode);
     void libraryShuffleSettingsRequested();
+    void radioShuffleSettingsRequested();
+    void rediscoveryMixRequested();
+    void deepCutsMixRequested();
     void stopRadioRequested();
     // The radio button's right-click menu is opening; MainWindow refreshes the
     // "Adventurous" checked state (it depends on live AppCore state) via

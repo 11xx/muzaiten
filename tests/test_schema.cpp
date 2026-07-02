@@ -22,6 +22,7 @@ private slots:
     void sortTagsFoldIntoSearchIndex();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
+    void trackFlagsRoundTrip();
     void searchTracksLikeUsesPendingRatingOverlay();
     void pendingRatingWritesRoundTrip();
     void tracksWithUserRatingsRoundTrip();
@@ -39,6 +40,7 @@ private slots:
     void trackGenresPopulatedOnUpsert();
     void trackGenresBackfillOnceFromBlobs();
     void trackGenresCascadeOnTrackDelete();
+    void genreAliasesRoundTripAndMigrationIsIdempotent();
     void genreTagsSplitsAndFolds();
 };
 
@@ -76,7 +78,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 10);
+    QCOMPARE(query.value(0).toInt(), 12);
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
@@ -194,6 +196,36 @@ void SchemaTest::pendingUserRatingOverridesScannedRating()
     QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
     tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::trackFlagsRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-track-flags-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const QString pathA = temp.filePath(QStringLiteral("Artist/Album/01.flac"));
+    const QString pathB = temp.filePath(QStringLiteral("Artist/Album/02.flac"));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NoLearn));
+
+    QVERIFY2(database.setTrackFlag(pathA, Database::TrackFlag::NeverRadio, true), qPrintable(database.lastError()));
+    QVERIFY(database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NoLearn));
+    QCOMPARE(database.flaggedPaths(Database::TrackFlag::NeverRadio), QSet<QString>({pathA}));
+    QVERIFY(database.flaggedPaths(Database::TrackFlag::NoLearn).isEmpty());
+
+    QVERIFY2(database.setTrackFlag(pathA, Database::TrackFlag::NoLearn, true), qPrintable(database.lastError()));
+    QVERIFY2(database.setTrackFlag(pathB, Database::TrackFlag::NoLearn, true), qPrintable(database.lastError()));
+    QVERIFY(database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QCOMPARE(database.flaggedPaths(Database::TrackFlag::NoLearn), QSet<QString>({pathA, pathB}));
+
+    QVERIFY2(database.setTrackFlag(pathA, Database::TrackFlag::NeverRadio, false), qPrintable(database.lastError()));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QVERIFY(database.trackFlag(pathA, Database::TrackFlag::NoLearn));
+    QVERIFY(database.flaggedPaths(Database::TrackFlag::NeverRadio).isEmpty());
 }
 
 void SchemaTest::searchTracksLikeUsesPendingRatingOverlay()
@@ -803,6 +835,33 @@ void SchemaTest::trackGenresCascadeOnTrackDelete()
     QVERIFY(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM track_genres")));
     QVERIFY(countQuery.next());
     QCOMPARE(countQuery.value(0).toInt(), 0);
+}
+
+void SchemaTest::genreAliasesRoundTripAndMigrationIsIdempotent()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString connectionName = QStringLiteral("schema-genre-alias-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    QHash<QString, QString> aliases = database.genreAliases();
+    QCOMPARE(aliases.value(QStringLiteral("clássica")), QStringLiteral("classical"));
+    QCOMPARE(aliases.value(QStringLiteral("classique")), QStringLiteral("classical"));
+
+    QVERIFY2(database.setGenreAlias(QStringLiteral("  Électro  "), QStringLiteral(" Electronic ")),
+             qPrintable(database.lastError()));
+    aliases = database.genreAliases();
+    QCOMPARE(aliases.value(QStringLiteral("électro")), QStringLiteral("electronic"));
+
+    QVERIFY2(database.removeGenreAlias(QStringLiteral("Électro")), qPrintable(database.lastError()));
+    aliases = database.genreAliases();
+    QVERIFY(!aliases.contains(QStringLiteral("électro")));
+
+    QVERIFY2(database.migrate(), qPrintable(database.lastError()));
+    aliases = database.genreAliases();
+    QCOMPARE(aliases.value(QStringLiteral("clássica")), QStringLiteral("classical"));
+    QCOMPARE(aliases.value(QStringLiteral("classique")), QStringLiteral("classical"));
 }
 
 void SchemaTest::genreTagsSplitsAndFolds()
