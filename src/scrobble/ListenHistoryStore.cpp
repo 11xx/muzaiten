@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QMetaType>
 #include <QSqlQuery>
+#include <QStringList>
 #include <QVariant>
 
 namespace {
@@ -110,6 +111,34 @@ QString owedColumn(const QString &service)
         return QStringLiteral("owed_listenbrainz");
     }
     return {};
+}
+
+QString placeholders(qsizetype count)
+{
+    QStringList marks;
+    marks.reserve(count);
+    for (qsizetype i = 0; i < count; ++i) {
+        marks << QStringLiteral("?");
+    }
+    return marks.join(QStringLiteral(", "));
+}
+
+int deleteByPaths(QSqlDatabase database, const QString &table, const QString &column, const QStringList &paths)
+{
+    if (paths.isEmpty()) {
+        return 0;
+    }
+
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral("DELETE FROM %1 WHERE %2 IN (%3)")
+                      .arg(table, column, placeholders(paths.size())));
+    for (const QString &path : paths) {
+        query.addBindValue(path);
+    }
+    if (!query.exec()) {
+        return 0;
+    }
+    return query.numRowsAffected();
 }
 
 } // namespace
@@ -496,6 +525,36 @@ int ListenHistoryStore::playEventCount() const
         return 0;
     }
     return query.value(0).toInt();
+}
+
+int ListenHistoryStore::forgetTrackBehavior(const QStringList &paths, bool includeImportedListens)
+{
+    if (!m_db.isOpen()) {
+        return 0;
+    }
+
+    QStringList uniquePaths;
+    for (const QString &path : paths) {
+        if (!path.isEmpty() && !uniquePaths.contains(path)) {
+            uniquePaths.push_back(path);
+        }
+    }
+    if (uniquePaths.isEmpty()) {
+        return 0;
+    }
+
+    if (!m_db.transaction()) {
+        return 0;
+    }
+    int removed = deleteByPaths(m_db, QStringLiteral("play_events"), QStringLiteral("track_path"), uniquePaths);
+    if (includeImportedListens) {
+        removed += deleteByPaths(m_db, QStringLiteral("imported_listens"), QStringLiteral("matched_track_path"), uniquePaths);
+    }
+    if (!m_db.commit()) {
+        m_db.rollback();
+        return 0;
+    }
+    return removed;
 }
 
 int ListenHistoryStore::recordImportedListens(const QList<ImportedListen> &rows)

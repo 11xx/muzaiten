@@ -70,6 +70,17 @@ bool execSql(QSqlQuery &query, const QString &sql, QString *error)
     return true;
 }
 
+QString trackFlagColumn(Database::TrackFlag flag)
+{
+    switch (flag) {
+    case Database::TrackFlag::NeverRadio:
+        return QStringLiteral("never_radio");
+    case Database::TrackFlag::NoLearn:
+        return QStringLiteral("no_learn");
+    }
+    return {};
+}
+
 bool tableHasColumn(QSqlDatabase database, const QString &table, const QString &column)
 {
     QSqlQuery query(database);
@@ -595,7 +606,19 @@ bool Database::migrate()
         return false;
     }
 
-    return Schema::currentVersion == 10;
+    // v11: per-track taste flags. AppCore applies these per song key so the
+    // storage remains path-scoped and does not need recommender identity logic.
+    const QStringList v11Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS user_track_flags (track_path TEXT PRIMARY KEY, never_radio INTEGER NOT NULL DEFAULT 0, no_learn INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(11, datetime('now'))"),
+    };
+    for (const QString &statement : v11Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 11;
 }
 
 QString Database::lastError() const
@@ -1264,6 +1287,65 @@ bool Database::clearUserTrackRating(const QString &trackPath)
         return false;
     }
     return true;
+}
+
+bool Database::setTrackFlag(const QString &trackPath, TrackFlag flag, bool on)
+{
+    if (trackPath.isEmpty()) {
+        m_lastError = QStringLiteral("Track path is required");
+        return false;
+    }
+    const QString column = trackFlagColumn(flag);
+    if (column.isEmpty()) {
+        m_lastError = QStringLiteral("Invalid track flag");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO user_track_flags(track_path, %1, updated_at) VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(track_path) DO UPDATE SET %1=excluded.%1, updated_at=datetime('now')")
+                      .arg(column));
+    query.addBindValue(trackPath);
+    query.addBindValue(on ? 1 : 0);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::trackFlag(const QString &trackPath, TrackFlag flag) const
+{
+    const QString column = trackFlagColumn(flag);
+    if (trackPath.isEmpty() || column.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT %1 FROM user_track_flags WHERE track_path = ?").arg(column));
+    query.addBindValue(trackPath);
+    if (!query.exec() || !query.next()) {
+        return false;
+    }
+    return query.value(0).toBool();
+}
+
+QSet<QString> Database::flaggedPaths(TrackFlag flag) const
+{
+    QSet<QString> paths;
+    const QString column = trackFlagColumn(flag);
+    if (column.isEmpty()) {
+        return paths;
+    }
+
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT track_path FROM user_track_flags WHERE %1 <> 0").arg(column))) {
+        while (query.next()) {
+            paths.insert(query.value(0).toString());
+        }
+    }
+    return paths;
 }
 
 bool Database::setPendingTrackRatingWrite(const QString &trackPath, int rating0To100, const QString &status, const QString &lastError)

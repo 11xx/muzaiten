@@ -38,6 +38,7 @@ class TestPlayEvents final : public QObject {
 private slots:
     void storeRoundTrip();
     void storeRejectsInvalid();
+    void storeForgetBehaviorRemovesPlayEventsAndOptionalImports();
     void recorderNaturalFinish();
     void recorderEarlySkipChainsPrevious();
     void recorderPauseExcludedFromPlayed();
@@ -140,6 +141,58 @@ void TestPlayEvents::storeRejectsInvalid()
     QCOMPARE(store.playEventCount(), 0);
     // The valid baseline still records.
     QVERIFY(store.recordPlayEvent(base) > 0);
+}
+
+void TestPlayEvents::storeForgetBehaviorRemovesPlayEventsAndOptionalImports()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    const Track a = makeTrack(QStringLiteral("/music/a.flac"));
+    const Track b = makeTrack(QStringLiteral("/music/b.flac"));
+    QVERIFY(store.recordListen(a, 1000, true, true) > 0);
+
+    PlayEvent eventA;
+    eventA.startedAtSecs = 2000;
+    eventA.playedMs = 5000;
+    eventA.outcome = QStringLiteral("skipped");
+    eventA.source = QStringLiteral("radio");
+    eventA.track = a;
+    eventA.sessionId = QStringLiteral("session");
+    QVERIFY(store.recordPlayEvent(eventA) > 0);
+
+    PlayEvent eventB = eventA;
+    eventB.startedAtSecs = 3000;
+    eventB.track = b;
+    QVERIFY(store.recordPlayEvent(eventB) > 0);
+
+    ListenHistoryStore::ImportedListen importedA;
+    importedA.source = ListenHistoryStore::LastFm;
+    importedA.listenedAtSecs = 4000;
+    importedA.title = a.title;
+    importedA.artist = a.artistName;
+    importedA.matchedTrackPath = a.path;
+
+    ListenHistoryStore::ImportedListen importedB = importedA;
+    importedB.listenedAtSecs = 5000;
+    importedB.title = b.title;
+    importedB.matchedTrackPath = b.path;
+
+    QCOMPARE(store.recordImportedListens({importedA, importedB}), 2);
+    QCOMPARE(store.totalCount(), 1);
+    QCOMPARE(store.playEventCount(), 2);
+    QCOMPARE(store.importedListenCount(ListenHistoryStore::LastFm), 2);
+
+    QCOMPARE(store.forgetTrackBehavior({a.path, a.path}, false), 1);
+    QCOMPARE(store.totalCount(), 1);
+    QCOMPARE(store.playEventCount(), 1);
+    QCOMPARE(store.importedListenCount(ListenHistoryStore::LastFm), 2);
+
+    QCOMPARE(store.forgetTrackBehavior({a.path}, true), 1);
+    QCOMPARE(store.totalCount(), 1);
+    QCOMPARE(store.playEventCount(), 1);
+    QCOMPARE(store.importedListenCount(ListenHistoryStore::LastFm), 1);
 }
 
 void TestPlayEvents::recorderNaturalFinish()

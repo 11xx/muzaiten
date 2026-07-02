@@ -61,6 +61,11 @@
   radio-backed sessions over long-unheard favorites or rarely played tracks by
   artists with strong listening history. Mixes reuse the normal radio queue,
   reasons, indicator, stop control, exploration, and batch-size behavior.
+- Taste controls: tracks can be marked "Never play on radio" or "Don't learn
+  from this", applying to every library copy of the same song; Listening
+  History can also forget a song's local recommendation behavior without
+  deleting the user's scrobble history, with imported listens removed only when
+  explicitly requested.
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

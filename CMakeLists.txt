@@ -69,6 +69,7 @@ set(MUZAITEN_SOURCES
     src/mpris/MprisService.cpp
     src/player/PlayerCore.cpp
     src/reco/AffinityPool.cpp
+    src/reco/RadioFilters.cpp
     src/reco/RadioMix.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp

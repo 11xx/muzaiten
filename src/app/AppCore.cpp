@@ -13,6 +13,7 @@
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "reco/AffinityPool.h"
+#include "reco/RadioFilters.h"
 #include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
@@ -42,6 +43,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -75,6 +77,17 @@ QString shuffleModeToString(ShuffleMode mode)
         break;
     }
     return QStringLiteral("off");
+}
+
+std::optional<Database::TrackFlag> trackFlagFromName(const QString &flag)
+{
+    if (flag == QStringLiteral("never_radio")) {
+        return Database::TrackFlag::NeverRadio;
+    }
+    if (flag == QStringLiteral("no_learn")) {
+        return Database::TrackFlag::NoLearn;
+    }
+    return std::nullopt;
 }
 
 // Leading 4-digit release year from a track's date fields (original date wins);
@@ -734,6 +747,39 @@ QStringList AppCore::radioFoldedGenresForTrack(const QString &path) const
     return genresFolded;
 }
 
+QStringList AppCore::pathsForSongKeyOfTrack(const QString &trackPath) const
+{
+    if (m_database == nullptr || trackPath.isEmpty()) {
+        return {};
+    }
+
+    const auto rows = m_database->trackMatchRows();
+    QString targetSongKey;
+    QList<std::tuple<QString, QString, QString, QString>> cachedRows;
+    cachedRows.reserve(rows.size());
+    for (const auto &[path, artist, title, recordingMbid] : rows) {
+        cachedRows.push_back({path, artist, title, recordingMbid});
+        if (path == trackPath) {
+            targetSongKey = FoldKey::songKey(recordingMbid, artist, title);
+        }
+    }
+    if (targetSongKey.isEmpty()) {
+        return {trackPath};
+    }
+
+    QStringList paths;
+    for (const auto &[path, artist, title, recordingMbid] : cachedRows) {
+        if (FoldKey::songKey(recordingMbid, artist, title) == targetSongKey) {
+            paths.push_back(path);
+        }
+    }
+    if (paths.isEmpty()) {
+        paths.push_back(trackPath);
+    }
+    paths.removeDuplicates();
+    return paths;
+}
+
 TrackScorer::Candidate AppCore::buildRadioSeedCandidate(const Track &seed,
                                                         const QStringList &seedGenresFolded) const
 {
@@ -787,7 +833,10 @@ QVector<TrackScorer::Candidate> AppCore::buildRadioCandidatePool(const QStringLi
     for (const RadioCandidateRow &row : rows) {
         pool.push_back(candidateFromRow(row));
     }
-    return pool;
+    // User taste flags are path-scoped storage but AppCore applies them at the
+    // recommender boundary, after every SQL candidate source has been merged.
+    return RadioFilters::excludeFlaggedCandidates(
+        pool, m_database->flaggedPaths(Database::TrackFlag::NeverRadio));
 }
 
 QVector<TrackScorer::Candidate> AppCore::buildRadioFallbackPool(int limit) const
@@ -802,7 +851,8 @@ QVector<TrackScorer::Candidate> AppCore::buildRadioFallbackPool(int limit) const
     for (const RadioCandidateRow &row : rows) {
         pool.push_back(candidateFromRow(row));
     }
-    return pool;
+    return RadioFilters::excludeFlaggedCandidates(
+        pool, m_database->flaggedPaths(Database::TrackFlag::NeverRadio));
 }
 
 QHash<QString, double> AppCore::buildRadioGenreIdf() const
@@ -833,9 +883,13 @@ QHash<QString, TrackScorer::Affinity> AppCore::buildRadioAffinities() const
         return affinities;
     }
 
+    const QSet<QString> noLearnPaths = m_database->flaggedPaths(Database::TrackFlag::NoLearn);
     const QHash<QString, ListenHistoryStore::TrackAffinityRow> affinityRows = m_listenHistory->trackAffinities();
     affinities.reserve(affinityRows.size());
     for (auto it = affinityRows.cbegin(); it != affinityRows.cend(); ++it) {
+        if (noLearnPaths.contains(it.key())) {
+            continue;
+        }
         affinities.insert(it.key(), affinityFromRow(it.value()));
     }
 
@@ -845,7 +899,9 @@ QHash<QString, TrackScorer::Affinity> AppCore::buildRadioAffinities() const
     for (const auto &[path, artist, title, recordingMbid] : matchRows) {
         pathToSongKey.insert(path, FoldKey::songKey(recordingMbid, artist, title));
     }
-    return AffinityPool::poolBySongKey(affinities, pathToSongKey);
+    pathToSongKey = RadioFilters::excludeFlaggedPathMappings(pathToSongKey, noLearnPaths);
+    return RadioFilters::excludeFlaggedAffinities(
+        AffinityPool::poolBySongKey(affinities, pathToSongKey), noLearnPaths);
 }
 
 void AppCore::saveRadioSessionState()
@@ -1196,6 +1252,52 @@ QString AppCore::radioPickReason(const QString &path) const
         return sentence;
     }
     return sentence + QLatin1Char('\n') + breakdown;
+}
+
+bool AppCore::trackFlag(const QString &trackPath, const QString &flag) const
+{
+    if (m_database == nullptr) {
+        return false;
+    }
+    const std::optional<Database::TrackFlag> parsed = trackFlagFromName(flag);
+    if (!parsed.has_value()) {
+        return false;
+    }
+    return m_database->trackFlag(trackPath, parsed.value());
+}
+
+bool AppCore::setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on)
+{
+    if (m_database == nullptr) {
+        return false;
+    }
+    const std::optional<Database::TrackFlag> parsed = trackFlagFromName(flag);
+    if (!parsed.has_value()) {
+        return false;
+    }
+
+    const QStringList paths = pathsForSongKeyOfTrack(trackPath);
+    if (paths.isEmpty()) {
+        return false;
+    }
+    for (const QString &path : paths) {
+        if (!m_database->setTrackFlag(path, parsed.value(), on)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int AppCore::forgetTrackBehaviorForSong(const QString &trackPath, bool includeImportedListens)
+{
+    if (m_listenHistory == nullptr) {
+        return 0;
+    }
+    const QStringList paths = pathsForSongKeyOfTrack(trackPath);
+    if (paths.isEmpty()) {
+        return 0;
+    }
+    return m_listenHistory->forgetTrackBehavior(paths, includeImportedListens);
 }
 
 int AppCore::radioExploration() const

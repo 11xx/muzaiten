@@ -80,6 +80,11 @@ private:
 
 class Database final {
 public:
+    enum class TrackFlag {
+        NeverRadio,
+        NoLearn,
+    };
+
     explicit Database(QString connectionName);
     ~Database();
 
@@ -126,6 +131,9 @@ public:
     MetadataBlob::FullMetadata fullMetadata(const QString &path) const;
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
+    bool setTrackFlag(const QString &trackPath, TrackFlag flag, bool on);
+    bool trackFlag(const QString &trackPath, TrackFlag flag) const;
+    QSet<QString> flaggedPaths(TrackFlag flag) const;
     bool setPendingTrackRatingWrite(const QString &trackPath, int rating0To100, const QString &status, const QString &lastError = {});
     bool clearPendingTrackRatingWrite(const QString &trackPath);
     QVector<Track> tracksWithUserRatings() const;

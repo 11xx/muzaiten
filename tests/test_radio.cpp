@@ -3,6 +3,7 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "reco/AffinityPool.h"
+#include "reco/RadioFilters.h"
 #include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
@@ -128,6 +129,10 @@ private slots:
     void deepCutsLikedArtistRarePasses();
     void deepCutsOverplayedFails();
     void deepCutsSkipStainedFails();
+
+    // RadioFilters
+    void radioFiltersExcludeFlaggedCandidates();
+    void radioFiltersDropNoLearnBeforeSongPooling();
 
     // TrackScorer
     void genreOverlapDominates();
@@ -360,6 +365,53 @@ void RadioTest::deepCutsSkipStainedFails()
         RadioMix::filterCandidates(RadioMix::Mode::DeepCuts, candidates, affinities, 1000);
 
     QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/skipped")));
+}
+
+// ---- RadioFilters ----------------------------------------------------------
+
+void RadioTest::radioFiltersExcludeFlaggedCandidates()
+{
+    const QVector<TrackScorer::Candidate> candidates = {
+        makeCandidate(QStringLiteral("/music/a.flac"), QStringLiteral("artist"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/music/b.flac"), QStringLiteral("artist"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/music/c.flac"), QStringLiteral("artist"), {QStringLiteral("rock")}),
+    };
+
+    const QVector<TrackScorer::Candidate> filtered = RadioFilters::excludeFlaggedCandidates(
+        candidates, QSet<QString>({QStringLiteral("/music/b.flac")}));
+
+    QCOMPARE(filtered.size(), 2);
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/music/a.flac")));
+    QVERIFY(!containsCandidatePath(filtered, QStringLiteral("/music/b.flac")));
+    QVERIFY(containsCandidatePath(filtered, QStringLiteral("/music/c.flac")));
+}
+
+void RadioTest::radioFiltersDropNoLearnBeforeSongPooling()
+{
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/music/album.flac"), makeAffinity(2, 1, 0, 100, 3, 10)},
+        {QStringLiteral("/music/compilation.flac"), makeAffinity(5, 4, 1, 200, 8, 20)},
+        {QStringLiteral("/music/other.flac"), makeAffinity(1, 1, 0, 50, 1, 0)},
+    };
+    const QHash<QString, QString> pathToSongKey{
+        {QStringLiteral("/music/album.flac"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/music/compilation.flac"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/music/other.flac"), QStringLiteral("mbid:other")},
+    };
+    const QSet<QString> noLearn{QStringLiteral("/music/compilation.flac")};
+
+    const QHash<QString, TrackScorer::Affinity> filteredAffinities =
+        RadioFilters::excludeFlaggedAffinities(byPath, noLearn);
+    const QHash<QString, QString> filteredMappings =
+        RadioFilters::excludeFlaggedPathMappings(pathToSongKey, noLearn);
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(filteredAffinities, filteredMappings);
+
+    QVERIFY(!pooled.contains(QStringLiteral("/music/compilation.flac")));
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/music/album.flac")),
+                      makeAffinity(2, 1, 0, 100, 3, 10));
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/music/other.flac")),
+                      makeAffinity(1, 1, 0, 50, 1, 0));
 }
 
 // ---- TrackScorer -----------------------------------------------------------

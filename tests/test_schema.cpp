@@ -22,6 +22,7 @@ private slots:
     void sortTagsFoldIntoSearchIndex();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
+    void trackFlagsRoundTrip();
     void searchTracksLikeUsesPendingRatingOverlay();
     void pendingRatingWritesRoundTrip();
     void tracksWithUserRatingsRoundTrip();
@@ -76,7 +77,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 10);
+    QCOMPARE(query.value(0).toInt(), 11);
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
@@ -194,6 +195,36 @@ void SchemaTest::pendingUserRatingOverridesScannedRating()
     QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
     tracks = database.tracksForArtist(QStringLiteral("Album Artist"));
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::trackFlagsRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-track-flags-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const QString pathA = temp.filePath(QStringLiteral("Artist/Album/01.flac"));
+    const QString pathB = temp.filePath(QStringLiteral("Artist/Album/02.flac"));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NoLearn));
+
+    QVERIFY2(database.setTrackFlag(pathA, Database::TrackFlag::NeverRadio, true), qPrintable(database.lastError()));
+    QVERIFY(database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NoLearn));
+    QCOMPARE(database.flaggedPaths(Database::TrackFlag::NeverRadio), QSet<QString>({pathA}));
+    QVERIFY(database.flaggedPaths(Database::TrackFlag::NoLearn).isEmpty());
+
+    QVERIFY2(database.setTrackFlag(pathA, Database::TrackFlag::NoLearn, true), qPrintable(database.lastError()));
+    QVERIFY2(database.setTrackFlag(pathB, Database::TrackFlag::NoLearn, true), qPrintable(database.lastError()));
+    QVERIFY(database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QCOMPARE(database.flaggedPaths(Database::TrackFlag::NoLearn), QSet<QString>({pathA, pathB}));
+
+    QVERIFY2(database.setTrackFlag(pathA, Database::TrackFlag::NeverRadio, false), qPrintable(database.lastError()));
+    QVERIFY(!database.trackFlag(pathA, Database::TrackFlag::NeverRadio));
+    QVERIFY(database.trackFlag(pathA, Database::TrackFlag::NoLearn));
+    QVERIFY(database.flaggedPaths(Database::TrackFlag::NeverRadio).isEmpty());
 }
 
 void SchemaTest::searchTracksLikeUsesPendingRatingOverlay()

@@ -83,6 +83,9 @@ public:
     // Queue contents stay as they are.
     void stopRadio();
     QString radioPickReason(const QString &path) const;
+    bool trackFlag(const QString &trackPath, const QString &flag) const;
+    bool setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on);
+    int forgetTrackBehaviorForSong(const QString &trackPath, bool includeImportedListens);
 
     // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
     // "Batch radio queue"). Backed by the library-DB settings
@@ -155,6 +158,7 @@ private:
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
     QStringList radioFoldedGenresForTrack(const QString &path) const;
+    QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
     TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit) const;
