@@ -265,9 +265,9 @@ void RadioSession::notePlayed(const Track &track)
     QString songKey = FoldKey::songKey(track.musicBrainz.recordingId, track.artistName, track.title);
     const auto it = m_byPath.constFind(track.path);
     if (it != m_byPath.constEnd()) {
-        // Filter here too: pool candidates carry their raw (unfiltered) genre
-        // set, and this is the other chokepoint genres enter the rolling
-        // context through.
+        // Filter here too: pool candidates already carry canonical genre keys,
+        // and this is the other chokepoint genres enter the rolling context
+        // through.
         genres = GenreTags::informative(it->genresFolded);
         albumKey = it->albumKey;
         songKey = it->songKey;

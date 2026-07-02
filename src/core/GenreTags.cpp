@@ -10,6 +10,11 @@ QString folded(const QString &genre)
     return genre.simplified().toCaseFolded();
 }
 
+QString canonical(const QString &folded, const QHash<QString, QString> &aliases)
+{
+    return aliases.value(folded, folded);
+}
+
 QStringList fromMetadata(const MetadataBlob::FullMetadata &metadata)
 {
     QStringList genres;

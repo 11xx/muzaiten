@@ -170,10 +170,13 @@ private slots:
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
+    void genreAliasesExpandCandidatesAndMergeCounts();
     void genreTrackCountsAggregatesAcrossLibrary();
     void trackAffinitiesAggregateAllSources();
 
     // GenreTags
+    void genreCanonicalIdentityAndMapping();
+    void genreCanonicalStoplistAfterMapping();
     void nonGenrePlaceholdersAreStoplisted();
     void informativeFiltersStoplistedGenres();
 };
@@ -1136,6 +1139,39 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
     QCOMPARE(fallback.size(), 3);
 }
 
+void RadioTest::genreAliasesExpandCandidatesAndMergeCounts()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("genre-alias-radio-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track canonical = makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Classical")},
+                                        QStringLiteral("2004-05-06"));
+    const Track portuguese = makeDbTrack(dir, QStringLiteral("02.flac"), {QString::fromUtf8("Clássica")},
+                                         QStringLiteral("1999"));
+    QVERIFY2(db.upsertTrack(canonical), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(portuguese), qPrintable(db.lastError()));
+
+    const QVector<RadioCandidateRow> rows = db.radioCandidates({QStringLiteral("classical")});
+    QCOMPARE(rows.size(), 2);
+    QVERIFY(containsCandidatePath(QVector<TrackScorer::Candidate>{
+                                      makeCandidate(rows.at(0).path, QStringLiteral("artist"), {}),
+                                      makeCandidate(rows.at(1).path, QStringLiteral("artist"), {}),
+                                  },
+                                  portuguese.path));
+
+    int taggedTrackTotal = 0;
+    const QHash<QString, int> rawCounts = db.genreTrackCounts(&taggedTrackTotal);
+    const QHash<QString, QString> aliases = db.genreAliases();
+    QHash<QString, int> canonicalCounts;
+    for (auto it = rawCounts.cbegin(); it != rawCounts.cend(); ++it) {
+        canonicalCounts[GenreTags::canonical(it.key(), aliases)] += it.value();
+    }
+    QCOMPARE(canonicalCounts.value(QStringLiteral("classical")), 2);
+    QCOMPARE(taggedTrackTotal, 2);
+}
+
 void RadioTest::genreTrackCountsAggregatesAcrossLibrary()
 {
     QTemporaryDir dir;
@@ -1243,6 +1279,27 @@ void RadioTest::trackAffinitiesAggregateAllSources()
 }
 
 // ---- GenreTags --------------------------------------------------------------
+
+void RadioTest::genreCanonicalIdentityAndMapping()
+{
+    const QHash<QString, QString> aliases{
+        {QString::fromUtf8("clássica"), QStringLiteral("classical")},
+    };
+
+    QCOMPARE(GenreTags::canonical(QStringLiteral("rock"), aliases), QStringLiteral("rock"));
+    QCOMPARE(GenreTags::canonical(QString::fromUtf8("clássica"), aliases), QStringLiteral("classical"));
+}
+
+void RadioTest::genreCanonicalStoplistAfterMapping()
+{
+    const QHash<QString, QString> aliases{
+        {QStringLiteral("miscellaneous"), QStringLiteral("misc")},
+    };
+
+    const QString canonical = GenreTags::canonical(QStringLiteral("miscellaneous"), aliases);
+    QCOMPARE(canonical, QStringLiteral("misc"));
+    QVERIFY(GenreTags::isNonGenre(canonical));
+}
 
 void RadioTest::nonGenrePlaceholdersAreStoplisted()
 {

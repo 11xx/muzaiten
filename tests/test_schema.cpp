@@ -40,6 +40,7 @@ private slots:
     void trackGenresPopulatedOnUpsert();
     void trackGenresBackfillOnceFromBlobs();
     void trackGenresCascadeOnTrackDelete();
+    void genreAliasesRoundTripAndMigrationIsIdempotent();
     void genreTagsSplitsAndFolds();
 };
 
@@ -77,7 +78,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 11);
+    QCOMPARE(query.value(0).toInt(), 12);
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
@@ -834,6 +835,33 @@ void SchemaTest::trackGenresCascadeOnTrackDelete()
     QVERIFY(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM track_genres")));
     QVERIFY(countQuery.next());
     QCOMPARE(countQuery.value(0).toInt(), 0);
+}
+
+void SchemaTest::genreAliasesRoundTripAndMigrationIsIdempotent()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString connectionName = QStringLiteral("schema-genre-alias-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    QHash<QString, QString> aliases = database.genreAliases();
+    QCOMPARE(aliases.value(QStringLiteral("clássica")), QStringLiteral("classical"));
+    QCOMPARE(aliases.value(QStringLiteral("classique")), QStringLiteral("classical"));
+
+    QVERIFY2(database.setGenreAlias(QStringLiteral("  Électro  "), QStringLiteral(" Electronic ")),
+             qPrintable(database.lastError()));
+    aliases = database.genreAliases();
+    QCOMPARE(aliases.value(QStringLiteral("électro")), QStringLiteral("electronic"));
+
+    QVERIFY2(database.removeGenreAlias(QStringLiteral("Électro")), qPrintable(database.lastError()));
+    aliases = database.genreAliases();
+    QVERIFY(!aliases.contains(QStringLiteral("électro")));
+
+    QVERIFY2(database.migrate(), qPrintable(database.lastError()));
+    aliases = database.genreAliases();
+    QCOMPARE(aliases.value(QStringLiteral("clássica")), QStringLiteral("classical"));
+    QCOMPARE(aliases.value(QStringLiteral("classique")), QStringLiteral("classical"));
 }
 
 void SchemaTest::genreTagsSplitsAndFolds()

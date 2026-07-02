@@ -175,6 +175,26 @@ QString sqlPlaceholders(qsizetype count)
     return marks.join(QStringLiteral(", "));
 }
 
+QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases)
+{
+    QStringList terms;
+    QSet<QString> seen;
+    for (const QString &genre : foldedGenres) {
+        const QString canonical = GenreTags::canonical(genre, aliases);
+        if (!canonical.isEmpty() && !seen.contains(canonical)) {
+            seen.insert(canonical);
+            terms.push_back(canonical);
+        }
+        for (auto it = aliases.cbegin(); it != aliases.cend(); ++it) {
+            if (it.value() == canonical && !seen.contains(it.key())) {
+                seen.insert(it.key());
+                terms.push_back(it.key());
+            }
+        }
+    }
+    return terms;
+}
+
 // Collapse a repeated string (album/artist/codec/date and their lowercased
 // forms) to a single shared COW buffer, so the in-memory search index holds one
 // allocation per distinct value instead of one per track.  QString is implicitly
@@ -618,7 +638,21 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 11;
+    // v12: engine-side genre aliases. Raw track_genres rows stay as scanned;
+    // radio lookups and scoring canonicalize through this table at session time.
+    const QStringList v12Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS genre_aliases (alias_folded TEXT PRIMARY KEY, canonical_folded TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO genre_aliases(alias_folded, canonical_folded, updated_at) VALUES('clássica', 'classical', datetime('now'))"),
+        QStringLiteral("INSERT OR IGNORE INTO genre_aliases(alias_folded, canonical_folded, updated_at) VALUES('classique', 'classical', datetime('now'))"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(12, datetime('now'))"),
+    };
+    for (const QString &statement : v12Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 12;
 }
 
 QString Database::lastError() const
@@ -1077,6 +1111,58 @@ QHash<QString, int> Database::genreTrackCounts(int *taggedTrackTotal) const
         }
     }
     return counts;
+}
+
+QHash<QString, QString> Database::genreAliases() const
+{
+    QHash<QString, QString> aliases;
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT alias_folded, canonical_folded FROM genre_aliases"))) {
+        while (query.next()) {
+            aliases.insert(query.value(0).toString(), query.value(1).toString());
+        }
+    }
+    return aliases;
+}
+
+bool Database::setGenreAlias(const QString &alias, const QString &canonical)
+{
+    const QString aliasFolded = GenreTags::folded(alias);
+    const QString canonicalFolded = GenreTags::folded(canonical);
+    if (aliasFolded.isEmpty() || canonicalFolded.isEmpty()) {
+        m_lastError = QStringLiteral("Genre alias and canonical genre are required");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO genre_aliases(alias_folded, canonical_folded, updated_at) VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(alias_folded) DO UPDATE SET canonical_folded=excluded.canonical_folded, updated_at=datetime('now')"));
+    query.addBindValue(aliasFolded);
+    query.addBindValue(canonicalFolded);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::removeGenreAlias(const QString &alias)
+{
+    const QString aliasFolded = GenreTags::folded(alias);
+    if (aliasFolded.isEmpty()) {
+        m_lastError = QStringLiteral("Genre alias is required");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM genre_aliases WHERE alias_folded = ?"));
+    query.addBindValue(aliasFolded);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 QVector<Artist> Database::albumArtists() const
@@ -1803,6 +1889,10 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
     if (foldedGenres.isEmpty() || limit <= 0) {
         return rows;
     }
+    const QStringList lookupGenres = radioGenreLookupTerms(foldedGenres, genreAliases());
+    if (lookupGenres.isEmpty()) {
+        return rows;
+    }
     // Genre join selects the pool; the correlated subquery keeps a track that
     // shares ANY seed genre, while the outer GROUP_CONCAT still returns ALL of
     // that track's folded genres (not just the matched ones).
@@ -1818,7 +1908,7 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
         "AND t.id IN (SELECT track_id FROM track_genres WHERE genre_folded IN (%1))")
-        .arg(sqlPlaceholders(foldedGenres.size()));
+        .arg(sqlPlaceholders(lookupGenres.size()));
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -1826,7 +1916,7 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
 
     QSqlQuery query(m_db);
     query.prepare(sql);
-    for (const QString &genre : foldedGenres) {
+    for (const QString &genre : lookupGenres) {
         query.addBindValue(genre);
     }
     query.addBindValue(limit);

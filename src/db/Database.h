@@ -151,6 +151,9 @@ public:
     // `taggedTrackTotal`, if non-null, receives the count of distinct tracks
     // carrying at least one genre (the IDF numerator base).
     QHash<QString, int> genreTrackCounts(int *taggedTrackTotal = nullptr) const;
+    QHash<QString, QString> genreAliases() const;
+    bool setGenreAlias(const QString &alias, const QString &canonical);
+    bool removeGenreAlias(const QString &alias);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

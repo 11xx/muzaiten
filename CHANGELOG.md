@@ -35,9 +35,13 @@
   either bucket can be switched to unlimited from Saved queue limits. The player
   bar shows a radio indicator button next to shuffle/repeat while a session is
   active; clicking it stops the radio and keeps the queue. Genre matching now
-  weights shared genres by rarity (IDF) instead of a plain overlap ratio, so a
-  broad or junk genre like "Other" can no longer dominate a session by itself;
-  tagger placeholder genres ("Other", "Unknown", "Various", ...) are ignored entirely — they
+  canonicalizes engine-side aliases before matching and weights shared genres
+  by rarity (IDF) instead of a plain overlap ratio, so multilingual variants
+  like "clássica"/"classique" can count as "classical" while the raw scanned
+  genre tags remain untouched; the starter alias set is intentionally small and
+  will grow through user curation. A broad or junk genre like "Other" can no
+  longer dominate a session by itself; tagger placeholder genres ("Other",
+  "Unknown", "Various", ...) are ignored entirely — they
   never seed a candidate pool or count as a genre match — and every session's
   candidate pool always blends in a random library slice so radio can escape
   a single genre cohort even when the seed's only genre is uninformative.
