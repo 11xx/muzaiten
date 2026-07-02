@@ -47,6 +47,12 @@ public:
     static QString matchTrackPath(const LibraryIndex &index, const QString &mbRecordingId,
                                   const QString &artist, const QString &title);
 
+    // Meta keys shared with AppCore, which reads/writes them from the main
+    // thread's ListenHistoryStore instance to drive eager auto-resume and the
+    // cancel-vs-interrupt distinction (see AppCore::startBackfill/cancelBackfill).
+    static const QString OldestTsMetaKey;   // "backfill.listenbrainz.oldest_ts"
+    static const QString CanceledMetaKey;   // "backfill.listenbrainz.canceled": "1" when explicitly canceled
+
 public slots:
     // Import full ListenBrainz history: validate token -> username, then page
     // /1/user/{name}/listens downward by max_ts from the persisted cursor (or
@@ -62,8 +68,11 @@ public slots:
     void abort();
 
 signals:
-    void progress(QString source, int processed, int inserted);
-    void finished(QString source, int processed, int inserted, QString message);
+    // reachedTs is the ListenBrainz cursor after the page just processed (0 for
+    // Last.fm, which has no timeline position); total is the listen-count total
+    // (0 when unknown, or for Last.fm).
+    void progress(QString source, int processed, int inserted, qint64 reachedTs, qint64 total);
+    void finished(QString source, int processed, int inserted, qint64 total, QString message);
     void failed(QString source, QString message);
 
 private:
@@ -75,6 +84,10 @@ private:
 
     // ListenBrainz flow.
     void validateListenBrainzToken();
+    // Best-effort total listen count, fetched once after token validation and
+    // before the first listens page. A failure here is non-fatal: the import
+    // proceeds with total 0 (unknown), it's a display nicety only.
+    void requestListenBrainzListenCount();
     void requestListenBrainzPage();
     void handleListenBrainzPage();
 
@@ -108,6 +121,7 @@ private:
 
     qint64 m_lbCursor = 0;                    // current max_ts (0 = from now)
     bool m_lbEarlyStopAllowed = false;        // re-run after completion may stop early
+    qint64 m_lbTotalListens = 0;              // from /listen-count; 0 = unknown
 
     int m_lfPage = 0;
     int m_lfTotalPages = 0;

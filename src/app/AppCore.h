@@ -29,6 +29,19 @@ class AppCore final : public QObject {
     Q_OBJECT
 
 public:
+    // Main-thread mirror of the backfill worker's state, refreshed from its
+    // progress/finished/failed signals. Consumed by the Scrobblers menu (see
+    // MainWindow::updateBackfillStatusDisplay) and the IPC "status" reply.
+    struct BackfillStatus {
+        QString service;          // ListenHistoryStore::ListenBrainz/LastFm, empty when never run
+        bool running = false;
+        int processed = 0;
+        int inserted = 0;
+        qint64 reachedTs = 0;      // ListenBrainz cursor reached; 0 for Last.fm/unknown
+        qint64 totalListens = 0;   // ListenBrainz listen-count total; 0 when unknown/Last.fm
+        QString lastMessage;       // outcome of the most recent finished/failed run
+    };
+
     explicit AppCore(QObject *parent = nullptr);
     ~AppCore() override;
 
@@ -68,6 +81,23 @@ public:
 
     void setTrayAlwaysVisible(bool visible);
 
+    // Shared start path for the scrobbler backfill, used by both the IPC
+    // handler and the Scrobblers menu. Returns "started" | "already-running" |
+    // "missing-credentials" | "unknown-service". Starting ListenBrainz clears
+    // any stale canceled flag so a later interruption can auto-resume again.
+    QString startBackfill(const QString &service);
+    // Explicit cancel: the ONLY thing that stops eager auto-resume. Marks the
+    // ListenBrainz canceled flag (via the main-thread store, so it survives
+    // even if the app quits before the worker acknowledges) then asks the
+    // worker to abort.
+    void cancelBackfill();
+    BackfillStatus backfillStatus() const { return m_backfillStatus; }
+
+signals:
+    // Emitted on every backfill progress/finished/failed update, so the
+    // Scrobblers menu (which stays open while browsing) can refresh live.
+    void backfillStatusChanged();
+
 public slots:
     void showWindow();
     void releaseWindow();
@@ -78,6 +108,9 @@ public slots:
     void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
 
 private:
+    // ~20s after construction, eagerly resume an interrupted ListenBrainz
+    // import if one is pending (see startBackfill's cancel-vs-interrupt rule).
+    void maybeAutoResumeListenBrainzBackfill();
     void setupMprisWiring();
     void setupScrobbleWiring();
     void setupIpcHandler();
@@ -112,6 +145,7 @@ private:
     // Main-thread mirror of the worker's busy state, so the IPC trigger can
     // report "already running" without a cross-thread query.
     bool              m_backfillRunning = false;
+    BackfillStatus    m_backfillStatus;
     MprisService     *m_mpris = nullptr;
     IpcServer        *m_ipc = nullptr;
     QSystemTrayIcon  *m_tray = nullptr;

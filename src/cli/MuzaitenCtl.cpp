@@ -12,6 +12,7 @@
 #include "search/SearchRecord.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -61,6 +62,8 @@ void printUsage()
         "  enqueue [--play|--next] <path...>  add files to the queue\n"
         "  raise                   show and focus the running instance's window\n"
         "  scrobble-backfill <listenbrainz|lastfm>  import listening history / sync play counts\n"
+        "  scrobble-backfill status                 show progress of the current/last backfill\n"
+        "  scrobble-backfill cancel                 cancel a running backfill (stops auto-resume)\n"
         "  start-radio <path>      start a radio session seeded from a library track\n"
         "  stop-radio              stop the current radio session\n"
         "\n"
@@ -555,11 +558,12 @@ int main(int argc, char **argv)
         }
     } else if (command == QLatin1String("scrobble-backfill")) {
         if (arguments.isEmpty()) {
-            return fail(QStringLiteral("scrobble-backfill needs a service: listenbrainz or lastfm"));
+            return fail(QStringLiteral("scrobble-backfill needs a service: listenbrainz, lastfm, status, or cancel"));
         }
         const QString service = arguments.first().toLower();
-        if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")) {
-            return fail(QStringLiteral("scrobble-backfill service must be listenbrainz or lastfm"));
+        if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")
+            && service != QLatin1String("status") && service != QLatin1String("cancel")) {
+            return fail(QStringLiteral("scrobble-backfill service must be listenbrainz, lastfm, status, or cancel"));
         }
         args.insert(QStringLiteral("service"), service);
     } else if (command == QLatin1String("start-radio")) {
@@ -658,9 +662,36 @@ int main(int argc, char **argv)
         return 0;
     }
     if (command == QLatin1String("scrobble-backfill")) {
-        std::printf("%s: %s\n",
-                    qPrintable(response.value(QStringLiteral("service")).toString()),
-                    qPrintable(response.value(QStringLiteral("backfill")).toString(QStringLiteral("started"))));
+        // "status" replies carry BackfillStatus fields directly (no "backfill"
+        // key); "cancel" and the service starters reply with {"backfill": ...}.
+        if (!response.contains(QStringLiteral("backfill"))) {
+            const QString service = response.value(QStringLiteral("service")).toString();
+            const bool running = response.value(QStringLiteral("running")).toBool();
+            std::printf("service: %s\n", qPrintable(service.isEmpty() ? QStringLiteral("(none)") : service));
+            std::printf("running: %s\n", running ? "yes" : "no");
+            std::printf("processed: %s\n", qPrintable(QString::number(response.value(QStringLiteral("processed")).toDouble(), 'f', 0)));
+            std::printf("stored: %s\n", qPrintable(QString::number(response.value(QStringLiteral("inserted")).toDouble(), 'f', 0)));
+            const qint64 reachedTs = static_cast<qint64>(response.value(QStringLiteral("reachedTs")).toDouble());
+            if (reachedTs > 0) {
+                std::printf("reached: %s\n", qPrintable(QDateTime::fromSecsSinceEpoch(reachedTs).toString(Qt::ISODate)));
+            }
+            const qint64 total = static_cast<qint64>(response.value(QStringLiteral("totalListens")).toDouble());
+            if (total > 0) {
+                std::printf("total: %s\n", qPrintable(QString::number(total)));
+            }
+            const QString message = response.value(QStringLiteral("message")).toString();
+            if (!message.isEmpty()) {
+                std::printf("message: %s\n", qPrintable(message));
+            }
+            return 0;
+        }
+        const QString service = response.value(QStringLiteral("service")).toString();
+        const QString state = response.value(QStringLiteral("backfill")).toString(QStringLiteral("started"));
+        if (service.isEmpty()) {
+            std::printf("%s\n", qPrintable(state));
+        } else {
+            std::printf("%s: %s\n", qPrintable(service), qPrintable(state));
+        }
         return 0;
     }
     if (command == QLatin1String("start-radio") || command == QLatin1String("stop-radio")) {

@@ -241,6 +241,10 @@ private:
     void clearScrobbleBacklog(const QString &service);
     void triggerScrobbleUpload(const QString &service);
     void updateScrobbleBacklogActions();
+    // Refreshes the Scrobblers menu's backfill status section from
+    // AppCore::backfillStatus() + the ListenBrainz resume cursor/canceled
+    // flag. Called both when the menu opens and on every backfillStatusChanged.
+    void updateBackfillStatusDisplay();
     void setListenBrainzEnabled(bool enabled);
     void setListenBrainzToken();
     void configureLastFm();
@@ -472,6 +476,10 @@ private:
     ListenTracker *m_listenTracker = nullptr;
     ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
     LastFmScrobbler *m_lastFmScrobbler = nullptr;
+    // Tracks the previous backfillStatusChanged running state so a
+    // running->idle transition (finished/failed) can pop a transient
+    // status-bar message exactly once, instead of on every progress tick.
+    bool m_backfillWasRunning = false;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;

@@ -25,11 +25,13 @@ constexpr int kTopTracksPerPage = 1000;
 constexpr int kMinRequestGapMs = 1100;
 constexpr int kMaxPageRetries = 3;
 
-const QString kLbOldestTsKey = QStringLiteral("backfill.listenbrainz.oldest_ts");
 const QString kLbCompletedKey = QStringLiteral("backfill.listenbrainz.completed_at");
 const QString kLfSyncedKey = QStringLiteral("backfill.lastfm.synced_at");
 
 } // namespace
+
+const QString ScrobbleBackfill::OldestTsMetaKey = QStringLiteral("backfill.listenbrainz.oldest_ts");
+const QString ScrobbleBackfill::CanceledMetaKey = QStringLiteral("backfill.listenbrainz.canceled");
 
 ScrobbleBackfill::ScrobbleBackfill(QObject *parent)
     : QObject(parent)
@@ -79,6 +81,7 @@ bool ScrobbleBackfill::beginJob(Job job, const QString &historyPath)
     m_processed = 0;
     m_inserted = 0;
     m_pageRetries = 0;
+    m_lbTotalListens = 0;
     m_history = historyPath.isEmpty() ? nullptr : std::make_unique<ListenHistoryStore>(historyPath);
     return true;
 }
@@ -182,7 +185,7 @@ void ScrobbleBackfill::startListenBrainzImport(const QString &token, const QStri
     // Resume from a prior interrupted run if a cursor persists; otherwise start
     // from now. A previously completed import may stop early once it pages into
     // already-imported history.
-    m_lbCursor = m_history->metaValue(kLbOldestTsKey).toLongLong();
+    m_lbCursor = m_history->metaValue(OldestTsMetaKey).toLongLong();
     m_lbEarlyStopAllowed = !m_history->metaValue(kLbCompletedKey).isEmpty();
     validateListenBrainzToken();
 }
@@ -215,6 +218,38 @@ void ScrobbleBackfill::validateListenBrainzToken()
             return;
         }
         m_username = validation.username;
+        requestListenBrainzListenCount();
+    });
+}
+
+void ScrobbleBackfill::requestListenBrainzListenCount()
+{
+    QNetworkRequest request(
+        QUrl(QStringLiteral("https://api.listenbrainz.org/1/user/%1/listen-count").arg(m_username)));
+    request.setTransferTimeout(30000);
+    request.setRawHeader("Accept", "application/json");
+    request.setRawHeader("Authorization", QStringLiteral("Token %1").arg(m_token).toUtf8());
+
+    m_reply = m_network->get(request);
+    connect(m_reply, &QNetworkReply::finished, this, [this]() {
+        QNetworkReply *reply = m_reply;
+        m_reply = nullptr;
+        const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
+        const bool networkOk = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (m_aborting) {
+            finishFailed(QStringLiteral("aborted"));
+            return;
+        }
+        // Non-fatal: a failed/malformed count just leaves the total unknown
+        // (0) and the import proceeds — it's a display nicety, not a
+        // correctness requirement.
+        if (networkOk) {
+            const BackfillParse::ListenCount count = BackfillParse::parseListenCount(body);
+            if (count.ok) {
+                m_lbTotalListens = count.count;
+            }
+        }
         requestListenBrainzPage();
     });
 }
@@ -262,7 +297,7 @@ void ScrobbleBackfill::handleListenBrainzPage()
             m_timer->start(delay);
             return;
         }
-        m_history->setMetaValue(kLbOldestTsKey, QString::number(m_lbCursor));
+        m_history->setMetaValue(OldestTsMetaKey, QString::number(m_lbCursor));
         finishFailed(QStringLiteral("ListenBrainz import failed after %1 retries").arg(kMaxPageRetries));
         return;
     }
@@ -271,12 +306,13 @@ void ScrobbleBackfill::handleListenBrainzPage()
     // Empty page: reached the end of history. Mark complete and clear the cursor.
     if (page.listens.isEmpty()) {
         m_history->setMetaValue(kLbCompletedKey, QString::number(QDateTime::currentSecsSinceEpoch()));
-        m_history->setMetaValue(kLbOldestTsKey, QString());
+        m_history->setMetaValue(OldestTsMetaKey, QString());
         const QString source = sourceName();
         const int processed = m_processed;
         const int inserted = m_inserted;
+        const qint64 total = m_lbTotalListens;
         endJob();
-        emit finished(source, processed, inserted,
+        emit finished(source, processed, inserted, total,
                       QStringLiteral("imported %1 new listens").arg(inserted));
         return;
     }
@@ -301,20 +337,21 @@ void ScrobbleBackfill::handleListenBrainzPage()
     // Page further back: max_ts is exclusive, so the oldest listened_at becomes
     // the next cursor (the row we already stored is excluded next time).
     m_lbCursor = page.oldestListenedAt;
-    m_history->setMetaValue(kLbOldestTsKey, QString::number(m_lbCursor));
-    emit progress(ListenHistoryStore::ListenBrainz, m_processed, m_inserted);
+    m_history->setMetaValue(OldestTsMetaKey, QString::number(m_lbCursor));
+    emit progress(ListenHistoryStore::ListenBrainz, m_processed, m_inserted, m_lbCursor, m_lbTotalListens);
 
     // Re-run optimization: once a completed import pages into a full page it has
     // already seen (nothing new inserted), everything older is known too — stop.
     if (m_lbEarlyStopAllowed && insertedThisPage == 0
         && static_cast<int>(rows.size()) >= kListensPerPage) {
         m_history->setMetaValue(kLbCompletedKey, QString::number(QDateTime::currentSecsSinceEpoch()));
-        m_history->setMetaValue(kLbOldestTsKey, QString());
+        m_history->setMetaValue(OldestTsMetaKey, QString());
         const QString source = sourceName();
         const int processed = m_processed;
         const int inserted = m_inserted;
+        const qint64 total = m_lbTotalListens;
         endJob();
-        emit finished(source, processed, inserted,
+        emit finished(source, processed, inserted, total,
                       QStringLiteral("imported %1 new listens (reached known history)").arg(inserted));
         return;
     }
@@ -418,7 +455,7 @@ void ScrobbleBackfill::handleLastFmPage()
         }
         ++m_processed;
     }
-    emit progress(ListenHistoryStore::LastFm, m_processed, m_inserted);
+    emit progress(ListenHistoryStore::LastFm, m_processed, m_inserted, 0, 0);
 
     // Done when the last page was reached (or the page carried no tracks).
     if (page.tracks.isEmpty() || (m_lfTotalPages > 0 && m_lfPage >= m_lfTotalPages)) {
@@ -427,7 +464,7 @@ void ScrobbleBackfill::handleLastFmPage()
         const int processed = m_processed;
         const int inserted = m_inserted;
         endJob();
-        emit finished(source, processed, inserted,
+        emit finished(source, processed, inserted, 0,
                       QStringLiteral("synced %1 playcount baselines").arg(inserted));
         return;
     }

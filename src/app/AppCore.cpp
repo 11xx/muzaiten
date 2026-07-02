@@ -223,19 +223,37 @@ AppCore::AppCore(QObject *parent)
     m_scrobbleBackfill->moveToThread(m_scrobbleBackfillThread);
     connect(m_scrobbleBackfillThread, &QThread::finished, m_scrobbleBackfill, &QObject::deleteLater);
     connect(m_scrobbleBackfill, &ScrobbleBackfill::progress, this,
-            [](const QString &source, int processed, int inserted) {
+            [this](const QString &source, int processed, int inserted, qint64 reachedTs, qint64 total) {
+                m_backfillStatus.service = source;
+                m_backfillStatus.running = true;
+                m_backfillStatus.processed = processed;
+                m_backfillStatus.inserted = inserted;
+                m_backfillStatus.reachedTs = reachedTs;
+                m_backfillStatus.totalListens = total;
                 qInfo("scrobble-backfill[%s]: processed %d, stored %d", qPrintable(source), processed, inserted);
+                emit backfillStatusChanged();
             });
     connect(m_scrobbleBackfill, &ScrobbleBackfill::finished, this,
-            [this](const QString &source, int processed, int inserted, const QString &message) {
+            [this](const QString &source, int processed, int inserted, qint64 total, const QString &message) {
                 m_backfillRunning = false;
+                m_backfillStatus.service = source;
+                m_backfillStatus.running = false;
+                m_backfillStatus.processed = processed;
+                m_backfillStatus.inserted = inserted;
+                m_backfillStatus.totalListens = total;
+                m_backfillStatus.lastMessage = message;
                 qInfo("scrobble-backfill[%s]: done — %s (processed %d, stored %d)",
                       qPrintable(source), qPrintable(message), processed, inserted);
+                emit backfillStatusChanged();
             });
     connect(m_scrobbleBackfill, &ScrobbleBackfill::failed, this,
             [this](const QString &source, const QString &message) {
                 m_backfillRunning = false;
+                m_backfillStatus.service = source;
+                m_backfillStatus.running = false;
+                m_backfillStatus.lastMessage = message;
                 qWarning("scrobble-backfill[%s]: failed — %s", qPrintable(source), qPrintable(message));
+                emit backfillStatusChanged();
             });
     m_scrobbleBackfillThread->start();
 
@@ -248,6 +266,12 @@ AppCore::AppCore(QObject *parent)
     // Playback resume is deferred to the first showWindow(): the saved queue is
     // loaded by MainWindow's constructor (loadQueueState), so the player's queue
     // is empty here. restoreSavedPlayback() is guarded to run once per process.
+
+    // Eagerly resume an interrupted ListenBrainz backfill, but not immediately:
+    // give startup I/O (library/db opens, scan resume, tray/mpris wiring) a
+    // window to settle first so the import doesn't compete with it for disk
+    // and CPU right as the app comes up.
+    QTimer::singleShot(20000, this, [this]() { maybeAutoResumeListenBrainzBackfill(); });
 }
 
 AppCore::~AppCore()
@@ -715,6 +739,91 @@ ScrobbleBackfill::LibraryIndex AppCore::buildLibraryIndex() const
     return index;
 }
 
+QString AppCore::startBackfill(const QString &service)
+{
+    const QString normalized = service.trimmed().toLower();
+    if (normalized != QLatin1String("listenbrainz") && normalized != QLatin1String("lastfm")) {
+        return QStringLiteral("unknown-service");
+    }
+    if (m_backfillRunning) {
+        return QStringLiteral("already-running");
+    }
+
+    const ScrobbleBackfill::LibraryIndex index = buildLibraryIndex();
+    const QString historyPath = listenHistoryPath();
+    if (normalized == QLatin1String("listenbrainz")) {
+        const QString token = m_database->setting(QStringLiteral("listenbrainz.token")).trimmed();
+        if (token.isEmpty()) {
+            return QStringLiteral("missing-credentials");
+        }
+        // A fresh, explicit start (manual or auto-resumed) means any earlier
+        // cancel no longer applies — clear it so a later interruption can
+        // auto-resume again. Auto-resume itself only gets here when the flag
+        // was already clear, so this is a no-op on that path.
+        if (m_listenHistory != nullptr && m_listenHistory->isOpen()) {
+            m_listenHistory->setMetaValue(ScrobbleBackfill::CanceledMetaKey, QString());
+        }
+        m_backfillRunning = true;
+        m_backfillStatus = BackfillStatus{};
+        m_backfillStatus.service = ListenHistoryStore::ListenBrainz;
+        m_backfillStatus.running = true;
+        emit backfillStatusChanged();
+        QMetaObject::invokeMethod(m_scrobbleBackfill, "startListenBrainzImport", Qt::QueuedConnection,
+                                  Q_ARG(QString, token), Q_ARG(QString, historyPath),
+                                  Q_ARG(ScrobbleBackfill::LibraryIndex, index));
+    } else {
+        const QString username = m_database->setting(QStringLiteral("lastfm.username")).trimmed();
+        // API key fallback chain, mirroring MainWindow::lastFmApiKey().
+        QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey")).trimmed();
+        if (apiKey.isEmpty()) {
+            apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
+        }
+        if (apiKey.isEmpty()) {
+            apiKey = QString::fromStdString(LastFmCredentials::defaultApiKey()).trimmed();
+        }
+        if (username.isEmpty() || apiKey.isEmpty()) {
+            return QStringLiteral("missing-credentials");
+        }
+        m_backfillRunning = true;
+        m_backfillStatus = BackfillStatus{};
+        m_backfillStatus.service = ListenHistoryStore::LastFm;
+        m_backfillStatus.running = true;
+        emit backfillStatusChanged();
+        QMetaObject::invokeMethod(m_scrobbleBackfill, "startLastFmCountSync", Qt::QueuedConnection,
+                                  Q_ARG(QString, apiKey), Q_ARG(QString, username),
+                                  Q_ARG(QString, historyPath),
+                                  Q_ARG(ScrobbleBackfill::LibraryIndex, index));
+    }
+    return QStringLiteral("started");
+}
+
+void AppCore::cancelBackfill()
+{
+    // Write the flag first (and from the main thread's own store instance) so
+    // it survives even if the app quits before the worker thread acknowledges
+    // the abort. Harmless when nothing is running or the job is Last.fm — the
+    // flag only gates ListenBrainz auto-resume.
+    if (m_listenHistory != nullptr && m_listenHistory->isOpen()) {
+        m_listenHistory->setMetaValue(ScrobbleBackfill::CanceledMetaKey, QStringLiteral("1"));
+    }
+    QMetaObject::invokeMethod(m_scrobbleBackfill, "abort", Qt::QueuedConnection);
+}
+
+void AppCore::maybeAutoResumeListenBrainzBackfill()
+{
+    if (m_backfillRunning || m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
+        return;
+    }
+    const QString cursor = m_listenHistory->metaValue(ScrobbleBackfill::OldestTsMetaKey);
+    const QString canceled = m_listenHistory->metaValue(ScrobbleBackfill::CanceledMetaKey);
+    const QString token = m_database->setting(QStringLiteral("listenbrainz.token")).trimmed();
+    if (cursor.isEmpty() || !canceled.isEmpty() || token.isEmpty()) {
+        return;
+    }
+    qInfo("scrobble-backfill: resuming interrupted ListenBrainz import");
+    startBackfill(QStringLiteral("listenbrainz"));
+}
+
 QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject &args)
 {
     const auto error = [](const QString &message) {
@@ -896,48 +1005,27 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
     }
     if (command == QLatin1String("scrobble-backfill")) {
         const QString service = args.value(QStringLiteral("service")).toString().trimmed().toLower();
-        if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")) {
-            return error(QStringLiteral("scrobble-backfill needs \"service\": \"listenbrainz\" or \"lastfm\""));
+        if (service == QLatin1String("cancel")) {
+            cancelBackfill();
+            return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("cancel-requested")}};
         }
-        if (m_backfillRunning) {
-            return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("already-running")},
-                               {QStringLiteral("service"), service}};
+        if (service == QLatin1String("status")) {
+            const BackfillStatus current = backfillStatus();
+            return QJsonObject{
+                {QStringLiteral("service"), current.service},
+                {QStringLiteral("running"), current.running},
+                {QStringLiteral("processed"), current.processed},
+                {QStringLiteral("inserted"), current.inserted},
+                {QStringLiteral("reachedTs"), static_cast<double>(current.reachedTs)},
+                {QStringLiteral("totalListens"), static_cast<double>(current.totalListens)},
+                {QStringLiteral("message"), current.lastMessage},
+            };
         }
-
-        const ScrobbleBackfill::LibraryIndex index = buildLibraryIndex();
-        const QString historyPath = listenHistoryPath();
-        if (service == QLatin1String("listenbrainz")) {
-            const QString token = m_database->setting(QStringLiteral("listenbrainz.token")).trimmed();
-            if (token.isEmpty()) {
-                return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("missing-credentials")},
-                                   {QStringLiteral("service"), service}};
-            }
-            m_backfillRunning = true;
-            QMetaObject::invokeMethod(m_scrobbleBackfill, "startListenBrainzImport", Qt::QueuedConnection,
-                                      Q_ARG(QString, token), Q_ARG(QString, historyPath),
-                                      Q_ARG(ScrobbleBackfill::LibraryIndex, index));
-        } else {
-            const QString username = m_database->setting(QStringLiteral("lastfm.username")).trimmed();
-            // API key fallback chain, mirroring MainWindow::lastFmApiKey().
-            QString apiKey = m_database->setting(QStringLiteral("lastfm.apiKey")).trimmed();
-            if (apiKey.isEmpty()) {
-                apiKey = QString::fromLocal8Bit(qgetenv("LASTFM_API_KEY")).trimmed();
-            }
-            if (apiKey.isEmpty()) {
-                apiKey = QString::fromStdString(LastFmCredentials::defaultApiKey()).trimmed();
-            }
-            if (username.isEmpty() || apiKey.isEmpty()) {
-                return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("missing-credentials")},
-                                   {QStringLiteral("service"), service}};
-            }
-            m_backfillRunning = true;
-            QMetaObject::invokeMethod(m_scrobbleBackfill, "startLastFmCountSync", Qt::QueuedConnection,
-                                      Q_ARG(QString, apiKey), Q_ARG(QString, username),
-                                      Q_ARG(QString, historyPath),
-                                      Q_ARG(ScrobbleBackfill::LibraryIndex, index));
+        const QString result = startBackfill(service);
+        if (result == QLatin1String("unknown-service")) {
+            return error(QStringLiteral("scrobble-backfill needs \"service\": \"listenbrainz\", \"lastfm\", \"status\", or \"cancel\""));
         }
-        return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("started")},
-                           {QStringLiteral("service"), service}};
+        return QJsonObject{{QStringLiteral("backfill"), result}, {QStringLiteral("service"), service}};
     }
     if (command == QLatin1String("start-radio")) {
         const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();

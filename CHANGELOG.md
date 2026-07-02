@@ -14,11 +14,15 @@
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library
-  tracks by recording MBID or folded artist+title. Trigger it with
-  `muzaitenctl scrobble-backfill <listenbrainz|lastfm>` for now (a widget UI
-  comes later). Imported rows live in their own tables and never re-scrobble;
-  re-running is cheap and incremental. The data feeds the upcoming
-  recommendation engine.
+  tracks by recording MBID or folded artist+title. Imported rows live in their
+  own tables and never re-scrobble; re-running is cheap and incremental. The
+  data feeds the upcoming recommendation engine. An interrupted ListenBrainz
+  import (persisted resume cursor) now resumes automatically ~20s after
+  launch, unless it was explicitly canceled — cancel is the only thing that
+  stops eager auto-resume. The Scrobblers menu shows live import/sync
+  progress (processed/stored counts, the point reached, and a total when
+  known) with start and cancel actions, and `muzaitenctl scrobble-backfill`
+  gained `status` and `cancel` alongside `<listenbrainz|lastfm>`.
 - Queryable genres: the GENRE tags already captured in each track's metadata
   are now mirrored into a `track_genres` table (split on common separators,
   deduplicated case-insensitively), populated on scan and backfilled once from

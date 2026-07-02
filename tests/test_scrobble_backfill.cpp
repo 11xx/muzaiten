@@ -20,6 +20,9 @@ private slots:
     void lbPageMalformed();
     void lbPageDropsIncompleteRows();
     void tokenValidationBothShapes();
+    void listenCountValid();
+    void listenCountMissingPayload();
+    void listenCountMalformed();
     void lastFmTrackArray();
     void lastFmSingleObjectTrack();
     void lastFmStringNumbers();
@@ -30,6 +33,7 @@ private slots:
     void importedCrossDedupSkipsOwnScrobbles();
     void playcountBaselineUpsert();
     void metaCursorRoundTrip();
+    void metaCanceledFlagRoundTrip();
 
     // Matching
     void matchMbidBeatsArtistTitle();
@@ -116,6 +120,28 @@ void TestScrobbleBackfill::tokenValidationBothShapes()
         BackfillParse::parseTokenValidation(R"({"valid":false,"message":"Token invalid."})");
     QVERIFY(!invalid.valid);
     QVERIFY(invalid.username.isEmpty());
+}
+
+void TestScrobbleBackfill::listenCountValid()
+{
+    const BackfillParse::ListenCount count =
+        BackfillParse::parseListenCount(R"({"payload":{"count":120345,"user_id":"alice"}})");
+    QVERIFY(count.ok);
+    QCOMPARE(count.count, static_cast<qint64>(120345));
+}
+
+void TestScrobbleBackfill::listenCountMissingPayload()
+{
+    QVERIFY(!BackfillParse::parseListenCount(R"({"user_id":"alice"})").ok);
+    QVERIFY(!BackfillParse::parseListenCount(R"({"payload":{"user_id":"alice"}})").ok);
+}
+
+void TestScrobbleBackfill::listenCountMalformed()
+{
+    QVERIFY(!BackfillParse::parseListenCount("not json").ok);
+    QVERIFY(!BackfillParse::parseListenCount("[]").ok);
+    QVERIFY(!BackfillParse::parseListenCount("{}").ok);
+    QCOMPARE(BackfillParse::parseListenCount(QByteArray()).count, static_cast<qint64>(0));
 }
 
 // --- BackfillParse: Last.fm ---------------------------------------------
@@ -269,6 +295,26 @@ void TestScrobbleBackfill::metaCursorRoundTrip()
     QCOMPARE(store.metaValue(QStringLiteral("backfill.listenbrainz.oldest_ts")), QStringLiteral("12345"));
     store.setMetaValue(QStringLiteral("backfill.listenbrainz.oldest_ts"), QStringLiteral("999"));
     QCOMPARE(store.metaValue(QStringLiteral("backfill.listenbrainz.oldest_ts")), QStringLiteral("999"));
+}
+
+void TestScrobbleBackfill::metaCanceledFlagRoundTrip()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    // AppCore reads/writes this exact key (ScrobbleBackfill::CanceledMetaKey)
+    // to implement cancel-vs-interrupt: empty means "eligible for auto-resume".
+    QCOMPARE(ScrobbleBackfill::CanceledMetaKey, QStringLiteral("backfill.listenbrainz.canceled"));
+    QVERIFY(store.metaValue(ScrobbleBackfill::CanceledMetaKey).isEmpty());
+
+    store.setMetaValue(ScrobbleBackfill::CanceledMetaKey, QStringLiteral("1"));
+    QCOMPARE(store.metaValue(ScrobbleBackfill::CanceledMetaKey), QStringLiteral("1"));
+
+    // A fresh manual start clears the flag (AppCore::startBackfill's job) —
+    // verify the store round-trips back to empty too.
+    store.setMetaValue(ScrobbleBackfill::CanceledMetaKey, QString());
+    QVERIFY(store.metaValue(ScrobbleBackfill::CanceledMetaKey).isEmpty());
 }
 
 // --- Matching -----------------------------------------------------------

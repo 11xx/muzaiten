@@ -82,6 +82,26 @@ TokenValidation parseTokenValidation(const QByteArray &json)
     return result;
 }
 
+ListenCount parseListenCount(const QByteArray &json)
+{
+    ListenCount result;
+    const QJsonDocument doc = QJsonDocument::fromJson(json);
+    if (!doc.isObject()) {
+        return result;
+    }
+    const QJsonValue payloadValue = doc.object().value(QStringLiteral("payload"));
+    if (!payloadValue.isObject()) {
+        return result;
+    }
+    const QJsonObject payload = payloadValue.toObject();
+    if (!payload.contains(QStringLiteral("count"))) {
+        return result;
+    }
+    result.ok = true;
+    result.count = toLongLong(payload.value(QStringLiteral("count")));
+    return result;
+}
+
 LastFmTopTracksPage parseLastFmTopTracks(const QByteArray &json)
 {
     LastFmTopTracksPage page;

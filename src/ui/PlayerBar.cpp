@@ -532,6 +532,16 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_scrobbleOffline = scrobblersMenu->addAction(QStringLiteral("Offline mode (buffer listens locally)"));
     m_scrobbleOffline->setCheckable(true);
     m_scrobbleOffline->setToolTip(QStringLiteral("Keep collecting listening history but send nothing; unchecking uploads the buffered backlog."));
+    scrobblersMenu->addSeparator();
+    // Backfill status + controls: live progress text (disabled, display-only),
+    // the two import triggers, and the one action that stops eager auto-resume.
+    m_backfillStatusAction = scrobblersMenu->addAction(QStringLiteral("Backfill idle"));
+    m_backfillStatusAction->setEnabled(false);
+    m_backfillStatusAction->setVisible(false);
+    m_importListenBrainzAction = scrobblersMenu->addAction(QStringLiteral("Import ListenBrainz history"));
+    m_syncLastFmAction = scrobblersMenu->addAction(QStringLiteral("Sync Last.fm play counts"));
+    m_cancelBackfillAction = scrobblersMenu->addAction(QStringLiteral("Cancel import"));
+    m_cancelBackfillAction->setVisible(false);
     connect(scrobblersMenu, &QMenu::aboutToShow, this, &PlayerBar::scrobblersMenuAboutToShow);
     historyMenu->addMenu(scrobblersMenu);
 
@@ -818,6 +828,13 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(lastFmSettings, &QAction::triggered, this, &PlayerBar::lastFmSettingsRequested);
     connect(m_clearLastFmBacklog, &QAction::triggered, this, &PlayerBar::lastFmBacklogClearRequested);
     connect(m_scrobbleOffline, &QAction::toggled, this, &PlayerBar::scrobbleOfflineChanged);
+    connect(m_importListenBrainzAction, &QAction::triggered, this, [this]() {
+        emit backfillStartRequested(QStringLiteral("listenbrainz"));
+    });
+    connect(m_syncLastFmAction, &QAction::triggered, this, [this]() {
+        emit backfillStartRequested(QStringLiteral("lastfm"));
+    });
+    connect(m_cancelBackfillAction, &QAction::triggered, this, &PlayerBar::backfillCancelRequested);
     connect(m_playPause, &QToolButton::clicked, this, &PlayerBar::playPauseRequested);
     connect(m_next, &QToolButton::clicked, this, &PlayerBar::nextRequested);
     connect(m_progress, &QSlider::sliderMoved, this, [this](int value) {
@@ -849,6 +866,26 @@ void PlayerBar::setScrobbleBacklogCounts(int lastFmPending, int listenBrainzPend
         m_clearListenBrainzBacklog->setText(listenBrainzPending > 0
                                                 ? QStringLiteral("Clear ListenBrainz backlog (%1)").arg(listenBrainzPending)
                                                 : QStringLiteral("Clear ListenBrainz backlog"));
+    }
+}
+
+void PlayerBar::setBackfillStatus(bool running, const QString &statusText, bool lbResumable)
+{
+    if (m_backfillStatusAction != nullptr) {
+        m_backfillStatusAction->setVisible(running || !statusText.isEmpty());
+        m_backfillStatusAction->setText(statusText.isEmpty() ? QStringLiteral("Backfill idle") : statusText);
+    }
+    if (m_cancelBackfillAction != nullptr) {
+        m_cancelBackfillAction->setVisible(running);
+    }
+    if (m_importListenBrainzAction != nullptr) {
+        m_importListenBrainzAction->setEnabled(!running);
+        m_importListenBrainzAction->setText(lbResumable
+                                                ? QStringLiteral("Resume ListenBrainz history import")
+                                                : QStringLiteral("Import ListenBrainz history"));
+    }
+    if (m_syncLastFmAction != nullptr) {
+        m_syncLastFmAction->setEnabled(!running);
     }
 }
 

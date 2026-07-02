@@ -24,6 +24,7 @@
 #include "scrobble/ListenBrainzScrobbler.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ListenTracker.h"
+#include "scrobble/ScrobbleBackfill.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/FileExplorerKeybindings.h"
@@ -85,6 +86,7 @@
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMessageBox>
@@ -1141,6 +1143,37 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_playerBar, &PlayerBar::listenBrainzBacklogClearRequested, this, [this]() {
         clearScrobbleBacklog(ListenHistoryStore::ListenBrainz);
+    });
+    connect(m_playerBar, &PlayerBar::backfillStartRequested, this, [this](const QString &service) {
+        const QString result = m_core->startBackfill(service);
+        QString message;
+        if (result == QLatin1String("already-running")) {
+            message = QStringLiteral("A scrobble backfill is already running");
+        } else if (result == QLatin1String("missing-credentials")) {
+            message = service == QLatin1String("listenbrainz")
+                ? QStringLiteral("Set a ListenBrainz token first")
+                : QStringLiteral("Set Last.fm credentials first");
+        } else if (result == QLatin1String("unknown-service")) {
+            message = QStringLiteral("Unknown backfill service \"%1\"").arg(service);
+        }
+        if (!message.isEmpty()) {
+            statusBar()->showMessage(message, 5000);
+        }
+    });
+    connect(m_playerBar, &PlayerBar::backfillCancelRequested, this, [this]() {
+        m_core->cancelBackfill();
+        statusBar()->showMessage(QStringLiteral("Cancelling scrobble backfill..."), 4000);
+    });
+    connect(m_core, &AppCore::backfillStatusChanged, this, [this]() {
+        const AppCore::BackfillStatus status = m_core->backfillStatus();
+        // A running->idle transition is the finished/failed outcome: surface it
+        // as a transient toast exactly once (the menu shows the same text as a
+        // persistent "last outcome" line until the next run starts).
+        if (m_backfillWasRunning && !status.running && !status.lastMessage.isEmpty()) {
+            statusBar()->showMessage(status.lastMessage, 6000);
+        }
+        m_backfillWasRunning = status.running;
+        updateBackfillStatusDisplay();
     });
     connect(m_playerBar, &PlayerBar::compactMenuChanged, this, &MainWindow::applyCompactMenu);
     connect(m_playerBar, &PlayerBar::alwaysShowTrayChanged, this, [this](bool enabled) {
@@ -5359,10 +5392,44 @@ void MainWindow::updateScrobbleBacklogActions()
 {
     if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
         m_playerBar->setScrobbleBacklogCounts(0, 0);
-        return;
+    } else {
+        m_playerBar->setScrobbleBacklogCounts(m_listenHistory->pendingCount(ListenHistoryStore::LastFm),
+                                              m_listenHistory->pendingCount(ListenHistoryStore::ListenBrainz));
     }
-    m_playerBar->setScrobbleBacklogCounts(m_listenHistory->pendingCount(ListenHistoryStore::LastFm),
-                                          m_listenHistory->pendingCount(ListenHistoryStore::ListenBrainz));
+    updateBackfillStatusDisplay();
+}
+
+void MainWindow::updateBackfillStatusDisplay()
+{
+    const AppCore::BackfillStatus status = m_core->backfillStatus();
+    const bool isListenBrainz = status.service == ListenHistoryStore::ListenBrainz;
+
+    QString text;
+    if (status.running) {
+        const QLocale locale;
+        QString stored = locale.toString(status.inserted);
+        if (status.totalListens > 0) {
+            stored += QStringLiteral(" of ~%1").arg(locale.toString(status.totalListens));
+        }
+        text = QStringLiteral("%1: %2 processed · %3 stored")
+                   .arg(isListenBrainz ? QStringLiteral("ListenBrainz import") : QStringLiteral("Last.fm sync"),
+                        locale.toString(status.processed), stored);
+        if (status.reachedTs > 0) {
+            text += QStringLiteral(" · reached %1")
+                        .arg(QDateTime::fromSecsSinceEpoch(status.reachedTs).toString(QStringLiteral("MMM yyyy")));
+        }
+    } else if (!status.lastMessage.isEmpty()) {
+        text = status.lastMessage;
+    }
+
+    bool lbResumable = false;
+    if (m_listenHistory != nullptr && m_listenHistory->isOpen()) {
+        const QString cursor = m_listenHistory->metaValue(ScrobbleBackfill::OldestTsMetaKey);
+        const QString canceled = m_listenHistory->metaValue(ScrobbleBackfill::CanceledMetaKey);
+        lbResumable = !cursor.isEmpty() && canceled.isEmpty();
+    }
+
+    m_playerBar->setBackfillStatus(status.running, text, lbResumable);
 }
 
 bool MainWindow::scrobbleOffline() const

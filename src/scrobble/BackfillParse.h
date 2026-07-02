@@ -35,6 +35,12 @@ struct TokenValidation {
     QString username;
 };
 
+// Response shape of ListenBrainz `GET /1/user/{name}/listen-count`.
+struct ListenCount {
+    bool ok = false;   // JSON parsed and payload.count was present
+    qint64 count = 0;
+};
+
 // One track from a Last.fm user.getTopTracks page.
 struct LastFmTrack {
     QString artist;
@@ -59,6 +65,11 @@ ListenBrainzPage parseListenBrainzPage(const QByteArray &json);
 
 // Parse a ListenBrainz `GET /1/validate-token` response.
 TokenValidation parseTokenValidation(const QByteArray &json);
+
+// Parse a ListenBrainz `GET /1/user/{name}/listen-count` response
+// (`{"payload": {"count": N}}`). ok is false when the JSON is malformed or the
+// payload/count is missing.
+ListenCount parseListenCount(const QByteArray &json);
 
 // Parse a Last.fm `user.getTopTracks` page (format=json). Handles numbers
 // arriving as JSON strings and a single-track page delivering `track` as an
