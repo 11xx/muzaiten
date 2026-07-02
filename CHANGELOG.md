@@ -30,6 +30,10 @@
   never seed a candidate pool or count as a genre match — and every session's
   candidate pool always blends in a random library slice so radio can escape
   a single genre cohort even when the seed's only genre is uninformative.
+  Skips are only held against a track when they happen before the scrobble
+  threshold (half the duration, capped at 4 minutes) — skipping near the end
+  is a listen, not a dislike — and a lone skip on a barely-played track is a
+  light penalty rather than a maximal one.
 - Scrobbler history backfill: muzaiten can now import your historical listening
   data — full timestamped listens from ListenBrainz and per-track play counts
   from Last.fm (`user.getTopTracks`) — into `history.sqlite`, matched to library

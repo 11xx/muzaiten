@@ -199,9 +199,19 @@ void RadioTest::skipPenaltyScalesWithSkipRate()
     affinity.playEvents = 10;
     affinity.skipped = 5;
 
+    // Smoothed rate: skipped / (playEvents + 2), so evidence tempers the blow.
     const TrackScorer::Scored scored =
         TrackScorer::score(makeCandidate(QStringLiteral("/a"), QStringLiteral("a"), {}), affinity, seed);
-    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("skips")), -2.5 * 0.5));
+    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("skips")), -2.5 * (5.0 / 12.0)));
+
+    // A lone "not right now" skip on a barely-played track is a light touch,
+    // not the maximum penalty the raw ratio would give.
+    TrackScorer::Affinity lone;
+    lone.playEvents = 1;
+    lone.skipped = 1;
+    const TrackScorer::Scored loneScored =
+        TrackScorer::score(makeCandidate(QStringLiteral("/b"), QStringLiteral("b"), {}), lone, seed);
+    QVERIFY(qFuzzyCompare(componentValue(loneScored, QStringLiteral("skips")), -2.5 * (1.0 / 3.0)));
 }
 
 void RadioTest::recencyPenaltyDecaysWithTime()
@@ -562,12 +572,24 @@ void RadioTest::trackAffinitiesAggregateAllSources()
     track.title = QStringLiteral("Song");
     track.artistName = QStringLiteral("Artist");
 
-    // play_events: 3 finished, 1 skipped.
-    for (int i = 0; i < 4; ++i) {
+    // play_events: 3 finished, 1 early skip, 1 late skip. Only the early skip
+    // (before the scrobble threshold, min(duration/2, 4 min)) may count as a
+    // dislike; the late skip is a listen the user merely moved on from.
+    for (int i = 0; i < 5; ++i) {
         ListenHistoryStore::PlayEvent event;
         event.track = track;
         event.startedAtSecs = 1000 + i;
-        event.outcome = (i == 3) ? QStringLiteral("skipped") : QStringLiteral("finished");
+        event.durationMs = 240000;
+        if (i == 3) {
+            event.outcome = QStringLiteral("skipped");
+            event.playedMs = 30000;    // early: 30 s of a 4-min track
+        } else if (i == 4) {
+            event.outcome = QStringLiteral("skipped");
+            event.playedMs = 200000;   // late: past the 120 s threshold
+        } else {
+            event.outcome = QStringLiteral("finished");
+            event.playedMs = 240000;
+        }
         event.source = QStringLiteral("queue_auto");
         event.sessionId = QStringLiteral("s1");
         QVERIFY(store.recordPlayEvent(event) > 0);
@@ -607,10 +629,10 @@ void RadioTest::trackAffinitiesAggregateAllSources()
     const QHash<QString, ListenHistoryStore::TrackAffinityRow> affinities = store.trackAffinities();
     QVERIFY(affinities.contains(path));
     const ListenHistoryStore::TrackAffinityRow row = affinities.value(path);
-    QCOMPARE(row.playEvents, 4);
+    QCOMPARE(row.playEvents, 5);
     QCOMPARE(row.finished, 3);
-    QCOMPARE(row.skipped, 1);
-    QCOMPARE(row.lastPlayedAtSecs, qint64(1003));
+    QCOMPARE(row.skipped, 1);          // the late skip is not a dislike
+    QCOMPARE(row.lastPlayedAtSecs, qint64(1004));
     QCOMPARE(row.listenCount, 5);      // 2 local + 3 imported
     QCOMPARE(row.baselineMax, 42);     // max(42, 30), never 72
 }

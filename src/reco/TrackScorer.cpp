@@ -113,9 +113,14 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
         }
     }
 
-    // skips: penalize a track the user tends to skip.
-    if (affinity.playEvents > 0) {
-        const double skipRate = static_cast<double>(affinity.skipped) / std::max(1, affinity.playEvents);
+    // skips: penalize a track the user tends to skip (early skips only — the
+    // aggregation already excludes skips past the scrobble threshold). The +2
+    // smoothing keeps a lone "not right now" skip from branding a low-evidence
+    // track (one skip on one spin reads ~0.33, not 1.0); with more spins the
+    // rate converges to the truth.
+    if (affinity.playEvents > 0 && affinity.skipped > 0) {
+        const double skipRate = static_cast<double>(affinity.skipped)
+            / (static_cast<double>(affinity.playEvents) + 2.0);
         pushIfNonZero(scored, QStringLiteral("skips"), kSkipPenalty * skipRate);
     }
 

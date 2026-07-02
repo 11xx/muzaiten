@@ -635,10 +635,18 @@ QHash<QString, ListenHistoryStore::TrackAffinityRow> ListenHistoryStore::trackAf
     }
 
     // play_events: spins, split by outcome, plus the most recent start.
+    // A "skip" only counts as a dislike signal when it happened before the
+    // scrobble threshold (half the duration, capped at 4 minutes — the same
+    // rule ListenTracker uses). A skip past that point already produced a
+    // listens row: the user heard the song and moved on, which is a listen,
+    // not a rejection ("skipped near the end" must not read as dislike).
     QSqlQuery events(m_db);
     if (events.exec(QStringLiteral(
             "SELECT track_path, COUNT(*), "
-            "SUM(outcome = 'finished'), SUM(outcome = 'skipped'), MAX(started_at) "
+            "SUM(outcome = 'finished'), "
+            "SUM(outcome = 'skipped' AND played_ms < "
+            " CASE WHEN duration_ms > 0 THEN MIN(duration_ms / 2, 240000) ELSE 240000 END), "
+            "MAX(started_at) "
             "FROM play_events WHERE track_path <> '' GROUP BY track_path"))) {
         while (events.next()) {
             TrackAffinityRow &row = affinities[events.value(0).toString()];
