@@ -48,6 +48,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 
 namespace {
 
@@ -430,6 +431,11 @@ public:
         endResetModel();
     }
 
+    void setPickReasonResolver(std::function<QString(const QString &)> resolver)
+    {
+        m_pickReasonResolver = std::move(resolver);
+    }
+
     int rowCount(const QModelIndex &parent = {}) const override
     {
         return parent.isValid() || m_store == nullptr ? 0 : static_cast<int>(m_store->tracks().size());
@@ -464,6 +470,15 @@ public:
         }
 
         const Track &track = m_store->tracks().at(index.row());
+        if (role == Qt::ToolTipRole) {
+            if (m_pickReasonResolver) {
+                const QString reason = m_pickReasonResolver(track.path);
+                if (!reason.isEmpty()) {
+                    return reason;
+                }
+            }
+            return {};
+        }
         if (role == TrackRole) {
             return QVariant::fromValue(track);
         }
@@ -578,6 +593,7 @@ private:
     }
 
     QueueStore *m_store = nullptr;
+    std::function<QString(const QString &)> m_pickReasonResolver;
     QVector<int> m_hoverRatings;
     bool m_showPlayNextBadge = true;
 };
@@ -746,6 +762,11 @@ void QueueTable::setQueueStore(QueueStore *store)
     static_cast<QueueTableView *>(m_view)->setCurrentPlayingRow(store->currentIndex());
     static_cast<QueueItemDelegate *>(m_itemDelegate)->setCurrentRow(store->currentIndex());
     m_ratingDelegate->setPlayingRow(store->currentIndex());
+}
+
+void QueueTable::setPickReasonResolver(std::function<QString(const QString &)> resolver)
+{
+    static_cast<QueueTableModel *>(m_model)->setPickReasonResolver(std::move(resolver));
 }
 
 QString QueueTable::viewSettingsJson() const

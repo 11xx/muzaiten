@@ -810,6 +810,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_rightSidebar->setObjectName(QStringLiteral("MainRightSidebar"));
     m_rightSidebar->setMinimumWidth(kRightSidebarMinimumWidth);
     m_rightSidebar->setQueueStore(m_queueStore);
+    m_rightSidebar->setPickReasonResolver([this](const QString &path) {
+        return m_core->radioPickReason(path);
+    });
 
     m_rootSplitter->addWidget(m_artistSidebar);
     m_rootSplitter->addWidget(m_libraryCenterStack);
@@ -2827,6 +2830,9 @@ QueueScreen *MainWindow::ensureQueueScreen()
 
     m_queueScreen = new QueueScreen(m_mainStack);
     m_queueScreen->setQueueStore(m_queueStore);
+    m_queueScreen->setPickReasonResolver([this](const QString &path) {
+        return m_core->radioPickReason(path);
+    });
     m_queueScreen->applyViewSettingsJson(m_state->setting(QStringLiteral("queueScreen.view")));
     m_queueScreen->setKeyBindingProfileName(m_state->setting(QStringLiteral("queueScreen.keyBindingProfile"),
                                                              defaultQueueKeyBindingProfileName()));

@@ -62,6 +62,9 @@ public:
     // names + rounded contributions). Empty when the path was never picked here.
     QString reasonFor(const QString &path) const;
 
+    // Stored scorer components for a pick made this session. Empty when unknown.
+    QList<TrackScorer::Component> reasonComponentsFor(const QString &path) const;
+
     // Pure classifier for AppCore's radio re-roll heuristic: true when a play
     // ended before crossing the scrobble threshold (half the track's duration,
     // capped at 4 minutes) -- the same rule ListenTracker and

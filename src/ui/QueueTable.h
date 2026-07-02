@@ -7,6 +7,8 @@
 
 #include <QWidget>
 
+#include <functional>
+
 class QueueStore;
 class QAbstractTableModel;
 class QLabel;
@@ -29,6 +31,7 @@ public:
     explicit QueueTable(QueueTablePreset preset, QWidget *parent = nullptr);
 
     void setQueueStore(QueueStore *store);
+    void setPickReasonResolver(std::function<QString(const QString &)> resolver);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();

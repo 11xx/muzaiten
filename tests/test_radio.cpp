@@ -2,6 +2,7 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "reco/RadioSession.h"
+#include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
 #include "scrobble/ListenHistoryStore.h"
 
@@ -85,6 +86,11 @@ private slots:
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
     void reasonForNonEmptyOnPick();
+    void reasonComponentsRoundTripFromPick();
+    void reasonSentencePicksTopPhrases();
+    void reasonSentenceHandlesPenaltyOnly();
+    void reasonSentenceEmptyOnEmptyInput();
+    void reasonBreakdownFormatsSigned();
     void setExplorationTakesEffectOnSubsequentPicks();
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
@@ -465,6 +471,61 @@ void RadioTest::reasonForNonEmptyOnPick()
     QCOMPARE(picks.size(), 1);
     QVERIFY(!session.reasonFor(picks.first().path).isEmpty());
     QVERIFY(session.reasonFor(QStringLiteral("/never")).isEmpty());
+}
+
+void RadioTest::reasonComponentsRoundTripFromPick()
+{
+    QVector<TrackScorer::Candidate> pool{makeCandidate(QStringLiteral("/t0"), QStringLiteral("a"),
+                                                       {QStringLiteral("rock")}, 2000, 90, true)};
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(1u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QVERIFY(!session.reasonComponentsFor(picks.first().path).isEmpty());
+    QVERIFY(session.reasonComponentsFor(QStringLiteral("/never")).isEmpty());
+}
+
+void RadioTest::reasonSentencePicksTopPhrases()
+{
+    const QList<TrackScorer::Component> components{
+        {QStringLiteral("genre"), 2.1},
+        {QStringLiteral("rating"), 1.4},
+        {QStringLiteral("novelty"), 0.1},
+        {QStringLiteral("recency"), -0.6},
+    };
+
+    QCOMPARE(ReasonText::sentence(components),
+             QStringLiteral("Radio pick — matches the session's mood · you rate it highly "
+                            "(held back: heard recently)"));
+}
+
+void RadioTest::reasonSentenceHandlesPenaltyOnly()
+{
+    const QList<TrackScorer::Component> components{
+        {QStringLiteral("skips"), -0.8},
+        {QStringLiteral("recency"), -0.6},
+    };
+
+    QCOMPARE(ReasonText::sentence(components),
+             QStringLiteral("Radio pick — held back: often skipped early · heard recently"));
+}
+
+void RadioTest::reasonSentenceEmptyOnEmptyInput()
+{
+    QVERIFY(ReasonText::sentence({}).isEmpty());
+}
+
+void RadioTest::reasonBreakdownFormatsSigned()
+{
+    const QList<TrackScorer::Component> components{
+        {QStringLiteral("recency"), -0.6},
+        {QStringLiteral("genre"), 2.1},
+    };
+
+    QCOMPARE(ReasonText::breakdown(components), QStringLiteral("genre +2.1 · recency -0.6"));
 }
 
 void RadioTest::setExplorationTakesEffectOnSubsequentPicks()
