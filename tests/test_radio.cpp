@@ -133,6 +133,7 @@ private slots:
     void setExplorationTakesEffectOnSubsequentPicks();
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
+    void anchorlessSessionDriftsFromPlayedContext();
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
@@ -797,6 +798,33 @@ void RadioTest::isEarlySkipUsesHalfDurationCappedAtFourMinutes()
     // Unknown duration (<= 0) falls back to the 4-minute cap outright.
     QVERIFY(RadioSession::isEarlySkip(200000, 0));
     QVERIFY(!RadioSession::isEarlySkip(250000, 0));
+}
+
+void RadioTest::anchorlessSessionDriftsFromPlayedContext()
+{
+    const auto buildPool = []() {
+        return QVector<TrackScorer::Candidate>{
+            makeCandidate(QStringLiteral("/feed"), QStringLiteral("feed"), {QStringLiteral("rock")}, 2000),
+            makeCandidate(QStringLiteral("/rock"), QStringLiteral("rock"), {QStringLiteral("rock")}, 2000),
+        };
+    };
+    const QHash<QString, double> genreIdf{{QStringLiteral("rock"), 2.0}};
+
+    QRandomGenerator rngA(44u);
+    RadioSession noContext(buildPool(), {}, genreIdf, 30, 1'000'000'000, &rngA);
+    const QVector<Track> before = noContext.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(before.size(), 1);
+    QVERIFY2(!noContext.reasonFor(before.first().path).contains(QStringLiteral("genre")),
+             "anchorless session had genre context before notePlayed");
+
+    QRandomGenerator rngB(44u);
+    RadioSession drifted(buildPool(), {}, genreIdf, 30, 1'000'000'000, &rngB);
+    drifted.notePlayed(resolvePathToTrack(QStringLiteral("/feed")));
+    const QVector<Track> after = drifted.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(after.size(), 1);
+    QCOMPARE(after.first().path, QStringLiteral("/rock"));
+    QVERIFY2(drifted.reasonFor(after.first().path).contains(QStringLiteral("genre")),
+             "anchorless session did not use notePlayed genre context");
 }
 
 // ---- Database + ListenHistoryStore -----------------------------------------

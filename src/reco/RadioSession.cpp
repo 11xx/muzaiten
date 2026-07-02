@@ -71,6 +71,17 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
     }
 }
 
+RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
+                           QHash<QString, TrackScorer::Affinity> affinities,
+                           QHash<QString, double> genreIdf,
+                           int exploration0To100,
+                           qint64 nowSecs,
+                           QRandomGenerator *rng)
+    : RadioSession(std::move(pool), std::move(affinities), std::move(genreIdf),
+                   TrackScorer::Candidate{}, exploration0To100, nowSecs, rng)
+{
+}
+
 QStringList RadioSession::rollingGenres() const
 {
     // The seed always anchors the mood; the last few played tracks let it drift.
