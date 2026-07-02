@@ -142,7 +142,7 @@ private:
     void loadQueueState();
     void saveQueueState();
     void scheduleQueueStateSave(bool immediate = false);
-    QJsonObject queueSnapshotObject(const QString &name) const;
+    QJsonObject queueSnapshotObject(const QString &name, const QString &source = {}) const;
     QVector<Track> tracksFromSnapshotObject(const QJsonObject &snapshot) const;
     QJsonObject loadQueueSnapshotsRoot() const;
     void saveQueueSnapshotsRoot(const QJsonObject &root);
@@ -156,7 +156,7 @@ private:
     void configureSavedQueueLimit();
     void ensureCurrentQueueIdentity();
     bool currentQueueBacklogEligible() const;
-    void pushCurrentQueueToBacklog(const QString &name);
+    void pushCurrentQueueToBacklog(const QString &name, const QString &source = {});
     void adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<Track> &tracks, int playIndex);
     void prepareQueueForTrackAddition(const QVector<Track> &tracks);
     void prepareQueueForLibraryInjection(const Track &track);
@@ -316,7 +316,7 @@ private:
                                 const QString &sourceKind = {},
                                 qint64 sourcePlaylistId = 0,
                                 const QString &sourceName = {});
-    void snapshotCurrentQueueAsPrevious();
+    void snapshotCurrentQueueAsPrevious(const QString &source = {});
     void restorePreviousQueue();
     void saveCurrentQueueAs();
     void mergeSavedQueueViaPlayNext();

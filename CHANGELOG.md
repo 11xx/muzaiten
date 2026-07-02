@@ -17,12 +17,15 @@
   explorers (only for files that resolve to a scanned library track), and the
   music explorer's expanded-album track list. Starting radio snapshots the
   current queue to the backlog first, the same way Clear queue does, so
-  "Restore previous queue" can undo it. The player bar shows a radio indicator
-  button next to shuffle/repeat while a session is active; clicking it stops
-  the radio and keeps the queue. Genre matching now weights shared genres by
-  rarity (IDF) instead of a plain overlap ratio, so a broad or junk genre like
-  "Other" can no longer dominate a session by itself; tagger placeholder
-  genres ("Other", "Unknown", "Various", ...) are ignored entirely — they
+  "Restore previous queue" can undo it; those radio-origin entries are tagged
+  and labeled "Radio session <timestamp>", and the automatic saved-queue ring
+  now keeps 10 entries by default with a configurable ceiling of 50 so repeated
+  radio starts churn recent restore points less aggressively. The player bar
+  shows a radio indicator button next to shuffle/repeat while a session is
+  active; clicking it stops the radio and keeps the queue. Genre matching now
+  weights shared genres by rarity (IDF) instead of a plain overlap ratio, so a
+  broad or junk genre like "Other" can no longer dominate a session by itself;
+  tagger placeholder genres ("Other", "Unknown", "Various", ...) are ignored entirely — they
   never seed a candidate pool or count as a genre match — and every session's
   candidate pool always blends in a random library slice so radio can escape
   a single genre cohort even when the seed's only genre is uninformative.

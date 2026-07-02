@@ -133,6 +133,9 @@ constexpr int kPanelMinimumHeight = 140;
 constexpr int kDefaultIdleReleaseSeconds = 60;
 constexpr int kDefaultDeepReleaseSeconds = 300;
 constexpr int kMaxMemoryReleaseSeconds = 3600;
+constexpr int kMinSavedQueueLimit = 1;
+constexpr int kDefaultSavedQueueLimit = 10;
+constexpr int kMaxSavedQueueLimit = 50;
 
 QString mainArtistSidebarStyleSheet(const QWidget *widget)
 {
@@ -208,15 +211,6 @@ QString normalizedQueueSourceKind(const QString &kind)
     return QStringLiteral("queue");
 }
 
-QString queueSnapshotLabel(const QJsonObject &snapshot, const QString &fallback)
-{
-    const QString name = snapshot.value(QStringLiteral("name")).toString().trimmed();
-    if (!name.isEmpty()) {
-        return name;
-    }
-    return fallback;
-}
-
 qint64 queueSnapshotSavedAt(const QJsonObject &snapshot)
 {
     qint64 savedAt = snapshot.value(QStringLiteral("savedAt")).toVariant().toLongLong();
@@ -232,6 +226,22 @@ QString queueSnapshotTimestamp(qint64 timestamp)
         return {};
     }
     return QDateTime::fromSecsSinceEpoch(timestamp).toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+}
+
+QString queueSnapshotLabel(const QJsonObject &snapshot, const QString &fallback)
+{
+    const QString name = snapshot.value(QStringLiteral("name")).toString().trimmed();
+    if (!name.isEmpty()) {
+        return name;
+    }
+    if (snapshot.value(QStringLiteral("source")).toString().trimmed() == QStringLiteral("radio")) {
+        const QString timestamp = queueSnapshotTimestamp(queueSnapshotSavedAt(snapshot));
+        if (!timestamp.isEmpty()) {
+            return QStringLiteral("Radio session %1").arg(timestamp);
+        }
+        return QStringLiteral("Radio session");
+    }
+    return fallback;
 }
 
 QString defaultSavedQueueName(int ordinal)
@@ -3585,7 +3595,7 @@ void MainWindow::scheduleQueueStateSave(bool immediate)
     }
 }
 
-QJsonObject MainWindow::queueSnapshotObject(const QString &name) const
+QJsonObject MainWindow::queueSnapshotObject(const QString &name, const QString &source) const
 {
     QJsonArray tracks;
     for (const Track &track : m_player->queue()) {
@@ -3600,6 +3610,10 @@ QJsonObject MainWindow::queueSnapshotObject(const QString &name) const
     snapshot.insert(QStringLiteral("sourceKind"), m_queueSourceKind);
     snapshot.insert(QStringLiteral("sourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
     snapshot.insert(QStringLiteral("sourceName"), m_queueSourceName);
+    const QString trimmedSource = source.trimmed();
+    if (!trimmedSource.isEmpty()) {
+        snapshot.insert(QStringLiteral("source"), trimmedSource);
+    }
     snapshot.insert(QStringLiteral("tracks"), tracks);
     return snapshot;
 }
@@ -3768,7 +3782,10 @@ void MainWindow::deleteQueueSnapshotById(const QString &id)
 
 int MainWindow::savedQueueLimitSetting() const
 {
-    return std::clamp(m_state->setting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("5")).toInt(), 1, 10);
+    return std::clamp(m_state->setting(QStringLiteral("queue.savedQueueLimit"),
+                                       QString::number(kDefaultSavedQueueLimit)).toInt(),
+                      kMinSavedQueueLimit,
+                      kMaxSavedQueueLimit);
 }
 
 void MainWindow::configureSavedQueueLimit()
@@ -3778,8 +3795,8 @@ void MainWindow::configureSavedQueueLimit()
                                            QStringLiteral("Saved queue limit"),
                                            QStringLiteral("Automatic saved queues to keep:"),
                                            savedQueueLimitSetting(),
-                                           1,
-                                           10,
+                                           kMinSavedQueueLimit,
+                                           kMaxSavedQueueLimit,
                                            1,
                                            &ok);
     if (!ok) {
@@ -3813,7 +3830,7 @@ bool MainWindow::currentQueueBacklogEligible() const
     return !m_player->queue().isEmpty() && m_queueSourceKind == QStringLiteral("queue");
 }
 
-void MainWindow::pushCurrentQueueToBacklog(const QString &name)
+void MainWindow::pushCurrentQueueToBacklog(const QString &name, const QString &source)
 {
     if (!currentQueueBacklogEligible()) {
         return;
@@ -3822,7 +3839,7 @@ void MainWindow::pushCurrentQueueToBacklog(const QString &name)
     QJsonObject root = loadQueueSnapshotsRoot();
     QJsonArray existing = queueBacklogFromRoot(root);
     const QString snapshotId = m_queueId;
-    QJsonObject snapshot = queueSnapshotObject(name);
+    QJsonObject snapshot = queueSnapshotObject(name, source);
     QJsonArray backlog;
     backlog.append(snapshot);
     for (const QJsonValue &value : existing) {
@@ -3840,9 +3857,9 @@ void MainWindow::pushCurrentQueueToBacklog(const QString &name)
     saveQueueSnapshotsRoot(root);
 }
 
-void MainWindow::snapshotCurrentQueueAsPrevious()
+void MainWindow::snapshotCurrentQueueAsPrevious(const QString &source)
 {
-    pushCurrentQueueToBacklog(QString());
+    pushCurrentQueueToBacklog(QString(), source);
 }
 
 void MainWindow::markQueueAsSpontaneous(const QString &id)
@@ -5906,7 +5923,7 @@ void MainWindow::startRadioFromSeed(const QString &path)
     }
     // Same snapshot call Clear queue uses before wiping the queue, so a radio
     // start can be undone via "Restore previous queue".
-    snapshotCurrentQueueAsPrevious();
+    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
     if (!m_core->startRadio(path)) {
         statusBar()->showMessage(QStringLiteral("Start Radio: track not found in library"), 4000);
     }

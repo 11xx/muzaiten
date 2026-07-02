@@ -1,9 +1,12 @@
 #include "app/AppCore.h"
 #include "core/Artist.h"
+#include "db/SettingsStore.h"
+#include "player/PlayerCore.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/MusicExplorerView.h"
 #include "ui/PanelSearchController.h"
+#include "ui/PlaylistView.h"
 #include "ui/SelectionColors.h"
 
 #define private public
@@ -11,6 +14,9 @@
 #include "ui/PlayerBar.h"
 #undef private
 
+#include <QDateTime>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QtTest/QtTest>
@@ -79,6 +85,77 @@ private slots:
         bar.setVolumeControlEnabled(true);
         QVERIFY(bar.m_volumeButton->isEnabled());
         QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
+    }
+
+    void savedQueueLimitDefaultsToTenAndClampsAtFifty()
+    {
+        AppCore core;
+        MainWindow window(&core);
+
+        QCOMPARE(window.savedQueueLimitSetting(), 10);
+
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("0"));
+        QCOMPARE(window.savedQueueLimitSetting(), 1);
+
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("37"));
+        QCOMPARE(window.savedQueueLimitSetting(), 37);
+
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("999"));
+        QCOMPARE(window.savedQueueLimitSetting(), 50);
+    }
+
+    void radioSnapshotsAreTaggedAndLabeled()
+    {
+        AppCore core;
+        MainWindow window(&core);
+
+        Track track;
+        track.path = QStringLiteral("/music/radio-seed.flac");
+        track.title = QStringLiteral("Radio Seed");
+        track.artistName = QStringLiteral("Artist");
+        window.m_player->resetQueue({track}, 0);
+        window.markQueueAsSpontaneous(QStringLiteral("queue:radio-test"));
+
+        window.snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+
+        const QJsonObject root = window.loadQueueSnapshotsRoot();
+        const QJsonArray backlog = root.value(QStringLiteral("backlog")).toArray();
+        QCOMPARE(backlog.size(), 1);
+        const QJsonObject snapshot = backlog.at(0).toObject();
+        QCOMPARE(snapshot.value(QStringLiteral("source")).toString(), QStringLiteral("radio"));
+        QCOMPARE(snapshot.value(QStringLiteral("name")).toString(), QString());
+
+        const QString timestamp = QDateTime::fromSecsSinceEpoch(snapshot.value(QStringLiteral("savedAt")).toVariant().toLongLong())
+                                      .toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
+        const QVector<SavedQueuePlaylistEntry> entries = window.savedQueuePlaylistEntries();
+        QCOMPARE(entries.size(), 1);
+        QCOMPARE(entries.at(0).name, QStringLiteral("Radio session %1").arg(timestamp));
+    }
+
+    void legacySnapshotsKeepFallbackLabel()
+    {
+        AppCore core;
+        MainWindow window(&core);
+
+        Track track;
+        track.path = QStringLiteral("/music/legacy.flac");
+        track.title = QStringLiteral("Legacy");
+        track.artistName = QStringLiteral("Artist");
+        window.m_player->resetQueue({track}, 0);
+        window.markQueueAsSpontaneous(QStringLiteral("queue:legacy-test"));
+
+        QJsonObject snapshot = window.queueSnapshotObject(QString());
+        snapshot.insert(QStringLiteral("id"), QStringLiteral("queue:legacy-test"));
+        snapshot.insert(QStringLiteral("savedAt"), 1'234'567'890);
+        QJsonArray backlog;
+        backlog.append(snapshot);
+        QJsonObject root;
+        root.insert(QStringLiteral("backlog"), backlog);
+        window.saveQueueSnapshotsRoot(root);
+
+        const QVector<SavedQueuePlaylistEntry> entries = window.savedQueuePlaylistEntries();
+        QCOMPARE(entries.size(), 1);
+        QCOMPARE(entries.at(0).name, QStringLiteral("saved queue 1"));
     }
 
     void musicExplorerKeepsMainPanelNavigationActive()
