@@ -36,7 +36,8 @@ public:
         QString service;          // ListenHistoryStore::ListenBrainz/LastFm, empty when never run
         bool running = false;
         int processed = 0;
-        int inserted = 0;
+        int inserted = 0;          // rows stored by the current/most recent run
+        int storedTotal = 0;       // cumulative imported rows in the DB (ListenBrainz)
         qint64 reachedTs = 0;      // ListenBrainz cursor reached; 0 for Last.fm/unknown
         qint64 totalListens = 0;   // ListenBrainz listen-count total; 0 when unknown/Last.fm
         QString lastMessage;       // outcome of the most recent finished/failed run

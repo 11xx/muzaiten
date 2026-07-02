@@ -201,8 +201,8 @@ void ScrobbleBackfill::validateListenBrainzToken()
     connect(m_reply, &QNetworkReply::finished, this, [this]() {
         QNetworkReply *reply = m_reply;
         m_reply = nullptr;
-        const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
         const bool networkOk = reply->error() == QNetworkReply::NoError;
+        const QByteArray body = (networkOk && reply->isOpen()) ? reply->readAll() : QByteArray();
         reply->deleteLater();
         if (m_aborting) {
             finishFailed(QStringLiteral("aborted"));
@@ -234,8 +234,8 @@ void ScrobbleBackfill::requestListenBrainzListenCount()
     connect(m_reply, &QNetworkReply::finished, this, [this]() {
         QNetworkReply *reply = m_reply;
         m_reply = nullptr;
-        const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
         const bool networkOk = reply->error() == QNetworkReply::NoError;
+        const QByteArray body = (networkOk && reply->isOpen()) ? reply->readAll() : QByteArray();
         reply->deleteLater();
         if (m_aborting) {
             finishFailed(QStringLiteral("aborted"));
@@ -265,7 +265,9 @@ void ScrobbleBackfill::requestListenBrainzPage()
     url.setQuery(query);
 
     QNetworkRequest request(url);
-    request.setTransferTimeout(30000);
+    // Deep max_ts pagination is slow on ListenBrainz's side for old history;
+    // a 30 s ceiling produced spurious timeouts partway through large imports.
+    request.setTransferTimeout(60000);
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("Authorization", QStringLiteral("Token %1").arg(m_token).toUtf8());
 
@@ -277,8 +279,12 @@ void ScrobbleBackfill::handleListenBrainzPage()
 {
     QNetworkReply *reply = m_reply;
     m_reply = nullptr;
-    const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
     const bool networkOk = reply->error() == QNetworkReply::NoError;
+    // Only read a healthy reply: readAll() on a timed-out/aborted reply's
+    // already-closed socket spams "QIODevice::read: device not open".
+    const QByteArray body = (networkOk && reply->isOpen()) ? reply->readAll() : QByteArray();
+    const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QString errorText = reply->errorString();
     const int nextDelay = rateLimitDelayMs(reply);
     reply->deleteLater();
 
@@ -290,15 +296,27 @@ void ScrobbleBackfill::handleListenBrainzPage()
     const BackfillParse::ListenBrainzPage page = networkOk ? BackfillParse::parseListenBrainzPage(body)
                                                            : BackfillParse::ListenBrainzPage();
     if (!networkOk || !page.ok) {
+        // Being rate-limited is the service pacing us, not an outage: wait out
+        // the advertised reset window without spending the retry budget.
+        if (httpStatus == 429) {
+            const int delay = std::max(nextDelay, 15 * 1000);
+            qCWarning(scrobbleBackfillLog)
+                << "ListenBrainz rate-limited the import (HTTP 429); waiting" << delay / 1000 << "s";
+            m_timer->start(delay);
+            return;
+        }
         // Persist the cursor so the next run resumes; retry with backoff first.
         if (m_pageRetries < kMaxPageRetries) {
             const int delay = retryDelayMs(m_pageRetries++);
-            qCWarning(scrobbleBackfillLog) << "ListenBrainz page failed; retry in" << delay << "ms";
+            qCWarning(scrobbleBackfillLog).nospace()
+                << "ListenBrainz page failed (HTTP " << httpStatus << ", " << errorText
+                << "); retry in " << delay << " ms";
             m_timer->start(delay);
             return;
         }
         m_history->setMetaValue(OldestTsMetaKey, QString::number(m_lbCursor));
-        finishFailed(QStringLiteral("ListenBrainz import failed after %1 retries").arg(kMaxPageRetries));
+        finishFailed(QStringLiteral("ListenBrainz import failed after %1 retries (last: HTTP %2, %3)")
+                         .arg(kMaxPageRetries).arg(httpStatus).arg(errorText));
         return;
     }
     m_pageRetries = 0;
@@ -410,8 +428,11 @@ void ScrobbleBackfill::handleLastFmPage()
 {
     QNetworkReply *reply = m_reply;
     m_reply = nullptr;
-    const QByteArray body = reply->isOpen() ? reply->readAll() : QByteArray();
     const bool networkOk = reply->error() == QNetworkReply::NoError;
+    // See handleListenBrainzPage: never readAll() an errored reply's socket.
+    const QByteArray body = (networkOk && reply->isOpen()) ? reply->readAll() : QByteArray();
+    const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QString errorText = reply->errorString();
     reply->deleteLater();
 
     if (m_aborting) {
@@ -430,11 +451,14 @@ void ScrobbleBackfill::handleLastFmPage()
         }
         if (m_pageRetries < kMaxPageRetries) {
             const int delay = retryDelayMs(m_pageRetries++);
-            qCWarning(scrobbleBackfillLog) << "Last.fm page failed; retry in" << delay << "ms";
+            qCWarning(scrobbleBackfillLog).nospace()
+                << "Last.fm page failed (HTTP " << httpStatus << ", " << errorText
+                << "); retry in " << delay << " ms";
             m_timer->start(delay);
             return;
         }
-        finishFailed(QStringLiteral("Last.fm sync failed after %1 retries").arg(kMaxPageRetries));
+        finishFailed(QStringLiteral("Last.fm sync failed after %1 retries (last: HTTP %2, %3)")
+                         .arg(kMaxPageRetries).arg(httpStatus).arg(errorText));
         return;
     }
     m_pageRetries = 0;

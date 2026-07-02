@@ -5407,7 +5407,9 @@ void MainWindow::updateBackfillStatusDisplay()
     QString text;
     if (status.running) {
         const QLocale locale;
-        QString stored = locale.toString(status.inserted);
+        // The cumulative DB count reads correctly across resume cycles; the
+        // per-run inserted counter restarts at zero on every resume.
+        QString stored = locale.toString(status.storedTotal > 0 ? status.storedTotal : status.inserted);
         if (status.totalListens > 0) {
             stored += QStringLiteral(" of ~%1").arg(locale.toString(status.totalListens));
         }

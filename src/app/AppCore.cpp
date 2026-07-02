@@ -230,7 +230,14 @@ AppCore::AppCore(QObject *parent)
                 m_backfillStatus.inserted = inserted;
                 m_backfillStatus.reachedTs = reachedTs;
                 m_backfillStatus.totalListens = total;
-                qInfo("scrobble-backfill[%s]: processed %d, stored %d", qPrintable(source), processed, inserted);
+                // Per-run counters restart on every resume; the cumulative DB
+                // count is what users track across interruptions.
+                m_backfillStatus.storedTotal =
+                    (m_listenHistory != nullptr && m_listenHistory->isOpen())
+                        ? m_listenHistory->importedListenCount(source)
+                        : 0;
+                qInfo("scrobble-backfill[%s]: processed %d, stored %d this run (%d total)",
+                      qPrintable(source), processed, inserted, m_backfillStatus.storedTotal);
                 emit backfillStatusChanged();
             });
     connect(m_scrobbleBackfill, &ScrobbleBackfill::finished, this,
@@ -254,6 +261,16 @@ AppCore::AppCore(QObject *parent)
                 m_backfillStatus.lastMessage = message;
                 qWarning("scrobble-backfill[%s]: failed — %s", qPrintable(source), qPrintable(message));
                 emit backfillStatusChanged();
+                // Transient service trouble (ListenBrainz's deep-history pages
+                // are flaky) heals itself: try again later, exactly like the
+                // startup auto-resume. Explicit cancel is respected because
+                // maybeAutoResume re-checks the canceled flag when it fires.
+                if (source == ListenHistoryStore::ListenBrainz
+                    && message != QLatin1String("aborted")) {
+                    qInfo("scrobble-backfill[listenbrainz]: will retry in 10 minutes");
+                    QTimer::singleShot(10 * 60 * 1000, this,
+                                       [this]() { maybeAutoResumeListenBrainzBackfill(); });
+                }
             });
     m_scrobbleBackfillThread->start();
 

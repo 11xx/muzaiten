@@ -22,7 +22,11 @@
   stops eager auto-resume. The Scrobblers menu shows live import/sync
   progress (processed/stored counts, the point reached, and a total when
   known) with start and cancel actions, and `muzaitenctl scrobble-backfill`
-  gained `status` and `cancel` alongside `<listenbrainz|lastfm>`.
+  gained `status` and `cancel` alongside `<listenbrainz|lastfm>`. Transient
+  ListenBrainz failures (its deep-history pages are flaky) self-heal: rate
+  limiting waits out the advertised window, a run that gives up retries on
+  its own ten minutes later, and the status shows the cumulative stored
+  total so a resumed run's counters don't read as data loss.
 - Queryable genres: the GENRE tags already captured in each track's metadata
   are now mirrored into a `track_genres` table (split on common separators,
   deduplicated case-insensitively), populated on scan and backfilled once from
