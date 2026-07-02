@@ -321,6 +321,9 @@ private:
     void saveCurrentQueueAs();
     void mergeSavedQueueViaPlayNext();
     int savedQueueLimitSetting() const;
+    int radioSavedQueueLimitSetting() const;
+    bool savedQueueUnlimitedSetting() const;
+    bool radioSavedQueueUnlimitedSetting() const;
     // explicitJump=true marks a user-activated jump (clicking a queue row),
     // which collapses play-next priority and refreshes the shuffle bucket.
     void playQueueIndex(int index, bool notifyScrobbler = true, bool startPaused = false, bool explicitJump = false);

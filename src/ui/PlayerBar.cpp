@@ -592,7 +592,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as..."));
     QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore saved queue..."));
     QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)..."));
-    QAction *savedQueueLimit = queueMenu->addAction(QStringLiteral("Saved queue limit..."));
+    QAction *savedQueueLimit = queueMenu->addAction(QStringLiteral("Saved queue limits..."));
     m_mergeSavedQueueAction = mergeQueue;
     queueMenu->setToolTipsVisible(true);
 

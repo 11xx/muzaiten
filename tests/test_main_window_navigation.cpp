@@ -87,27 +87,34 @@ private slots:
         QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
     }
 
-    void savedQueueLimitDefaultsToTenAndClampsAtFifty()
+    void savedQueueLimitsDefaultToFifteenUnlessUnlimited()
     {
         AppCore core;
         MainWindow window(&core);
 
-        QCOMPARE(window.savedQueueLimitSetting(), 10);
+        QCOMPARE(window.savedQueueLimitSetting(), 15);
+        QCOMPARE(window.radioSavedQueueLimitSetting(), 15);
+        QVERIFY(!window.savedQueueUnlimitedSetting());
+        QVERIFY(!window.radioSavedQueueUnlimitedSetting());
 
-        window.m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("0"));
-        QCOMPARE(window.savedQueueLimitSetting(), 1);
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueUnlimited"), QStringLiteral("1"));
+        window.m_state->setSetting(QStringLiteral("queue.radioSavedQueueUnlimited"), QStringLiteral("true"));
+        QCOMPARE(window.savedQueueLimitSetting(), 0);
+        QCOMPARE(window.radioSavedQueueLimitSetting(), 0);
+        QVERIFY(window.savedQueueUnlimitedSetting());
+        QVERIFY(window.radioSavedQueueUnlimitedSetting());
 
-        window.m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("37"));
-        QCOMPARE(window.savedQueueLimitSetting(), 37);
-
-        window.m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QStringLiteral("999"));
-        QCOMPARE(window.savedQueueLimitSetting(), 50);
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueUnlimited"), QStringLiteral("0"));
+        window.m_state->setSetting(QStringLiteral("queue.radioSavedQueueUnlimited"), QStringLiteral("0"));
+        QCOMPARE(window.savedQueueLimitSetting(), 15);
+        QCOMPARE(window.radioSavedQueueLimitSetting(), 15);
     }
 
     void radioSnapshotsAreTaggedAndLabeled()
     {
         AppCore core;
         MainWindow window(&core);
+        window.m_state->removeSetting(QStringLiteral("queue.snapshots"));
 
         Track track;
         track.path = QStringLiteral("/music/radio-seed.flac");
@@ -119,9 +126,10 @@ private slots:
         window.snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
 
         const QJsonObject root = window.loadQueueSnapshotsRoot();
-        const QJsonArray backlog = root.value(QStringLiteral("backlog")).toArray();
-        QCOMPARE(backlog.size(), 1);
-        const QJsonObject snapshot = backlog.at(0).toObject();
+        const QJsonArray radioBacklog = root.value(QStringLiteral("radioBacklog")).toArray();
+        QCOMPARE(root.value(QStringLiteral("backlog")).toArray().size(), 0);
+        QCOMPARE(radioBacklog.size(), 1);
+        const QJsonObject snapshot = radioBacklog.at(0).toObject();
         QCOMPARE(snapshot.value(QStringLiteral("source")).toString(), QStringLiteral("radio"));
         QCOMPARE(snapshot.value(QStringLiteral("name")).toString(), QString());
 
@@ -132,10 +140,130 @@ private slots:
         QCOMPARE(entries.at(0).name, QStringLiteral("Radio session %1").arg(timestamp));
     }
 
+    void radioSnapshotsUseSeparateFifteenEntryBucket()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.m_state->removeSetting(QStringLiteral("queue.snapshots"));
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueUnlimited"), QStringLiteral("0"));
+        window.m_state->setSetting(QStringLiteral("queue.radioSavedQueueUnlimited"), QStringLiteral("0"));
+
+        for (int i = 0; i < 17; ++i) {
+            Track track;
+            track.path = QStringLiteral("/music/regular-%1.flac").arg(i);
+            track.title = QStringLiteral("Regular %1").arg(i);
+            track.artistName = QStringLiteral("Artist");
+            window.m_player->resetQueue({track}, 0);
+            window.markQueueAsSpontaneous(QStringLiteral("queue:regular-%1").arg(i));
+            window.snapshotCurrentQueueAsPrevious();
+        }
+        for (int i = 0; i < 17; ++i) {
+            Track track;
+            track.path = QStringLiteral("/music/radio-%1.flac").arg(i);
+            track.title = QStringLiteral("Radio %1").arg(i);
+            track.artistName = QStringLiteral("Artist");
+            window.m_player->resetQueue({track}, 0);
+            window.markQueueAsSpontaneous(QStringLiteral("queue:radio-%1").arg(i));
+            window.snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+        }
+
+        const QJsonObject root = window.loadQueueSnapshotsRoot();
+        const QJsonArray backlog = root.value(QStringLiteral("backlog")).toArray();
+        const QJsonArray radioBacklog = root.value(QStringLiteral("radioBacklog")).toArray();
+        QCOMPARE(backlog.size(), 15);
+        QCOMPARE(radioBacklog.size(), 15);
+        QCOMPARE(backlog.at(0).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:regular-16"));
+        QCOMPARE(backlog.at(14).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:regular-2"));
+        QCOMPARE(radioBacklog.at(0).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:radio-16"));
+        QCOMPARE(radioBacklog.at(14).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:radio-2"));
+        for (const QJsonValue &value : radioBacklog) {
+            QCOMPARE(value.toObject().value(QStringLiteral("source")).toString(), QStringLiteral("radio"));
+        }
+    }
+
+    void unlimitedSavedQueueTogglesDisableTrimming()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.m_state->removeSetting(QStringLiteral("queue.snapshots"));
+        window.m_state->setSetting(QStringLiteral("queue.savedQueueUnlimited"), QStringLiteral("1"));
+        window.m_state->setSetting(QStringLiteral("queue.radioSavedQueueUnlimited"), QStringLiteral("1"));
+
+        for (int i = 0; i < 17; ++i) {
+            Track regularTrack;
+            regularTrack.path = QStringLiteral("/music/unlimited-regular-%1.flac").arg(i);
+            regularTrack.title = QStringLiteral("Unlimited Regular %1").arg(i);
+            regularTrack.artistName = QStringLiteral("Artist");
+            window.m_player->resetQueue({regularTrack}, 0);
+            window.markQueueAsSpontaneous(QStringLiteral("queue:unlimited-regular-%1").arg(i));
+            window.snapshotCurrentQueueAsPrevious();
+
+            Track radioTrack;
+            radioTrack.path = QStringLiteral("/music/unlimited-radio-%1.flac").arg(i);
+            radioTrack.title = QStringLiteral("Unlimited Radio %1").arg(i);
+            radioTrack.artistName = QStringLiteral("Artist");
+            window.m_player->resetQueue({radioTrack}, 0);
+            window.markQueueAsSpontaneous(QStringLiteral("queue:unlimited-radio-%1").arg(i));
+            window.snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+        }
+
+        const QJsonObject root = window.loadQueueSnapshotsRoot();
+        QCOMPARE(root.value(QStringLiteral("backlog")).toArray().size(), 17);
+        QCOMPARE(root.value(QStringLiteral("radioBacklog")).toArray().size(), 17);
+    }
+
+    void legacyRadioSnapshotsMoveOutOfRegularBacklog()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.m_state->removeSetting(QStringLiteral("queue.snapshots"));
+
+        Track radioTrack;
+        radioTrack.path = QStringLiteral("/music/legacy-radio.flac");
+        radioTrack.title = QStringLiteral("Legacy Radio");
+        radioTrack.artistName = QStringLiteral("Artist");
+        window.m_player->resetQueue({radioTrack}, 0);
+        window.markQueueAsSpontaneous(QStringLiteral("queue:legacy-radio"));
+        const QJsonObject legacyRadio = window.queueSnapshotObject(QString(), QStringLiteral("radio"));
+
+        Track regularTrack;
+        regularTrack.path = QStringLiteral("/music/legacy-regular.flac");
+        regularTrack.title = QStringLiteral("Legacy Regular");
+        regularTrack.artistName = QStringLiteral("Artist");
+        window.m_player->resetQueue({regularTrack}, 0);
+        window.markQueueAsSpontaneous(QStringLiteral("queue:legacy-regular"));
+        const QJsonObject legacyRegular = window.queueSnapshotObject(QString());
+
+        QJsonArray legacyBacklog;
+        legacyBacklog.append(legacyRadio);
+        legacyBacklog.append(legacyRegular);
+        QJsonObject legacyRoot;
+        legacyRoot.insert(QStringLiteral("backlog"), legacyBacklog);
+        window.saveQueueSnapshotsRoot(legacyRoot);
+
+        Track newRegularTrack;
+        newRegularTrack.path = QStringLiteral("/music/new-regular.flac");
+        newRegularTrack.title = QStringLiteral("New Regular");
+        newRegularTrack.artistName = QStringLiteral("Artist");
+        window.m_player->resetQueue({newRegularTrack}, 0);
+        window.markQueueAsSpontaneous(QStringLiteral("queue:new-regular"));
+        window.snapshotCurrentQueueAsPrevious();
+
+        const QJsonObject root = window.loadQueueSnapshotsRoot();
+        const QJsonArray backlog = root.value(QStringLiteral("backlog")).toArray();
+        const QJsonArray radioBacklog = root.value(QStringLiteral("radioBacklog")).toArray();
+        QCOMPARE(backlog.size(), 2);
+        QCOMPARE(radioBacklog.size(), 1);
+        QCOMPARE(backlog.at(0).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:new-regular"));
+        QCOMPARE(backlog.at(1).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:legacy-regular"));
+        QCOMPARE(radioBacklog.at(0).toObject().value(QStringLiteral("id")).toString(), QStringLiteral("queue:legacy-radio"));
+    }
+
     void legacySnapshotsKeepFallbackLabel()
     {
         AppCore core;
         MainWindow window(&core);
+        window.m_state->removeSetting(QStringLiteral("queue.snapshots"));
 
         Track track;
         track.path = QStringLiteral("/music/legacy.flac");

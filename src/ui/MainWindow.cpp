@@ -133,9 +133,7 @@ constexpr int kPanelMinimumHeight = 140;
 constexpr int kDefaultIdleReleaseSeconds = 60;
 constexpr int kDefaultDeepReleaseSeconds = 300;
 constexpr int kMaxMemoryReleaseSeconds = 3600;
-constexpr int kMinSavedQueueLimit = 1;
-constexpr int kDefaultSavedQueueLimit = 10;
-constexpr int kMaxSavedQueueLimit = 50;
+constexpr int kAutomaticSavedQueueLimit = 15;
 
 QString mainArtistSidebarStyleSheet(const QWidget *widget)
 {
@@ -244,6 +242,11 @@ QString queueSnapshotLabel(const QJsonObject &snapshot, const QString &fallback)
     return fallback;
 }
 
+bool queueSnapshotIsRadio(const QJsonObject &snapshot)
+{
+    return snapshot.value(QStringLiteral("source")).toString().trimmed() == QStringLiteral("radio");
+}
+
 QString defaultSavedQueueName(int ordinal)
 {
     return QStringLiteral("saved queue %1").arg(std::max(1, ordinal));
@@ -259,23 +262,91 @@ QString queueSnapshotKey(const QJsonObject &snapshot)
 
 QJsonArray queueBacklogFromRoot(const QJsonObject &root)
 {
-    QJsonArray backlog = root.value(QStringLiteral("backlog")).toArray();
-    const QJsonObject previous = root.value(QStringLiteral("previous")).toObject();
-    if (!previous.isEmpty()) {
-        bool alreadyPresent = false;
-        const QString previousId = previous.value(QStringLiteral("id")).toString();
-        for (const QJsonValue &value : backlog) {
-            const QJsonObject snapshot = value.toObject();
-            if (!previousId.isEmpty() && snapshot.value(QStringLiteral("id")).toString() == previousId) {
-                alreadyPresent = true;
-                break;
-            }
+    QJsonArray backlog;
+    QSet<QString> seenIds;
+    const auto appendSnapshot = [&backlog, &seenIds](const QJsonObject &snapshot) {
+        if (snapshot.isEmpty() || queueSnapshotIsRadio(snapshot)) {
+            return;
         }
-        if (!alreadyPresent) {
-            backlog.prepend(previous);
+        const QString id = snapshot.value(QStringLiteral("id")).toString();
+        if (!id.isEmpty() && seenIds.contains(id)) {
+            return;
         }
+        backlog.append(snapshot);
+        if (!id.isEmpty()) {
+            seenIds.insert(id);
+        }
+    };
+
+    appendSnapshot(root.value(QStringLiteral("previous")).toObject());
+    for (const QJsonValue &value : root.value(QStringLiteral("backlog")).toArray()) {
+        appendSnapshot(value.toObject());
     }
     return backlog;
+}
+
+QJsonArray radioQueueBacklogFromRoot(const QJsonObject &root)
+{
+    QJsonArray backlog;
+    QSet<QString> seenIds;
+    const auto appendSnapshot = [&backlog, &seenIds](QJsonObject snapshot, bool forceRadio) {
+        if (snapshot.isEmpty()) {
+            return;
+        }
+        if (forceRadio) {
+            snapshot.insert(QStringLiteral("source"), QStringLiteral("radio"));
+        } else if (!queueSnapshotIsRadio(snapshot)) {
+            return;
+        }
+        const QString id = snapshot.value(QStringLiteral("id")).toString();
+        if (!id.isEmpty() && seenIds.contains(id)) {
+            return;
+        }
+        backlog.append(snapshot);
+        if (!id.isEmpty()) {
+            seenIds.insert(id);
+        }
+    };
+
+    for (const QJsonValue &value : root.value(QStringLiteral("radioBacklog")).toArray()) {
+        appendSnapshot(value.toObject(), true);
+    }
+    appendSnapshot(root.value(QStringLiteral("previous")).toObject(), false);
+    for (const QJsonValue &value : root.value(QStringLiteral("backlog")).toArray()) {
+        appendSnapshot(value.toObject(), false);
+    }
+    return backlog;
+}
+
+void trimQueueBacklog(QJsonArray *backlog, int limit)
+{
+    if (backlog == nullptr || limit <= 0) {
+        return;
+    }
+    while (backlog->size() > limit) {
+        backlog->removeLast();
+    }
+}
+
+QVector<QJsonObject> automaticQueueSnapshotsFromRoot(const QJsonObject &root)
+{
+    QVector<QJsonObject> snapshots;
+    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
+        const QJsonObject snapshot = value.toObject();
+        if (!snapshot.isEmpty()) {
+            snapshots.push_back(snapshot);
+        }
+    }
+    for (const QJsonValue &value : radioQueueBacklogFromRoot(root)) {
+        const QJsonObject snapshot = value.toObject();
+        if (!snapshot.isEmpty()) {
+            snapshots.push_back(snapshot);
+        }
+    }
+    std::stable_sort(snapshots.begin(), snapshots.end(), [](const QJsonObject &left, const QJsonObject &right) {
+        return queueSnapshotSavedAt(left) > queueSnapshotSavedAt(right);
+    });
+    return snapshots;
 }
 
 struct QueueSnapshotChoice {
@@ -316,9 +387,14 @@ bool removeQueueSnapshotFromRoot(QJsonObject *root, const QString &keyOrId)
         return false;
     }
     QJsonArray backlog = queueBacklogFromRoot(*root);
-    if (removeQueueSnapshotFromArray(&backlog, keyOrId)) {
+    QJsonArray radioBacklog = radioQueueBacklogFromRoot(*root);
+    const bool removedFromBacklog = removeQueueSnapshotFromArray(&backlog, keyOrId);
+    const bool removedFromRadioBacklog = removeQueueSnapshotFromArray(&radioBacklog, keyOrId);
+    const bool removedAutomatic = removedFromBacklog || removedFromRadioBacklog;
+    if (removedAutomatic) {
         root->remove(QStringLiteral("previous"));
         root->insert(QStringLiteral("backlog"), backlog);
+        root->insert(QStringLiteral("radioBacklog"), radioBacklog);
         return true;
     }
     QJsonArray saved = root->value(QStringLiteral("saved")).toArray();
@@ -338,8 +414,7 @@ QVector<QueueSnapshotChoice> queueSnapshotChoicesFromRoot(const QJsonObject &roo
 {
     QVector<QueueSnapshotChoice> choices;
     int ordinal = 1;
-    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
-        const QJsonObject snapshot = value.toObject();
+    for (const QJsonObject &snapshot : automaticQueueSnapshotsFromRoot(root)) {
         if (snapshot.isEmpty()) {
             continue;
         }
@@ -3677,8 +3752,8 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
         entries.push_back(entry);
     };
 
-    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
-        appendSnapshot(value.toObject());
+    for (const QJsonObject &snapshot : automaticQueueSnapshotsFromRoot(root)) {
+        appendSnapshot(snapshot);
     }
     for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
         appendSnapshot(value.toObject());
@@ -3692,8 +3767,7 @@ QJsonObject MainWindow::queueSnapshotByKey(const QString &keyOrId) const
         return {};
     }
     const QJsonObject root = loadQueueSnapshotsRoot();
-    for (const QJsonValue &value : queueBacklogFromRoot(root)) {
-        const QJsonObject snapshot = value.toObject();
+    for (const QJsonObject &snapshot : automaticQueueSnapshotsFromRoot(root)) {
         if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
             return snapshot;
         }
@@ -3782,36 +3856,60 @@ void MainWindow::deleteQueueSnapshotById(const QString &id)
 
 int MainWindow::savedQueueLimitSetting() const
 {
-    return std::clamp(m_state->setting(QStringLiteral("queue.savedQueueLimit"),
-                                       QString::number(kDefaultSavedQueueLimit)).toInt(),
-                      kMinSavedQueueLimit,
-                      kMaxSavedQueueLimit);
+    return savedQueueUnlimitedSetting() ? 0 : kAutomaticSavedQueueLimit;
+}
+
+int MainWindow::radioSavedQueueLimitSetting() const
+{
+    return radioSavedQueueUnlimitedSetting() ? 0 : kAutomaticSavedQueueLimit;
+}
+
+bool MainWindow::savedQueueUnlimitedSetting() const
+{
+    const QString value = m_state->setting(QStringLiteral("queue.savedQueueUnlimited")).trimmed();
+    return value == QStringLiteral("1") || value == QStringLiteral("true");
+}
+
+bool MainWindow::radioSavedQueueUnlimitedSetting() const
+{
+    const QString value = m_state->setting(QStringLiteral("queue.radioSavedQueueUnlimited")).trimmed();
+    return value == QStringLiteral("1") || value == QStringLiteral("true");
 }
 
 void MainWindow::configureSavedQueueLimit()
 {
-    bool ok = false;
-    const int limit = QInputDialog::getInt(this,
-                                           QStringLiteral("Saved queue limit"),
-                                           QStringLiteral("Automatic saved queues to keep:"),
-                                           savedQueueLimitSetting(),
-                                           kMinSavedQueueLimit,
-                                           kMaxSavedQueueLimit,
-                                           1,
-                                           &ok);
-    if (!ok) {
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Saved queue limits"));
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *regularLimit = new QCheckBox(
+        QStringLiteral("Limit regular automatic saved queues to %1").arg(kAutomaticSavedQueueLimit),
+        &dialog);
+    regularLimit->setChecked(!savedQueueUnlimitedSetting());
+    auto *radioLimit = new QCheckBox(
+        QStringLiteral("Limit radio session saved queues to %1").arg(kAutomaticSavedQueueLimit),
+        &dialog);
+    radioLimit->setChecked(!radioSavedQueueUnlimitedSetting());
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(regularLimit);
+    layout->addWidget(radioLimit);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) {
         return;
     }
-    m_state->setSetting(QStringLiteral("queue.savedQueueLimit"), QString::number(limit));
+    m_state->setSetting(QStringLiteral("queue.savedQueueUnlimited"), regularLimit->isChecked() ? QStringLiteral("0") : QStringLiteral("1"));
+    m_state->setSetting(QStringLiteral("queue.radioSavedQueueUnlimited"), radioLimit->isChecked() ? QStringLiteral("0") : QStringLiteral("1"));
     QJsonObject root = loadQueueSnapshotsRoot();
     QJsonArray backlog = queueBacklogFromRoot(root);
-    while (backlog.size() > limit) {
-        backlog.removeLast();
-    }
+    QJsonArray radioBacklog = radioQueueBacklogFromRoot(root);
+    trimQueueBacklog(&backlog, savedQueueLimitSetting());
+    trimQueueBacklog(&radioBacklog, radioSavedQueueLimitSetting());
     root.remove(QStringLiteral("previous"));
     root.insert(QStringLiteral("backlog"), backlog);
+    root.insert(QStringLiteral("radioBacklog"), radioBacklog);
     saveQueueSnapshotsRoot(root);
-    statusBar()->showMessage(QStringLiteral("Automatic saved queue limit set to %1").arg(limit), 4000);
+    statusBar()->showMessage(QStringLiteral("Saved queue limits updated"), 4000);
 }
 
 void MainWindow::ensureCurrentQueueIdentity()
@@ -3837,23 +3935,29 @@ void MainWindow::pushCurrentQueueToBacklog(const QString &name, const QString &s
     }
     ensureCurrentQueueIdentity();
     QJsonObject root = loadQueueSnapshotsRoot();
-    QJsonArray existing = queueBacklogFromRoot(root);
     const QString snapshotId = m_queueId;
     QJsonObject snapshot = queueSnapshotObject(name, source);
-    QJsonArray backlog;
-    backlog.append(snapshot);
-    for (const QJsonValue &value : existing) {
+    QJsonArray backlog = queueBacklogFromRoot(root);
+    QJsonArray radioBacklog = radioQueueBacklogFromRoot(root);
+    const bool radioSnapshot = queueSnapshotIsRadio(snapshot);
+    const int limit = radioSnapshot ? radioSavedQueueLimitSetting() : savedQueueLimitSetting();
+    QJsonArray &targetBacklog = radioSnapshot ? radioBacklog : backlog;
+    QJsonArray updatedBacklog;
+    updatedBacklog.append(snapshot);
+    for (const QJsonValue &value : targetBacklog) {
         const QJsonObject candidate = value.toObject();
         if (candidate.isEmpty() || candidate.value(QStringLiteral("id")).toString() == snapshotId) {
             continue;
         }
-        backlog.append(candidate);
-        if (backlog.size() >= savedQueueLimitSetting()) {
+        updatedBacklog.append(candidate);
+        if (limit > 0 && updatedBacklog.size() >= limit) {
             break;
         }
     }
+    targetBacklog = updatedBacklog;
     root.remove(QStringLiteral("previous"));
     root.insert(QStringLiteral("backlog"), backlog);
+    root.insert(QStringLiteral("radioBacklog"), radioBacklog);
     saveQueueSnapshotsRoot(root);
 }
 

@@ -18,10 +18,11 @@
   music explorer's expanded-album track list. Starting radio snapshots the
   current queue to the backlog first, the same way Clear queue does, so
   "Restore previous queue" can undo it; those radio-origin entries are tagged
-  and labeled "Radio session <timestamp>", and the automatic saved-queue ring
-  now keeps 10 entries by default with a configurable ceiling of 50 so repeated
-  radio starts churn recent restore points less aggressively. The player bar
-  shows a radio indicator button next to shuffle/repeat while a session is
+  and labeled "Radio session <timestamp>", and kept in their own 15-entry
+  bucket so repeated radio starts no longer evict regular automatic restore
+  points. Regular automatic queue snapshots also keep 15 entries by default;
+  either bucket can be switched to unlimited from Saved queue limits. The player
+  bar shows a radio indicator button next to shuffle/repeat while a session is
   active; clicking it stops the radio and keeps the queue. Genre matching now
   weights shared genres by rarity (IDF) instead of a plain overlap ratio, so a
   broad or junk genre like "Other" can no longer dominate a session by itself;
