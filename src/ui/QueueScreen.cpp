@@ -4,6 +4,8 @@
 
 #include <QVBoxLayout>
 
+#include <utility>
+
 QueueScreen::QueueScreen(QWidget *parent)
     : QWidget(parent)
 {
@@ -36,6 +38,11 @@ QueueScreen::QueueScreen(QWidget *parent)
 void QueueScreen::setQueueStore(QueueStore *store)
 {
     m_table->setQueueStore(store);
+}
+
+void QueueScreen::setPickReasonResolver(std::function<QString(const QString &)> resolver)
+{
+    m_table->setPickReasonResolver(std::move(resolver));
 }
 
 QString QueueScreen::viewSettingsJson() const

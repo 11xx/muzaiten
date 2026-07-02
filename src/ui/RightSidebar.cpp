@@ -18,6 +18,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 // Per-pane height floors for the vertical splitter (queue / track info / album
@@ -102,6 +103,11 @@ void RightSidebar::setQueueStore(QueueStore *store)
 {
     m_queueStore = store;
     m_queueTable->setQueueStore(store);
+}
+
+void RightSidebar::setPickReasonResolver(std::function<QString(const QString &)> resolver)
+{
+    m_queueTable->setPickReasonResolver(std::move(resolver));
 }
 
 void RightSidebar::setQueueIsPlaylistSourced(bool sourced)

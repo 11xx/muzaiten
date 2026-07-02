@@ -4,6 +4,8 @@
 
 #include "core/Track.h"
 
+#include <functional>
+
 class QueueStore;
 class QueueTable;
 
@@ -14,6 +16,7 @@ public:
     explicit QueueScreen(QWidget *parent = nullptr);
 
     void setQueueStore(QueueStore *store);
+    void setPickReasonResolver(std::function<QString(const QString &)> resolver);
     QString viewSettingsJson() const;
     void applyViewSettingsJson(const QString &json);
     void resetViewSettings();

@@ -13,6 +13,7 @@
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
 #include "reco/RadioSession.h"
+#include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
 #include "scanner/ArtworkCache.h"
 #include "scrobble/LastFmCredentials.h"
@@ -843,6 +844,28 @@ void AppCore::stopRadio()
     m_radioConsecutiveEarlySkips = 0;
     // "Resets when a session ends" -- see setRadioAdventurous's doc comment.
     m_radioAdventurous = false;
+}
+
+QString AppCore::radioPickReason(const QString &path) const
+{
+    if (!m_radioSession) {
+        return {};
+    }
+
+    const QList<TrackScorer::Component> components = m_radioSession->reasonComponentsFor(path);
+    if (components.isEmpty()) {
+        return {};
+    }
+
+    const QString sentence = ReasonText::sentence(components);
+    const QString breakdown = ReasonText::breakdown(components);
+    if (sentence.isEmpty()) {
+        return breakdown;
+    }
+    if (breakdown.isEmpty()) {
+        return sentence;
+    }
+    return sentence + QLatin1Char('\n') + breakdown;
 }
 
 int AppCore::radioExploration() const

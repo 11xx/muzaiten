@@ -74,6 +74,7 @@ public:
     // End the session: deactivates radio and tears down the provider/session.
     // Queue contents stay as they are.
     void stopRadio();
+    QString radioPickReason(const QString &path) const;
 
     // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
     // "Batch radio queue"). Backed by the library-DB settings

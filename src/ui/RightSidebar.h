@@ -6,6 +6,8 @@
 #include <QList>
 #include <QString>
 
+#include <functional>
+
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/QueueTable.h"
@@ -26,6 +28,7 @@ public:
 
     void setDatabase(const Database *db) { m_database = db; }
     void setQueueStore(QueueStore *store);
+    void setPickReasonResolver(std::function<QString(const QString &)> resolver);
     void setQueue(const QVector<Track> &tracks);
     void setPlayNextRange(int begin, int end);
     void setCurrentIndex(int index, bool reveal = false);
