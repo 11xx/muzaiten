@@ -364,6 +364,10 @@ QIcon shuffleIcon(const QPalette &palette, ShuffleMode mode)
         painter.setPen(badge);
         painter.drawLine(QPointF(21, 1.5), QPointF(21, 6.5));
         painter.drawLine(QPointF(18.5, 4), QPointF(23.5, 4));
+    } else if (mode == ShuffleMode::Radio) {
+        painter.setBrush(color);
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(QPointF(21, 4), 2.5, 2.5);
     }
     return QIcon(pixmap);
 }
@@ -532,6 +536,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(playbackMenu, &QMenu::aboutToShow, this, &PlayerBar::playbackMenuAboutToShow);
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
     QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle..."));
+    QAction *radioShuffleSettings = playbackMenu->addAction(QStringLiteral("Radio shuffle percent..."));
 
     auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
     QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
@@ -833,6 +838,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_releaseDeviceAction, &QAction::triggered, this, &PlayerBar::releaseDeviceRequested);
     connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
     connect(libraryShuffleSettings, &QAction::triggered, this, &PlayerBar::libraryShuffleSettingsRequested);
+    connect(radioShuffleSettings, &QAction::triggered, this, &PlayerBar::radioShuffleSettingsRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
@@ -1331,6 +1337,9 @@ void PlayerBar::updateShuffleIcon()
     case ShuffleMode::Library:
         m_shuffle->setToolTip(QStringLiteral("Shuffle: library-wide"));
         break;
+    case ShuffleMode::Radio:
+        m_shuffle->setToolTip(QStringLiteral("Shuffle: radio"));
+        break;
     }
 }
 
@@ -1405,6 +1414,7 @@ void PlayerBar::cycleShuffleMode()
 {
     const ShuffleMode next = m_shuffleMode == ShuffleMode::Off ? ShuffleMode::Queue
         : m_shuffleMode == ShuffleMode::Queue                 ? ShuffleMode::Library
+        : m_shuffleMode == ShuffleMode::Library               ? ShuffleMode::Radio
                                                               : ShuffleMode::Off;
     setShuffleMode(next);
     emit shuffleModeChangeRequested(next);

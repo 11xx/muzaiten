@@ -1,12 +1,16 @@
 #pragma once
 
 #include "core/Track.h"
+#include "reco/TrackScorer.h"
 #include "scrobble/ScrobbleBackfill.h"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 #include <memory>
 
 class ArtworkCache;
@@ -146,6 +150,14 @@ private:
     // Build the scrobbler-backfill match index from the library DB (folded
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
+    QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres) const;
+    QHash<QString, double> buildRadioGenreIdf() const;
+    QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
+    void installRadioProvider(bool markPicksAsRadio);
+    // Maintains the ambient, anchorless radio provider used only by
+    // ShuffleMode::Radio. Explicit Start Radio owns m_radioSession while
+    // PlayerCore::radioActive() is true and takes precedence.
+    void syncRadioShuffleSession();
 
     // Generates up to `count` fresh radio picks from the current rolling
     // context and queues them via PlayerCore::injectTracks (queue-only; see its
@@ -219,4 +231,5 @@ private:
     int               m_radioConsecutiveEarlySkips = 0;
     // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
     bool              m_radioAdventurous = false;
+    bool              m_radioShuffleSessionActive = false;
 };

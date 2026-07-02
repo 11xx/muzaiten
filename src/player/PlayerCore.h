@@ -22,8 +22,9 @@ enum class RepeatMode {
 enum class ShuffleMode {
     Off,      // linear queue order
     Queue,    // random order within the current queue
-    Library   // queue shuffle, but with a tunable chance to pull a fresh track
+    Library,  // queue shuffle, but with a tunable chance to pull a fresh track
               // from the whole library instead
+    Radio     // queue shuffle, but library pulls come from the radio provider
 };
 
 // Window-free playback/queue state machine: owns the playback backend, the
@@ -60,9 +61,9 @@ public:
     PlaybackBackend *backend() const { return m_backend; }
     void setPathResolver(PathResolver resolver) { m_resolvePath = std::move(resolver); }
     void setRandomTrackProvider(RandomTrackProvider provider) { m_randomTracks = std::move(provider); }
-    // Radio's recommendation-driven provider. Same signature as the random
-    // provider, but consulted only while radio is active — orthogonal to
-    // shuffle/repeat, which keep their own persisted settings untouched.
+    // Radio's recommendation-driven provider. Explicit Start Radio consults it
+    // while radioActive(); ambient Radio shuffle consults it for taste-aware
+    // library pulls while radioActive() remains false.
     void setRadioProvider(RandomTrackProvider provider) { m_radioTracks = std::move(provider); }
     void setPlaybackStartPlanner(PlaybackStartPlanner planner) { m_playbackStartPlanner = std::move(planner); }
 
@@ -76,15 +77,19 @@ public:
     RepeatMode repeatMode() const { return m_repeatMode; }
     ShuffleMode shuffleMode() const { return m_shuffleMode; }
     int libraryShufflePercent() const { return m_libraryShufflePercent; }
+    int radioShufflePercent() const { return m_radioShufflePercent; }
     void setRepeatMode(RepeatMode mode);
     void setShuffleMode(ShuffleMode mode);
     // Chance (0..100) that a library-wide-shuffle advance pulls a fresh track.
     void setLibraryShufflePercent(int percent);
+    // Chance (0..100) that Radio shuffle pulls a taste-aware library track.
+    void setRadioShufflePercent(int percent);
 
     // -- radio --------------------------------------------------------------
-    // A radio session installs a scored provider (setRadioProvider) and, while
-    // active, extends past the queue's end with recommendation picks instead of
-    // stopping. Orthogonal to shuffle/repeat; deactivating clears nothing else.
+    // An explicit Start Radio session installs a scored provider
+    // (setRadioProvider) and, while active, extends past the queue's end with
+    // recommendation picks instead of stopping. Ambient Radio shuffle uses the
+    // same provider with this flag false; deactivating clears nothing else.
     bool radioActive() const { return m_radioActive; }
     void setRadioActive(bool active);
 
@@ -172,6 +177,7 @@ signals:
     void repeatModeChanged(RepeatMode mode);
     void shuffleModeChanged(ShuffleMode mode);
     void libraryShufflePercentChanged(int percent);
+    void radioShufflePercentChanged(int percent);
     void radioActiveChanged(bool active);
 
 private:
@@ -223,6 +229,7 @@ private:
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
     int m_libraryShufflePercent = 20;
+    int m_radioShufflePercent = 80;
     bool m_radioActive = false;
     // The advance gaplessly prepared for the current track; committed when the
     // backend reports the prepared track started (so the index lands on the row

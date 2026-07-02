@@ -193,6 +193,9 @@ ShuffleMode shuffleModeFromString(const QString &value)
     if (value == QStringLiteral("library")) {
         return ShuffleMode::Library;
     }
+    if (value == QStringLiteral("radio")) {
+        return ShuffleMode::Radio;
+    }
     return ShuffleMode::Off;
 }
 
@@ -929,7 +932,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             markQueueAsSpontaneous();
         }
     });
-    // libraryShufflePercentChanged is handled by AppCore (state + MPRIS).
+    // Shuffle-percent persistence is handled by AppCore (state + MPRIS).
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
@@ -1352,6 +1355,16 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_player->libraryShufflePercent(), 0, 100, 5, &ok);
         if (ok) {
             m_player->setLibraryShufflePercent(percent);
+        }
+    });
+    connect(m_playerBar, &PlayerBar::radioShuffleSettingsRequested, this, [this]() {
+        bool ok = false;
+        const int percent = QInputDialog::getInt(
+            this, QStringLiteral("Radio shuffle"),
+            QStringLiteral("Chance to pull a radio pick from the library on each advance (%):"),
+            m_player->radioShufflePercent(), 0, 100, 5, &ok);
+        if (ok) {
+            m_player->setRadioShufflePercent(percent);
         }
     });
     connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
@@ -5037,12 +5050,15 @@ void MainWindow::loadPlaybackModes()
 {
     const RepeatMode repeat = repeatModeFromString(m_state->setting(QStringLiteral("playback.repeatMode")));
     const ShuffleMode shuffle = shuffleModeFromString(m_state->setting(QStringLiteral("playback.shuffleMode")));
-    const int percent = std::clamp(
+    const int libraryPercent = std::clamp(
         m_state->setting(QStringLiteral("playback.libraryShufflePercent"), QStringLiteral("20")).toInt(), 0, 100);
-    // Percent first so a restored library-shuffle uses the saved chance. The
+    const int radioPercent = std::clamp(
+        m_state->setting(QStringLiteral("playback.radioShufflePercent"), QStringLiteral("80")).toInt(), 0, 100);
+    // Percents first so restored shuffle modes use their saved chances. The
     // PlayerCore setters only emit on a change, so push the player bar
     // explicitly to cover restoring the default (off) modes too.
-    m_player->setLibraryShufflePercent(percent);
+    m_player->setLibraryShufflePercent(libraryPercent);
+    m_player->setRadioShufflePercent(radioPercent);
     m_player->setRepeatMode(repeat);
     m_player->setShuffleMode(shuffle);
     m_playerBar->setRepeatMode(repeat);

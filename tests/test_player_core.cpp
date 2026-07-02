@@ -110,6 +110,9 @@ private slots:
     void shuffleAppendAndPlayRefreshesBucket();
     void shuffleBackwardJumpDoesNotBadgePlayNext();
     void libraryShuffleInjectsLibraryTrack();
+    void radioShuffleAtPercent100InjectsRadioProviderTrack();
+    void radioShuffleAtPercent0UsesQueueShuffle();
+    void explicitRadioActiveTakesPrecedenceOverRadioShuffleRoll();
     void radioMidQueueAdvancesLinearly();
     void radioAtEndInjectsProviderPickOnAutoAdvance();
     void radioAtEndInjectsProviderPickOnManualNext();
@@ -565,6 +568,69 @@ void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()
     QCOMPARE(injected.count(), 1);
     QCOMPARE(injected.first().first().value<Track>().path, QStringLiteral("/lib"));
     QCOMPARE(userAdd.count(), 0);
+}
+
+void PlayerCoreTest::radioShuffleAtPercent100InjectsRadioProviderTrack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    int radioCalls = 0;
+    m_core->setRadioProvider([&radioCalls](int, const QSet<QString> &) {
+        ++radioCalls;
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setShuffleMode(ShuffleMode::Radio);
+    m_core->setRadioShufflePercent(100);
+    m_core->playAt(0);
+
+    QSignalSpy injected(m_core.get(), &PlayerCore::aboutToInjectLibraryTrack);
+    QSignalSpy userAdd(m_core.get(), &PlayerCore::aboutToAddTracks);
+
+    m_core->next();
+    QVERIFY(radioCalls > 0);
+    QCOMPARE(m_core->queue().size(), 3);
+    QCOMPARE(m_core->queue().last().path, QStringLiteral("/radio"));
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/radio"));
+    QCOMPARE(injected.count(), 1);
+    QCOMPARE(userAdd.count(), 0);
+    QVERIFY(!m_core->radioActive());
+}
+
+void PlayerCoreTest::radioShuffleAtPercent0UsesQueueShuffle()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    int radioCalls = 0;
+    m_core->setRadioProvider([&radioCalls](int, const QSet<QString> &) {
+        ++radioCalls;
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setShuffleMode(ShuffleMode::Radio);
+    m_core->setRadioShufflePercent(0);
+    m_core->playAt(0);
+
+    m_core->next();
+    QCOMPARE(radioCalls, 0);
+    QCOMPARE(m_core->queue().size(), 3);
+    QVERIFY(m_core->currentTrack().path == QStringLiteral("/b")
+            || m_core->currentTrack().path == QStringLiteral("/c"));
+}
+
+void PlayerCoreTest::explicitRadioActiveTakesPrecedenceOverRadioShuffleRoll()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    int radioCalls = 0;
+    m_core->setRadioProvider([&radioCalls](int, const QSet<QString> &) {
+        ++radioCalls;
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setShuffleMode(ShuffleMode::Radio);
+    m_core->setRadioShufflePercent(100);
+    m_core->setRadioActive(true);
+    m_core->playAt(0);
+
+    m_core->next();
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+    QVERIFY(m_core->radioActive());
 }
 
 void PlayerCoreTest::dsdTakeoverDefersThenStartsNatively()

@@ -771,6 +771,16 @@ void PlayerCore::setLibraryShufflePercent(int percent)
     emit libraryShufflePercentChanged(m_libraryShufflePercent);
 }
 
+void PlayerCore::setRadioShufflePercent(int percent)
+{
+    percent = std::clamp(percent, 0, 100);
+    if (m_radioShufflePercent == percent) {
+        return;
+    }
+    m_radioShufflePercent = percent;
+    emit radioShufflePercentChanged(m_radioShufflePercent);
+}
+
 void PlayerCore::setRadioActive(bool active)
 {
     if (m_radioActive == active) {
@@ -823,6 +833,22 @@ PlayerCore::AutoNext PlayerCore::decideAutoNext()
                 exclude.insert(track.path);
             }
             const QVector<Track> picks = m_randomTracks(1, exclude);
+            if (!picks.isEmpty() && !picks.first().path.isEmpty()) {
+                return {-1, picks.first()};
+            }
+        }
+    }
+    // Ambient Radio shuffle: same queue-vs-library semantics as Library shuffle,
+    // but taste-aware pulls use the radio provider. Explicit Start Radio is
+    // handled above by m_radioActive and always takes precedence.
+    if (m_shuffleMode == ShuffleMode::Radio && m_radioTracks && m_radioShufflePercent > 0) {
+        if (QRandomGenerator::global()->bounded(100) < m_radioShufflePercent) {
+            QSet<QString> exclude;
+            exclude.reserve(m_queue.size());
+            for (const Track &track : m_queue) {
+                exclude.insert(track.path);
+            }
+            const QVector<Track> picks = m_radioTracks(1, exclude);
             if (!picks.isEmpty() && !picks.first().path.isEmpty()) {
                 return {-1, picks.first()};
             }

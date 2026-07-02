@@ -14,7 +14,10 @@
   remasters/deluxe editions count as the same album. Listening affinity is
   pooled across every library path with the same song key, so a FLAC album copy
   and a compilation/portable copy strengthen the same recommendation signal
-  instead of diluting each other. Hovering a radio
+  instead of diluting each other. The shuffle button now includes Radio shuffle,
+  an ambient taste-aware shuffle mode that uses the radio engine for library
+  pulls without starting a visible Start Radio session; its pull chance defaults
+  to 80% and is configurable from the Playback menu. Hovering a radio
   pick in the queue now explains the choice with a human-readable summary and
   the numeric scorer breakdown. Powered by the play history, imported scrobbles,
   and genre data added in the previous

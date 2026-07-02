@@ -110,6 +110,8 @@ QString shuffleModeName(ShuffleMode mode)
         return QStringLiteral("queue");
     case ShuffleMode::Library:
         return QStringLiteral("library");
+    case ShuffleMode::Radio:
+        return QStringLiteral("radio");
     case ShuffleMode::Off:
         break;
     }
@@ -547,8 +549,8 @@ void MprisService::setShuffleMode(ShuffleMode mode)
     const bool wasShuffling = m_shuffleMode != ShuffleMode::Off;
     m_shuffleMode = mode;
     // MPRIS exposes only a bool, so its Shuffle signal fires only when the
-    // on/off state flips; the custom JSON distinguishes queue vs library, so it
-    // refreshes on any mode change.
+    // on/off state flips; the custom JSON distinguishes queue/library/radio, so
+    // it refreshes on any mode change.
     if (wasShuffling != (m_shuffleMode != ShuffleMode::Off)) {
         emitPropertiesChanged(QString::fromLatin1(playerInterface),
                               {{QStringLiteral("Shuffle"), shuffle()}});
