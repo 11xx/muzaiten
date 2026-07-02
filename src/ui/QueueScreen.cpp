@@ -31,6 +31,7 @@ QueueScreen::QueueScreen(QWidget *parent)
     connect(m_table, &QueueTable::addToPlaylistRequested, this, &QueueScreen::addToPlaylistRequested);
     connect(m_table, &QueueTable::propertiesRequested, this, &QueueScreen::propertiesRequested);
     connect(m_table, &QueueTable::startRadioRequested, this, &QueueScreen::startRadioRequested);
+    connect(m_table, &QueueTable::trackFlagChanged, this, &QueueScreen::trackFlagChanged);
     connect(m_table, &QueueTable::trackLibraryRequested, this, &QueueScreen::trackLibraryRequested);
     connect(m_table, &QueueTable::viewSettingsChanged, this, &QueueScreen::viewSettingsChanged);
 }
@@ -43,6 +44,11 @@ void QueueScreen::setQueueStore(QueueStore *store)
 void QueueScreen::setPickReasonResolver(std::function<QString(const QString &)> resolver)
 {
     m_table->setPickReasonResolver(std::move(resolver));
+}
+
+void QueueScreen::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_table->setTrackFlagResolver(std::move(resolver));
 }
 
 QString QueueScreen::viewSettingsJson() const

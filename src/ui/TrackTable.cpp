@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 namespace {
 
@@ -522,6 +523,11 @@ void TrackTable::setAutoHeightToRows(bool autoHeight)
     setMinimumHeight(height);
     setMaximumHeight(height);
     updateGeometry();
+}
+
+void TrackTable::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_trackFlagResolver = std::move(resolver);
 }
 
 void TrackTable::updateTrackRating(const QString &path, int effectiveRating, bool hasUserRating)
@@ -1026,6 +1032,22 @@ void TrackTable::showCellMenu(const QPoint &pos)
     QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
     connect(startRadio, &QAction::triggered, this, [this, track]() {
         emit startRadioRequested(track);
+    });
+    QAction *neverRadio = menu.addAction(QStringLiteral("Never play on radio"));
+    neverRadio->setCheckable(true);
+    neverRadio->setChecked(static_cast<bool>(m_trackFlagResolver)
+                           && m_trackFlagResolver(track, QStringLiteral("never_radio")));
+    neverRadio->setEnabled(!track.path.isEmpty());
+    connect(neverRadio, &QAction::toggled, this, [this, track](bool on) {
+        emit trackFlagChanged(track, QStringLiteral("never_radio"), on);
+    });
+    QAction *noLearn = menu.addAction(QStringLiteral("Don't learn from this"));
+    noLearn->setCheckable(true);
+    noLearn->setChecked(static_cast<bool>(m_trackFlagResolver)
+                        && m_trackFlagResolver(track, QStringLiteral("no_learn")));
+    noLearn->setEnabled(!track.path.isEmpty());
+    connect(noLearn, &QAction::toggled, this, [this, track](bool on) {
+        emit trackFlagChanged(track, QStringLiteral("no_learn"), on);
     });
 
     menu.addSeparator();

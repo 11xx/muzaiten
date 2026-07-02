@@ -769,6 +769,11 @@ void QueueTable::setPickReasonResolver(std::function<QString(const QString &)> r
     static_cast<QueueTableModel *>(m_model)->setPickReasonResolver(std::move(resolver));
 }
 
+void QueueTable::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_trackFlagResolver = std::move(resolver);
+}
+
 QString QueueTable::viewSettingsJson() const
 {
     QJsonArray visibleColumns;
@@ -1072,6 +1077,22 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
     connect(startRadio, &QAction::triggered, this, [this, track]() {
         emit startRadioRequested(track);
+    });
+    QAction *neverRadio = menu.addAction(QStringLiteral("Never play on radio"));
+    neverRadio->setCheckable(true);
+    neverRadio->setChecked(static_cast<bool>(m_trackFlagResolver)
+                           && m_trackFlagResolver(track, QStringLiteral("never_radio")));
+    neverRadio->setEnabled(!track.path.isEmpty());
+    connect(neverRadio, &QAction::toggled, this, [this, track](bool on) {
+        emit trackFlagChanged(track, QStringLiteral("never_radio"), on);
+    });
+    QAction *noLearn = menu.addAction(QStringLiteral("Don't learn from this"));
+    noLearn->setCheckable(true);
+    noLearn->setChecked(static_cast<bool>(m_trackFlagResolver)
+                        && m_trackFlagResolver(track, QStringLiteral("no_learn")));
+    noLearn->setEnabled(!track.path.isEmpty());
+    connect(noLearn, &QAction::toggled, this, [this, track](bool on) {
+        emit trackFlagChanged(track, QStringLiteral("no_learn"), on);
     });
     menu.addSeparator();
     QAction *findInLibrary = menu.addAction(QStringLiteral("Find in library"));

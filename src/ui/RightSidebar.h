@@ -29,6 +29,7 @@ public:
     void setDatabase(const Database *db) { m_database = db; }
     void setQueueStore(QueueStore *store);
     void setPickReasonResolver(std::function<QString(const QString &)> resolver);
+    void setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver);
     void setQueue(const QVector<Track> &tracks);
     void setPlayNextRange(int begin, int end);
     void setCurrentIndex(int index, bool reveal = false);
@@ -68,6 +69,7 @@ signals:
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
     void startRadioRequested(const Track &track);
+    void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void trackLibraryRequested(const Track &track);
     void viewSettingsChanged();
 

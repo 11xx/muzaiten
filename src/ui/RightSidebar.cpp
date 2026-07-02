@@ -64,6 +64,7 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable, &QueueTable::findFileRequested, this, &RightSidebar::findFileRequested);
     connect(m_queueTable, &QueueTable::propertiesRequested, this, &RightSidebar::propertiesRequested);
     connect(m_queueTable, &QueueTable::startRadioRequested, this, &RightSidebar::startRadioRequested);
+    connect(m_queueTable, &QueueTable::trackFlagChanged, this, &RightSidebar::trackFlagChanged);
     connect(m_queueTable, &QueueTable::trackLibraryRequested, this, &RightSidebar::trackLibraryRequested);
     connect(m_queueTable, &QueueTable::viewSettingsChanged, this, &RightSidebar::viewSettingsChanged);
 
@@ -108,6 +109,11 @@ void RightSidebar::setQueueStore(QueueStore *store)
 void RightSidebar::setPickReasonResolver(std::function<QString(const QString &)> resolver)
 {
     m_queueTable->setPickReasonResolver(std::move(resolver));
+}
+
+void RightSidebar::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_queueTable->setTrackFlagResolver(std::move(resolver));
 }
 
 void RightSidebar::setQueueIsPlaylistSourced(bool sourced)

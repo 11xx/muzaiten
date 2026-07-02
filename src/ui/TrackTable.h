@@ -4,6 +4,8 @@
 #include <QVector>
 #include <QPersistentModelIndex>
 
+#include <functional>
+
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/NavigableTableView.h"
@@ -60,6 +62,7 @@ public:
     // When true, the context menu also offers "(don't save to playlist)" queue
     // adds (the queue is mirroring a playlist).
     void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
+    void setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver);
 
 signals:
     void trackActivated(const Track &track);
@@ -71,6 +74,7 @@ signals:
     void addToQueueTemporaryRequested(const QVector<Track> &tracks);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void startRadioRequested(const Track &track);
+    void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
     void trackRatingChanged(const Track &track, int rating0To100);
@@ -94,6 +98,7 @@ private:
 
     QPersistentModelIndex m_hoverRatingIndex;
     QSet<QString> m_markedTrackPaths;
+    std::function<bool(const Track &, const QString &)> m_trackFlagResolver;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     int m_hoveredRow = -1;
     bool m_queueIsPlaylistSourced = false;
