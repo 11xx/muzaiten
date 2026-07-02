@@ -11,7 +11,10 @@
   artist or album — and every pick records why it was chosen. Song no-repeat
   now follows MusicBrainz recording IDs when available, falling back to folded
   artist+title, and the album cap follows MusicBrainz release groups so
-  remasters/deluxe editions count as the same album. Hovering a radio
+  remasters/deluxe editions count as the same album. Listening affinity is
+  pooled across every library path with the same song key, so a FLAC album copy
+  and a compilation/portable copy strengthen the same recommendation signal
+  instead of diluting each other. Hovering a radio
   pick in the queue now explains the choice with a human-readable summary and
   the numeric scorer breakdown. Powered by the play history, imported scrobbles,
   and genre data added in the previous

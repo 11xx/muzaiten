@@ -2,6 +2,7 @@
 #include "core/GenreTags.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
+#include "reco/AffinityPool.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -62,6 +63,29 @@ Track resolvePathToTrack(const QString &path)
     return track;
 }
 
+TrackScorer::Affinity makeAffinity(int playEvents, int finished, int skipped,
+                                   qint64 lastPlayedAtSecs, int listenCount, int baselineMax)
+{
+    TrackScorer::Affinity affinity;
+    affinity.playEvents = playEvents;
+    affinity.finished = finished;
+    affinity.skipped = skipped;
+    affinity.lastPlayedAtSecs = lastPlayedAtSecs;
+    affinity.listenCount = listenCount;
+    affinity.baselineMax = baselineMax;
+    return affinity;
+}
+
+void QCOMPARE_AFFINITY(const TrackScorer::Affinity &actual, const TrackScorer::Affinity &expected)
+{
+    QCOMPARE(actual.playEvents, expected.playEvents);
+    QCOMPARE(actual.finished, expected.finished);
+    QCOMPARE(actual.skipped, expected.skipped);
+    QCOMPARE(actual.lastPlayedAtSecs, expected.lastPlayedAtSecs);
+    QCOMPARE(actual.listenCount, expected.listenCount);
+    QCOMPARE(actual.baselineMax, expected.baselineMax);
+}
+
 } // namespace
 
 class RadioTest final : public QObject {
@@ -72,6 +96,11 @@ private slots:
     void songKeyPrefersRecordingMbid();
     void songKeyFallsBackToFoldedArtistTitle();
     void albumGroupKeyPrefersReleaseGroupMbid();
+
+    // AffinityPool
+    void affinityPoolSumsDuplicateSongHistory();
+    void affinityPoolLeavesUnmappedPathsUnchanged();
+    void affinityPoolEmptyMapIsNoOp();
 
     // TrackScorer
     void genreOverlapDominates();
@@ -136,6 +165,60 @@ void RadioTest::albumGroupKeyPrefersReleaseGroupMbid()
              QStringLiteral("rg:release-group-1"));
     QCOMPARE(FoldKey::albumGroupKey({}, QStringLiteral("  Album  Artist  "), QStringLiteral("  Album  ")),
              QStringLiteral("album artist\nalbum"));
+}
+
+// ---- AffinityPool ----------------------------------------------------------
+
+void RadioTest::affinityPoolSumsDuplicateSongHistory()
+{
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/album.flac"), makeAffinity(2, 1, 1, 100, 3, 12)},
+        {QStringLiteral("/compilation.opus"), makeAffinity(4, 3, 0, 250, 5, 9)},
+    };
+    const QHash<QString, QString> pathToSongKey{
+        {QStringLiteral("/album.flac"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/compilation.opus"), QStringLiteral("mbid:shared")},
+        {QStringLiteral("/portable.mp3"), QStringLiteral("mbid:shared")},
+    };
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(byPath, pathToSongKey);
+    const TrackScorer::Affinity expected = makeAffinity(6, 4, 1, 250, 8, 12);
+
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/album.flac")), expected);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/compilation.opus")), expected);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/portable.mp3")), expected);
+}
+
+void RadioTest::affinityPoolLeavesUnmappedPathsUnchanged()
+{
+    const TrackScorer::Affinity original = makeAffinity(1, 1, 0, 42, 2, 7);
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/unmapped.flac"), original},
+    };
+    const QHash<QString, QString> pathToSongKey{
+        {QStringLiteral("/other.flac"), QStringLiteral("mbid:other")},
+    };
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(byPath, pathToSongKey);
+
+    QCOMPARE(pooled.size(), 1);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/unmapped.flac")), original);
+}
+
+void RadioTest::affinityPoolEmptyMapIsNoOp()
+{
+    const TrackScorer::Affinity original = makeAffinity(3, 2, 1, 123, 5, 11);
+    const QHash<QString, TrackScorer::Affinity> byPath{
+        {QStringLiteral("/song.flac"), original},
+    };
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(byPath, {});
+
+    QCOMPARE(pooled.size(), 1);
+    QCOMPARE_AFFINITY(pooled.value(QStringLiteral("/song.flac")), original);
 }
 
 // ---- TrackScorer -----------------------------------------------------------

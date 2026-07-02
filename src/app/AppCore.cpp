@@ -12,6 +12,7 @@
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
+#include "reco/AffinityPool.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -767,6 +768,13 @@ bool AppCore::startRadio(const QString &seedPath)
         for (auto it = affinityRows.cbegin(); it != affinityRows.cend(); ++it) {
             affinities.insert(it.key(), affinityFromRow(it.value()));
         }
+        QHash<QString, QString> pathToSongKey;
+        const auto matchRows = m_database->trackMatchRows();
+        pathToSongKey.reserve(matchRows.size());
+        for (const auto &[path, artist, title, recordingMbid] : matchRows) {
+            pathToSongKey.insert(path, FoldKey::songKey(recordingMbid, artist, title));
+        }
+        affinities = AffinityPool::poolBySongKey(affinities, pathToSongKey);
     }
 
     TrackScorer::Candidate seedCandidate;
