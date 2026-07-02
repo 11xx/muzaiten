@@ -705,6 +705,11 @@ void ListenHistoryStore::setMetaValue(const QString &key, const QString &value)
         "INSERT INTO meta(key, value) VALUES(?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
     query.addBindValue(key);
-    query.addBindValue(value);
+    // A null QString() (used to clear a key, e.g. the backfill cursor/canceled
+    // flag) binds as SQL NULL, which the column's NOT NULL constraint would
+    // silently reject (exec() failing without anyone checking it here).
+    // Normalize to a non-null empty string so "clear" round-trips through
+    // metaValue() as "" like the rest of this API documents.
+    query.addBindValue(value.isNull() ? QString(QLatin1String("")) : value);
     query.exec();
 }
