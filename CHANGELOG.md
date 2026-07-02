@@ -8,8 +8,10 @@
   (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
   scored by genre, era, rating and listening affinity, with a novelty bonus for
   the unheard and artist/album throttling so a session never stalls on one
-  artist or album — and every pick records why it was chosen. Powered by the
-  play history, imported scrobbles, and genre data added in the previous
+  artist or album — and every pick records why it was chosen. Hovering a radio
+  pick in the queue now explains the choice with a human-readable summary and
+  the numeric scorer breakdown. Powered by the play history, imported scrobbles,
+  and genre data added in the previous
   slices. A "Start Radio" context-menu action, seeded from the clicked track,
   is now available in the library track table, the queue (sidebar and
   full-screen), the playlist view (per-item and per-playlist/saved-queue,
