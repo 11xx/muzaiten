@@ -87,11 +87,13 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            TrackScorer::Candidate seed,
                            int exploration0To100,
                            qint64 nowSecs,
-                           QRandomGenerator *rng)
+                           QRandomGenerator *rng,
+                           TrackScorer::Weights weights)
     : m_pool(std::move(pool))
     , m_affinities(std::move(affinities))
     , m_genreIdf(std::move(genreIdf))
     , m_seed(std::move(seed))
+    , m_weights(std::move(weights))
     , m_exploration(std::clamp(exploration0To100, 0, 100))
     , m_nowSecs(nowSecs)
     , m_rng(rng != nullptr ? rng : QRandomGenerator::global())
@@ -118,9 +120,10 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            QHash<QString, double> genreIdf,
                            int exploration0To100,
                            qint64 nowSecs,
-                           QRandomGenerator *rng)
+                           QRandomGenerator *rng,
+                           TrackScorer::Weights weights)
     : RadioSession(std::move(pool), std::move(affinities), std::move(genreIdf),
-                   TrackScorer::Candidate{}, exploration0To100, nowSecs, rng)
+                   TrackScorer::Candidate{}, exploration0To100, nowSecs, rng, std::move(weights))
 {
 }
 
@@ -196,7 +199,7 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
             if (m_albumCounts.value(candidate.albumKey) >= kAlbumCap) {
                 continue;
             }
-            scored.push_back({TrackScorer::score(candidate, m_affinities.value(candidate.path), context),
+            scored.push_back({TrackScorer::score(candidate, m_affinities.value(candidate.path), context, m_weights),
                               &candidate});
         }
         if (scored.isEmpty()) {

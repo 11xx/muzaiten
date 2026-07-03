@@ -45,6 +45,9 @@
   never seed a candidate pool or count as a genre match — and every session's
   candidate pool always blends in a random library slice so radio can escape
   a single genre cohort even when the seed's only genre is uninformative.
+  Crowded tag-soup genre lists now dampen the genre score instead of saturating
+  similarity by offering many broad overlaps, and the scorer can load runtime
+  JSON weights from `radio.scoringWeights` for no-rebuild tuning.
   Skips are only held against a track when they happen before the scrobble
   threshold (half the duration, capped at 4 minutes) — skipping near the end
   is a listen, not a dislike — and a lone skip on a barely-played track is a

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
 #include <QList>
 #include <QSet>
@@ -61,6 +62,32 @@ struct Scored {
     QList<Component> components;    // retained for explainability (Stage 3)
 };
 
+// Runtime-tunable scorer weights. AppCore reads a JSON object from the
+// library-DB setting `radio.scoringWeights`; omitted or invalid fields keep
+// these defaults.
+struct Weights {
+    double genreWeight = 3.0;
+    double genreIdfSaturation = 4.0;
+    double genreCrowdingSoftLimit = 3.0;
+    double eraWeight = 1.0;
+    double eraSpanYears = 30.0;
+    double ratingWeight = 1.5;
+    double userRatingBoost = 1.25;
+    double historyWeight = 1.0;
+    double historySaturation = 50.0;
+    double noveltyWeight = 0.8;
+    double noveltyZeroAt = 10.0;
+    double recencyPenalty = -2.0;
+    double recencyHalfLifeDays = 14.0;
+    double skipPenalty = -2.5;
+    double sameArtistPenalty = -0.6;
+};
+
+Weights defaultWeights();
+Weights weightsFromJson(const QByteArray &json, QString *error = nullptr);
+
 Scored score(const Candidate &candidate, const Affinity &affinity, const SeedContext &seed);
+Scored score(const Candidate &candidate, const Affinity &affinity, const SeedContext &seed,
+             const Weights &weights);
 
 } // namespace TrackScorer

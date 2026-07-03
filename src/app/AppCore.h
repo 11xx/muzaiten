@@ -165,6 +165,7 @@ private:
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
                                                            const QHash<QString, QString> &genreAliases) const;
     QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases) const;
+    TrackScorer::Weights radioScoringWeights() const;
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
     void installRadioProvider(bool markPicksAsRadio);
     void saveRadioSessionState();

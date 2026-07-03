@@ -902,6 +902,21 @@ QHash<QString, double> AppCore::buildRadioGenreIdf(const QHash<QString, QString>
     return genreIdf;
 }
 
+TrackScorer::Weights AppCore::radioScoringWeights() const
+{
+    if (m_database == nullptr) {
+        return TrackScorer::defaultWeights();
+    }
+
+    QString error;
+    const TrackScorer::Weights weights =
+        TrackScorer::weightsFromJson(m_database->setting(QStringLiteral("radio.scoringWeights")).toUtf8(), &error);
+    if (!error.isEmpty()) {
+        qWarning("radio-scoring: ignoring invalid radio.scoringWeights: %s", qPrintable(error));
+    }
+    return weights;
+}
+
 QHash<QString, TrackScorer::Affinity> AppCore::buildRadioAffinities() const
 {
     QHash<QString, TrackScorer::Affinity> affinities;
@@ -986,6 +1001,7 @@ void AppCore::maybeRestoreRadioSession()
                                        0, 100);
     const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
+    const TrackScorer::Weights scoringWeights = radioScoringWeights();
     std::unique_ptr<RadioSession> restored;
     QString seedPath;
 
@@ -1003,7 +1019,7 @@ void AppCore::maybeRestoreRadioSession()
         restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
                                                   buildRadioGenreIdf(genreAliases),
                                                   buildRadioSeedCandidate(seed, seedGenresFolded),
-                                                  exploration, nowSecs);
+                                                  exploration, nowSecs, nullptr, scoringWeights);
     } else if (kind == QLatin1String("anchorless")) {
         QVector<TrackScorer::Candidate> pool = buildRadioCandidatePool({}, genreAliases);
         if (pool.isEmpty()) {
@@ -1012,7 +1028,8 @@ void AppCore::maybeRestoreRadioSession()
             return;
         }
         restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
-                                                  buildRadioGenreIdf(genreAliases), exploration, nowSecs);
+                                                  buildRadioGenreIdf(genreAliases), exploration, nowSecs,
+                                                  nullptr, scoringWeights);
     } else if (const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(kind)) {
         QVector<TrackScorer::Candidate> pool = buildRadioFallbackPool(5000, genreAliases);
         QHash<QString, TrackScorer::Affinity> affinities = buildRadioAffinities();
@@ -1023,7 +1040,8 @@ void AppCore::maybeRestoreRadioSession()
             return;
         }
         restored = std::make_unique<RadioSession>(std::move(pool), std::move(affinities),
-                                                  buildRadioGenreIdf(genreAliases), exploration, nowSecs);
+                                                  buildRadioGenreIdf(genreAliases), exploration, nowSecs,
+                                                  nullptr, scoringWeights);
     } else {
         qInfo("radio-restore: clearing malformed session state with unknown kind");
         clearRadioSessionState();
@@ -1102,7 +1120,8 @@ void AppCore::syncRadioShuffleSession()
 
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
                                                     buildRadioGenreIdf(genreAliases),
-                                                    radioExploration(), QDateTime::currentSecsSinceEpoch());
+                                                    radioExploration(), QDateTime::currentSecsSinceEpoch(),
+                                                    nullptr, radioScoringWeights());
     m_radioSessionKind = QStringLiteral("anchorless");
     m_radioSessionSeedPath.clear();
     m_radioSessionExploration = radioExploration();
@@ -1160,7 +1179,8 @@ bool AppCore::startRadio(const QString &seedPath)
     m_radioSessionExploration = exploration;
 
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
-                                                    seedCandidate, exploration, QDateTime::currentSecsSinceEpoch());
+                                                    seedCandidate, exploration, QDateTime::currentSecsSinceEpoch(),
+                                                    nullptr, radioScoringWeights());
     // Install the scored provider; it resolves each pick to a full Track by
     // path. Stays installed regardless of batch size: it is the safety net for
     // when the queue runs dry (e.g. the user deleted rows ahead of playback).
@@ -1214,7 +1234,7 @@ bool AppCore::startMix(const QString &mode)
         1, 100);
 
     auto session = std::make_unique<RadioSession>(std::move(pool), affinities, buildRadioGenreIdf(genreAliases),
-                                                  exploration, nowSecs);
+                                                  exploration, nowSecs, nullptr, radioScoringWeights());
     QVector<Track> picks = session->nextTracks(m_radioBatchSize, {}, [this](const QString &path) {
         return m_database ? m_database->trackForPath(path) : Track{};
     });

@@ -138,8 +138,10 @@ private slots:
     void genreOverlapDominates();
     void genreIdfSaturatesOnRareSharedGenre();
     void genreIdfPartialOnBroadSharedGenre();
+    void genreCrowdingDampensTagSoupMatches();
     void genreAbsentWithNoSharedGenres();
     void genreAbsentWithEmptyIdfMap();
+    void scoringWeightsJsonOverridesDefaults();
     void eraDecaysWithYearGap();
     void skipPenaltyScalesWithSkipRate();
     void recencyPenaltyDecaysWithTime();
@@ -468,6 +470,32 @@ void RadioTest::genreIdfPartialOnBroadSharedGenre()
     QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("genre")), 3.0 * 0.45 * 1.10));
 }
 
+void RadioTest::genreCrowdingDampensTagSoupMatches()
+{
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("electronic"), QStringLiteral("trance"), QStringLiteral("pop"),
+                         QStringLiteral("jazz"), QStringLiteral("alternative")};
+    seed.genreIdf = {
+        {QStringLiteral("electronic"), 1.0},
+        {QStringLiteral("trance"), 1.0},
+        {QStringLiteral("pop"), 1.0},
+        {QStringLiteral("jazz"), 1.0},
+        {QStringLiteral("alternative"), 1.0},
+    };
+
+    const TrackScorer::Candidate soup =
+        makeCandidate(QStringLiteral("/soup"), QStringLiteral("a"), seed.genresFolded);
+    const double damped = componentValue(TrackScorer::score(soup, {}, seed), QStringLiteral("genre"));
+
+    TrackScorer::Weights noCrowding = TrackScorer::defaultWeights();
+    noCrowding.genreCrowdingSoftLimit = 99.0;
+    const double undamped = componentValue(TrackScorer::score(soup, {}, seed, noCrowding), QStringLiteral("genre"));
+
+    QVERIFY(damped > 0.0);
+    QVERIFY(damped < undamped);
+    QVERIFY(qFuzzyCompare(undamped, 3.0 * 1.0 * 1.10));
+}
+
 void RadioTest::genreAbsentWithNoSharedGenres()
 {
     TrackScorer::SeedContext seed;
@@ -492,6 +520,28 @@ void RadioTest::genreAbsentWithEmptyIdfMap()
         makeCandidate(QStringLiteral("/m"), QStringLiteral("a"), {QStringLiteral("rock")}), {}, seed);
 
     QVERIFY(!hasComponent(scored, QStringLiteral("genre")));
+}
+
+void RadioTest::scoringWeightsJsonOverridesDefaults()
+{
+    QString error;
+    const TrackScorer::Weights weights = TrackScorer::weightsFromJson(
+        R"({"ratingWeight":0.75,"genreWeight":2.0,"skipPenalty":-3.5,"genreCrowdingSoftLimit":2})",
+        &error);
+    QVERIFY(error.isEmpty());
+    QVERIFY(qFuzzyCompare(weights.ratingWeight, 0.75));
+    QVERIFY(qFuzzyCompare(weights.genreWeight, 2.0));
+    QVERIFY(qFuzzyCompare(weights.skipPenalty, -3.5));
+    QVERIFY(qFuzzyCompare(weights.genreCrowdingSoftLimit, 2.0));
+
+    TrackScorer::SeedContext seed;
+    const TrackScorer::Scored scored = TrackScorer::score(
+        makeCandidate(QStringLiteral("/rated"), QStringLiteral("a"), {}, 0, 100), {}, seed, weights);
+    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("rating")), 0.75));
+
+    const TrackScorer::Weights fallback = TrackScorer::weightsFromJson("{", &error);
+    QVERIFY(!error.isEmpty());
+    QVERIFY(qFuzzyCompare(fallback.ratingWeight, TrackScorer::defaultWeights().ratingWeight));
 }
 
 void RadioTest::eraDecaysWithYearGap()

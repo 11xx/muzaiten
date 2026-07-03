@@ -40,7 +40,8 @@ public:
                  TrackScorer::Candidate seed,
                  int exploration0To100,
                  qint64 nowSecs,
-                 QRandomGenerator *rng = nullptr);
+                 QRandomGenerator *rng = nullptr,
+                 TrackScorer::Weights weights = TrackScorer::defaultWeights());
 
     // Anchorless ambient-radio mode: no fixed seed, so rollingGenres() starts
     // empty and becomes the last few notePlayed() tracks.
@@ -49,7 +50,8 @@ public:
                  QHash<QString, double> genreIdf,
                  int exploration0To100,
                  qint64 nowSecs,
-                 QRandomGenerator *rng = nullptr);
+                 QRandomGenerator *rng = nullptr,
+                 TrackScorer::Weights weights = TrackScorer::defaultWeights());
 
     // Up to `count` picks scored against the CURRENT rolling context, resolved to
     // full Tracks via `resolveTrack`. `excludePaths` (typically the live queue)
@@ -104,6 +106,7 @@ private:
     QHash<QString, TrackScorer::Candidate> m_byPath; // pool + seed, for notePlayed lookups
     QHash<QString, double> m_genreIdf;
     TrackScorer::Candidate m_seed;
+    TrackScorer::Weights m_weights;
     int m_exploration = 30;
     qint64 m_nowSecs = 0;
     QRandomGenerator *m_rng = nullptr;
