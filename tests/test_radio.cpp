@@ -12,6 +12,8 @@
 
 #include <QRandomGenerator>
 #include <QSet>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QUuid>
 #include <QtTest>
@@ -174,9 +176,11 @@ private slots:
     void radioCandidatesJoinsGenresAndFallback();
     void genreAliasesExpandCandidatesAndMergeCounts();
     void genreTrackCountsAggregatesAcrossLibrary();
+    void genrePipeBackfillResplitsStoredMetadata();
     void trackAffinitiesAggregateAllSources();
 
     // GenreTags
+    void genreTagsSplitPipeSeparators();
     void genreCanonicalIdentityAndMapping();
     void genreCanonicalStoplistAfterMapping();
     void nonGenrePlaceholdersAreStoplisted();
@@ -1249,6 +1253,49 @@ void RadioTest::genreTrackCountsAggregatesAcrossLibrary()
     QCOMPARE(taggedTrackTotal, 2);
 }
 
+void RadioTest::genrePipeBackfillResplitsStoredMetadata()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString dbPath = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString connectionName = QStringLiteral("genre-pipe-backfill-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+    const Track track = makeDbTrack(dir, QStringLiteral("01.flac"),
+                                    {QStringLiteral("Alternative | Other")},
+                                    QStringLiteral("2004-05-06"));
+    {
+        Database db(connectionName);
+        QVERIFY2(db.open(dbPath), qPrintable(db.lastError()));
+        QVERIFY2(db.upsertTrack(track), qPrintable(db.lastError()));
+        QCOMPARE(db.genresForTrack(track.path),
+                 QStringList({QStringLiteral("Alternative"), QStringLiteral("Other")}));
+    }
+
+    {
+        const QString rawConnection = QStringLiteral("genre-pipe-backfill-raw-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), rawConnection);
+            raw.setDatabaseName(dbPath);
+            QVERIFY(raw.open());
+            QSqlQuery q(raw);
+            QVERIFY(q.exec(QStringLiteral("DELETE FROM track_genres")));
+            QVERIFY(q.exec(QStringLiteral(
+                "INSERT INTO track_genres(track_id, genre, genre_folded) "
+                "SELECT id, 'Alternative | Other', 'alternative | other' FROM tracks WHERE path LIKE '%01.flac'")));
+            QVERIFY(q.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version = 13")));
+            raw.close();
+        }
+        QSqlDatabase::removeDatabase(rawConnection);
+    }
+
+    {
+        Database db(connectionName);
+        QVERIFY2(db.open(dbPath), qPrintable(db.lastError()));
+        QCOMPARE(db.genresForTrack(track.path),
+                 QStringList({QStringLiteral("Alternative"), QStringLiteral("Other")}));
+    }
+}
+
 void RadioTest::trackAffinitiesAggregateAllSources()
 {
     QTemporaryDir dir;
@@ -1329,6 +1376,22 @@ void RadioTest::trackAffinitiesAggregateAllSources()
 }
 
 // ---- GenreTags --------------------------------------------------------------
+
+void RadioTest::genreTagsSplitPipeSeparators()
+{
+    MetadataBlob::FullMetadata metadata;
+    metadata.tags.insert(QStringLiteral("GENRE"), {
+        QStringLiteral("Alternative|Other"),
+        QStringLiteral("Dream Pop | Shoegaze"),
+        QStringLiteral("Jazz/Fusion;Soul,Neo Soul"),
+    });
+
+    QCOMPARE(GenreTags::fromMetadata(metadata),
+             QStringList({QStringLiteral("Alternative"), QStringLiteral("Other"),
+                          QStringLiteral("Dream Pop"), QStringLiteral("Shoegaze"),
+                          QStringLiteral("Jazz"), QStringLiteral("Fusion"),
+                          QStringLiteral("Soul"), QStringLiteral("Neo Soul")}));
+}
 
 void RadioTest::genreCanonicalIdentityAndMapping()
 {

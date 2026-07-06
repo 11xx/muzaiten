@@ -652,7 +652,64 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 12;
+    // v13: re-backfill queryable genres after the splitter learned about '|'
+    // packed genre tags. Metadata blobs stay untouched; track_genres is the
+    // derived index and can be rebuilt deterministically.
+    {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 13"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            if (!m_db.transaction()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+            if (!execSql(query, QStringLiteral("DELETE FROM track_genres"), &m_lastError)) {
+                m_db.rollback();
+                return false;
+            }
+            QSqlQuery bfQuery(m_db);
+            bfQuery.prepare(QStringLiteral(
+                "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
+            if (!bfQuery.exec()) {
+                m_lastError = bfQuery.lastError().text();
+                m_db.rollback();
+                return false;
+            }
+            QSqlQuery ins(m_db);
+            ins.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
+            while (bfQuery.next()) {
+                const qint64 trackId = bfQuery.value(0).toLongLong();
+                const qint64 rawSize = bfQuery.value(1).toLongLong();
+                const QByteArray blob = bfQuery.value(2).toByteArray();
+                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
+                for (const QString &genre : GenreTags::fromMetadata(meta)) {
+                    ins.addBindValue(trackId);
+                    ins.addBindValue(genre);
+                    ins.addBindValue(GenreTags::folded(genre));
+                    if (!ins.exec()) {
+                        m_lastError = ins.lastError().text();
+                        m_db.rollback();
+                        return false;
+                    }
+                }
+            }
+            if (!m_db.commit()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+        }
+    }
+
+    if (!execSql(query, QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(13, datetime('now'))"), &m_lastError)) {
+        return false;
+    }
+
+    return Schema::currentVersion == 13;
 }
 
 QString Database::lastError() const

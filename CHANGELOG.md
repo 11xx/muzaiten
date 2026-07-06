@@ -95,6 +95,10 @@
   the existing library without a rescan. Groundwork for genre-based
   recommendations; the accompanying schema bump triggers a one-time search
   index rebuild on first launch.
+- Queryable genre splitting now also treats `|` as a separator, so tags like
+  `Alternative | Other` no longer survive as one folded genre. A one-time
+  library migration rebuilds `track_genres` from the already-stored metadata
+  blobs without rescanning files.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

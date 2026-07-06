@@ -78,7 +78,7 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 12);
+    QCOMPARE(query.value(0).toInt(), 13);
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
