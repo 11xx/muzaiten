@@ -73,6 +73,17 @@ public:
         bool radioActive = false;
     };
 
+    // Append-only telemetry for explicit queue row removals. These rows are
+    // record-only provenance; recommendation affinity deliberately ignores them.
+    struct QueueRemovalEvent {
+        qint64 id = 0;
+        qint64 occurredAtSecs = 0;
+        Track track;                // persisted as track_path/mb_recording_id
+        bool wasRadioPick = false;
+        bool wasUnheard = false;
+        bool radioActive = false;
+    };
+
     // One historical listen pulled from a scrobbler service (ListenBrainz's
     // full listen export, or a Last.fm import), destined for `imported_listens`.
     // Deliberately a separate table from `listens`: imported rows carry no
@@ -152,6 +163,8 @@ public:
 
     bool recordRatingEvent(const RatingEvent &event);
     QVector<RatingEvent> ratingEvents(int limit = -1) const;
+    bool recordQueueRemoval(const QueueRemovalEvent &event);
+    QVector<QueueRemovalEvent> queueRemovalEvents(int limit = -1) const;
 
     int forgetTrackBehavior(const QStringList &paths, bool includeImportedListens = false);
 

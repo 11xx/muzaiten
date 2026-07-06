@@ -613,6 +613,9 @@ void AppCore::setupMprisWiring()
 void AppCore::setupScrobbleWiring()
 {
     connect(m_player, &PlayerCore::currentTrackChanged, this, [this](const Track &track, bool notifyScrobbler) {
+        if (!track.path.isEmpty()) {
+            m_queueHeardPaths.insert(track.path);
+        }
         // Consume the attribution set by the preceding currentIndexChanged /
         // aboutToInjectLibraryTrack regardless of notifyScrobbler, so a silent
         // present/restore does not leave stale flags for the next real start.
@@ -694,6 +697,46 @@ bool AppCore::recordRatingEvent(const Track &track,
         }
     }
     return m_listenHistory->recordRatingEvent(event);
+}
+
+void AppCore::recordUserQueueRemovals(const QVector<int> &rows)
+{
+    if (m_player == nullptr || m_listenHistory == nullptr || rows.isEmpty()) {
+        return;
+    }
+
+    const QVector<Track> queue = m_player->queue();
+    if (queue.isEmpty()) {
+        return;
+    }
+
+    QVector<int> sortedRows = rows;
+    std::sort(sortedRows.begin(), sortedRows.end());
+    sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
+
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+    const bool radioActive = m_player->radioActive() || m_radioShuffleSessionActive;
+    for (int row : sortedRows) {
+        if (row < 0 || row >= queue.size()) {
+            continue;
+        }
+        const Track &track = queue.at(row);
+        if (track.path.isEmpty()) {
+            continue;
+        }
+
+        ListenHistoryStore::QueueRemovalEvent event;
+        event.occurredAtSecs = nowSecs;
+        event.track = track;
+        event.wasRadioPick = m_radioPickPaths.contains(track.path);
+        event.wasUnheard = !m_queueHeardPaths.contains(track.path);
+        event.radioActive = radioActive;
+        m_listenHistory->recordQueueRemoval(event);
+
+        if (event.wasRadioPick) {
+            m_radioPickPaths.remove(track.path);
+        }
+    }
 }
 
 void AppCore::setupTrayIcon()

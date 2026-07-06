@@ -171,6 +171,7 @@ private slots:
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
     void anchorlessSessionDriftsFromPlayedContext();
+    void foreignNotePlayedEntersRollingConstraints();
     void constraintStateRoundTripPreservesSequencing();
 
     // Database + ListenHistoryStore round-trips
@@ -1105,6 +1106,68 @@ void RadioTest::anchorlessSessionDriftsFromPlayedContext()
     QCOMPARE(after.first().path, QStringLiteral("/rock"));
     QVERIFY2(drifted.reasonFor(after.first().path).contains(QStringLiteral("genre")),
              "anchorless session did not use notePlayed genre context");
+}
+
+void RadioTest::foreignNotePlayedEntersRollingConstraints()
+{
+    const QString foreignSongKey = FoldKey::songKey(QStringLiteral("foreign-rec"), QStringLiteral("Foreign"),
+                                                    QStringLiteral("Manual Song"));
+    const QString foreignAlbum = FoldKey::albumKey(QStringLiteral("Foreign"), QStringLiteral("Manual Album"));
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/manual-foreign"), QStringLiteral("foreign"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      foreignAlbum, foreignSongKey),
+        makeCandidate(QStringLiteral("/same-artist"), QStringLiteral("foreign"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      QStringLiteral("same-artist\nalbum"), QStringLiteral("song:same-artist")),
+        makeCandidate(QStringLiteral("/same-song"), QStringLiteral("other"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      QStringLiteral("same-song\nalbum"), foreignSongKey),
+        makeCandidate(QStringLiteral("/same-album"), QStringLiteral("album-a"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      foreignAlbum, QStringLiteral("song:album-a")),
+        makeCandidate(QStringLiteral("/same-album-2"), QStringLiteral("album-b"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      foreignAlbum, QStringLiteral("song:album-b")),
+        makeCandidate(QStringLiteral("/same-album-3"), QStringLiteral("album-c"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      foreignAlbum, QStringLiteral("song:album-c")),
+        makeCandidate(QStringLiteral("/rock-target"), QStringLiteral("target"),
+                      {QStringLiteral("rock")}, 2000, 100, true,
+                      QStringLiteral("target\nalbum"), QStringLiteral("song:target")),
+    };
+    const QHash<QString, double> genreIdf{{QStringLiteral("rock"), 2.0}};
+    RadioSession session(pool, {}, genreIdf, 30, 1'000'000'000);
+
+    Track foreign;
+    foreign.path = QStringLiteral("/manual-foreign");
+    foreign.title = QStringLiteral("Manual Song");
+    foreign.artistName = QStringLiteral("Foreign");
+    foreign.albumArtistName = QStringLiteral("Foreign");
+    foreign.albumTitle = QStringLiteral("Manual Album");
+    foreign.musicBrainz.recordingId = QStringLiteral("foreign-rec");
+    foreign.musicBrainz.releaseGroupId = QStringLiteral("foreign-rg");
+    session.notePlayed(foreign);
+
+    const QVector<Track> picks = session.nextTracks(10, {}, resolvePathToTrack);
+    QSet<QString> pickedPaths;
+    for (const Track &pick : picks) {
+        pickedPaths.insert(pick.path);
+    }
+
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/same-artist")));
+    QVERIFY(!pickedPaths.contains(QStringLiteral("/same-song")));
+    int sameAlbumPicks = 0;
+    for (const QString &path : {QStringLiteral("/same-album"), QStringLiteral("/same-album-2"),
+                               QStringLiteral("/same-album-3")}) {
+        if (pickedPaths.contains(path)) {
+            ++sameAlbumPicks;
+        }
+    }
+    QCOMPARE(sameAlbumPicks, 1);
+    QVERIFY(pickedPaths.contains(QStringLiteral("/rock-target")));
+    QVERIFY2(session.reasonFor(QStringLiteral("/rock-target")).contains(QStringLiteral("genre")),
+             "foreign notePlayed track did not enter the rolling genre context");
 }
 
 void RadioTest::constraintStateRoundTripPreservesSequencing()

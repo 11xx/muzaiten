@@ -19,6 +19,8 @@ private slots:
     void invalidListensRejected();
     void recordAndQueryRatingEvents();
     void ratingEventsDoNotAffectAffinities();
+    void recordAndQueryQueueRemovals();
+    void queueRemovalsDoNotAffectAffinities();
     void schemaVersionIsCurrent();
 
 private:
@@ -279,13 +281,109 @@ void TestListenHistory::ratingEventsDoNotAffectAffinities()
     QVERIFY(!after.contains(other.path));
 }
 
+void TestListenHistory::recordAndQueryQueueRemovals()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    Track radio = makeTrack();
+    ListenHistoryStore::QueueRemovalEvent radioEvent;
+    radioEvent.occurredAtSecs = 1000;
+    radioEvent.track = radio;
+    radioEvent.wasRadioPick = true;
+    radioEvent.wasUnheard = true;
+    radioEvent.radioActive = true;
+    QVERIFY(store.recordQueueRemoval(radioEvent));
+
+    Track manual = makeTrack(QStringLiteral("Manual"), QStringLiteral("Other Artist"));
+    manual.path = QStringLiteral("/music/manual.flac");
+    manual.musicBrainz.recordingId.clear();
+    ListenHistoryStore::QueueRemovalEvent manualEvent;
+    manualEvent.occurredAtSecs = 1001;
+    manualEvent.track = manual;
+    manualEvent.wasUnheard = false;
+    QVERIFY(store.recordQueueRemoval(manualEvent));
+
+    const QVector<ListenHistoryStore::QueueRemovalEvent> events = store.queueRemovalEvents();
+    QCOMPARE(events.size(), 2);
+    QCOMPARE(events.at(0).occurredAtSecs, 1000);
+    QCOMPARE(events.at(0).track.path, radio.path);
+    QCOMPARE(events.at(0).track.musicBrainz.recordingId, QStringLiteral("rec-mbid"));
+    QVERIFY(events.at(0).wasRadioPick);
+    QVERIFY(events.at(0).wasUnheard);
+    QVERIFY(events.at(0).radioActive);
+
+    QCOMPARE(events.at(1).occurredAtSecs, 1001);
+    QCOMPARE(events.at(1).track.path, QStringLiteral("/music/manual.flac"));
+    QVERIFY(events.at(1).track.musicBrainz.recordingId.isEmpty());
+    QVERIFY(!events.at(1).wasRadioPick);
+    QVERIFY(!events.at(1).wasUnheard);
+    QVERIFY(!events.at(1).radioActive);
+
+    const QVector<ListenHistoryStore::QueueRemovalEvent> limited = store.queueRemovalEvents(1);
+    QCOMPARE(limited.size(), 1);
+    QCOMPARE(limited.first().track.path, radio.path);
+}
+
+void TestListenHistory::queueRemovalsDoNotAffectAffinities()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    Track track = makeTrack();
+    ListenHistoryStore::PlayEvent play;
+    play.startedAtSecs = 1000;
+    play.endedAtSecs = 1200;
+    play.playedMs = 200000;
+    play.durationMs = 200000;
+    play.completion = 1.0;
+    play.outcome = QStringLiteral("finished");
+    play.source = QStringLiteral("queue_auto");
+    play.sessionId = QStringLiteral("session-1");
+    play.track = track;
+    QVERIFY(store.recordPlayEvent(play) > 0);
+    QVERIFY(store.recordListen(track, 1000, false, false) > 0);
+
+    const auto before = store.trackAffinities();
+    QVERIFY(before.contains(track.path));
+
+    ListenHistoryStore::QueueRemovalEvent sameTrack;
+    sameTrack.occurredAtSecs = 1300;
+    sameTrack.track = track;
+    sameTrack.wasRadioPick = true;
+    sameTrack.wasUnheard = true;
+    sameTrack.radioActive = true;
+    QVERIFY(store.recordQueueRemoval(sameTrack));
+
+    Track other = makeTrack(QStringLiteral("Other"), QStringLiteral("Other Artist"));
+    other.path = QStringLiteral("/music/other.flac");
+    ListenHistoryStore::QueueRemovalEvent otherTrack;
+    otherTrack.occurredAtSecs = 1301;
+    otherTrack.track = other;
+    otherTrack.wasUnheard = true;
+    QVERIFY(store.recordQueueRemoval(otherTrack));
+
+    const auto after = store.trackAffinities();
+    QCOMPARE(after.size(), before.size());
+    QVERIFY(after.contains(track.path));
+    QCOMPARE(after.value(track.path).playEvents, before.value(track.path).playEvents);
+    QCOMPARE(after.value(track.path).finished, before.value(track.path).finished);
+    QCOMPARE(after.value(track.path).skipped, before.value(track.path).skipped);
+    QCOMPARE(after.value(track.path).lastPlayedAtSecs, before.value(track.path).lastPlayedAtSecs);
+    QCOMPARE(after.value(track.path).listenCount, before.value(track.path).listenCount);
+    QCOMPARE(after.value(track.path).baselineMax, before.value(track.path).baselineMax);
+    QVERIFY(!after.contains(other.path));
+}
+
 void TestListenHistory::schemaVersionIsCurrent()
 {
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
     QVERIFY(store.isOpen());
 
-    QCOMPARE(store.metaValue(QStringLiteral("schemaVersion")), QStringLiteral("5"));
+    QCOMPARE(store.metaValue(QStringLiteral("schemaVersion")), QStringLiteral("6"));
 }
 
 QTEST_GUILESS_MAIN(TestListenHistory)

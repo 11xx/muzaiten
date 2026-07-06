@@ -92,6 +92,7 @@ public:
                            int oldEffectiveRating0To100,
                            int newRating0To100,
                            const QString &sourceSurface);
+    void recordUserQueueRemovals(const QVector<int> &rows);
 
     // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
     // "Batch radio queue"). Backed by the library-DB settings
@@ -242,8 +243,14 @@ private:
     QString           m_currentPlayingSource;
     // Paths this radio session has handed out (batch appends + JIT provider
     // picks alike), for telemetry (source "radio") and for rerollRadioQueue()
-    // to find not-yet-played radio rows. Cleared on startRadio/stopRadio.
+    // to find not-yet-played radio rows. User queue removals prune paths from
+    // this set too so later playback attribution stays aligned with the queue.
+    // Cleared on startRadio/stopRadio.
     QSet<QString>     m_radioPickPaths;
+    // Paths that have become current in this app session. Queue-removal
+    // telemetry uses path-level granularity: if the same path was heard once,
+    // later duplicate rows are not counted as unheard.
+    QSet<QString>     m_queueHeardPaths;
     // Cached "radio.batchSize" setting (1 = pure JIT, matching pre-batch
     // behaviour exactly); reloaded at each startRadio, otherwise updated live by
     // setRadioBatchSize.

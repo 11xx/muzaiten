@@ -6082,6 +6082,7 @@ void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)
 
 void MainWindow::removeQueueRows(const QVector<int> &rows)
 {
+    m_core->recordUserQueueRemovals(rows);
     m_player->removeRows(rows);
 }
 
