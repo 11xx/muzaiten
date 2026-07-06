@@ -1094,6 +1094,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    connect(m_artistSidebar, &ArtistSidebar::startArtistRadioRequested,
+            this, &MainWindow::startArtistRadio);
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
     connect(m_artistSidebar, &ArtistSidebar::librarySourceChanged, this, &MainWindow::onLibrarySourceChanged);
     connect(m_trackTable, &TrackTable::trackActivated, this, &MainWindow::appendAndPlayTrack);
@@ -6135,6 +6137,18 @@ void MainWindow::startRadioFromSeed(const QString &path)
     snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
     if (!m_core->startRadio(path)) {
         statusBar()->showMessage(QStringLiteral("Start Radio: track not found in library"), 4000);
+    }
+}
+
+void MainWindow::startArtistRadio(const QString &artistName)
+{
+    const QString trimmedArtist = artistName.trimmed();
+    if (trimmedArtist.isEmpty()) {
+        return;
+    }
+    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+    if (!m_core->startArtistRadio(trimmedArtist)) {
+        statusBar()->showMessage(QStringLiteral("Start Artist Radio: artist not found in library"), 4000);
     }
 }
 

@@ -73,6 +73,11 @@
   radio-backed sessions over long-unheard favorites or rarely played tracks by
   artists with strong listening history. Mixes reuse the normal radio queue,
   reasons, indicator, stop control, exploration, and batch-size behavior.
+- Start Artist Radio: right-click an artist in the library sidebar or run
+  `muzaitenctl start-artist-radio <artist>` to seed radio from that artist's
+  aggregate genres and era. The session opens with a representative track by
+  the artist, then uses the normal radio batching, explanations, reroll,
+  restore, and stop controls.
 - Taste controls: tracks can be marked "Never play on radio" or "Don't learn
   from this", applying to every library copy of the same song; Listening
   History can also forget a song's local recommendation behavior without

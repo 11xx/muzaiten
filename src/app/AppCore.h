@@ -75,6 +75,10 @@ public:
     // queue with recommendations. Returns false (no state change) when the seed
     // path is not a known library track.
     bool startRadio(const QString &seedPath);
+    // Start a radio session seeded from an album-artist name. Uses a synthetic
+    // seed built from the artist's genre/era aggregate and opens with a
+    // representative track by that artist.
+    bool startArtistRadio(const QString &artistName);
     // Start a seedless, radio-backed library mix. Returns false without state
     // change when the mode is unknown or filtering cannot produce playable
     // candidates.
@@ -270,5 +274,6 @@ private:
     bool              m_radioRestoreDone = false;
     QString           m_radioSessionKind;
     QString           m_radioSessionSeedPath;
+    QString           m_radioSessionArtistName;
     int               m_radioSessionExploration = 30;
 };

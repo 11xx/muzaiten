@@ -1187,6 +1187,34 @@ QHash<QString, int> Database::genreTrackCounts(int *taggedTrackTotal) const
     return counts;
 }
 
+QVector<QPair<QString, int>> Database::genreCountsForArtist(const QString &albumArtist) const
+{
+    QVector<QPair<QString, int>> counts;
+    if (albumArtist.isEmpty()) {
+        return counts;
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT g.genre_folded, COUNT(*) "
+        "FROM track_genres g JOIN tracks t ON t.id = g.track_id "
+        "WHERE t.album_artist_name = ? AND t.missing = 0 AND %1")
+        .arg(visibleTrackPredicate(QStringLiteral("t"), m_showGuessedPlaceholders));
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    sql += QStringLiteral(" GROUP BY g.genre_folded ORDER BY COUNT(*) DESC, g.genre_folded");
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    query.addBindValue(albumArtist);
+    if (query.exec()) {
+        while (query.next()) {
+            counts.push_back({query.value(0).toString(), query.value(1).toInt()});
+        }
+    }
+    return counts;
+}
+
 QStringList Database::sampleArtistsForGenre(const QString &folded, int limit) const
 {
     QStringList artists;

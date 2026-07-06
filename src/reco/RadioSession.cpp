@@ -113,6 +113,7 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
     if (!m_seed.songKey.isEmpty()) {
         m_usedSongKeys.insert(m_seed.songKey);
     }
+    pushRecentArtist(m_recentArtists, m_seed.artistFolded, kThrottleArtists);
 }
 
 RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,

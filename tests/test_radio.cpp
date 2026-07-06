@@ -3,6 +3,7 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "reco/AffinityPool.h"
+#include "reco/ArtistRadio.h"
 #include "reco/RadioFilters.h"
 #include "reco/RadioMix.h"
 #include "reco/RadioSession.h"
@@ -11,6 +12,8 @@
 #include "scrobble/ListenHistoryStore.h"
 
 #include <QRandomGenerator>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -171,8 +174,10 @@ private slots:
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
     void anchorlessSessionDriftsFromPlayedContext();
+    void syntheticArtistSeedThrottlesSeedArtistAndIsNotPickable();
     void foreignNotePlayedEntersRollingConstraints();
     void constraintStateRoundTripPreservesSequencing();
+    void artistConstraintStateMetadataRoundTrips();
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
@@ -180,6 +185,9 @@ private slots:
     void ignoredRadioGenresRoundTripAndSuppressCandidateJoins();
     void ignoredRadioGenresCanonicalizeAliasesAndPreserveVisibility();
     void genreTrackCountsAggregatesAcrossLibrary();
+    void artistSeedGenresAggregateFrequencyAliasesIgnoresAndCap();
+    void artistMedianYearIgnoresUnknowns();
+    void artistRepresentativeTrackUsesRatingThenAffinity();
     void sampleArtistsForGenreReturnsDeterministicNames();
     void genrePipeBackfillResplitsStoredMetadata();
     void trackAffinitiesAggregateAllSources();
@@ -1108,6 +1116,25 @@ void RadioTest::anchorlessSessionDriftsFromPlayedContext()
              "anchorless session did not use notePlayed genre context");
 }
 
+void RadioTest::syntheticArtistSeedThrottlesSeedArtistAndIsNotPickable()
+{
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/same"), QStringLiteral("seed artist"), {QStringLiteral("rock")}, 2000, 100, true),
+        makeCandidate(QStringLiteral("/other"), QStringLiteral("other artist"), {QStringLiteral("rock")}, 2000, 60, true),
+    };
+    TrackScorer::Candidate seed = ArtistRadio::syntheticSeedCandidate(
+        QStringLiteral("Seed Artist"), {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(7u);
+    RadioSession session(pool, {}, {{QStringLiteral("rock"), 2.0}}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QCOMPARE(picks.first().path, QStringLiteral("/other"));
+    for (const Track &pick : picks) {
+        QVERIFY(!pick.path.isEmpty());
+    }
+}
+
 void RadioTest::foreignNotePlayedEntersRollingConstraints()
 {
     const QString foreignSongKey = FoldKey::songKey(QStringLiteral("foreign-rec"), QStringLiteral("Foreign"),
@@ -1211,6 +1238,24 @@ void RadioTest::constraintStateRoundTripPreservesSequencing()
     QVERIFY(!pickedPaths.contains(QStringLiteral("/used-b")));
     QVERIFY(!pickedPaths.contains(QStringLiteral("/album-c")));
     QVERIFY(!pickedPaths.contains(QStringLiteral("/recent-c")));
+}
+
+void RadioTest::artistConstraintStateMetadataRoundTrips()
+{
+    RadioSession session({}, {}, {}, ArtistRadio::syntheticSeedCandidate(
+                             QStringLiteral("The Artist"), {QStringLiteral("rock")}, 1999),
+                         30, 1'000'000'000);
+
+    QJsonObject root = session.constraintState();
+    root.insert(QStringLiteral("active"), true);
+    root.insert(QStringLiteral("kind"), QStringLiteral("artist"));
+    root.insert(QStringLiteral("artistName"), QStringLiteral("The Artist"));
+    root.insert(QStringLiteral("exploration"), 30);
+
+    const QJsonObject restored = QJsonDocument(root).object();
+    QCOMPARE(restored.value(QStringLiteral("kind")).toString(), QStringLiteral("artist"));
+    QCOMPARE(restored.value(QStringLiteral("artistName")).toString(), QStringLiteral("The Artist"));
+    QVERIFY(restored.value(QStringLiteral("seedPath")).toString().isEmpty());
 }
 
 // ---- Database + ListenHistoryStore -----------------------------------------
@@ -1403,6 +1448,81 @@ void RadioTest::genreTrackCountsAggregatesAcrossLibrary()
     QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Pop"))), 1);
     QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Jazz"))), 1);
     QCOMPARE(taggedTrackTotal, 2);
+}
+
+void RadioTest::artistSeedGenresAggregateFrequencyAliasesIgnoresAndCap()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("artist-seed-genres-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    QVector<Track> tracks{
+        makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Alt Rock"), QStringLiteral("Metal")},
+                    QStringLiteral("2000")),
+        makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Rock"), QStringLiteral("Metal")},
+                    QStringLiteral("2001")),
+        makeDbTrack(dir, QStringLiteral("03.flac"), {QStringLiteral("Alt Rock"), QStringLiteral("Jazz")},
+                    QStringLiteral("2002")),
+        makeDbTrack(dir, QStringLiteral("04.flac"), {QStringLiteral("Pop")}, QStringLiteral("2003")),
+        makeDbTrack(dir, QStringLiteral("05.flac"), {QStringLiteral("Classical")}, QStringLiteral("2004")),
+        makeDbTrack(dir, QStringLiteral("06.flac"), {QStringLiteral("Electronic")}, QStringLiteral("2005")),
+        makeDbTrack(dir, QStringLiteral("07.flac"), {QStringLiteral("Other")}, QStringLiteral("2006")),
+    };
+    for (Track &track : tracks) {
+        track.albumArtistName = QStringLiteral("Artist Radio");
+        QVERIFY2(db.upsertTrack(track), qPrintable(db.lastError()));
+    }
+    QVERIFY2(db.setGenreAlias(QStringLiteral("Alt Rock"), QStringLiteral("Rock")), qPrintable(db.lastError()));
+    QVERIFY2(db.setRadioGenreIgnored(GenreTags::folded(QStringLiteral("Pop")), true), qPrintable(db.lastError()));
+
+    const QStringList seedGenres = ArtistRadio::aggregateSeedGenres(
+        db.genreCountsForArtist(QStringLiteral("Artist Radio")), db.genreAliases(), db.ignoredRadioGenres());
+
+    QCOMPARE(seedGenres, QStringList({QStringLiteral("rock"), QStringLiteral("metal"),
+                                      QStringLiteral("classical"), QStringLiteral("electronic")}));
+}
+
+void RadioTest::artistMedianYearIgnoresUnknowns()
+{
+    QVector<Track> odd(4);
+    odd[0].originalDate = QStringLiteral("2001-01-01");
+    odd[1].date = QStringLiteral("1999");
+    odd[2].originalDate = QStringLiteral("2010");
+    odd[3].date = QStringLiteral("unknown");
+    QCOMPARE(ArtistRadio::medianTrackYear(odd), 2001);
+
+    QVector<Track> even(3);
+    even[0].date = QStringLiteral("1990");
+    even[1].originalDate = QStringLiteral("2000-05-06");
+    even[2].date = QStringLiteral("not-a-year");
+    QCOMPARE(ArtistRadio::medianTrackYear(even), 1995);
+
+    QVector<Track> unknownOnly(1);
+    unknownOnly[0].date = QStringLiteral("xxxx");
+    QCOMPARE(ArtistRadio::medianTrackYear(unknownOnly), 0);
+}
+
+void RadioTest::artistRepresentativeTrackUsesRatingThenAffinity()
+{
+    Track lowerRated;
+    lowerRated.path = QStringLiteral("/a");
+    lowerRated.effectiveRating0To100 = 80;
+
+    Track higherAffinity;
+    higherAffinity.path = QStringLiteral("/b");
+    higherAffinity.effectiveRating0To100 = 90;
+
+    Track lowerAffinity;
+    lowerAffinity.path = QStringLiteral("/c");
+    lowerAffinity.effectiveRating0To100 = 90;
+
+    QHash<QString, TrackScorer::Affinity> affinities;
+    affinities.insert(QStringLiteral("/b"), makeAffinity(3, 2, 0, 0, 3, 0));
+    affinities.insert(QStringLiteral("/c"), makeAffinity(1, 0, 1, 0, 1, 0));
+
+    QCOMPARE(ArtistRadio::representativeTrack({lowerRated, lowerAffinity, higherAffinity}, affinities).path,
+             QStringLiteral("/b"));
 }
 
 void RadioTest::sampleArtistsForGenreReturnsDeterministicNames()

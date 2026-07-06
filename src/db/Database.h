@@ -160,6 +160,10 @@ public:
     // `taggedTrackTotal`, if non-null, receives the count of distinct tracks
     // carrying at least one genre (the IDF numerator base).
     QHash<QString, int> genreTrackCounts(int *taggedTrackTotal = nullptr) const;
+    // Folded-genre -> distinct-track count for one album artist. Ordered
+    // deterministically by descending count, then folded genre, for artist
+    // radio seed aggregation.
+    QVector<QPair<QString, int>> genreCountsForArtist(const QString &albumArtist) const;
     // Deterministic display samples for human genre curation reports.
     QStringList sampleArtistsForGenre(const QString &folded, int limit = 3) const;
     QHash<QString, QString> genreAliases() const;
