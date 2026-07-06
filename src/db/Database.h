@@ -85,6 +85,14 @@ public:
         NoLearn,
     };
 
+    struct TrackRatingSnapshot {
+        bool found = false;
+        bool hasUserRating = false;
+        int userRating0To100 = -1;
+        int effectiveRating0To100 = -1;
+        QString mbRecordingId;
+    };
+
     explicit Database(QString connectionName);
     ~Database();
 
@@ -129,6 +137,7 @@ public:
     int removeMissingTracks();
     int missingTrackCount() const;
     MetadataBlob::FullMetadata fullMetadata(const QString &path) const;
+    TrackRatingSnapshot trackRatingSnapshot(const QString &trackPath) const;
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
     bool setTrackFlag(const QString &trackPath, TrackFlag flag, bool on);

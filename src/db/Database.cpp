@@ -1363,6 +1363,40 @@ bool Database::setUserTrackRating(const QString &trackPath, int rating0To100)
     return true;
 }
 
+Database::TrackRatingSnapshot Database::trackRatingSnapshot(const QString &trackPath) const
+{
+    TrackRatingSnapshot snapshot;
+    if (!m_db.isOpen() || trackPath.isEmpty()) {
+        return snapshot;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT t.rating_0_100, utr.rating_0_100, p.status, t.musicbrainz_recording_id "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.path = ?"));
+    query.addBindValue(trackPath);
+    if (!query.exec() || !query.next()) {
+        return snapshot;
+    }
+
+    snapshot.found = true;
+    const int scannedRating = query.value(0).isNull() ? -1 : query.value(0).toInt();
+    snapshot.hasUserRating = !query.value(1).isNull();
+    snapshot.userRating0To100 = snapshot.hasUserRating ? query.value(1).toInt() : -1;
+    const QString pendingStatus = query.value(2).toString();
+    const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
+        || pendingStatus == QStringLiteral("failed")
+        || pendingStatus == QStringLiteral("blocked_no_writable_path");
+    snapshot.effectiveRating0To100 = pendingDbRating && snapshot.hasUserRating
+        ? snapshot.userRating0To100
+        : (scannedRating >= 0 ? scannedRating : snapshot.userRating0To100);
+    snapshot.mbRecordingId = query.value(3).toString();
+    return snapshot;
+}
+
 bool Database::clearUserTrackRating(const QString &trackPath)
 {
     QSqlQuery query(m_db);

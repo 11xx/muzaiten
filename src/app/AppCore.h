@@ -86,6 +86,12 @@ public:
     bool trackFlag(const QString &trackPath, const QString &flag) const;
     bool setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on);
     int forgetTrackBehaviorForSong(const QString &trackPath, bool includeImportedListens);
+    bool recordRatingEvent(const Track &track,
+                           bool hadOldUserRating,
+                           int oldUserRating0To100,
+                           int oldEffectiveRating0To100,
+                           int newRating0To100,
+                           const QString &sourceSurface);
 
     // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
     // "Batch radio queue"). Backed by the library-DB settings
@@ -229,6 +235,7 @@ private:
     // these carry the attribution forward to the currentTrackChanged handler.
     bool              m_nextStartUserInitiated = false;
     bool              m_nextStartInjected = false;
+    QString           m_currentPlayingSource;
     // Paths this radio session has handed out (batch appends + JIT provider
     // picks alike), for telemetry (source "radio") and for rerollRadioQueue()
     // to find not-yet-played radio rows. Cleared on startRadio/stopRadio.

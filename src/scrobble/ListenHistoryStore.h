@@ -7,6 +7,7 @@
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 // Always-on local listening history, independent of any scrobbling service.
 // Every completed listen is recorded here (full track snapshot, timestamped to
@@ -54,6 +55,22 @@ public:
         Track track;                // persisted as track_path/mb_recording_id/track_json
         QString previousTrackPath;
         QString sessionId;
+    };
+
+    // Append-only local telemetry for explicit user track-rating edits. This is
+    // record-only provenance data; recommendation affinity deliberately ignores it.
+    struct RatingEvent {
+        qint64 id = 0;
+        qint64 occurredAtSecs = 0;
+        Track track;                // persisted as track_path/mb_recording_id/track_json
+        bool hasOldUserRating = false;
+        int oldUserRating0To100 = -1;
+        int oldEffectiveRating0To100 = -1;
+        int newRating0To100 = -1;   // <0 = rating cleared, stored as NULL
+        QString sourceSurface;
+        QString playingTrackPath;
+        QString playingSource;
+        bool radioActive = false;
     };
 
     // One historical listen pulled from a scrobbler service (ListenBrainz's
@@ -132,6 +149,10 @@ public:
     // Newest-first play events, for inspection and analysis.
     QList<PlayEvent> recentPlayEvents(int limit, int offset = 0) const;
     int playEventCount() const;
+
+    bool recordRatingEvent(const RatingEvent &event);
+    QVector<RatingEvent> ratingEvents(int limit = -1) const;
+
     int forgetTrackBehavior(const QStringList &paths, bool includeImportedListens = false);
 
     // Scrobbler backfill (Stage 0b). Imported history and per-service playcount

@@ -1109,7 +1109,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_trackTable, &TrackTable::addToQueueTemporaryRequested, this, [this](const QVector<Track> &tracks) {
         enqueueTracksFromMenu(tracks, QueueAddMode::Append, true);
     });
-    connect(m_trackTable, &TrackTable::trackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_trackTable, &TrackTable::trackRatingChanged, this, [this](const Track &track, int rating) {
+        applyTrackRating(track, rating, QStringLiteral("track_table"));
+    });
     connect(m_trackTable, &TrackTable::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_trackTable, &TrackTable::viewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
     connect(m_albumGrid, &AlbumGrid::albumSelectionToggled, this, &MainWindow::selectAlbumFilter);
@@ -1194,7 +1196,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::queueTrackActivated, this, [this](int index) {
         playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
     });
-    connect(m_rightSidebar, &RightSidebar::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_rightSidebar, &RightSidebar::queueTrackRatingChanged, this, [this](const Track &track, int rating) {
+        applyTrackRating(track, rating, QStringLiteral("right_sidebar"));
+    });
     connect(m_rightSidebar, &RightSidebar::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_rightSidebar, &RightSidebar::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
     connect(m_rightSidebar, &RightSidebar::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
@@ -1388,7 +1392,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_playerBar, &PlayerBar::currentTrackRatingChanged, this, [this](int rating) {
         if (!m_player->currentTrack().path.isEmpty()) {
-            applyTrackRating(m_player->currentTrack(), rating);
+            applyTrackRating(m_player->currentTrack(), rating, QStringLiteral("player_bar"));
         }
     });
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
@@ -2364,8 +2368,9 @@ void MainWindow::refreshTrackTable()
     }
 }
 
-void MainWindow::applyTrackRating(const Track &track, int rating0To100)
+void MainWindow::applyTrackRating(const Track &track, int rating0To100, const QString &sourceSurface)
 {
+    const auto oldRating = m_database->trackRatingSnapshot(track.path);
     const bool ok = rating0To100 < 0 ? m_database->clearUserTrackRating(track.path) : m_database->setUserTrackRating(track.path, rating0To100);
     if (!ok) {
         QMessageBox::warning(this, QStringLiteral("Rating"), m_database->lastError());
@@ -2376,6 +2381,16 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100)
     } else {
         m_database->clearPendingTrackRatingWrite(track.path);
     }
+    Track eventTrack = track;
+    if (eventTrack.musicBrainz.recordingId.isEmpty()) {
+        eventTrack.musicBrainz.recordingId = oldRating.mbRecordingId;
+    }
+    m_core->recordRatingEvent(eventTrack,
+                              oldRating.hasUserRating,
+                              oldRating.userRating0To100,
+                              oldRating.effectiveRating0To100,
+                              rating0To100,
+                              sourceSurface);
     // Patch the rated row in place instead of rebuilding the whole track table
     // (a full reload also dropped scroll/selection, hence the old remember/restore
     // dance). The album grid still refreshes because its star reflects the album's
@@ -2875,7 +2890,9 @@ QueueScreen *MainWindow::ensureQueueScreen()
     connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) {
         playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
     });
-    connect(m_queueScreen, &QueueScreen::queueTrackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_queueScreen, &QueueScreen::queueTrackRatingChanged, this, [this](const Track &track, int rating) {
+        applyTrackRating(track, rating, QStringLiteral("queue"));
+    });
     connect(m_queueScreen, &QueueScreen::queueRowsMoveRequested, this, &MainWindow::moveQueueRows);
     connect(m_queueScreen, &QueueScreen::queueRowsRemoveRequested, this, &MainWindow::removeQueueRows);
     connect(m_queueScreen, &QueueScreen::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
@@ -3029,8 +3046,12 @@ void MainWindow::ensureFileExplorers()
         startRadioFromSeed(track.path);
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
-    connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, &MainWindow::applyTrackRating);
+    connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, [this](const Track &track, int rating) {
+        applyTrackRating(track, rating, QStringLiteral("library_file_explorer"));
+    });
+    connect(m_freeRoamFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, [this](const Track &track, int rating) {
+        applyTrackRating(track, rating, QStringLiteral("free_roam_file_explorer"));
+    });
 
     connect(m_freeRoamFileExplorer, &FileExplorerView::startDirectoryChanged, this, [this](const QString &path) {
         m_state->setSetting(QStringLiteral("fileExplorer.startDirectory"), path);
@@ -3142,7 +3163,9 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
-    connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, &MainWindow::applyTrackRating);
+    connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, [this](const Track &track, int rating) {
+        applyTrackRating(track, rating, QStringLiteral("music_explorer"));
+    });
     connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
 
     m_libraryCenterStack->addWidget(m_musicExplorerView);
@@ -3383,7 +3406,7 @@ PlaylistView *MainWindow::ensurePlaylistView()
         if (track.path.isEmpty()) {
             track.path = path;
         }
-        applyTrackRating(track, rating);
+        applyTrackRating(track, rating, QStringLiteral("playlist"));
     });
 
     m_mainStack->addWidget(m_playlistView);

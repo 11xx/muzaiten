@@ -270,6 +270,9 @@ AppCore::AppCore(QObject *parent)
             &PlayEventRecorder::trackFinishedNaturally);
     connect(m_player, &PlayerCore::playbackCleared, m_playEventRecorder,
             &PlayEventRecorder::playbackCleared);
+    connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
+        m_currentPlayingSource.clear();
+    });
     connect(qApp, &QCoreApplication::aboutToQuit, m_playEventRecorder,
             &PlayEventRecorder::flushSessionEnd);
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
@@ -617,6 +620,7 @@ void AppCore::setupScrobbleWiring()
             : (injected
                 ? QStringLiteral("library_shuffle")
                 : (userInitiated ? QStringLiteral("queue_manual") : QStringLiteral("queue_auto")));
+        m_currentPlayingSource = source;
         m_playEventRecorder->trackStarted(track, userInitiated, source);
         // Advance the radio rolling context with every real track start while a
         // session is active — the seed, radio picks, and user-queued
@@ -641,6 +645,40 @@ void AppCore::setupIpcHandler()
     if (!m_ipc->listen()) {
         qWarning("muzaiten: IPC socket unavailable: %s", qPrintable(m_ipc->lastError()));
     }
+}
+
+bool AppCore::recordRatingEvent(const Track &track,
+                                bool hadOldUserRating,
+                                int oldUserRating0To100,
+                                int oldEffectiveRating0To100,
+                                int newRating0To100,
+                                const QString &sourceSurface)
+{
+    if (m_listenHistory == nullptr) {
+        return false;
+    }
+
+    ListenHistoryStore::RatingEvent event;
+    event.occurredAtSecs = QDateTime::currentSecsSinceEpoch();
+    event.track = track;
+    event.hasOldUserRating = hadOldUserRating;
+    event.oldUserRating0To100 = oldUserRating0To100;
+    event.oldEffectiveRating0To100 = oldEffectiveRating0To100;
+    event.newRating0To100 = newRating0To100;
+    event.sourceSurface = sourceSurface;
+    if (m_player != nullptr) {
+        event.radioActive = m_player->radioActive();
+        const bool activeSource = m_playback != nullptr
+            && m_playback->hasSource()
+            && m_playback->state() != PlaybackBackend::State::Stopped
+            && m_playback->state() != PlaybackBackend::State::Error;
+        if (activeSource) {
+            const Track playing = m_player->currentTrack();
+            event.playingTrackPath = playing.path;
+            event.playingSource = playing.path.isEmpty() ? QString() : m_currentPlayingSource;
+        }
+    }
+    return m_listenHistory->recordRatingEvent(event);
 }
 
 void AppCore::setupTrayIcon()
@@ -1781,13 +1819,32 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
             }
         }
         const Track rated = m_player->currentTrack();
+        const auto oldRating = m_database->trackRatingSnapshot(rated.path);
+        bool ok = false;
         if (rating >= 0) {
-            m_database->setUserTrackRating(rated.path, rating);
-            m_database->setPendingTrackRatingWrite(rated.path, rating, QStringLiteral("pending"));
+            ok = m_database->setUserTrackRating(rated.path, rating);
+            if (ok) {
+                m_database->setPendingTrackRatingWrite(rated.path, rating, QStringLiteral("pending"));
+            }
         } else {
-            m_database->clearUserTrackRating(rated.path);
-            m_database->clearPendingTrackRatingWrite(rated.path);
+            ok = m_database->clearUserTrackRating(rated.path);
+            if (ok) {
+                m_database->clearPendingTrackRatingWrite(rated.path);
+            }
         }
+        if (!ok) {
+            return error(QStringLiteral("rate failed: %1").arg(m_database->lastError()));
+        }
+        Track eventTrack = rated;
+        if (eventTrack.musicBrainz.recordingId.isEmpty()) {
+            eventTrack.musicBrainz.recordingId = oldRating.mbRecordingId;
+        }
+        recordRatingEvent(eventTrack,
+                          oldRating.hasUserRating,
+                          oldRating.userRating0To100,
+                          oldRating.effectiveRating0To100,
+                          rating,
+                          QStringLiteral("ipc"));
         m_player->updateTrackRating(rated.path, rating >= 0 ? rating : rated.rating0To100, rating >= 0);
         return status();
     }

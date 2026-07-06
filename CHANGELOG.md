@@ -100,6 +100,9 @@
   the track came from, and which listening session it belonged to, stored
   locally in `history.sqlite`. No network use; groundwork for the upcoming
   recommendation engine.
+- Local rating-change telemetry: every explicit track-rating edit now records
+  an append-only event in `history.sqlite` with old/new rating values and the
+  playback/UI context, without changing recommendation scoring behavior.
 
 ## [2026.07.01.2]
 

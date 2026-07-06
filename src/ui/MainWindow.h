@@ -98,7 +98,7 @@ private:
     void clearAlbumFilter();
     void refreshAlbumGrid(bool freshLoad = false);
     void refreshTrackTable();
-    void applyTrackRating(const Track &track, int rating0To100);
+    void applyTrackRating(const Track &track, int rating0To100, const QString &sourceSurface);
     void applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     void startRatingTagSync(const QVector<Track> &tracks, int scope);
     void schedulePendingRatingTagSync();
