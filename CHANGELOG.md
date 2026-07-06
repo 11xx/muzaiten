@@ -99,6 +99,10 @@
   `Alternative | Other` no longer survive as one folded genre. A one-time
   library migration rebuilds `track_genres` from the already-stored metadata
   blobs without rescanning files.
+- `muzaitenctl genre-report` now dumps the folded genre vocabulary offline with
+  document frequency, radio-style IDF, alias/stoplist status, sample artists,
+  and curation flags for near-duplicates, separators, classifier-looking tags,
+  and non-ASCII genre names.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

@@ -1170,6 +1170,30 @@ QHash<QString, int> Database::genreTrackCounts(int *taggedTrackTotal) const
     return counts;
 }
 
+QStringList Database::sampleArtistsForGenre(const QString &folded, int limit) const
+{
+    QStringList artists;
+    if (folded.isEmpty() || limit <= 0) {
+        return artists;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT DISTINCT t.artist_name "
+        "FROM track_genres g JOIN tracks t ON t.id = g.track_id "
+        "WHERE g.genre_folded = ? AND t.artist_name IS NOT NULL AND t.artist_name <> '' "
+        "ORDER BY t.artist_name COLLATE NOCASE, t.artist_name "
+        "LIMIT ?"));
+    query.addBindValue(folded);
+    query.addBindValue(limit);
+    if (query.exec()) {
+        while (query.next()) {
+            artists.append(query.value(0).toString());
+        }
+    }
+    return artists;
+}
+
 QHash<QString, QString> Database::genreAliases() const
 {
     QHash<QString, QString> aliases;

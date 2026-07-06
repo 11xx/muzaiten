@@ -176,6 +176,7 @@ private slots:
     void radioCandidatesJoinsGenresAndFallback();
     void genreAliasesExpandCandidatesAndMergeCounts();
     void genreTrackCountsAggregatesAcrossLibrary();
+    void sampleArtistsForGenreReturnsDeterministicNames();
     void genrePipeBackfillResplitsStoredMetadata();
     void trackAffinitiesAggregateAllSources();
 
@@ -1251,6 +1252,33 @@ void RadioTest::genreTrackCountsAggregatesAcrossLibrary()
     QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Pop"))), 1);
     QCOMPARE(counts.value(GenreTags::folded(QStringLiteral("Jazz"))), 1);
     QCOMPARE(taggedTrackTotal, 2);
+}
+
+void RadioTest::sampleArtistsForGenreReturnsDeterministicNames()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("genre-sample-artists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    Track beta = makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Rock")},
+                             QStringLiteral("2004-05-06"));
+    beta.artistName = QStringLiteral("Beta Artist");
+    Track alpha = makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Rock")},
+                              QStringLiteral("2004-05-06"));
+    alpha.artistName = QStringLiteral("Alpha Artist");
+    Track jazz = makeDbTrack(dir, QStringLiteral("03.flac"), {QStringLiteral("Jazz")},
+                             QStringLiteral("2004-05-06"));
+    jazz.artistName = QStringLiteral("Jazz Artist");
+
+    QVERIFY2(db.upsertTrack(beta), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(alpha), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(jazz), qPrintable(db.lastError()));
+
+    QCOMPARE(db.sampleArtistsForGenre(GenreTags::folded(QStringLiteral("Rock")), 3),
+             QStringList({QStringLiteral("Alpha Artist"), QStringLiteral("Beta Artist")}));
+    QCOMPARE(db.sampleArtistsForGenre(GenreTags::folded(QStringLiteral("Rock")), 1),
+             QStringList({QStringLiteral("Alpha Artist")}));
 }
 
 void RadioTest::genrePipeBackfillResplitsStoredMetadata()
