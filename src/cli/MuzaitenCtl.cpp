@@ -72,6 +72,7 @@ void printUsage()
         "  scrobble-backfill cancel                 cancel a running backfill (stops auto-resume)\n"
         "  start-radio <path>      start a radio session seeded from a library track\n"
         "  start-mix <mode>        start rediscovery or deepcuts radio mix\n"
+        "  radio-reasons          show live radio pick explanations\n"
         "  stop-radio              stop the current radio session\n"
         "\n"
         "Options:\n"
@@ -443,6 +444,45 @@ void printGenreReportTsv(const QVector<GenreReportRow> &rows, int taggedTrackTot
             << tsvField(row.flags.join(QLatin1Char(','))) << '\n';
     }
     out << "# end\tvocabulary_size\t" << rows.size() << "\ttagged_track_total\t" << taggedTrackTotal << '\n';
+}
+
+void printRadioReasons(const QJsonObject &response)
+{
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+
+    if (!response.value(QStringLiteral("active")).toBool()) {
+        out << "radio: inactive\n";
+        return;
+    }
+
+    const QString kind = response.value(QStringLiteral("kind")).toString(QStringLiteral("radio"));
+    const QJsonArray picks = response.value(QStringLiteral("picks")).toArray();
+    out << "radio: " << (kind.isEmpty() ? QStringLiteral("active") : kind)
+        << " (" << picks.size() << " explained picks)\n";
+    for (qsizetype i = 0; i < picks.size(); ++i) {
+        const QJsonObject pick = picks.at(i).toObject();
+        const QString path = pick.value(QStringLiteral("path")).toString();
+        const QString artist = pick.value(QStringLiteral("artist")).toString();
+        const QString title = pick.value(QStringLiteral("title")).toString();
+        QString label = path;
+        if (!artist.isEmpty() || !title.isEmpty()) {
+            label = QStringLiteral("%1 - %2").arg(artist.isEmpty() ? QStringLiteral("?") : artist,
+                                                  title.isEmpty() ? QStringLiteral("?") : title);
+        }
+        out << QStringLiteral("%1. %2\n").arg(static_cast<int>(i + 1), 3).arg(label);
+        if (label != path && !path.isEmpty()) {
+            out << "    " << path << '\n';
+        }
+        const QString sentence = pick.value(QStringLiteral("sentence")).toString();
+        if (!sentence.isEmpty()) {
+            out << "    " << sentence << '\n';
+        }
+        const QString breakdown = pick.value(QStringLiteral("breakdown")).toString();
+        if (!breakdown.isEmpty()) {
+            out << "    " << breakdown << '\n';
+        }
+    }
 }
 
 // One NUL-terminated fzf record. Newline-separated lines:
@@ -817,6 +857,10 @@ int main(int argc, char **argv)
             return fail(QStringLiteral("start-mix needs a mode: rediscovery or deepcuts"));
         }
         args.insert(QStringLiteral("mode"), arguments.first().toLower());
+    } else if (command == QLatin1String("radio-reasons")) {
+        if (!arguments.isEmpty()) {
+            return fail(QStringLiteral("radio-reasons does not take arguments"));
+        }
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
@@ -945,6 +989,10 @@ int main(int argc, char **argv)
     }
     if (command == QLatin1String("start-mix")) {
         std::printf("mix: %s\n", qPrintable(response.value(QStringLiteral("mix")).toString()));
+        return 0;
+    }
+    if (command == QLatin1String("radio-reasons")) {
+        printRadioReasons(response);
         return 0;
     }
     // Plain "status" replies carry the canonical track JSON at the top level,

@@ -151,6 +151,7 @@ void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const Tra
     }
     m_albumCounts[candidate.albumKey] += 1;
     m_pickReasons.insert(candidate.path, scored.components);
+    m_pickReasonOrder.push_back(candidate.path);
 }
 
 QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludePaths,
@@ -318,6 +319,19 @@ QString RadioSession::reasonFor(const QString &path) const
 QList<TrackScorer::Component> RadioSession::reasonComponentsFor(const QString &path) const
 {
     return m_pickReasons.value(path);
+}
+
+QVector<RadioSession::PickReason> RadioSession::pickReasons() const
+{
+    QVector<PickReason> reasons;
+    reasons.reserve(m_pickReasonOrder.size());
+    for (const QString &path : m_pickReasonOrder) {
+        const auto it = m_pickReasons.constFind(path);
+        if (it != m_pickReasons.constEnd()) {
+            reasons.push_back(PickReason{path, *it});
+        }
+    }
+    return reasons;
 }
 
 QJsonObject RadioSession::constraintState() const

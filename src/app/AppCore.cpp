@@ -190,6 +190,18 @@ QJsonObject trackJson(const Track &track, int index = -1)
     return json;
 }
 
+QJsonArray reasonComponentsJson(const QList<TrackScorer::Component> &components)
+{
+    QJsonArray array;
+    for (const TrackScorer::Component &component : components) {
+        array.append(QJsonObject{
+            {QStringLiteral("name"), component.name},
+            {QStringLiteral("value"), component.value},
+        });
+    }
+    return array;
+}
+
 } // namespace
 
 AppCore::AppCore(QObject *parent)
@@ -1889,6 +1901,36 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         const bool started = startMix(mode);
         return QJsonObject{{QStringLiteral("mix"),
                             started ? QStringLiteral("started") : QStringLiteral("empty-pool")}};
+    }
+    if (command == QLatin1String("radio-reasons")) {
+        QJsonArray picks;
+        if (m_radioSession) {
+            QHash<QString, Track> queuedTracks;
+            for (const Track &track : m_player->queue()) {
+                if (!track.path.isEmpty() && !queuedTracks.contains(track.path)) {
+                    queuedTracks.insert(track.path, track);
+                }
+            }
+            for (const RadioSession::PickReason &reason : m_radioSession->pickReasons()) {
+                QJsonObject pick{
+                    {QStringLiteral("path"), reason.path},
+                    {QStringLiteral("components"), reasonComponentsJson(reason.components)},
+                    {QStringLiteral("sentence"), ReasonText::sentence(reason.components)},
+                    {QStringLiteral("breakdown"), ReasonText::breakdown(reason.components)},
+                };
+                const auto queued = queuedTracks.constFind(reason.path);
+                if (queued != queuedTracks.constEnd()) {
+                    pick.insert(QStringLiteral("artist"), queued->artistName);
+                    pick.insert(QStringLiteral("title"), queued->title.isEmpty() ? queued->filename : queued->title);
+                }
+                picks.append(pick);
+            }
+        }
+        return QJsonObject{
+            {QStringLiteral("active"), static_cast<bool>(m_radioSession)},
+            {QStringLiteral("kind"), m_radioSessionKind},
+            {QStringLiteral("picks"), picks},
+        };
     }
     if (command == QLatin1String("stop-radio")) {
         stopRadio();

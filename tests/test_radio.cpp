@@ -162,6 +162,7 @@ private slots:
     void rollingContextDriftsGenreWindow();
     void reasonForNonEmptyOnPick();
     void reasonComponentsRoundTripFromPick();
+    void pickReasonsEnumeratesStoredComponents();
     void reasonSentencePicksTopPhrases();
     void reasonSentenceHandlesPenaltyOnly();
     void reasonSentenceEmptyOnEmptyInput();
@@ -924,6 +925,33 @@ void RadioTest::reasonComponentsRoundTripFromPick()
     QCOMPARE(picks.size(), 1);
     QVERIFY(!session.reasonComponentsFor(picks.first().path).isEmpty());
     QVERIFY(session.reasonComponentsFor(QStringLiteral("/never")).isEmpty());
+}
+
+void RadioTest::pickReasonsEnumeratesStoredComponents()
+{
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/t0"), QStringLiteral("a"), {QStringLiteral("rock")}, 2000, 90, true),
+        makeCandidate(QStringLiteral("/t1"), QStringLiteral("b"), {QStringLiteral("rock")}, 2001, 70, true),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(1u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 2);
+
+    const QVector<RadioSession::PickReason> reasons = session.pickReasons();
+    QCOMPARE(reasons.size(), picks.size());
+    for (qsizetype i = 0; i < reasons.size(); ++i) {
+        QCOMPARE(reasons.at(i).path, picks.at(i).path);
+        const QList<TrackScorer::Component> byPath = session.reasonComponentsFor(reasons.at(i).path);
+        QCOMPARE(reasons.at(i).components.size(), byPath.size());
+        for (qsizetype j = 0; j < reasons.at(i).components.size(); ++j) {
+            QCOMPARE(reasons.at(i).components.at(j).name, byPath.at(j).name);
+            QCOMPARE(reasons.at(i).components.at(j).value, byPath.at(j).value);
+        }
+    }
 }
 
 void RadioTest::reasonSentencePicksTopPhrases()
