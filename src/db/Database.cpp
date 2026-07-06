@@ -175,12 +175,16 @@ QString sqlPlaceholders(qsizetype count)
     return marks.join(QStringLiteral(", "));
 }
 
-QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases)
+QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases,
+                                  const QSet<QString> &ignored)
 {
     QStringList terms;
     QSet<QString> seen;
     for (const QString &genre : foldedGenres) {
         const QString canonical = GenreTags::canonical(genre, aliases);
+        if (ignored.contains(canonical)) {
+            continue;
+        }
         if (!canonical.isEmpty() && !seen.contains(canonical)) {
             seen.insert(canonical);
             terms.push_back(canonical);
@@ -709,7 +713,20 @@ bool Database::migrate()
         return false;
     }
 
-    return Schema::currentVersion == 13;
+    // v14: per-library radio-only genre ignore list. Raw track_genres rows
+    // remain visible; AppCore and radio lookup joins consult this table when
+    // building a session snapshot.
+    const QStringList v14Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS radio_ignored_genres (genre_folded TEXT PRIMARY KEY, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(14, datetime('now'))"),
+    };
+    for (const QString &statement : v14Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 14;
 }
 
 QString Database::lastError() const
@@ -1239,6 +1256,42 @@ bool Database::removeGenreAlias(const QString &alias)
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM genre_aliases WHERE alias_folded = ?"));
     query.addBindValue(aliasFolded);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QSet<QString> Database::ignoredRadioGenres() const
+{
+    QSet<QString> ignored;
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT genre_folded FROM radio_ignored_genres"))) {
+        while (query.next()) {
+            ignored.insert(query.value(0).toString());
+        }
+    }
+    return ignored;
+}
+
+bool Database::setRadioGenreIgnored(const QString &genreFolded, bool ignored)
+{
+    const QString folded = GenreTags::folded(genreFolded);
+    if (folded.isEmpty()) {
+        m_lastError = QStringLiteral("Genre is required");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    if (ignored) {
+        query.prepare(QStringLiteral(
+            "INSERT INTO radio_ignored_genres(genre_folded, updated_at) VALUES(?, datetime('now')) "
+            "ON CONFLICT(genre_folded) DO UPDATE SET updated_at=datetime('now')"));
+    } else {
+        query.prepare(QStringLiteral("DELETE FROM radio_ignored_genres WHERE genre_folded = ?"));
+    }
+    query.addBindValue(folded);
     if (!query.exec()) {
         m_lastError = query.lastError().text();
         return false;
@@ -2004,7 +2057,7 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
     if (foldedGenres.isEmpty() || limit <= 0) {
         return rows;
     }
-    const QStringList lookupGenres = radioGenreLookupTerms(foldedGenres, genreAliases());
+    const QStringList lookupGenres = radioGenreLookupTerms(foldedGenres, genreAliases(), ignoredRadioGenres());
     if (lookupGenres.isEmpty()) {
         return rows;
     }

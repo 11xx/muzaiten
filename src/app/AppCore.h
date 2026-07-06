@@ -163,14 +163,18 @@ private:
     // Build the scrobbler-backfill match index from the library DB (folded
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
-    QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases) const;
+    QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases,
+                                          const QSet<QString> &ignoredRadioGenres) const;
     QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
     TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
-                                                            const QHash<QString, QString> &genreAliases) const;
+                                                            const QHash<QString, QString> &genreAliases,
+                                                            const QSet<QString> &ignoredRadioGenres) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
-                                                           const QHash<QString, QString> &genreAliases) const;
-    QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases) const;
+                                                           const QHash<QString, QString> &genreAliases,
+                                                           const QSet<QString> &ignoredRadioGenres) const;
+    QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases,
+                                              const QSet<QString> &ignoredRadioGenres) const;
     TrackScorer::Weights radioScoringWeights() const;
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
     void installRadioProvider(bool markPicksAsRadio);

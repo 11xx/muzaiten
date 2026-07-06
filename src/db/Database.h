@@ -165,6 +165,8 @@ public:
     QHash<QString, QString> genreAliases() const;
     bool setGenreAlias(const QString &alias, const QString &canonical);
     bool removeGenreAlias(const QString &alias);
+    QSet<QString> ignoredRadioGenres() const;
+    bool setRadioGenreIgnored(const QString &genreFolded, bool ignored);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

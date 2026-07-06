@@ -176,6 +176,8 @@ private slots:
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
     void genreAliasesExpandCandidatesAndMergeCounts();
+    void ignoredRadioGenresRoundTripAndSuppressCandidateJoins();
+    void ignoredRadioGenresCanonicalizeAliasesAndPreserveVisibility();
     void genreTrackCountsAggregatesAcrossLibrary();
     void sampleArtistsForGenreReturnsDeterministicNames();
     void genrePipeBackfillResplitsStoredMetadata();
@@ -1253,6 +1255,64 @@ void RadioTest::genreAliasesExpandCandidatesAndMergeCounts()
     }
     QCOMPARE(canonicalCounts.value(QStringLiteral("classical")), 2);
     QCOMPARE(taggedTrackTotal, 2);
+}
+
+void RadioTest::ignoredRadioGenresRoundTripAndSuppressCandidateJoins()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("radio-ignored-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track rock = makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Rock")},
+                                   QStringLiteral("2004-05-06"));
+    const Track metal = makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Metal")},
+                                    QStringLiteral("2005"));
+    QVERIFY2(db.upsertTrack(rock), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(metal), qPrintable(db.lastError()));
+
+    const QString rockFolded = GenreTags::folded(QStringLiteral("Rock"));
+    QCOMPARE(db.radioCandidates({rockFolded}).size(), 1);
+
+    QVERIFY2(db.setRadioGenreIgnored(rockFolded, true), qPrintable(db.lastError()));
+    QVERIFY(db.ignoredRadioGenres().contains(rockFolded));
+    QVERIFY(db.radioCandidates({rockFolded}).isEmpty());
+    QCOMPARE(db.radioCandidates({GenreTags::folded(QStringLiteral("Metal"))}).size(), 1);
+
+    QVERIFY2(db.setRadioGenreIgnored(rockFolded, false), qPrintable(db.lastError()));
+    QVERIFY(!db.ignoredRadioGenres().contains(rockFolded));
+    QCOMPARE(db.radioCandidates({rockFolded}).size(), 1);
+}
+
+void RadioTest::ignoredRadioGenresCanonicalizeAliasesAndPreserveVisibility()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("radio-ignored-alias-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track aliasOnly = makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Alt Rock")},
+                                        QStringLiteral("2004-05-06"));
+    const Track mixed = makeDbTrack(dir, QStringLiteral("02.flac"),
+                                    {QStringLiteral("Alt Rock"), QStringLiteral("Metal")},
+                                    QStringLiteral("2005"));
+    QVERIFY2(db.upsertTrack(aliasOnly), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(mixed), qPrintable(db.lastError()));
+    QVERIFY2(db.setGenreAlias(QStringLiteral("Alt Rock"), QStringLiteral("Rock")), qPrintable(db.lastError()));
+
+    const QHash<QString, QString> aliases = db.genreAliases();
+    const QString canonical = GenreTags::canonical(GenreTags::folded(QStringLiteral("Alt Rock")), aliases);
+    QCOMPARE(canonical, QStringLiteral("rock"));
+    QVERIFY2(db.setRadioGenreIgnored(canonical, true), qPrintable(db.lastError()));
+
+    QVERIFY(db.radioCandidates({GenreTags::folded(QStringLiteral("Alt Rock"))}).isEmpty());
+    const QVector<RadioCandidateRow> metalRows = db.radioCandidates({GenreTags::folded(QStringLiteral("Metal"))});
+    QCOMPARE(metalRows.size(), 1);
+    QCOMPARE(metalRows.first().path, mixed.path);
+    QVERIFY(metalRows.first().genresFolded.contains(GenreTags::folded(QStringLiteral("Alt Rock"))));
+    QVERIFY(metalRows.first().genresFolded.contains(GenreTags::folded(QStringLiteral("Metal"))));
+
+    QCOMPARE(db.genresForTrack(aliasOnly.path), QStringList{QStringLiteral("Alt Rock")});
 }
 
 void RadioTest::genreTrackCountsAggregatesAcrossLibrary()

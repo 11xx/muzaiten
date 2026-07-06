@@ -64,6 +64,10 @@ void printUsage()
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
+        "  radio-genre ignore <genre> | unignore <genre> | list\n"
+        "                          curate radio-only ignored folded genres (works offline)\n"
+        "  genre-alias set <alias> <canonical> | remove <alias> | list\n"
+        "                          curate folded genre aliases (works offline)\n"
         "  play-file <path>        append a file to the queue and play it\n"
         "  enqueue [--play|--next] <path...>  add files to the queue\n"
         "  raise                   show and focus the running instance's window\n"
@@ -295,6 +299,7 @@ QVector<GenreReportRow> buildGenreReportRows(Database &db, int *taggedTrackTotal
     }
 
     const QHash<QString, QString> aliases = db.genreAliases();
+    const QSet<QString> ignored = db.ignoredRadioGenres();
     QHash<QString, int> canonicalDf;
     for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
         const QString canonical = GenreTags::canonical(it.key(), aliases);
@@ -323,7 +328,9 @@ QVector<GenreReportRow> buildGenreReportRows(Database &db, int *taggedTrackTotal
         row.df = it.value();
         row.canonical = GenreTags::canonical(row.genre, aliases);
         const bool stoplisted = GenreTags::isNonGenre(row.canonical);
-        if (stoplisted) {
+        if (ignored.contains(row.canonical)) {
+            row.status = QStringLiteral("ignored");
+        } else if (stoplisted) {
             row.status = QStringLiteral("stoplist");
         } else if (row.canonical != row.genre) {
             row.status = QStringLiteral("alias");
@@ -754,6 +761,164 @@ int runGenreReport(QStringList arguments, bool json)
     return 0;
 }
 
+int runRadioGenre(QStringList arguments, bool json)
+{
+    if (arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-genre needs a verb: ignore, unignore, or list"));
+    }
+    const QString verb = arguments.takeFirst();
+    if (verb != QLatin1String("ignore") && verb != QLatin1String("unignore") && verb != QLatin1String("list")) {
+        return fail(QStringLiteral("radio-genre verb must be ignore, unignore, or list"));
+    }
+    if (verb == QLatin1String("list") && !arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-genre list does not take arguments"));
+    }
+    if (verb != QLatin1String("list") && arguments.size() != 1) {
+        return fail(QStringLiteral("radio-genre %1 needs exactly one genre").arg(verb));
+    }
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-radio-genre-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (verb == QLatin1String("list")) {
+        QStringList ignored;
+        for (const QString &genre : db.ignoredRadioGenres()) {
+            ignored.push_back(genre);
+        }
+        ignored.sort(Qt::CaseInsensitive);
+        if (json) {
+            QJsonArray array;
+            for (const QString &genre : ignored) {
+                array.append(genre);
+            }
+            out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            for (const QString &genre : ignored) {
+                out << genre << '\n';
+            }
+        }
+        return 0;
+    }
+
+    const QString folded = GenreTags::folded(arguments.first());
+    const QString canonical = GenreTags::canonical(folded, db.genreAliases());
+    if (canonical.isEmpty()) {
+        return fail(QStringLiteral("radio-genre %1 needs a non-empty genre").arg(verb));
+    }
+    const bool ignored = verb == QLatin1String("ignore");
+    if (!db.setRadioGenreIgnored(canonical, ignored)) {
+        return fail(db.lastError());
+    }
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("action"), ignored ? QStringLiteral("ignore") : QStringLiteral("unignore")},
+            {QStringLiteral("genre"), canonical},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "radio-genre: " << (ignored ? QStringLiteral("ignored ") : QStringLiteral("unignored "))
+            << canonical << '\n';
+    }
+    return 0;
+}
+
+int runGenreAlias(QStringList arguments, bool json)
+{
+    if (arguments.isEmpty()) {
+        return fail(QStringLiteral("genre-alias needs a verb: set, remove, or list"));
+    }
+    const QString verb = arguments.takeFirst();
+    if (verb != QLatin1String("set") && verb != QLatin1String("remove") && verb != QLatin1String("list")) {
+        return fail(QStringLiteral("genre-alias verb must be set, remove, or list"));
+    }
+    if (verb == QLatin1String("list") && !arguments.isEmpty()) {
+        return fail(QStringLiteral("genre-alias list does not take arguments"));
+    }
+    if (verb == QLatin1String("remove") && arguments.size() != 1) {
+        return fail(QStringLiteral("genre-alias remove needs exactly one alias"));
+    }
+    if (verb == QLatin1String("set") && arguments.size() != 2) {
+        return fail(QStringLiteral("genre-alias set needs exactly alias and canonical arguments"));
+    }
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-genre-alias-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (verb == QLatin1String("list")) {
+        const QHash<QString, QString> aliases = db.genreAliases();
+        QStringList keys = aliases.keys();
+        keys.sort(Qt::CaseInsensitive);
+        if (json) {
+            QJsonArray array;
+            for (const QString &alias : keys) {
+                array.append(QJsonObject{
+                    {QStringLiteral("alias"), alias},
+                    {QStringLiteral("canonical"), aliases.value(alias)},
+                });
+            }
+            out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            for (const QString &alias : keys) {
+                out << alias << '\t' << aliases.value(alias) << '\n';
+            }
+        }
+        return 0;
+    }
+
+    const QString alias = GenreTags::folded(arguments.first());
+    if (alias.isEmpty()) {
+        return fail(QStringLiteral("genre-alias %1 needs a non-empty alias").arg(verb));
+    }
+    if (verb == QLatin1String("remove")) {
+        if (!db.removeGenreAlias(alias)) {
+            return fail(db.lastError());
+        }
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(QJsonObject{
+                {QStringLiteral("ok"), true},
+                {QStringLiteral("action"), QStringLiteral("remove")},
+                {QStringLiteral("alias"), alias},
+            }).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << "genre-alias: removed " << alias << '\n';
+        }
+        return 0;
+    }
+
+    const QString canonical = GenreTags::folded(arguments.at(1));
+    if (canonical.isEmpty()) {
+        return fail(QStringLiteral("genre-alias set needs a non-empty canonical genre"));
+    }
+    if (!db.setGenreAlias(alias, canonical)) {
+        return fail(db.lastError());
+    }
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("action"), QStringLiteral("set")},
+            {QStringLiteral("alias"), alias},
+            {QStringLiteral("canonical"), canonical},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "genre-alias: " << alias << " -> " << canonical << '\n';
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -785,6 +950,12 @@ int main(int argc, char **argv)
     }
     if (command == QLatin1String("genre-report")) {
         return runGenreReport(arguments, json);
+    }
+    if (command == QLatin1String("radio-genre")) {
+        return runRadioGenre(arguments, json);
+    }
+    if (command == QLatin1String("genre-alias")) {
+        return runGenreAlias(arguments, json);
     }
 
     if (command == QLatin1String("jump")

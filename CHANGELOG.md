@@ -106,6 +106,10 @@
 - `muzaitenctl radio-reasons` now prints the active radio session's stored pick
   explanations, including scorer components, so tuning can inspect the live
   queue without hovering UI tooltips.
+- Radio can now ignore curated real genres without hiding them elsewhere:
+  schema v14 adds `radio_ignored_genres`, radio session genre joins/scoring skip
+  ignored canonical genres, `genre-report` marks them, and `muzaitenctl`
+  provides `radio-genre`/`genre-alias` curation verbs.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
