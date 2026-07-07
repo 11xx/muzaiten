@@ -117,6 +117,15 @@ target_link_libraries(test_song_identity PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_song_identity PRIVATE cxx_std_26)
 add_test(NAME test_song_identity COMMAND test_song_identity)
 
+add_executable(test_dsp
+    test_dsp.cpp
+    ../src/indexer/Dsp.cpp
+)
+target_include_directories(test_dsp PRIVATE ../src)
+target_link_libraries(test_dsp PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_dsp PRIVATE cxx_std_26)
+add_test(NAME test_dsp COMMAND test_dsp)
+
 add_executable(test_quality_rank
     test_quality_rank.cpp
     ../src/features/QualityRank.cpp
