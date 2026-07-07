@@ -4,9 +4,12 @@
 #include <QFileInfo>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QtEndian>
 #include <QVariant>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace {
 
@@ -46,6 +49,28 @@ FeatureStore::Scalars scalarsFromQuery(const QSqlQuery &query, int firstColumn)
         scalars.brightness = query.value(firstColumn + 3).toDouble();
     }
     return scalars;
+}
+
+QVector<float> embeddingFromBlob(const QByteArray &blob, int dim)
+{
+    if (dim <= 0 || blob.size() != dim * static_cast<int>(sizeof(float))) {
+        return {};
+    }
+
+    QVector<float> vector;
+    vector.reserve(dim);
+    const auto *data = reinterpret_cast<const uchar *>(blob.constData());
+    for (int i = 0; i < dim; ++i) {
+        const quint32 raw = qFromLittleEndian<quint32>(data + i * static_cast<int>(sizeof(quint32)));
+        float value = 0.0F;
+        static_assert(sizeof(value) == sizeof(raw));
+        std::memcpy(&value, &raw, sizeof(value));
+        if (!std::isfinite(value)) {
+            return {};
+        }
+        vector.push_back(value);
+    }
+    return vector;
 }
 
 qint64 scalarCount(QSqlDatabase database, const QString &sql)
@@ -255,6 +280,74 @@ QHash<qint64, FeatureStore::Scalars> FeatureStore::scalarsForGroups(const QList<
         while (query.next()) {
             rows.insert(query.value(0).toLongLong(), scalarsFromQuery(query, 1));
         }
+    }
+    return rows;
+}
+
+QVector<float> FeatureStore::embeddingForGroup(qint64 groupId) const
+{
+    if (!isOpen() || groupId < 0) {
+        return {};
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT dim, vector FROM embeddings WHERE content_group_id = ?"));
+    query.addBindValue(groupId);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+    return embeddingFromBlob(query.value(1).toByteArray(), query.value(0).toInt());
+}
+
+QHash<qint64, QVector<float>> FeatureStore::embeddingsForGroups(const QList<qint64> &groupIds) const
+{
+    QHash<qint64, QVector<float>> rows;
+    if (!isOpen() || groupIds.isEmpty()) {
+        return rows;
+    }
+
+    for (qsizetype start = 0; start < groupIds.size(); start += kMaxSqlBindings) {
+        const qsizetype count = std::min(kMaxSqlBindings, groupIds.size() - start);
+        QSqlQuery query(m_db);
+        query.prepare(QStringLiteral(
+            "SELECT content_group_id, dim, vector FROM embeddings "
+            "WHERE content_group_id IN (%1)")
+                          .arg(placeholders(count)));
+        for (qsizetype i = 0; i < count; ++i) {
+            query.addBindValue(groupIds.at(start + i));
+        }
+        if (!query.exec()) {
+            continue;
+        }
+        while (query.next()) {
+            QVector<float> embedding = embeddingFromBlob(query.value(2).toByteArray(), query.value(1).toInt());
+            if (!embedding.isEmpty()) {
+                rows.insert(query.value(0).toLongLong(), embedding);
+            }
+        }
+    }
+    return rows;
+}
+
+QList<QPair<qint64, double>> FeatureStore::neighborsOfGroup(qint64 groupId, int limit) const
+{
+    QList<QPair<qint64, double>> rows;
+    if (!isOpen() || groupId < 0 || limit <= 0) {
+        return rows;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT neighbor_group_id, cosine FROM track_neighbors "
+        "WHERE content_group_id = ? ORDER BY rank LIMIT ?"));
+    query.addBindValue(groupId);
+    query.addBindValue(limit);
+    if (!query.exec()) {
+        return rows;
+    }
+    while (query.next()) {
+        rows.push_back({query.value(0).toLongLong(), query.value(1).toDouble()});
     }
     return rows;
 }

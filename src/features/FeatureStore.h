@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QList>
+#include <QPair>
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
@@ -39,6 +40,9 @@ public:
     QStringList pathsInGroup(qint64 groupId) const;
     Scalars scalarsForGroup(qint64 groupId) const;
     QHash<qint64, Scalars> scalarsForGroups(const QList<qint64> &groupIds) const;
+    QVector<float> embeddingForGroup(qint64 groupId) const;
+    QHash<qint64, QVector<float>> embeddingsForGroups(const QList<qint64> &groupIds) const;
+    QList<QPair<qint64, double>> neighborsOfGroup(qint64 groupId, int limit) const;
     Status status() const;
 
 private:

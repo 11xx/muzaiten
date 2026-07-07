@@ -21,6 +21,8 @@ private slots:
     void batchLookupsAndScalarsRoundTrip();
     void statusCountsRows();
     void contentGroupIdsHonorMinimumSize();
+    void versionOneEmbeddingReadsAreEmpty();
+    void embeddingsAndNeighborsRoundTrip();
 };
 
 namespace {
@@ -81,6 +83,24 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
                                       " extractor TEXT NOT NULL,"
                                       " version TEXT NOT NULL)"),
                                   error);
+            if (schemaVersion >= 2) {
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE embeddings("
+                                          " content_group_id INTEGER PRIMARY KEY,"
+                                          " model TEXT NOT NULL,"
+                                          " version TEXT NOT NULL,"
+                                          " dim INTEGER NOT NULL,"
+                                          " vector BLOB NOT NULL)"),
+                                      error);
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE track_neighbors("
+                                          " content_group_id INTEGER NOT NULL,"
+                                          " neighbor_group_id INTEGER NOT NULL,"
+                                          " rank INTEGER NOT NULL,"
+                                          " cosine REAL NOT NULL,"
+                                          " PRIMARY KEY(content_group_id, rank))"),
+                                      error);
+            }
         }
 
         if (ok) {
@@ -161,6 +181,44 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
                 }
                 ok = false;
             }
+        }
+
+        if (ok && schemaVersion >= 2) {
+            QSqlQuery embeddingA(db);
+            embeddingA.prepare(QStringLiteral(
+                "INSERT INTO embeddings(content_group_id, model, version, dim, vector) "
+                "VALUES(10, 'fixture-model', 'fixture-version', 2, ?)"));
+            embeddingA.addBindValue(QByteArray::fromHex("0000803f00000000"));
+            if (!embeddingA.exec()) {
+                if (error != nullptr) {
+                    *error = embeddingA.lastError().text();
+                }
+                ok = false;
+            }
+        }
+        if (ok && schemaVersion >= 2) {
+            QSqlQuery embeddingB(db);
+            embeddingB.prepare(QStringLiteral(
+                "INSERT INTO embeddings(content_group_id, model, version, dim, vector) "
+                "VALUES(11, 'fixture-model', 'fixture-version', 2, ?)"));
+            embeddingB.addBindValue(QByteArray::fromHex("000000000000803f"));
+            if (!embeddingB.exec()) {
+                if (error != nullptr) {
+                    *error = embeddingB.lastError().text();
+                }
+                ok = false;
+            }
+        }
+        if (ok && schemaVersion >= 2) {
+            QSqlQuery neighbors(db);
+            ok = ok && execSql(neighbors, QStringLiteral(
+                                      "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine) "
+                                      "VALUES(10, 11, 1, 0.5)"),
+                                  error);
+            ok = ok && execSql(neighbors, QStringLiteral(
+                                      "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine) "
+                                      "VALUES(11, 10, 1, 0.5)"),
+                                  error);
         }
 
         db.close();
@@ -327,6 +385,52 @@ void FeatureStoreTest::contentGroupIdsHonorMinimumSize()
     QCOMPARE(store.contentGroupIds(1), QVector<qint64>({10, 11}));
     QCOMPARE(store.contentGroupIds(2), QVector<qint64>({10}));
     QVERIFY(store.contentGroupIds(3).isEmpty());
+}
+
+void FeatureStoreTest::versionOneEmbeddingReadsAreEmpty()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    QString error;
+    const QString path = createFixture(temp, 1, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    FeatureStore store(path);
+    QVERIFY(store.isOpen());
+    QVERIFY(store.embeddingForGroup(10).isEmpty());
+    QVERIFY(store.embeddingsForGroups({10, 11}).isEmpty());
+    QVERIFY(store.neighborsOfGroup(10, 10).isEmpty());
+}
+
+void FeatureStoreTest::embeddingsAndNeighborsRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    QString error;
+    const QString path = createFixture(temp, 2, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    FeatureStore store(path);
+    QVERIFY(store.isOpen());
+
+    const QVector<float> groupA = store.embeddingForGroup(10);
+    QCOMPARE(groupA.size(), 2);
+    QCOMPARE(groupA.at(0), 1.0F);
+    QCOMPARE(groupA.at(1), 0.0F);
+    QVERIFY(store.embeddingForGroup(999).isEmpty());
+
+    const QHash<qint64, QVector<float>> embeddings = store.embeddingsForGroups({10, 11, 999});
+    QCOMPARE(embeddings.size(), 2);
+    QCOMPARE(embeddings.value(11).size(), 2);
+    QCOMPARE(embeddings.value(11).at(0), 0.0F);
+    QCOMPARE(embeddings.value(11).at(1), 1.0F);
+
+    const QList<QPair<qint64, double>> neighbors = store.neighborsOfGroup(10, 10);
+    QCOMPARE(neighbors.size(), 1);
+    QCOMPARE(neighbors.first().first, qint64(11));
+    QCOMPARE(neighbors.first().second, 0.5);
+    QVERIFY(store.neighborsOfGroup(10, 0).isEmpty());
+    QVERIFY(store.neighborsOfGroup(999, 10).isEmpty());
 }
 
 QTEST_MAIN(FeatureStoreTest)
