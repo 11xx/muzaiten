@@ -94,6 +94,7 @@ public:
     // When true, the context menus also offer "(don't save to playlist)" queue
     // adds (the queue is mirroring a playlist).
     void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
+    void setTrackFlagResolver(std::function<bool(const QString &, const QString &)> resolver);
 
 public slots:
     void createPlaylist();
@@ -149,6 +150,7 @@ signals:
     void playNextSavedQueueRequested(const QString &snapshotId);
     void deleteSavedQueueRequested(const QString &snapshotId);
     void trackRatingChanged(const QString &path, int rating0To100);
+    void trackFlagChanged(const QString &path, const QString &flag, bool on);
     // Emitted after a structural edit made directly in this view. MainWindow
     // uses it to rebuild a queue that is mirroring this playlist.
     void playlistItemsChanged(qint64 playlistId);
@@ -230,6 +232,7 @@ private:
 
     PlaylistDatabase *m_db = nullptr;
     std::function<Track(const QString &)> m_trackResolver;
+    std::function<bool(const QString &, const QString &)> m_trackFlagResolver;
     qint64 m_currentPlaylistId = 0;
     QString m_currentQueueSnapshotId;
     QVector<SavedQueuePlaylistEntry> m_savedQueueEntries;

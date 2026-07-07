@@ -6,15 +6,25 @@
 //   muzaitenctl rate 4 && notify-send "rated $(muzaitenctl status --format artist-title)"
 
 #include "cli/SearchCli.h"
+#include "app/AppPaths.h"
 #include "core/GenreTags.h"
+#include "core/MetadataBlob.h"
 #include "db/Database.h"
+#include "features/FeatureStore.h"
+#include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
+#include "reco/GenreCuration.h"
+#include "reco/TrackScorer.h"
+#include "reco/WeightLearner.h"
+#include "reco/WeightLearnerData.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
 
 #include <QCoreApplication>
+#include <QDate>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -22,15 +32,18 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QProcess>
-#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTextStream>
 #include <QUuid>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include <unistd.h>
 
@@ -38,6 +51,8 @@ namespace {
 
 constexpr int connectTimeoutMs = 2000;
 constexpr int replyTimeoutMs = 5000;
+constexpr int semanticQueryTimeoutMs = 10 * 60 * 1000;
+constexpr int defaultSemanticSearchLimit = 20;
 
 void printUsage()
 {
@@ -63,9 +78,19 @@ void printUsage()
         "      --fuzzy               fuzzy match instead of exact substring\n"
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
+        "  semantic-search [--limit N] <text>\n"
+        "                          CLAP text-to-library search (requires muzaiten-embed)\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
+        "  features-status         show features.sqlite coverage (works offline)\n"
+        "  duplicate-groups [--min-size N]  inspect features.sqlite duplicate groups\n"
+        "  pin-copy <group-id> <path> | unpin-copy <group-id>\n"
+        "                          prefer one library copy for radio playback\n"
         "  radio-genre ignore <genre> | unignore <genre> | list\n"
         "                          curate radio-only ignored folded genres (works offline)\n"
+        "  radio-weights get | set <json> | save <name> | apply <name> | list | remove <name>\n"
+        "                          inspect and curate radio scoring weights (works offline)\n"
+        "  radio-learn [--dry-run] [--min-samples N]\n"
+        "                          suggest a learned radio-weight profile from local telemetry\n"
         "  genre-alias set <alias> <canonical> | remove <alias> | list\n"
         "                          curate folded genre aliases (works offline)\n"
         "  play-file <path>        append a file to the queue and play it\n"
@@ -240,6 +265,435 @@ QString searchHumanLine(const Search::SearchRecord &r)
     return line;
 }
 
+QString featuresDbPath()
+{
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
+}
+
+QString historyDbPath()
+{
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("history.sqlite"));
+}
+
+QJsonObject featureStatusJson(const QString &path, bool found, bool open, const FeatureStore::Status &status,
+                              int schemaVersion, const QString &message = {})
+{
+    QJsonObject object{
+        {QStringLiteral("path"), path},
+        {QStringLiteral("found"), found},
+        {QStringLiteral("open"), open},
+        {QStringLiteral("files"), static_cast<double>(status.files)},
+        {QStringLiteral("ok"), static_cast<double>(status.ok)},
+        {QStringLiteral("failed"), static_cast<double>(status.failed)},
+        {QStringLiteral("groups"), static_cast<double>(status.groups)},
+        {QStringLiteral("featured"), static_cast<double>(status.featured)},
+        {QStringLiteral("dsp_version"), status.dspVersion},
+        {QStringLiteral("embedded_groups"), static_cast<double>(status.embeddedGroups)},
+        {QStringLiteral("embedding_model"), status.embeddingModel},
+        {QStringLiteral("embedding_version"), status.embeddingVersion},
+        {QStringLiteral("neighbor_rows"), static_cast<double>(status.neighborRows)},
+    };
+    if (schemaVersion > 0) {
+        object.insert(QStringLiteral("schema_version"), schemaVersion);
+    }
+    if (!message.isEmpty()) {
+        object.insert(QStringLiteral("message"), message);
+    }
+    return object;
+}
+
+QStringList mediaTagsForPath(const Database &db, const QString &path)
+{
+    QStringList media;
+    const MetadataBlob::FullMetadata metadata = db.fullMetadata(path);
+    for (auto it = metadata.tags.cbegin(); it != metadata.tags.cend(); ++it) {
+        if (it.key().compare(QStringLiteral("MEDIA"), Qt::CaseInsensitive) == 0) {
+            media.append(it.value());
+        }
+    }
+    return media;
+}
+
+QualityRank::Copy qualityCopyForTrack(const Track &track, const QStringList &mediaTags)
+{
+    return QualityRank::Copy{
+        track.path,
+        track.codec,
+        track.bitDepth,
+        track.sampleRateHz,
+        track.bitrateKbps,
+        mediaTags,
+    };
+}
+
+struct DuplicateMember {
+    Track track;
+    QStringList mediaTags;
+    int qualityScore = 0;
+    bool pinned = false;
+};
+
+QVector<DuplicateMember> duplicateMembers(Database &db, const FeatureStore &features,
+                                          qint64 groupId, const QString &pinnedPath)
+{
+    QVector<DuplicateMember> members;
+    const QStringList paths = features.pathsInGroup(groupId);
+    members.reserve(paths.size());
+    for (const QString &path : paths) {
+        Track track = db.trackForPath(path);
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        db.enrichTrackForStatus(track);
+        const QStringList mediaTags = mediaTagsForPath(db, path);
+        const QualityRank::Copy copy = qualityCopyForTrack(track, mediaTags);
+        members.push_back({track, mediaTags, QualityRank::score(copy), path == pinnedPath});
+    }
+    std::sort(members.begin(), members.end(), [](const DuplicateMember &left, const DuplicateMember &right) {
+        if (left.pinned != right.pinned) {
+            return left.pinned;
+        }
+        if (left.qualityScore != right.qualityScore) {
+            return left.qualityScore > right.qualityScore;
+        }
+        return left.track.path < right.track.path;
+    });
+    return members;
+}
+
+QJsonObject duplicateMemberJson(const DuplicateMember &member)
+{
+    return QJsonObject{
+        {QStringLiteral("path"), member.track.path},
+        {QStringLiteral("codec"), member.track.codec},
+        {QStringLiteral("bit_depth"), member.track.bitDepth},
+        {QStringLiteral("sample_rate_hz"), member.track.sampleRateHz},
+        {QStringLiteral("bitrate_kbps"), member.track.bitrateKbps},
+        {QStringLiteral("quality_score"), member.qualityScore},
+        {QStringLiteral("pinned"), member.pinned},
+        {QStringLiteral("media"), QJsonArray::fromStringList(member.mediaTags)},
+    };
+}
+
+struct SemanticScore {
+    qint64 groupId = -1;
+    double score = 0.0;
+};
+
+struct SemanticSearchResult {
+    qint64 groupId = -1;
+    double score = 0.0;
+    DuplicateMember member;
+};
+
+QVector<float> normalizedVector(const QVector<float> &values, QString *error)
+{
+    if (values.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("embedding vector is empty");
+        }
+        return {};
+    }
+
+    double normSquared = 0.0;
+    for (float value : values) {
+        if (!std::isfinite(value)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("embedding vector contains a non-finite value");
+            }
+            return {};
+        }
+        normSquared += static_cast<double>(value) * static_cast<double>(value);
+    }
+    if (!(normSquared > 0.0) || !std::isfinite(normSquared)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("embedding vector must have a finite non-zero norm");
+        }
+        return {};
+    }
+
+    const double scale = 1.0 / std::sqrt(normSquared);
+    QVector<float> normalized;
+    normalized.reserve(values.size());
+    for (float value : values) {
+        normalized.push_back(static_cast<float>(static_cast<double>(value) * scale));
+    }
+    return normalized;
+}
+
+QVector<float> vectorFromJsonArray(const QJsonArray &array, QString *error)
+{
+    QVector<float> raw;
+    raw.reserve(array.size());
+    for (qsizetype i = 0; i < array.size(); ++i) {
+        const QJsonValue value = array.at(i);
+        if (!value.isDouble()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("embedding vector entry %1 is not numeric").arg(i);
+            }
+            return {};
+        }
+        const double number = value.toDouble();
+        if (!std::isfinite(number)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("embedding vector entry %1 is not finite").arg(i);
+            }
+            return {};
+        }
+        raw.push_back(static_cast<float>(number));
+    }
+    return normalizedVector(raw, error);
+}
+
+QVector<float> parseQueryVectorJson(const QByteArray &json, QString *error)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        if (error != nullptr) {
+            *error = QStringLiteral("could not parse query embedding JSON: %1").arg(parseError.errorString());
+        }
+        return {};
+    }
+
+    if (document.isArray()) {
+        return vectorFromJsonArray(document.array(), error);
+    }
+    if (!document.isObject()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("query embedding JSON must be an array or object");
+        }
+        return {};
+    }
+
+    const QJsonObject object = document.object();
+    const QJsonValue vectorValue = object.value(QStringLiteral("vector")).isArray()
+        ? object.value(QStringLiteral("vector"))
+        : object.value(QStringLiteral("embedding"));
+    if (!vectorValue.isArray()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("query embedding JSON object must contain a vector array");
+        }
+        return {};
+    }
+    return vectorFromJsonArray(vectorValue.toArray(), error);
+}
+
+QString compactProcessError(QString value)
+{
+    value.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    if (value.size() > 500) {
+        value = value.left(500).trimmed() + QStringLiteral("...");
+    }
+    return value;
+}
+
+QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
+{
+    const QString executable = QStandardPaths::findExecutable(QStringLiteral("muzaiten-embed"));
+    if (executable.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder tool (muzaiten-embed not found)");
+        }
+        return {};
+    }
+
+    QProcess process;
+    process.start(executable, {QStringLiteral("query"), text, QStringLiteral("--json")});
+    if (!process.waitForStarted(5000)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder tool (could not start muzaiten-embed)");
+        }
+        return {};
+    }
+    if (!process.waitForFinished(semanticQueryTimeoutMs)) {
+        process.kill();
+        process.waitForFinished(1000);
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder tool (query timed out)");
+        }
+        return {};
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        QString detail = QString::fromUtf8(process.readAllStandardError()).trimmed();
+        if (detail.isEmpty()) {
+            detail = QStringLiteral("query failed");
+        }
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder tool: %1").arg(compactProcessError(detail));
+        }
+        return {};
+    }
+
+    QString parseError;
+    QVector<float> vector = parseQueryVectorJson(process.readAllStandardOutput(), &parseError);
+    if (vector.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder tool: %1").arg(parseError);
+        }
+        return {};
+    }
+    return vector;
+}
+
+double cosineSimilarity(const QVector<float> &left, const QVector<float> &right)
+{
+    if (left.size() != right.size() || left.isEmpty()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    double dot = 0.0;
+    double leftNorm = 0.0;
+    double rightNorm = 0.0;
+    for (qsizetype i = 0; i < left.size(); ++i) {
+        const double a = left.at(i);
+        const double b = right.at(i);
+        if (!std::isfinite(a) || !std::isfinite(b)) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        dot += a * b;
+        leftNorm += a * a;
+        rightNorm += b * b;
+    }
+    if (!(leftNorm > 0.0) || !(rightNorm > 0.0)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return dot / (std::sqrt(leftNorm) * std::sqrt(rightNorm));
+}
+
+DuplicateMember bestCopyForGroup(Database &db, const FeatureStore &features,
+                                 qint64 groupId, const QString &pinnedPath)
+{
+    const QVector<DuplicateMember> members = duplicateMembers(db, features, groupId, pinnedPath);
+    if (members.isEmpty()) {
+        return {};
+    }
+
+    QVector<QualityRank::Copy> copies;
+    copies.reserve(members.size());
+    for (const DuplicateMember &member : members) {
+        copies.push_back(qualityCopyForTrack(member.track, member.mediaTags));
+    }
+    const QString bestPath = QualityRank::bestPath(copies, pinnedPath);
+    for (const DuplicateMember &member : members) {
+        if (member.track.path == bestPath) {
+            return member;
+        }
+    }
+    return members.first();
+}
+
+QVector<SemanticSearchResult> rankSemanticMatches(const QVector<float> &queryVector,
+                                                  FeatureStore &features,
+                                                  Database &db,
+                                                  int limit,
+                                                  QString *error)
+{
+    const QVector<qint64> groupIds = features.contentGroupIds(1);
+    QList<qint64> groupList;
+    groupList.reserve(groupIds.size());
+    for (qint64 groupId : groupIds) {
+        groupList.push_back(groupId);
+    }
+
+    const QHash<qint64, QVector<float>> embeddings = features.embeddingsForGroups(groupList);
+    if (embeddings.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("features.sqlite has no embeddings; run muzaiten-embed scan first");
+        }
+        return {};
+    }
+
+    QVector<SemanticScore> scores;
+    scores.reserve(embeddings.size());
+    for (qint64 groupId : groupIds) {
+        const QVector<float> embedding = embeddings.value(groupId);
+        if (embedding.isEmpty() || embedding.size() != queryVector.size()) {
+            continue;
+        }
+        const double score = cosineSimilarity(queryVector, embedding);
+        if (std::isfinite(score)) {
+            scores.push_back({groupId, score});
+        }
+    }
+    if (scores.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("features.sqlite has no embeddings matching query dimension %1")
+                         .arg(queryVector.size());
+        }
+        return {};
+    }
+
+    std::sort(scores.begin(), scores.end(), [](const SemanticScore &left, const SemanticScore &right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        return left.groupId < right.groupId;
+    });
+
+    const QHash<qint64, QString> pins = db.contentGroupPins();
+    QVector<SemanticSearchResult> results;
+    results.reserve(std::min(static_cast<qsizetype>(limit), scores.size()));
+    for (const SemanticScore &score : scores) {
+        const DuplicateMember member = bestCopyForGroup(db, features, score.groupId, pins.value(score.groupId));
+        if (member.track.path.isEmpty()) {
+            continue;
+        }
+        results.push_back({score.groupId, score.score, member});
+        if (results.size() >= limit) {
+            break;
+        }
+    }
+    if (results.isEmpty() && error != nullptr) {
+        *error = QStringLiteral("semantic search found embeddings, but no matching groups are present in library.sqlite");
+    }
+    return results;
+}
+
+QJsonObject semanticResultJson(const SemanticSearchResult &result)
+{
+    QJsonObject object = duplicateMemberJson(result.member);
+    object.insert(QStringLiteral("content_group_id"), static_cast<double>(result.groupId));
+    object.insert(QStringLiteral("score"), result.score);
+    object.insert(QStringLiteral("title"), result.member.track.title);
+    object.insert(QStringLiteral("artist"), result.member.track.artistName);
+    object.insert(QStringLiteral("album_artist"), result.member.track.albumArtistName);
+    object.insert(QStringLiteral("album"), result.member.track.albumTitle);
+    object.insert(QStringLiteral("date"), result.member.track.date);
+    object.insert(QStringLiteral("duration"), std::round(static_cast<double>(result.member.track.durationMs) / 10.0) / 100.0);
+    object.insert(QStringLiteral("rating"), result.member.track.rating0To100);
+    return object;
+}
+
+QString qualitySummary(const DuplicateMember &member)
+{
+    QStringList parts;
+    if (!member.track.codec.isEmpty()) {
+        parts << member.track.codec;
+    }
+    if (member.track.bitDepth > 0 || member.track.sampleRateHz > 0) {
+        QString rateDepth;
+        if (member.track.bitDepth > 0) {
+            rateDepth += QStringLiteral("%1bit").arg(member.track.bitDepth);
+        }
+        if (member.track.sampleRateHz > 0) {
+            if (!rateDepth.isEmpty()) {
+                rateDepth += QLatin1Char('/');
+            }
+            rateDepth += QStringLiteral("%1Hz").arg(member.track.sampleRateHz);
+        }
+        parts << rateDepth;
+    }
+    if (member.track.bitrateKbps > 0) {
+        parts << QStringLiteral("%1kbps").arg(member.track.bitrateKbps);
+    }
+    if (!member.mediaTags.isEmpty()) {
+        parts << QStringLiteral("MEDIA=%1").arg(member.mediaTags.join(QLatin1Char('|')));
+    }
+    parts << QStringLiteral("score=%1").arg(member.qualityScore);
+    return parts.join(QLatin1Char(' '));
+}
+
 QString oneLine(const QString &value)
 {
     QString v = value;
@@ -258,129 +712,10 @@ bool hasNonAscii(const QString &s)
     return false;
 }
 
-bool hasNonAsciiLetter(const QString &s)
-{
-    for (const QChar c : s) {
-        if (c.isLetter() && c.unicode() > 127) {
-            return true;
-        }
-    }
-    return false;
-}
-
-QString punctuationFoldKey(QString s)
-{
-    static const QRegularExpression nonAlnum(QStringLiteral("[^a-z0-9]"));
-    s.remove(nonAlnum);
-    return s;
-}
-
-bool looksLikeClassifierToken(const QString &genre)
-{
-    static const QRegularExpression classifier(QStringLiteral(
-        "^(?:[a-z]{1,4}:[^\\s].*|\\d+_information:.*|[a-z0-9_.-]{1,32}:[^\\s].*)$"));
-    return classifier.match(genre).hasMatch();
-}
-
-struct GenreReportRow {
-    QString genre;
-    int df = 0;
-    double idf = 0.0;
-    QString canonical;
-    QString status;
-    QStringList sampleArtists;
-    QStringList flags;
-};
-
-QVector<GenreReportRow> buildGenreReportRows(Database &db, int *taggedTrackTotal)
-{
-    int total = 0;
-    const QHash<QString, int> counts = db.genreTrackCounts(&total);
-    if (taggedTrackTotal != nullptr) {
-        *taggedTrackTotal = total;
-    }
-
-    const QHash<QString, QString> aliases = db.genreAliases();
-    const QSet<QString> ignored = db.ignoredRadioGenres();
-    QHash<QString, int> canonicalDf;
-    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
-        const QString canonical = GenreTags::canonical(it.key(), aliases);
-        if (canonical.isEmpty() || GenreTags::isNonGenre(canonical)) {
-            continue;
-        }
-        canonicalDf[canonical] += it.value();
-    }
-
-    QHash<QString, QStringList> nearDupGroups;
-    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
-        const QString key = punctuationFoldKey(it.key());
-        if (!key.isEmpty()) {
-            nearDupGroups[key].append(it.key());
-        }
-    }
-    for (QStringList &group : nearDupGroups) {
-        group.sort(Qt::CaseInsensitive);
-    }
-
-    QVector<GenreReportRow> rows;
-    rows.reserve(counts.size());
-    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
-        GenreReportRow row;
-        row.genre = it.key();
-        row.df = it.value();
-        row.canonical = GenreTags::canonical(row.genre, aliases);
-        const bool stoplisted = GenreTags::isNonGenre(row.canonical);
-        if (ignored.contains(row.canonical)) {
-            row.status = QStringLiteral("ignored");
-        } else if (stoplisted) {
-            row.status = QStringLiteral("stoplist");
-        } else if (row.canonical != row.genre) {
-            row.status = QStringLiteral("alias");
-        } else {
-            row.status = QStringLiteral("ok");
-        }
-
-        const int dfForIdf = stoplisted ? row.df : canonicalDf.value(row.canonical, row.df);
-        row.idf = std::log(std::max(2.0, static_cast<double>(total) / std::max(1, dfForIdf)));
-        row.sampleArtists = db.sampleArtistsForGenre(row.genre, 3);
-
-        const QString key = punctuationFoldKey(row.genre);
-        const QStringList nearDups = nearDupGroups.value(key);
-        if (nearDups.size() > 1) {
-            for (const QString &other : nearDups) {
-                if (other != row.genre) {
-                    row.flags.append(QStringLiteral("neardup:%1").arg(other));
-                    break;
-                }
-            }
-        }
-        if (hasNonAsciiLetter(row.genre)) {
-            row.flags.append(QStringLiteral("nonascii"));
-        }
-        if (row.genre.contains(QLatin1Char('|')) || row.genre.contains(QLatin1Char(';'))
-            || row.genre.contains(QLatin1Char('/'))) {
-            row.flags.append(QStringLiteral("separator"));
-        }
-        if (looksLikeClassifierToken(row.genre)) {
-            row.flags.append(QStringLiteral("classifier"));
-        }
-
-        rows.append(std::move(row));
-    }
-
-    std::sort(rows.begin(), rows.end(), [](const GenreReportRow &a, const GenreReportRow &b) {
-        if (a.df != b.df) {
-            return a.df > b.df;
-        }
-        return QString::compare(a.genre, b.genre, Qt::CaseInsensitive) < 0;
-    });
-    return rows;
-}
-
-QJsonArray genreRowsToJson(const QVector<GenreReportRow> &rows)
+QJsonArray genreRowsToJson(const QVector<GenreCuration::ReportRow> &rows)
 {
     QJsonArray array;
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         QJsonArray samples;
         for (const QString &artist : row.sampleArtists) {
             samples.append(artist);
@@ -402,12 +737,12 @@ QJsonArray genreRowsToJson(const QVector<GenreReportRow> &rows)
     return array;
 }
 
-void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackTotal)
+void printGenreReportTable(const QVector<GenreCuration::ReportRow> &rows, int taggedTrackTotal)
 {
     int genreWidth = 5;
     int canonicalWidth = 9;
     int sampleWidth = 14;
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         genreWidth = std::max(genreWidth, static_cast<int>(row.genre.size()));
         canonicalWidth = std::max(canonicalWidth, static_cast<int>(row.canonical.size()));
         sampleWidth = std::max(sampleWidth, static_cast<int>(row.sampleArtists.join(QStringLiteral(", ")).size()));
@@ -424,7 +759,7 @@ void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackT
                .arg(QStringLiteral("status"), -8)
                .arg(QStringLiteral("sample_artists"), -sampleWidth)
                .arg(QStringLiteral("flags"));
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         out << QStringLiteral("%1  %2  %3  %4  %5  %6  %7\n")
                    .arg(row.genre, -genreWidth)
                    .arg(row.df, 6)
@@ -437,13 +772,13 @@ void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackT
     out << "genre-report: end, " << rows.size() << " genres, " << taggedTrackTotal << " tagged tracks\n";
 }
 
-void printGenreReportTsv(const QVector<GenreReportRow> &rows, int taggedTrackTotal)
+void printGenreReportTsv(const QVector<GenreCuration::ReportRow> &rows, int taggedTrackTotal)
 {
     QTextStream out(stdout);
     out.setEncoding(QStringConverter::Utf8);
     out << "# vocabulary_size\t" << rows.size() << "\ttagged_track_total\t" << taggedTrackTotal << '\n';
     out << "genre\tdf\tidf\tcanonical\tstatus\tsample_artists\tflags\n";
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         out << tsvField(row.genre) << '\t'
             << row.df << '\t'
             << QString::number(row.idf, 'f', 6) << '\t'
@@ -492,6 +827,420 @@ void printRadioReasons(const QJsonObject &response)
             out << "    " << breakdown << '\n';
         }
     }
+}
+
+constexpr const char kRadioScoringWeightsKey[] = "radio.scoringWeights";
+
+QJsonObject jsonObjectFromBytes(const QByteArray &json)
+{
+    return QJsonDocument::fromJson(json).object();
+}
+
+QString prettyJson(const QByteArray &json)
+{
+    const QJsonDocument document = QJsonDocument::fromJson(json);
+    return QString::fromUtf8(document.toJson(QJsonDocument::Indented)).trimmed();
+}
+
+bool parseWeightsForCli(const QByteArray &json, TrackScorer::Weights *weights, QString *error)
+{
+    QString parseError;
+    const TrackScorer::Weights parsed = TrackScorer::weightsFromJson(json, &parseError);
+    if (!parseError.isEmpty()) {
+        if (error != nullptr) {
+            *error = parseError;
+        }
+        return false;
+    }
+    if (weights != nullptr) {
+        *weights = parsed;
+    }
+    return true;
+}
+
+QByteArray compactJsonObject(const QByteArray &json)
+{
+    return QJsonDocument(QJsonDocument::fromJson(json).object()).toJson(QJsonDocument::Compact);
+}
+
+QByteArray activeWeightsJson(Database &db)
+{
+    return db.setting(QString::fromLatin1(kRadioScoringWeightsKey)).toUtf8();
+}
+
+QByteArray effectiveWeightsJson(const QByteArray &activeJson)
+{
+    QString error;
+    const TrackScorer::Weights weights = TrackScorer::weightsFromJson(activeJson, &error);
+    if (!error.isEmpty()) {
+        return TrackScorer::weightsToJson(TrackScorer::defaultWeights());
+    }
+    return TrackScorer::weightsToJson(weights);
+}
+
+QJsonObject weightsDiffJson(const QByteArray &activeJson, const QByteArray &suggestedJson)
+{
+    const QJsonObject active = jsonObjectFromBytes(activeJson);
+    const QJsonObject suggested = jsonObjectFromBytes(suggestedJson);
+    QStringList keys = active.keys();
+    for (const QString &key : suggested.keys()) {
+        if (!keys.contains(key)) {
+            keys.push_back(key);
+        }
+    }
+    keys.sort(Qt::CaseInsensitive);
+
+    QJsonObject diff;
+    for (const QString &key : keys) {
+        const QJsonValue activeValue = active.value(key);
+        const QJsonValue suggestedValue = suggested.value(key);
+        const bool bothNumeric = activeValue.isDouble() && suggestedValue.isDouble();
+        const bool changed = bothNumeric
+            ? std::abs(activeValue.toDouble() - suggestedValue.toDouble()) > 0.000001
+            : activeValue != suggestedValue;
+        if (changed) {
+            diff.insert(key, QJsonObject{
+                {QStringLiteral("active"), activeValue},
+                {QStringLiteral("suggested"), suggestedValue},
+            });
+        }
+    }
+    return diff;
+}
+
+QJsonObject componentResultJson(const WeightLearner::ComponentResult &row,
+                                const TrackScorer::Weights &activeWeights)
+{
+    double activeWeight = 0.0;
+    WeightLearner::componentWeight(activeWeights, row.componentName, &activeWeight);
+    return QJsonObject{
+        {QStringLiteral("component"), row.componentName},
+        {QStringLiteral("weight_key"), row.weightKey},
+        {QStringLiteral("coefficient"), row.coefficient},
+        {QStringLiteral("multiplier"), row.multiplier},
+        {QStringLiteral("default_weight"), row.defaultWeight},
+        {QStringLiteral("active_weight"), activeWeight},
+        {QStringLiteral("suggested_weight"), row.suggestedWeight},
+        {QStringLiteral("non_zero_samples"), row.nonZeroSamples},
+    };
+}
+
+QJsonArray componentResultsJson(const QVector<WeightLearner::ComponentResult> &components,
+                                const TrackScorer::Weights &activeWeights)
+{
+    QJsonArray array;
+    for (const WeightLearner::ComponentResult &row : components) {
+        array.append(componentResultJson(row, activeWeights));
+    }
+    return array;
+}
+
+void printRadioLearnPlain(const WeightLearner::Result &learned,
+                          const TrackScorer::Weights &activeWeights,
+                          const QByteArray &activeJson,
+                          const WeightLearnerData::LoadResult &load,
+                          const QString &profileName,
+                          bool dryRun)
+{
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    out << "radio-learn: " << learned.sampleCount << " labeled picks ("
+        << learned.positiveLabels << " early skips)\n";
+    out << "join window: " << WeightLearnerData::kJoinWindowSecs << " seconds\n";
+    if (load.skippedInvalidWeights > 0 || load.skippedNoSignals > 0) {
+        out << "skipped rows: " << load.skippedInvalidWeights << " invalid weights, "
+            << load.skippedNoSignals << " without learnable components\n";
+    }
+
+    out << "component        multiplier  default   active    suggested  samples\n";
+    for (const WeightLearner::ComponentResult &row : learned.components) {
+        double activeWeight = 0.0;
+        WeightLearner::componentWeight(activeWeights, row.componentName, &activeWeight);
+        out << QStringLiteral("%1  %2  %3  %4  %5  %6\n")
+                   .arg(row.componentName, -14)
+                   .arg(QString::number(row.multiplier, 'f', 3), 10)
+                   .arg(QString::number(row.defaultWeight, 'f', 3), 8)
+                   .arg(QString::number(activeWeight, 'f', 3), 8)
+                   .arg(QString::number(row.suggestedWeight, 'f', 3), 9)
+                   .arg(row.nonZeroSamples, 7);
+    }
+
+    out << "suggested weights:\n" << prettyJson(learned.suggestedWeightsJson) << '\n';
+    const QJsonObject diff = weightsDiffJson(activeJson, learned.suggestedWeightsJson);
+    out << "diff vs active:\n";
+    if (diff.isEmpty()) {
+        out << "  (none)\n";
+    } else {
+        for (auto it = diff.constBegin(); it != diff.constEnd(); ++it) {
+            const QJsonObject row = it.value().toObject();
+            out << "  " << it.key() << ": "
+                << QString::number(row.value(QStringLiteral("active")).toDouble(), 'f', 6)
+                << " -> "
+                << QString::number(row.value(QStringLiteral("suggested")).toDouble(), 'f', 6)
+                << '\n';
+        }
+    }
+
+    if (dryRun) {
+        out << "radio-learn: dry run; no profile saved\n";
+    } else {
+        out << "radio-learn: saved profile " << profileName
+            << "; apply later with radio-weights apply " << profileName << '\n';
+    }
+}
+
+int runRadioLearn(QStringList arguments, bool json)
+{
+    bool dryRun = false;
+    int minSamples = 200;
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString word = arguments.at(i);
+        if (word == QLatin1String("--dry-run")) {
+            dryRun = true;
+        } else if (word == QLatin1String("--min-samples")) {
+            bool ok = false;
+            if (i + 1 >= arguments.size() || (minSamples = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
+                return fail(QStringLiteral("radio-learn --min-samples needs a positive number"));
+            }
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown radio-learn option \"%1\"").arg(word));
+        } else {
+            return fail(QStringLiteral("radio-learn does not take positional arguments"));
+        }
+    }
+
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    if (!QFileInfo::exists(historyDbPath())) {
+        return fail(QStringLiteral("history database not found at %1").arg(historyDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-radio-learn-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    const QByteArray activeJson = effectiveWeightsJson(activeWeightsJson(db));
+    QString activeError;
+    const TrackScorer::Weights activeWeights = TrackScorer::weightsFromJson(activeJson, &activeError);
+    if (!activeError.isEmpty()) {
+        return fail(activeError);
+    }
+
+    const WeightLearnerData::LoadResult load = WeightLearnerData::loadSamplesFromPath(historyDbPath());
+    if (!load.error.isEmpty()) {
+        return fail(load.error);
+    }
+
+    WeightLearner::Options options;
+    options.minSamples = minSamples;
+    options.minPositiveLabels = minSamples == 200 ? 20 : std::max(1, minSamples / 10);
+    const WeightLearner::Result learned = WeightLearner::learn(load.samples, options);
+    if (!learned.ok) {
+        return fail(learned.error);
+    }
+
+    QString profileName;
+    if (!dryRun) {
+        profileName = QStringLiteral("learned-%1").arg(QDate::currentDate().toString(QStringLiteral("yyyyMMdd")));
+        if (!db.saveRadioWeightProfile(profileName, QString::fromUtf8(learned.suggestedWeightsJson))) {
+            return fail(db.lastError());
+        }
+    }
+
+    if (json) {
+        QTextStream out(stdout);
+        out.setEncoding(QStringConverter::Utf8);
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("dry_run"), dryRun},
+            {QStringLiteral("profile"), profileName.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                                              : QJsonValue(profileName)},
+            {QStringLiteral("sample_count"), learned.sampleCount},
+            {QStringLiteral("positive_labels"), learned.positiveLabels},
+            {QStringLiteral("min_samples"), options.minSamples},
+            {QStringLiteral("min_positive_labels"), options.minPositiveLabels},
+            {QStringLiteral("join_window_seconds"), WeightLearnerData::kJoinWindowSecs},
+            {QStringLiteral("skipped_invalid_weights"), load.skippedInvalidWeights},
+            {QStringLiteral("skipped_no_signals"), load.skippedNoSignals},
+            {QStringLiteral("components"), componentResultsJson(learned.components, activeWeights)},
+            {QStringLiteral("active"), jsonObjectFromBytes(activeJson)},
+            {QStringLiteral("suggested"), jsonObjectFromBytes(learned.suggestedWeightsJson)},
+            {QStringLiteral("diff"), weightsDiffJson(activeJson, learned.suggestedWeightsJson)},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        printRadioLearnPlain(learned, activeWeights, activeJson, load, profileName, dryRun);
+    }
+    return 0;
+}
+
+int runRadioWeights(QStringList arguments, bool json)
+{
+    if (arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-weights needs a verb: get, set, save, apply, list, or remove"));
+    }
+    const QString verb = arguments.takeFirst();
+    const QSet<QString> validVerbs{
+        QStringLiteral("get"),
+        QStringLiteral("set"),
+        QStringLiteral("save"),
+        QStringLiteral("apply"),
+        QStringLiteral("list"),
+        QStringLiteral("remove"),
+    };
+    if (!validVerbs.contains(verb)) {
+        return fail(QStringLiteral("radio-weights verb must be get, set, save, apply, list, or remove"));
+    }
+    if ((verb == QLatin1String("get") || verb == QLatin1String("list")) && !arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-weights %1 does not take arguments").arg(verb));
+    }
+    if ((verb == QLatin1String("save") || verb == QLatin1String("apply") || verb == QLatin1String("remove"))
+        && arguments.size() != 1) {
+        return fail(QStringLiteral("radio-weights %1 needs exactly one profile name").arg(verb));
+    }
+    if (verb == QLatin1String("set") && arguments.size() != 1) {
+        return fail(QStringLiteral("radio-weights set needs exactly one JSON object"));
+    }
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-radio-weights-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+
+    if (verb == QLatin1String("get")) {
+        const QByteArray active = activeWeightsJson(db);
+        const QByteArray effective = active.isEmpty()
+            ? TrackScorer::weightsToJson(TrackScorer::defaultWeights())
+            : effectiveWeightsJson(active);
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(QJsonObject{
+                {QStringLiteral("active"), active.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                                            : QJsonValue(jsonObjectFromBytes(active))},
+                {QStringLiteral("defaults"), active.isEmpty()},
+                {QStringLiteral("effective"), jsonObjectFromBytes(effective)},
+            }).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << "active:\n";
+            out << (active.isEmpty() ? QStringLiteral("(defaults)") : prettyJson(active)) << '\n';
+            out << "effective:\n" << prettyJson(effective) << '\n';
+        }
+        return 0;
+    }
+
+    if (verb == QLatin1String("list")) {
+        const QVector<Database::RadioWeightProfile> profiles = db.radioWeightProfiles();
+        if (json) {
+            QJsonArray array;
+            for (const Database::RadioWeightProfile &profile : profiles) {
+                array.append(QJsonObject{
+                    {QStringLiteral("name"), profile.name},
+                    {QStringLiteral("weights"), jsonObjectFromBytes(profile.weightsJson.toUtf8())},
+                    {QStringLiteral("updated_at"), profile.updatedAt},
+                });
+            }
+            out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            for (const Database::RadioWeightProfile &profile : profiles) {
+                out << profile.name << '\t' << profile.updatedAt << '\n';
+            }
+        }
+        return 0;
+    }
+
+    if (verb == QLatin1String("set")) {
+        const QByteArray raw = arguments.first().toUtf8();
+        TrackScorer::Weights weights;
+        QString error;
+        if (!parseWeightsForCli(raw, &weights, &error)) {
+            return fail(error);
+        }
+        const QByteArray compact = compactJsonObject(raw);
+        if (!db.setSetting(QString::fromLatin1(kRadioScoringWeightsKey), QString::fromUtf8(compact))) {
+            return fail(db.lastError());
+        }
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(QJsonObject{
+                {QStringLiteral("ok"), true},
+                {QStringLiteral("action"), QStringLiteral("set")},
+                {QStringLiteral("active"), jsonObjectFromBytes(compact)},
+                {QStringLiteral("effective"), jsonObjectFromBytes(TrackScorer::weightsToJson(weights))},
+                {QStringLiteral("takes_effect"), QStringLiteral("next radio session")},
+            }).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << "radio-weights: set active weights; takes effect on next radio session\n";
+        }
+        return 0;
+    }
+
+    const QString profileName = arguments.first().trimmed();
+    if (profileName.isEmpty()) {
+        return fail(QStringLiteral("radio-weights %1 needs a non-empty profile name").arg(verb));
+    }
+
+    if (verb == QLatin1String("save")) {
+        const QByteArray active = activeWeightsJson(db);
+        const QByteArray snapshot = active.isEmpty()
+            ? TrackScorer::weightsToJson(TrackScorer::defaultWeights())
+            : effectiveWeightsJson(active);
+        if (!db.saveRadioWeightProfile(profileName, QString::fromUtf8(snapshot))) {
+            return fail(db.lastError());
+        }
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(QJsonObject{
+                {QStringLiteral("ok"), true},
+                {QStringLiteral("action"), QStringLiteral("save")},
+                {QStringLiteral("name"), profileName},
+                {QStringLiteral("weights"), jsonObjectFromBytes(snapshot)},
+            }).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << "radio-weights: saved profile " << profileName << '\n';
+        }
+        return 0;
+    }
+
+    if (verb == QLatin1String("apply")) {
+        const QString profileJson = db.radioWeightProfile(profileName);
+        if (profileJson.isEmpty()) {
+            return fail(QStringLiteral("radio-weights profile not found: %1").arg(profileName));
+        }
+        if (!db.setSetting(QString::fromLatin1(kRadioScoringWeightsKey), profileJson)) {
+            return fail(db.lastError());
+        }
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(QJsonObject{
+                {QStringLiteral("ok"), true},
+                {QStringLiteral("action"), QStringLiteral("apply")},
+                {QStringLiteral("name"), profileName},
+                {QStringLiteral("active"), jsonObjectFromBytes(profileJson.toUtf8())},
+                {QStringLiteral("takes_effect"), QStringLiteral("next radio session")},
+            }).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << "radio-weights: applied profile " << profileName
+                << "; takes effect on next radio session\n";
+        }
+        return 0;
+    }
+
+    if (!db.removeRadioWeightProfile(profileName)) {
+        return fail(db.lastError());
+    }
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("action"), QStringLiteral("remove")},
+            {QStringLiteral("name"), profileName},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "radio-weights: removed profile " << profileName << '\n';
+    }
+    return 0;
 }
 
 // One NUL-terminated fzf record. Newline-separated lines:
@@ -727,6 +1476,95 @@ int runSearch(QStringList arguments, bool json)
     return 0;
 }
 
+int runSemanticSearch(QStringList arguments, bool json)
+{
+    bool jsonOut = json;
+    int limit = defaultSemanticSearchLimit;
+    QByteArray queryVectorJson;
+    QStringList queryWords;
+
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString word = arguments.at(i);
+        if (word == QLatin1String("--json")) {
+            jsonOut = true;
+        } else if (word == QLatin1String("--limit")) {
+            bool ok = false;
+            if (i + 1 >= arguments.size() || (limit = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
+                return fail(QStringLiteral("semantic-search --limit needs a positive number"));
+            }
+        } else if (word == QLatin1String("--query-vector-json")) {
+            if (i + 1 >= arguments.size()) {
+                return fail(QStringLiteral("semantic-search --query-vector-json needs a JSON vector"));
+            }
+            queryVectorJson = arguments.at(++i).toUtf8();
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown semantic-search option \"%1\"").arg(word));
+        } else {
+            queryWords.push_back(word);
+        }
+    }
+
+    if (queryWords.isEmpty()) {
+        return fail(QStringLiteral("semantic-search needs a text query"));
+    }
+    const QString queryText = queryWords.join(QLatin1Char(' ')).trimmed();
+    if (queryText.isEmpty()) {
+        return fail(QStringLiteral("semantic-search needs a non-empty text query"));
+    }
+
+    const QString featurePath = featuresDbPath();
+    if (!QFileInfo::exists(featurePath)) {
+        return fail(QStringLiteral("features.sqlite not found at %1").arg(featurePath));
+    }
+    FeatureStore features(featurePath);
+    if (!features.isOpen()) {
+        return fail(QStringLiteral("features.sqlite unsupported or unreadable at %1").arg(featurePath));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-semantic-search-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QString vectorError;
+    const QVector<float> queryVector = queryVectorJson.isEmpty()
+        ? queryEmbeddingViaEmbedder(queryText, &vectorError)
+        : parseQueryVectorJson(queryVectorJson, &vectorError);
+    if (queryVector.isEmpty()) {
+        return fail(vectorError.isEmpty() ? QStringLiteral("semantic-search could not build a query embedding")
+                                          : vectorError);
+    }
+
+    QString rankError;
+    const QVector<SemanticSearchResult> results = rankSemanticMatches(queryVector, features, db, limit, &rankError);
+    if (results.isEmpty() && !rankError.isEmpty()) {
+        return fail(rankError);
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (jsonOut) {
+        QJsonArray array;
+        for (const SemanticSearchResult &result : results) {
+            array.append(semanticResultJson(result));
+        }
+        out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        return 0;
+    }
+
+    for (const SemanticSearchResult &result : results) {
+        const Track &track = result.member.track;
+        out << QString::number(result.score, 'f', 6) << '\t'
+            << tsvField(track.path) << '\t'
+            << tsvField(track.title) << '\t'
+            << tsvField(track.artistName) << '\t'
+            << tsvField(track.albumTitle) << '\n';
+    }
+    return 0;
+}
+
 int runGenreReport(QStringList arguments, bool json)
 {
     bool plain = false;
@@ -750,7 +1588,7 @@ int runGenreReport(QStringList arguments, bool json)
     }
 
     int taggedTrackTotal = 0;
-    const QVector<GenreReportRow> rows = buildGenreReportRows(db, &taggedTrackTotal);
+    const QVector<GenreCuration::ReportRow> rows = GenreCuration::buildReportRows(db, &taggedTrackTotal);
     if (json) {
         QTextStream out(stdout);
         out.setEncoding(QStringConverter::Utf8);
@@ -759,6 +1597,230 @@ int runGenreReport(QStringList arguments, bool json)
         printGenreReportTsv(rows, taggedTrackTotal);
     } else {
         printGenreReportTable(rows, taggedTrackTotal);
+    }
+    return 0;
+}
+
+int runFeaturesStatus(QStringList arguments, bool json)
+{
+    if (!arguments.isEmpty()) {
+        return fail(QStringLiteral("features-status does not take arguments"));
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    const QString path = featuresDbPath();
+    if (!QFileInfo::exists(path)) {
+        const QString message = QStringLiteral("features.sqlite not found");
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(
+                featureStatusJson(path, false, false, {}, -1, message)).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << message << " at " << path << '\n';
+        }
+        return 0;
+    }
+
+    FeatureStore store(path);
+    if (!store.isOpen()) {
+        const QString message = QStringLiteral("features.sqlite unsupported or unreadable");
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(
+                featureStatusJson(path, true, false, {}, -1, message)).toJson(QJsonDocument::Compact)) << '\n';
+        }
+        return fail(QStringLiteral("%1 at %2").arg(message, path));
+    }
+
+    const FeatureStore::Status status = store.status();
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(
+            featureStatusJson(path, true, true, status, store.schemaVersion())).toJson(QJsonDocument::Compact)) << '\n';
+        return 0;
+    }
+
+    out << "features.sqlite: " << path << '\n';
+    out << "schema: " << store.schemaVersion() << '\n';
+    out << "files: " << status.files << " (" << status.ok << " ok, "
+        << status.failed << " failed)\n";
+    out << "groups: " << status.groups << '\n';
+    out << "featured: " << status.featured << '\n';
+    out << "dsp version: " << (status.dspVersion.isEmpty() ? QStringLiteral("unknown") : status.dspVersion) << '\n';
+    out << "embedded groups: " << status.embeddedGroups;
+    if (!status.embeddingModel.isEmpty() || !status.embeddingVersion.isEmpty()) {
+        out << " (" << (status.embeddingModel.isEmpty() ? QStringLiteral("unknown-model") : status.embeddingModel)
+            << ' ' << (status.embeddingVersion.isEmpty() ? QStringLiteral("unknown-version") : status.embeddingVersion)
+            << ')';
+    }
+    out << '\n';
+    out << "neighbor rows: " << status.neighborRows << '\n';
+    return 0;
+}
+
+int runDuplicateGroups(QStringList arguments, bool json)
+{
+    int minSize = 2;
+    while (!arguments.isEmpty()) {
+        const QString word = arguments.takeFirst();
+        if (word == QLatin1String("--min-size")) {
+            if (arguments.isEmpty()) {
+                return fail(QStringLiteral("duplicate-groups --min-size needs a value"));
+            }
+            bool ok = false;
+            minSize = arguments.takeFirst().toInt(&ok);
+            if (!ok || minSize < 1) {
+                return fail(QStringLiteral("duplicate-groups --min-size needs a positive integer"));
+            }
+        } else {
+            return fail(QStringLiteral("unknown duplicate-groups option \"%1\"").arg(word));
+        }
+    }
+
+    const QString featurePath = featuresDbPath();
+    if (!QFileInfo::exists(featurePath)) {
+        return fail(QStringLiteral("features.sqlite not found at %1").arg(featurePath));
+    }
+    FeatureStore features(featurePath);
+    if (!features.isOpen()) {
+        return fail(QStringLiteral("features.sqlite unsupported or unreadable at %1").arg(featurePath));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-duplicate-groups-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    const QHash<qint64, QString> pins = db.contentGroupPins();
+    QJsonArray groupsJson;
+    int printed = 0;
+    for (qint64 groupId : features.contentGroupIds(minSize)) {
+        const QString pinnedPath = pins.value(groupId);
+        const QVector<DuplicateMember> members = duplicateMembers(db, features, groupId, pinnedPath);
+        if (members.size() < minSize) {
+            continue;
+        }
+        QVector<QualityRank::Copy> copies;
+        copies.reserve(members.size());
+        for (const DuplicateMember &member : members) {
+            copies.push_back(qualityCopyForTrack(member.track, member.mediaTags));
+        }
+        const QString bestPath = QualityRank::bestPath(copies, pinnedPath);
+        if (json) {
+            QJsonArray memberArray;
+            for (const DuplicateMember &member : members) {
+                memberArray.append(duplicateMemberJson(member));
+            }
+            groupsJson.append(QJsonObject{
+                {QStringLiteral("content_group_id"), static_cast<double>(groupId)},
+                {QStringLiteral("pin"), pinnedPath},
+                {QStringLiteral("best_path"), bestPath},
+                {QStringLiteral("members"), memberArray},
+            });
+        } else {
+            out << "group " << groupId << " (" << members.size() << " copies";
+            if (!bestPath.isEmpty()) {
+                out << ", best " << bestPath;
+            }
+            if (!pinnedPath.isEmpty()) {
+                out << ", pinned " << pinnedPath;
+            }
+            out << ")\n";
+            for (const DuplicateMember &member : members) {
+                out << "  " << (member.pinned ? '*' : ' ') << ' '
+                    << qualitySummary(member) << '\t' << member.track.path << '\n';
+            }
+        }
+        ++printed;
+    }
+
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(groupsJson).toJson(QJsonDocument::Compact)) << '\n';
+    } else if (printed == 0) {
+        out << "duplicate-groups: no groups with at least " << minSize << " library members\n";
+    }
+    return 0;
+}
+
+int runPinCopy(QStringList arguments, bool json)
+{
+    if (arguments.size() != 2) {
+        return fail(QStringLiteral("pin-copy needs <group-id> <path>"));
+    }
+    bool ok = false;
+    const qint64 groupId = arguments.at(0).toLongLong(&ok);
+    if (!ok || groupId < 0) {
+        return fail(QStringLiteral("pin-copy needs a non-negative group id"));
+    }
+    const QString path = arguments.at(1);
+    const QString featurePath = featuresDbPath();
+    if (!QFileInfo::exists(featurePath)) {
+        return fail(QStringLiteral("features.sqlite not found at %1").arg(featurePath));
+    }
+    FeatureStore features(featurePath);
+    if (!features.isOpen()) {
+        return fail(QStringLiteral("features.sqlite unsupported or unreadable at %1").arg(featurePath));
+    }
+    if (!features.pathsInGroup(groupId).contains(path)) {
+        return fail(QStringLiteral("path is not a member of content group %1").arg(groupId));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-pin-copy-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+    if (!db.setContentGroupPin(groupId, path)) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("content_group_id"), static_cast<double>(groupId)},
+            {QStringLiteral("pinned_path"), path},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "pin-copy: group " << groupId << " -> " << path << '\n';
+    }
+    return 0;
+}
+
+int runUnpinCopy(QStringList arguments, bool json)
+{
+    if (arguments.size() != 1) {
+        return fail(QStringLiteral("unpin-copy needs <group-id>"));
+    }
+    bool ok = false;
+    const qint64 groupId = arguments.at(0).toLongLong(&ok);
+    if (!ok || groupId < 0) {
+        return fail(QStringLiteral("unpin-copy needs a non-negative group id"));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-unpin-copy-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+    if (!db.removeContentGroupPin(groupId)) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("content_group_id"), static_cast<double>(groupId)},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "unpin-copy: removed pin for group " << groupId << '\n';
     }
     return 0;
 }
@@ -809,9 +1871,9 @@ int runRadioGenre(QStringList arguments, bool json)
         return 0;
     }
 
-    const QString folded = GenreTags::folded(arguments.first());
-    const QString canonical = GenreTags::canonical(folded, db.genreAliases());
-    if (canonical.isEmpty()) {
+    QString genreError;
+    const QString canonical = GenreCuration::canonicalGenreInput(db, arguments.first(), &genreError);
+    if (!genreError.isEmpty()) {
         return fail(QStringLiteral("radio-genre %1 needs a non-empty genre").arg(verb));
     }
     const bool ignored = verb == QLatin1String("ignore");
@@ -901,22 +1963,22 @@ int runGenreAlias(QStringList arguments, bool json)
         return 0;
     }
 
-    const QString canonical = GenreTags::folded(arguments.at(1));
-    if (canonical.isEmpty()) {
-        return fail(QStringLiteral("genre-alias set needs a non-empty canonical genre"));
+    const GenreCuration::AliasValidation validation = GenreCuration::validateAlias(arguments.first(), arguments.at(1));
+    if (!validation.ok()) {
+        return fail(validation.error);
     }
-    if (!db.setGenreAlias(alias, canonical)) {
+    if (!db.setGenreAlias(validation.aliasFolded, validation.canonicalFolded)) {
         return fail(db.lastError());
     }
     if (json) {
         out << QString::fromUtf8(QJsonDocument(QJsonObject{
             {QStringLiteral("ok"), true},
             {QStringLiteral("action"), QStringLiteral("set")},
-            {QStringLiteral("alias"), alias},
-            {QStringLiteral("canonical"), canonical},
+            {QStringLiteral("alias"), validation.aliasFolded},
+            {QStringLiteral("canonical"), validation.canonicalFolded},
         }).toJson(QJsonDocument::Compact)) << '\n';
     } else {
-        out << "genre-alias: " << alias << " -> " << canonical << '\n';
+        out << "genre-alias: " << validation.aliasFolded << " -> " << validation.canonicalFolded << '\n';
     }
     return 0;
 }
@@ -950,11 +2012,32 @@ int main(int argc, char **argv)
     if (command == QLatin1String("search")) {
         return runSearch(arguments, json);
     }
+    if (command == QLatin1String("semantic-search")) {
+        return runSemanticSearch(arguments, json);
+    }
     if (command == QLatin1String("genre-report")) {
         return runGenreReport(arguments, json);
     }
+    if (command == QLatin1String("features-status")) {
+        return runFeaturesStatus(arguments, json);
+    }
+    if (command == QLatin1String("duplicate-groups")) {
+        return runDuplicateGroups(arguments, json);
+    }
+    if (command == QLatin1String("pin-copy")) {
+        return runPinCopy(arguments, json);
+    }
+    if (command == QLatin1String("unpin-copy")) {
+        return runUnpinCopy(arguments, json);
+    }
     if (command == QLatin1String("radio-genre")) {
         return runRadioGenre(arguments, json);
+    }
+    if (command == QLatin1String("radio-weights")) {
+        return runRadioWeights(arguments, json);
+    }
+    if (command == QLatin1String("radio-learn")) {
+        return runRadioLearn(arguments, json);
     }
     if (command == QLatin1String("genre-alias")) {
         return runGenreAlias(arguments, json);

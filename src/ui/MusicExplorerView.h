@@ -16,6 +16,7 @@
 
 class ArtworkCache;
 class QColor;
+class QMenu;
 class QScrollArea;
 class QVBoxLayout;
 
@@ -28,9 +29,11 @@ public:
     void setArtworkCache(ArtworkCache *cache);
     void setAlbums(const QVector<Album> &albums);
     void setTrackProvider(std::function<QVector<Track>(const Album &album)> provider);
+    void setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver);
     void setQueueIsPlaylistSourced(bool sourced);
     void refreshExpandedTracks();
     void applyAlbumGridViewSettingsJson(const QString &json);
+    QString albumGridViewSettingsJson() const;
     void applyTrackTableViewSettingsJson(const QString &json);
     QString trackTableViewSettingsJson() const;
     void setNavigationScrollPadding(int rows);
@@ -72,6 +75,7 @@ signals:
     void albumPlayNextTemporaryRequested(const QString &albumTitle);
     void albumAddToQueueTemporaryRequested(const QString &albumTitle);
     void albumAddToPlaylistRequested(const QStringList &albumTitles);
+    void albumStartRadioRequested(const QString &albumTitle);
     void albumRatingChanged(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     void trackActivated(const Track &track);
     void trackPlayNextRequested(const QVector<Track> &tracks);
@@ -82,7 +86,10 @@ signals:
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
     void startRadioRequested(const Track &track);
+    void startArtistRadioRequested(const QString &artistName);
+    void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void trackRatingChanged(const Track &track, int rating0To100);
+    void albumGridViewSettingsChanged();
     void trackTableViewSettingsChanged();
 
 protected:
@@ -116,6 +123,9 @@ private:
     void ensureExpandedPanelVisible();
     void ensureInlineTrackVisible(int direction);
     void showAlbumContextMenu(int row, const QPoint &globalPos);
+    void showBackgroundContextMenu(const QPoint &globalPos);
+    void appendAlbumViewActions(QMenu &menu);
+    void applyAlbumViewSettingsChanged(bool resort);
     bool handleInlineTrackKey(QKeyEvent *event);
     int columnCountForWidth(int width) const;
     int rowForTitle(const QString &albumTitle) const;

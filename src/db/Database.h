@@ -93,6 +93,12 @@ public:
         QString mbRecordingId;
     };
 
+    struct RadioWeightProfile {
+        QString name;
+        QString weightsJson;
+        QString updatedAt;
+    };
+
     explicit Database(QString connectionName);
     ~Database();
 
@@ -171,6 +177,14 @@ public:
     bool removeGenreAlias(const QString &alias);
     QSet<QString> ignoredRadioGenres() const;
     bool setRadioGenreIgnored(const QString &genreFolded, bool ignored);
+    QVector<RadioWeightProfile> radioWeightProfiles() const;
+    QString radioWeightProfile(const QString &name) const;
+    bool saveRadioWeightProfile(const QString &name, const QString &weightsJson);
+    bool removeRadioWeightProfile(const QString &name);
+    QString contentGroupPin(qint64 groupId) const;
+    QHash<qint64, QString> contentGroupPins() const;
+    bool setContentGroupPin(qint64 groupId, const QString &path);
+    bool removeContentGroupPin(qint64 groupId);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);
@@ -204,6 +218,10 @@ public:
     // Random-sample fallback for seeds with no genres to match on (same ORDER BY
     // RANDOM() idiom as randomTracks). Genres are still returned when present.
     QVector<RadioCandidateRow> radioFallbackCandidates(int limit = 2000) const;
+    // Targeted radio candidate rows for specific local library paths. Used by
+    // semantic neighbor augmentation after the feature store has picked group
+    // neighbors and the app has resolved each group to a preferred copy path.
+    QVector<RadioCandidateRow> radioCandidatesForPaths(const QStringList &paths) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);

@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaType>
@@ -11,7 +12,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 6;
+constexpr int kSchemaVersion = 7;
 
 void insertIfPresent(QJsonObject &object, const QString &key, const QString &value)
 {
@@ -123,6 +124,38 @@ QString placeholders(qsizetype count)
     return marks.join(QStringLiteral(", "));
 }
 
+QString componentsToJson(const QVector<ListenHistoryStore::RadioPickComponent> &components)
+{
+    QJsonArray array;
+    for (const ListenHistoryStore::RadioPickComponent &component : components) {
+        QJsonObject object;
+        object.insert(QStringLiteral("name"), component.name);
+        object.insert(QStringLiteral("value"), component.value);
+        array.push_back(object);
+    }
+    return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
+
+QVector<ListenHistoryStore::RadioPickComponent> componentsFromJson(const QByteArray &json)
+{
+    QVector<ListenHistoryStore::RadioPickComponent> components;
+    const QJsonDocument document = QJsonDocument::fromJson(json);
+    if (!document.isArray()) {
+        return components;
+    }
+    const QJsonArray array = document.array();
+    components.reserve(array.size());
+    for (const QJsonValue &value : array) {
+        const QJsonObject object = value.toObject();
+        const QString name = object.value(QStringLiteral("name")).toString();
+        if (name.isEmpty() || !object.value(QStringLiteral("value")).isDouble()) {
+            continue;
+        }
+        components.push_back({name, object.value(QStringLiteral("value")).toDouble()});
+    }
+    return components;
+}
+
 int deleteByPaths(QSqlDatabase database, const QString &table, const QString &column, const QStringList &paths)
 {
     if (paths.isEmpty()) {
@@ -232,6 +265,17 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " was_radio_pick INTEGER NOT NULL,"
         " was_unheard INTEGER NOT NULL,"
         " radio_active INTEGER NOT NULL)"));
+    create.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS radio_picks ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " occurred_at INTEGER NOT NULL,"
+        " track_path TEXT NOT NULL,"
+        " mb_recording_id TEXT,"
+        " session_kind TEXT NOT NULL,"
+        " exploration INTEGER NOT NULL,"
+        " weights_json TEXT NOT NULL,"
+        " components_json TEXT NOT NULL,"
+        " score REAL NOT NULL)"));
     create.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
 
     // Scrobbler backfill (Stage 0b). Historical listens pulled from a service
@@ -682,6 +726,69 @@ QVector<ListenHistoryStore::QueueRemovalEvent> ListenHistoryStore::queueRemovalE
         event.wasRadioPick = query.value(4).toInt() != 0;
         event.wasUnheard = query.value(5).toInt() != 0;
         event.radioActive = query.value(6).toInt() != 0;
+        events.push_back(event);
+    }
+    return events;
+}
+
+bool ListenHistoryStore::recordRadioPick(const RadioPickEvent &event)
+{
+    if (!m_db.isOpen() || event.occurredAtSecs <= 0 || event.track.path.isEmpty()
+        || event.sessionKind.isEmpty() || event.weightsJson.trimmed().isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO radio_picks(occurred_at, track_path, mb_recording_id, session_kind, "
+        "exploration, weights_json, components_json, score) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?)"));
+    query.addBindValue(event.occurredAtSecs);
+    query.addBindValue(event.track.path);
+    query.addBindValue(event.track.musicBrainz.recordingId.isEmpty()
+                           ? QVariant(QMetaType(QMetaType::QString))
+                           : QVariant(event.track.musicBrainz.recordingId));
+    query.addBindValue(event.sessionKind);
+    query.addBindValue(event.exploration0To100);
+    query.addBindValue(QString::fromUtf8(event.weightsJson));
+    query.addBindValue(componentsToJson(event.components));
+    query.addBindValue(event.score);
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+QVector<ListenHistoryStore::RadioPickEvent> ListenHistoryStore::radioPickEvents(int limit) const
+{
+    QVector<RadioPickEvent> events;
+    if (!m_db.isOpen() || limit == 0) {
+        return events;
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT id, occurred_at, track_path, mb_recording_id, session_kind, exploration, "
+        "weights_json, components_json, score "
+        "FROM radio_picks ORDER BY occurred_at ASC, id ASC");
+    if (limit > 0) {
+        sql += QStringLiteral(" LIMIT ?");
+    }
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    if (limit > 0) {
+        query.addBindValue(limit);
+    }
+    if (!query.exec()) {
+        return events;
+    }
+    while (query.next()) {
+        RadioPickEvent event;
+        event.id = query.value(0).toLongLong();
+        event.occurredAtSecs = query.value(1).toLongLong();
+        event.track.path = query.value(2).toString();
+        event.track.musicBrainz.recordingId = query.value(3).toString();
+        event.sessionKind = query.value(4).toString();
+        event.exploration0To100 = query.value(5).toInt();
+        event.weightsJson = query.value(6).toString().toUtf8();
+        event.components = componentsFromJson(query.value(7).toString().toUtf8());
+        event.score = query.value(8).toDouble();
         events.push_back(event);
     }
     return events;

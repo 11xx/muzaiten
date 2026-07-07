@@ -60,6 +60,9 @@ set(MUZAITEN_SOURCES
     src/db/Database.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
+    src/features/FeatureStore.cpp
+    src/features/QualityRank.cpp
+    src/features/SongIdentity.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
@@ -74,7 +77,10 @@ set(MUZAITEN_SOURCES
     src/reco/RadioMix.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
+    src/reco/GenreCuration.cpp
     src/reco/TrackScorer.cpp
+    src/reco/WeightLearner.cpp
+    src/reco/WeightLearnerData.cpp
     src/playback/AudioDeviceControl.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
@@ -107,6 +113,8 @@ set(MUZAITEN_SOURCES
     src/search/SearchWorker.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumArtView.cpp
+    src/ui/AudioAnalysisData.cpp
+    src/ui/AudioAnalysisDialogs.cpp
     src/ui/ConditionEditor.cpp
     src/ui/NeighborColumnResizer.cpp
     src/ui/ResponsiveColumnLayout.cpp
@@ -120,6 +128,7 @@ set(MUZAITEN_SOURCES
     src/ui/FileExplorerKeybindings.cpp
     src/ui/IdleReleaseController.cpp
     src/ui/KeybindingsDialog.cpp
+    src/ui/GenreCurationDialog.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/ListeningHistoryDialog.cpp
     src/ui/MainWindow.cpp
@@ -138,6 +147,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelSearchBar.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
+    src/ui/ScoringWeightsDialog.cpp
     src/ui/PlaylistAddDialog.cpp
     src/ui/PlaylistImportDialog.cpp
     src/ui/PlaylistView.cpp
@@ -156,6 +166,7 @@ set(MUZAITEN_SOURCES
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
+    src/ui/TrackMenuSections.cpp
     src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
     src/ui/ViewKeyReferences.cpp
@@ -185,6 +196,9 @@ set(MUZAITEN_HEADERS
     src/db/PlaylistDatabase.h
     src/db/SettingsStore.h
     src/db/Schema.h
+    src/features/FeatureStore.h
+    src/features/QualityRank.h
+    src/features/SongIdentity.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
     src/mpd/MpdClient.h
@@ -201,7 +215,11 @@ set(MUZAITEN_HEADERS
     src/playback/QtPlaybackBackend.h
     src/reco/AffinityPool.h
     src/reco/ArtistRadio.h
+    src/reco/GenreCuration.h
     src/reco/RadioMix.h
+    src/reco/TrackScorer.h
+    src/reco/WeightLearner.h
+    src/reco/WeightLearnerData.h
     src/scanner/ArtworkCache.h
     src/scanner/DirectoryWalker.h
     src/scanner/LibraryScanner.h
@@ -236,6 +254,8 @@ set(MUZAITEN_HEADERS
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
     src/ui/AlbumArtView.h
+    src/ui/AudioAnalysisData.h
+    src/ui/AudioAnalysisDialogs.h
     src/ui/ConditionEditor.h
     src/ui/NeighborColumnResizer.h
     src/ui/ResponsiveColumnLayout.h
@@ -248,6 +268,7 @@ set(MUZAITEN_HEADERS
     src/ui/FileExplorerKeybindings.h
     src/ui/IdleReleaseController.h
     src/ui/KeybindingsDialog.h
+    src/ui/GenreCurationDialog.h
     src/ui/LinkRootsDialog.h
     src/ui/ListeningHistoryDialog.h
     src/ui/KeyBindingTypes.h
@@ -261,6 +282,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
+    src/ui/ScoringWeightsDialog.h
     src/ui/PlaylistAddDialog.h
     src/ui/HeaderLabelStyle.h
     src/ui/PanelBorderStyle.h
@@ -336,10 +358,17 @@ add_executable(muzaitenctl
     src/app/AppPaths.cpp
     src/ipc/IpcSocket.cpp
     src/db/Database.cpp
+    src/features/FeatureStore.cpp
+    src/features/QualityRank.cpp
+    src/features/SongIdentity.cpp
     src/core/GenreTags.cpp
     src/core/MetadataBlob.cpp
     src/core/Rating.cpp
     src/fs/PathResolver.cpp
+    src/reco/GenreCuration.cpp
+    src/reco/TrackScorer.cpp
+    src/reco/WeightLearner.cpp
+    src/reco/WeightLearnerData.cpp
     src/search/Exclusion.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
@@ -354,12 +383,22 @@ target_compile_options(muzaitenctl PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
+add_executable(muzaiten-index
+    src/indexer/IndexMain.cpp
+    src/indexer/Dsp.cpp
+)
+target_include_directories(muzaiten-index PRIVATE src)
+target_link_libraries(muzaiten-index PRIVATE Qt6::Core Qt6::Sql)
+target_compile_options(muzaiten-index PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+
 # Installation (freedesktop integration). Lets distro packaging and `make dev`
 # alike drop the binary plus a desktop entry, icon, and AppStream metadata into
 # the standard prefix.
 include(GNUInstallDirs)
 
-install(TARGETS muzaiten muzaitenctl
+install(TARGETS muzaiten muzaitenctl muzaiten-index
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 # The standalone playlist-import helper (convert/youtube subcommands). Deployed

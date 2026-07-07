@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 // Pure, explainable per-track scoring for the rule-based radio engine (Stage 1).
 // No Qt-SQL dependency: callers build the plain data structs from whatever store
@@ -16,11 +17,14 @@ namespace TrackScorer {
 // One library track under consideration, reduced to the fields scoring needs.
 struct Candidate {
     QString path;
+    qint64 contentGroupId = -1;     // -1 = no features.sqlite content group
     QString songKey;
     QString artistFolded;
     QString albumKey;              // folded "albumartist\nalbum"
     QStringList genresFolded;
     int year = 0;                  // 0 = unknown
+    double tempoBpm = -1.0;         // -1 = unknown
+    double energy = -1.0;           // -1 = unknown, expected unit-ish extractor scale
     int effectiveRating0To100 = -1; // -1 = unrated
     bool hasUserRating = false;
 };
@@ -47,6 +51,10 @@ struct SeedContext {
     QHash<QString, double> genreIdf;
     QSet<QString> recentArtistsFolded; // for the soft same-artist term (not the hard constraint)
     int year = 0;
+    double contextTempoBpm = -1.0;
+    double contextEnergy = -1.0;
+    QVector<float> audioCentroid;       // L2-normalized; empty = unknown
+    const QHash<qint64, QVector<float>> *embeddingsByGroup = nullptr;
     qint64 nowSecs = 0;
     int exploration0To100 = 30;        // conservative .. exploratory
 };
@@ -63,14 +71,16 @@ struct Scored {
 };
 
 // Runtime-tunable scorer weights. AppCore reads a JSON object from the
-// library-DB setting `radio.scoringWeights`; omitted or invalid fields keep
-// these defaults.
+// library-DB setting `radio.scoringWeights`; omitted fields keep these defaults.
 struct Weights {
     double genreWeight = 3.0;
     double genreIdfSaturation = 4.0;
     double genreCrowdingSoftLimit = 3.0;
     double eraWeight = 1.0;
     double eraSpanYears = 30.0;
+    double tempoWeight = 0.4;
+    double energyWeight = 0.6;
+    double audioWeight = 1.2;
     double ratingWeight = 1.5;
     double userRatingBoost = 1.25;
     double historyWeight = 1.0;
@@ -83,8 +93,21 @@ struct Weights {
     double sameArtistPenalty = -0.6;
 };
 
+struct WeightSpec {
+    QString key;
+    QString label;
+    QString tooltip;
+    double minimum = 0.0;
+    double maximum = 0.0;
+    double defaultValue = 0.0;
+};
+
 Weights defaultWeights();
+QVector<WeightSpec> weightSpecs();
+bool weightValue(const Weights &weights, const QString &key, double *value);
+bool setWeightValue(Weights &weights, const QString &key, double value);
 Weights weightsFromJson(const QByteArray &json, QString *error = nullptr);
+QByteArray weightsToJson(const Weights &weights);
 
 Scored score(const Candidate &candidate, const Affinity &affinity, const SeedContext &seed);
 Scored score(const Candidate &candidate, const Affinity &affinity, const SeedContext &seed,

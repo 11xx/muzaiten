@@ -75,6 +75,7 @@ signals:
     // grid rebuild that albumSelectionNarrowRequested (n key) triggers.
     void albumNarrowFollowRequested(const QStringList &albumTitles);
     void albumAddToPlaylistRequested(const QStringList &albumTitles);
+    void albumStartRadioRequested(const QString &albumTitle);
     void albumPlayNextRequested(const QString &albumTitle);
     void albumPlayReplaceRequested(const QStringList &albumTitles);
     void albumAddToQueueRequested(const QString &albumTitle);

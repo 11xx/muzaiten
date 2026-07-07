@@ -7,14 +7,17 @@
 #include "ui/IdleReleaseController.h"
 #include "ui/OverlayScrollBar.h"
 #include "ui/PanelSearchBar.h"
+#include "ui/TrackMenuSections.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QDir>
 #include <QDirIterator>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFont>
+#include <QGuiApplication>
 #include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -25,6 +28,7 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QStringList>
 #include <QStyle>
 #include <QTimer>
 #include <QTreeWidget>
@@ -56,6 +60,18 @@ enum Column {
     RatingColumn,
     SizeColumn,
 };
+
+QString joinedTrackPaths(const QVector<Track> &tracks)
+{
+    QStringList paths;
+    paths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            paths << track.path;
+        }
+    }
+    return paths.join(QLatin1Char('\n'));
+}
 
 QString formatSize(qint64 bytes)
 {
@@ -562,20 +578,27 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     if (tracks.isEmpty()) {
         return;
     }
-    QAction *play = menu.addAction(QStringLiteral("Play"));
-    QAction *playNext = menu.addAction(QStringLiteral("Play next"));
-    QAction *addQueue = menu.addAction(QStringLiteral("Add to queue"));
-    QAction *playNextTemp = m_queueIsPlaylistSourced
-        ? menu.addAction(QStringLiteral("Play next (don't save to playlist)")) : nullptr;
-    QAction *addQueueTemp = m_queueIsPlaylistSourced
-        ? menu.addAction(QStringLiteral("Add to queue (don't save to playlist)")) : nullptr;
     // Only offer a seed when the clicked file resolves to a scanned library
     // track — FreeRoam rows can be tag-read-only files that were never indexed.
     const bool seedIsLibraryTrack = m_trackResolver && !m_trackResolver(tracks.first().path).path.isEmpty();
-    QAction *startRadio = seedIsLibraryTrack ? menu.addAction(QStringLiteral("Start Radio")) : nullptr;
-    QAction *addPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
-    QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
-    QAction *properties = menu.addAction(QStringLiteral("Properties"));
+    TrackMenuSections::Callbacks callbacks;
+    callbacks.playNow = [this, tracks]() { emit trackActivated(tracks.first()); };
+    callbacks.playNext = [this, tracks]() { emit playNextRequested(tracks); };
+    callbacks.addToQueue = [this, tracks]() { emit addToQueueRequested(tracks); };
+    if (m_queueIsPlaylistSourced) {
+        callbacks.playNextTemporary = [this, tracks]() { emit playNextTemporaryRequested(tracks); };
+        callbacks.addToQueueTemporary = [this, tracks]() { emit addToQueueTemporaryRequested(tracks); };
+    }
+    callbacks.addToPlaylist = [this, tracks]() { emit addToPlaylistRequested(tracks); };
+    if (seedIsLibraryTrack) {
+        callbacks.startRadio = [this, tracks]() { emit startRadioRequested(tracks.first()); };
+    }
+    callbacks.openContainingDirectory = [this, tracks]() { emit findFileRequested(tracks.first()); };
+    callbacks.copyPath = [tracks]() { QGuiApplication::clipboard()->setText(joinedTrackPaths(tracks)); };
+    callbacks.properties = [this, tracks]() { emit propertiesRequested(tracks.first()); };
+    TrackMenuSections::State state;
+    state.trackCount = static_cast<int>(tracks.size());
+    TrackMenuSections::appendTrackSections(menu, callbacks, state);
 
     QMenu *ratingMenu = menu.addMenu(QStringLiteral("Rating"));
     QHash<QAction *, int> ratingActions;
@@ -603,25 +626,7 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     hintToggle->setChecked(m_hintBar->isVisible());
     connect(hintToggle, &QAction::toggled, this, &FileExplorerView::setKeyHintBarVisible);
     QAction *selected = menu.exec(m_tree->viewport()->mapToGlobal(pos));
-    if (selected == play) {
-        emit trackActivated(tracks.first());
-    } else if (selected == playNext) {
-        emit playNextRequested(tracks);
-    } else if (selected == addQueue) {
-        emit addToQueueRequested(tracks);
-    } else if (playNextTemp != nullptr && selected == playNextTemp) {
-        emit playNextTemporaryRequested(tracks);
-    } else if (addQueueTemp != nullptr && selected == addQueueTemp) {
-        emit addToQueueTemporaryRequested(tracks);
-    } else if (startRadio != nullptr && selected == startRadio) {
-        emit startRadioRequested(tracks.first());
-    } else if (selected == addPlaylist) {
-        emit addToPlaylistRequested(tracks);
-    } else if (selected == findFile) {
-        emit findFileRequested(tracks.first());
-    } else if (selected == properties) {
-        emit propertiesRequested(tracks.first());
-    } else if (selected != nullptr && ratingActions.contains(selected)) {
+    if (selected != nullptr && ratingActions.contains(selected)) {
         const int rating = ratingActions.value(selected);
         for (const Track &track : tracks) {
             emit trackRatingChangeRequested(track, rating);

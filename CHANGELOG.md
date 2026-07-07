@@ -4,6 +4,47 @@
 
 ### Added
 
+- Documentation restructure: the README is now a concise front page and the
+  deep guides moved to docs/ (search, radio/recommendation engine,
+  playlists, controls, muzaitenctl reference, runtime paths).
+- Track context menus now share one canonical action builder across the library
+  table, queue, search results, playlist items, file explorers, and Music
+  Explorer inline tracks. The shared menus add `Copy path`, make Search expose
+  Start Radio and taste flags, add taste flags to playlist items, and use
+  consistent ordering, count suffixes, checked flag state, and ellipsis glyphs.
+  Album and artist menus also gained the missing playlist/radio/play-all
+  actions, and the player-bar artwork can now reveal the current track in the
+  library or file manager.
+- Empty-area context menus now expose view-level actions in the queue, library
+  track table, search results, Music Explorer, and playlist item table, so a
+  right-click on whitespace no longer dead-ends common queue, search, layout,
+  and playlist commands.
+- The menu bar was reorganized around what muzaiten actually is. "File" is
+  now "Library" (everything in it manages the library) and hosts the MPD
+  source config that previously hid under Settings. Radio gets its own
+  top-level menu: start radio / artist radio from the current track, stop
+  radio, the Rediscovery and Deep-cuts mixes (replacing the two-item Mixes
+  menu), and — reachable at last WITHOUT an active session — Adventurous,
+  Exploration, Radio batch size, and Radio shuffle percent (the radio
+  indicator button's right-click menu still mirrors the session controls).
+  A Help menu with About muzaiten shows the exact running version for
+  reports.
+- Radio and Library now expose Stage-4 curation in-app: `Radio > Genre
+  curation...` edits aliases and ignored radio genres while showing the folded
+  vocabulary, and `Library > Audio analysis` opens read-only status and
+  duplicate-copy dialogs with pin/unpin controls.
+- `Library > Audio analysis > Analyze library audio` now starts the bundled
+  `muzaiten-index` from inside the app, with live menu progress, cancel, and a
+  completion summary. The indexer gained a `--progress` stderr stream so JSON
+  stdout stays machine-readable.
+- `Radio > Scoring weights...` now edits the active scoring weights, manages
+  named tuning profiles, and can save suggestion-only learned profiles from the
+  same local radio telemetry used by `muzaitenctl radio-learn`.
+- Clean-room scalar extraction is now live end to end: `muzaiten-index` is a
+  C++ binary built with the app, writes schema-v3 `features.sqlite` rows with
+  DSP tempo/loudness/energy/spectral scalars, and replaces the GPL-blocked
+  bliss sidecar plan. The Rust indexer crate and top-level `sidecar/` layout
+  were retired; the optional CLAP embedder now lives under `tools/embedder`.
 - Start Radio: seed a radio session from any library track
   (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
   scored by genre, era, rating and listening affinity, with a novelty bonus for
@@ -17,7 +58,7 @@
   instead of diluting each other. The shuffle button now includes Radio shuffle,
   an ambient taste-aware shuffle mode that uses the radio engine for library
   pulls without starting a visible Start Radio session; its pull chance defaults
-  to 80% and is configurable from the Playback menu. Hovering a radio
+  to 80% and is configurable from the Radio menu. Hovering a radio
   pick in the queue now explains the choice with a human-readable summary and
   the numeric scorer breakdown. Powered by the play history, imported scrobbles,
   and genre data added in the previous
@@ -120,6 +161,44 @@
   schema v14 adds `radio_ignored_genres`, radio session genre joins/scoring skip
   ignored canonical genres, `genre-report` marks them, and `muzaitenctl`
   provides `radio-genre`/`genre-alias` curation verbs.
+- `muzaitenctl radio-weights` now exposes validated get/set/save/apply/list/remove
+  commands for radio scoring weights, with named profiles stored in the library
+  database and active changes taking effect on the next radio session.
+- `muzaitenctl radio-learn` now suggests a local learned radio-weight profile
+  from accumulated radio-pick telemetry and play outcomes; dry-runs print the
+  multiplier table and JSON diff, while saves create a named profile for later
+  explicit `radio-weights apply`.
+- A standalone `sidecar/indexer` Rust crate now builds `features.sqlite`
+  groundwork from generated or library audio paths: canonical decode hashes,
+  fpcalc Chromaprint fingerprints, content groups, incremental scan state, and
+  status JSON. Bliss scalar extraction is deliberately not linked because the
+  available Rust bliss crates are GPL-only.
+- The app now opens `features.sqlite` read-only when present and exposes a
+  `FeatureStore` seam for later radio consumers, while
+  `muzaitenctl features-status` reports local coverage without a running app.
+- Radio now uses `features.sqlite` content groups when present: duplicate copies
+  share one recommendation identity, candidate explanations follow the resolved
+  queued copy, and playback prefers the highest-quality copy unless the user
+  pins a different path. `muzaitenctl duplicate-groups`, `pin-copy`, and
+  `unpin-copy` expose the local duplicate sets and per-group override.
+- When `features.sqlite` includes scalar feature rows, radio scoring now adds
+  explainable tempo and energy proximity components to the existing genre, era,
+  rating, and history signals. Libraries without scalar rows keep the previous
+  scores and explanations exactly.
+- A standalone `sidecar/embedder` Python CLI can now add CLAP content-group
+  embeddings and precomputed cosine neighbors to `features.sqlite` schema v2.
+  The app accepts both schema v1 and v2 databases read-only; model weights stay
+  outside the repository cache and are verified before use.
+- When CLAP embeddings are present, radio now scores an explainable "sounds
+  similar" audio component against the session's rolling sonic centroid and
+  augments seeded/anchorless candidate pools with precomputed sonic neighbors,
+  helping tag-poor tracks participate without changing behavior for libraries
+  that have no embeddings.
+- `muzaitenctl semantic-search "<text>"` now performs CLI-only free-text
+  semantic library search by embedding the query through the optional
+  `muzaiten-embed` sidecar, cosine-ranking stored CLAP content-group
+  embeddings, and returning each group as its preferred library copy with a
+  score.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
@@ -128,6 +207,10 @@
 - Local rating-change telemetry: every explicit track-rating edit now records
   an append-only event in `history.sqlite` with old/new rating values and the
   playback/UI context, without changing recommendation scoring behavior.
+- Local radio-pick telemetry: generated radio picks now persist their scorer
+  component breakdown, active weights, session kind, exploration value, and
+  total score in `history.sqlite`, without feeding that data back into current
+  recommendation scoring.
 - `muzaitenctl scrobble-backfill reset <listenbrainz|lastfm>` clears a service's
   completed/synced marker so the next import re-walks full history. This recovers
   listens added *behind* an already-imported range, which the completed-import

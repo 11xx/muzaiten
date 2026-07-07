@@ -726,7 +726,33 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 14;
+    // v15: named runtime radio scoring-weight profiles. The active profile
+    // remains the existing app_settings radio.scoringWeights value; this table
+    // stores listable snapshots that muzaitenctl can apply without sqlite3.
+    const QStringList v15Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS radio_weight_profiles (name TEXT PRIMARY KEY, weights_json TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(15, datetime('now'))"),
+    };
+    for (const QString &statement : v15Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    // v16: per-content-group best-copy pins. The content-group ids come from
+    // the read-only features.sqlite, but user preference lives in the
+    // writable library DB.
+    const QStringList v16Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS content_group_pins (content_group_id INTEGER PRIMARY KEY, pinned_path TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(16, datetime('now'))"),
+    };
+    for (const QString &statement : v16Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 16;
 }
 
 QString Database::lastError() const
@@ -1801,6 +1827,118 @@ bool Database::clearUserAlbumRating(const QString &albumArtistName, const QStrin
     return true;
 }
 
+QVector<Database::RadioWeightProfile> Database::radioWeightProfiles() const
+{
+    QVector<RadioWeightProfile> profiles;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral(
+            "SELECT name, weights_json, updated_at FROM radio_weight_profiles ORDER BY name COLLATE NOCASE ASC"))) {
+        return profiles;
+    }
+    while (query.next()) {
+        profiles.push_back({
+            query.value(0).toString(),
+            query.value(1).toString(),
+            query.value(2).toString(),
+        });
+    }
+    return profiles;
+}
+
+QString Database::radioWeightProfile(const QString &name) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT weights_json FROM radio_weight_profiles WHERE name = ?"));
+    query.addBindValue(name);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+    return query.value(0).toString();
+}
+
+bool Database::saveRadioWeightProfile(const QString &name, const QString &weightsJson)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO radio_weight_profiles(name, weights_json, updated_at) VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(name) DO UPDATE SET weights_json=excluded.weights_json, updated_at=datetime('now')"));
+    query.addBindValue(name);
+    query.addBindValue(weightsJson);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::removeRadioWeightProfile(const QString &name)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM radio_weight_profiles WHERE name = ?"));
+    query.addBindValue(name);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QString Database::contentGroupPin(qint64 groupId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT pinned_path FROM content_group_pins WHERE content_group_id = ?"));
+    query.addBindValue(groupId);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+    return {};
+}
+
+QHash<qint64, QString> Database::contentGroupPins() const
+{
+    QHash<qint64, QString> pins;
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT content_group_id, pinned_path FROM content_group_pins"))) {
+        while (query.next()) {
+            pins.insert(query.value(0).toLongLong(), query.value(1).toString());
+        }
+    }
+    return pins;
+}
+
+bool Database::setContentGroupPin(qint64 groupId, const QString &path)
+{
+    if (groupId < 0 || path.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO content_group_pins(content_group_id, pinned_path, updated_at) "
+        "VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(content_group_id) DO UPDATE SET "
+        "pinned_path = excluded.pinned_path, updated_at = excluded.updated_at"));
+    query.addBindValue(groupId);
+    query.addBindValue(path);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::removeContentGroupPin(qint64 groupId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM content_group_pins WHERE content_group_id = ?"));
+    query.addBindValue(groupId);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 QString Database::setting(const QString &key, const QString &fallback) const
 {
     QSqlQuery query(m_db);
@@ -2157,6 +2295,62 @@ QVector<RadioCandidateRow> Database::radioFallbackCandidates(int limit) const
     }
     while (query.next()) {
         rows.push_back(readRadioCandidateRow(query));
+    }
+    return rows;
+}
+
+QVector<RadioCandidateRow> Database::radioCandidatesForPaths(const QStringList &paths) const
+{
+    QVector<RadioCandidateRow> rows;
+    if (paths.isEmpty()) {
+        return rows;
+    }
+
+    QStringList uniquePaths;
+    QSet<QString> seenPaths;
+    uniquePaths.reserve(paths.size());
+    for (const QString &path : paths) {
+        if (path.isEmpty() || seenPaths.contains(path)) {
+            continue;
+        }
+        seenPaths.insert(path);
+        uniquePaths.push_back(path);
+    }
+    if (uniquePaths.isEmpty()) {
+        return rows;
+    }
+
+    constexpr qsizetype kChunk = 500;
+    for (qsizetype start = 0; start < uniquePaths.size(); start += kChunk) {
+        const qsizetype count = std::min(kChunk, uniquePaths.size() - start);
+        QString sql = QStringLiteral(
+            "SELECT t.path, t.artist_name, t.title, t.album_artist_name, t.album_title, "
+            "t.musicbrainz_recording_id, a.musicbrainz_release_group_id, "
+            "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
+            "t.rating_0_100, utr.rating_0_100, p.status "
+            "FROM tracks t "
+            "LEFT JOIN track_genres g ON g.track_id = t.id "
+            "LEFT JOIN albums a ON a.id = t.album_id "
+            "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+            "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+            "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND t.path IN (%1)")
+            .arg(sqlPlaceholders(count));
+        if (hasScanRoots(m_db)) {
+            sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+        }
+        sql += QStringLiteral(" GROUP BY t.id");
+
+        QSqlQuery query(m_db);
+        query.prepare(sql);
+        for (qsizetype i = 0; i < count; ++i) {
+            query.addBindValue(uniquePaths.at(start + i));
+        }
+        if (!query.exec()) {
+            continue;
+        }
+        while (query.next()) {
+            rows.push_back(readRadioCandidateRow(query));
+        }
     }
     return rows;
 }

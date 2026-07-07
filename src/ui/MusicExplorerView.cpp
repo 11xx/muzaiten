@@ -78,6 +78,17 @@ Qt::Alignment alignmentFromString(const QString &value)
     return Qt::AlignHCenter;
 }
 
+QString alignmentToString(Qt::Alignment alignment)
+{
+    if (alignment & Qt::AlignLeft) {
+        return QStringLiteral("left");
+    }
+    if (alignment & Qt::AlignRight) {
+        return QStringLiteral("right");
+    }
+    return QStringLiteral("center");
+}
+
 QColor averageColor(const QImage &image)
 {
     if (image.isNull()) {
@@ -427,7 +438,9 @@ MusicExplorerView::MusicExplorerView(QWidget *parent)
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scroll->viewport()->installEventFilter(this);
+    m_scroll->viewport()->setContextMenuPolicy(Qt::CustomContextMenu);
     m_content = new QWidget(m_scroll);
+    m_content->setContextMenuPolicy(Qt::CustomContextMenu);
     m_rows = new QVBoxLayout(m_content);
     m_rows->setContentsMargins(8, 8, 8, 8);
     m_rows->setSpacing(8);
@@ -449,8 +462,16 @@ MusicExplorerView::MusicExplorerView(QWidget *parent)
     connect(m_inlineTrackTable, &TrackTable::findFileRequested, this, &MusicExplorerView::findFileRequested);
     connect(m_inlineTrackTable, &TrackTable::propertiesRequested, this, &MusicExplorerView::propertiesRequested);
     connect(m_inlineTrackTable, &TrackTable::startRadioRequested, this, &MusicExplorerView::startRadioRequested);
+    connect(m_inlineTrackTable, &TrackTable::startArtistRadioRequested, this, &MusicExplorerView::startArtistRadioRequested);
+    connect(m_inlineTrackTable, &TrackTable::trackFlagChanged, this, &MusicExplorerView::trackFlagChanged);
     connect(m_inlineTrackTable, &TrackTable::trackRatingChanged, this, &MusicExplorerView::trackRatingChanged);
     connect(m_inlineTrackTable, &TrackTable::viewSettingsChanged, this, &MusicExplorerView::trackTableViewSettingsChanged);
+    connect(m_scroll->viewport(), &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        showBackgroundContextMenu(m_scroll->viewport()->mapToGlobal(pos));
+    });
+    connect(m_content, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        showBackgroundContextMenu(m_content->mapToGlobal(pos));
+    });
 }
 
 void MusicExplorerView::setArtworkCache(ArtworkCache *cache)
@@ -535,6 +556,11 @@ void MusicExplorerView::setTrackProvider(std::function<QVector<Track>(const Albu
     refreshExpandedTracks();
 }
 
+void MusicExplorerView::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_inlineTrackTable->setTrackFlagResolver(std::move(resolver));
+}
+
 void MusicExplorerView::setQueueIsPlaylistSourced(bool sourced)
 {
     m_queueIsPlaylistSourced = sourced;
@@ -557,6 +583,21 @@ void MusicExplorerView::applyAlbumGridViewSettingsJson(const QString &json)
     }
     applySortedAlbums(m_sourceAlbums);
     rebuildLayout();
+}
+
+QString MusicExplorerView::albumGridViewSettingsJson() const
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("cellWidth"), m_cellWidth);
+    root.insert(QStringLiteral("cellHeight"), m_cellHeight);
+    root.insert(QStringLiteral("artSize"), m_artSize);
+    root.insert(QStringLiteral("spacing"), m_spacing);
+    root.insert(QStringLiteral("textAlignment"), alignmentToString(m_textAlignment));
+    root.insert(QStringLiteral("starSize"), m_starSize);
+    root.insert(QStringLiteral("sortField"), MusicSort::sortFieldToString(m_sortField));
+    root.insert(QStringLiteral("sortDescending"), m_sortDescending);
+    root.insert(QStringLiteral("sortReverseGroups"), m_sortReverseGroups);
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
 void MusicExplorerView::applyTrackTableViewSettingsJson(const QString &json)
@@ -1229,9 +1270,94 @@ void MusicExplorerView::showAlbumContextMenu(int row, const QPoint &globalPos)
         QAction *addQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
         connect(addQueueTemp, &QAction::triggered, this, [this, album]() { emit albumAddToQueueTemporaryRequested(album.title); });
     }
-    QAction *addPlaylist = menu.addAction(QStringLiteral("Add to playlist..."));
+    QAction *addPlaylist = menu.addAction(QStringLiteral("Add album to playlist…"));
     connect(addPlaylist, &QAction::triggered, this, [this, album]() { emit albumAddToPlaylistRequested(QStringList{album.title}); });
+    QAction *startRadio = menu.addAction(QStringLiteral("Start radio from album"));
+    connect(startRadio, &QAction::triggered, this, [this, album]() { emit albumStartRadioRequested(album.title); });
     menu.exec(globalPos);
+}
+
+void MusicExplorerView::showBackgroundContextMenu(const QPoint &globalPos)
+{
+    QMenu menu(this);
+    menu.setMinimumWidth(180);
+    appendAlbumViewActions(menu);
+    menu.exec(globalPos);
+}
+
+void MusicExplorerView::appendAlbumViewActions(QMenu &menu)
+{
+    QMenu *sortMenu = menu.addMenu(QStringLiteral("Sort by"));
+    const struct { const char *label; MusicSort::SortField field; } sortOptions[] = {
+        {"Original year", MusicSort::SortField::Year},
+        {"Title (A–Z)", MusicSort::SortField::Title},
+        {"Rating", MusicSort::SortField::Rating},
+        {"Track count", MusicSort::SortField::TrackCount},
+        {"Recently added", MusicSort::SortField::DateAdded},
+    };
+    for (const auto &opt : sortOptions) {
+        QAction *action = sortMenu->addAction(QString::fromUtf8(opt.label));
+        action->setCheckable(true);
+        action->setChecked(m_sortField == opt.field);
+        connect(action, &QAction::triggered, this, [this, field = opt.field]() {
+            m_sortField = field;
+            applyAlbumViewSettingsChanged(true);
+        });
+    }
+    sortMenu->addSeparator();
+    QAction *descAction = sortMenu->addAction(QStringLiteral("Descending"));
+    descAction->setCheckable(true);
+    descAction->setChecked(m_sortDescending);
+    connect(descAction, &QAction::triggered, this, [this](bool checked) {
+        m_sortDescending = checked;
+        if (!checked) {
+            m_sortReverseGroups = false;
+        }
+        applyAlbumViewSettingsChanged(true);
+    });
+    QAction *reverseGroupsAction = sortMenu->addAction(QStringLiteral("Reverse groups too"));
+    reverseGroupsAction->setCheckable(true);
+    reverseGroupsAction->setChecked(m_sortReverseGroups);
+    reverseGroupsAction->setEnabled(m_sortDescending);
+    connect(reverseGroupsAction, &QAction::triggered, this, [this](bool checked) {
+        m_sortReverseGroups = checked;
+        applyAlbumViewSettingsChanged(true);
+    });
+
+    QMenu *alignment = menu.addMenu(QStringLiteral("Text alignment"));
+    const std::pair<QString, Qt::Alignment> alignmentOptions[] = {
+        {QStringLiteral("Left"), Qt::AlignLeft},
+        {QStringLiteral("Center"), Qt::AlignHCenter},
+        {QStringLiteral("Right"), Qt::AlignRight},
+    };
+    for (const auto &[label, value] : alignmentOptions) {
+        QAction *action = alignment->addAction(label);
+        action->setCheckable(true);
+        action->setChecked(m_textAlignment == value);
+        connect(action, &QAction::triggered, this, [this, value]() {
+            m_textAlignment = value;
+            applyAlbumViewSettingsChanged(false);
+        });
+    }
+}
+
+void MusicExplorerView::applyAlbumViewSettingsChanged(bool resort)
+{
+    const QString currentTitle = currentAlbumTitle();
+    const QString expandedTitle = m_expandedAlbumTitle;
+    if (resort) {
+        applySortedAlbums(m_sourceAlbums);
+        m_currentAlbumRow = rowForTitle(currentTitle);
+        if (m_currentAlbumRow < 0 && !m_albums.isEmpty()) {
+            m_currentAlbumRow = 0;
+        }
+        m_expandedAlbumRow = rowForTitle(expandedTitle);
+        if (m_expandedAlbumRow < 0) {
+            m_expandedAlbumTitle.clear();
+        }
+    }
+    rebuildLayout();
+    emit albumGridViewSettingsChanged();
 }
 
 bool MusicExplorerView::handleInlineTrackKey(QKeyEvent *event)

@@ -15,6 +15,16 @@ endfunction()
 add_muzaiten_test(test_rating test_rating.cpp)
 set_tests_properties(test_rating PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_track_menu_sections
+    test_track_menu_sections.cpp
+    ../src/ui/TrackMenuSections.cpp
+)
+target_include_directories(test_track_menu_sections PRIVATE ../src)
+target_link_libraries(test_track_menu_sections PRIVATE Qt6::Core Qt6::Widgets Qt6::Test)
+target_compile_features(test_track_menu_sections PRIVATE cxx_std_26)
+add_test(NAME test_track_menu_sections COMMAND test_track_menu_sections)
+set_tests_properties(test_track_menu_sections PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_track_info_settings
     test_track_info_settings.cpp
     ../src/core/HumanQuantity.cpp
@@ -63,6 +73,10 @@ add_executable(test_search_cli
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
     ../src/core/MusicSort.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/reco/TrackScorer.cpp
+    ../src/reco/WeightLearner.cpp
+    ../src/reco/WeightLearnerData.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/IndexCache.cpp
@@ -74,6 +88,7 @@ add_executable(test_search_cli
 target_include_directories(test_search_cli PRIVATE ../src)
 target_link_libraries(test_search_cli PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
 target_compile_features(test_search_cli PRIVATE cxx_std_26)
+add_dependencies(test_search_cli muzaitenctl)
 add_test(NAME test_search_cli COMMAND test_search_cli)
 
 add_executable(test_playlist_database
@@ -96,6 +111,70 @@ target_compile_features(test_listen_history PRIVATE cxx_std_26)
 add_test(NAME test_listen_history COMMAND test_listen_history)
 set_tests_properties(test_listen_history PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_feature_store
+    test_feature_store.cpp
+    ../src/features/FeatureStore.cpp
+)
+target_include_directories(test_feature_store PRIVATE ../src)
+target_link_libraries(test_feature_store PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_feature_store PRIVATE cxx_std_26)
+add_test(NAME test_feature_store COMMAND test_feature_store)
+set_tests_properties(test_feature_store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_curation_dialog_data
+    test_curation_dialog_data.cpp
+    ../src/core/GenreTags.cpp
+    ../src/core/MetadataBlob.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+    ../src/features/FeatureStore.cpp
+    ../src/features/QualityRank.cpp
+    ../src/reco/GenreCuration.cpp
+    ../src/search/fold/Fold.cpp
+    ../src/ui/AudioAnalysisData.cpp
+)
+target_include_directories(test_curation_dialog_data PRIVATE ../src)
+target_link_libraries(test_curation_dialog_data PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
+target_compile_features(test_curation_dialog_data PRIVATE cxx_std_26)
+add_test(NAME test_curation_dialog_data COMMAND test_curation_dialog_data)
+set_tests_properties(test_curation_dialog_data PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_song_identity
+    test_song_identity.cpp
+    ../src/features/SongIdentity.cpp
+)
+target_include_directories(test_song_identity PRIVATE ../src)
+target_link_libraries(test_song_identity PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_song_identity PRIVATE cxx_std_26)
+add_test(NAME test_song_identity COMMAND test_song_identity)
+
+add_executable(test_dsp
+    test_dsp.cpp
+    ../src/indexer/Dsp.cpp
+)
+target_include_directories(test_dsp PRIVATE ../src)
+target_link_libraries(test_dsp PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_dsp PRIVATE cxx_std_26)
+add_test(NAME test_dsp COMMAND test_dsp)
+
+add_executable(test_indexer_scan
+    test_indexer_scan.cpp
+)
+target_include_directories(test_indexer_scan PRIVATE ../src)
+target_link_libraries(test_indexer_scan PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_indexer_scan PRIVATE cxx_std_26)
+add_dependencies(test_indexer_scan muzaiten-index)
+add_test(NAME test_indexer_scan COMMAND test_indexer_scan)
+
+add_executable(test_quality_rank
+    test_quality_rank.cpp
+    ../src/features/QualityRank.cpp
+)
+target_include_directories(test_quality_rank PRIVATE ../src)
+target_link_libraries(test_quality_rank PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_quality_rank PRIVATE cxx_std_26)
+add_test(NAME test_quality_rank COMMAND test_quality_rank)
+
 add_executable(test_play_events
     test_play_events.cpp
     ../src/scrobble/ListenHistoryStore.cpp
@@ -114,6 +193,9 @@ add_executable(test_radio
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/features/FeatureStore.cpp
+    ../src/features/QualityRank.cpp
+    ../src/features/SongIdentity.cpp
     ../src/fs/PathResolver.cpp
     ../src/reco/AffinityPool.cpp
     ../src/reco/ArtistRadio.cpp
@@ -122,6 +204,7 @@ add_executable(test_radio
     ../src/reco/RadioSession.cpp
     ../src/reco/ReasonText.cpp
     ../src/reco/TrackScorer.cpp
+    ../src/reco/WeightLearner.cpp
     ../src/scrobble/ListenHistoryStore.cpp
     ../src/search/IndexCache.cpp
     ../src/search/fold/Fold.cpp
@@ -354,6 +437,7 @@ add_executable(test_queue_table
     ../src/ui/QueueKeybindings.cpp
     ../src/ui/QueueStore.cpp
     ../src/ui/QueueTable.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/PanelSearchBar.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp
@@ -381,6 +465,7 @@ add_executable(test_playlist_view
     test_playlist_view.cpp
     ../src/db/PlaylistDatabase.cpp
     ../src/ui/PlaylistView.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/IdleReleaseController.cpp
     ../src/ui/PanelSearchBar.cpp
     ../src/search/SearchMatcher.cpp
@@ -409,6 +494,7 @@ add_executable(test_responsive_column_layout
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
     ../src/ui/TrackTable.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp
@@ -489,6 +575,7 @@ add_executable(test_music_explorer_view
     test_music_explorer_view.cpp
     ../src/ui/MusicExplorerView.cpp
     ../src/ui/TrackTable.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp
@@ -616,4 +703,10 @@ add_executable(playlist_match_bench
 target_include_directories(playlist_match_bench PRIVATE ../src)
 target_link_libraries(playlist_match_bench PRIVATE Qt6::Core Qt6::Sql PkgConfig::ZSTD)
 target_compile_features(playlist_match_bench PRIVATE cxx_std_26)
+endif()
+
+get_property(MUZAITEN_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
+if(MUZAITEN_REGISTERED_TESTS)
+    set_property(TEST ${MUZAITEN_REGISTERED_TESTS} APPEND PROPERTY
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" "QT_QPA_PLATFORMTHEME=")
 endif()

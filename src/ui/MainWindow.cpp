@@ -27,8 +27,10 @@
 #include "scrobble/ScrobbleBackfill.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/AudioAnalysisDialogs.h"
 #include "ui/FileExplorerKeybindings.h"
 #include "ui/FileExplorerView.h"
+#include "ui/GenreCurationDialog.h"
 #include "ui/IdleReleaseController.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
@@ -48,6 +50,7 @@
 #include "playlist/PlaylistDropImportWorker.h"
 #include "ui/PlaylistImportDialog.h"
 #include "ui/PlaylistView.h"
+#include "ui/ScoringWeightsDialog.h"
 #include "ui/SearchView.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
@@ -91,6 +94,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QCloseEvent>
+#include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -1094,6 +1098,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    connect(m_artistSidebar, &ArtistSidebar::artistPlayRequested, this, &MainWindow::playArtistReplacingQueue);
+    connect(m_artistSidebar, &ArtistSidebar::artistAddToQueueRequested, this, &MainWindow::addArtistToQueue);
     connect(m_artistSidebar, &ArtistSidebar::startArtistRadioRequested,
             this, &MainWindow::startArtistRadio);
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
@@ -1125,6 +1131,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumPlayNextTemporaryRequested, this, &MainWindow::playNextAlbumTemporary);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueTemporaryRequested, this, &MainWindow::addAlbumToQueueTemporary);
+    connect(m_albumGrid, &AlbumGrid::albumStartRadioRequested, this, &MainWindow::startRadioFromAlbum);
     connect(m_albumGrid, &AlbumGrid::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
         QVector<Track> tracks;
         for (const QString &title : titles) {
@@ -1242,6 +1249,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
     connect(m_playerBar, &PlayerBar::retryPendingRatingTagsRequested, this, &MainWindow::retryPendingRatingTags);
     connect(m_playerBar, &PlayerBar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
+    connect(m_playerBar, &PlayerBar::currentTrackFileRequested, this, [this]() {
+        const Track current = m_player->currentTrack();
+        if (!current.path.isEmpty()) {
+            findTrackFile(current);
+        }
+    });
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
     connect(m_playerBar, &PlayerBar::releaseDeviceRequested, this, &MainWindow::releaseHeldOutputDevice);
@@ -1249,6 +1262,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         m_playerBar->setReleaseDeviceVisible(canReleaseOutputDevice());
     });
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
+    connect(m_playerBar, &PlayerBar::scoringWeightsRequested, this, &MainWindow::showScoringWeights);
+    connect(m_playerBar, &PlayerBar::genreCurationRequested, this, &MainWindow::showGenreCuration);
+    connect(m_playerBar, &PlayerBar::audioAnalysisStartRequested, this, &MainWindow::startAudioAnalysis);
+    connect(m_playerBar, &PlayerBar::audioAnalysisCancelRequested, this, &MainWindow::cancelAudioAnalysis);
+    connect(m_playerBar, &PlayerBar::analysisStatusRequested, this, &MainWindow::showAnalysisStatus);
+    connect(m_playerBar, &PlayerBar::duplicateCopiesRequested, this, &MainWindow::showDuplicateCopies);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::listeningHistoryRequested, this, &MainWindow::showListeningHistory);
@@ -1341,6 +1360,30 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_core->setRadioBatchSize(size);
         }
     });
+    connect(m_playerBar, &PlayerBar::startRadioFromCurrentRequested, this, [this]() {
+        const Track current = m_player->currentTrack();
+        if (current.path.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("Start radio: nothing is playing"), 4000);
+            return;
+        }
+        startRadioFromSeed(current.path);
+    });
+    connect(m_playerBar, &PlayerBar::startArtistRadioFromCurrentRequested, this, [this]() {
+        const Track current = m_player->currentTrack();
+        if (current.artistName.trimmed().isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("Start artist radio: nothing is playing"), 4000);
+            return;
+        }
+        startArtistRadio(current.artistName);
+    });
+    connect(m_playerBar, &PlayerBar::aboutRequested, this, [this]() {
+        QMessageBox::about(
+            this, QStringLiteral("About muzaiten"),
+            QStringLiteral("<b>muzaiten</b> %1<br/>"
+                           "A local-first music player with an offline recommendation engine.<br/>"
+                           "Released into the public domain under the Unlicense.")
+                .arg(QCoreApplication::applicationVersion().toHtmlEscaped()));
+    });
     connect(m_playerBar, &PlayerBar::rediscoveryMixRequested, this, [this]() {
         startMix(QStringLiteral("rediscovery"));
     });
@@ -1403,6 +1446,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_trackTable, &TrackTable::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
+    connect(m_trackTable, &TrackTable::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::startRadioRequested, this, [this](const Track &track) {
@@ -1573,6 +1617,13 @@ MainWindow::~MainWindow()
     if (m_fillThread != nullptr) {
         m_fillThread->quit();
         m_fillThread->wait(3000);
+    }
+    if (m_audioAnalysisProcess != nullptr) {
+        m_audioAnalysisProcess->terminate();
+        if (!m_audioAnalysisProcess->waitForFinished(3000)) {
+            m_audioAnalysisProcess->kill();
+            m_audioAnalysisProcess->waitForFinished(1000);
+        }
     }
     if (m_mpdImportThread != nullptr) {
         // run() can be blocked on network I/O; cancel() (atomic) makes it and the
@@ -2667,6 +2718,16 @@ void MainWindow::saveAlbumGridViewSettings()
     }
 }
 
+void MainWindow::saveMusicExplorerAlbumGridViewSettings()
+{
+    if (m_musicExplorerView == nullptr) {
+        return;
+    }
+    const QString settings = m_musicExplorerView->albumGridViewSettingsJson();
+    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
+    m_albumGrid->applyViewSettingsJson(settings);
+}
+
 void MainWindow::saveArtistSidebarViewSettings()
 {
     m_state->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
@@ -2926,6 +2987,9 @@ SearchView *MainWindow::ensureSearchView()
     m_searchView = new SearchView(m_mainStack, idleReleaseMs());
     m_searchView->setRankConfig(Search::RankConfig::fromJsonString(m_database->setting(QStringLiteral("search.ranking"))));
     m_searchView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    m_searchView->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
+    });
 
     connect(m_searchView, &SearchView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
         enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
@@ -2948,6 +3012,11 @@ SearchView *MainWindow::ensureSearchView()
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_searchView, &SearchView::searchRankingRequested, this, &MainWindow::configureSearchRanking);
+    connect(m_searchView, &SearchView::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
+    connect(m_searchView, &SearchView::trackFlagChanged, this, &MainWindow::applyTrackFlag);
 
     m_mainStack->addWidget(m_searchView);
     return m_searchView;
@@ -3121,6 +3190,9 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     m_musicExplorerView = new MusicExplorerView(m_libraryCenterStack);
     m_musicExplorerView->setArtworkCache(m_artworkCache);
     m_musicExplorerView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    m_musicExplorerView->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
+    });
     m_musicExplorerView->applyAlbumGridViewSettingsJson(m_albumGrid->viewSettingsJson());
     m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
     m_musicExplorerView->setTrackProvider([this](const Album &album) {
@@ -3135,6 +3207,7 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_musicExplorerView, &MusicExplorerView::albumPlayNextTemporaryRequested, this, &MainWindow::playNextAlbumTemporary);
     connect(m_musicExplorerView, &MusicExplorerView::albumAddToQueueTemporaryRequested, this, &MainWindow::addAlbumToQueueTemporary);
+    connect(m_musicExplorerView, &MusicExplorerView::albumStartRadioRequested, this, &MainWindow::startRadioFromAlbum);
     connect(m_musicExplorerView, &MusicExplorerView::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
         QVector<Track> tracks;
         for (const QString &title : titles) {
@@ -3165,9 +3238,13 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
+    connect(m_musicExplorerView, &MusicExplorerView::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
+    connect(m_musicExplorerView, &MusicExplorerView::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, [this](const Track &track, int rating) {
         applyTrackRating(track, rating, QStringLiteral("music_explorer"));
     });
+    connect(m_musicExplorerView, &MusicExplorerView::albumGridViewSettingsChanged,
+            this, &MainWindow::saveMusicExplorerAlbumGridViewSettings);
     connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
 
     m_libraryCenterStack->addWidget(m_musicExplorerView);
@@ -3338,6 +3415,9 @@ PlaylistView *MainWindow::ensurePlaylistView()
     m_playlistView->setTrackResolver([this](const QString &path) {
         return m_database != nullptr ? m_database->trackForPath(path) : Track();
     });
+    m_playlistView->setTrackFlagResolver([this](const QString &path, const QString &flag) {
+        return m_core->trackFlag(path, flag);
+    });
     m_playlistView->applyViewSettingsJson(m_state->setting(QStringLiteral("playlistView.view")));
     m_playlistView->setSavedQueueEntries(savedQueuePlaylistEntries());
     m_playlistView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
@@ -3384,6 +3464,11 @@ PlaylistView *MainWindow::ensurePlaylistView()
     });
     connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
         showTrackProperties(m_database->trackForPath(path));
+    });
+    connect(m_playlistView, &PlaylistView::trackFlagChanged, this, [this](const QString &path, const QString &flag, bool on) {
+        Track track;
+        track.path = path;
+        applyTrackFlag(track, flag, on);
     });
     connect(m_playlistView, &PlaylistView::startRadioRequested, this, &MainWindow::startRadioFromSeed);
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
@@ -5397,6 +5482,199 @@ void MainWindow::jumpToTrackInfoAlbum(const QString &artistName, const QString &
     }
 }
 
+void MainWindow::showGenreCuration()
+{
+    GenreCurationDialog dialog(m_database, this);
+    dialog.exec();
+}
+
+void MainWindow::showScoringWeights()
+{
+    ScoringWeightsDialog dialog(m_database, listenHistoryPath(), this);
+    dialog.exec();
+}
+
+void MainWindow::showAnalysisStatus()
+{
+    AudioAnalysisStatusDialog dialog(m_core->featuresPath(), this);
+    dialog.exec();
+}
+
+void MainWindow::showDuplicateCopies()
+{
+    DuplicateCopiesDialog dialog(m_database, m_core->featuresPath(), this);
+    dialog.exec();
+}
+
+void MainWindow::startAudioAnalysis()
+{
+    if (m_audioAnalysisProcess != nullptr) {
+        statusBar()->showMessage(QStringLiteral("Audio analysis is already running"), 5000);
+        return;
+    }
+
+    const QString binary = resolveMuzaitenIndexBinary();
+    if (binary.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("muzaiten-index was not found next to the app or on PATH"), 8000);
+        return;
+    }
+
+    m_audioAnalysisStdout.clear();
+    m_audioAnalysisStderr.clear();
+    m_audioAnalysisStderrBuffer.clear();
+    m_audioAnalysisCancelRequested = false;
+
+    auto *process = new QProcess(this);
+    m_audioAnalysisProcess = process;
+    connect(process, &QProcess::readyReadStandardOutput, this, &MainWindow::readAudioAnalysisStdout);
+    connect(process, &QProcess::readyReadStandardError, this, &MainWindow::readAudioAnalysisStderr);
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, &MainWindow::finishAudioAnalysis);
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (process != m_audioAnalysisProcess || error != QProcess::FailedToStart) {
+            return;
+        }
+        const QString detail = process->errorString();
+        m_audioAnalysisProcess = nullptr;
+        m_playerBar->setAudioAnalysisRunStatus(false, QString());
+        process->deleteLater();
+        statusBar()->showMessage(QStringLiteral("Audio analysis failed to start: %1").arg(detail), 10000);
+    });
+
+    process->setProgram(binary);
+    process->setArguments({
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        databasePath(),
+        QStringLiteral("--features"),
+        m_core->featuresPath(),
+        QStringLiteral("--json"),
+        QStringLiteral("--progress"),
+    });
+
+    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Analyzing..."));
+    statusBar()->showMessage(QStringLiteral("Starting audio analysis..."));
+    process->start();
+}
+
+void MainWindow::cancelAudioAnalysis()
+{
+    if (m_audioAnalysisProcess == nullptr) {
+        return;
+    }
+    QProcess *process = m_audioAnalysisProcess;
+    m_audioAnalysisCancelRequested = true;
+    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Canceling analysis..."));
+    statusBar()->showMessage(QStringLiteral("Canceling audio analysis..."), 4000);
+    process->terminate();
+    QTimer::singleShot(3000, this, [this, process]() {
+        if (m_audioAnalysisProcess == process && process->state() != QProcess::NotRunning) {
+            process->kill();
+        }
+    });
+}
+
+void MainWindow::readAudioAnalysisStdout()
+{
+    if (m_audioAnalysisProcess != nullptr) {
+        m_audioAnalysisStdout.append(m_audioAnalysisProcess->readAllStandardOutput());
+    }
+}
+
+void MainWindow::readAudioAnalysisStderr()
+{
+    if (m_audioAnalysisProcess == nullptr) {
+        return;
+    }
+    m_audioAnalysisStderrBuffer.append(m_audioAnalysisProcess->readAllStandardError());
+    qsizetype newline = -1;
+    while ((newline = m_audioAnalysisStderrBuffer.indexOf('\n')) >= 0) {
+        const QByteArray line = m_audioAnalysisStderrBuffer.left(newline);
+        m_audioAnalysisStderrBuffer.remove(0, newline + 1);
+        handleAudioAnalysisProgressLine(QString::fromUtf8(line).trimmed());
+    }
+}
+
+void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStatus)
+{
+    QProcess *process = m_audioAnalysisProcess;
+    if (process == nullptr) {
+        return;
+    }
+
+    readAudioAnalysisStdout();
+    readAudioAnalysisStderr();
+    if (!m_audioAnalysisStderrBuffer.isEmpty()) {
+        handleAudioAnalysisProgressLine(QString::fromUtf8(m_audioAnalysisStderrBuffer).trimmed());
+        m_audioAnalysisStderrBuffer.clear();
+    }
+
+    m_audioAnalysisProcess = nullptr;
+    m_playerBar->setAudioAnalysisRunStatus(false, QString());
+
+    if (m_audioAnalysisCancelRequested) {
+        statusBar()->showMessage(QStringLiteral("Audio analysis canceled"), 5000);
+    } else if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+        QString detail = QString::fromUtf8(m_audioAnalysisStderr).trimmed();
+        if (detail.isEmpty()) {
+            detail = process->errorString();
+        }
+        if (detail.isEmpty()) {
+            detail = QStringLiteral("exit code %1").arg(exitCode);
+        }
+        statusBar()->showMessage(QStringLiteral("Audio analysis failed: %1").arg(detail.left(240)), 10000);
+    } else {
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(m_audioAnalysisStdout, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            statusBar()->showMessage(QStringLiteral("Audio analysis finished but returned invalid JSON: %1")
+                                         .arg(parseError.errorString()),
+                                     10000);
+        } else {
+            const QJsonObject object = document.object();
+            statusBar()->showMessage(QStringLiteral("Audio analysis: scanned %1, skipped %2, failed %3, groups %4")
+                                         .arg(object.value(QStringLiteral("scanned")).toInt())
+                                         .arg(object.value(QStringLiteral("skipped")).toInt())
+                                         .arg(object.value(QStringLiteral("failed")).toInt())
+                                         .arg(object.value(QStringLiteral("groups")).toInt()),
+                                     10000);
+        }
+    }
+
+    m_audioAnalysisStdout.clear();
+    m_audioAnalysisStderr.clear();
+    m_audioAnalysisStderrBuffer.clear();
+    m_audioAnalysisCancelRequested = false;
+    process->deleteLater();
+}
+
+void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
+{
+    if (line.isEmpty()) {
+        return;
+    }
+    static const QRegularExpression progressPattern(QStringLiteral("^progress\\s+(\\d+)/(\\d+)$"));
+    const QRegularExpressionMatch match = progressPattern.match(line);
+    if (match.hasMatch()) {
+        m_playerBar->setAudioAnalysisRunStatus(
+            true,
+            QStringLiteral("Analyzing... %1/%2").arg(match.captured(1), match.captured(2)));
+        return;
+    }
+    m_audioAnalysisStderr.append(line.toUtf8());
+    m_audioAnalysisStderr.append('\n');
+}
+
+QString MainWindow::resolveMuzaitenIndexBinary() const
+{
+    const QString sibling = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("muzaiten-index"));
+    const QFileInfo siblingInfo(sibling);
+    if (siblingInfo.exists() && siblingInfo.isExecutable()) {
+        return siblingInfo.absoluteFilePath();
+    }
+    return QStandardPaths::findExecutable(QStringLiteral("muzaiten-index"));
+}
+
 void MainWindow::configureMpdSource()
 {
     QString startPath = m_database->setting(QStringLiteral("mpd.configPath"));
@@ -6347,6 +6625,25 @@ void MainWindow::playAlbumsReplacingQueue(const QStringList &albumTitles)
     replaceQueueWithTracks(tracks, 0, QStringLiteral("album"), 0, sourceName);
 }
 
+void MainWindow::playArtistReplacingQueue(const QString &artistName)
+{
+    const QVector<Track> tracks = tracksForArtistName(artistName);
+    replaceQueueWithTracks(tracks, 0, QStringLiteral("artist"), 0, artistName);
+}
+
+void MainWindow::addArtistToQueue(const QString &artistName)
+{
+    enqueueTracksFromMenu(tracksForArtistName(artistName), QueueAddMode::Append, false);
+}
+
+void MainWindow::startRadioFromAlbum(const QString &albumTitle)
+{
+    const QVector<Track> tracks = tracksForAlbumTitle(albumTitle);
+    if (!tracks.isEmpty()) {
+        startRadioFromSeed(tracks.first().path);
+    }
+}
+
 QVector<Track> MainWindow::tracksForAlbumTitle(const QString &albumTitle) const
 {
     if (m_currentArtist.isEmpty() || albumTitle.isEmpty()) {
@@ -6355,6 +6652,17 @@ QVector<Track> MainWindow::tracksForAlbumTitle(const QString &albumTitle) const
     return m_librarySource == LibrarySource::Mpd
         ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
         : m_database->tracksForArtist(m_currentArtist, albumTitle);
+}
+
+QVector<Track> MainWindow::tracksForArtistName(const QString &artistName) const
+{
+    const QString trimmed = artistName.trimmed();
+    if (m_database == nullptr || trimmed.isEmpty()) {
+        return {};
+    }
+    return m_librarySource == LibrarySource::Mpd
+        ? m_database->mpdTracksForArtist(trimmed, mpdMusicDirectory())
+        : m_database->tracksForArtist(trimmed);
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)

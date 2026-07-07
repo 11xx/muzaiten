@@ -27,8 +27,9 @@ public:
     // running: show live status text + Cancel, disable the start actions.
     // idle: hide status unless statusText carries a last-outcome message,
     // hide Cancel, re-enable the start actions. lbResumable relabels the
-    // ListenBrainz action to "Resume..." when a prior import was interrupted.
+    // ListenBrainz action to "Resume…" when a prior import was interrupted.
     void setBackfillStatus(bool running, const QString &statusText, bool lbResumable);
+    void setAudioAnalysisRunStatus(bool running, const QString &statusText);
     void setListUnsupportedFiles(bool show);
     // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
     void setScanProfile(int profile);
@@ -90,6 +91,7 @@ signals:
     // availability (it depends on live device-hold state).
     void playbackMenuAboutToShow();
     void currentTrackLibraryRequested();
+    void currentTrackFileRequested();
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdImportRequested();
@@ -144,6 +146,8 @@ signals:
     void currentTrackRatingChanged(int rating0To100);
     void repeatModeChangeRequested(RepeatMode mode);
     void shuffleModeChangeRequested(ShuffleMode mode);
+    void audioAnalysisStartRequested();
+    void audioAnalysisCancelRequested();
     void libraryShuffleSettingsRequested();
     void radioShuffleSettingsRequested();
     void rediscoveryMixRequested();
@@ -156,6 +160,15 @@ signals:
     void radioAdventurousChanged(bool on);
     void radioExplorationSettingsRequested();
     void radioBatchSizeSettingsRequested();
+    void scoringWeightsRequested();
+    void genreCurationRequested();
+    void analysisStatusRequested();
+    void duplicateCopiesRequested();
+    // Menu-bar Radio entries; seeded from whatever is currently playing, so
+    // the owner validates there IS a current track and reports otherwise.
+    void startRadioFromCurrentRequested();
+    void startArtistRadioFromCurrentRequested();
+    void aboutRequested();
 
 private:
     void refreshTheme();
@@ -179,6 +192,10 @@ private:
     class QToolButton *m_radio = nullptr;
     class QMenu *m_radioMenu = nullptr;
     class QAction *m_radioAdventurousAction = nullptr;
+    // Menu-bar mirrors of the radio indicator's session controls; kept in
+    // sync with m_radioAdventurousAction by setRadioAdventurous.
+    class QAction *m_radioBarAdventurousAction = nullptr;
+    class QAction *m_stopRadioAction = nullptr;
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
     bool m_radioActive = false;
@@ -197,6 +214,9 @@ private:
     class QAction *m_importListenBrainzAction = nullptr;
     class QAction *m_syncLastFmAction = nullptr;
     class QAction *m_cancelBackfillAction = nullptr;
+    class QAction *m_audioAnalysisRunStatusAction = nullptr;
+    class QAction *m_analyzeAudioAction = nullptr;
+    class QAction *m_cancelAudioAnalysisAction = nullptr;
     class QAction *m_mergeSavedQueueAction = nullptr;
     class QAction *m_releaseDeviceAction = nullptr;
     QList<class QAction *> m_playlistViewActions;

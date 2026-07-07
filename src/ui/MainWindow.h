@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QByteArray>
 #include <QMainWindow>
+#include <QProcess>
 #include <QSet>
 #include <QStringList>
 
@@ -109,6 +111,7 @@ private:
     void loadViewSettings();
     void saveTrackTableViewSettings();
     void saveAlbumGridViewSettings();
+    void saveMusicExplorerAlbumGridViewSettings();
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
     void saveQueueScreenViewSettings();
@@ -233,6 +236,17 @@ private:
     int deepReleaseMs() const;
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
+    void showScoringWeights();
+    void showGenreCuration();
+    void showAnalysisStatus();
+    void showDuplicateCopies();
+    void startAudioAnalysis();
+    void cancelAudioAnalysis();
+    void readAudioAnalysisStdout();
+    void readAudioAnalysisStderr();
+    void finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStatus);
+    void handleAudioAnalysisProgressLine(const QString &line);
+    QString resolveMuzaitenIndexBinary() const;
     void configureMpdSource();
     void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;
@@ -310,11 +324,15 @@ private:
     void playAlbumNow(const QString &albumTitle);
     void playAlbumsNow(const QStringList &albumTitles);
     void playAlbumsReplacingQueue(const QStringList &albumTitles);
+    void playArtistReplacingQueue(const QString &artistName);
+    void addArtistToQueue(const QString &artistName);
+    void startRadioFromAlbum(const QString &albumTitle);
     void playNextAlbum(const QString &albumTitle);
     void addAlbumToQueue(const QString &albumTitle);
     void playNextAlbumTemporary(const QString &albumTitle);
     void addAlbumToQueueTemporary(const QString &albumTitle);
     QVector<Track> tracksForAlbumTitle(const QString &albumTitle) const;
+    QVector<Track> tracksForArtistName(const QString &artistName) const;
     // Queue snapshots (stored in state.sqlite, distinct from library playlists).
     // Spontaneous queues keep a stable id and are moved through a short backlog
     // when displaced, so restoring/mutating one does not create duplicate queue
@@ -494,6 +512,11 @@ private:
     // running->idle transition (finished/failed) can pop a transient
     // status-bar message exactly once, instead of on every progress tick.
     bool m_backfillWasRunning = false;
+    QProcess *m_audioAnalysisProcess = nullptr;
+    QByteArray m_audioAnalysisStdout;
+    QByteArray m_audioAnalysisStderr;
+    QByteArray m_audioAnalysisStderrBuffer;
+    bool m_audioAnalysisCancelRequested = false;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;

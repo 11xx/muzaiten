@@ -436,6 +436,14 @@ void ArtistSidebar::showContextMenu(const QPoint &pos)
     if (index.isValid()) {
         const QString artistName = index.data(Qt::UserRole).toString();
         if (!artistName.isEmpty()) {
+            QAction *playArtist = menu.addAction(QStringLiteral("Play all by artist"));
+            connect(playArtist, &QAction::triggered, this, [this, artistName]() {
+                emit artistPlayRequested(artistName);
+            });
+            QAction *addArtist = menu.addAction(QStringLiteral("Add all to queue"));
+            connect(addArtist, &QAction::triggered, this, [this, artistName]() {
+                emit artistAddToQueueRequested(artistName);
+            });
             QAction *startArtistRadio = menu.addAction(QStringLiteral("Start Artist Radio"));
             connect(startArtistRadio, &QAction::triggered, this, [this, artistName]() {
                 emit startArtistRadioRequested(artistName);

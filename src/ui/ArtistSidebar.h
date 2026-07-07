@@ -40,6 +40,8 @@ public:
 
 signals:
     void artistSelected(const QString &artistName);
+    void artistPlayRequested(const QString &artistName);
+    void artistAddToQueueRequested(const QString &artistName);
     void startArtistRadioRequested(const QString &artistName);
     void viewSettingsChanged();
     void librarySourceChanged(int index);

@@ -2,6 +2,9 @@
 
 #include <QApplication>
 #include <QHeaderView>
+#include <QMenu>
+#include <QScrollArea>
+#include <QTimer>
 #include <QtTest/QtTest>
 
 #include <memory>
@@ -27,6 +30,8 @@ private slots:
     void albumDoubleClickDoesNotPlay();
     void currentCardUsesFullActiveHighlight();
     void albumActionsForwardSignals();
+    void backgroundMenuExposesViewSettings();
+    void inlineTrackEmptyMenuOffersFullTableActions();
 
 private:
     static QVector<Album> makeAlbums();
@@ -427,6 +432,90 @@ void MusicExplorerViewTest::albumActionsForwardSignals()
 
     QCOMPARE(addSpy.count(), 1);
     QCOMPARE(addSpy.takeFirst().at(0).toString(), QStringLiteral("Two"));
+}
+
+void MusicExplorerViewTest::backgroundMenuExposesViewSettings()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    auto *scroll = view.findChild<QScrollArea *>();
+    QVERIFY(scroll != nullptr);
+
+    QStringList actions;
+    bool sawMenu = false;
+    QTimer::singleShot(0, [&]() {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (menu == nullptr) {
+            return;
+        }
+        sawMenu = true;
+        for (QAction *action : menu->actions()) {
+            if (!action->isSeparator()) {
+                actions << action->text();
+            }
+        }
+        menu->close();
+    });
+
+    QVERIFY(QMetaObject::invokeMethod(scroll->viewport(), "customContextMenuRequested",
+                                      Qt::DirectConnection,
+                                      Q_ARG(QPoint, QPoint(12, 12))));
+    QVERIFY(sawMenu);
+    QCOMPARE(actions, (QStringList{
+                          QStringLiteral("Sort by"),
+                          QStringLiteral("Text alignment"),
+                      }));
+}
+
+void MusicExplorerViewTest::inlineTrackEmptyMenuOffersFullTableActions()
+{
+    MusicExplorerView view;
+    view.resize(720, 640);
+    view.setTrackProvider([](const Album &album) { return makeTracks(album.title); });
+    view.setAlbums(makeAlbums());
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    view.selectAlbumTitle(QStringLiteral("Two"), true);
+    auto *table = view.inlineTrackTableForTests();
+    QVERIFY(table != nullptr);
+    QTRY_VERIFY(table->isVisible());
+    QCOMPARE(table->rowCount(), 3);
+
+    QStringList actions;
+    bool sawMenu = false;
+    QTimer::singleShot(0, [&]() {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (menu == nullptr) {
+            return;
+        }
+        sawMenu = true;
+        for (QAction *action : menu->actions()) {
+            if (!action->isSeparator()) {
+                actions << action->text();
+            }
+        }
+        menu->close();
+    });
+
+    QVERIFY(QMetaObject::invokeMethod(table, "customContextMenuRequested",
+                                      Qt::DirectConnection,
+                                      Q_ARG(QPoint, QPoint(table->viewport()->width() + 20,
+                                                           table->viewport()->height() + 20))));
+    QVERIFY(sawMenu);
+    QCOMPARE(actions, (QStringList{
+                          QStringLiteral("Play now (3)"),
+                          QStringLiteral("Play next (3)"),
+                          QStringLiteral("Add to queue (3)"),
+                          QStringLiteral("Copy path"),
+                          QStringLiteral("Start Artist Radio"),
+                          QStringLiteral("Responsive options…"),
+                          QStringLiteral("Reset table layout to defaults"),
+                      }));
 }
 
 QTEST_MAIN(MusicExplorerViewTest)

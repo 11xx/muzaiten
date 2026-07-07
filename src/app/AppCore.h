@@ -15,6 +15,7 @@
 
 class ArtworkCache;
 class Database;
+class FeatureStore;
 class IpcServer;
 class LastFmScrobbler;
 class ListenBrainzScrobbler;
@@ -58,6 +59,7 @@ public:
     PlaylistDatabase    *playlistDatabase() const;
     SettingsStore       *settings() const;
     ArtworkCache        *artworkCache() const;
+    FeatureStore        *features() const;
     ListenHistoryStore  *listenHistory() const;
     ListenTracker       *listenTracker() const;
     PlayEventRecorder   *playEventRecorder() const;
@@ -117,6 +119,7 @@ public:
 
     QString databasePath() const;
     QString playlistDatabasePath() const;
+    QString featuresPath() const;
     QString listenHistoryPath() const;
     bool scrobbleOffline() const;
     bool trayAvailable() const;
@@ -176,18 +179,31 @@ private:
     QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases,
                                           const QSet<QString> &ignoredRadioGenres) const;
     QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
-    TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
+    QHash<QString, QString> buildResolvedSongKeyMap() const;
+    void attachRadioFeatures(QVector<TrackScorer::Candidate> &candidates) const;
+    void attachRadioFeatures(TrackScorer::Candidate &candidate) const;
+    QStringList radioNeighborCandidatePaths(const QStringList &anchorPaths) const;
+    QHash<qint64, QVector<float>> radioEmbeddingsForSession(const QVector<TrackScorer::Candidate> &pool,
+                                                            const TrackScorer::Candidate &seed = {}) const;
+    TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded,
+                                                   const QHash<QString, QString> &resolvedSongKeys) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
                                                             const QHash<QString, QString> &genreAliases,
-                                                            const QSet<QString> &ignoredRadioGenres) const;
+                                                            const QSet<QString> &ignoredRadioGenres,
+                                                            const QHash<QString, QString> &resolvedSongKeys,
+                                                            const QStringList &neighborAnchorPaths = {}) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
                                                            const QHash<QString, QString> &genreAliases,
-                                                           const QSet<QString> &ignoredRadioGenres) const;
+                                                           const QSet<QString> &ignoredRadioGenres,
+                                                           const QHash<QString, QString> &resolvedSongKeys) const;
     QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases,
                                               const QSet<QString> &ignoredRadioGenres) const;
     TrackScorer::Weights radioScoringWeights() const;
-    QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
+    QHash<QString, TrackScorer::Affinity> buildRadioAffinities(const QHash<QString, QString> &resolvedSongKeys) const;
+    Track bestRadioCopyForPick(const Track &track, const QSet<QString> &blockedPaths) const;
+    Track resolveRadioPick(const QString &path, const QSet<QString> &blockedPaths) const;
     void installRadioProvider(bool markPicksAsRadio);
+    void recordRadioPicks(const QVector<Track> &picks);
     void saveRadioSessionState();
     void clearRadioSessionState();
     void maybeRestoreRadioSession();
@@ -220,6 +236,7 @@ private:
     std::unique_ptr<PlaylistDatabase>  m_playlistDb;
     std::unique_ptr<SettingsStore>     m_state;
     std::unique_ptr<ArtworkCache>      m_artworkCache;
+    std::unique_ptr<FeatureStore>      m_features;
     std::unique_ptr<ListenHistoryStore> m_listenHistory;
     std::unique_ptr<RadioSession>      m_radioSession;
     PlayerCore       *m_player = nullptr;
@@ -281,4 +298,5 @@ private:
     QString           m_radioSessionSeedPath;
     QString           m_radioSessionArtistName;
     int               m_radioSessionExploration = 30;
+    TrackScorer::Weights m_radioSessionWeights;
 };

@@ -17,9 +17,11 @@
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
 #include "ui/SplitterPersistence.h"
+#include "ui/TrackMenuSections.h"
 
 #include <QAbstractTableModel>
 #include <QActionGroup>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
@@ -28,6 +30,7 @@
 #include <QFormLayout>
 #include <QFont>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -85,6 +88,11 @@ bool isPlayablePlaylistItem(const PlaylistItem &item)
 {
     return !item.trackPath.isEmpty()
         && (item.status == PlaylistItemStatus::Matched || item.status == PlaylistItemStatus::Approximate);
+}
+
+QString joinedPaths(const QStringList &paths)
+{
+    return paths.join(QLatin1Char('\n'));
 }
 
 class PlaylistItemTableView final : public NavigableTableView {
@@ -873,6 +881,11 @@ void PlaylistView::setTrackResolver(std::function<Track(const QString &)> resolv
     m_trackResolver = std::move(resolver);
     refreshItemRatings();
     populateItems();
+}
+
+void PlaylistView::setTrackFlagResolver(std::function<bool(const QString &, const QString &)> resolver)
+{
+    m_trackFlagResolver = std::move(resolver);
 }
 
 void PlaylistView::setSavedQueueEntries(const QVector<SavedQueuePlaylistEntry> &entries)
@@ -1713,19 +1726,19 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     }
 
     menu.addSeparator();
-    QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
+    QAction *addSong = menu.addAction(QStringLiteral("Add song…"));
     addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
-    QAction *importAction = menu.addAction(QStringLiteral("Import into this playlist..."));
+    QAction *importAction = menu.addAction(QStringLiteral("Import into this playlist…"));
     importAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(importAction, &QAction::triggered, this, &PlaylistView::importIntoCurrentPlaylist);
-    QAction *importNew = menu.addAction(QStringLiteral("Import playlist..."));
+    QAction *importNew = menu.addAction(QStringLiteral("Import playlist…"));
     connect(importNew, &QAction::triggered, this, &PlaylistView::importNewRequested);
-    menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
+    menu.addAction(QStringLiteral("New playlist…"), this, &PlaylistView::createPlaylist);
     QAction *rename = menu.addAction(QStringLiteral("Rename"));
     rename->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(rename, &QAction::triggered, this, &PlaylistView::renameCurrentPlaylist);
-    QAction *exportAction = menu.addAction(QStringLiteral("Export..."));
+    QAction *exportAction = menu.addAction(QStringLiteral("Export…"));
     exportAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
     connect(exportAction, &QAction::triggered, this, &PlaylistView::exportCurrentPlaylist);
     QAction *deleteAction = menu.addAction(QStringLiteral("Delete"));
@@ -1754,9 +1767,18 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     const QModelIndex index = m_itemTable->indexAt(pos);
     if (!index.isValid()) {
         QMenu menu(this);
-        QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
-        addSong->setEnabled(m_currentPlaylistId > 0);
+        const bool savedQueue = currentSelectionIsSavedQueue();
+        const bool hasPlayableCollection = savedQueue || m_currentPlaylistId > 0;
+        QAction *addSong = menu.addAction(QStringLiteral("Add song…"));
+        addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
         connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
+        QAction *importAction = menu.addAction(QStringLiteral("Import into this playlist…"));
+        importAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
+        connect(importAction, &QAction::triggered, this, &PlaylistView::importIntoCurrentPlaylist);
+        QAction *playPlaylist = menu.addAction(QStringLiteral("Play playlist"));
+        playPlaylist->setEnabled(hasPlayableCollection);
+        connect(playPlaylist, &QAction::triggered, this, &PlaylistView::playCurrentPlaylist);
+        menu.addAction(QStringLiteral("New playlist…"), this, &PlaylistView::createPlaylist);
         menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
         return;
     }
@@ -1769,48 +1791,60 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     const PlaylistItem *item = itemForDisplayRow(index.row());
     const bool hasPlayableSelection = !selectedOnlyItemPaths().isEmpty();
     QMenu menu(this);
-    QAction *play = menu.addAction(QStringLiteral("Play"));
-    play->setEnabled(item != nullptr && isPlayablePlaylistItem(*item));
-    connect(play, &QAction::triggered, this, &PlaylistView::playCurrentItem);
-    QAction *playNext = menu.addAction(QStringLiteral("Play next"));
-    playNext->setEnabled(hasPlayableSelection);
-    connect(playNext, &QAction::triggered, this, &PlaylistView::playNextSelectedItems);
-    QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
-    addToQueue->setEnabled(hasPlayableSelection);
-    connect(addToQueue, &QAction::triggered, this, &PlaylistView::addSelectedItemsToQueue);
-    if (m_queueIsPlaylistSourced) {
-        QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
-        playNextTemp->setEnabled(hasPlayableSelection);
-        connect(playNextTemp, &QAction::triggered, this, [this]() { enqueueSelectedItems(true, true); });
-        QAction *addToQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
-        addToQueueTemp->setEnabled(hasPlayableSelection);
-        connect(addToQueueTemp, &QAction::triggered, this, [this]() { enqueueSelectedItems(false, true); });
-    }
-    QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist..."));
-    addToPlaylist->setEnabled(hasPlayableSelection);
-    connect(addToPlaylist, &QAction::triggered, this, &PlaylistView::addSelectedItemsToPlaylist);
-
-    // Only offer a seed when this row resolves to a local library track path
-    // (Missing/MultiMatch rows have none).
+    const QStringList selectedPaths = selectedOnlyItemPaths();
+    const auto allFlagged = [this, &selectedPaths](const QString &flag) {
+        return !selectedPaths.isEmpty()
+            && static_cast<bool>(m_trackFlagResolver)
+            && std::all_of(selectedPaths.cbegin(), selectedPaths.cend(), [this, &flag](const QString &path) {
+                   return !path.isEmpty() && m_trackFlagResolver(path, flag);
+               });
+    };
+    const auto setFlagForPaths = [this, selectedPaths](const QString &flag, bool on) {
+        for (const QString &path : selectedPaths) {
+            if (!path.isEmpty()) {
+                emit trackFlagChanged(path, flag, on);
+            }
+        }
+    };
+    TrackMenuSections::Callbacks callbacks;
     if (item != nullptr && isPlayablePlaylistItem(*item)) {
-        QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
-        const QString seedPath = item->trackPath;
-        connect(startRadio, &QAction::triggered, this, [this, seedPath]() {
-            emit startRadioRequested(seedPath);
-        });
+        callbacks.playNow = [this]() { playCurrentItem(); };
     }
+    if (hasPlayableSelection) {
+        callbacks.playNext = [this]() { playNextSelectedItems(); };
+        callbacks.addToQueue = [this]() { addSelectedItemsToQueue(); };
+    }
+    if (m_queueIsPlaylistSourced) {
+        if (hasPlayableSelection) {
+            callbacks.playNextTemporary = [this]() { enqueueSelectedItems(true, true); };
+            callbacks.addToQueueTemporary = [this]() { enqueueSelectedItems(false, true); };
+        }
+    }
+    if (item != nullptr && isPlayablePlaylistItem(*item)) {
+        const QString seedPath = item->trackPath;
+        callbacks.startRadio = [this, seedPath]() { emit startRadioRequested(seedPath); };
+    }
+    if (hasPlayableSelection) {
+        callbacks.addToPlaylist = [this]() { addSelectedItemsToPlaylist(); };
+        callbacks.setNeverRadio = [setFlagForPaths](bool on) { setFlagForPaths(QStringLiteral("never_radio"), on); };
+        callbacks.setNoLearn = [setFlagForPaths](bool on) { setFlagForPaths(QStringLiteral("no_learn"), on); };
+        callbacks.copyPath = [selectedPaths]() { QGuiApplication::clipboard()->setText(joinedPaths(selectedPaths)); };
+    }
+    if (item != nullptr && isPlayablePlaylistItem(*item)) {
+        callbacks.properties = [this, item]() { emit propertiesForPathRequested(item->trackPath); };
+    }
+    TrackMenuSections::State state;
+    state.trackCount = std::max(1, static_cast<int>(selectedPaths.size()));
+    state.neverRadioChecked = allFlagged(QStringLiteral("never_radio"));
+    state.noLearnChecked = allFlagged(QStringLiteral("no_learn"));
+    TrackMenuSections::appendTrackSections(menu, callbacks, state);
 
-    menu.addSeparator();
+    if (!menu.actions().isEmpty() && !menu.actions().last()->isSeparator()) {
+        menu.addSeparator();
+    }
     QAction *edit = menu.addAction(QStringLiteral("Edit match"));
     edit->setEnabled(item != nullptr && !currentSelectionIsSavedQueue() && m_currentPlaylistId > 0);
     connect(edit, &QAction::triggered, this, &PlaylistView::editCurrentItem);
-    QAction *properties = menu.addAction(QStringLiteral("Properties"));
-    properties->setEnabled(item != nullptr && isPlayablePlaylistItem(*item));
-    connect(properties, &QAction::triggered, this, [this, item]() {
-        if (item != nullptr && isPlayablePlaylistItem(*item)) {
-            emit propertiesForPathRequested(item->trackPath);
-        }
-    });
     if (item != nullptr && item->status == PlaylistItemStatus::Missing && !currentSelectionIsSavedQueue()) {
         menu.addSeparator();
         QAction *removeMissing = menu.addAction(QStringLiteral("Remove missing tracks from playlist"));
@@ -1890,7 +1924,7 @@ void PlaylistView::showHeaderMenu(const QPoint &pos)
     }
 
     menu.addSeparator();
-    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
+    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options…"));
     connect(responsiveOptions, &QAction::triggered, this, [this]() {
         ResponsiveColumnOptionsDialog dialog(m_columnLayout, playlistResponsiveOptions(), this);
         dialog.exec();
