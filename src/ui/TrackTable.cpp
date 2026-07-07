@@ -978,15 +978,7 @@ void TrackTable::showHeaderMenu(const QPoint &pos)
             });
         }
     }
-    menu.addSeparator();
-    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
-    connect(responsiveOptions, &QAction::triggered, this, [this]() {
-        ResponsiveColumnOptionsDialog dialog(m_columnLayout, responsiveColumnOptions(), this);
-        dialog.exec();
-    });
-    menu.addSeparator();
-    QAction *resetLayout = menu.addAction(QStringLiteral("Reset table layout to defaults"));
-    connect(resetLayout, &QAction::triggered, this, &TrackTable::resetViewSettings);
+    appendTableLayoutActions(menu);
     menu.exec(horizontalHeader()->mapToGlobal(pos));
 }
 
@@ -994,6 +986,33 @@ void TrackTable::showCellMenu(const QPoint &pos)
 {
     const QModelIndex index = indexAt(pos);
     if (!index.isValid()) {
+        const QVector<Track> tracks = allTracksForContextMenu();
+        QMenu menu(this);
+        if (!tracks.isEmpty()) {
+            QAction *playAll = menu.addAction(QStringLiteral("Play all"));
+            connect(playAll, &QAction::triggered, this, [this, tracks]() {
+                playAllTracks(tracks);
+            });
+            QAction *playAllNext = menu.addAction(QStringLiteral("Play all next"));
+            connect(playAllNext, &QAction::triggered, this, [this, tracks]() {
+                emit playNextRequested(tracks);
+            });
+            QAction *addAll = menu.addAction(QStringLiteral("Add all to queue"));
+            connect(addAll, &QAction::triggered, this, [this, tracks]() {
+                emit addToQueueRequested(tracks);
+            });
+
+            const QString artistName = singleVisibleArtistForContextMenu();
+            if (!artistName.isEmpty()) {
+                menu.addSeparator();
+                QAction *startArtistRadio = menu.addAction(QStringLiteral("Start Artist Radio"));
+                connect(startArtistRadio, &QAction::triggered, this, [this, artistName]() {
+                    emit startArtistRadioRequested(artistName);
+                });
+            }
+        }
+        appendTableLayoutActions(menu);
+        menu.exec(viewport()->mapToGlobal(pos));
         return;
     }
 
@@ -1070,6 +1089,37 @@ void TrackTable::showCellMenu(const QPoint &pos)
     menu.exec(viewport()->mapToGlobal(pos));
 }
 
+void TrackTable::appendTableLayoutActions(QMenu &menu)
+{
+    if (!menu.actions().isEmpty()) {
+        menu.addSeparator();
+    }
+    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
+    connect(responsiveOptions, &QAction::triggered, this, [this]() {
+        ResponsiveColumnOptionsDialog dialog(m_columnLayout, responsiveColumnOptions(), this);
+        dialog.exec();
+    });
+    menu.addSeparator();
+    QAction *resetLayout = menu.addAction(QStringLiteral("Reset table layout to defaults"));
+    connect(resetLayout, &QAction::triggered, this, &TrackTable::resetViewSettings);
+}
+
+QVector<Track> TrackTable::allTracksForContextMenu() const
+{
+    QVector<Track> tracks;
+    if (model() == nullptr) {
+        return tracks;
+    }
+    tracks.reserve(model()->rowCount());
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const Track track = model()->index(row, 0).data(TrackRole).value<Track>();
+        if (!track.path.isEmpty()) {
+            tracks.push_back(track);
+        }
+    }
+    return tracks;
+}
+
 QVector<Track> TrackTable::tracksForContextRow(int row) const
 {
     QVector<int> rows;
@@ -1118,6 +1168,43 @@ QVector<Track> TrackTable::tracksForActionRow(int row) const
         }
     }
     return tracks;
+}
+
+QString TrackTable::singleVisibleArtistForContextMenu() const
+{
+    QString artistName;
+    for (const Track &track : allTracksForContextMenu()) {
+        const QString candidate = (track.albumArtistName.trimmed().isEmpty()
+                                       ? track.artistName
+                                       : track.albumArtistName)
+                                      .trimmed();
+        if (candidate.isEmpty()) {
+            return {};
+        }
+        if (artistName.isEmpty()) {
+            artistName = candidate;
+        } else if (artistName != candidate) {
+            return {};
+        }
+    }
+    return artistName;
+}
+
+void TrackTable::playAllTracks(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty()) {
+        return;
+    }
+    emit trackActivated(tracks.first());
+    if (tracks.size() <= 1) {
+        return;
+    }
+    QVector<Track> remaining;
+    remaining.reserve(tracks.size() - 1);
+    for (qsizetype i = 1; i < tracks.size(); ++i) {
+        remaining.push_back(tracks.at(i));
+    }
+    emit addToQueueRequested(remaining);
 }
 
 void TrackTable::reselectMarkedRows()

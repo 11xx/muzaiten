@@ -678,7 +678,21 @@ void SearchView::onDoubleClicked(const QModelIndex &index)
 void SearchView::showContextMenu(const QPoint &pos)
 {
     const QModelIndex idx = m_resultList->indexAt(pos);
-    if (!idx.isValid()) return;
+    if (!idx.isValid()) {
+        QMenu menu(this);
+        QAction *clearSearch = menu.addAction(QStringLiteral("Clear search"));
+        clearSearch->setEnabled(!m_searchBox->text().isEmpty());
+        connect(clearSearch, &QAction::triggered, m_searchBox, &QLineEdit::clear);
+        QAction *searchRanking = menu.addAction(QStringLiteral("Search ranking..."));
+        connect(searchRanking, &QAction::triggered, this, [this]() {
+            emit searchRankingRequested();
+        });
+        QAction *rebuildIndex = menu.addAction(QStringLiteral("Rebuild search index"));
+        rebuildIndex->setEnabled(!m_dbPath.isEmpty());
+        connect(rebuildIndex, &QAction::triggered, this, &SearchView::forceRefresh);
+        menu.exec(m_resultList->viewport()->mapToGlobal(pos));
+        return;
+    }
 
     const Track single = trackAt(idx);
     const QVector<Track> targets = tracksForAction(idx);

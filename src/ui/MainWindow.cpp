@@ -1437,6 +1437,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_trackTable, &TrackTable::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
+    connect(m_trackTable, &TrackTable::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_rightSidebar, &RightSidebar::startRadioRequested, this, [this](const Track &track) {
@@ -2708,6 +2709,16 @@ void MainWindow::saveAlbumGridViewSettings()
     }
 }
 
+void MainWindow::saveMusicExplorerAlbumGridViewSettings()
+{
+    if (m_musicExplorerView == nullptr) {
+        return;
+    }
+    const QString settings = m_musicExplorerView->albumGridViewSettingsJson();
+    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
+    m_albumGrid->applyViewSettingsJson(settings);
+}
+
 void MainWindow::saveArtistSidebarViewSettings()
 {
     m_state->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
@@ -2989,6 +3000,7 @@ SearchView *MainWindow::ensureSearchView()
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
+    connect(m_searchView, &SearchView::searchRankingRequested, this, &MainWindow::configureSearchRanking);
 
     m_mainStack->addWidget(m_searchView);
     return m_searchView;
@@ -3206,9 +3218,12 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::startRadioRequested, this, [this](const Track &track) {
         startRadioFromSeed(track.path);
     });
+    connect(m_musicExplorerView, &MusicExplorerView::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
     connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, [this](const Track &track, int rating) {
         applyTrackRating(track, rating, QStringLiteral("music_explorer"));
     });
+    connect(m_musicExplorerView, &MusicExplorerView::albumGridViewSettingsChanged,
+            this, &MainWindow::saveMusicExplorerAlbumGridViewSettings);
     connect(m_musicExplorerView, &MusicExplorerView::trackTableViewSettingsChanged, this, &MainWindow::saveTrackTableViewSettings);
 
     m_libraryCenterStack->addWidget(m_musicExplorerView);

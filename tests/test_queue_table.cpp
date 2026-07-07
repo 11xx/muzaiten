@@ -10,8 +10,10 @@
 #include <QBrush>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QMenu>
 #include <QTableView>
 #include <QTest>
+#include <QTimer>
 
 class QueueTableTest : public QObject {
     Q_OBJECT
@@ -145,6 +147,48 @@ private slots:
         QCOMPARE(layout->columnPriority(QStringLiteral("track")), ResponsiveColumnPriority::HideEarly);
         QCOMPARE(layout->columnPriority(QStringLiteral("year")), ResponsiveColumnPriority::HideEarly);
         QCOMPARE(layout->columnPriority(QStringLiteral("position")), ResponsiveColumnPriority::HideEarly);
+    }
+
+    void emptyAreaMenuKeepsQueueWideActions()
+    {
+        QueueStore store;
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        table.setQueueIsPlaylistSourced(true);
+        table.resize(640, 260);
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+
+        QStringList actions;
+        bool sawMenu = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            sawMenu = true;
+            for (QAction *action : menu->actions()) {
+                if (!action->isSeparator()) {
+                    actions << action->text();
+                }
+            }
+            menu->close();
+        });
+
+        QVERIFY(QMetaObject::invokeMethod(view, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, QPoint(12, 120))));
+        QVERIFY(sawMenu);
+        QCOMPARE(actions, (QStringList{
+                              QStringLiteral("Clear play next priority"),
+                              QStringLiteral("Clear queue"),
+                              QStringLiteral("Save queue as…"),
+                              QStringLiteral("Restore saved queue..."),
+                              QStringLiteral("Detach queue from playlist"),
+                          }));
     }
 
     void currentPlayingDoesNotStealSelection()

@@ -12,6 +12,7 @@
 #include "ui/TrackTableRowStyle.h"
 
 class QEvent;
+class QMenu;
 class QMouseEvent;
 class QWheelEvent;
 class ResponsiveColumnLayout;
@@ -74,6 +75,7 @@ signals:
     void addToQueueTemporaryRequested(const QVector<Track> &tracks);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void startRadioRequested(const Track &track);
+    void startArtistRadioRequested(const QString &artistName);
     void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
@@ -89,8 +91,12 @@ protected:
 private:
     void showHeaderMenu(const QPoint &pos);
     void showCellMenu(const QPoint &pos);
+    void appendTableLayoutActions(QMenu &menu);
+    QVector<Track> allTracksForContextMenu() const;
     QVector<Track> tracksForContextRow(int row) const;
     QVector<Track> tracksForActionRow(int row) const;
+    QString singleVisibleArtistForContextMenu() const;
+    void playAllTracks(const QVector<Track> &tracks);
     void reselectMarkedRows();
     void setCurrentTrackMarked(bool marked);
     void setHoveredRow(int row);

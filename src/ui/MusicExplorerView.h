@@ -16,6 +16,7 @@
 
 class ArtworkCache;
 class QColor;
+class QMenu;
 class QScrollArea;
 class QVBoxLayout;
 
@@ -31,6 +32,7 @@ public:
     void setQueueIsPlaylistSourced(bool sourced);
     void refreshExpandedTracks();
     void applyAlbumGridViewSettingsJson(const QString &json);
+    QString albumGridViewSettingsJson() const;
     void applyTrackTableViewSettingsJson(const QString &json);
     QString trackTableViewSettingsJson() const;
     void setNavigationScrollPadding(int rows);
@@ -82,7 +84,9 @@ signals:
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
     void startRadioRequested(const Track &track);
+    void startArtistRadioRequested(const QString &artistName);
     void trackRatingChanged(const Track &track, int rating0To100);
+    void albumGridViewSettingsChanged();
     void trackTableViewSettingsChanged();
 
 protected:
@@ -116,6 +120,9 @@ private:
     void ensureExpandedPanelVisible();
     void ensureInlineTrackVisible(int direction);
     void showAlbumContextMenu(int row, const QPoint &globalPos);
+    void showBackgroundContextMenu(const QPoint &globalPos);
+    void appendAlbumViewActions(QMenu &menu);
+    void applyAlbumViewSettingsChanged(bool resort);
     bool handleInlineTrackKey(QKeyEvent *event);
     int columnCountForWidth(int width) const;
     int rowForTitle(const QString &albumTitle) const;

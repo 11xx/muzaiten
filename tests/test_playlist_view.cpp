@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QListWidget>
+#include <QMenu>
 #include <QMetaObject>
 #include <QSignalSpy>
 #include <QScrollBar>
@@ -17,6 +18,7 @@
 #include <QHeaderView>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include <QUuid>
 
 class PlaylistViewTest : public QObject {
@@ -236,6 +238,56 @@ private slots:
         QCOMPARE(table->model()->headerData(5, Qt::Horizontal, Qt::DisplayRole).toString(), QStringLiteral("Rating"));
         QVERIFY(header->isSectionHidden(5));
         QCOMPARE(header->visualIndex(5), header->count() - 1);
+    }
+
+    void emptyItemMenuOffersPlaylistActions()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-empty-menu-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Empty"));
+        QVERIFY(playlistId > 0);
+
+        PlaylistView view;
+        view.resize(900, 260);
+        view.setDatabase(&db);
+        view.selectPlaylist(playlistId);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+        auto *table = view.findChild<QTableView *>();
+        QVERIFY(table != nullptr);
+
+        QStringList actions;
+        QList<bool> enabled;
+        bool sawMenu = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            sawMenu = true;
+            for (QAction *action : menu->actions()) {
+                if (!action->isSeparator()) {
+                    actions << action->text();
+                    enabled << action->isEnabled();
+                }
+            }
+            menu->close();
+        });
+
+        QVERIFY(QMetaObject::invokeMethod(table, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, QPoint(12, 80))));
+        QVERIFY(sawMenu);
+        QCOMPARE(actions, (QStringList{
+                              QStringLiteral("Add song..."),
+                              QStringLiteral("Import into this playlist..."),
+                              QStringLiteral("Play playlist"),
+                              QStringLiteral("New playlist..."),
+                          }));
+        QCOMPARE(enabled, (QList<bool>{true, true, true, true}));
     }
 
     void nowPlayingRowPaintsLeftMarker()

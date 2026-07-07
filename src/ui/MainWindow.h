@@ -111,6 +111,7 @@ private:
     void loadViewSettings();
     void saveTrackTableViewSettings();
     void saveAlbumGridViewSettings();
+    void saveMusicExplorerAlbumGridViewSettings();
     void saveArtistSidebarViewSettings();
     void saveRightSidebarViewSettings();
     void saveQueueScreenViewSettings();

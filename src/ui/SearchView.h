@@ -66,6 +66,7 @@ signals:
     void findInLibraryRequested(Track track);
     void findFileRequested(Track track);
     void propertiesRequested(Track track);
+    void searchRankingRequested();
 
 protected:
     void changeEvent(QEvent *event) override;

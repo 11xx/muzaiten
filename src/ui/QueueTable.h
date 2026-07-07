@@ -13,6 +13,7 @@ class QueueStore;
 class QAbstractTableModel;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QStyledItemDelegate;
 class QTableView;
 class PanelSearchBar;
@@ -79,6 +80,7 @@ protected:
 private:
     void showHeaderMenu(const QPoint &pos);
     void showQueueMenu(const QPoint &pos);
+    void appendQueueWideActions(QMenu &menu);
     void setHoveredRow(int row);
     void updateHoverFromCursor();
     void applyPresetDefaults();

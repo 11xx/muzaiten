@@ -1754,9 +1754,18 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     const QModelIndex index = m_itemTable->indexAt(pos);
     if (!index.isValid()) {
         QMenu menu(this);
+        const bool savedQueue = currentSelectionIsSavedQueue();
+        const bool hasPlayableCollection = savedQueue || m_currentPlaylistId > 0;
         QAction *addSong = menu.addAction(QStringLiteral("Add song..."));
-        addSong->setEnabled(m_currentPlaylistId > 0);
+        addSong->setEnabled(!savedQueue && m_currentPlaylistId > 0);
         connect(addSong, &QAction::triggered, this, &PlaylistView::addSongToCurrentPlaylist);
+        QAction *importAction = menu.addAction(QStringLiteral("Import into this playlist..."));
+        importAction->setEnabled(!savedQueue && m_currentPlaylistId > 0);
+        connect(importAction, &QAction::triggered, this, &PlaylistView::importIntoCurrentPlaylist);
+        QAction *playPlaylist = menu.addAction(QStringLiteral("Play playlist"));
+        playPlaylist->setEnabled(hasPlayableCollection);
+        connect(playPlaylist, &QAction::triggered, this, &PlaylistView::playCurrentPlaylist);
+        menu.addAction(QStringLiteral("New playlist..."), this, &PlaylistView::createPlaylist);
         menu.exec(m_itemTable->viewport()->mapToGlobal(pos));
         return;
     }

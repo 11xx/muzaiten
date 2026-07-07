@@ -1062,6 +1062,9 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     }
     const int row = m_view->rowAt(pos.y());
     if (row < 0 || row >= m_store->tracks().size()) {
+        QMenu menu(this);
+        appendQueueWideActions(menu);
+        menu.exec(m_view->viewport()->mapToGlobal(pos));
         return;
     }
     if (!m_view->selectionModel()->isRowSelected(row, QModelIndex())) {
@@ -1149,6 +1152,18 @@ void QueueTable::showQueueMenu(const QPoint &pos)
         }
         emit rowsRemoveRequested(rows);
     });
+
+    appendQueueWideActions(menu);
+
+    menu.exec(m_view->viewport()->mapToGlobal(pos));
+}
+
+void QueueTable::appendQueueWideActions(QMenu &menu)
+{
+    if (m_store == nullptr) {
+        return;
+    }
+
     QAction *clearPlayNext = menu.addAction(QStringLiteral("Clear play next priority"));
     clearPlayNext->setEnabled(m_store->playNextEnd() > m_store->playNextBegin() && m_store->playNextBegin() >= 0);
     connect(clearPlayNext, &QAction::triggered, this, [this]() {
@@ -1176,8 +1191,6 @@ void QueueTable::showQueueMenu(const QPoint &pos)
             emit unlinkFromPlaylistRequested();
         });
     }
-
-    menu.exec(m_view->viewport()->mapToGlobal(pos));
 }
 
 bool QueueTable::handleKeyPress(QKeyEvent *event)

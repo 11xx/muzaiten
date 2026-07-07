@@ -4,6 +4,10 @@
 
 ### Added
 
+- Empty-area context menus now expose view-level actions in the queue, library
+  track table, search results, Music Explorer, and playlist item table, so a
+  right-click on whitespace no longer dead-ends common queue, search, layout,
+  and playlist commands.
 - The menu bar was reorganized around what muzaiten actually is. "File" is
   now "Library" (everything in it manages the library) and hosts the MPD
   source config that previously hid under Settings. Radio gets its own
