@@ -144,6 +144,11 @@
   embeddings and precomputed cosine neighbors to `features.sqlite` schema v2.
   The app accepts both schema v1 and v2 databases read-only; model weights stay
   outside the repository cache and are verified before use.
+- When CLAP embeddings are present, radio now scores an explainable "sounds
+  similar" audio component against the session's rolling sonic centroid and
+  augments seeded/anchorless candidate pools with precomputed sonic neighbors,
+  helping tag-poor tracks participate without changing behavior for libraries
+  that have no embeddings.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
