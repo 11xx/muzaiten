@@ -61,6 +61,8 @@ set(MUZAITEN_SOURCES
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
     src/features/FeatureStore.cpp
+    src/features/QualityRank.cpp
+    src/features/SongIdentity.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
@@ -187,6 +189,8 @@ set(MUZAITEN_HEADERS
     src/db/SettingsStore.h
     src/db/Schema.h
     src/features/FeatureStore.h
+    src/features/QualityRank.h
+    src/features/SongIdentity.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
     src/mpd/MpdClient.h
@@ -339,6 +343,8 @@ add_executable(muzaitenctl
     src/ipc/IpcSocket.cpp
     src/db/Database.cpp
     src/features/FeatureStore.cpp
+    src/features/QualityRank.cpp
+    src/features/SongIdentity.cpp
     src/core/GenreTags.cpp
     src/core/MetadataBlob.cpp
     src/core/Rating.cpp

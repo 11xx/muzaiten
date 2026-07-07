@@ -106,6 +106,24 @@ target_compile_features(test_feature_store PRIVATE cxx_std_26)
 add_test(NAME test_feature_store COMMAND test_feature_store)
 set_tests_properties(test_feature_store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_song_identity
+    test_song_identity.cpp
+    ../src/features/SongIdentity.cpp
+)
+target_include_directories(test_song_identity PRIVATE ../src)
+target_link_libraries(test_song_identity PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_song_identity PRIVATE cxx_std_26)
+add_test(NAME test_song_identity COMMAND test_song_identity)
+
+add_executable(test_quality_rank
+    test_quality_rank.cpp
+    ../src/features/QualityRank.cpp
+)
+target_include_directories(test_quality_rank PRIVATE ../src)
+target_link_libraries(test_quality_rank PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_quality_rank PRIVATE cxx_std_26)
+add_test(NAME test_quality_rank COMMAND test_quality_rank)
+
 add_executable(test_play_events
     test_play_events.cpp
     ../src/scrobble/ListenHistoryStore.cpp
