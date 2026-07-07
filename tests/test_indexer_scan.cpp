@@ -26,6 +26,7 @@ class IndexerScanTest final : public QObject {
 
 private slots:
     void generatedFixtureMatrixWritesSchemaV3Features();
+    void groupIdsStayStableWhenLibraryGrows();
 };
 
 namespace {
@@ -425,6 +426,168 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QCOMPARE(status.value(QStringLiteral("statuses")).toObject().value(QStringLiteral("ok")).toInt(), 8);
     QCOMPARE(status.value(QStringLiteral("featured_groups")).toInt(),
              first.value(QStringLiteral("featured_groups")).toInt());
+}
+
+void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    requireTool(QStringLiteral("fpcalc"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir audioDir(dir.filePath(QStringLiteral("audio")));
+    QVERIFY(QDir().mkpath(audioDir.absolutePath()));
+
+    // The file added later sorts alphabetically FIRST: under renumber-style
+    // regrouping it would claim id 1 and shift every existing group.
+    const QString tone = audioDir.filePath(QStringLiteral("m-tone.flac"));
+    const QString click = audioDir.filePath(QStringLiteral("z-click.wav"));
+    const QString added = audioDir.filePath(QStringLiteral("aaa-noise.wav"));
+
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("sine=frequency=550:duration=12:sample_rate=44100"), tone});
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("aevalsrc=(lt(mod(t\\,0.5)\\,0.002))*0.9:duration=15:sample_rate=44100"),
+            click});
+
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {tone, click});
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        library,
+        QStringLiteral("--features"),
+        features,
+        QStringLiteral("--json"),
+    };
+    runIndexer(scanArgs);
+
+    qint64 toneGroup = -1;
+    qint64 clickGroup = -1;
+    QStringList toneFeatureBefore;
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        toneGroup = groupFor(db, tone);
+        clickGroup = groupFor(db, click);
+        QVERIFY(toneGroup != clickGroup);
+        for (const QString &row : featureRows(db)) {
+            if (row.startsWith(QStringLiteral("%1|").arg(toneGroup))) {
+                toneFeatureBefore << row;
+            }
+        }
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    QCOMPARE(toneFeatureBefore.size(), 1);
+
+    // Plant embedder-owned rows the way tools/embedder writes them; a
+    // regroup must never orphan or misassociate these while their content
+    // still exists.
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-embed-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QString error;
+            QVERIFY2(execSql(query, QStringLiteral(
+                                       "CREATE TABLE IF NOT EXISTS embeddings("
+                                       " content_group_id INTEGER PRIMARY KEY,"
+                                       " model TEXT NOT NULL, version TEXT NOT NULL,"
+                                       " dim INTEGER NOT NULL, vector BLOB NOT NULL)"),
+                             &error),
+                     qPrintable(error));
+            QVERIFY2(execSql(query, QStringLiteral(
+                                       "CREATE TABLE IF NOT EXISTS track_neighbors("
+                                       " content_group_id INTEGER NOT NULL,"
+                                       " neighbor_group_id INTEGER NOT NULL,"
+                                       " rank INTEGER NOT NULL, cosine REAL NOT NULL,"
+                                       " PRIMARY KEY(content_group_id, rank))"),
+                             &error),
+                     qPrintable(error));
+            QSqlQuery insert(db);
+            insert.prepare(QStringLiteral(
+                "INSERT INTO embeddings(content_group_id, model, version, dim, vector)"
+                " VALUES(?, 'test-model', 'v1', 2, x'0000803f00000000')"));
+            insert.addBindValue(toneGroup);
+            QVERIFY2(insert.exec(), qPrintable(insert.lastError().text()));
+            QSqlQuery neighbor(db);
+            neighbor.prepare(QStringLiteral(
+                "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine)"
+                " VALUES(?, ?, 1, 0.5)"));
+            neighbor.addBindValue(toneGroup);
+            neighbor.addBindValue(clickGroup);
+            QVERIFY2(neighbor.exec(), qPrintable(neighbor.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=pink:duration=12:amplitude=0.2:sample_rate=44100"),
+            added});
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-grow-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(library);
+            QVERIFY(db.open());
+            const QPair<qint64, qint64> stats = fileStats(added);
+            QSqlQuery insert(db);
+            insert.prepare(QStringLiteral(
+                "INSERT INTO tracks(path, file_mtime, file_size, missing) VALUES(?, ?, ?, 0)"));
+            insert.addBindValue(added);
+            insert.addBindValue(stats.first);
+            insert.addBindValue(stats.second);
+            QVERIFY2(insert.exec(), qPrintable(insert.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    const QJsonObject grown = runIndexer(scanArgs);
+    QCOMPARE(grown.value(QStringLiteral("scanned")).toInt(), 1);
+    QCOMPARE(grown.value(QStringLiteral("skipped")).toInt(), 2);
+
+    QString connectionName;
+    QSqlDatabase db = openReadOnly(features, &connectionName);
+    QVERIFY(db.open());
+
+    QCOMPARE(groupFor(db, tone), toneGroup);
+    QCOMPARE(groupFor(db, click), clickGroup);
+    const qint64 addedGroup = groupFor(db, added);
+    QVERIFY(addedGroup != toneGroup && addedGroup != clickGroup);
+
+    QStringList toneFeatureAfter;
+    for (const QString &row : featureRows(db)) {
+        if (row.startsWith(QStringLiteral("%1|").arg(toneGroup))) {
+            toneFeatureAfter << row;
+        }
+    }
+    QCOMPARE(toneFeatureAfter, toneFeatureBefore);
+
+    QSqlQuery embedding(db);
+    embedding.prepare(QStringLiteral("SELECT model FROM embeddings WHERE content_group_id = ?"));
+    embedding.addBindValue(toneGroup);
+    QVERIFY2(embedding.exec() && embedding.next(), "planted embedding lost its group");
+    QCOMPARE(embedding.value(0).toString(), QStringLiteral("test-model"));
+
+    QSqlQuery neighbor(db);
+    neighbor.prepare(QStringLiteral(
+        "SELECT neighbor_group_id FROM track_neighbors WHERE content_group_id = ?"));
+    neighbor.addBindValue(toneGroup);
+    QVERIFY2(neighbor.exec() && neighbor.next(), "planted neighbor row lost its group");
+    QCOMPARE(neighbor.value(0).toLongLong(), clickGroup);
+
+    db.close();
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 QTEST_MAIN(IndexerScanTest)

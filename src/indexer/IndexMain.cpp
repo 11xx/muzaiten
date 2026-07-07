@@ -91,6 +91,7 @@ struct GroupRow {
     qint64 durationMs = 0;
     QString decodeHash;
     std::vector<qint32> chromaprint;
+    qint64 oldGroupId = -1; // pre-regroup content_group_id; -1 = none
 };
 
 struct ScalarExtraction {
@@ -586,7 +587,7 @@ std::vector<GroupRow> loadGroupRows(QSqlDatabase &database)
 {
     QSqlQuery query(database);
     if (!query.exec(QStringLiteral(
-            "SELECT path, duration_ms, decode_hash, chromaprint_fp "
+            "SELECT path, duration_ms, decode_hash, chromaprint_fp, content_group_id "
             "FROM files "
             "WHERE status = 'ok' "
             "  AND duration_ms IS NOT NULL "
@@ -603,6 +604,7 @@ std::vector<GroupRow> loadGroupRows(QSqlDatabase &database)
             query.value(1).toLongLong(),
             query.value(2).toString(),
             decodeFingerprint(query.value(3).toByteArray()),
+            query.value(4).isNull() ? -1 : query.value(4).toLongLong(),
         });
     }
     return rows;
@@ -714,41 +716,130 @@ std::vector<std::vector<std::size_t>> groupedRows(const std::vector<GroupRow> &r
     return groups;
 }
 
+// Group ids must be STABLE across rescans: features, embeddings, and
+// track_neighbors rows all key on content_group_id, and embeddings are
+// expensive to recompute. A group that keeps (part of) its membership keeps
+// its id; only genuinely new content gets a new id, and rows keyed to ids
+// that no longer exist are removed.
+std::vector<qint64> assignStableGroupIds(const std::vector<GroupRow> &rows,
+                                         const std::vector<std::vector<std::size_t>> &groups)
+{
+    // The old representative (first path in load order, which is sorted) is
+    // the tie-breaker when an old group's members end up split across new
+    // groups: the half holding the old representative keeps the id.
+    QHash<qint64, QString> oldRepresentative;
+    qint64 maxOldId = 0;
+    for (const GroupRow &row : rows) {
+        if (row.oldGroupId < 0) {
+            continue;
+        }
+        maxOldId = std::max(maxOldId, row.oldGroupId);
+        if (!oldRepresentative.contains(row.oldGroupId)) {
+            oldRepresentative.insert(row.oldGroupId, row.path);
+        }
+    }
+
+    std::vector<qint64> assigned(groups.size(), -1);
+    QSet<qint64> claimed;
+
+    // Pass 1: a group that contains an old group's representative keeps that
+    // old id (smallest such id on merges, for determinism).
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+        qint64 best = -1;
+        for (std::size_t member : groups[g]) {
+            const qint64 oldId = rows[member].oldGroupId;
+            if (oldId < 0 || claimed.contains(oldId)) {
+                continue;
+            }
+            if (oldRepresentative.value(oldId) == rows[member].path && (best < 0 || oldId < best)) {
+                best = oldId;
+            }
+        }
+        if (best >= 0) {
+            assigned[g] = best;
+            claimed.insert(best);
+        }
+    }
+
+    // Pass 2: otherwise reuse the smallest still-unclaimed old id among the
+    // group's members (covers representative files that vanished).
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+        if (assigned[g] >= 0) {
+            continue;
+        }
+        qint64 best = -1;
+        for (std::size_t member : groups[g]) {
+            const qint64 oldId = rows[member].oldGroupId;
+            if (oldId >= 0 && !claimed.contains(oldId) && (best < 0 || oldId < best)) {
+                best = oldId;
+            }
+        }
+        if (best >= 0) {
+            assigned[g] = best;
+            claimed.insert(best);
+        }
+    }
+
+    // Pass 3: genuinely new content gets fresh ids past every id ever seen.
+    qint64 nextId = maxOldId + 1;
+    for (qint64 &id : assigned) {
+        if (id < 0) {
+            id = nextId++;
+        }
+    }
+    return assigned;
+}
+
+void deleteOrphanedGroupRows(QSqlDatabase &database)
+{
+    const QStringList tables = database.tables();
+    execSql(database, QStringLiteral(
+                          "DELETE FROM features WHERE content_group_id NOT IN "
+                          "(SELECT id FROM content_groups)"));
+    // The embedder owns these tables, so they exist only once it has run.
+    if (tables.contains(QStringLiteral("embeddings"))) {
+        execSql(database, QStringLiteral(
+                              "DELETE FROM embeddings WHERE content_group_id NOT IN "
+                              "(SELECT id FROM content_groups)"));
+    }
+    if (tables.contains(QStringLiteral("track_neighbors"))) {
+        execSql(database, QStringLiteral(
+                              "DELETE FROM track_neighbors WHERE content_group_id NOT IN "
+                              "(SELECT id FROM content_groups) OR neighbor_group_id NOT IN "
+                              "(SELECT id FROM content_groups)"));
+    }
+}
+
 int regroupContent(QSqlDatabase &database, bool clearFeatures)
 {
     const std::vector<GroupRow> rows = loadGroupRows(database);
     const std::vector<std::vector<std::size_t>> groups = groupedRows(rows);
+    const std::vector<qint64> groupIds = assignStableGroupIds(rows, groups);
 
     if (!database.transaction()) {
         fail(database.lastError().text());
     }
     execSql(database, QStringLiteral("UPDATE files SET content_group_id = NULL"));
     execSql(database, QStringLiteral("DELETE FROM content_groups"));
-    QSqlQuery reset(database);
-    reset.exec(QStringLiteral("DELETE FROM sqlite_sequence WHERE name = 'content_groups'"));
     if (clearFeatures) {
         execSql(database, QStringLiteral("DELETE FROM features"));
     }
 
-    qint64 groupId = 1;
-    for (const std::vector<std::size_t> &members : groups) {
+    for (std::size_t g = 0; g < groups.size(); ++g) {
         QSqlQuery insertGroup(database);
         prepareOrFail(insertGroup, QStringLiteral("INSERT INTO content_groups(id) VALUES(?)"));
-        insertGroup.addBindValue(groupId);
+        insertGroup.addBindValue(groupIds[g]);
         execPrepared(insertGroup);
 
-        for (std::size_t member : members) {
+        for (std::size_t member : groups[g]) {
             QSqlQuery updateFile(database);
             prepareOrFail(updateFile, QStringLiteral("UPDATE files SET content_group_id = ? WHERE path = ?"));
-            updateFile.addBindValue(groupId);
+            updateFile.addBindValue(groupIds[g]);
             updateFile.addBindValue(rows[member].path);
             execPrepared(updateFile);
         }
-        ++groupId;
     }
-    execSql(database, QStringLiteral(
-                          "DELETE FROM features WHERE content_group_id NOT IN "
-                          "(SELECT id FROM content_groups)"));
+    deleteOrphanedGroupRows(database);
     if (!database.commit()) {
         fail(database.lastError().text());
     }
