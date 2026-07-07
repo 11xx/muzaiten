@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 4;
+constexpr int kSchemaVersion = 6;
 
 void insertIfPresent(QJsonObject &object, const QString &key, const QString &value)
 {
@@ -209,6 +209,29 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         "CREATE INDEX IF NOT EXISTS idx_play_events_track ON play_events(track_path, started_at)"));
     create.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_play_events_session ON play_events(session_id)"));
+    create.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS rating_events ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " occurred_at INTEGER NOT NULL,"
+        " track_path TEXT NOT NULL,"
+        " mb_recording_id TEXT,"
+        " old_user_rating INTEGER,"
+        " old_effective_rating INTEGER,"
+        " new_rating INTEGER,"
+        " source_surface TEXT NOT NULL,"
+        " playing_track_path TEXT,"
+        " playing_source TEXT,"
+        " radio_active INTEGER NOT NULL DEFAULT 0,"
+        " track_json TEXT)"));
+    create.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS queue_removals ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " occurred_at INTEGER NOT NULL,"
+        " track_path TEXT NOT NULL,"
+        " mb_recording_id TEXT,"
+        " was_radio_pick INTEGER NOT NULL,"
+        " was_unheard INTEGER NOT NULL,"
+        " radio_active INTEGER NOT NULL)"));
     create.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
 
     // Scrobbler backfill (Stage 0b). Historical listens pulled from a service
@@ -525,6 +548,143 @@ int ListenHistoryStore::playEventCount() const
         return 0;
     }
     return query.value(0).toInt();
+}
+
+bool ListenHistoryStore::recordRatingEvent(const RatingEvent &event)
+{
+    if (!m_db.isOpen() || event.occurredAtSecs <= 0 || event.track.path.isEmpty() || event.sourceSurface.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO rating_events(occurred_at, track_path, mb_recording_id, old_user_rating, "
+        "old_effective_rating, new_rating, source_surface, playing_track_path, playing_source, "
+        "radio_active, track_json) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+    query.addBindValue(event.occurredAtSecs);
+    query.addBindValue(event.track.path);
+    query.addBindValue(event.track.musicBrainz.recordingId);
+    query.addBindValue(event.hasOldUserRating ? QVariant(event.oldUserRating0To100) : QVariant(QMetaType(QMetaType::Int)));
+    query.addBindValue(event.oldEffectiveRating0To100 >= 0
+                           ? QVariant(event.oldEffectiveRating0To100)
+                           : QVariant(QMetaType(QMetaType::Int)));
+    query.addBindValue(event.newRating0To100 >= 0
+                           ? QVariant(event.newRating0To100)
+                           : QVariant(QMetaType(QMetaType::Int)));
+    query.addBindValue(event.sourceSurface);
+    query.addBindValue(event.playingTrackPath.isEmpty()
+                           ? QVariant(QMetaType(QMetaType::QString))
+                           : QVariant(event.playingTrackPath));
+    query.addBindValue(event.playingSource.isEmpty()
+                           ? QVariant(QMetaType(QMetaType::QString))
+                           : QVariant(event.playingSource));
+    query.addBindValue(event.radioActive ? 1 : 0);
+    query.addBindValue(QString::fromUtf8(QJsonDocument(trackToJson(event.track)).toJson(QJsonDocument::Compact)));
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+QVector<ListenHistoryStore::RatingEvent> ListenHistoryStore::ratingEvents(int limit) const
+{
+    QVector<RatingEvent> events;
+    if (!m_db.isOpen() || limit == 0) {
+        return events;
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT id, occurred_at, track_path, mb_recording_id, old_user_rating, old_effective_rating, new_rating, "
+        "source_surface, playing_track_path, playing_source, radio_active, track_json "
+        "FROM rating_events ORDER BY occurred_at ASC, id ASC");
+    if (limit > 0) {
+        sql += QStringLiteral(" LIMIT ?");
+    }
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    if (limit > 0) {
+        query.addBindValue(limit);
+    }
+    if (!query.exec()) {
+        return events;
+    }
+    while (query.next()) {
+        RatingEvent event;
+        event.id = query.value(0).toLongLong();
+        event.occurredAtSecs = query.value(1).toLongLong();
+        event.hasOldUserRating = !query.value(4).isNull();
+        event.oldUserRating0To100 = event.hasOldUserRating ? query.value(4).toInt() : -1;
+        event.oldEffectiveRating0To100 = query.value(5).isNull() ? -1 : query.value(5).toInt();
+        event.newRating0To100 = query.value(6).isNull() ? -1 : query.value(6).toInt();
+        event.sourceSurface = query.value(7).toString();
+        event.playingTrackPath = query.value(8).toString();
+        event.playingSource = query.value(9).toString();
+        event.radioActive = query.value(10).toInt() != 0;
+        event.track = trackFromJson(QJsonDocument::fromJson(query.value(11).toString().toUtf8()).object());
+        if (event.track.path.isEmpty()) {
+            event.track.path = query.value(2).toString();
+        }
+        if (event.track.musicBrainz.recordingId.isEmpty()) {
+            event.track.musicBrainz.recordingId = query.value(3).toString();
+        }
+        events.push_back(event);
+    }
+    return events;
+}
+
+bool ListenHistoryStore::recordQueueRemoval(const QueueRemovalEvent &event)
+{
+    if (!m_db.isOpen() || event.occurredAtSecs <= 0 || event.track.path.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO queue_removals(occurred_at, track_path, mb_recording_id, "
+        "was_radio_pick, was_unheard, radio_active) "
+        "VALUES(?, ?, ?, ?, ?, ?)"));
+    query.addBindValue(event.occurredAtSecs);
+    query.addBindValue(event.track.path);
+    query.addBindValue(event.track.musicBrainz.recordingId.isEmpty()
+                           ? QVariant(QMetaType(QMetaType::QString))
+                           : QVariant(event.track.musicBrainz.recordingId));
+    query.addBindValue(event.wasRadioPick ? 1 : 0);
+    query.addBindValue(event.wasUnheard ? 1 : 0);
+    query.addBindValue(event.radioActive ? 1 : 0);
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+QVector<ListenHistoryStore::QueueRemovalEvent> ListenHistoryStore::queueRemovalEvents(int limit) const
+{
+    QVector<QueueRemovalEvent> events;
+    if (!m_db.isOpen() || limit == 0) {
+        return events;
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT id, occurred_at, track_path, mb_recording_id, was_radio_pick, was_unheard, radio_active "
+        "FROM queue_removals ORDER BY occurred_at ASC, id ASC");
+    if (limit > 0) {
+        sql += QStringLiteral(" LIMIT ?");
+    }
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    if (limit > 0) {
+        query.addBindValue(limit);
+    }
+    if (!query.exec()) {
+        return events;
+    }
+    while (query.next()) {
+        QueueRemovalEvent event;
+        event.id = query.value(0).toLongLong();
+        event.occurredAtSecs = query.value(1).toLongLong();
+        event.track.path = query.value(2).toString();
+        event.track.musicBrainz.recordingId = query.value(3).toString();
+        event.wasRadioPick = query.value(4).toInt() != 0;
+        event.wasUnheard = query.value(5).toInt() != 0;
+        event.radioActive = query.value(6).toInt() != 0;
+        events.push_back(event);
+    }
+    return events;
 }
 
 int ListenHistoryStore::forgetTrackBehavior(const QStringList &paths, bool includeImportedListens)

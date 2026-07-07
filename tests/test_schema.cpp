@@ -1,6 +1,7 @@
 #include "core/GenreTags.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
+#include "db/Schema.h"
 #include "search/IndexCache.h"
 #include "search/SearchRecord.h"
 
@@ -78,7 +79,8 @@ void SchemaTest::migratesFreshDatabase()
     QSqlQuery query(QSqlDatabase::database(connectionName));
     QVERIFY(query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 12);
+    QCOMPARE(query.value(0).toInt(), Schema::currentVersion);
+    QVERIFY(query.exec(QStringLiteral("SELECT 1 FROM radio_ignored_genres LIMIT 1")));
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()

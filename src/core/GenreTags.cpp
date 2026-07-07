@@ -25,8 +25,8 @@ QStringList fromMetadata(const MetadataBlob::FullMetadata &metadata)
     }
 
     // Some taggers pack multiple genres into a single tag value separated by
-    // ';', ',', '/' or NUL, on top of GENRE itself being a repeatable tag.
-    static const QRegularExpression separator(QStringLiteral("[;,/\\x00]"));
+    // ';', ',', '/', '|' or NUL, on top of GENRE itself being a repeatable tag.
+    static const QRegularExpression separator(QStringLiteral("[;,/|\\x00]"));
 
     QSet<QString> seenFolded;
     for (const QString &value : *it) {

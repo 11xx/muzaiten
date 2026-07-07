@@ -175,12 +175,16 @@ QString sqlPlaceholders(qsizetype count)
     return marks.join(QStringLiteral(", "));
 }
 
-QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases)
+QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases,
+                                  const QSet<QString> &ignored)
 {
     QStringList terms;
     QSet<QString> seen;
     for (const QString &genre : foldedGenres) {
         const QString canonical = GenreTags::canonical(genre, aliases);
+        if (ignored.contains(canonical)) {
+            continue;
+        }
         if (!canonical.isEmpty() && !seen.contains(canonical)) {
             seen.insert(canonical);
             terms.push_back(canonical);
@@ -652,7 +656,77 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 12;
+    // v13: re-backfill queryable genres after the splitter learned about '|'
+    // packed genre tags. Metadata blobs stay untouched; track_genres is the
+    // derived index and can be rebuilt deterministically.
+    {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 13"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            if (!m_db.transaction()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+            if (!execSql(query, QStringLiteral("DELETE FROM track_genres"), &m_lastError)) {
+                m_db.rollback();
+                return false;
+            }
+            QSqlQuery bfQuery(m_db);
+            bfQuery.prepare(QStringLiteral(
+                "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
+            if (!bfQuery.exec()) {
+                m_lastError = bfQuery.lastError().text();
+                m_db.rollback();
+                return false;
+            }
+            QSqlQuery ins(m_db);
+            ins.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
+            while (bfQuery.next()) {
+                const qint64 trackId = bfQuery.value(0).toLongLong();
+                const qint64 rawSize = bfQuery.value(1).toLongLong();
+                const QByteArray blob = bfQuery.value(2).toByteArray();
+                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
+                for (const QString &genre : GenreTags::fromMetadata(meta)) {
+                    ins.addBindValue(trackId);
+                    ins.addBindValue(genre);
+                    ins.addBindValue(GenreTags::folded(genre));
+                    if (!ins.exec()) {
+                        m_lastError = ins.lastError().text();
+                        m_db.rollback();
+                        return false;
+                    }
+                }
+            }
+            if (!m_db.commit()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+        }
+    }
+
+    if (!execSql(query, QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(13, datetime('now'))"), &m_lastError)) {
+        return false;
+    }
+
+    // v14: per-library radio-only genre ignore list. Raw track_genres rows
+    // remain visible; AppCore and radio lookup joins consult this table when
+    // building a session snapshot.
+    const QStringList v14Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS radio_ignored_genres (genre_folded TEXT PRIMARY KEY, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(14, datetime('now'))"),
+    };
+    for (const QString &statement : v14Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 14;
 }
 
 QString Database::lastError() const
@@ -1113,6 +1187,58 @@ QHash<QString, int> Database::genreTrackCounts(int *taggedTrackTotal) const
     return counts;
 }
 
+QVector<QPair<QString, int>> Database::genreCountsForArtist(const QString &albumArtist) const
+{
+    QVector<QPair<QString, int>> counts;
+    if (albumArtist.isEmpty()) {
+        return counts;
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT g.genre_folded, COUNT(*) "
+        "FROM track_genres g JOIN tracks t ON t.id = g.track_id "
+        "WHERE t.album_artist_name = ? AND t.missing = 0 AND %1")
+        .arg(visibleTrackPredicate(QStringLiteral("t"), m_showGuessedPlaceholders));
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    sql += QStringLiteral(" GROUP BY g.genre_folded ORDER BY COUNT(*) DESC, g.genre_folded");
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    query.addBindValue(albumArtist);
+    if (query.exec()) {
+        while (query.next()) {
+            counts.push_back({query.value(0).toString(), query.value(1).toInt()});
+        }
+    }
+    return counts;
+}
+
+QStringList Database::sampleArtistsForGenre(const QString &folded, int limit) const
+{
+    QStringList artists;
+    if (folded.isEmpty() || limit <= 0) {
+        return artists;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT DISTINCT t.artist_name "
+        "FROM track_genres g JOIN tracks t ON t.id = g.track_id "
+        "WHERE g.genre_folded = ? AND t.artist_name IS NOT NULL AND t.artist_name <> '' "
+        "ORDER BY t.artist_name COLLATE NOCASE, t.artist_name "
+        "LIMIT ?"));
+    query.addBindValue(folded);
+    query.addBindValue(limit);
+    if (query.exec()) {
+        while (query.next()) {
+            artists.append(query.value(0).toString());
+        }
+    }
+    return artists;
+}
+
 QHash<QString, QString> Database::genreAliases() const
 {
     QHash<QString, QString> aliases;
@@ -1158,6 +1284,42 @@ bool Database::removeGenreAlias(const QString &alias)
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM genre_aliases WHERE alias_folded = ?"));
     query.addBindValue(aliasFolded);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QSet<QString> Database::ignoredRadioGenres() const
+{
+    QSet<QString> ignored;
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT genre_folded FROM radio_ignored_genres"))) {
+        while (query.next()) {
+            ignored.insert(query.value(0).toString());
+        }
+    }
+    return ignored;
+}
+
+bool Database::setRadioGenreIgnored(const QString &genreFolded, bool ignored)
+{
+    const QString folded = GenreTags::folded(genreFolded);
+    if (folded.isEmpty()) {
+        m_lastError = QStringLiteral("Genre is required");
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    if (ignored) {
+        query.prepare(QStringLiteral(
+            "INSERT INTO radio_ignored_genres(genre_folded, updated_at) VALUES(?, datetime('now')) "
+            "ON CONFLICT(genre_folded) DO UPDATE SET updated_at=datetime('now')"));
+    } else {
+        query.prepare(QStringLiteral("DELETE FROM radio_ignored_genres WHERE genre_folded = ?"));
+    }
+    query.addBindValue(folded);
     if (!query.exec()) {
         m_lastError = query.lastError().text();
         return false;
@@ -1361,6 +1523,40 @@ bool Database::setUserTrackRating(const QString &trackPath, int rating0To100)
         return false;
     }
     return true;
+}
+
+Database::TrackRatingSnapshot Database::trackRatingSnapshot(const QString &trackPath) const
+{
+    TrackRatingSnapshot snapshot;
+    if (!m_db.isOpen() || trackPath.isEmpty()) {
+        return snapshot;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT t.rating_0_100, utr.rating_0_100, p.status, t.musicbrainz_recording_id "
+        "FROM tracks t "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.path = ?"));
+    query.addBindValue(trackPath);
+    if (!query.exec() || !query.next()) {
+        return snapshot;
+    }
+
+    snapshot.found = true;
+    const int scannedRating = query.value(0).isNull() ? -1 : query.value(0).toInt();
+    snapshot.hasUserRating = !query.value(1).isNull();
+    snapshot.userRating0To100 = snapshot.hasUserRating ? query.value(1).toInt() : -1;
+    const QString pendingStatus = query.value(2).toString();
+    const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
+        || pendingStatus == QStringLiteral("failed")
+        || pendingStatus == QStringLiteral("blocked_no_writable_path");
+    snapshot.effectiveRating0To100 = pendingDbRating && snapshot.hasUserRating
+        ? snapshot.userRating0To100
+        : (scannedRating >= 0 ? scannedRating : snapshot.userRating0To100);
+    snapshot.mbRecordingId = query.value(3).toString();
+    return snapshot;
 }
 
 bool Database::clearUserTrackRating(const QString &trackPath)
@@ -1889,7 +2085,7 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
     if (foldedGenres.isEmpty() || limit <= 0) {
         return rows;
     }
-    const QStringList lookupGenres = radioGenreLookupTerms(foldedGenres, genreAliases());
+    const QStringList lookupGenres = radioGenreLookupTerms(foldedGenres, genreAliases(), ignoredRadioGenres());
     if (lookupGenres.isEmpty()) {
         return rows;
     }

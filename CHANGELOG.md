@@ -59,7 +59,12 @@
   a right-click menu exposing exploration (a persistent 0–100 setting plus a
   per-session "Adventurous" boost to 85) and the batch size. Play events
   originating from radio picks are now attributed source "radio" instead of
-  riding along as "library_shuffle"/"queue_auto". Active radio and mix
+  riding along as "library_shuffle"/"queue_auto". Manually adding tracks while
+  radio is active is now a defined part of the session contract: queued rows
+  play normally, then join the rolling radio mood once they are heard. Removing
+  queue rows now records local, record-only telemetry for future inspection,
+  including whether the row was an unheard radio pick, without feeding that
+  signal back into scoring. Active radio and mix
   sessions now survive app restarts: the visible queue resumes from the saved
   queue state, while the radio brain restores its sequencing constraints and
   rolling mood but rebuilds candidates and listening affinity from fresh data.
@@ -68,6 +73,11 @@
   radio-backed sessions over long-unheard favorites or rarely played tracks by
   artists with strong listening history. Mixes reuse the normal radio queue,
   reasons, indicator, stop control, exploration, and batch-size behavior.
+- Start Artist Radio: right-click an artist in the library sidebar or run
+  `muzaitenctl start-artist-radio <artist>` to seed radio from that artist's
+  aggregate genres and era. The session opens with a representative track by
+  the artist, then uses the normal radio batching, explanations, reroll,
+  restore, and stop controls.
 - Taste controls: tracks can be marked "Never play on radio" or "Don't learn
   from this", applying to every library copy of the same song; Listening
   History can also forget a song's local recommendation behavior without
@@ -95,11 +105,29 @@
   the existing library without a rescan. Groundwork for genre-based
   recommendations; the accompanying schema bump triggers a one-time search
   index rebuild on first launch.
+- Queryable genre splitting now also treats `|` as a separator, so tags like
+  `Alternative | Other` no longer survive as one folded genre. A one-time
+  library migration rebuilds `track_genres` from the already-stored metadata
+  blobs without rescanning files.
+- `muzaitenctl genre-report` now dumps the folded genre vocabulary offline with
+  document frequency, radio-style IDF, alias/stoplist status, sample artists,
+  and curation flags for near-duplicates, separators, classifier-looking tags,
+  and non-ASCII genre names.
+- `muzaitenctl radio-reasons` now prints the active radio session's stored pick
+  explanations, including scorer components, so tuning can inspect the live
+  queue without hovering UI tooltips.
+- Radio can now ignore curated real genres without hiding them elsewhere:
+  schema v14 adds `radio_ignored_genres`, radio session genre joins/scoring skip
+  ignored canonical genres, `genre-report` marks them, and `muzaitenctl`
+  provides `radio-genre`/`genre-alias` curation verbs.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
   locally in `history.sqlite`. No network use; groundwork for the upcoming
   recommendation engine.
+- Local rating-change telemetry: every explicit track-rating edit now records
+  an append-only event in `history.sqlite` with old/new rating values and the
+  playback/UI context, without changing recommendation scoring behavior.
 
 ## [2026.07.01.2]
 

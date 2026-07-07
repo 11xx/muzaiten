@@ -85,6 +85,14 @@ public:
         NoLearn,
     };
 
+    struct TrackRatingSnapshot {
+        bool found = false;
+        bool hasUserRating = false;
+        int userRating0To100 = -1;
+        int effectiveRating0To100 = -1;
+        QString mbRecordingId;
+    };
+
     explicit Database(QString connectionName);
     ~Database();
 
@@ -129,6 +137,7 @@ public:
     int removeMissingTracks();
     int missingTrackCount() const;
     MetadataBlob::FullMetadata fullMetadata(const QString &path) const;
+    TrackRatingSnapshot trackRatingSnapshot(const QString &trackPath) const;
     bool setUserTrackRating(const QString &trackPath, int rating0To100);
     bool clearUserTrackRating(const QString &trackPath);
     bool setTrackFlag(const QString &trackPath, TrackFlag flag, bool on);
@@ -151,9 +160,17 @@ public:
     // `taggedTrackTotal`, if non-null, receives the count of distinct tracks
     // carrying at least one genre (the IDF numerator base).
     QHash<QString, int> genreTrackCounts(int *taggedTrackTotal = nullptr) const;
+    // Folded-genre -> distinct-track count for one album artist. Ordered
+    // deterministically by descending count, then folded genre, for artist
+    // radio seed aggregation.
+    QVector<QPair<QString, int>> genreCountsForArtist(const QString &albumArtist) const;
+    // Deterministic display samples for human genre curation reports.
+    QStringList sampleArtistsForGenre(const QString &folded, int limit = 3) const;
     QHash<QString, QString> genreAliases() const;
     bool setGenreAlias(const QString &alias, const QString &canonical);
     bool removeGenreAlias(const QString &alias);
+    QSet<QString> ignoredRadioGenres() const;
+    bool setRadioGenreIgnored(const QString &genreFolded, bool ignored);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

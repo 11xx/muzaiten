@@ -98,7 +98,7 @@ private:
     void clearAlbumFilter();
     void refreshAlbumGrid(bool freshLoad = false);
     void refreshTrackTable();
-    void applyTrackRating(const Track &track, int rating0To100);
+    void applyTrackRating(const Track &track, int rating0To100, const QString &sourceSurface);
     void applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100);
     void startRatingTagSync(const QVector<Track> &tracks, int scope);
     void schedulePendingRatingTagSync();
@@ -282,6 +282,9 @@ private:
     // "Restore previous queue" can undo a radio start, then hands the seed
     // path to AppCore::startRadio(). Shows a status message on an unknown seed.
     void startRadioFromSeed(const QString &path);
+    // Same snapshot policy as Start Radio, but seeds the session from an album
+    // artist name instead of one track path.
+    void startArtistRadio(const QString &artistName);
     void applyTrackFlag(const Track &track, const QString &flag, bool on);
     // Same queue-snapshot policy as Start Radio, but starts a seedless mix over
     // the user's listening history.

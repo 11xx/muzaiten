@@ -114,6 +114,7 @@ private slots:
     void radioShuffleAtPercent0UsesQueueShuffle();
     void explicitRadioActiveTakesPrecedenceOverRadioShuffleRoll();
     void radioMidQueueAdvancesLinearly();
+    void radioManualAppendMidQueueAdvancesBeforeProvider();
     void radioAtEndInjectsProviderPickOnAutoAdvance();
     void radioAtEndInjectsProviderPickOnManualNext();
     void radioEmptyProviderFallsBackToEndOfQueue();
@@ -747,6 +748,39 @@ void PlayerCoreTest::radioMidQueueAdvancesLinearly()
     QCOMPARE(m_core->queue().size(), 3);
     QCOMPARE(injected.count(), 0);
     QCOMPARE(radioCalls, 0);
+}
+
+void PlayerCoreTest::radioManualAppendMidQueueAdvancesBeforeProvider()
+{
+    // A user-appended row during active radio is ordinary queue material at
+    // enqueue time. Auto-advance consumes it before asking the provider for the
+    // next radio pick; provider pulls resume only once the queue end is reached.
+    m_core->resetQueue(makeTracks({"/seed"}));
+    int radioCalls = 0;
+    m_core->setRadioProvider([&radioCalls](int, const QSet<QString> &) {
+        ++radioCalls;
+        return QVector<Track>{makeTrack(QStringLiteral("/radio"))};
+    });
+    m_core->setRadioActive(true);
+    m_core->playAt(0);
+    m_core->appendTracks(makeTracks({"/manual"}));
+    radioCalls = 0;
+
+    QSignalSpy injected(m_core.get(), &PlayerCore::aboutToInjectLibraryTrack);
+    emit m_backend->finished();
+
+    QCOMPARE(m_core->queueIndex(), 1);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/manual"));
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(injected.count(), 0);
+
+    const int callsBeforeQueueEnd = radioCalls;
+    emit m_backend->finished();
+
+    QCOMPARE(m_core->queue().size(), 3);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/radio"));
+    QCOMPARE(injected.count(), 1);
+    QVERIFY(radioCalls > callsBeforeQueueEnd);
 }
 
 void PlayerCoreTest::radioAtEndInjectsProviderPickOnAutoAdvance()

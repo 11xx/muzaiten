@@ -6,6 +6,8 @@
 //   muzaitenctl rate 4 && notify-send "rated $(muzaitenctl status --format artist-title)"
 
 #include "cli/SearchCli.h"
+#include "core/GenreTags.h"
+#include "db/Database.h"
 #include "ipc/IpcSocket.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
@@ -20,10 +22,13 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QTextStream>
+#include <QUuid>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -58,6 +63,11 @@ void printUsage()
         "      --fuzzy               fuzzy match instead of exact substring\n"
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
+        "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
+        "  radio-genre ignore <genre> | unignore <genre> | list\n"
+        "                          curate radio-only ignored folded genres (works offline)\n"
+        "  genre-alias set <alias> <canonical> | remove <alias> | list\n"
+        "                          curate folded genre aliases (works offline)\n"
         "  play-file <path>        append a file to the queue and play it\n"
         "  enqueue [--play|--next] <path...>  add files to the queue\n"
         "  raise                   show and focus the running instance's window\n"
@@ -65,7 +75,9 @@ void printUsage()
         "  scrobble-backfill status                 show progress of the current/last backfill\n"
         "  scrobble-backfill cancel                 cancel a running backfill (stops auto-resume)\n"
         "  start-radio <path>      start a radio session seeded from a library track\n"
+        "  start-artist-radio <artist>  start a radio session seeded from an artist\n"
         "  start-mix <mode>        start rediscovery or deepcuts radio mix\n"
+        "  radio-reasons          show live radio pick explanations\n"
         "  stop-radio              stop the current radio session\n"
         "\n"
         "Options:\n"
@@ -243,6 +255,242 @@ bool hasNonAscii(const QString &s)
         }
     }
     return false;
+}
+
+bool hasNonAsciiLetter(const QString &s)
+{
+    for (const QChar c : s) {
+        if (c.isLetter() && c.unicode() > 127) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString punctuationFoldKey(QString s)
+{
+    static const QRegularExpression nonAlnum(QStringLiteral("[^a-z0-9]"));
+    s.remove(nonAlnum);
+    return s;
+}
+
+bool looksLikeClassifierToken(const QString &genre)
+{
+    static const QRegularExpression classifier(QStringLiteral(
+        "^(?:[a-z]{1,4}:[^\\s].*|\\d+_information:.*|[a-z0-9_.-]{1,32}:[^\\s].*)$"));
+    return classifier.match(genre).hasMatch();
+}
+
+struct GenreReportRow {
+    QString genre;
+    int df = 0;
+    double idf = 0.0;
+    QString canonical;
+    QString status;
+    QStringList sampleArtists;
+    QStringList flags;
+};
+
+QVector<GenreReportRow> buildGenreReportRows(Database &db, int *taggedTrackTotal)
+{
+    int total = 0;
+    const QHash<QString, int> counts = db.genreTrackCounts(&total);
+    if (taggedTrackTotal != nullptr) {
+        *taggedTrackTotal = total;
+    }
+
+    const QHash<QString, QString> aliases = db.genreAliases();
+    const QSet<QString> ignored = db.ignoredRadioGenres();
+    QHash<QString, int> canonicalDf;
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
+        const QString canonical = GenreTags::canonical(it.key(), aliases);
+        if (canonical.isEmpty() || GenreTags::isNonGenre(canonical)) {
+            continue;
+        }
+        canonicalDf[canonical] += it.value();
+    }
+
+    QHash<QString, QStringList> nearDupGroups;
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
+        const QString key = punctuationFoldKey(it.key());
+        if (!key.isEmpty()) {
+            nearDupGroups[key].append(it.key());
+        }
+    }
+    for (QStringList &group : nearDupGroups) {
+        group.sort(Qt::CaseInsensitive);
+    }
+
+    QVector<GenreReportRow> rows;
+    rows.reserve(counts.size());
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
+        GenreReportRow row;
+        row.genre = it.key();
+        row.df = it.value();
+        row.canonical = GenreTags::canonical(row.genre, aliases);
+        const bool stoplisted = GenreTags::isNonGenre(row.canonical);
+        if (ignored.contains(row.canonical)) {
+            row.status = QStringLiteral("ignored");
+        } else if (stoplisted) {
+            row.status = QStringLiteral("stoplist");
+        } else if (row.canonical != row.genre) {
+            row.status = QStringLiteral("alias");
+        } else {
+            row.status = QStringLiteral("ok");
+        }
+
+        const int dfForIdf = stoplisted ? row.df : canonicalDf.value(row.canonical, row.df);
+        row.idf = std::log(std::max(2.0, static_cast<double>(total) / std::max(1, dfForIdf)));
+        row.sampleArtists = db.sampleArtistsForGenre(row.genre, 3);
+
+        const QString key = punctuationFoldKey(row.genre);
+        const QStringList nearDups = nearDupGroups.value(key);
+        if (nearDups.size() > 1) {
+            for (const QString &other : nearDups) {
+                if (other != row.genre) {
+                    row.flags.append(QStringLiteral("neardup:%1").arg(other));
+                    break;
+                }
+            }
+        }
+        if (hasNonAsciiLetter(row.genre)) {
+            row.flags.append(QStringLiteral("nonascii"));
+        }
+        if (row.genre.contains(QLatin1Char('|')) || row.genre.contains(QLatin1Char(';'))
+            || row.genre.contains(QLatin1Char('/'))) {
+            row.flags.append(QStringLiteral("separator"));
+        }
+        if (looksLikeClassifierToken(row.genre)) {
+            row.flags.append(QStringLiteral("classifier"));
+        }
+
+        rows.append(std::move(row));
+    }
+
+    std::sort(rows.begin(), rows.end(), [](const GenreReportRow &a, const GenreReportRow &b) {
+        if (a.df != b.df) {
+            return a.df > b.df;
+        }
+        return QString::compare(a.genre, b.genre, Qt::CaseInsensitive) < 0;
+    });
+    return rows;
+}
+
+QJsonArray genreRowsToJson(const QVector<GenreReportRow> &rows)
+{
+    QJsonArray array;
+    for (const GenreReportRow &row : rows) {
+        QJsonArray samples;
+        for (const QString &artist : row.sampleArtists) {
+            samples.append(artist);
+        }
+        QJsonArray flags;
+        for (const QString &flag : row.flags) {
+            flags.append(flag);
+        }
+        array.append(QJsonObject{
+            {QStringLiteral("genre"), row.genre},
+            {QStringLiteral("df"), row.df},
+            {QStringLiteral("idf"), row.idf},
+            {QStringLiteral("canonical"), row.canonical},
+            {QStringLiteral("status"), row.status},
+            {QStringLiteral("sample_artists"), samples},
+            {QStringLiteral("flags"), flags},
+        });
+    }
+    return array;
+}
+
+void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackTotal)
+{
+    int genreWidth = 5;
+    int canonicalWidth = 9;
+    int sampleWidth = 14;
+    for (const GenreReportRow &row : rows) {
+        genreWidth = std::max(genreWidth, static_cast<int>(row.genre.size()));
+        canonicalWidth = std::max(canonicalWidth, static_cast<int>(row.canonical.size()));
+        sampleWidth = std::max(sampleWidth, static_cast<int>(row.sampleArtists.join(QStringLiteral(", ")).size()));
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    out << "genre-report: " << rows.size() << " genres, " << taggedTrackTotal << " tagged tracks\n";
+    out << QStringLiteral("%1  %2  %3  %4  %5  %6  %7\n")
+               .arg(QStringLiteral("genre"), -genreWidth)
+               .arg(QStringLiteral("df"), 6)
+               .arg(QStringLiteral("idf"), 6)
+               .arg(QStringLiteral("canonical"), -canonicalWidth)
+               .arg(QStringLiteral("status"), -8)
+               .arg(QStringLiteral("sample_artists"), -sampleWidth)
+               .arg(QStringLiteral("flags"));
+    for (const GenreReportRow &row : rows) {
+        out << QStringLiteral("%1  %2  %3  %4  %5  %6  %7\n")
+                   .arg(row.genre, -genreWidth)
+                   .arg(row.df, 6)
+                   .arg(QString::number(row.idf, 'f', 3), 6)
+                   .arg(row.canonical, -canonicalWidth)
+                   .arg(row.status, -8)
+                   .arg(row.sampleArtists.join(QStringLiteral(", ")), -sampleWidth)
+                   .arg(row.flags.join(QLatin1Char(',')));
+    }
+    out << "genre-report: end, " << rows.size() << " genres, " << taggedTrackTotal << " tagged tracks\n";
+}
+
+void printGenreReportTsv(const QVector<GenreReportRow> &rows, int taggedTrackTotal)
+{
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    out << "# vocabulary_size\t" << rows.size() << "\ttagged_track_total\t" << taggedTrackTotal << '\n';
+    out << "genre\tdf\tidf\tcanonical\tstatus\tsample_artists\tflags\n";
+    for (const GenreReportRow &row : rows) {
+        out << tsvField(row.genre) << '\t'
+            << row.df << '\t'
+            << QString::number(row.idf, 'f', 6) << '\t'
+            << tsvField(row.canonical) << '\t'
+            << row.status << '\t'
+            << tsvField(row.sampleArtists.join(QStringLiteral(", "))) << '\t'
+            << tsvField(row.flags.join(QLatin1Char(','))) << '\n';
+    }
+    out << "# end\tvocabulary_size\t" << rows.size() << "\ttagged_track_total\t" << taggedTrackTotal << '\n';
+}
+
+void printRadioReasons(const QJsonObject &response)
+{
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+
+    if (!response.value(QStringLiteral("active")).toBool()) {
+        out << "radio: inactive\n";
+        return;
+    }
+
+    const QString kind = response.value(QStringLiteral("kind")).toString(QStringLiteral("radio"));
+    const QJsonArray picks = response.value(QStringLiteral("picks")).toArray();
+    out << "radio: " << (kind.isEmpty() ? QStringLiteral("active") : kind)
+        << " (" << picks.size() << " explained picks)\n";
+    for (qsizetype i = 0; i < picks.size(); ++i) {
+        const QJsonObject pick = picks.at(i).toObject();
+        const QString path = pick.value(QStringLiteral("path")).toString();
+        const QString artist = pick.value(QStringLiteral("artist")).toString();
+        const QString title = pick.value(QStringLiteral("title")).toString();
+        QString label = path;
+        if (!artist.isEmpty() || !title.isEmpty()) {
+            label = QStringLiteral("%1 - %2").arg(artist.isEmpty() ? QStringLiteral("?") : artist,
+                                                  title.isEmpty() ? QStringLiteral("?") : title);
+        }
+        out << QStringLiteral("%1. %2\n").arg(static_cast<int>(i + 1), 3).arg(label);
+        if (label != path && !path.isEmpty()) {
+            out << "    " << path << '\n';
+        }
+        const QString sentence = pick.value(QStringLiteral("sentence")).toString();
+        if (!sentence.isEmpty()) {
+            out << "    " << sentence << '\n';
+        }
+        const QString breakdown = pick.value(QStringLiteral("breakdown")).toString();
+        if (!breakdown.isEmpty()) {
+            out << "    " << breakdown << '\n';
+        }
+    }
 }
 
 // One NUL-terminated fzf record. Newline-separated lines:
@@ -478,6 +726,200 @@ int runSearch(QStringList arguments, bool json)
     return 0;
 }
 
+int runGenreReport(QStringList arguments, bool json)
+{
+    bool plain = false;
+    for (const QString &word : arguments) {
+        if (word == QLatin1String("--plain")) {
+            plain = true;
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown genre-report option \"%1\"").arg(word));
+        } else {
+            return fail(QStringLiteral("genre-report does not take positional arguments"));
+        }
+    }
+
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-genre-report-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    int taggedTrackTotal = 0;
+    const QVector<GenreReportRow> rows = buildGenreReportRows(db, &taggedTrackTotal);
+    if (json) {
+        QTextStream out(stdout);
+        out.setEncoding(QStringConverter::Utf8);
+        out << QString::fromUtf8(QJsonDocument(genreRowsToJson(rows)).toJson(QJsonDocument::Compact)) << '\n';
+    } else if (plain) {
+        printGenreReportTsv(rows, taggedTrackTotal);
+    } else {
+        printGenreReportTable(rows, taggedTrackTotal);
+    }
+    return 0;
+}
+
+int runRadioGenre(QStringList arguments, bool json)
+{
+    if (arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-genre needs a verb: ignore, unignore, or list"));
+    }
+    const QString verb = arguments.takeFirst();
+    if (verb != QLatin1String("ignore") && verb != QLatin1String("unignore") && verb != QLatin1String("list")) {
+        return fail(QStringLiteral("radio-genre verb must be ignore, unignore, or list"));
+    }
+    if (verb == QLatin1String("list") && !arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-genre list does not take arguments"));
+    }
+    if (verb != QLatin1String("list") && arguments.size() != 1) {
+        return fail(QStringLiteral("radio-genre %1 needs exactly one genre").arg(verb));
+    }
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-radio-genre-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (verb == QLatin1String("list")) {
+        QStringList ignored;
+        for (const QString &genre : db.ignoredRadioGenres()) {
+            ignored.push_back(genre);
+        }
+        ignored.sort(Qt::CaseInsensitive);
+        if (json) {
+            QJsonArray array;
+            for (const QString &genre : ignored) {
+                array.append(genre);
+            }
+            out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            for (const QString &genre : ignored) {
+                out << genre << '\n';
+            }
+        }
+        return 0;
+    }
+
+    const QString folded = GenreTags::folded(arguments.first());
+    const QString canonical = GenreTags::canonical(folded, db.genreAliases());
+    if (canonical.isEmpty()) {
+        return fail(QStringLiteral("radio-genre %1 needs a non-empty genre").arg(verb));
+    }
+    const bool ignored = verb == QLatin1String("ignore");
+    if (!db.setRadioGenreIgnored(canonical, ignored)) {
+        return fail(db.lastError());
+    }
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("action"), ignored ? QStringLiteral("ignore") : QStringLiteral("unignore")},
+            {QStringLiteral("genre"), canonical},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "radio-genre: " << (ignored ? QStringLiteral("ignored ") : QStringLiteral("unignored "))
+            << canonical << '\n';
+    }
+    return 0;
+}
+
+int runGenreAlias(QStringList arguments, bool json)
+{
+    if (arguments.isEmpty()) {
+        return fail(QStringLiteral("genre-alias needs a verb: set, remove, or list"));
+    }
+    const QString verb = arguments.takeFirst();
+    if (verb != QLatin1String("set") && verb != QLatin1String("remove") && verb != QLatin1String("list")) {
+        return fail(QStringLiteral("genre-alias verb must be set, remove, or list"));
+    }
+    if (verb == QLatin1String("list") && !arguments.isEmpty()) {
+        return fail(QStringLiteral("genre-alias list does not take arguments"));
+    }
+    if (verb == QLatin1String("remove") && arguments.size() != 1) {
+        return fail(QStringLiteral("genre-alias remove needs exactly one alias"));
+    }
+    if (verb == QLatin1String("set") && arguments.size() != 2) {
+        return fail(QStringLiteral("genre-alias set needs exactly alias and canonical arguments"));
+    }
+    if (!QFile::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-genre-alias-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (verb == QLatin1String("list")) {
+        const QHash<QString, QString> aliases = db.genreAliases();
+        QStringList keys = aliases.keys();
+        keys.sort(Qt::CaseInsensitive);
+        if (json) {
+            QJsonArray array;
+            for (const QString &alias : keys) {
+                array.append(QJsonObject{
+                    {QStringLiteral("alias"), alias},
+                    {QStringLiteral("canonical"), aliases.value(alias)},
+                });
+            }
+            out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            for (const QString &alias : keys) {
+                out << alias << '\t' << aliases.value(alias) << '\n';
+            }
+        }
+        return 0;
+    }
+
+    const QString alias = GenreTags::folded(arguments.first());
+    if (alias.isEmpty()) {
+        return fail(QStringLiteral("genre-alias %1 needs a non-empty alias").arg(verb));
+    }
+    if (verb == QLatin1String("remove")) {
+        if (!db.removeGenreAlias(alias)) {
+            return fail(db.lastError());
+        }
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(QJsonObject{
+                {QStringLiteral("ok"), true},
+                {QStringLiteral("action"), QStringLiteral("remove")},
+                {QStringLiteral("alias"), alias},
+            }).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << "genre-alias: removed " << alias << '\n';
+        }
+        return 0;
+    }
+
+    const QString canonical = GenreTags::folded(arguments.at(1));
+    if (canonical.isEmpty()) {
+        return fail(QStringLiteral("genre-alias set needs a non-empty canonical genre"));
+    }
+    if (!db.setGenreAlias(alias, canonical)) {
+        return fail(db.lastError());
+    }
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("action"), QStringLiteral("set")},
+            {QStringLiteral("alias"), alias},
+            {QStringLiteral("canonical"), canonical},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "genre-alias: " << alias << " -> " << canonical << '\n';
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -506,6 +948,15 @@ int main(int argc, char **argv)
     // so it works without a running instance and never touches the socket.
     if (command == QLatin1String("search")) {
         return runSearch(arguments, json);
+    }
+    if (command == QLatin1String("genre-report")) {
+        return runGenreReport(arguments, json);
+    }
+    if (command == QLatin1String("radio-genre")) {
+        return runRadioGenre(arguments, json);
+    }
+    if (command == QLatin1String("genre-alias")) {
+        return runGenreAlias(arguments, json);
     }
 
     if (command == QLatin1String("jump")
@@ -573,11 +1024,20 @@ int main(int argc, char **argv)
         }
         // Resolve against the client's cwd; the server has its own.
         args.insert(QStringLiteral("path"), QFileInfo(arguments.first()).absoluteFilePath());
+    } else if (command == QLatin1String("start-artist-radio")) {
+        if (arguments.isEmpty()) {
+            return fail(QStringLiteral("start-artist-radio needs an artist name"));
+        }
+        args.insert(QStringLiteral("artist"), arguments.join(QLatin1Char(' ')));
     } else if (command == QLatin1String("start-mix")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("start-mix needs a mode: rediscovery or deepcuts"));
         }
         args.insert(QStringLiteral("mode"), arguments.first().toLower());
+    } else if (command == QLatin1String("radio-reasons")) {
+        if (!arguments.isEmpty()) {
+            return fail(QStringLiteral("radio-reasons does not take arguments"));
+        }
     } else if (command == QLatin1String("play-file")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("play-file needs a path"));
@@ -700,12 +1160,17 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    if (command == QLatin1String("start-radio") || command == QLatin1String("stop-radio")) {
+    if (command == QLatin1String("start-radio") || command == QLatin1String("start-artist-radio")
+        || command == QLatin1String("stop-radio")) {
         std::printf("radio: %s\n", qPrintable(response.value(QStringLiteral("radio")).toString()));
         return 0;
     }
     if (command == QLatin1String("start-mix")) {
         std::printf("mix: %s\n", qPrintable(response.value(QStringLiteral("mix")).toString()));
+        return 0;
+    }
+    if (command == QLatin1String("radio-reasons")) {
+        printRadioReasons(response);
         return 0;
     }
     // Plain "status" replies carry the canonical track JSON at the top level,

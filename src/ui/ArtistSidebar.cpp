@@ -432,6 +432,17 @@ void ArtistSidebar::restyleChrome()
 void ArtistSidebar::showContextMenu(const QPoint &pos)
 {
     QMenu menu(this);
+    const QModelIndex index = m_view->indexAt(pos);
+    if (index.isValid()) {
+        const QString artistName = index.data(Qt::UserRole).toString();
+        if (!artistName.isEmpty()) {
+            QAction *startArtistRadio = menu.addAction(QStringLiteral("Start Artist Radio"));
+            connect(startArtistRadio, &QAction::triggered, this, [this, artistName]() {
+                emit startArtistRadioRequested(artistName);
+            });
+            menu.addSeparator();
+        }
+    }
     QAction *showCount = menu.addAction(QStringLiteral("Show album count"));
     showCount->setCheckable(true);
     showCount->setChecked(m_showAlbumCount);

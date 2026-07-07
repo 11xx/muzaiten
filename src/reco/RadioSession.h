@@ -26,6 +26,11 @@ class QRandomGenerator;
 // provider closure calls it on the main thread. Not thread-safe.
 class RadioSession final {
 public:
+    struct PickReason {
+        QString path;
+        QList<TrackScorer::Component> components;
+    };
+
     // The seed candidate anchors the mood: its genres are always part of the
     // rolling genre window (stoplisted placeholder genres are filtered out
     // first — see GenreTags::informative). `genreIdf` is the library-wide
@@ -79,6 +84,10 @@ public:
     // Stored scorer components for a pick made this session. Empty when unknown.
     QList<TrackScorer::Component> reasonComponentsFor(const QString &path) const;
 
+    // Pick explanations in generation order. Deliberately live-only: restored
+    // sessions resume sequencing but do not resurrect pre-restart explanations.
+    QVector<PickReason> pickReasons() const;
+
     // Constraint-only session persistence. Pick reasons are deliberately not
     // included: restored pre-restart rows can continue sequencing correctly, but
     // only new picks have freshly computed explanations.
@@ -117,4 +126,5 @@ private:
     QSet<QString> m_usedPaths;                // never pick/repeat a path twice
     QSet<QString> m_usedSongKeys;             // never pick/repeat a song twice through duplicate files
     QHash<QString, QList<TrackScorer::Component>> m_pickReasons;
+    QStringList m_pickReasonOrder;
 };

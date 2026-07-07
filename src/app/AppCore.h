@@ -75,6 +75,10 @@ public:
     // queue with recommendations. Returns false (no state change) when the seed
     // path is not a known library track.
     bool startRadio(const QString &seedPath);
+    // Start a radio session seeded from an album-artist name. Uses a synthetic
+    // seed built from the artist's genre/era aggregate and opens with a
+    // representative track by that artist.
+    bool startArtistRadio(const QString &artistName);
     // Start a seedless, radio-backed library mix. Returns false without state
     // change when the mode is unknown or filtering cannot produce playable
     // candidates.
@@ -86,6 +90,13 @@ public:
     bool trackFlag(const QString &trackPath, const QString &flag) const;
     bool setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on);
     int forgetTrackBehaviorForSong(const QString &trackPath, bool includeImportedListens);
+    bool recordRatingEvent(const Track &track,
+                           bool hadOldUserRating,
+                           int oldUserRating0To100,
+                           int oldEffectiveRating0To100,
+                           int newRating0To100,
+                           const QString &sourceSurface);
+    void recordUserQueueRemovals(const QVector<int> &rows);
 
     // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
     // "Batch radio queue"). Backed by the library-DB settings
@@ -157,14 +168,18 @@ private:
     // Build the scrobbler-backfill match index from the library DB (folded
     // artist+title and recording MBID -> track path).
     ScrobbleBackfill::LibraryIndex buildLibraryIndex() const;
-    QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases) const;
+    QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases,
+                                          const QSet<QString> &ignoredRadioGenres) const;
     QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
     TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
-                                                            const QHash<QString, QString> &genreAliases) const;
+                                                            const QHash<QString, QString> &genreAliases,
+                                                            const QSet<QString> &ignoredRadioGenres) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
-                                                           const QHash<QString, QString> &genreAliases) const;
-    QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases) const;
+                                                           const QHash<QString, QString> &genreAliases,
+                                                           const QSet<QString> &ignoredRadioGenres) const;
+    QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases,
+                                              const QSet<QString> &ignoredRadioGenres) const;
     TrackScorer::Weights radioScoringWeights() const;
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
     void installRadioProvider(bool markPicksAsRadio);
@@ -229,10 +244,17 @@ private:
     // these carry the attribution forward to the currentTrackChanged handler.
     bool              m_nextStartUserInitiated = false;
     bool              m_nextStartInjected = false;
+    QString           m_currentPlayingSource;
     // Paths this radio session has handed out (batch appends + JIT provider
     // picks alike), for telemetry (source "radio") and for rerollRadioQueue()
-    // to find not-yet-played radio rows. Cleared on startRadio/stopRadio.
+    // to find not-yet-played radio rows. User queue removals prune paths from
+    // this set too so later playback attribution stays aligned with the queue.
+    // Cleared on startRadio/stopRadio.
     QSet<QString>     m_radioPickPaths;
+    // Paths that have become current in this app session. Queue-removal
+    // telemetry uses path-level granularity: if the same path was heard once,
+    // later duplicate rows are not counted as unheard.
+    QSet<QString>     m_queueHeardPaths;
     // Cached "radio.batchSize" setting (1 = pure JIT, matching pre-batch
     // behaviour exactly); reloaded at each startRadio, otherwise updated live by
     // setRadioBatchSize.
@@ -252,5 +274,6 @@ private:
     bool              m_radioRestoreDone = false;
     QString           m_radioSessionKind;
     QString           m_radioSessionSeedPath;
+    QString           m_radioSessionArtistName;
     int               m_radioSessionExploration = 30;
 };

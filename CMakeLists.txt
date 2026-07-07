@@ -69,6 +69,7 @@ set(MUZAITEN_SOURCES
     src/mpris/MprisService.cpp
     src/player/PlayerCore.cpp
     src/reco/AffinityPool.cpp
+    src/reco/ArtistRadio.cpp
     src/reco/RadioFilters.cpp
     src/reco/RadioMix.cpp
     src/reco/RadioSession.cpp
@@ -199,6 +200,7 @@ set(MUZAITEN_HEADERS
     src/playback/GStreamerPlaybackBackend.h
     src/playback/QtPlaybackBackend.h
     src/reco/AffinityPool.h
+    src/reco/ArtistRadio.h
     src/reco/RadioMix.h
     src/scanner/ArtworkCache.h
     src/scanner/DirectoryWalker.h
