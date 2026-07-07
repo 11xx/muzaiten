@@ -62,9 +62,9 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and reconstructed development
 
 muzaiten indexes and plays local files without moving, renaming, deleting, or writing artwork into the music library.
 
-Rating edits are stored in the application database immediately. For local files, muzaiten can also write those ratings back to tags through `File > Rating tags` or the automatic pending-write path after a rating change. Tag writes are narrow in scope: they update the rating field, verify the result by re-reading the file, and keep failed or unwritable writes pending for retry.
+Rating edits are stored in the application database immediately. For local files, muzaiten can also write those ratings back to tags through `Library > Rating tags` or the automatic pending-write path after a rating change. Tag writes are narrow in scope: they update the rating field, verify the result by re-reading the file, and keep failed or unwritable writes pending for retry.
 
-Scans do not traverse symlinks. Missing files are marked missing rather than deleted from the database until you explicitly choose `File > Remove missing tracks`. Tracks that go missing are shown with a red `×` wherever they appear in the queue and in playlists; `File > Remove missing tracks` drops them from the library and the queue but keeps (and marks) playlist entries, so a playlist still remembers them. Right-clicking a missing row offers both a scoped "Remove missing track(s)" (from the queue/playlist you're in) and the global "Remove all missing tracks from library".
+Scans do not traverse symlinks. Missing files are marked missing rather than deleted from the database until you explicitly choose `Library > Remove missing tracks`. Tracks that go missing are shown with a red `×` wherever they appear in the queue and in playlists; `Library > Remove missing tracks` drops them from the library and the queue but keeps (and marks) playlist entries, so a playlist still remembers them. Right-clicking a missing row offers both a scoped "Remove missing track(s)" (from the queue/playlist you're in) and the global "Remove all missing tracks from library".
 
 ## Build
 
@@ -401,14 +401,14 @@ The file explorers support selectable keybinding profiles from the explorer cont
 
 Backspace remains "up/back directory". The free-roam explorer can set a start folder from its context menu; `b` jumps back to it.
 
-Unsupported files are hidden by default. Enable `Settings > List unsupported files in explorer` while in a file-explorer view to show them.
+Unsupported files are hidden by default. Enable `View > List unsupported files in explorer` while in a file-explorer view to show them.
 
 ## Less Obvious Settings
 
-- `File > Source directories...`: configure scan-enabled and library-visible roots.
-- `File > Force full rescan`: ignore fingerprints and re-read enabled source directories.
-- `File > Rating tags`: sync current, current artist, all saved ratings, or retry pending tag writes.
-- `File > Link roots...`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
+- `Library > Source directories...`: configure scan-enabled and library-visible roots.
+- `Library > Force full rescan`: ignore fingerprints and re-read enabled source directories.
+- `Library > Rating tags`: sync current, current artist, all saved ratings, or retry pending tag writes.
+- `Library > Link roots...`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
 - `Playback > Output profile...`: configure playback output behavior, including software volume, resampling, sink release on pause, and preload settings.
 - `Playback > Resume behavior...`: configure whether position and playback state are restored.
 - `Settings > Track information panel...`: choose the fields shown in the right-side track information pane.

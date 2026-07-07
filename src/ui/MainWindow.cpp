@@ -1341,6 +1341,30 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_core->setRadioBatchSize(size);
         }
     });
+    connect(m_playerBar, &PlayerBar::startRadioFromCurrentRequested, this, [this]() {
+        const Track current = m_player->currentTrack();
+        if (current.path.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("Start radio: nothing is playing"), 4000);
+            return;
+        }
+        startRadioFromSeed(current.path);
+    });
+    connect(m_playerBar, &PlayerBar::startArtistRadioFromCurrentRequested, this, [this]() {
+        const Track current = m_player->currentTrack();
+        if (current.artistName.trimmed().isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("Start artist radio: nothing is playing"), 4000);
+            return;
+        }
+        startArtistRadio(current.artistName);
+    });
+    connect(m_playerBar, &PlayerBar::aboutRequested, this, [this]() {
+        QMessageBox::about(
+            this, QStringLiteral("About muzaiten"),
+            QStringLiteral("<b>muzaiten</b> %1<br/>"
+                           "A local-first music player with an offline recommendation engine.<br/>"
+                           "Released into the public domain under the Unlicense.")
+                .arg(QCoreApplication::applicationVersion().toHtmlEscaped()));
+    });
     connect(m_playerBar, &PlayerBar::rediscoveryMixRequested, this, [this]() {
         startMix(QStringLiteral("rediscovery"));
     });

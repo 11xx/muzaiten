@@ -156,6 +156,11 @@ signals:
     void radioAdventurousChanged(bool on);
     void radioExplorationSettingsRequested();
     void radioBatchSizeSettingsRequested();
+    // Menu-bar Radio entries; seeded from whatever is currently playing, so
+    // the owner validates there IS a current track and reports otherwise.
+    void startRadioFromCurrentRequested();
+    void startArtistRadioFromCurrentRequested();
+    void aboutRequested();
 
 private:
     void refreshTheme();
@@ -179,6 +184,10 @@ private:
     class QToolButton *m_radio = nullptr;
     class QMenu *m_radioMenu = nullptr;
     class QAction *m_radioAdventurousAction = nullptr;
+    // Menu-bar mirrors of the radio indicator's session controls; kept in
+    // sync with m_radioAdventurousAction by setRadioAdventurous.
+    class QAction *m_radioBarAdventurousAction = nullptr;
+    class QAction *m_stopRadioAction = nullptr;
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;
     bool m_radioActive = false;

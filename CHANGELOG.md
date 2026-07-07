@@ -4,6 +4,16 @@
 
 ### Added
 
+- The menu bar was reorganized around what muzaiten actually is. "File" is
+  now "Library" (everything in it manages the library) and hosts the MPD
+  source config that previously hid under Settings. Radio gets its own
+  top-level menu: start radio / artist radio from the current track, stop
+  radio, the Rediscovery and Deep-cuts mixes (replacing the two-item Mixes
+  menu), and — reachable at last WITHOUT an active session — Adventurous,
+  Exploration, Radio batch size, and Radio shuffle percent (the radio
+  indicator button's right-click menu still mirrors the session controls).
+  A Help menu with About muzaiten shows the exact running version for
+  reports.
 - Clean-room scalar extraction is now live end to end: `muzaiten-index` is a
   C++ binary built with the app, writes schema-v3 `features.sqlite` rows with
   DSP tempo/loudness/energy/spectral scalars, and replaces the GPL-blocked
@@ -22,7 +32,7 @@
   instead of diluting each other. The shuffle button now includes Radio shuffle,
   an ambient taste-aware shuffle mode that uses the radio engine for library
   pulls without starting a visible Start Radio session; its pull chance defaults
-  to 80% and is configurable from the Playback menu. Hovering a radio
+  to 80% and is configurable from the Radio menu. Hovering a radio
   pick in the queue now explains the choice with a human-readable summary and
   the numeric scorer breakdown. Powered by the play history, imported scrobbles,
   and genre data added in the previous

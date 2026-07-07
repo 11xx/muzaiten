@@ -497,9 +497,18 @@ PlayerBar::PlayerBar(QWidget *parent)
     root->setSpacing(0);
 
     auto *compactMenu = new QMenu(this);
-    auto *fileMenu = new QMenu(QStringLiteral("File"), this);
+    auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
+    QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
+    QAction *mpdImport = mpdMenu->addAction(QStringLiteral("Import MPD library metadata"));
+
+    // Everything in here manages the library (sources, scanning, tags) — no
+    // file operations — hence the label.
+    auto *fileMenu = new QMenu(QStringLiteral("Library"), this);
     QAction *openLibrary = fileMenu->addAction(QStringLiteral("Open library folder..."));
     QAction *sourceDirectories = fileMenu->addAction(QStringLiteral("Source directories..."));
+    QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
+    fileMenu->addMenu(mpdMenu); // MPD is a library source, so it lives here
+    fileMenu->addSeparator();
     QAction *scanEnabledSources = fileMenu->addAction(QStringLiteral("Scan enabled source directories"));
     QAction *forceRescan = fileMenu->addAction(QStringLiteral("Force full rescan"));
     auto *scanPowerMenu = fileMenu->addMenu(QStringLiteral("Scan power"));
@@ -517,7 +526,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_showGuessedPlaceholders->setCheckable(true);
     connect(m_showGuessedPlaceholders, &QAction::toggled, this, &PlayerBar::showGuessedPlaceholdersChanged);
     QAction *removeMissingTracks = fileMenu->addAction(QStringLiteral("Remove missing tracks"));
-    QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
+    fileMenu->addSeparator();
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
     QAction *syncCurrentTrackRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current track rating to file"));
     QAction *syncCurrentArtistRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current artist rated tracks"));
@@ -536,15 +545,31 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(playbackMenu, &QMenu::aboutToShow, this, &PlayerBar::playbackMenuAboutToShow);
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
     QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle..."));
-    QAction *radioShuffleSettings = playbackMenu->addAction(QStringLiteral("Radio shuffle percent..."));
 
-    auto *mixesMenu = new QMenu(QStringLiteral("Mixes"), this);
-    QAction *rediscoveryMix = mixesMenu->addAction(QStringLiteral("Play Rediscovery mix"));
-    QAction *deepCutsMix = mixesMenu->addAction(QStringLiteral("Play Deep cuts mix"));
-
-    auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
-    QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
-    QAction *mpdImport = mpdMenu->addAction(QStringLiteral("Import MPD library metadata"));
+    // Radio gets a top-level menu: session control, the mixes, and every
+    // radio setting reachable WITHOUT an active session (the radio indicator
+    // button's menu mirrors the session controls but only exists mid-session).
+    auto *radioMenu = new QMenu(QStringLiteral("Radio"), this);
+    QAction *startRadioCurrent = radioMenu->addAction(QStringLiteral("Start radio from current track"));
+    QAction *startArtistRadioCurrent = radioMenu->addAction(QStringLiteral("Start artist radio"));
+    m_stopRadioAction = radioMenu->addAction(QStringLiteral("Stop radio"));
+    radioMenu->addSeparator();
+    QAction *rediscoveryMix = radioMenu->addAction(QStringLiteral("Play Rediscovery mix"));
+    QAction *deepCutsMix = radioMenu->addAction(QStringLiteral("Play Deep cuts mix"));
+    radioMenu->addSeparator();
+    m_radioBarAdventurousAction = radioMenu->addAction(QStringLiteral("Adventurous (this session)"));
+    m_radioBarAdventurousAction->setCheckable(true);
+    connect(m_radioBarAdventurousAction, &QAction::toggled, this, &PlayerBar::radioAdventurousChanged);
+    QAction *radioExplorationBar = radioMenu->addAction(QStringLiteral("Exploration..."));
+    connect(radioExplorationBar, &QAction::triggered, this, &PlayerBar::radioExplorationSettingsRequested);
+    QAction *radioBatchSizeBar = radioMenu->addAction(QStringLiteral("Radio batch size..."));
+    connect(radioBatchSizeBar, &QAction::triggered, this, &PlayerBar::radioBatchSizeSettingsRequested);
+    QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent..."));
+    connect(radioMenu, &QMenu::aboutToShow, this, [this]() {
+        m_stopRadioAction->setEnabled(m_radioActive);
+        m_radioBarAdventurousAction->setEnabled(m_radioActive);
+        emit radioMenuAboutToShow();
+    });
 
     auto *historyMenu = new QMenu(QStringLiteral("History"), this);
     QAction *listeningHistory = historyMenu->addAction(QStringLiteral("Listening history..."));
@@ -634,7 +659,6 @@ PlayerBar::PlayerBar(QWidget *parent)
     };
 
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
-    settingsMenu->addMenu(mpdMenu);
     QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
     QAction *memoryReclaim = settingsMenu->addAction(QStringLiteral("Memory reclaim..."));
     QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
@@ -643,7 +667,11 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_alwaysShowTray = settingsMenu->addAction(QStringLiteral("Always show system tray icon"));
     m_alwaysShowTray->setCheckable(true);
 
-    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, mixesMenu, mpdMenu, historyMenu, scrobblersMenu, settingsMenu};
+    auto *helpMenu = new QMenu(QStringLiteral("Help"), this);
+    QAction *aboutApp = helpMenu->addAction(QStringLiteral("About muzaiten..."));
+    connect(aboutApp, &QAction::triggered, this, &PlayerBar::aboutRequested);
+
+    const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, radioMenu, mpdMenu, historyMenu, scrobblersMenu, settingsMenu, helpMenu};
     for (QMenu *menu : styledMenus) {
         styleMenu(menu);
     }
@@ -653,9 +681,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     compactMenu->addMenu(queueMenu);
     compactMenu->addMenu(playlistMenu);
     compactMenu->addMenu(playbackMenu);
-    compactMenu->addMenu(mixesMenu);
+    compactMenu->addMenu(radioMenu);
     compactMenu->addMenu(historyMenu);
     compactMenu->addMenu(settingsMenu);
+    compactMenu->addMenu(helpMenu);
 
     m_menuStrip = new QWidget(this);
     m_menuStrip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -684,9 +713,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_menuBar->addMenu(queueMenu);
     m_menuBar->addMenu(playlistMenu);
     m_menuBar->addMenu(playbackMenu);
-    m_menuBar->addMenu(mixesMenu);
+    m_menuBar->addMenu(radioMenu);
     m_menuBar->addMenu(historyMenu);
     m_menuBar->addMenu(settingsMenu);
+    m_menuBar->addMenu(helpMenu);
     menuStripLayout->addWidget(m_menuButton);
     menuStripLayout->addWidget(m_menuBar, 1);
     root->addWidget(m_menuStrip);
@@ -847,6 +877,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(radioShuffleSettings, &QAction::triggered, this, &PlayerBar::radioShuffleSettingsRequested);
     connect(rediscoveryMix, &QAction::triggered, this, &PlayerBar::rediscoveryMixRequested);
     connect(deepCutsMix, &QAction::triggered, this, &PlayerBar::deepCutsMixRequested);
+    connect(startRadioCurrent, &QAction::triggered, this, &PlayerBar::startRadioFromCurrentRequested);
+    connect(startArtistRadioCurrent, &QAction::triggered, this, &PlayerBar::startArtistRadioFromCurrentRequested);
+    connect(m_stopRadioAction, &QAction::triggered, this, &PlayerBar::stopRadioRequested);
     connect(linkRoots, &QAction::triggered, this, &PlayerBar::linkRootsRequested);
     connect(mpdSource, &QAction::triggered, this, &PlayerBar::mpdSourceRequested);
     connect(mpdImport, &QAction::triggered, this, &PlayerBar::mpdImportRequested);
@@ -1390,11 +1423,17 @@ void PlayerBar::setRadioActive(bool active)
 
 void PlayerBar::setRadioAdventurous(bool on)
 {
-    if (m_radioAdventurousAction == nullptr) {
-        return;
+    // Both the indicator-button menu and the menu-bar Radio menu carry this
+    // action; each menu refreshes through here on aboutToShow, which also
+    // keeps the two mirrors consistent after either one is toggled.
+    if (m_radioAdventurousAction != nullptr) {
+        const QSignalBlocker blocker(m_radioAdventurousAction);
+        m_radioAdventurousAction->setChecked(on);
     }
-    const QSignalBlocker blocker(m_radioAdventurousAction);
-    m_radioAdventurousAction->setChecked(on);
+    if (m_radioBarAdventurousAction != nullptr) {
+        const QSignalBlocker blocker(m_radioBarAdventurousAction);
+        m_radioBarAdventurousAction->setChecked(on);
+    }
 }
 
 void PlayerBar::setRepeatMode(RepeatMode mode)
