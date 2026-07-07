@@ -263,6 +263,15 @@ void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const Tra
     m_pickReasons.insert(candidate.path, scored.components);
     if (reasonPath != candidate.path) {
         m_pickReasons.insert(reasonPath, scored.components);
+        // A substituted best copy is not necessarily a pool row, but it carries
+        // the same content as the scored candidate. Alias the row so notePlayed
+        // and exclusion lookups resolve the played path to the candidate's
+        // genres, scalars, and content group instead of silently missing.
+        if (!m_byPath.contains(reasonPath)) {
+            TrackScorer::Candidate alias = candidate;
+            alias.path = reasonPath;
+            m_byPath.insert(reasonPath, alias);
+        }
     }
     m_pickReasonOrder.push_back(reasonPath);
 }

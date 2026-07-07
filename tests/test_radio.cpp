@@ -200,6 +200,7 @@ private slots:
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
     void rollingSonicContextUsesPlayedMean();
+    void substitutedBestCopyFeedsRollingContext();
     void rollingAudioContextUsesSeedAndPlayedEmbeddings();
     void reasonForNonEmptyOnPick();
     void reasonComponentsRoundTripFromPick();
@@ -1166,6 +1167,40 @@ void RadioTest::rollingSonicContextUsesPlayedMean()
     QCOMPARE(picks.size(), 1);
     QCOMPARE(picks.first().path, QStringLiteral("/target"));
 
+    const QList<TrackScorer::Component> components = session.reasonComponentsFor(QStringLiteral("/target"));
+    QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("tempo")), 0.4));
+    QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("energy")), 0.6));
+}
+
+void RadioTest::substitutedBestCopyFeedsRollingContext()
+{
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/dup-a"), QStringLiteral("dup"), {}, 0, -1, false,
+                      QStringLiteral("album-dup"), QStringLiteral("song-dup"), 100.0, 0.4),
+        makeCandidate(QStringLiteral("/target"), QStringLiteral("target"), {}, 0, -1, false,
+                      QStringLiteral("album-target"), QStringLiteral("song-target"), 100.0, 0.4),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"), {});
+    QRandomGenerator rng(9u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    // Force the dup pick, substituted by the resolver to a non-pool best copy.
+    const QVector<Track> firstPicks =
+        session.nextTracks(1, {QStringLiteral("/target")}, [](const QString &path) {
+            Q_UNUSED(path);
+            return playedTrack(QStringLiteral("/dup-best"), QStringLiteral("dup"));
+        });
+    QCOMPARE(firstPicks.size(), 1);
+    QCOMPARE(firstPicks.first().path, QStringLiteral("/dup-best"));
+
+    session.notePlayed(firstPicks.first());
+
+    const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QCOMPARE(picks.first().path, QStringLiteral("/target"));
+
+    // The played best copy resolves through the aliased candidate row, so the
+    // rolling sonic context knows its scalars and the target scores on them.
     const QList<TrackScorer::Component> components = session.reasonComponentsFor(QStringLiteral("/target"));
     QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("tempo")), 0.4));
     QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("energy")), 0.6));
