@@ -74,6 +74,7 @@ void printUsage()
         "  scrobble-backfill <listenbrainz|lastfm>  import listening history / sync play counts\n"
         "  scrobble-backfill status                 show progress of the current/last backfill\n"
         "  scrobble-backfill cancel                 cancel a running backfill (stops auto-resume)\n"
+        "  scrobble-backfill reset <listenbrainz|lastfm>  clear the completed marker so the next run re-walks history\n"
         "  start-radio <path>      start a radio session seeded from a library track\n"
         "  start-artist-radio <artist>  start a radio session seeded from an artist\n"
         "  start-mix <mode>        start rediscovery or deepcuts radio mix\n"
@@ -1013,11 +1014,22 @@ int main(int argc, char **argv)
             return fail(QStringLiteral("scrobble-backfill needs a service: listenbrainz, lastfm, status, or cancel"));
         }
         const QString service = arguments.first().toLower();
-        if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")
-            && service != QLatin1String("status") && service != QLatin1String("cancel")) {
-            return fail(QStringLiteral("scrobble-backfill service must be listenbrainz, lastfm, status, or cancel"));
+        if (service == QLatin1String("reset")) {
+            if (arguments.size() < 2) {
+                return fail(QStringLiteral("scrobble-backfill reset needs a service: listenbrainz or lastfm"));
+            }
+            const QString target = arguments.at(1).toLower();
+            if (target != QLatin1String("listenbrainz") && target != QLatin1String("lastfm")) {
+                return fail(QStringLiteral("scrobble-backfill reset service must be listenbrainz or lastfm"));
+            }
+            args.insert(QStringLiteral("service"), service);
+            args.insert(QStringLiteral("target"), target);
+        } else if (service != QLatin1String("listenbrainz") && service != QLatin1String("lastfm")
+                   && service != QLatin1String("status") && service != QLatin1String("cancel")) {
+            return fail(QStringLiteral("scrobble-backfill service must be listenbrainz, lastfm, status, cancel, or reset"));
+        } else {
+            args.insert(QStringLiteral("service"), service);
         }
-        args.insert(QStringLiteral("service"), service);
     } else if (command == QLatin1String("start-radio")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("start-radio needs a library track path"));

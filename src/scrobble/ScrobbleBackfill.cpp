@@ -25,13 +25,28 @@ constexpr int kTopTracksPerPage = 1000;
 constexpr int kMinRequestGapMs = 1100;
 constexpr int kMaxPageRetries = 3;
 
-const QString kLbCompletedKey = QStringLiteral("backfill.listenbrainz.completed_at");
-const QString kLfSyncedKey = QStringLiteral("backfill.lastfm.synced_at");
-
 } // namespace
 
 const QString ScrobbleBackfill::OldestTsMetaKey = QStringLiteral("backfill.listenbrainz.oldest_ts");
 const QString ScrobbleBackfill::CanceledMetaKey = QStringLiteral("backfill.listenbrainz.canceled");
+const QString ScrobbleBackfill::CompletedMetaKey = QStringLiteral("backfill.listenbrainz.completed_at");
+const QString ScrobbleBackfill::LastFmSyncedMetaKey = QStringLiteral("backfill.lastfm.synced_at");
+
+bool ScrobbleBackfill::clearCompletedMarker(ListenHistoryStore &history, const QString &service)
+{
+    const QString normalized = service.trimmed().toLower();
+    if (normalized == QLatin1String("listenbrainz")) {
+        // Only the completed marker gates the early-stop optimization; leave the
+        // oldest-ts cursor alone so an interrupted (not completed) run still resumes.
+        history.setMetaValue(CompletedMetaKey, QString());
+        return true;
+    }
+    if (normalized == QLatin1String("lastfm")) {
+        history.setMetaValue(LastFmSyncedMetaKey, QString());
+        return true;
+    }
+    return false;
+}
 
 ScrobbleBackfill::ScrobbleBackfill(QObject *parent)
     : QObject(parent)
@@ -186,7 +201,7 @@ void ScrobbleBackfill::startListenBrainzImport(const QString &token, const QStri
     // from now. A previously completed import may stop early once it pages into
     // already-imported history.
     m_lbCursor = m_history->metaValue(OldestTsMetaKey).toLongLong();
-    m_lbEarlyStopAllowed = !m_history->metaValue(kLbCompletedKey).isEmpty();
+    m_lbEarlyStopAllowed = !m_history->metaValue(CompletedMetaKey).isEmpty();
     validateListenBrainzToken();
 }
 
@@ -323,7 +338,7 @@ void ScrobbleBackfill::handleListenBrainzPage()
 
     // Empty page: reached the end of history. Mark complete and clear the cursor.
     if (page.listens.isEmpty()) {
-        m_history->setMetaValue(kLbCompletedKey, QString::number(QDateTime::currentSecsSinceEpoch()));
+        m_history->setMetaValue(CompletedMetaKey, QString::number(QDateTime::currentSecsSinceEpoch()));
         m_history->setMetaValue(OldestTsMetaKey, QString());
         const QString source = sourceName();
         const int processed = m_processed;
@@ -362,7 +377,7 @@ void ScrobbleBackfill::handleListenBrainzPage()
     // already seen (nothing new inserted), everything older is known too — stop.
     if (m_lbEarlyStopAllowed && insertedThisPage == 0
         && static_cast<int>(rows.size()) >= kListensPerPage) {
-        m_history->setMetaValue(kLbCompletedKey, QString::number(QDateTime::currentSecsSinceEpoch()));
+        m_history->setMetaValue(CompletedMetaKey, QString::number(QDateTime::currentSecsSinceEpoch()));
         m_history->setMetaValue(OldestTsMetaKey, QString());
         const QString source = sourceName();
         const int processed = m_processed;
@@ -483,7 +498,7 @@ void ScrobbleBackfill::handleLastFmPage()
 
     // Done when the last page was reached (or the page carried no tracks).
     if (page.tracks.isEmpty() || (m_lfTotalPages > 0 && m_lfPage >= m_lfTotalPages)) {
-        m_history->setMetaValue(kLfSyncedKey, QString::number(now));
+        m_history->setMetaValue(LastFmSyncedMetaKey, QString::number(now));
         const QString source = sourceName();
         const int processed = m_processed;
         const int inserted = m_inserted;

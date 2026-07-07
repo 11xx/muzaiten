@@ -134,6 +134,11 @@ public:
     // even if the app quits before the worker acknowledges) then asks the
     // worker to abort.
     void cancelBackfill();
+    // Clear a service's completed/synced marker so the next import re-walks full
+    // history (recovers listens added behind an already-imported range). Returns
+    // "reset" | "already-running" | "history-unavailable" | "unknown-service".
+    // Refuses while any backfill is running so it can't race the live cursor.
+    QString resetBackfill(const QString &service);
     BackfillStatus backfillStatus() const { return m_backfillStatus; }
 
 signals:

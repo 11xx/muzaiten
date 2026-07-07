@@ -52,6 +52,14 @@ public:
     // cancel-vs-interrupt distinction (see AppCore::startBackfill/cancelBackfill).
     static const QString OldestTsMetaKey;   // "backfill.listenbrainz.oldest_ts"
     static const QString CanceledMetaKey;   // "backfill.listenbrainz.canceled": "1" when explicitly canceled
+    static const QString CompletedMetaKey;     // "backfill.listenbrainz.completed_at": set once history is fully walked
+    static const QString LastFmSyncedMetaKey;  // "backfill.lastfm.synced_at": set once a playcount sync completes
+
+    // Clear the completed/synced marker for `service` ("listenbrainz" | "lastfm")
+    // so the next import re-walks full history instead of early-stopping into the
+    // already-imported range. Returns false for an unknown service (nothing
+    // cleared). Idempotent; imported-listen dedup keeps the re-walk safe.
+    static bool clearCompletedMarker(ListenHistoryStore &history, const QString &service);
 
 public slots:
     // Import full ListenBrainz history: validate token -> username, then page
