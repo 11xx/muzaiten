@@ -10,8 +10,14 @@
 
 namespace {
 
-constexpr int kSupportedSchemaVersion = 1;
+constexpr int kMinSupportedSchemaVersion = 1;
+constexpr int kMaxSupportedSchemaVersion = 2;
 constexpr qsizetype kMaxSqlBindings = 500;
+
+bool isSupportedSchemaVersion(int version)
+{
+    return version >= kMinSupportedSchemaVersion && version <= kMaxSupportedSchemaVersion;
+}
 
 QString placeholders(qsizetype count)
 {
@@ -84,9 +90,10 @@ FeatureStore::FeatureStore(const QString &path)
 
     bool ok = false;
     const int version = versionQuery.value(0).toString().toInt(&ok);
-    if (!ok || version != kSupportedSchemaVersion) {
-        qWarning("FeatureStore: unsupported features.sqlite schema %s at %s",
-                 qPrintable(versionQuery.value(0).toString()), qPrintable(path));
+    if (!ok || !isSupportedSchemaVersion(version)) {
+        qWarning("FeatureStore: unsupported features.sqlite schema %s at %s (supported %d..%d)",
+                 qPrintable(versionQuery.value(0).toString()), qPrintable(path),
+                 kMinSupportedSchemaVersion, kMaxSupportedSchemaVersion);
         close();
         return;
     }
@@ -113,7 +120,7 @@ void FeatureStore::close()
 
 bool FeatureStore::isOpen() const
 {
-    return m_db.isOpen() && m_schemaVersion == kSupportedSchemaVersion;
+    return m_db.isOpen() && isSupportedSchemaVersion(m_schemaVersion);
 }
 
 int FeatureStore::schemaVersion() const

@@ -16,6 +16,7 @@ class FeatureStoreTest final : public QObject {
 private slots:
     void absentFileIsClosed();
     void versionMismatchIsClosed();
+    void versionTwoIsOpen();
     void groupLookupsRoundTrip();
     void batchLookupsAndScalarsRoundTrip();
     void statusCountsRows();
@@ -208,12 +209,27 @@ void FeatureStoreTest::versionMismatchIsClosed()
     QVERIFY(temp.isValid());
 
     QString error;
-    const QString path = createFixture(temp, 2, &error);
+    const QString path = createFixture(temp, 3, &error);
     QVERIFY2(!path.isEmpty(), qPrintable(error));
     FeatureStore store(path);
     QVERIFY(!store.isOpen());
     QCOMPARE(store.schemaVersion(), -1);
     QCOMPARE(store.contentGroupForPath(QStringLiteral("/music/a.flac")), -1);
+}
+
+void FeatureStoreTest::versionTwoIsOpen()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    QString error;
+    const QString path = createFixture(temp, 2, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    FeatureStore store(path);
+    QVERIFY(store.isOpen());
+    QCOMPARE(store.schemaVersion(), 2);
+    QCOMPARE(store.contentGroupForPath(QStringLiteral("/music/a.flac")), 10);
+    QVERIFY(store.scalarsForGroup(10).valid);
 }
 
 void FeatureStoreTest::groupLookupsRoundTrip()
