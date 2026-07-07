@@ -4,6 +4,9 @@
 
 ### Added
 
+- Documentation restructure: the README is now a concise front page and the
+  deep guides moved to docs/ (search, radio/recommendation engine,
+  playlists, controls, muzaitenctl reference, runtime paths).
 - Track context menus now share one canonical action builder across the library
   table, queue, search results, playlist items, file explorers, and Music
   Explorer inline tracks. The shared menus add `Copy path`, make Search expose
