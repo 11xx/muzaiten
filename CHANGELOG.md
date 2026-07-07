@@ -123,6 +123,11 @@
 - `muzaitenctl radio-weights` now exposes validated get/set/save/apply/list/remove
   commands for radio scoring weights, with named profiles stored in the library
   database and active changes taking effect on the next radio session.
+- A standalone `sidecar/indexer` Rust crate now builds `features.sqlite`
+  groundwork from generated or library audio paths: canonical decode hashes,
+  fpcalc Chromaprint fingerprints, content groups, incremental scan state, and
+  status JSON. Bliss scalar extraction is deliberately not linked because the
+  available Rust bliss crates are GPL-only.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
