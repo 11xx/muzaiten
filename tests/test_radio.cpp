@@ -673,6 +673,13 @@ void RadioTest::scoringWeightsJsonRejectsUnknownAndInvalidFields()
 
     TrackScorer::weightsFromJson(R"({"audioWeight":-0.1})", &error);
     QVERIFY(error.contains(QStringLiteral("audioWeight")));
+
+    // Rejection is all-or-nothing: a valid key before the failing one must not
+    // survive into the returned weights.
+    const TrackScorer::Weights partial =
+        TrackScorer::weightsFromJson(R"({"genreWeight":9.0,"skipPenalty":1.0})", &error);
+    QVERIFY(error.contains(QStringLiteral("skipPenalty")));
+    QVERIFY(qFuzzyCompare(partial.genreWeight, TrackScorer::defaultWeights().genreWeight));
 }
 
 void RadioTest::eraDecaysWithYearGap()

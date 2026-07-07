@@ -184,7 +184,9 @@ Weights weightsFromJson(const QByteArray &json, QString *error)
         || !assignNumber(object, QStringLiteral("recencyHalfLifeDays"), weights.recencyHalfLifeDays, 0.001, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("skipPenalty"), weights.skipPenalty, -100.0, 0.0, error)
         || !assignNumber(object, QStringLiteral("sameArtistPenalty"), weights.sameArtistPenalty, -100.0, 0.0, error)) {
-        return weights;
+        // Invalid input rejects the whole object: keys assigned before the
+        // failing one must not leak through, callers treat error as all-or-nothing.
+        return defaultWeights();
     }
     return weights;
 }
