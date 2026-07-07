@@ -1,0 +1,35 @@
+[project]
+name = "muzaiten-embed"
+version = "0.1.0"
+description = "Standalone muzaiten CLAP embedding sidecar"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.23.5,<2.0.0",
+]
+
+[project.optional-dependencies]
+model = [
+    "laion-clap==1.1.7",
+    "torch>=2.3",
+]
+
+[project.scripts]
+muzaiten-embed = "muzaiten_embed.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "ruff>=0.13",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

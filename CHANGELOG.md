@@ -140,6 +140,10 @@
   explainable tempo and energy proximity components to the existing genre, era,
   rating, and history signals. Libraries without scalar rows keep the previous
   scores and explanations exactly.
+- A standalone `sidecar/embedder` Python CLI can now add CLAP content-group
+  embeddings and precomputed cosine neighbors to `features.sqlite` schema v2.
+  The app accepts both schema v1 and v2 databases read-only; model weights stay
+  outside the repository cache and are verified before use.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

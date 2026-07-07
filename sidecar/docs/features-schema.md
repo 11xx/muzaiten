@@ -4,7 +4,7 @@
 read by later muzaiten application slices. The app must treat this database as
 read-only.
 
-Schema version: `1`
+Schema version: `2`
 
 ```sql
 meta(key TEXT PRIMARY KEY, value TEXT);
@@ -33,11 +33,27 @@ features(
     extractor TEXT NOT NULL,
     version TEXT NOT NULL
 );
+
+embeddings(
+    content_group_id INTEGER PRIMARY KEY,
+    model TEXT NOT NULL,
+    version TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    vector BLOB NOT NULL
+);
+
+track_neighbors(
+    content_group_id INTEGER NOT NULL,
+    neighbor_group_id INTEGER NOT NULL,
+    rank INTEGER NOT NULL,
+    cosine REAL NOT NULL,
+    PRIMARY KEY(content_group_id, rank)
+);
 ```
 
 ## Meta Keys
 
-- `schema_version`: `1`.
+- `schema_version`: `2`.
 - `indexer_version`: the `muzaiten-index` crate version.
 - `bliss_version`: currently `blocked_license_gpl_3_only`.
 - `created_at`: Unix epoch seconds when the database was first initialized.
@@ -83,3 +99,35 @@ The intended scalar mapping is still reserved as:
 
 Because bliss extraction is not active, there is no authoritative bliss
 index-to-name mapping in this schema version.
+
+## Embedding Rows
+
+The standalone `sidecar/embedder` Python CLI upgrades schema-1 databases to
+schema version 2 by adding CLAP embedding and neighbor tables. It is intentionally
+not linked into the Qt application.
+
+`embeddings` contains one row per content group for the active model:
+
+- `content_group_id`: the content group being represented.
+- `model`: model family identifier, currently `laion-clap-music-audioset`.
+- `version`: checkpoint filename, currently
+  `music_audioset_epoch_15_esc_90.14.pt`.
+- `dim`: number of `float32` values in `vector`.
+- `vector`: little-endian `float32` values, L2-normalized before storage.
+
+The embedder uses the lexicographically first successfully analyzed path in a
+content group as the representative audio file. Model weights are downloaded
+outside the repository into the user cache and verified by SHA-256 before use.
+
+## Neighbor Rows
+
+`track_neighbors` contains precomputed cosine nearest neighbors over normalized
+embedding vectors. Rows are regenerated as a full table:
+
+- `content_group_id`: source group.
+- `neighbor_group_id`: neighboring group.
+- `rank`: one-based rank within the source group's neighbors.
+- `cosine`: cosine similarity from the vector dot product.
+
+The current sidecar stores the top 100 neighbors per source group by default and
+breaks equal-score ties by `neighbor_group_id` for deterministic output.
