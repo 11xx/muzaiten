@@ -1791,6 +1791,25 @@ void AppCore::cancelBackfill()
     QMetaObject::invokeMethod(m_scrobbleBackfill, "abort", Qt::QueuedConnection);
 }
 
+QString AppCore::resetBackfill(const QString &service)
+{
+    const QString normalized = service.trimmed().toLower();
+    if (normalized != QLatin1String("listenbrainz") && normalized != QLatin1String("lastfm")) {
+        return QStringLiteral("unknown-service");
+    }
+    // Refuse mid-run: the worker owns the live cursor/marker, so clearing it now
+    // would race the import. Only one backfill runs at a time (m_backfillRunning
+    // is engine-wide), so this covers "a backfill for that service is running".
+    if (m_backfillRunning) {
+        return QStringLiteral("already-running");
+    }
+    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
+        return QStringLiteral("history-unavailable");
+    }
+    ScrobbleBackfill::clearCompletedMarker(*m_listenHistory, normalized);
+    return QStringLiteral("reset");
+}
+
 void AppCore::maybeAutoResumeListenBrainzBackfill()
 {
     if (m_backfillRunning || m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
@@ -2009,6 +2028,20 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         if (service == QLatin1String("cancel")) {
             cancelBackfill();
             return QJsonObject{{QStringLiteral("backfill"), QStringLiteral("cancel-requested")}};
+        }
+        if (service == QLatin1String("reset")) {
+            const QString target = args.value(QStringLiteral("target")).toString().trimmed().toLower();
+            const QString result = resetBackfill(target);
+            if (result == QLatin1String("unknown-service")) {
+                return error(QStringLiteral("scrobble-backfill reset needs a service: listenbrainz or lastfm"));
+            }
+            if (result == QLatin1String("already-running")) {
+                return error(QStringLiteral("cannot reset while a backfill is running; cancel it first"));
+            }
+            if (result == QLatin1String("history-unavailable")) {
+                return error(QStringLiteral("listen history store is unavailable"));
+            }
+            return QJsonObject{{QStringLiteral("backfill"), result}, {QStringLiteral("service"), target}};
         }
         if (service == QLatin1String("status")) {
             const BackfillStatus current = backfillStatus();

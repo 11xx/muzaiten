@@ -311,7 +311,17 @@ muzaitenctl rate 4            # 0-5 stars (rate raw <0-100>, rate clear)
 muzaitenctl queue             # list the queue; `queue <n>` jumps to a row
 muzaitenctl enqueue [--play|--next] <path...>   # add files to the queue
 muzaitenctl play-file <path>  # append a file and play it
+muzaitenctl scrobble-backfill <listenbrainz|lastfm>   # import history / sync play counts
+muzaitenctl scrobble-backfill status | cancel         # progress, or stop the running import
+muzaitenctl scrobble-backfill reset <listenbrainz|lastfm>   # re-walk history behind a completed import
 ```
+
+The same backfill controls live under `History > Scrobblers` in the app. A
+completed ListenBrainz import stops early once it pages into the already-imported
+range, so listens later added *behind* that range are never revisited. Run
+`scrobble-backfill reset listenbrainz` to clear the completed marker and force the
+next import to re-walk full history (imported-listen dedup keeps re-walks safe);
+`reset` is refused while a backfill is running.
 
 `search` is different: it runs **entirely client-side**, opening the library
 database and the shared folded-index cache directly, so it works whether or not

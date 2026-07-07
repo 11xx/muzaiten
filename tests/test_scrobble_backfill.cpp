@@ -34,6 +34,9 @@ private slots:
     void playcountBaselineUpsert();
     void metaCursorRoundTrip();
     void metaCanceledFlagRoundTrip();
+    void clearCompletedMarkerListenBrainz();
+    void clearCompletedMarkerLastFm();
+    void clearCompletedMarkerUnknownServiceNoop();
 
     // Matching
     void matchMbidBeatsArtistTitle();
@@ -315,6 +318,57 @@ void TestScrobbleBackfill::metaCanceledFlagRoundTrip()
     // verify the store round-trips back to empty too.
     store.setMetaValue(ScrobbleBackfill::CanceledMetaKey, QString());
     QVERIFY(store.metaValue(ScrobbleBackfill::CanceledMetaKey).isEmpty());
+}
+
+void TestScrobbleBackfill::clearCompletedMarkerListenBrainz()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    // The completed marker is what gates the early-stop optimization on re-run;
+    // `reset listenbrainz` clears it so the next import re-walks full history.
+    QCOMPARE(ScrobbleBackfill::CompletedMetaKey, QStringLiteral("backfill.listenbrainz.completed_at"));
+    store.setMetaValue(ScrobbleBackfill::CompletedMetaKey, QStringLiteral("1700000000"));
+    // A stray cursor from an unrelated interrupted run must survive the reset —
+    // reset only clears the completed marker, never the resume cursor.
+    store.setMetaValue(ScrobbleBackfill::OldestTsMetaKey, QStringLiteral("42"));
+
+    QVERIFY(ScrobbleBackfill::clearCompletedMarker(store, QStringLiteral("listenbrainz")));
+    QVERIFY(store.metaValue(ScrobbleBackfill::CompletedMetaKey).isEmpty());
+    QCOMPARE(store.metaValue(ScrobbleBackfill::OldestTsMetaKey), QStringLiteral("42"));
+
+    // Case-insensitive and idempotent.
+    QVERIFY(ScrobbleBackfill::clearCompletedMarker(store, QStringLiteral("ListenBrainz")));
+    QVERIFY(store.metaValue(ScrobbleBackfill::CompletedMetaKey).isEmpty());
+}
+
+void TestScrobbleBackfill::clearCompletedMarkerLastFm()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    QCOMPARE(ScrobbleBackfill::LastFmSyncedMetaKey, QStringLiteral("backfill.lastfm.synced_at"));
+    store.setMetaValue(ScrobbleBackfill::LastFmSyncedMetaKey, QStringLiteral("1700000000"));
+
+    QVERIFY(ScrobbleBackfill::clearCompletedMarker(store, QStringLiteral("lastfm")));
+    QVERIFY(store.metaValue(ScrobbleBackfill::LastFmSyncedMetaKey).isEmpty());
+}
+
+void TestScrobbleBackfill::clearCompletedMarkerUnknownServiceNoop()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    store.setMetaValue(ScrobbleBackfill::CompletedMetaKey, QStringLiteral("keep-me"));
+    store.setMetaValue(ScrobbleBackfill::LastFmSyncedMetaKey, QStringLiteral("keep-me-too"));
+
+    // Unknown service touches nothing and reports the miss.
+    QVERIFY(!ScrobbleBackfill::clearCompletedMarker(store, QStringLiteral("spotify")));
+    QCOMPARE(store.metaValue(ScrobbleBackfill::CompletedMetaKey), QStringLiteral("keep-me"));
+    QCOMPARE(store.metaValue(ScrobbleBackfill::LastFmSyncedMetaKey), QStringLiteral("keep-me-too"));
 }
 
 // --- Matching -----------------------------------------------------------

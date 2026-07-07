@@ -128,6 +128,12 @@
 - Local rating-change telemetry: every explicit track-rating edit now records
   an append-only event in `history.sqlite` with old/new rating values and the
   playback/UI context, without changing recommendation scoring behavior.
+- `muzaitenctl scrobble-backfill reset <listenbrainz|lastfm>` clears a service's
+  completed/synced marker so the next import re-walks full history. This recovers
+  listens added *behind* an already-imported range, which the completed-import
+  early-stop would otherwise never revisit; imported-listen dedup keeps the
+  re-walk safe, and `reset` is refused while a backfill is running. README's
+  `muzaitenctl` reference now documents the full backfill verb set.
 
 ## [2026.07.01.2]
 
