@@ -14,11 +14,13 @@
 #include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
 #include "reco/TrackScorer.h"
+#include "reco/WeightLearner.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
 
 #include <QCoreApplication>
+#include <QDate>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -31,6 +33,9 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTextStream>
 #include <QUuid>
 
@@ -83,6 +88,8 @@ void printUsage()
         "                          curate radio-only ignored folded genres (works offline)\n"
         "  radio-weights get | set <json> | save <name> | apply <name> | list | remove <name>\n"
         "                          inspect and curate radio scoring weights (works offline)\n"
+        "  radio-learn [--dry-run] [--min-samples N]\n"
+        "                          suggest a learned radio-weight profile from local telemetry\n"
         "  genre-alias set <alias> <canonical> | remove <alias> | list\n"
         "                          curate folded genre aliases (works offline)\n"
         "  play-file <path>        append a file to the queue and play it\n"
@@ -260,6 +267,11 @@ QString searchHumanLine(const Search::SearchRecord &r)
 QString featuresDbPath()
 {
     return QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
+}
+
+QString historyDbPath()
+{
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("history.sqlite"));
 }
 
 QJsonObject featureStatusJson(const QString &path, bool found, bool open, const FeatureStore::Status &status,
@@ -931,6 +943,7 @@ void printRadioReasons(const QJsonObject &response)
 }
 
 constexpr const char kRadioScoringWeightsKey[] = "radio.scoringWeights";
+constexpr int kRadioLearnJoinWindowSecs = 12 * 60 * 60;
 
 QJsonObject jsonObjectFromBytes(const QByteArray &json)
 {
@@ -977,6 +990,315 @@ QByteArray effectiveWeightsJson(const QByteArray &activeJson)
         return TrackScorer::weightsToJson(TrackScorer::defaultWeights());
     }
     return TrackScorer::weightsToJson(weights);
+}
+
+QVector<TrackScorer::Component> radioLearnComponentsFromJson(const QByteArray &json)
+{
+    QVector<TrackScorer::Component> components;
+    const QJsonDocument document = QJsonDocument::fromJson(json);
+    if (!document.isArray()) {
+        return components;
+    }
+    const QJsonArray array = document.array();
+    components.reserve(array.size());
+    for (const QJsonValue &value : array) {
+        const QJsonObject object = value.toObject();
+        const QString name = object.value(QStringLiteral("name")).toString();
+        const QJsonValue componentValue = object.value(QStringLiteral("value"));
+        if (name.isEmpty() || !componentValue.isDouble()) {
+            continue;
+        }
+        components.push_back({name, componentValue.toDouble()});
+    }
+    return components;
+}
+
+bool radioLearnEarlySkip(const QString &outcome, qint64 playedMs, qint64 durationMs)
+{
+    if (outcome != QLatin1String("skipped")) {
+        return false;
+    }
+    const qint64 threshold = durationMs > 0 ? std::min(durationMs / 2, qint64(4 * 60 * 1000))
+                                             : qint64(4 * 60 * 1000);
+    return playedMs < threshold;
+}
+
+struct RadioLearnLoadResult {
+    QVector<WeightLearner::Sample> samples;
+    QString error;
+    int skippedInvalidWeights = 0;
+    int skippedNoSignals = 0;
+};
+
+RadioLearnLoadResult loadRadioLearningSamples(const QString &path)
+{
+    RadioLearnLoadResult result;
+    const QString connectionName =
+        QStringLiteral("muzaitenctl-radio-learn-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QSqlDatabase history = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+    history.setDatabaseName(path);
+    if (!history.open()) {
+        result.error = history.lastError().text();
+        history = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connectionName);
+        return result;
+    }
+
+    {
+        QSqlQuery query(history);
+        query.prepare(QStringLiteral(
+            "SELECT rp.weights_json, rp.components_json, pe.outcome, pe.played_ms, pe.duration_ms "
+            "FROM radio_picks rp "
+            "JOIN play_events pe ON pe.id = ("
+            " SELECT pe2.id FROM play_events pe2 "
+            " WHERE pe2.source = 'radio' "
+            "   AND pe2.track_path = rp.track_path "
+            "   AND pe2.started_at >= rp.occurred_at "
+            "   AND pe2.started_at <= rp.occurred_at + ? "
+            " ORDER BY pe2.started_at ASC, pe2.id ASC "
+            " LIMIT 1"
+            ") "
+            "ORDER BY rp.occurred_at ASC, rp.id ASC"));
+        query.addBindValue(kRadioLearnJoinWindowSecs);
+        if (!query.exec()) {
+            result.error = query.lastError().text();
+        } else {
+            while (query.next()) {
+                QString parseError;
+                const TrackScorer::Weights rowWeights =
+                    TrackScorer::weightsFromJson(query.value(0).toString().toUtf8(), &parseError);
+                if (!parseError.isEmpty()) {
+                    ++result.skippedInvalidWeights;
+                    continue;
+                }
+
+                WeightLearner::Sample sample;
+                sample.earlySkip = radioLearnEarlySkip(query.value(2).toString(),
+                                                       query.value(3).toLongLong(),
+                                                       query.value(4).toLongLong());
+                const QVector<TrackScorer::Component> components =
+                    radioLearnComponentsFromJson(query.value(1).toString().toUtf8());
+                for (const TrackScorer::Component &component : components) {
+                    double weight = 0.0;
+                    if (!WeightLearner::componentWeight(rowWeights, component.name, &weight)
+                        || weight == 0.0) {
+                        continue;
+                    }
+                    const double signal = component.value / weight;
+                    if (std::isfinite(signal)) {
+                        sample.features.insert(component.name, signal);
+                    }
+                }
+                if (sample.features.isEmpty()) {
+                    ++result.skippedNoSignals;
+                    continue;
+                }
+                result.samples.push_back(std::move(sample));
+            }
+        }
+    }
+
+    history.close();
+    history = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+    return result;
+}
+
+QJsonObject weightsDiffJson(const QByteArray &activeJson, const QByteArray &suggestedJson)
+{
+    const QJsonObject active = jsonObjectFromBytes(activeJson);
+    const QJsonObject suggested = jsonObjectFromBytes(suggestedJson);
+    QStringList keys = active.keys();
+    for (const QString &key : suggested.keys()) {
+        if (!keys.contains(key)) {
+            keys.push_back(key);
+        }
+    }
+    keys.sort(Qt::CaseInsensitive);
+
+    QJsonObject diff;
+    for (const QString &key : keys) {
+        const QJsonValue activeValue = active.value(key);
+        const QJsonValue suggestedValue = suggested.value(key);
+        const bool bothNumeric = activeValue.isDouble() && suggestedValue.isDouble();
+        const bool changed = bothNumeric
+            ? std::abs(activeValue.toDouble() - suggestedValue.toDouble()) > 0.000001
+            : activeValue != suggestedValue;
+        if (changed) {
+            diff.insert(key, QJsonObject{
+                {QStringLiteral("active"), activeValue},
+                {QStringLiteral("suggested"), suggestedValue},
+            });
+        }
+    }
+    return diff;
+}
+
+QJsonObject componentResultJson(const WeightLearner::ComponentResult &row,
+                                const TrackScorer::Weights &activeWeights)
+{
+    double activeWeight = 0.0;
+    WeightLearner::componentWeight(activeWeights, row.componentName, &activeWeight);
+    return QJsonObject{
+        {QStringLiteral("component"), row.componentName},
+        {QStringLiteral("weight_key"), row.weightKey},
+        {QStringLiteral("coefficient"), row.coefficient},
+        {QStringLiteral("multiplier"), row.multiplier},
+        {QStringLiteral("default_weight"), row.defaultWeight},
+        {QStringLiteral("active_weight"), activeWeight},
+        {QStringLiteral("suggested_weight"), row.suggestedWeight},
+        {QStringLiteral("non_zero_samples"), row.nonZeroSamples},
+    };
+}
+
+QJsonArray componentResultsJson(const QVector<WeightLearner::ComponentResult> &components,
+                                const TrackScorer::Weights &activeWeights)
+{
+    QJsonArray array;
+    for (const WeightLearner::ComponentResult &row : components) {
+        array.append(componentResultJson(row, activeWeights));
+    }
+    return array;
+}
+
+void printRadioLearnPlain(const WeightLearner::Result &learned,
+                          const TrackScorer::Weights &activeWeights,
+                          const QByteArray &activeJson,
+                          const RadioLearnLoadResult &load,
+                          const QString &profileName,
+                          bool dryRun)
+{
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    out << "radio-learn: " << learned.sampleCount << " labeled picks ("
+        << learned.positiveLabels << " early skips)\n";
+    out << "join window: " << kRadioLearnJoinWindowSecs << " seconds\n";
+    if (load.skippedInvalidWeights > 0 || load.skippedNoSignals > 0) {
+        out << "skipped rows: " << load.skippedInvalidWeights << " invalid weights, "
+            << load.skippedNoSignals << " without learnable components\n";
+    }
+
+    out << "component        multiplier  default   active    suggested  samples\n";
+    for (const WeightLearner::ComponentResult &row : learned.components) {
+        double activeWeight = 0.0;
+        WeightLearner::componentWeight(activeWeights, row.componentName, &activeWeight);
+        out << QStringLiteral("%1  %2  %3  %4  %5  %6\n")
+                   .arg(row.componentName, -14)
+                   .arg(QString::number(row.multiplier, 'f', 3), 10)
+                   .arg(QString::number(row.defaultWeight, 'f', 3), 8)
+                   .arg(QString::number(activeWeight, 'f', 3), 8)
+                   .arg(QString::number(row.suggestedWeight, 'f', 3), 9)
+                   .arg(row.nonZeroSamples, 7);
+    }
+
+    out << "suggested weights:\n" << prettyJson(learned.suggestedWeightsJson) << '\n';
+    const QJsonObject diff = weightsDiffJson(activeJson, learned.suggestedWeightsJson);
+    out << "diff vs active:\n";
+    if (diff.isEmpty()) {
+        out << "  (none)\n";
+    } else {
+        for (auto it = diff.constBegin(); it != diff.constEnd(); ++it) {
+            const QJsonObject row = it.value().toObject();
+            out << "  " << it.key() << ": "
+                << QString::number(row.value(QStringLiteral("active")).toDouble(), 'f', 6)
+                << " -> "
+                << QString::number(row.value(QStringLiteral("suggested")).toDouble(), 'f', 6)
+                << '\n';
+        }
+    }
+
+    if (dryRun) {
+        out << "radio-learn: dry run; no profile saved\n";
+    } else {
+        out << "radio-learn: saved profile " << profileName
+            << "; apply later with radio-weights apply " << profileName << '\n';
+    }
+}
+
+int runRadioLearn(QStringList arguments, bool json)
+{
+    bool dryRun = false;
+    int minSamples = 200;
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString word = arguments.at(i);
+        if (word == QLatin1String("--dry-run")) {
+            dryRun = true;
+        } else if (word == QLatin1String("--min-samples")) {
+            bool ok = false;
+            if (i + 1 >= arguments.size() || (minSamples = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
+                return fail(QStringLiteral("radio-learn --min-samples needs a positive number"));
+            }
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown radio-learn option \"%1\"").arg(word));
+        } else {
+            return fail(QStringLiteral("radio-learn does not take positional arguments"));
+        }
+    }
+
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    if (!QFileInfo::exists(historyDbPath())) {
+        return fail(QStringLiteral("history database not found at %1").arg(historyDbPath()));
+    }
+
+    Database db(QStringLiteral("muzaitenctl-radio-learn-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    const QByteArray activeJson = effectiveWeightsJson(activeWeightsJson(db));
+    QString activeError;
+    const TrackScorer::Weights activeWeights = TrackScorer::weightsFromJson(activeJson, &activeError);
+    if (!activeError.isEmpty()) {
+        return fail(activeError);
+    }
+
+    const RadioLearnLoadResult load = loadRadioLearningSamples(historyDbPath());
+    if (!load.error.isEmpty()) {
+        return fail(load.error);
+    }
+
+    WeightLearner::Options options;
+    options.minSamples = minSamples;
+    options.minPositiveLabels = minSamples == 200 ? 20 : std::max(1, minSamples / 10);
+    const WeightLearner::Result learned = WeightLearner::learn(load.samples, options);
+    if (!learned.ok) {
+        return fail(learned.error);
+    }
+
+    QString profileName;
+    if (!dryRun) {
+        profileName = QStringLiteral("learned-%1").arg(QDate::currentDate().toString(QStringLiteral("yyyyMMdd")));
+        if (!db.saveRadioWeightProfile(profileName, QString::fromUtf8(learned.suggestedWeightsJson))) {
+            return fail(db.lastError());
+        }
+    }
+
+    if (json) {
+        QTextStream out(stdout);
+        out.setEncoding(QStringConverter::Utf8);
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("dry_run"), dryRun},
+            {QStringLiteral("profile"), profileName.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                                              : QJsonValue(profileName)},
+            {QStringLiteral("sample_count"), learned.sampleCount},
+            {QStringLiteral("positive_labels"), learned.positiveLabels},
+            {QStringLiteral("min_samples"), options.minSamples},
+            {QStringLiteral("min_positive_labels"), options.minPositiveLabels},
+            {QStringLiteral("join_window_seconds"), kRadioLearnJoinWindowSecs},
+            {QStringLiteral("skipped_invalid_weights"), load.skippedInvalidWeights},
+            {QStringLiteral("skipped_no_signals"), load.skippedNoSignals},
+            {QStringLiteral("components"), componentResultsJson(learned.components, activeWeights)},
+            {QStringLiteral("active"), jsonObjectFromBytes(activeJson)},
+            {QStringLiteral("suggested"), jsonObjectFromBytes(learned.suggestedWeightsJson)},
+            {QStringLiteral("diff"), weightsDiffJson(activeJson, learned.suggestedWeightsJson)},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        printRadioLearnPlain(learned, activeWeights, activeJson, load, profileName, dryRun);
+    }
+    return 0;
 }
 
 int runRadioWeights(QStringList arguments, bool json)
@@ -1930,6 +2252,9 @@ int main(int argc, char **argv)
     }
     if (command == QLatin1String("radio-weights")) {
         return runRadioWeights(arguments, json);
+    }
+    if (command == QLatin1String("radio-learn")) {
+        return runRadioLearn(arguments, json);
     }
     if (command == QLatin1String("genre-alias")) {
         return runGenreAlias(arguments, json);

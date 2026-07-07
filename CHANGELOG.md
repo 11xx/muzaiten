@@ -123,6 +123,10 @@
 - `muzaitenctl radio-weights` now exposes validated get/set/save/apply/list/remove
   commands for radio scoring weights, with named profiles stored in the library
   database and active changes taking effect on the next radio session.
+- `muzaitenctl radio-learn` now suggests a local learned radio-weight profile
+  from accumulated radio-pick telemetry and play outcomes; dry-runs print the
+  multiplier table and JSON diff, while saves create a named profile for later
+  explicit `radio-weights apply`.
 - A standalone `sidecar/indexer` Rust crate now builds `features.sqlite`
   groundwork from generated or library audio paths: canonical decode hashes,
   fpcalc Chromaprint fingerprints, content groups, incremental scan state, and

@@ -78,6 +78,7 @@ set(MUZAITEN_SOURCES
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
     src/reco/TrackScorer.cpp
+    src/reco/WeightLearner.cpp
     src/playback/AudioDeviceControl.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
@@ -208,6 +209,7 @@ set(MUZAITEN_HEADERS
     src/reco/AffinityPool.h
     src/reco/ArtistRadio.h
     src/reco/RadioMix.h
+    src/reco/WeightLearner.h
     src/scanner/ArtworkCache.h
     src/scanner/DirectoryWalker.h
     src/scanner/LibraryScanner.h
@@ -350,6 +352,7 @@ add_executable(muzaitenctl
     src/core/Rating.cpp
     src/fs/PathResolver.cpp
     src/reco/TrackScorer.cpp
+    src/reco/WeightLearner.cpp
     src/search/Exclusion.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp

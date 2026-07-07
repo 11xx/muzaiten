@@ -63,6 +63,7 @@ add_executable(test_search_cli
     ../src/db/Database.cpp
     ../src/fs/PathResolver.cpp
     ../src/core/MusicSort.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/IndexCache.cpp
@@ -154,6 +155,7 @@ add_executable(test_radio
     ../src/reco/RadioSession.cpp
     ../src/reco/ReasonText.cpp
     ../src/reco/TrackScorer.cpp
+    ../src/reco/WeightLearner.cpp
     ../src/scrobble/ListenHistoryStore.cpp
     ../src/search/IndexCache.cpp
     ../src/search/fold/Fold.cpp

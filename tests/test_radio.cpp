@@ -12,6 +12,7 @@
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
+#include "reco/WeightLearner.h"
 #include "scrobble/ListenHistoryStore.h"
 
 #include <QRandomGenerator>
@@ -90,6 +91,26 @@ bool hasComponent(const QList<TrackScorer::Component> &components, const QString
         }
     }
     return false;
+}
+
+WeightLearner::Sample learnerSample(bool earlySkip, std::initializer_list<QPair<QString, double>> features)
+{
+    WeightLearner::Sample sample;
+    sample.earlySkip = earlySkip;
+    for (const QPair<QString, double> &feature : features) {
+        sample.features.insert(feature.first, feature.second);
+    }
+    return sample;
+}
+
+double learnedMultiplier(const WeightLearner::Result &result, const QString &componentName)
+{
+    for (const WeightLearner::ComponentResult &row : result.components) {
+        if (row.componentName == componentName) {
+            return row.multiplier;
+        }
+    }
+    return 1.0;
 }
 
 Track resolvePathToTrack(const QString &path)
@@ -179,6 +200,12 @@ private slots:
     void scoringWeightsJsonOverridesDefaults();
     void scoringWeightsJsonRoundTripsAllFields();
     void scoringWeightsJsonRejectsUnknownAndInvalidFields();
+    void weightLearnerLearnsDirectionalMultipliers();
+    void weightLearnerStrengthensVindicatedPenalties();
+    void weightLearnerWeakensUselessPenalties();
+    void weightLearnerIsDeterministic();
+    void weightLearnerClampsExtremeSuggestions();
+    void weightLearnerRefusesSparseData();
     void eraDecaysWithYearGap();
     void tempoAndEnergyUseSonicProximity();
     void unknownTempoOrEnergyYieldsNoComponent();
@@ -681,6 +708,140 @@ void RadioTest::scoringWeightsJsonRejectsUnknownAndInvalidFields()
         TrackScorer::weightsFromJson(R"({"genreWeight":9.0,"skipPenalty":1.0})", &error);
     QVERIFY(error.contains(QStringLiteral("skipPenalty")));
     QVERIFY(qFuzzyCompare(partial.genreWeight, TrackScorer::defaultWeights().genreWeight));
+}
+
+void RadioTest::weightLearnerLearnsDirectionalMultipliers()
+{
+    QVector<WeightLearner::Sample> samples;
+    for (int i = 0; i < 40; ++i) {
+        samples.push_back(learnerSample(true, {
+            {QStringLiteral("genre"), 1.0},
+            {QStringLiteral("rating"), 0.0},
+            {QStringLiteral("tempo"), 0.5},
+        }));
+    }
+    for (int i = 0; i < 200; ++i) {
+        samples.push_back(learnerSample(false, {
+            {QStringLiteral("genre"), 0.0},
+            {QStringLiteral("rating"), 1.0},
+            {QStringLiteral("tempo"), 0.5},
+        }));
+    }
+
+    const WeightLearner::Result result = WeightLearner::learn(samples);
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QCOMPARE(result.sampleCount, 240);
+    QCOMPARE(result.positiveLabels, 40);
+    QVERIFY(learnedMultiplier(result, QStringLiteral("genre")) < 1.0);
+    QVERIFY(learnedMultiplier(result, QStringLiteral("rating")) > 1.0);
+    QVERIFY(std::abs(learnedMultiplier(result, QStringLiteral("tempo")) - 1.0) < 0.10);
+}
+
+void RadioTest::weightLearnerStrengthensVindicatedPenalties()
+{
+    // Skipped picks carried a strong (negative) recency contribution: the
+    // penalty warned and the pick happened anyway. The suggestion must make
+    // that penalty STRONGER (larger magnitude, still negative), not weaker.
+    QVector<WeightLearner::Sample> samples;
+    for (int i = 0; i < 40; ++i) {
+        samples.push_back(learnerSample(true, {{QStringLiteral("recency"), -1.5}}));
+    }
+    for (int i = 0; i < 200; ++i) {
+        samples.push_back(learnerSample(false, {{QStringLiteral("recency"), 0.0}}));
+    }
+
+    const WeightLearner::Result result = WeightLearner::learn(samples);
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QVERIFY(learnedMultiplier(result, QStringLiteral("recency")) > 1.0);
+    QVERIFY(result.suggestedWeights.recencyPenalty
+            < TrackScorer::defaultWeights().recencyPenalty);
+    QVERIFY(result.suggestedWeights.recencyPenalty <= 0.0);
+}
+
+void RadioTest::weightLearnerWeakensUselessPenalties()
+{
+    // The penalized tracks were the ones the user LISTENED to; skips came
+    // from unpenalized picks. The penalty is suppressing the wrong tracks
+    // and must shrink toward zero while staying non-positive.
+    QVector<WeightLearner::Sample> samples;
+    for (int i = 0; i < 40; ++i) {
+        samples.push_back(learnerSample(true, {{QStringLiteral("skips"), 0.0}}));
+    }
+    for (int i = 0; i < 200; ++i) {
+        samples.push_back(learnerSample(false, {{QStringLiteral("skips"), -1.0}}));
+    }
+
+    const WeightLearner::Result result = WeightLearner::learn(samples);
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QVERIFY(learnedMultiplier(result, QStringLiteral("skips")) < 1.0);
+    QVERIFY(result.suggestedWeights.skipPenalty
+            > TrackScorer::defaultWeights().skipPenalty);
+    QVERIFY(result.suggestedWeights.skipPenalty <= 0.0);
+}
+
+void RadioTest::weightLearnerIsDeterministic()
+{
+    QVector<WeightLearner::Sample> samples;
+    for (int i = 0; i < 30; ++i) {
+        samples.push_back(learnerSample(true, {{QStringLiteral("audio"), 1.0}}));
+    }
+    for (int i = 0; i < 200; ++i) {
+        samples.push_back(learnerSample(false, {{QStringLiteral("audio"), 0.0},
+                                                {QStringLiteral("novelty"), 1.0}}));
+    }
+
+    const WeightLearner::Result first = WeightLearner::learn(samples);
+    const WeightLearner::Result second = WeightLearner::learn(samples);
+    QVERIFY(first.ok);
+    QVERIFY(second.ok);
+    QCOMPARE(first.suggestedWeightsJson, second.suggestedWeightsJson);
+    QCOMPARE(first.components.size(), second.components.size());
+    for (qsizetype i = 0; i < first.components.size(); ++i) {
+        QCOMPARE(first.components.at(i).componentName, second.components.at(i).componentName);
+        QVERIFY(qFuzzyCompare(first.components.at(i).multiplier, second.components.at(i).multiplier));
+    }
+}
+
+void RadioTest::weightLearnerClampsExtremeSuggestions()
+{
+    QVector<WeightLearner::Sample> samples;
+    for (int i = 0; i < 60; ++i) {
+        samples.push_back(learnerSample(true, {{QStringLiteral("genre"), 1.0},
+                                               {QStringLiteral("rating"), 0.0}}));
+    }
+    for (int i = 0; i < 200; ++i) {
+        samples.push_back(learnerSample(false, {{QStringLiteral("genre"), 0.0},
+                                                {QStringLiteral("rating"), 1.0}}));
+    }
+
+    WeightLearner::Options options;
+    options.iterations = 5000;
+    options.l2Lambda = 0.0;
+    const WeightLearner::Result result = WeightLearner::learn(samples, options);
+    QVERIFY2(result.ok, qPrintable(result.error));
+    QVERIFY(qFuzzyCompare(learnedMultiplier(result, QStringLiteral("genre")), 0.25));
+    QVERIFY(qFuzzyCompare(learnedMultiplier(result, QStringLiteral("rating")), 4.0));
+    QVERIFY(qFuzzyCompare(result.suggestedWeights.genreWeight,
+                          TrackScorer::defaultWeights().genreWeight * 0.25));
+    QVERIFY(qFuzzyCompare(result.suggestedWeights.ratingWeight,
+                          TrackScorer::defaultWeights().ratingWeight * 4.0));
+}
+
+void RadioTest::weightLearnerRefusesSparseData()
+{
+    QVector<WeightLearner::Sample> samples;
+    samples.push_back(learnerSample(true, {{QStringLiteral("genre"), 1.0}}));
+    const WeightLearner::Result tooFew = WeightLearner::learn(samples);
+    QVERIFY(!tooFew.ok);
+    QVERIFY(tooFew.error.contains(QStringLiteral("have 1, need 200")));
+
+    samples.clear();
+    for (int i = 0; i < 200; ++i) {
+        samples.push_back(learnerSample(false, {{QStringLiteral("genre"), 0.5}}));
+    }
+    const WeightLearner::Result noSkips = WeightLearner::learn(samples);
+    QVERIFY(!noSkips.ok);
+    QVERIFY(noSkips.error.contains(QStringLiteral("have 0, need 20")));
 }
 
 void RadioTest::eraDecaysWithYearGap()

@@ -2,6 +2,7 @@
 #include "core/Rating.h"
 #include "core/Track.h"
 #include "db/Database.h"
+#include "scrobble/ListenHistoryStore.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 
@@ -206,6 +207,98 @@ QString muzaitenCtlPath()
     QDir buildDir(QCoreApplication::applicationDirPath());
     buildDir.cdUp();
     return buildDir.filePath(QStringLiteral("muzaitenctl"));
+}
+
+Track radioLearnTrack(const QString &path)
+{
+    Track track;
+    track.path = path;
+    track.title = QFileInfo(path).completeBaseName();
+    track.artistName = QStringLiteral("Radio Fixture");
+    track.albumArtistName = track.artistName;
+    track.albumTitle = QStringLiteral("Learn");
+    track.durationMs = 240000;
+    return track;
+}
+
+QVector<ListenHistoryStore::RadioPickComponent> pickComponents(const QString &name, double value)
+{
+    return {{name, value}};
+}
+
+void recordRadioPick(ListenHistoryStore &store,
+                     const Track &track,
+                     qint64 occurredAtSecs,
+                     const QVector<ListenHistoryStore::RadioPickComponent> &components)
+{
+    ListenHistoryStore::RadioPickEvent pick;
+    pick.occurredAtSecs = occurredAtSecs;
+    pick.track = track;
+    pick.sessionKind = QStringLiteral("fixture");
+    pick.exploration0To100 = 30;
+    pick.weightsJson = QByteArrayLiteral("{}");
+    pick.components = components;
+    for (const ListenHistoryStore::RadioPickComponent &component : components) {
+        pick.score += component.value;
+    }
+    QVERIFY(store.recordRadioPick(pick));
+}
+
+void recordPlayEvent(ListenHistoryStore &store,
+                     const Track &track,
+                     qint64 startedAtSecs,
+                     const QString &source,
+                     const QString &outcome,
+                     qint64 playedMs,
+                     qint64 durationMs)
+{
+    ListenHistoryStore::PlayEvent event;
+    event.startedAtSecs = startedAtSecs;
+    event.endedAtSecs = startedAtSecs + 60;
+    event.playedMs = playedMs;
+    event.durationMs = durationMs;
+    event.outcome = outcome;
+    event.source = source;
+    event.shuffleMode = QStringLiteral("radio");
+    event.sessionId = QStringLiteral("radio-learn-fixture");
+    event.track = track;
+    QVERIFY(store.recordPlayEvent(event) > 0);
+}
+
+void createRadioLearnFixture(const QString &dataDir)
+{
+    QDir().mkpath(dataDir);
+    const QString libraryPath = QDir(dataDir).filePath(QStringLiteral("library.sqlite"));
+    const QString historyPath = QDir(dataDir).filePath(QStringLiteral("history.sqlite"));
+    QFile::remove(historyPath);
+    QFile::remove(historyPath + QStringLiteral("-wal"));
+    QFile::remove(historyPath + QStringLiteral("-shm"));
+
+    Database db(QStringLiteral("radio-learn-library-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(libraryPath), qPrintable(db.lastError()));
+
+    ListenHistoryStore store(historyPath);
+    QVERIFY(store.isOpen());
+
+    const Track early = radioLearnTrack(dataDir + QStringLiteral("/early.flac"));
+    const Track finished = radioLearnTrack(dataDir + QStringLiteral("/finished.flac"));
+    const Track late = radioLearnTrack(dataDir + QStringLiteral("/late.flac"));
+    const Track unmatched = radioLearnTrack(dataDir + QStringLiteral("/unmatched.flac"));
+
+    recordRadioPick(store, early, 1000, pickComponents(QStringLiteral("genre"), 3.0));
+    recordPlayEvent(store, early, 900, QStringLiteral("radio"), QStringLiteral("finished"), 240000, 240000);
+    recordPlayEvent(store, early, 1005, QStringLiteral("queue_auto"), QStringLiteral("skipped"), 1000, 240000);
+    recordPlayEvent(store, early, 1010, QStringLiteral("radio"), QStringLiteral("skipped"), 30000, 240000);
+
+    recordRadioPick(store, finished, 2000, pickComponents(QStringLiteral("rating"), 1.5));
+    recordPlayEvent(store, finished, 2010, QStringLiteral("radio"), QStringLiteral("finished"), 240000, 240000);
+
+    recordRadioPick(store, late, 3000, pickComponents(QStringLiteral("rating"), 1.5));
+    recordPlayEvent(store, late, 3010, QStringLiteral("radio"), QStringLiteral("skipped"), 200000, 240000);
+
+    recordRadioPick(store, unmatched, 4000, pickComponents(QStringLiteral("genre"), 3.0));
+    recordPlayEvent(store, unmatched, 4000 + 12 * 60 * 60 + 1,
+                    QStringLiteral("radio"), QStringLiteral("skipped"), 1000, 240000);
 }
 
 } // namespace
@@ -418,6 +511,75 @@ private slots:
         QCOMPARE(ctl.exitCode(), 1);
         QVERIFY(QString::fromUtf8(ctl.readAllStandardError())
                     .contains(QStringLiteral("semantic search requires the embedder sidecar")));
+    }
+
+    void radioLearnDryRunAndSaveUseJoinedTelemetry()
+    {
+        const QString dataDir = qEnvironmentVariable("MUZAITEN_DATA_DIR");
+        createRadioLearnFixture(dataDir);
+
+        const QString ctlPath = muzaitenCtlPath();
+        QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
+
+        QProcess dryRun;
+        dryRun.setProgram(ctlPath);
+        dryRun.setArguments({
+            QStringLiteral("--json"),
+            QStringLiteral("radio-learn"),
+            QStringLiteral("--dry-run"),
+            QStringLiteral("--min-samples"),
+            QStringLiteral("3"),
+        });
+        dryRun.start();
+        QVERIFY2(dryRun.waitForFinished(10000), qPrintable(dryRun.errorString()));
+        QCOMPARE(dryRun.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(dryRun.exitCode(), 0);
+
+        QJsonParseError parseError;
+        const QJsonDocument dryDocument = QJsonDocument::fromJson(dryRun.readAllStandardOutput(), &parseError);
+        QVERIFY2(parseError.error == QJsonParseError::NoError, qPrintable(parseError.errorString()));
+        const QJsonObject dry = dryDocument.object();
+        QVERIFY(dry.value(QStringLiteral("dry_run")).toBool());
+        QCOMPARE(dry.value(QStringLiteral("sample_count")).toInt(), 3);
+        QCOMPARE(dry.value(QStringLiteral("positive_labels")).toInt(), 1);
+        QCOMPARE(dry.value(QStringLiteral("join_window_seconds")).toInt(), 12 * 60 * 60);
+        QVERIFY(dry.value(QStringLiteral("components")).toArray().size() > 0);
+
+        {
+            Database db(QStringLiteral("radio-learn-dry-check-%1")
+                            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY2(db.open(QDir(dataDir).filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+            QVERIFY(db.radioWeightProfiles().isEmpty());
+        }
+
+        QProcess save;
+        save.setProgram(ctlPath);
+        save.setArguments({
+            QStringLiteral("--json"),
+            QStringLiteral("radio-learn"),
+            QStringLiteral("--min-samples"),
+            QStringLiteral("3"),
+        });
+        save.start();
+        QVERIFY2(save.waitForFinished(10000), qPrintable(save.errorString()));
+        QCOMPARE(save.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(save.exitCode(), 0);
+
+        const QJsonDocument saveDocument = QJsonDocument::fromJson(save.readAllStandardOutput(), &parseError);
+        QVERIFY2(parseError.error == QJsonParseError::NoError, qPrintable(parseError.errorString()));
+        const QJsonObject saved = saveDocument.object();
+        QVERIFY(!saved.value(QStringLiteral("dry_run")).toBool());
+        QVERIFY(saved.value(QStringLiteral("profile")).toString().startsWith(QStringLiteral("learned-")));
+        QCOMPARE(saved.value(QStringLiteral("sample_count")).toInt(), 3);
+        QCOMPARE(saved.value(QStringLiteral("positive_labels")).toInt(), 1);
+
+        Database db(QStringLiteral("radio-learn-save-check-%1")
+                        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY2(db.open(QDir(dataDir).filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+        const QVector<Database::RadioWeightProfile> profiles = db.radioWeightProfiles();
+        QCOMPARE(profiles.size(), 1);
+        QCOMPARE(profiles.first().name, saved.value(QStringLiteral("profile")).toString());
+        QVERIFY(!profiles.first().weightsJson.isEmpty());
     }
 };
 
