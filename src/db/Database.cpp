@@ -740,7 +740,7 @@ bool Database::migrate()
     }
 
     // v16: per-content-group best-copy pins. The content-group ids come from
-    // the read-only sidecar features.sqlite, but user preference lives in the
+    // the read-only features.sqlite, but user preference lives in the
     // writable library DB.
     const QStringList v16Statements = {
         QStringLiteral("CREATE TABLE IF NOT EXISTS content_group_pins (content_group_id INTEGER PRIMARY KEY, pinned_path TEXT NOT NULL, updated_at TEXT NOT NULL)"),

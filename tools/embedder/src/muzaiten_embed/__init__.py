@@ -1,4 +1,4 @@
-"""muzaiten embedding sidecar."""
+"""muzaiten embedding tool."""
 
 __all__ = ["__version__"]
 

@@ -1,7 +1,7 @@
 [project]
 name = "muzaiten-embed"
 version = "0.1.0"
-description = "Standalone muzaiten CLAP embedding sidecar"
+description = "Standalone muzaiten CLAP embedding tool"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

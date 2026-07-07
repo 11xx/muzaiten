@@ -78,7 +78,7 @@ void printUsage()
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
         "  semantic-search [--limit N] <text>\n"
-        "                          CLAP text-to-library search (requires embedder sidecar)\n"
+        "                          CLAP text-to-library search (requires muzaiten-embed)\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
         "  features-status         show features.sqlite coverage (works offline)\n"
         "  duplicate-groups [--min-size N]  inspect features.sqlite duplicate groups\n"
@@ -483,12 +483,12 @@ QString compactProcessError(QString value)
     return value;
 }
 
-QVector<float> queryEmbeddingViaSidecar(const QString &text, QString *error)
+QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
 {
     const QString executable = QStandardPaths::findExecutable(QStringLiteral("muzaiten-embed"));
     if (executable.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder sidecar (muzaiten-embed not found)");
+            *error = QStringLiteral("semantic search requires the embedder tool (muzaiten-embed not found)");
         }
         return {};
     }
@@ -497,7 +497,7 @@ QVector<float> queryEmbeddingViaSidecar(const QString &text, QString *error)
     process.start(executable, {QStringLiteral("query"), text, QStringLiteral("--json")});
     if (!process.waitForStarted(5000)) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder sidecar (could not start muzaiten-embed)");
+            *error = QStringLiteral("semantic search requires the embedder tool (could not start muzaiten-embed)");
         }
         return {};
     }
@@ -505,7 +505,7 @@ QVector<float> queryEmbeddingViaSidecar(const QString &text, QString *error)
         process.kill();
         process.waitForFinished(1000);
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder sidecar (query timed out)");
+            *error = QStringLiteral("semantic search requires the embedder tool (query timed out)");
         }
         return {};
     }
@@ -515,7 +515,7 @@ QVector<float> queryEmbeddingViaSidecar(const QString &text, QString *error)
             detail = QStringLiteral("query failed");
         }
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder sidecar: %1").arg(compactProcessError(detail));
+            *error = QStringLiteral("semantic search requires the embedder tool: %1").arg(compactProcessError(detail));
         }
         return {};
     }
@@ -524,7 +524,7 @@ QVector<float> queryEmbeddingViaSidecar(const QString &text, QString *error)
     QVector<float> vector = parseQueryVectorJson(process.readAllStandardOutput(), &parseError);
     if (vector.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder sidecar: %1").arg(parseError);
+            *error = QStringLiteral("semantic search requires the embedder tool: %1").arg(parseError);
         }
         return {};
     }
@@ -1756,7 +1756,7 @@ int runSemanticSearch(QStringList arguments, bool json)
 
     QString vectorError;
     const QVector<float> queryVector = queryVectorJson.isEmpty()
-        ? queryEmbeddingViaSidecar(queryText, &vectorError)
+        ? queryEmbeddingViaEmbedder(queryText, &vectorError)
         : parseQueryVectorJson(queryVectorJson, &vectorError);
     if (queryVector.isEmpty()) {
         return fail(vectorError.isEmpty() ? QStringLiteral("semantic-search could not build a query embedding")

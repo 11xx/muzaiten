@@ -488,7 +488,7 @@ private slots:
         QVERIFY(result.value(QStringLiteral("score")).toDouble() > 0.99);
     }
 
-    void semanticSearchWithoutSidecarReportsCleanError()
+    void semanticSearchWithoutEmbedderReportsCleanError()
     {
         const QString ctlPath = muzaitenCtlPath();
         QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
@@ -510,7 +510,7 @@ private slots:
         QCOMPARE(ctl.exitStatus(), QProcess::NormalExit);
         QCOMPARE(ctl.exitCode(), 1);
         QVERIFY(QString::fromUtf8(ctl.readAllStandardError())
-                    .contains(QStringLiteral("semantic search requires the embedder sidecar")));
+                    .contains(QStringLiteral("semantic search requires the embedder tool")));
     }
 
     void radioLearnDryRunAndSaveUseJoinedTelemetry()

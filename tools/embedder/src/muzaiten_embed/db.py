@@ -11,6 +11,7 @@ from typing import Iterable, Sequence
 import numpy as np
 
 SCHEMA_VERSION = 2
+MAX_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     version = read_schema_version(conn)
     if version < 1:
         raise ValueError("features.sqlite is missing schema_version")
-    if version > SCHEMA_VERSION:
+    if version > MAX_SCHEMA_VERSION:
         raise ValueError(f"unsupported features.sqlite schema_version {version}")
 
     conn.executescript(
@@ -87,11 +88,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.execute(
-        "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (str(SCHEMA_VERSION),),
-    )
+    if version < SCHEMA_VERSION:
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(SCHEMA_VERSION),),
+        )
     conn.commit()
 
 

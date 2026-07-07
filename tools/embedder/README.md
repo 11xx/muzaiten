@@ -1,6 +1,6 @@
 # muzaiten-embed
 
-`muzaiten-embed` is a standalone sidecar for adding CLAP embeddings and
+`muzaiten-embed` is a standalone tool for adding CLAP embeddings and
 precomputed content-group neighbors to `features.sqlite`. It is not linked into
 the Qt application.
 

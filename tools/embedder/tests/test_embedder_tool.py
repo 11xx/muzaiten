@@ -120,6 +120,49 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
     ]
 
 
+def test_schema_three_is_accepted_without_downgrade(tmp_path: Path) -> None:
+    path = tmp_path / "features.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE files(
+                path TEXT PRIMARY KEY,
+                mtime INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                duration_ms INTEGER,
+                decode_hash TEXT,
+                chromaprint_fp BLOB,
+                content_group_id INTEGER,
+                analyzed_at INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'ok'
+            );
+            CREATE TABLE content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT);
+            CREATE TABLE features(
+                content_group_id INTEGER PRIMARY KEY,
+                tempo_bpm REAL,
+                loudness_lufs REAL,
+                loudness_std_db REAL,
+                spectral_centroid_mean_hz REAL,
+                spectral_centroid_std_hz REAL,
+                spectral_flatness_mean REAL,
+                zero_crossing_rate REAL,
+                onset_rate_hz REAL,
+                energy REAL,
+                extractor TEXT NOT NULL,
+                version TEXT NOT NULL
+            );
+            """
+        )
+        conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '3')")
+
+    with db.connect(path) as conn:
+        db.ensure_schema(conn)
+        assert db.read_schema_version(conn) == 3
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'embeddings'").fetchone() is not None
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'track_neighbors'").fetchone() is not None
+
+
 def test_neighbors_are_ranked_by_cosine_then_group_id(features_path: Path) -> None:
     fake = FakeEmbedder(
         {

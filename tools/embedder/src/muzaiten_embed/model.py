@@ -106,7 +106,7 @@ class RealClapEmbedder:
         except ImportError as exc:  # pragma: no cover - depends on optional extra
             raise RuntimeError(
                 "real CLAP embedding requires optional dependencies; run "
-                "`uv sync --extra model` in sidecar/embedder"
+                "`uv sync --extra model` in tools/embedder"
             ) from exc
 
         checkpoint_path = checkpoint if checkpoint is not None else ensure_checkpoint().path
