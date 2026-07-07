@@ -1,3 +1,5 @@
+pub mod dsp;
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
