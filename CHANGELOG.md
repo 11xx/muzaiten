@@ -149,6 +149,11 @@
   augments seeded/anchorless candidate pools with precomputed sonic neighbors,
   helping tag-poor tracks participate without changing behavior for libraries
   that have no embeddings.
+- `muzaitenctl semantic-search "<text>"` now performs CLI-only free-text
+  semantic library search by embedding the query through the optional
+  `muzaiten-embed` sidecar, cosine-ranking stored CLAP content-group
+  embeddings, and returning each group as its preferred library copy with a
+  score.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

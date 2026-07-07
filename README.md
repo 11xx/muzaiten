@@ -335,6 +335,7 @@ muzaitenctl search --plain utada      # human-readable blocks
 muzaitenctl search --limit 5 --json jazz
 muzaitenctl search --fuzzy nhuage     # fuzzy instead of exact substring
 muzaitenctl search --refresh          # rebuild the cache; --clear-cache to drop it
+muzaitenctl semantic-search "melancholic shoegaze" --limit 10 --json
 ```
 
 With no query in a terminal (and `fzf` installed) `search` launches an **fzf
@@ -342,6 +343,11 @@ picker** over the whole library — multi-line rows, romaji matches kanji, `Ente
 queues the selection and `Alt+Enter` plays it (via `enqueue`). Piped or without
 fzf, a bare `search` dumps the whole library as TSV. First run builds the cache
 (a few seconds); later runs are instant.
+
+`semantic-search` also runs client-side, but requires `features.sqlite` to
+contain CLAP embeddings from the optional `muzaiten-embed` sidecar. It embeds
+the text query through `muzaiten-embed query`, ranks content groups by cosine,
+and prints the preferred library copy for each group.
 
 Radio tuning commands (`radio-weights`, `radio-genre`, `genre-alias`,
 `genre-report`) also run client-side against the library database. Weight
