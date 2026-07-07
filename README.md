@@ -39,6 +39,15 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and reconstructed development
 
 - Local library scanner with source-directory management, incremental rescans, and missing-file marking.
 - Fast library search that matches by sound/shape across scripts — diacritics (`cafe`↔`Café`), Greek/Cyrillic/Turkish, and Japanese romaji↔kana/kanji (`sanshin no hana`→`三線の花`) — backed by an on-disk cache, in-app and via the `muzaitenctl` CLI (with an fzf picker).
+- Local, fully offline recommendation engine: Start Radio from any track (or
+  artist), a taste-aware Radio shuffle mode, Rediscovery and Deep-cuts mixes,
+  and explainable picks — every queue entry can show why it was chosen.
+  Scoring blends genres (alias-curated, rarity-weighted), era, ratings, and
+  listening history, plus content-aware signals when `features.sqlite` is
+  built: tempo/energy proximity from clean-room DSP analysis and CLAP
+  audio-embedding similarity, with duplicate copies resolved to the best
+  quality. Weights are runtime-tunable, saveable as profiles, and
+  `radio-learn` can suggest a profile learned from your own skips.
 - Album artist sidebar, album grid, artist track table, and queue sidebar.
 - Playlists in a dedicated database: import from a pasted tracklist, `m3u`/`m3u8`, `csv`, or `jsonl`/`ndjson`, or fetch a YouTube / YT Music playlist via `yt-dlp`; tracks resolve by sound/shape matching with a live-streaming match preview and multi-candidate triage. Entries keep a metadata snapshot so playlists survive rescans and remember tracks that go missing.
 - Library file explorer and free-roam file explorer, with keyboard-oriented navigation profiles.
@@ -316,6 +325,10 @@ muzaitenctl scrobble-backfill status | cancel         # progress, or stop the ru
 muzaitenctl scrobble-backfill reset <listenbrainz|lastfm>   # re-walk history behind a completed import
 muzaitenctl radio-weights get | set '<json>'                 # inspect or replace active radio scoring weights
 muzaitenctl radio-weights save <name> | apply <name> | list  # named radio tuning profiles
+muzaitenctl radio-learn --dry-run                            # suggest weights learned from your radio skips
+muzaitenctl features-status                                  # features.sqlite coverage report
+muzaitenctl duplicate-groups --min-size 2                    # inspect detected duplicate copies
+muzaitenctl pin-copy <group-id> <path>                       # prefer one copy for radio (unpin-copy undoes)
 ```
 
 The same backfill controls live under `History > Scrobblers` in the app. A
@@ -371,6 +384,13 @@ and prints the preferred library copy for each group.
 Radio tuning commands (`radio-weights`, `radio-genre`, `genre-alias`,
 `genre-report`) also run client-side against the library database. Weight
 changes are validated before writing and take effect on the next radio session.
+`radio-learn` fits a small model to your recorded radio picks and early skips
+and is suggestion-only: it saves a `learned-YYYYMMDD` profile for review and
+never touches the active weights (apply it explicitly with
+`radio-weights apply`). It refuses to run until enough labeled listening data
+exists (about 200 radio picks). The full `features.sqlite` layout — identity,
+scalar, and embedding tables, with units and caveats — is documented in
+`docs/features-schema.md`.
 
 ## File Explorer Notes
 

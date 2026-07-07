@@ -99,8 +99,19 @@ changed file, feeds it to both the SHA-256 identity hash and `Dsp::analyze`, and
 writes scalar rows after grouping.
 
 NULL means the extractor could not report that value for the representative.
-For example, near-silence has NULL loudness and energy; non-rhythmic material
-usually has NULL tempo.
+Near-silence has NULL loudness and energy; a flat or empty onset envelope
+(true silence) has NULL tempo.
+
+Known tempo caveats, pending a salience gate that needs real-corpus evidence
+to tune:
+
+- The global estimate may fold to the half or double octave toward the edges
+  of the common range (a 180 BPM track can report 90) — the standard
+  limitation of autocorrelation tempo estimation under a 120 BPM-centered
+  prior; octave-equivalent values should be treated as matching.
+- Non-rhythmic but non-silent material (drones, noise, field recordings)
+  does NOT get NULL: the prior pulls the estimate toward ~120 BPM, so its
+  `tempo_bpm` is unreliable rather than absent.
 
 - `tempo_bpm`: global tempo estimate in beats per minute.
 - `loudness_lufs`: BS.1770-style integrated loudness in LUFS.
