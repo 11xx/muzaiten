@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.07.07]
+
 ### Added
 
 - Documentation restructure: the README is now a concise front page and the
