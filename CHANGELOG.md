@@ -120,6 +120,9 @@
   schema v14 adds `radio_ignored_genres`, radio session genre joins/scoring skip
   ignored canonical genres, `genre-report` marks them, and `muzaitenctl`
   provides `radio-genre`/`genre-alias` curation verbs.
+- `muzaitenctl radio-weights` now exposes validated get/set/save/apply/list/remove
+  commands for radio scoring weights, with named profiles stored in the library
+  database and active changes taking effect on the next radio session.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

@@ -93,6 +93,12 @@ public:
         QString mbRecordingId;
     };
 
+    struct RadioWeightProfile {
+        QString name;
+        QString weightsJson;
+        QString updatedAt;
+    };
+
     explicit Database(QString connectionName);
     ~Database();
 
@@ -171,6 +177,10 @@ public:
     bool removeGenreAlias(const QString &alias);
     QSet<QString> ignoredRadioGenres() const;
     bool setRadioGenreIgnored(const QString &genreFolded, bool ignored);
+    QVector<RadioWeightProfile> radioWeightProfiles() const;
+    QString radioWeightProfile(const QString &name) const;
+    bool saveRadioWeightProfile(const QString &name, const QString &weightsJson);
+    bool removeRadioWeightProfile(const QString &name);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

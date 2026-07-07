@@ -148,6 +148,7 @@ private slots:
     void genreAbsentWithEmptyIdfMap();
     void scoringWeightsJsonOverridesDefaults();
     void scoringWeightsJsonRoundTripsAllFields();
+    void scoringWeightsJsonRejectsUnknownAndInvalidFields();
     void eraDecaysWithYearGap();
     void skipPenaltyScalesWithSkipRate();
     void recencyPenaltyDecaysWithTime();
@@ -183,6 +184,7 @@ private slots:
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
     void genreAliasesExpandCandidatesAndMergeCounts();
+    void radioWeightProfilesRoundTrip();
     void ignoredRadioGenresRoundTripAndSuppressCandidateJoins();
     void ignoredRadioGenresCanonicalizeAliasesAndPreserveVisibility();
     void genreTrackCountsAggregatesAcrossLibrary();
@@ -600,6 +602,19 @@ void RadioTest::scoringWeightsJsonRoundTripsAllFields()
     QVERIFY(qFuzzyCompare(roundTrip.recencyHalfLifeDays, weights.recencyHalfLifeDays));
     QVERIFY(qFuzzyCompare(roundTrip.skipPenalty, weights.skipPenalty));
     QVERIFY(qFuzzyCompare(roundTrip.sameArtistPenalty, weights.sameArtistPenalty));
+}
+
+void RadioTest::scoringWeightsJsonRejectsUnknownAndInvalidFields()
+{
+    QString error;
+    TrackScorer::weightsFromJson(R"({"unknownWeight":1.0})", &error);
+    QVERIFY(error.contains(QStringLiteral("unknownWeight")));
+
+    TrackScorer::weightsFromJson(R"({"genreWeight":"loud"})", &error);
+    QVERIFY(error.contains(QStringLiteral("genreWeight")));
+
+    TrackScorer::weightsFromJson(R"({"recencyPenalty":1.0})", &error);
+    QVERIFY(error.contains(QStringLiteral("recencyPenalty")));
 }
 
 void RadioTest::eraDecaysWithYearGap()
@@ -1404,6 +1419,45 @@ void RadioTest::genreAliasesExpandCandidatesAndMergeCounts()
     }
     QCOMPARE(canonicalCounts.value(QStringLiteral("classical")), 2);
     QCOMPARE(taggedTrackTotal, 2);
+}
+
+void RadioTest::radioWeightProfilesRoundTrip()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("radio-weight-profiles-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    TrackScorer::Weights weights = TrackScorer::defaultWeights();
+    weights.genreWeight = 2.25;
+    weights.ratingWeight = 0.75;
+    const QString balanced = QString::fromUtf8(TrackScorer::weightsToJson(weights));
+    QVERIFY2(db.saveRadioWeightProfile(QStringLiteral("balanced"), balanced), qPrintable(db.lastError()));
+    QCOMPARE(db.radioWeightProfile(QStringLiteral("balanced")), balanced);
+
+    weights.genreWeight = 1.0;
+    weights.noveltyWeight = 1.4;
+    const QString exploratory = QString::fromUtf8(TrackScorer::weightsToJson(weights));
+    QVERIFY2(db.saveRadioWeightProfile(QStringLiteral("explore"), exploratory), qPrintable(db.lastError()));
+
+    QVector<Database::RadioWeightProfile> profiles = db.radioWeightProfiles();
+    QCOMPARE(profiles.size(), 2);
+    QCOMPARE(profiles.at(0).name, QStringLiteral("balanced"));
+    QCOMPARE(profiles.at(0).weightsJson, balanced);
+    QVERIFY(!profiles.at(0).updatedAt.isEmpty());
+    QCOMPARE(profiles.at(1).name, QStringLiteral("explore"));
+
+    weights.ratingWeight = 1.1;
+    const QString updated = QString::fromUtf8(TrackScorer::weightsToJson(weights));
+    QVERIFY2(db.saveRadioWeightProfile(QStringLiteral("balanced"), updated), qPrintable(db.lastError()));
+    QCOMPARE(db.radioWeightProfile(QStringLiteral("balanced")), updated);
+    QCOMPARE(db.radioWeightProfiles().size(), 2);
+
+    QVERIFY2(db.removeRadioWeightProfile(QStringLiteral("explore")), qPrintable(db.lastError()));
+    QVERIFY(db.radioWeightProfile(QStringLiteral("explore")).isEmpty());
+    profiles = db.radioWeightProfiles();
+    QCOMPARE(profiles.size(), 1);
+    QCOMPARE(profiles.first().name, QStringLiteral("balanced"));
 }
 
 void RadioTest::ignoredRadioGenresRoundTripAndSuppressCandidateJoins()

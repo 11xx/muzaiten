@@ -314,6 +314,8 @@ muzaitenctl play-file <path>  # append a file and play it
 muzaitenctl scrobble-backfill <listenbrainz|lastfm>   # import history / sync play counts
 muzaitenctl scrobble-backfill status | cancel         # progress, or stop the running import
 muzaitenctl scrobble-backfill reset <listenbrainz|lastfm>   # re-walk history behind a completed import
+muzaitenctl radio-weights get | set '<json>'                 # inspect or replace active radio scoring weights
+muzaitenctl radio-weights save <name> | apply <name> | list  # named radio tuning profiles
 ```
 
 The same backfill controls live under `History > Scrobblers` in the app. A
@@ -340,6 +342,10 @@ picker** over the whole library — multi-line rows, romaji matches kanji, `Ente
 queues the selection and `Alt+Enter` plays it (via `enqueue`). Piped or without
 fzf, a bare `search` dumps the whole library as TSV. First run builds the cache
 (a few seconds); later runs are instant.
+
+Radio tuning commands (`radio-weights`, `radio-genre`, `genre-alias`,
+`genre-report`) also run client-side against the library database. Weight
+changes are validated before writing and take effect on the next radio session.
 
 ## File Explorer Notes
 

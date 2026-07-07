@@ -63,8 +63,7 @@ struct Scored {
 };
 
 // Runtime-tunable scorer weights. AppCore reads a JSON object from the
-// library-DB setting `radio.scoringWeights`; omitted or invalid fields keep
-// these defaults.
+// library-DB setting `radio.scoringWeights`; omitted fields keep these defaults.
 struct Weights {
     double genreWeight = 3.0;
     double genreIdfSaturation = 4.0;

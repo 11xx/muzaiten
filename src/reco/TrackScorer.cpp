@@ -29,18 +29,49 @@ double crowdingScale(qsizetype seedGenreCount, qsizetype candidateGenreCount, do
                      / (static_cast<double>(seedGenreCount) * static_cast<double>(candidateGenreCount)));
 }
 
-void assignNumber(const QJsonObject &object, const QString &key, double &target, double minimum,
-                  double maximum = std::numeric_limits<double>::infinity())
+QStringList weightKeys()
+{
+    return {
+        QStringLiteral("genreWeight"),
+        QStringLiteral("genreIdfSaturation"),
+        QStringLiteral("genreCrowdingSoftLimit"),
+        QStringLiteral("eraWeight"),
+        QStringLiteral("eraSpanYears"),
+        QStringLiteral("ratingWeight"),
+        QStringLiteral("userRatingBoost"),
+        QStringLiteral("historyWeight"),
+        QStringLiteral("historySaturation"),
+        QStringLiteral("noveltyWeight"),
+        QStringLiteral("noveltyZeroAt"),
+        QStringLiteral("recencyPenalty"),
+        QStringLiteral("recencyHalfLifeDays"),
+        QStringLiteral("skipPenalty"),
+        QStringLiteral("sameArtistPenalty"),
+    };
+}
+
+bool assignNumber(const QJsonObject &object, const QString &key, double &target, double minimum,
+                  double maximum = std::numeric_limits<double>::infinity(), QString *error = nullptr)
 {
     const QJsonValue value = object.value(key);
+    if (value.isUndefined()) {
+        return true;
+    }
     if (!value.isDouble()) {
-        return;
+        if (error != nullptr) {
+            *error = QStringLiteral("%1 must be a number").arg(key);
+        }
+        return false;
     }
     const double number = value.toDouble();
     if (!std::isfinite(number) || number < minimum || number > maximum) {
-        return;
+        if (error != nullptr) {
+            *error = QStringLiteral("%1 is outside its allowed range").arg(key);
+        }
+        return false;
     }
     target = number;
+    return true;
 }
 
 } // namespace
@@ -95,21 +126,33 @@ Weights weightsFromJson(const QByteArray &json, QString *error)
     }
 
     const QJsonObject object = document.object();
-    assignNumber(object, QStringLiteral("genreWeight"), weights.genreWeight, 0.0);
-    assignNumber(object, QStringLiteral("genreIdfSaturation"), weights.genreIdfSaturation, 0.001);
-    assignNumber(object, QStringLiteral("genreCrowdingSoftLimit"), weights.genreCrowdingSoftLimit, 1.0);
-    assignNumber(object, QStringLiteral("eraWeight"), weights.eraWeight, 0.0);
-    assignNumber(object, QStringLiteral("eraSpanYears"), weights.eraSpanYears, 0.001);
-    assignNumber(object, QStringLiteral("ratingWeight"), weights.ratingWeight, 0.0);
-    assignNumber(object, QStringLiteral("userRatingBoost"), weights.userRatingBoost, 0.0);
-    assignNumber(object, QStringLiteral("historyWeight"), weights.historyWeight, 0.0);
-    assignNumber(object, QStringLiteral("historySaturation"), weights.historySaturation, 0.001);
-    assignNumber(object, QStringLiteral("noveltyWeight"), weights.noveltyWeight, 0.0);
-    assignNumber(object, QStringLiteral("noveltyZeroAt"), weights.noveltyZeroAt, 0.001);
-    assignNumber(object, QStringLiteral("recencyPenalty"), weights.recencyPenalty, -100.0, 0.0);
-    assignNumber(object, QStringLiteral("recencyHalfLifeDays"), weights.recencyHalfLifeDays, 0.001);
-    assignNumber(object, QStringLiteral("skipPenalty"), weights.skipPenalty, -100.0, 0.0);
-    assignNumber(object, QStringLiteral("sameArtistPenalty"), weights.sameArtistPenalty, -100.0, 0.0);
+    const QStringList keys = weightKeys();
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+        if (!keys.contains(it.key())) {
+            if (error != nullptr) {
+                *error = QStringLiteral("unknown radio scoring weight: %1").arg(it.key());
+            }
+            return weights;
+        }
+    }
+
+    if (!assignNumber(object, QStringLiteral("genreWeight"), weights.genreWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("genreIdfSaturation"), weights.genreIdfSaturation, 0.001, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("genreCrowdingSoftLimit"), weights.genreCrowdingSoftLimit, 1.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("eraWeight"), weights.eraWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("eraSpanYears"), weights.eraSpanYears, 0.001, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("ratingWeight"), weights.ratingWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("userRatingBoost"), weights.userRatingBoost, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("historyWeight"), weights.historyWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("historySaturation"), weights.historySaturation, 0.001, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("noveltyWeight"), weights.noveltyWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("noveltyZeroAt"), weights.noveltyZeroAt, 0.001, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("recencyPenalty"), weights.recencyPenalty, -100.0, 0.0, error)
+        || !assignNumber(object, QStringLiteral("recencyHalfLifeDays"), weights.recencyHalfLifeDays, 0.001, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("skipPenalty"), weights.skipPenalty, -100.0, 0.0, error)
+        || !assignNumber(object, QStringLiteral("sameArtistPenalty"), weights.sameArtistPenalty, -100.0, 0.0, error)) {
+        return weights;
+    }
     return weights;
 }
 

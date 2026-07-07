@@ -340,6 +340,7 @@ add_executable(muzaitenctl
     src/core/MetadataBlob.cpp
     src/core/Rating.cpp
     src/fs/PathResolver.cpp
+    src/reco/TrackScorer.cpp
     src/search/Exclusion.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp

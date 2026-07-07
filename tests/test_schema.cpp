@@ -81,6 +81,7 @@ void SchemaTest::migratesFreshDatabase()
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toInt(), Schema::currentVersion);
     QVERIFY(query.exec(QStringLiteral("SELECT 1 FROM radio_ignored_genres LIMIT 1")));
+    QVERIFY(query.exec(QStringLiteral("SELECT 1 FROM radio_weight_profiles LIMIT 1")));
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()

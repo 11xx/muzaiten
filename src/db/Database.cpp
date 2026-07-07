@@ -726,7 +726,20 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 14;
+    // v15: named runtime radio scoring-weight profiles. The active profile
+    // remains the existing app_settings radio.scoringWeights value; this table
+    // stores listable snapshots that muzaitenctl can apply without sqlite3.
+    const QStringList v15Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS radio_weight_profiles (name TEXT PRIMARY KEY, weights_json TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(15, datetime('now'))"),
+    };
+    for (const QString &statement : v15Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 15;
 }
 
 QString Database::lastError() const
@@ -1794,6 +1807,62 @@ bool Database::clearUserAlbumRating(const QString &albumArtistName, const QStrin
     query.prepare(QStringLiteral("DELETE FROM user_album_ratings WHERE album_artist_name = ? AND album_title = ?"));
     query.addBindValue(albumArtistName);
     query.addBindValue(albumTitle);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QVector<Database::RadioWeightProfile> Database::radioWeightProfiles() const
+{
+    QVector<RadioWeightProfile> profiles;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral(
+            "SELECT name, weights_json, updated_at FROM radio_weight_profiles ORDER BY name COLLATE NOCASE ASC"))) {
+        return profiles;
+    }
+    while (query.next()) {
+        profiles.push_back({
+            query.value(0).toString(),
+            query.value(1).toString(),
+            query.value(2).toString(),
+        });
+    }
+    return profiles;
+}
+
+QString Database::radioWeightProfile(const QString &name) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT weights_json FROM radio_weight_profiles WHERE name = ?"));
+    query.addBindValue(name);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+    return query.value(0).toString();
+}
+
+bool Database::saveRadioWeightProfile(const QString &name, const QString &weightsJson)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO radio_weight_profiles(name, weights_json, updated_at) VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(name) DO UPDATE SET weights_json=excluded.weights_json, updated_at=datetime('now')"));
+    query.addBindValue(name);
+    query.addBindValue(weightsJson);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::removeRadioWeightProfile(const QString &name)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM radio_weight_profiles WHERE name = ?"));
+    query.addBindValue(name);
     if (!query.exec()) {
         m_lastError = query.lastError().text();
         return false;
