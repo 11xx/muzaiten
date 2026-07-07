@@ -4,6 +4,11 @@
 
 ### Added
 
+- Clean-room scalar extraction is now live end to end: `muzaiten-index` is a
+  C++ binary built with the app, writes schema-v3 `features.sqlite` rows with
+  DSP tempo/loudness/energy/spectral scalars, and replaces the GPL-blocked
+  bliss sidecar plan. The Rust indexer crate and top-level `sidecar/` layout
+  were retired; the optional CLAP embedder now lives under `tools/embedder`.
 - Start Radio: seed a radio session from any library track
   (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
   scored by genre, era, rating and listening affinity, with a novelty bonus for

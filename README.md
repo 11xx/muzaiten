@@ -345,7 +345,26 @@ fzf, a bare `search` dumps the whole library as TSV. First run builds the cache
 (a few seconds); later runs are instant.
 
 `semantic-search` also runs client-side, but requires `features.sqlite` to
-contain CLAP embeddings from the optional `muzaiten-embed` sidecar. It embeds
+exist. Build or refresh it with the C++ indexer that is built alongside the app:
+
+```sh
+muzaiten-index scan --library ~/.local/share/muzaiten/library.sqlite \
+  --features ~/.local/share/muzaiten/features.sqlite --json
+muzaiten-index status --features ~/.local/share/muzaiten/features.sqlite --json
+```
+
+The indexer computes decoded-audio identity, Chromaprint content groups, and
+clean-room DSP scalars in one canonical decode pass. CLAP embeddings are added
+separately by the optional Python tool in `tools/embedder`:
+
+```sh
+cd tools/embedder
+uv run muzaiten-embed scan --features ~/.local/share/muzaiten/features.sqlite
+uv run muzaiten-embed neighbors --features ~/.local/share/muzaiten/features.sqlite
+```
+
+`semantic-search` requires `features.sqlite` to contain those CLAP embeddings.
+It embeds
 the text query through `muzaiten-embed query`, ranks content groups by cosine,
 and prints the preferred library copy for each group.
 
