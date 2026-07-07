@@ -5,6 +5,7 @@
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 class FeatureStore final {
 public:
@@ -34,6 +35,7 @@ public:
     int schemaVersion() const;
     qint64 contentGroupForPath(const QString &path) const;
     QHash<QString, qint64> contentGroupsForPaths(const QStringList &paths) const;
+    QVector<qint64> contentGroupIds(int minSize = 1) const;
     QStringList pathsInGroup(qint64 groupId) const;
     Scalars scalarsForGroup(qint64 groupId) const;
     QHash<qint64, Scalars> scalarsForGroups(const QList<qint64> &groupIds) const;

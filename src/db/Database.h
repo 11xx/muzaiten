@@ -181,6 +181,10 @@ public:
     QString radioWeightProfile(const QString &name) const;
     bool saveRadioWeightProfile(const QString &name, const QString &weightsJson);
     bool removeRadioWeightProfile(const QString &name);
+    QString contentGroupPin(qint64 groupId) const;
+    QHash<qint64, QString> contentGroupPins() const;
+    bool setContentGroupPin(qint64 groupId, const QString &path);
+    bool removeContentGroupPin(qint64 groupId);
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);

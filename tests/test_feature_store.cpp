@@ -19,6 +19,7 @@ private slots:
     void groupLookupsRoundTrip();
     void batchLookupsAndScalarsRoundTrip();
     void statusCountsRows();
+    void contentGroupIdsHonorMinimumSize();
 };
 
 namespace {
@@ -295,6 +296,21 @@ void FeatureStoreTest::statusCountsRows()
     QCOMPARE(status.failed, 1);
     QCOMPARE(status.groups, 2);
     QCOMPARE(status.featured, 2);
+}
+
+void FeatureStoreTest::contentGroupIdsHonorMinimumSize()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    QString error;
+    const QString path = createFixture(temp, 1, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    FeatureStore store(path);
+
+    QCOMPARE(store.contentGroupIds(1), QVector<qint64>({10, 11}));
+    QCOMPARE(store.contentGroupIds(2), QVector<qint64>({10}));
+    QVERIFY(store.contentGroupIds(3).isEmpty());
 }
 
 QTEST_MAIN(FeatureStoreTest)

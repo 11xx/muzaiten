@@ -8,8 +8,10 @@
 #include "cli/SearchCli.h"
 #include "app/AppPaths.h"
 #include "core/GenreTags.h"
+#include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "features/FeatureStore.h"
+#include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
 #include "reco/TrackScorer.h"
 #include "search/SearchIndex.h"
@@ -69,6 +71,9 @@ void printUsage()
         "      --clear-cache         delete the cache and exit\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
         "  features-status         show features.sqlite coverage (works offline)\n"
+        "  duplicate-groups [--min-size N]  inspect features.sqlite duplicate groups\n"
+        "  pin-copy <group-id> <path> | unpin-copy <group-id>\n"
+        "                          prefer one library copy for radio playback\n"
         "  radio-genre ignore <genre> | unignore <genre> | list\n"
         "                          curate radio-only ignored folded genres (works offline)\n"
         "  radio-weights get | set <json> | save <name> | apply <name> | list | remove <name>\n"
@@ -272,6 +277,108 @@ QJsonObject featureStatusJson(const QString &path, bool found, bool open, const 
         object.insert(QStringLiteral("message"), message);
     }
     return object;
+}
+
+QStringList mediaTagsForPath(const Database &db, const QString &path)
+{
+    QStringList media;
+    const MetadataBlob::FullMetadata metadata = db.fullMetadata(path);
+    for (auto it = metadata.tags.cbegin(); it != metadata.tags.cend(); ++it) {
+        if (it.key().compare(QStringLiteral("MEDIA"), Qt::CaseInsensitive) == 0) {
+            media.append(it.value());
+        }
+    }
+    return media;
+}
+
+QualityRank::Copy qualityCopyForTrack(const Track &track, const QStringList &mediaTags)
+{
+    return QualityRank::Copy{
+        track.path,
+        track.codec,
+        track.bitDepth,
+        track.sampleRateHz,
+        track.bitrateKbps,
+        mediaTags,
+    };
+}
+
+struct DuplicateMember {
+    Track track;
+    QStringList mediaTags;
+    int qualityScore = 0;
+    bool pinned = false;
+};
+
+QVector<DuplicateMember> duplicateMembers(Database &db, const FeatureStore &features,
+                                          qint64 groupId, const QString &pinnedPath)
+{
+    QVector<DuplicateMember> members;
+    const QStringList paths = features.pathsInGroup(groupId);
+    members.reserve(paths.size());
+    for (const QString &path : paths) {
+        Track track = db.trackForPath(path);
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        db.enrichTrackForStatus(track);
+        const QStringList mediaTags = mediaTagsForPath(db, path);
+        const QualityRank::Copy copy = qualityCopyForTrack(track, mediaTags);
+        members.push_back({track, mediaTags, QualityRank::score(copy), path == pinnedPath});
+    }
+    std::sort(members.begin(), members.end(), [](const DuplicateMember &left, const DuplicateMember &right) {
+        if (left.pinned != right.pinned) {
+            return left.pinned;
+        }
+        if (left.qualityScore != right.qualityScore) {
+            return left.qualityScore > right.qualityScore;
+        }
+        return left.track.path < right.track.path;
+    });
+    return members;
+}
+
+QJsonObject duplicateMemberJson(const DuplicateMember &member)
+{
+    return QJsonObject{
+        {QStringLiteral("path"), member.track.path},
+        {QStringLiteral("codec"), member.track.codec},
+        {QStringLiteral("bit_depth"), member.track.bitDepth},
+        {QStringLiteral("sample_rate_hz"), member.track.sampleRateHz},
+        {QStringLiteral("bitrate_kbps"), member.track.bitrateKbps},
+        {QStringLiteral("quality_score"), member.qualityScore},
+        {QStringLiteral("pinned"), member.pinned},
+        {QStringLiteral("media"), QJsonArray::fromStringList(member.mediaTags)},
+    };
+}
+
+QString qualitySummary(const DuplicateMember &member)
+{
+    QStringList parts;
+    if (!member.track.codec.isEmpty()) {
+        parts << member.track.codec;
+    }
+    if (member.track.bitDepth > 0 || member.track.sampleRateHz > 0) {
+        QString rateDepth;
+        if (member.track.bitDepth > 0) {
+            rateDepth += QStringLiteral("%1bit").arg(member.track.bitDepth);
+        }
+        if (member.track.sampleRateHz > 0) {
+            if (!rateDepth.isEmpty()) {
+                rateDepth += QLatin1Char('/');
+            }
+            rateDepth += QStringLiteral("%1Hz").arg(member.track.sampleRateHz);
+        }
+        parts << rateDepth;
+    }
+    if (member.track.bitrateKbps > 0) {
+        parts << QStringLiteral("%1kbps").arg(member.track.bitrateKbps);
+    }
+    if (!member.mediaTags.isEmpty()) {
+        parts << QStringLiteral("MEDIA=%1").arg(member.mediaTags.join(QLatin1Char('|')));
+    }
+    parts << QStringLiteral("score=%1").arg(member.qualityScore);
+    return parts.join(QLatin1Char(' '));
 }
 
 QString oneLine(const QString &value)
@@ -1060,6 +1167,175 @@ int runFeaturesStatus(QStringList arguments, bool json)
     return 0;
 }
 
+int runDuplicateGroups(QStringList arguments, bool json)
+{
+    int minSize = 2;
+    while (!arguments.isEmpty()) {
+        const QString word = arguments.takeFirst();
+        if (word == QLatin1String("--min-size")) {
+            if (arguments.isEmpty()) {
+                return fail(QStringLiteral("duplicate-groups --min-size needs a value"));
+            }
+            bool ok = false;
+            minSize = arguments.takeFirst().toInt(&ok);
+            if (!ok || minSize < 1) {
+                return fail(QStringLiteral("duplicate-groups --min-size needs a positive integer"));
+            }
+        } else {
+            return fail(QStringLiteral("unknown duplicate-groups option \"%1\"").arg(word));
+        }
+    }
+
+    const QString featurePath = featuresDbPath();
+    if (!QFileInfo::exists(featurePath)) {
+        return fail(QStringLiteral("features.sqlite not found at %1").arg(featurePath));
+    }
+    FeatureStore features(featurePath);
+    if (!features.isOpen()) {
+        return fail(QStringLiteral("features.sqlite unsupported or unreadable at %1").arg(featurePath));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-duplicate-groups-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    const QHash<qint64, QString> pins = db.contentGroupPins();
+    QJsonArray groupsJson;
+    int printed = 0;
+    for (qint64 groupId : features.contentGroupIds(minSize)) {
+        const QString pinnedPath = pins.value(groupId);
+        const QVector<DuplicateMember> members = duplicateMembers(db, features, groupId, pinnedPath);
+        if (members.size() < minSize) {
+            continue;
+        }
+        QVector<QualityRank::Copy> copies;
+        copies.reserve(members.size());
+        for (const DuplicateMember &member : members) {
+            copies.push_back(qualityCopyForTrack(member.track, member.mediaTags));
+        }
+        const QString bestPath = QualityRank::bestPath(copies, pinnedPath);
+        if (json) {
+            QJsonArray memberArray;
+            for (const DuplicateMember &member : members) {
+                memberArray.append(duplicateMemberJson(member));
+            }
+            groupsJson.append(QJsonObject{
+                {QStringLiteral("content_group_id"), static_cast<double>(groupId)},
+                {QStringLiteral("pin"), pinnedPath},
+                {QStringLiteral("best_path"), bestPath},
+                {QStringLiteral("members"), memberArray},
+            });
+        } else {
+            out << "group " << groupId << " (" << members.size() << " copies";
+            if (!bestPath.isEmpty()) {
+                out << ", best " << bestPath;
+            }
+            if (!pinnedPath.isEmpty()) {
+                out << ", pinned " << pinnedPath;
+            }
+            out << ")\n";
+            for (const DuplicateMember &member : members) {
+                out << "  " << (member.pinned ? '*' : ' ') << ' '
+                    << qualitySummary(member) << '\t' << member.track.path << '\n';
+            }
+        }
+        ++printed;
+    }
+
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(groupsJson).toJson(QJsonDocument::Compact)) << '\n';
+    } else if (printed == 0) {
+        out << "duplicate-groups: no groups with at least " << minSize << " library members\n";
+    }
+    return 0;
+}
+
+int runPinCopy(QStringList arguments, bool json)
+{
+    if (arguments.size() != 2) {
+        return fail(QStringLiteral("pin-copy needs <group-id> <path>"));
+    }
+    bool ok = false;
+    const qint64 groupId = arguments.at(0).toLongLong(&ok);
+    if (!ok || groupId < 0) {
+        return fail(QStringLiteral("pin-copy needs a non-negative group id"));
+    }
+    const QString path = arguments.at(1);
+    const QString featurePath = featuresDbPath();
+    if (!QFileInfo::exists(featurePath)) {
+        return fail(QStringLiteral("features.sqlite not found at %1").arg(featurePath));
+    }
+    FeatureStore features(featurePath);
+    if (!features.isOpen()) {
+        return fail(QStringLiteral("features.sqlite unsupported or unreadable at %1").arg(featurePath));
+    }
+    if (!features.pathsInGroup(groupId).contains(path)) {
+        return fail(QStringLiteral("path is not a member of content group %1").arg(groupId));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-pin-copy-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+    if (!db.setContentGroupPin(groupId, path)) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("content_group_id"), static_cast<double>(groupId)},
+            {QStringLiteral("pinned_path"), path},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "pin-copy: group " << groupId << " -> " << path << '\n';
+    }
+    return 0;
+}
+
+int runUnpinCopy(QStringList arguments, bool json)
+{
+    if (arguments.size() != 1) {
+        return fail(QStringLiteral("unpin-copy needs <group-id>"));
+    }
+    bool ok = false;
+    const qint64 groupId = arguments.at(0).toLongLong(&ok);
+    if (!ok || groupId < 0) {
+        return fail(QStringLiteral("unpin-copy needs a non-negative group id"));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-unpin-copy-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+    if (!db.removeContentGroupPin(groupId)) {
+        return fail(db.lastError());
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("content_group_id"), static_cast<double>(groupId)},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "unpin-copy: removed pin for group " << groupId << '\n';
+    }
+    return 0;
+}
+
 int runRadioGenre(QStringList arguments, bool json)
 {
     if (arguments.isEmpty()) {
@@ -1252,6 +1528,15 @@ int main(int argc, char **argv)
     }
     if (command == QLatin1String("features-status")) {
         return runFeaturesStatus(arguments, json);
+    }
+    if (command == QLatin1String("duplicate-groups")) {
+        return runDuplicateGroups(arguments, json);
+    }
+    if (command == QLatin1String("pin-copy")) {
+        return runPinCopy(arguments, json);
+    }
+    if (command == QLatin1String("unpin-copy")) {
+        return runUnpinCopy(arguments, json);
     }
     if (command == QLatin1String("radio-genre")) {
         return runRadioGenre(arguments, json);

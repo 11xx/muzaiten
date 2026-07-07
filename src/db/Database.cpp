@@ -739,7 +739,20 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 15;
+    // v16: per-content-group best-copy pins. The content-group ids come from
+    // the read-only sidecar features.sqlite, but user preference lives in the
+    // writable library DB.
+    const QStringList v16Statements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS content_group_pins (content_group_id INTEGER PRIMARY KEY, pinned_path TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+        QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(16, datetime('now'))"),
+    };
+    for (const QString &statement : v16Statements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    return Schema::currentVersion == 16;
 }
 
 QString Database::lastError() const
@@ -1863,6 +1876,62 @@ bool Database::removeRadioWeightProfile(const QString &name)
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("DELETE FROM radio_weight_profiles WHERE name = ?"));
     query.addBindValue(name);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QString Database::contentGroupPin(qint64 groupId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT pinned_path FROM content_group_pins WHERE content_group_id = ?"));
+    query.addBindValue(groupId);
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+    return {};
+}
+
+QHash<qint64, QString> Database::contentGroupPins() const
+{
+    QHash<qint64, QString> pins;
+    QSqlQuery query(m_db);
+    if (query.exec(QStringLiteral("SELECT content_group_id, pinned_path FROM content_group_pins"))) {
+        while (query.next()) {
+            pins.insert(query.value(0).toLongLong(), query.value(1).toString());
+        }
+    }
+    return pins;
+}
+
+bool Database::setContentGroupPin(qint64 groupId, const QString &path)
+{
+    if (groupId < 0 || path.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO content_group_pins(content_group_id, pinned_path, updated_at) "
+        "VALUES(?, ?, datetime('now')) "
+        "ON CONFLICT(content_group_id) DO UPDATE SET "
+        "pinned_path = excluded.pinned_path, updated_at = excluded.updated_at"));
+    query.addBindValue(groupId);
+    query.addBindValue(path);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::removeContentGroupPin(qint64 groupId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM content_group_pins WHERE content_group_id = ?"));
+    query.addBindValue(groupId);
     if (!query.exec()) {
         m_lastError = query.lastError().text();
         return false;

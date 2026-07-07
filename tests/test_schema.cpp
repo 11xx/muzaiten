@@ -43,6 +43,7 @@ private slots:
     void trackGenresCascadeOnTrackDelete();
     void genreAliasesRoundTripAndMigrationIsIdempotent();
     void genreTagsSplitsAndFolds();
+    void contentGroupPinsRoundTrip();
 };
 
 namespace {
@@ -82,6 +83,7 @@ void SchemaTest::migratesFreshDatabase()
     QCOMPARE(query.value(0).toInt(), Schema::currentVersion);
     QVERIFY(query.exec(QStringLiteral("SELECT 1 FROM radio_ignored_genres LIMIT 1")));
     QVERIFY(query.exec(QStringLiteral("SELECT 1 FROM radio_weight_profiles LIMIT 1")));
+    QVERIFY(query.exec(QStringLiteral("SELECT 1 FROM content_group_pins LIMIT 1")));
 }
 
 void SchemaTest::databaseCacheMemoryCanBeReleasedAndRestored()
@@ -894,6 +896,25 @@ void SchemaTest::genreTagsSplitsAndFolds()
     QVERIFY(GenreTags::folded(QStringLiteral("   ")).isEmpty());
 
     QVERIFY(GenreTags::fromMetadata(MetadataBlob::FullMetadata{}).isEmpty());
+}
+
+void SchemaTest::contentGroupPinsRoundTrip()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-content-group-pins-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    QCOMPARE(database.contentGroupPin(42), QString());
+    QVERIFY(database.contentGroupPins().isEmpty());
+    QVERIFY2(database.setContentGroupPin(42, QStringLiteral("/music/best.flac")), qPrintable(database.lastError()));
+    QCOMPARE(database.contentGroupPin(42), QStringLiteral("/music/best.flac"));
+    QCOMPARE(database.contentGroupPins().value(42), QStringLiteral("/music/best.flac"));
+    QVERIFY2(database.setContentGroupPin(42, QStringLiteral("/music/pinned.dsf")), qPrintable(database.lastError()));
+    QCOMPARE(database.contentGroupPin(42), QStringLiteral("/music/pinned.dsf"));
+    QVERIFY2(database.removeContentGroupPin(42), qPrintable(database.lastError()));
+    QCOMPARE(database.contentGroupPin(42), QString());
 }
 
 QTEST_MAIN(SchemaTest)

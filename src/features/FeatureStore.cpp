@@ -165,6 +165,29 @@ QHash<QString, qint64> FeatureStore::contentGroupsForPaths(const QStringList &pa
     return groups;
 }
 
+QVector<qint64> FeatureStore::contentGroupIds(int minSize) const
+{
+    QVector<qint64> groups;
+    if (!isOpen()) {
+        return groups;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT content_group_id FROM files "
+        "WHERE content_group_id IS NOT NULL "
+        "GROUP BY content_group_id HAVING COUNT(*) >= ? "
+        "ORDER BY content_group_id"));
+    query.addBindValue(std::max(1, minSize));
+    if (!query.exec()) {
+        return groups;
+    }
+    while (query.next()) {
+        groups.push_back(query.value(0).toLongLong());
+    }
+    return groups;
+}
+
 QStringList FeatureStore::pathsInGroup(qint64 groupId) const
 {
     QStringList paths;
