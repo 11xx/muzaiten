@@ -21,6 +21,8 @@ private slots:
     void ratingEventsDoNotAffectAffinities();
     void recordAndQueryQueueRemovals();
     void queueRemovalsDoNotAffectAffinities();
+    void recordAndQueryRadioPicks();
+    void radioPicksDoNotAffectAffinities();
     void schemaVersionIsCurrent();
 
 private:
@@ -377,13 +379,126 @@ void TestListenHistory::queueRemovalsDoNotAffectAffinities()
     QVERIFY(!after.contains(other.path));
 }
 
+void TestListenHistory::recordAndQueryRadioPicks()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    ListenHistoryStore::RadioPickEvent pick;
+    pick.occurredAtSecs = 1000;
+    pick.track = makeTrack();
+    pick.sessionKind = QStringLiteral("seeded");
+    pick.exploration0To100 = 35;
+    pick.weightsJson = R"({"genreWeight":2.5,"ratingWeight":0.5})";
+    pick.components = {
+        {QStringLiteral("genre"), 1.25},
+        {QStringLiteral("rating"), 0.5},
+        {QStringLiteral("same-artist"), -0.25},
+    };
+    pick.score = 1.5;
+    QVERIFY(store.recordRadioPick(pick));
+
+    ListenHistoryStore::RadioPickEvent anchorless;
+    anchorless.occurredAtSecs = 1001;
+    anchorless.track = makeTrack(QStringLiteral("Other"), QStringLiteral("Other Artist"));
+    anchorless.track.path = QStringLiteral("/music/other.flac");
+    anchorless.track.musicBrainz.recordingId.clear();
+    anchorless.sessionKind = QStringLiteral("anchorless");
+    anchorless.exploration0To100 = 60;
+    anchorless.weightsJson = R"({"genreWeight":3.0})";
+    anchorless.components = {{QStringLiteral("novelty"), 0.8}};
+    anchorless.score = 0.8;
+    QVERIFY(store.recordRadioPick(anchorless));
+
+    const QVector<ListenHistoryStore::RadioPickEvent> events = store.radioPickEvents();
+    QCOMPARE(events.size(), 2);
+    QCOMPARE(events.at(0).occurredAtSecs, 1000);
+    QCOMPARE(events.at(0).track.path, QStringLiteral("/music/a.flac"));
+    QCOMPARE(events.at(0).track.musicBrainz.recordingId, QStringLiteral("rec-mbid"));
+    QCOMPARE(events.at(0).sessionKind, QStringLiteral("seeded"));
+    QCOMPARE(events.at(0).exploration0To100, 35);
+    QCOMPARE(events.at(0).weightsJson, QByteArray(R"({"genreWeight":2.5,"ratingWeight":0.5})"));
+    QCOMPARE(events.at(0).components.size(), 3);
+    QCOMPARE(events.at(0).components.at(0).name, QStringLiteral("genre"));
+    QVERIFY(qFuzzyCompare(events.at(0).components.at(0).value, 1.25));
+    QCOMPARE(events.at(0).components.at(2).name, QStringLiteral("same-artist"));
+    QVERIFY(qFuzzyCompare(events.at(0).components.at(2).value, -0.25));
+    QVERIFY(qFuzzyCompare(events.at(0).score, 1.5));
+
+    QCOMPARE(events.at(1).track.path, QStringLiteral("/music/other.flac"));
+    QVERIFY(events.at(1).track.musicBrainz.recordingId.isEmpty());
+    QCOMPARE(events.at(1).sessionKind, QStringLiteral("anchorless"));
+
+    const QVector<ListenHistoryStore::RadioPickEvent> limited = store.radioPickEvents(1);
+    QCOMPARE(limited.size(), 1);
+    QCOMPARE(limited.first().sessionKind, QStringLiteral("seeded"));
+}
+
+void TestListenHistory::radioPicksDoNotAffectAffinities()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(store.isOpen());
+
+    Track track = makeTrack();
+    ListenHistoryStore::PlayEvent play;
+    play.startedAtSecs = 1000;
+    play.endedAtSecs = 1200;
+    play.playedMs = 200000;
+    play.durationMs = 200000;
+    play.completion = 1.0;
+    play.outcome = QStringLiteral("finished");
+    play.source = QStringLiteral("radio");
+    play.sessionId = QStringLiteral("session-1");
+    play.track = track;
+    QVERIFY(store.recordPlayEvent(play) > 0);
+    QVERIFY(store.recordListen(track, 1000, false, false) > 0);
+
+    const auto before = store.trackAffinities();
+    QVERIFY(before.contains(track.path));
+
+    ListenHistoryStore::RadioPickEvent sameTrack;
+    sameTrack.occurredAtSecs = 1300;
+    sameTrack.track = track;
+    sameTrack.sessionKind = QStringLiteral("seeded");
+    sameTrack.exploration0To100 = 30;
+    sameTrack.weightsJson = R"({"genreWeight":3.0})";
+    sameTrack.components = {{QStringLiteral("genre"), 1.0}};
+    sameTrack.score = 1.0;
+    QVERIFY(store.recordRadioPick(sameTrack));
+
+    Track other = makeTrack(QStringLiteral("Other"), QStringLiteral("Other Artist"));
+    other.path = QStringLiteral("/music/other.flac");
+    ListenHistoryStore::RadioPickEvent otherTrack;
+    otherTrack.occurredAtSecs = 1301;
+    otherTrack.track = other;
+    otherTrack.sessionKind = QStringLiteral("artist");
+    otherTrack.exploration0To100 = 80;
+    otherTrack.weightsJson = R"({"genreWeight":3.0})";
+    otherTrack.components = {{QStringLiteral("novelty"), 0.8}};
+    otherTrack.score = 0.8;
+    QVERIFY(store.recordRadioPick(otherTrack));
+
+    const auto after = store.trackAffinities();
+    QCOMPARE(after.size(), before.size());
+    QVERIFY(after.contains(track.path));
+    QCOMPARE(after.value(track.path).playEvents, before.value(track.path).playEvents);
+    QCOMPARE(after.value(track.path).finished, before.value(track.path).finished);
+    QCOMPARE(after.value(track.path).skipped, before.value(track.path).skipped);
+    QCOMPARE(after.value(track.path).lastPlayedAtSecs, before.value(track.path).lastPlayedAtSecs);
+    QCOMPARE(after.value(track.path).listenCount, before.value(track.path).listenCount);
+    QCOMPARE(after.value(track.path).baselineMax, before.value(track.path).baselineMax);
+    QVERIFY(!after.contains(other.path));
+}
+
 void TestListenHistory::schemaVersionIsCurrent()
 {
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
     QVERIFY(store.isOpen());
 
-    QCOMPARE(store.metaValue(QStringLiteral("schemaVersion")), QStringLiteral("6"));
+    QCOMPARE(store.metaValue(QStringLiteral("schemaVersion")), QStringLiteral("7"));
 }
 
 QTEST_GUILESS_MAIN(TestListenHistory)

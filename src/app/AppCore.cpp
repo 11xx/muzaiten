@@ -1018,6 +1018,40 @@ TrackScorer::Weights AppCore::radioScoringWeights() const
     return weights;
 }
 
+void AppCore::recordRadioPicks(const QVector<Track> &picks)
+{
+    if (m_listenHistory == nullptr || m_radioSession == nullptr || picks.isEmpty()) {
+        return;
+    }
+
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+    const QString sessionKind = m_radioSessionKind.isEmpty() ? QStringLiteral("anchorless") : m_radioSessionKind;
+    const QByteArray weightsJson = TrackScorer::weightsToJson(m_radioSessionWeights);
+    for (const Track &track : picks) {
+        if (track.path.isEmpty()) {
+            continue;
+        }
+        const QList<TrackScorer::Component> components = m_radioSession->reasonComponentsFor(track.path);
+        QVector<ListenHistoryStore::RadioPickComponent> persistedComponents;
+        persistedComponents.reserve(components.size());
+        double score = 0.0;
+        for (const TrackScorer::Component &component : components) {
+            persistedComponents.push_back({component.name, component.value});
+            score += component.value;
+        }
+
+        ListenHistoryStore::RadioPickEvent event;
+        event.occurredAtSecs = nowSecs;
+        event.track = track;
+        event.sessionKind = sessionKind;
+        event.exploration0To100 = m_radioSessionExploration;
+        event.weightsJson = weightsJson;
+        event.components = persistedComponents;
+        event.score = score;
+        m_listenHistory->recordRadioPick(event);
+    }
+}
+
 QHash<QString, TrackScorer::Affinity> AppCore::buildRadioAffinities() const
 {
     QHash<QString, TrackScorer::Affinity> affinities;
@@ -1171,6 +1205,7 @@ void AppCore::maybeRestoreRadioSession()
 
     restored->restoreConstraintState(root);
     m_radioSession = std::move(restored);
+    m_radioSessionWeights = scoringWeights;
     m_radioSessionKind = kind;
     m_radioSessionSeedPath = seedPath;
     m_radioSessionArtistName = artistName;
@@ -1202,6 +1237,7 @@ void AppCore::installRadioProvider(bool markPicksAsRadio)
         const QVector<Track> picks = m_radioSession->nextTracks(count, excludePaths, [this](const QString &path) {
             return m_database ? m_database->trackForPath(path) : Track{};
         });
+        recordRadioPicks(picks);
         if (markPicksAsRadio) {
             for (const Track &track : picks) {
                 if (!track.path.isEmpty()) {
@@ -1243,10 +1279,11 @@ void AppCore::syncRadioShuffleSession()
         return;
     }
 
+    m_radioSessionWeights = radioScoringWeights();
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(),
                                                     buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
                                                     radioExploration(), QDateTime::currentSecsSinceEpoch(),
-                                                    nullptr, radioScoringWeights());
+                                                    nullptr, m_radioSessionWeights);
     m_radioSessionKind = QStringLiteral("anchorless");
     m_radioSessionSeedPath.clear();
     m_radioSessionArtistName.clear();
@@ -1306,9 +1343,10 @@ bool AppCore::startRadio(const QString &seedPath)
     m_radioSessionArtistName.clear();
     m_radioSessionExploration = exploration;
 
+    m_radioSessionWeights = radioScoringWeights();
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
                                                     seedCandidate, exploration, QDateTime::currentSecsSinceEpoch(),
-                                                    nullptr, radioScoringWeights());
+                                                    nullptr, m_radioSessionWeights);
     // Install the scored provider; it resolves each pick to a full Track by
     // path. Stays installed regardless of batch size: it is the safety net for
     // when the queue runs dry (e.g. the user deleted rows ahead of playback).
@@ -1382,9 +1420,10 @@ bool AppCore::startArtistRadio(const QString &artistName)
     m_radioSessionArtistName = trimmedArtist;
     m_radioSessionExploration = exploration;
 
+    m_radioSessionWeights = radioScoringWeights();
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
                                                     seedCandidate, exploration, QDateTime::currentSecsSinceEpoch(),
-                                                    nullptr, radioScoringWeights());
+                                                    nullptr, m_radioSessionWeights);
     installRadioProvider(/*markPicksAsRadio=*/true);
     m_player->setRadioActive(true);
     m_radioTopUpInProgress = true;
@@ -1424,9 +1463,10 @@ bool AppCore::startMix(const QString &mode)
         m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
         1, 100);
 
+    m_radioSessionWeights = radioScoringWeights();
     auto session = std::make_unique<RadioSession>(std::move(pool), affinities,
                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
-                                                  exploration, nowSecs, nullptr, radioScoringWeights());
+                                                  exploration, nowSecs, nullptr, m_radioSessionWeights);
     QVector<Track> picks = session->nextTracks(m_radioBatchSize, {}, [this](const QString &path) {
         return m_database ? m_database->trackForPath(path) : Track{};
     });
@@ -1443,6 +1483,7 @@ bool AppCore::startMix(const QString &mode)
     m_radioSessionArtistName.clear();
     m_radioSessionExploration = exploration;
     m_radioSession = std::move(session);
+    recordRadioPicks(picks);
     for (const Track &track : picks) {
         if (!track.path.isEmpty()) {
             m_radioPickPaths.insert(track.path);
@@ -1615,6 +1656,7 @@ void AppCore::appendRadioBatch(int count)
     if (picks.isEmpty()) {
         return;
     }
+    recordRadioPicks(picks);
     for (const Track &track : picks) {
         if (!track.path.isEmpty()) {
             m_radioPickPaths.insert(track.path);

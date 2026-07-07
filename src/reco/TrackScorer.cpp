@@ -52,6 +52,27 @@ Weights defaultWeights()
     return {};
 }
 
+QByteArray weightsToJson(const Weights &weights)
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("genreWeight"), weights.genreWeight);
+    object.insert(QStringLiteral("genreIdfSaturation"), weights.genreIdfSaturation);
+    object.insert(QStringLiteral("genreCrowdingSoftLimit"), weights.genreCrowdingSoftLimit);
+    object.insert(QStringLiteral("eraWeight"), weights.eraWeight);
+    object.insert(QStringLiteral("eraSpanYears"), weights.eraSpanYears);
+    object.insert(QStringLiteral("ratingWeight"), weights.ratingWeight);
+    object.insert(QStringLiteral("userRatingBoost"), weights.userRatingBoost);
+    object.insert(QStringLiteral("historyWeight"), weights.historyWeight);
+    object.insert(QStringLiteral("historySaturation"), weights.historySaturation);
+    object.insert(QStringLiteral("noveltyWeight"), weights.noveltyWeight);
+    object.insert(QStringLiteral("noveltyZeroAt"), weights.noveltyZeroAt);
+    object.insert(QStringLiteral("recencyPenalty"), weights.recencyPenalty);
+    object.insert(QStringLiteral("recencyHalfLifeDays"), weights.recencyHalfLifeDays);
+    object.insert(QStringLiteral("skipPenalty"), weights.skipPenalty);
+    object.insert(QStringLiteral("sameArtistPenalty"), weights.sameArtistPenalty);
+    return QJsonDocument(object).toJson(QJsonDocument::Compact);
+}
+
 Weights weightsFromJson(const QByteArray &json, QString *error)
 {
     if (error != nullptr) {

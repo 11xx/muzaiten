@@ -85,6 +85,7 @@ struct Weights {
 
 Weights defaultWeights();
 Weights weightsFromJson(const QByteArray &json, QString *error = nullptr);
+QByteArray weightsToJson(const Weights &weights);
 
 Scored score(const Candidate &candidate, const Affinity &affinity, const SeedContext &seed);
 Scored score(const Candidate &candidate, const Affinity &affinity, const SeedContext &seed,

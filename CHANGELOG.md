@@ -128,6 +128,10 @@
 - Local rating-change telemetry: every explicit track-rating edit now records
   an append-only event in `history.sqlite` with old/new rating values and the
   playback/UI context, without changing recommendation scoring behavior.
+- Local radio-pick telemetry: generated radio picks now persist their scorer
+  component breakdown, active weights, session kind, exploration value, and
+  total score in `history.sqlite`, without feeding that data back into current
+  recommendation scoring.
 - `muzaitenctl scrobble-backfill reset <listenbrainz|lastfm>` clears a service's
   completed/synced marker so the next import re-walks full history. This recovers
   listens added *behind* an already-imported range, which the completed-import

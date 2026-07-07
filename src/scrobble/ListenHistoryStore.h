@@ -2,6 +2,7 @@
 
 #include "core/Track.h"
 
+#include <QByteArray>
 #include <QHash>
 #include <QList>
 #include <QSqlDatabase>
@@ -82,6 +83,25 @@ public:
         bool wasRadioPick = false;
         bool wasUnheard = false;
         bool radioActive = false;
+    };
+
+    struct RadioPickComponent {
+        QString name;
+        double value = 0.0;
+    };
+
+    // Append-only telemetry for generated radio picks. These rows are
+    // record-only training data for offline analysis; recommendation affinity
+    // deliberately ignores them.
+    struct RadioPickEvent {
+        qint64 id = 0;
+        qint64 occurredAtSecs = 0;
+        Track track;                // persisted as track_path/mb_recording_id
+        QString sessionKind;
+        int exploration0To100 = 0;
+        QByteArray weightsJson;
+        QVector<RadioPickComponent> components;
+        double score = 0.0;
     };
 
     // One historical listen pulled from a scrobbler service (ListenBrainz's
@@ -165,6 +185,8 @@ public:
     QVector<RatingEvent> ratingEvents(int limit = -1) const;
     bool recordQueueRemoval(const QueueRemovalEvent &event);
     QVector<QueueRemovalEvent> queueRemovalEvents(int limit = -1) const;
+    bool recordRadioPick(const RadioPickEvent &event);
+    QVector<RadioPickEvent> radioPickEvents(int limit = -1) const;
 
     int forgetTrackBehavior(const QStringList &paths, bool includeImportedListens = false);
 

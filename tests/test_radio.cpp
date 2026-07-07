@@ -147,6 +147,7 @@ private slots:
     void genreAbsentWithNoSharedGenres();
     void genreAbsentWithEmptyIdfMap();
     void scoringWeightsJsonOverridesDefaults();
+    void scoringWeightsJsonRoundTripsAllFields();
     void eraDecaysWithYearGap();
     void skipPenaltyScalesWithSkipRate();
     void recencyPenaltyDecaysWithTime();
@@ -559,6 +560,46 @@ void RadioTest::scoringWeightsJsonOverridesDefaults()
     const TrackScorer::Weights fallback = TrackScorer::weightsFromJson("{", &error);
     QVERIFY(!error.isEmpty());
     QVERIFY(qFuzzyCompare(fallback.ratingWeight, TrackScorer::defaultWeights().ratingWeight));
+}
+
+void RadioTest::scoringWeightsJsonRoundTripsAllFields()
+{
+    TrackScorer::Weights weights;
+    weights.genreWeight = 2.5;
+    weights.genreIdfSaturation = 3.5;
+    weights.genreCrowdingSoftLimit = 2.0;
+    weights.eraWeight = 0.75;
+    weights.eraSpanYears = 12.0;
+    weights.ratingWeight = 0.6;
+    weights.userRatingBoost = 1.4;
+    weights.historyWeight = 1.2;
+    weights.historySaturation = 25.0;
+    weights.noveltyWeight = 0.9;
+    weights.noveltyZeroAt = 8.0;
+    weights.recencyPenalty = -1.5;
+    weights.recencyHalfLifeDays = 10.0;
+    weights.skipPenalty = -3.0;
+    weights.sameArtistPenalty = -0.4;
+
+    QString error;
+    const TrackScorer::Weights roundTrip = TrackScorer::weightsFromJson(
+        TrackScorer::weightsToJson(weights), &error);
+    QVERIFY(error.isEmpty());
+    QVERIFY(qFuzzyCompare(roundTrip.genreWeight, weights.genreWeight));
+    QVERIFY(qFuzzyCompare(roundTrip.genreIdfSaturation, weights.genreIdfSaturation));
+    QVERIFY(qFuzzyCompare(roundTrip.genreCrowdingSoftLimit, weights.genreCrowdingSoftLimit));
+    QVERIFY(qFuzzyCompare(roundTrip.eraWeight, weights.eraWeight));
+    QVERIFY(qFuzzyCompare(roundTrip.eraSpanYears, weights.eraSpanYears));
+    QVERIFY(qFuzzyCompare(roundTrip.ratingWeight, weights.ratingWeight));
+    QVERIFY(qFuzzyCompare(roundTrip.userRatingBoost, weights.userRatingBoost));
+    QVERIFY(qFuzzyCompare(roundTrip.historyWeight, weights.historyWeight));
+    QVERIFY(qFuzzyCompare(roundTrip.historySaturation, weights.historySaturation));
+    QVERIFY(qFuzzyCompare(roundTrip.noveltyWeight, weights.noveltyWeight));
+    QVERIFY(qFuzzyCompare(roundTrip.noveltyZeroAt, weights.noveltyZeroAt));
+    QVERIFY(qFuzzyCompare(roundTrip.recencyPenalty, weights.recencyPenalty));
+    QVERIFY(qFuzzyCompare(roundTrip.recencyHalfLifeDays, weights.recencyHalfLifeDays));
+    QVERIFY(qFuzzyCompare(roundTrip.skipPenalty, weights.skipPenalty));
+    QVERIFY(qFuzzyCompare(roundTrip.sameArtistPenalty, weights.sameArtistPenalty));
 }
 
 void RadioTest::eraDecaysWithYearGap()

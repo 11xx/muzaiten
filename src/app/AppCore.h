@@ -188,6 +188,7 @@ private:
     TrackScorer::Weights radioScoringWeights() const;
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
     void installRadioProvider(bool markPicksAsRadio);
+    void recordRadioPicks(const QVector<Track> &picks);
     void saveRadioSessionState();
     void clearRadioSessionState();
     void maybeRestoreRadioSession();
@@ -281,4 +282,5 @@ private:
     QString           m_radioSessionSeedPath;
     QString           m_radioSessionArtistName;
     int               m_radioSessionExploration = 30;
+    TrackScorer::Weights m_radioSessionWeights;
 };
