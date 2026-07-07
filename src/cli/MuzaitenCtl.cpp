@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include <unistd.h>
 
@@ -44,6 +45,8 @@ namespace {
 
 constexpr int connectTimeoutMs = 2000;
 constexpr int replyTimeoutMs = 5000;
+constexpr int semanticQueryTimeoutMs = 10 * 60 * 1000;
+constexpr int defaultSemanticSearchLimit = 20;
 
 void printUsage()
 {
@@ -69,6 +72,8 @@ void printUsage()
         "      --fuzzy               fuzzy match instead of exact substring\n"
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
+        "  semantic-search [--limit N] <text>\n"
+        "                          CLAP text-to-library search (requires embedder sidecar)\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
         "  features-status         show features.sqlite coverage (works offline)\n"
         "  duplicate-groups [--min-size N]  inspect features.sqlite duplicate groups\n"
@@ -350,6 +355,296 @@ QJsonObject duplicateMemberJson(const DuplicateMember &member)
         {QStringLiteral("pinned"), member.pinned},
         {QStringLiteral("media"), QJsonArray::fromStringList(member.mediaTags)},
     };
+}
+
+struct SemanticScore {
+    qint64 groupId = -1;
+    double score = 0.0;
+};
+
+struct SemanticSearchResult {
+    qint64 groupId = -1;
+    double score = 0.0;
+    DuplicateMember member;
+};
+
+QVector<float> normalizedVector(const QVector<float> &values, QString *error)
+{
+    if (values.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("embedding vector is empty");
+        }
+        return {};
+    }
+
+    double normSquared = 0.0;
+    for (float value : values) {
+        if (!std::isfinite(value)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("embedding vector contains a non-finite value");
+            }
+            return {};
+        }
+        normSquared += static_cast<double>(value) * static_cast<double>(value);
+    }
+    if (!(normSquared > 0.0) || !std::isfinite(normSquared)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("embedding vector must have a finite non-zero norm");
+        }
+        return {};
+    }
+
+    const double scale = 1.0 / std::sqrt(normSquared);
+    QVector<float> normalized;
+    normalized.reserve(values.size());
+    for (float value : values) {
+        normalized.push_back(static_cast<float>(static_cast<double>(value) * scale));
+    }
+    return normalized;
+}
+
+QVector<float> vectorFromJsonArray(const QJsonArray &array, QString *error)
+{
+    QVector<float> raw;
+    raw.reserve(array.size());
+    for (qsizetype i = 0; i < array.size(); ++i) {
+        const QJsonValue value = array.at(i);
+        if (!value.isDouble()) {
+            if (error != nullptr) {
+                *error = QStringLiteral("embedding vector entry %1 is not numeric").arg(i);
+            }
+            return {};
+        }
+        const double number = value.toDouble();
+        if (!std::isfinite(number)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("embedding vector entry %1 is not finite").arg(i);
+            }
+            return {};
+        }
+        raw.push_back(static_cast<float>(number));
+    }
+    return normalizedVector(raw, error);
+}
+
+QVector<float> parseQueryVectorJson(const QByteArray &json, QString *error)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        if (error != nullptr) {
+            *error = QStringLiteral("could not parse query embedding JSON: %1").arg(parseError.errorString());
+        }
+        return {};
+    }
+
+    if (document.isArray()) {
+        return vectorFromJsonArray(document.array(), error);
+    }
+    if (!document.isObject()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("query embedding JSON must be an array or object");
+        }
+        return {};
+    }
+
+    const QJsonObject object = document.object();
+    const QJsonValue vectorValue = object.value(QStringLiteral("vector")).isArray()
+        ? object.value(QStringLiteral("vector"))
+        : object.value(QStringLiteral("embedding"));
+    if (!vectorValue.isArray()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("query embedding JSON object must contain a vector array");
+        }
+        return {};
+    }
+    return vectorFromJsonArray(vectorValue.toArray(), error);
+}
+
+QString compactProcessError(QString value)
+{
+    value.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    if (value.size() > 500) {
+        value = value.left(500).trimmed() + QStringLiteral("...");
+    }
+    return value;
+}
+
+QVector<float> queryEmbeddingViaSidecar(const QString &text, QString *error)
+{
+    const QString executable = QStandardPaths::findExecutable(QStringLiteral("muzaiten-embed"));
+    if (executable.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder sidecar (muzaiten-embed not found)");
+        }
+        return {};
+    }
+
+    QProcess process;
+    process.start(executable, {QStringLiteral("query"), text, QStringLiteral("--json")});
+    if (!process.waitForStarted(5000)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder sidecar (could not start muzaiten-embed)");
+        }
+        return {};
+    }
+    if (!process.waitForFinished(semanticQueryTimeoutMs)) {
+        process.kill();
+        process.waitForFinished(1000);
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder sidecar (query timed out)");
+        }
+        return {};
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        QString detail = QString::fromUtf8(process.readAllStandardError()).trimmed();
+        if (detail.isEmpty()) {
+            detail = QStringLiteral("query failed");
+        }
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder sidecar: %1").arg(compactProcessError(detail));
+        }
+        return {};
+    }
+
+    QString parseError;
+    QVector<float> vector = parseQueryVectorJson(process.readAllStandardOutput(), &parseError);
+    if (vector.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("semantic search requires the embedder sidecar: %1").arg(parseError);
+        }
+        return {};
+    }
+    return vector;
+}
+
+double cosineSimilarity(const QVector<float> &left, const QVector<float> &right)
+{
+    if (left.size() != right.size() || left.isEmpty()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    double dot = 0.0;
+    double leftNorm = 0.0;
+    double rightNorm = 0.0;
+    for (qsizetype i = 0; i < left.size(); ++i) {
+        const double a = left.at(i);
+        const double b = right.at(i);
+        if (!std::isfinite(a) || !std::isfinite(b)) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        dot += a * b;
+        leftNorm += a * a;
+        rightNorm += b * b;
+    }
+    if (!(leftNorm > 0.0) || !(rightNorm > 0.0)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return dot / (std::sqrt(leftNorm) * std::sqrt(rightNorm));
+}
+
+DuplicateMember bestCopyForGroup(Database &db, const FeatureStore &features,
+                                 qint64 groupId, const QString &pinnedPath)
+{
+    const QVector<DuplicateMember> members = duplicateMembers(db, features, groupId, pinnedPath);
+    if (members.isEmpty()) {
+        return {};
+    }
+
+    QVector<QualityRank::Copy> copies;
+    copies.reserve(members.size());
+    for (const DuplicateMember &member : members) {
+        copies.push_back(qualityCopyForTrack(member.track, member.mediaTags));
+    }
+    const QString bestPath = QualityRank::bestPath(copies, pinnedPath);
+    for (const DuplicateMember &member : members) {
+        if (member.track.path == bestPath) {
+            return member;
+        }
+    }
+    return members.first();
+}
+
+QVector<SemanticSearchResult> rankSemanticMatches(const QVector<float> &queryVector,
+                                                  FeatureStore &features,
+                                                  Database &db,
+                                                  int limit,
+                                                  QString *error)
+{
+    const QVector<qint64> groupIds = features.contentGroupIds(1);
+    QList<qint64> groupList;
+    groupList.reserve(groupIds.size());
+    for (qint64 groupId : groupIds) {
+        groupList.push_back(groupId);
+    }
+
+    const QHash<qint64, QVector<float>> embeddings = features.embeddingsForGroups(groupList);
+    if (embeddings.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("features.sqlite has no embeddings; run muzaiten-embed scan first");
+        }
+        return {};
+    }
+
+    QVector<SemanticScore> scores;
+    scores.reserve(embeddings.size());
+    for (qint64 groupId : groupIds) {
+        const QVector<float> embedding = embeddings.value(groupId);
+        if (embedding.isEmpty() || embedding.size() != queryVector.size()) {
+            continue;
+        }
+        const double score = cosineSimilarity(queryVector, embedding);
+        if (std::isfinite(score)) {
+            scores.push_back({groupId, score});
+        }
+    }
+    if (scores.isEmpty()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("features.sqlite has no embeddings matching query dimension %1")
+                         .arg(queryVector.size());
+        }
+        return {};
+    }
+
+    std::sort(scores.begin(), scores.end(), [](const SemanticScore &left, const SemanticScore &right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        return left.groupId < right.groupId;
+    });
+
+    const QHash<qint64, QString> pins = db.contentGroupPins();
+    QVector<SemanticSearchResult> results;
+    results.reserve(std::min(static_cast<qsizetype>(limit), scores.size()));
+    for (const SemanticScore &score : scores) {
+        const DuplicateMember member = bestCopyForGroup(db, features, score.groupId, pins.value(score.groupId));
+        if (member.track.path.isEmpty()) {
+            continue;
+        }
+        results.push_back({score.groupId, score.score, member});
+        if (results.size() >= limit) {
+            break;
+        }
+    }
+    if (results.isEmpty() && error != nullptr) {
+        *error = QStringLiteral("semantic search found embeddings, but no matching groups are present in library.sqlite");
+    }
+    return results;
+}
+
+QJsonObject semanticResultJson(const SemanticSearchResult &result)
+{
+    QJsonObject object = duplicateMemberJson(result.member);
+    object.insert(QStringLiteral("content_group_id"), static_cast<double>(result.groupId));
+    object.insert(QStringLiteral("score"), result.score);
+    object.insert(QStringLiteral("title"), result.member.track.title);
+    object.insert(QStringLiteral("artist"), result.member.track.artistName);
+    object.insert(QStringLiteral("album_artist"), result.member.track.albumArtistName);
+    object.insert(QStringLiteral("album"), result.member.track.albumTitle);
+    object.insert(QStringLiteral("date"), result.member.track.date);
+    object.insert(QStringLiteral("duration"), std::round(static_cast<double>(result.member.track.durationMs) / 10.0) / 100.0);
+    object.insert(QStringLiteral("rating"), result.member.track.rating0To100);
+    return object;
 }
 
 QString qualitySummary(const DuplicateMember &member)
@@ -1085,6 +1380,95 @@ int runSearch(QStringList arguments, bool json)
     return 0;
 }
 
+int runSemanticSearch(QStringList arguments, bool json)
+{
+    bool jsonOut = json;
+    int limit = defaultSemanticSearchLimit;
+    QByteArray queryVectorJson;
+    QStringList queryWords;
+
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString word = arguments.at(i);
+        if (word == QLatin1String("--json")) {
+            jsonOut = true;
+        } else if (word == QLatin1String("--limit")) {
+            bool ok = false;
+            if (i + 1 >= arguments.size() || (limit = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
+                return fail(QStringLiteral("semantic-search --limit needs a positive number"));
+            }
+        } else if (word == QLatin1String("--query-vector-json")) {
+            if (i + 1 >= arguments.size()) {
+                return fail(QStringLiteral("semantic-search --query-vector-json needs a JSON vector"));
+            }
+            queryVectorJson = arguments.at(++i).toUtf8();
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown semantic-search option \"%1\"").arg(word));
+        } else {
+            queryWords.push_back(word);
+        }
+    }
+
+    if (queryWords.isEmpty()) {
+        return fail(QStringLiteral("semantic-search needs a text query"));
+    }
+    const QString queryText = queryWords.join(QLatin1Char(' ')).trimmed();
+    if (queryText.isEmpty()) {
+        return fail(QStringLiteral("semantic-search needs a non-empty text query"));
+    }
+
+    const QString featurePath = featuresDbPath();
+    if (!QFileInfo::exists(featurePath)) {
+        return fail(QStringLiteral("features.sqlite not found at %1").arg(featurePath));
+    }
+    FeatureStore features(featurePath);
+    if (!features.isOpen()) {
+        return fail(QStringLiteral("features.sqlite unsupported or unreadable at %1").arg(featurePath));
+    }
+    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
+        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
+    }
+    Database db(QStringLiteral("muzaitenctl-semantic-search-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (!db.open(SearchCli::libraryDbPath())) {
+        return fail(db.lastError());
+    }
+
+    QString vectorError;
+    const QVector<float> queryVector = queryVectorJson.isEmpty()
+        ? queryEmbeddingViaSidecar(queryText, &vectorError)
+        : parseQueryVectorJson(queryVectorJson, &vectorError);
+    if (queryVector.isEmpty()) {
+        return fail(vectorError.isEmpty() ? QStringLiteral("semantic-search could not build a query embedding")
+                                          : vectorError);
+    }
+
+    QString rankError;
+    const QVector<SemanticSearchResult> results = rankSemanticMatches(queryVector, features, db, limit, &rankError);
+    if (results.isEmpty() && !rankError.isEmpty()) {
+        return fail(rankError);
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (jsonOut) {
+        QJsonArray array;
+        for (const SemanticSearchResult &result : results) {
+            array.append(semanticResultJson(result));
+        }
+        out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
+        return 0;
+    }
+
+    for (const SemanticSearchResult &result : results) {
+        const Track &track = result.member.track;
+        out << QString::number(result.score, 'f', 6) << '\t'
+            << tsvField(track.path) << '\t'
+            << tsvField(track.title) << '\t'
+            << tsvField(track.artistName) << '\t'
+            << tsvField(track.albumTitle) << '\n';
+    }
+    return 0;
+}
+
 int runGenreReport(QStringList arguments, bool json)
 {
     bool plain = false;
@@ -1522,6 +1906,9 @@ int main(int argc, char **argv)
     // so it works without a running instance and never touches the socket.
     if (command == QLatin1String("search")) {
         return runSearch(arguments, json);
+    }
+    if (command == QLatin1String("semantic-search")) {
+        return runSemanticSearch(arguments, json);
     }
     if (command == QLatin1String("genre-report")) {
         return runGenreReport(arguments, json);

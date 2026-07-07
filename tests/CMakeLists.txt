@@ -74,6 +74,7 @@ add_executable(test_search_cli
 target_include_directories(test_search_cli PRIVATE ../src)
 target_link_libraries(test_search_cli PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
 target_compile_features(test_search_cli PRIVATE cxx_std_26)
+add_dependencies(test_search_cli muzaitenctl)
 add_test(NAME test_search_cli COMMAND test_search_cli)
 
 add_executable(test_playlist_database

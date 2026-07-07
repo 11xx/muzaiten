@@ -6,11 +6,25 @@
 #include "search/SearchQuery.h"
 
 #include <QByteArray>
+#include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QSet>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QString>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <QVariant>
+#include <QVector>
 
 namespace {
 
@@ -30,6 +44,168 @@ Track makeTrack(const QString &dir, const QString &filename, const QString &titl
     track.fileSize = 10;
     track.fileMtime = 20;
     return track;
+}
+
+struct SemanticFeatureRow {
+    QString path;
+    qint64 groupId = -1;
+    QByteArray vectorBlob;
+};
+
+bool execFeatureSql(QSqlQuery &query, const QString &sql, QString *error)
+{
+    if (query.exec(sql)) {
+        return true;
+    }
+    if (error != nullptr) {
+        *error = query.lastError().text() + QStringLiteral(": ") + sql;
+    }
+    return false;
+}
+
+bool createSemanticFeatureFixture(const QString &path, const QVector<SemanticFeatureRow> &rows, QString *error)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile::remove(path);
+    const QString connectionName =
+        QStringLiteral("semantic-feature-fixture-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    bool ok = true;
+
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(path);
+        if (!db.open()) {
+            if (error != nullptr) {
+                *error = db.lastError().text();
+            }
+            ok = false;
+        }
+
+        if (ok) {
+            QSqlQuery query(db);
+            ok = ok && execFeatureSql(query, QStringLiteral("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)"), error);
+            ok = ok && execFeatureSql(query, QStringLiteral(
+                                          "CREATE TABLE files("
+                                          " path TEXT PRIMARY KEY,"
+                                          " mtime INTEGER NOT NULL,"
+                                          " size INTEGER NOT NULL,"
+                                          " duration_ms INTEGER,"
+                                          " decode_hash TEXT,"
+                                          " chromaprint_fp BLOB,"
+                                          " content_group_id INTEGER,"
+                                          " analyzed_at INTEGER NOT NULL,"
+                                          " status TEXT NOT NULL DEFAULT 'ok')"),
+                                      error);
+            ok = ok && execFeatureSql(query, QStringLiteral(
+                                          "CREATE TABLE content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT)"),
+                                      error);
+            ok = ok && execFeatureSql(query, QStringLiteral(
+                                          "CREATE TABLE features("
+                                          " content_group_id INTEGER PRIMARY KEY,"
+                                          " bliss_vector BLOB NOT NULL,"
+                                          " tempo_bpm REAL,"
+                                          " loudness REAL,"
+                                          " energy REAL,"
+                                          " brightness REAL,"
+                                          " extractor TEXT NOT NULL,"
+                                          " version TEXT NOT NULL)"),
+                                      error);
+            ok = ok && execFeatureSql(query, QStringLiteral(
+                                          "CREATE TABLE embeddings("
+                                          " content_group_id INTEGER PRIMARY KEY,"
+                                          " model TEXT NOT NULL,"
+                                          " version TEXT NOT NULL,"
+                                          " dim INTEGER NOT NULL,"
+                                          " vector BLOB NOT NULL)"),
+                                      error);
+            ok = ok && execFeatureSql(query, QStringLiteral(
+                                          "CREATE TABLE track_neighbors("
+                                          " content_group_id INTEGER NOT NULL,"
+                                          " neighbor_group_id INTEGER NOT NULL,"
+                                          " rank INTEGER NOT NULL,"
+                                          " cosine REAL NOT NULL,"
+                                          " PRIMARY KEY(content_group_id, rank))"),
+                                      error);
+        }
+
+        if (ok) {
+            QSqlQuery meta(db);
+            meta.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES('schema_version', '2')"));
+            if (!meta.exec()) {
+                if (error != nullptr) {
+                    *error = meta.lastError().text();
+                }
+                ok = false;
+            }
+        }
+
+        QSet<qint64> groups;
+        if (ok) {
+            for (const SemanticFeatureRow &row : rows) {
+                if (groups.contains(row.groupId)) {
+                    continue;
+                }
+                QSqlQuery group(db);
+                group.prepare(QStringLiteral("INSERT INTO content_groups(id) VALUES(?)"));
+                group.addBindValue(row.groupId);
+                if (!group.exec()) {
+                    if (error != nullptr) {
+                        *error = group.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+                groups.insert(row.groupId);
+            }
+        }
+
+        if (ok) {
+            for (const SemanticFeatureRow &row : rows) {
+                QSqlQuery file(db);
+                file.prepare(QStringLiteral(
+                    "INSERT INTO files(path, mtime, size, duration_ms, decode_hash, chromaprint_fp, "
+                    "content_group_id, analyzed_at, status) VALUES(?, 1, 1, 1000, ?, ?, ?, 1000, 'ok')"));
+                file.addBindValue(row.path);
+                file.addBindValue(QStringLiteral("hash-%1").arg(row.groupId));
+                file.addBindValue(QByteArray::fromHex("01020304"));
+                file.addBindValue(row.groupId);
+                if (!file.exec()) {
+                    if (error != nullptr) {
+                        *error = file.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+
+                QSqlQuery embedding(db);
+                embedding.prepare(QStringLiteral(
+                    "INSERT INTO embeddings(content_group_id, model, version, dim, vector) "
+                    "VALUES(?, 'fixture-model', 'fixture-version', ?, ?)"));
+                embedding.addBindValue(row.groupId);
+                embedding.addBindValue(row.vectorBlob.size() / static_cast<int>(sizeof(float)));
+                embedding.addBindValue(row.vectorBlob);
+                if (!embedding.exec()) {
+                    if (error != nullptr) {
+                        *error = embedding.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        db.close();
+    }
+
+    QSqlDatabase::removeDatabase(connectionName);
+    return ok;
+}
+
+QString muzaitenCtlPath()
+{
+    QDir buildDir(QCoreApplication::applicationDirPath());
+    buildDir.cdUp();
+    return buildDir.filePath(QStringLiteral("muzaitenctl"));
 }
 
 } // namespace
@@ -150,6 +326,98 @@ private slots:
         QCOMPARE(path, SearchCli::cachePath());
         QVERIFY(!QFile::exists(SearchCli::cachePath()));
         QVERIFY(!SearchCli::clearCache(nullptr)); // already gone
+    }
+
+    void semanticSearchRanksInjectedQueryVector()
+    {
+        const QString dbPath = SearchCli::libraryDbPath();
+        Track warm = makeTrack(m_temp.path(), QStringLiteral("10.flac"), QStringLiteral("Warm Piano"), 70);
+        warm.artistName = QStringLiteral("Alpha");
+        warm.albumArtistName = QStringLiteral("Alpha");
+        warm.albumTitle = QStringLiteral("Late Room");
+        warm.codec = QStringLiteral("flac");
+        warm.bitDepth = 24;
+        warm.sampleRateHz = 96000;
+
+        Track bright = makeTrack(m_temp.path(), QStringLiteral("11.flac"), QStringLiteral("Bright Synth"), 70);
+        bright.artistName = QStringLiteral("Beta");
+        bright.albumArtistName = QStringLiteral("Beta");
+        bright.albumTitle = QStringLiteral("Morning");
+        bright.codec = QStringLiteral("mp3");
+        bright.bitrateKbps = 320;
+
+        {
+            Database db(QStringLiteral("semantic-cli-setup-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY2(db.open(dbPath), qPrintable(db.lastError()));
+            QVERIFY2(db.upsertTrack(warm), qPrintable(db.lastError()));
+            QVERIFY2(db.upsertTrack(bright), qPrintable(db.lastError()));
+        }
+
+        QString error;
+        const QString featurePath = QDir(qEnvironmentVariable("MUZAITEN_DATA_DIR")).filePath(QStringLiteral("features.sqlite"));
+        QVERIFY2(createSemanticFeatureFixture(featurePath,
+                                              {
+                                                  {warm.path, 101, QByteArray::fromHex("0000803f00000000")},
+                                                  {bright.path, 102, QByteArray::fromHex("000000000000803f")},
+                                              },
+                                              &error),
+                 qPrintable(error));
+
+        const QString ctlPath = muzaitenCtlPath();
+        QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
+
+        QProcess ctl;
+        ctl.setProgram(ctlPath);
+        ctl.setArguments({
+            QStringLiteral("--json"),
+            QStringLiteral("semantic-search"),
+            QStringLiteral("warm piano"),
+            QStringLiteral("--limit"),
+            QStringLiteral("1"),
+            QStringLiteral("--query-vector-json"),
+            QStringLiteral("[1,0]"),
+        });
+        ctl.start();
+        QVERIFY2(ctl.waitForFinished(10000), qPrintable(ctl.errorString()));
+        QCOMPARE(ctl.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(ctl.exitCode(), 0);
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(ctl.readAllStandardOutput(), &parseError);
+        QVERIFY2(parseError.error == QJsonParseError::NoError, qPrintable(parseError.errorString()));
+        QVERIFY(document.isArray());
+        const QJsonArray results = document.array();
+        QCOMPARE(results.size(), 1);
+        const QJsonObject result = results.at(0).toObject();
+        QCOMPARE(result.value(QStringLiteral("content_group_id")).toInt(), 101);
+        QCOMPARE(result.value(QStringLiteral("path")).toString(), warm.path);
+        QCOMPARE(result.value(QStringLiteral("title")).toString(), warm.title);
+        QVERIFY(result.value(QStringLiteral("score")).toDouble() > 0.99);
+    }
+
+    void semanticSearchWithoutSidecarReportsCleanError()
+    {
+        const QString ctlPath = muzaitenCtlPath();
+        QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
+
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("PATH"), m_temp.path() + QStringLiteral("/empty-bin"));
+
+        QProcess ctl;
+        ctl.setProgram(ctlPath);
+        ctl.setProcessEnvironment(env);
+        ctl.setArguments({
+            QStringLiteral("semantic-search"),
+            QStringLiteral("warm piano"),
+            QStringLiteral("--limit"),
+            QStringLiteral("1"),
+        });
+        ctl.start();
+        QVERIFY2(ctl.waitForFinished(10000), qPrintable(ctl.errorString()));
+        QCOMPARE(ctl.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(ctl.exitCode(), 1);
+        QVERIFY(QString::fromUtf8(ctl.readAllStandardError())
+                    .contains(QStringLiteral("semantic search requires the embedder sidecar")));
     }
 };
 
