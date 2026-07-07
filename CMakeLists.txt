@@ -80,6 +80,7 @@ set(MUZAITEN_SOURCES
     src/reco/GenreCuration.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
+    src/reco/WeightLearnerData.cpp
     src/playback/AudioDeviceControl.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/QtPlaybackBackend.cpp
@@ -146,6 +147,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelSearchBar.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
+    src/ui/ScoringWeightsDialog.cpp
     src/ui/PlaylistAddDialog.cpp
     src/ui/PlaylistImportDialog.cpp
     src/ui/PlaylistView.cpp
@@ -214,7 +216,9 @@ set(MUZAITEN_HEADERS
     src/reco/ArtistRadio.h
     src/reco/GenreCuration.h
     src/reco/RadioMix.h
+    src/reco/TrackScorer.h
     src/reco/WeightLearner.h
+    src/reco/WeightLearnerData.h
     src/scanner/ArtworkCache.h
     src/scanner/DirectoryWalker.h
     src/scanner/LibraryScanner.h
@@ -277,6 +281,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
+    src/ui/ScoringWeightsDialog.h
     src/ui/PlaylistAddDialog.h
     src/ui/HeaderLabelStyle.h
     src/ui/PanelBorderStyle.h
@@ -362,6 +367,7 @@ add_executable(muzaitenctl
     src/reco/GenreCuration.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
+    src/reco/WeightLearnerData.cpp
     src/search/Exclusion.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp

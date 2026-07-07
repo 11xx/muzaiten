@@ -199,6 +199,7 @@ private slots:
     void genreAbsentWithEmptyIdfMap();
     void scoringWeightsJsonOverridesDefaults();
     void scoringWeightsJsonRoundTripsAllFields();
+    void scoringWeightSpecsRoundTripThroughJson();
     void scoringWeightsJsonRejectsUnknownAndInvalidFields();
     void weightLearnerLearnsDirectionalMultipliers();
     void weightLearnerStrengthensVindicatedPenalties();
@@ -683,6 +684,36 @@ void RadioTest::scoringWeightsJsonRoundTripsAllFields()
     QVERIFY(qFuzzyCompare(roundTrip.recencyHalfLifeDays, weights.recencyHalfLifeDays));
     QVERIFY(qFuzzyCompare(roundTrip.skipPenalty, weights.skipPenalty));
     QVERIFY(qFuzzyCompare(roundTrip.sameArtistPenalty, weights.sameArtistPenalty));
+}
+
+void RadioTest::scoringWeightSpecsRoundTripThroughJson()
+{
+    const QVector<TrackScorer::WeightSpec> specs = TrackScorer::weightSpecs();
+    QCOMPARE(specs.size(), 18);
+    TrackScorer::Weights weights = TrackScorer::defaultWeights();
+    for (const TrackScorer::WeightSpec &spec : specs) {
+        QVERIFY(!spec.key.isEmpty());
+        QVERIFY(!spec.label.isEmpty());
+        QVERIFY(!spec.tooltip.isEmpty());
+        QVERIFY(spec.minimum <= spec.defaultValue);
+        QVERIFY(spec.defaultValue <= spec.maximum);
+        double current = 0.0;
+        QVERIFY(TrackScorer::weightValue(weights, spec.key, &current));
+        QVERIFY(qFuzzyCompare(current, spec.defaultValue));
+        const double adjusted = spec.maximum <= 0.0 ? spec.maximum : spec.minimum;
+        QVERIFY(TrackScorer::setWeightValue(weights, spec.key, adjusted));
+    }
+
+    QString error;
+    const TrackScorer::Weights roundTrip = TrackScorer::weightsFromJson(TrackScorer::weightsToJson(weights), &error);
+    QVERIFY(error.isEmpty());
+    for (const TrackScorer::WeightSpec &spec : specs) {
+        double expected = 0.0;
+        double actual = 0.0;
+        QVERIFY(TrackScorer::weightValue(weights, spec.key, &expected));
+        QVERIFY(TrackScorer::weightValue(roundTrip, spec.key, &actual));
+        QVERIFY(qFuzzyCompare(expected, actual));
+    }
 }
 
 void RadioTest::scoringWeightsJsonRejectsUnknownAndInvalidFields()

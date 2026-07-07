@@ -18,6 +18,9 @@
   curation...` edits aliases and ignored radio genres while showing the folded
   vocabulary, and `Library > Audio analysis` opens read-only status and
   duplicate-copy dialogs with pin/unpin controls.
+- `Radio > Scoring weights...` now edits the active scoring weights, manages
+  named tuning profiles, and can save suggestion-only learned profiles from the
+  same local radio telemetry used by `muzaitenctl radio-learn`.
 - Clean-room scalar extraction is now live end to end: `muzaiten-index` is a
   C++ binary built with the app, writes schema-v3 `features.sqlite` rows with
   DSP tempo/loudness/energy/spectral scalars, and replaces the GPL-blocked

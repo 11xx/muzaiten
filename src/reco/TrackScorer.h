@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 // Pure, explainable per-track scoring for the rule-based radio engine (Stage 1).
 // No Qt-SQL dependency: callers build the plain data structs from whatever store
@@ -92,7 +93,19 @@ struct Weights {
     double sameArtistPenalty = -0.6;
 };
 
+struct WeightSpec {
+    QString key;
+    QString label;
+    QString tooltip;
+    double minimum = 0.0;
+    double maximum = 0.0;
+    double defaultValue = 0.0;
+};
+
 Weights defaultWeights();
+QVector<WeightSpec> weightSpecs();
+bool weightValue(const Weights &weights, const QString &key, double *value);
+bool setWeightValue(Weights &weights, const QString &key, double value);
 Weights weightsFromJson(const QByteArray &json, QString *error = nullptr);
 QByteArray weightsToJson(const Weights &weights);
 

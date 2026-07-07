@@ -385,7 +385,8 @@ and prints the preferred library copy for each group.
 Radio tuning commands (`radio-weights`, `radio-genre`, `genre-alias`,
 `genre-report`) also run client-side against the library database. Weight
 changes are validated before writing and take effect on the next radio session.
-The same genre curation lives in-app at `Radio > Genre curation...`.
+The same weight editor and genre curation live in-app at
+`Radio > Scoring weights...` and `Radio > Genre curation...`.
 `radio-learn` fits a small model to your recorded radio picks and early skips
 and is suggestion-only: it saves a `learned-YYYYMMDD` profile for review and
 never touches the active weights (apply it explicitly with
@@ -412,6 +413,7 @@ Unsupported files are hidden by default. Enable `View > List unsupported files i
 - `Library > Rating tags`: sync current, current artist, all saved ratings, or retry pending tag writes.
 - `Library > Audio analysis`: inspect `features.sqlite` coverage and duplicate-copy groups.
 - `Library > Link roots...`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
+- `Radio > Scoring weights...`: edit radio scoring weights, manage named profiles, or save a learned profile suggested from radio skip history.
 - `Radio > Genre curation...`: edit genre aliases, ignored radio genres, and the folded vocabulary used by radio matching.
 - `Playback > Output profile...`: configure playback output behavior, including software volume, resampling, sink release on pause, and preload settings.
 - `Playback > Resume behavior...`: configure whether position and playback state are restored.

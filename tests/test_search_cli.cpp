@@ -2,6 +2,7 @@
 #include "core/Rating.h"
 #include "core/Track.h"
 #include "db/Database.h"
+#include "reco/WeightLearnerData.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
@@ -517,6 +518,18 @@ private slots:
     {
         const QString dataDir = qEnvironmentVariable("MUZAITEN_DATA_DIR");
         createRadioLearnFixture(dataDir);
+        const WeightLearnerData::LoadResult load =
+            WeightLearnerData::loadSamplesFromPath(QDir(dataDir).filePath(QStringLiteral("history.sqlite")));
+        QVERIFY2(load.error.isEmpty(), qPrintable(load.error));
+        QCOMPARE(load.samples.size(), qsizetype(3));
+        QCOMPARE(WeightLearnerData::kJoinWindowSecs, 12 * 60 * 60);
+        int earlySkips = 0;
+        for (const WeightLearner::Sample &sample : load.samples) {
+            if (sample.earlySkip) {
+                ++earlySkips;
+            }
+        }
+        QCOMPARE(earlySkips, 1);
 
         const QString ctlPath = muzaitenCtlPath();
         QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));

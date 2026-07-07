@@ -64,6 +64,9 @@ add_executable(test_search_cli
     ../src/fs/PathResolver.cpp
     ../src/core/MusicSort.cpp
     ../src/scrobble/ListenHistoryStore.cpp
+    ../src/reco/TrackScorer.cpp
+    ../src/reco/WeightLearner.cpp
+    ../src/reco/WeightLearnerData.cpp
     ../src/search/Exclusion.cpp
     ../src/search/FuzzyMatch.cpp
     ../src/search/IndexCache.cpp

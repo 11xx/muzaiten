@@ -156,6 +156,7 @@ signals:
     void radioAdventurousChanged(bool on);
     void radioExplorationSettingsRequested();
     void radioBatchSizeSettingsRequested();
+    void scoringWeightsRequested();
     void genreCurationRequested();
     void analysisStatusRequested();
     void duplicateCopiesRequested();

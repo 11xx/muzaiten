@@ -16,6 +16,7 @@
 #include "reco/GenreCuration.h"
 #include "reco/TrackScorer.h"
 #include "reco/WeightLearner.h"
+#include "reco/WeightLearnerData.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
@@ -829,7 +830,6 @@ void printRadioReasons(const QJsonObject &response)
 }
 
 constexpr const char kRadioScoringWeightsKey[] = "radio.scoringWeights";
-constexpr int kRadioLearnJoinWindowSecs = 12 * 60 * 60;
 
 QJsonObject jsonObjectFromBytes(const QByteArray &json)
 {
@@ -876,118 +876,6 @@ QByteArray effectiveWeightsJson(const QByteArray &activeJson)
         return TrackScorer::weightsToJson(TrackScorer::defaultWeights());
     }
     return TrackScorer::weightsToJson(weights);
-}
-
-QVector<TrackScorer::Component> radioLearnComponentsFromJson(const QByteArray &json)
-{
-    QVector<TrackScorer::Component> components;
-    const QJsonDocument document = QJsonDocument::fromJson(json);
-    if (!document.isArray()) {
-        return components;
-    }
-    const QJsonArray array = document.array();
-    components.reserve(array.size());
-    for (const QJsonValue &value : array) {
-        const QJsonObject object = value.toObject();
-        const QString name = object.value(QStringLiteral("name")).toString();
-        const QJsonValue componentValue = object.value(QStringLiteral("value"));
-        if (name.isEmpty() || !componentValue.isDouble()) {
-            continue;
-        }
-        components.push_back({name, componentValue.toDouble()});
-    }
-    return components;
-}
-
-bool radioLearnEarlySkip(const QString &outcome, qint64 playedMs, qint64 durationMs)
-{
-    if (outcome != QLatin1String("skipped")) {
-        return false;
-    }
-    const qint64 threshold = durationMs > 0 ? std::min(durationMs / 2, qint64(4 * 60 * 1000))
-                                             : qint64(4 * 60 * 1000);
-    return playedMs < threshold;
-}
-
-struct RadioLearnLoadResult {
-    QVector<WeightLearner::Sample> samples;
-    QString error;
-    int skippedInvalidWeights = 0;
-    int skippedNoSignals = 0;
-};
-
-RadioLearnLoadResult loadRadioLearningSamples(const QString &path)
-{
-    RadioLearnLoadResult result;
-    const QString connectionName =
-        QStringLiteral("muzaitenctl-radio-learn-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-    QSqlDatabase history = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
-    history.setDatabaseName(path);
-    if (!history.open()) {
-        result.error = history.lastError().text();
-        history = QSqlDatabase();
-        QSqlDatabase::removeDatabase(connectionName);
-        return result;
-    }
-
-    {
-        QSqlQuery query(history);
-        query.prepare(QStringLiteral(
-            "SELECT rp.weights_json, rp.components_json, pe.outcome, pe.played_ms, pe.duration_ms "
-            "FROM radio_picks rp "
-            "JOIN play_events pe ON pe.id = ("
-            " SELECT pe2.id FROM play_events pe2 "
-            " WHERE pe2.source = 'radio' "
-            "   AND pe2.track_path = rp.track_path "
-            "   AND pe2.started_at >= rp.occurred_at "
-            "   AND pe2.started_at <= rp.occurred_at + ? "
-            " ORDER BY pe2.started_at ASC, pe2.id ASC "
-            " LIMIT 1"
-            ") "
-            "ORDER BY rp.occurred_at ASC, rp.id ASC"));
-        query.addBindValue(kRadioLearnJoinWindowSecs);
-        if (!query.exec()) {
-            result.error = query.lastError().text();
-        } else {
-            while (query.next()) {
-                QString parseError;
-                const TrackScorer::Weights rowWeights =
-                    TrackScorer::weightsFromJson(query.value(0).toString().toUtf8(), &parseError);
-                if (!parseError.isEmpty()) {
-                    ++result.skippedInvalidWeights;
-                    continue;
-                }
-
-                WeightLearner::Sample sample;
-                sample.earlySkip = radioLearnEarlySkip(query.value(2).toString(),
-                                                       query.value(3).toLongLong(),
-                                                       query.value(4).toLongLong());
-                const QVector<TrackScorer::Component> components =
-                    radioLearnComponentsFromJson(query.value(1).toString().toUtf8());
-                for (const TrackScorer::Component &component : components) {
-                    double weight = 0.0;
-                    if (!WeightLearner::componentWeight(rowWeights, component.name, &weight)
-                        || weight == 0.0) {
-                        continue;
-                    }
-                    const double signal = component.value / weight;
-                    if (std::isfinite(signal)) {
-                        sample.features.insert(component.name, signal);
-                    }
-                }
-                if (sample.features.isEmpty()) {
-                    ++result.skippedNoSignals;
-                    continue;
-                }
-                result.samples.push_back(std::move(sample));
-            }
-        }
-    }
-
-    history.close();
-    history = QSqlDatabase();
-    QSqlDatabase::removeDatabase(connectionName);
-    return result;
 }
 
 QJsonObject weightsDiffJson(const QByteArray &activeJson, const QByteArray &suggestedJson)
@@ -1050,7 +938,7 @@ QJsonArray componentResultsJson(const QVector<WeightLearner::ComponentResult> &c
 void printRadioLearnPlain(const WeightLearner::Result &learned,
                           const TrackScorer::Weights &activeWeights,
                           const QByteArray &activeJson,
-                          const RadioLearnLoadResult &load,
+                          const WeightLearnerData::LoadResult &load,
                           const QString &profileName,
                           bool dryRun)
 {
@@ -1058,7 +946,7 @@ void printRadioLearnPlain(const WeightLearner::Result &learned,
     out.setEncoding(QStringConverter::Utf8);
     out << "radio-learn: " << learned.sampleCount << " labeled picks ("
         << learned.positiveLabels << " early skips)\n";
-    out << "join window: " << kRadioLearnJoinWindowSecs << " seconds\n";
+    out << "join window: " << WeightLearnerData::kJoinWindowSecs << " seconds\n";
     if (load.skippedInvalidWeights > 0 || load.skippedNoSignals > 0) {
         out << "skipped rows: " << load.skippedInvalidWeights << " invalid weights, "
             << load.skippedNoSignals << " without learnable components\n";
@@ -1140,7 +1028,7 @@ int runRadioLearn(QStringList arguments, bool json)
         return fail(activeError);
     }
 
-    const RadioLearnLoadResult load = loadRadioLearningSamples(historyDbPath());
+    const WeightLearnerData::LoadResult load = WeightLearnerData::loadSamplesFromPath(historyDbPath());
     if (!load.error.isEmpty()) {
         return fail(load.error);
     }
@@ -1173,7 +1061,7 @@ int runRadioLearn(QStringList arguments, bool json)
             {QStringLiteral("positive_labels"), learned.positiveLabels},
             {QStringLiteral("min_samples"), options.minSamples},
             {QStringLiteral("min_positive_labels"), options.minPositiveLabels},
-            {QStringLiteral("join_window_seconds"), kRadioLearnJoinWindowSecs},
+            {QStringLiteral("join_window_seconds"), WeightLearnerData::kJoinWindowSecs},
             {QStringLiteral("skipped_invalid_weights"), load.skippedInvalidWeights},
             {QStringLiteral("skipped_no_signals"), load.skippedNoSignals},
             {QStringLiteral("components"), componentResultsJson(learned.components, activeWeights)},
