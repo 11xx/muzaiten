@@ -79,6 +79,69 @@ QSet<QString> stringSetFromJson(const QJsonValue &value)
     return QSet<QString>(strings.cbegin(), strings.cend());
 }
 
+QJsonArray groupListToJson(const QList<qint64> &groups)
+{
+    QJsonArray json;
+    for (qint64 group : groups) {
+        json.append(QString::number(group));
+    }
+    return json;
+}
+
+QList<qint64> groupListFromJson(const QJsonValue &value)
+{
+    QList<qint64> groups;
+    const QJsonArray array = value.toArray();
+    groups.reserve(array.size());
+    for (const QJsonValue &item : array) {
+        bool ok = false;
+        const qint64 group = item.toString().toLongLong(&ok);
+        groups.push_back(ok ? group : -1);
+    }
+    return groups;
+}
+
+bool addEmbedding(QVector<double> &sum, int &count, const QVector<float> &embedding)
+{
+    if (embedding.isEmpty()) {
+        return false;
+    }
+    if (sum.isEmpty()) {
+        sum.resize(embedding.size());
+    }
+    if (sum.size() != embedding.size()) {
+        return false;
+    }
+    for (qsizetype i = 0; i < embedding.size(); ++i) {
+        sum[i] += static_cast<double>(embedding.at(i));
+    }
+    ++count;
+    return true;
+}
+
+QVector<float> normalizedMean(const QVector<double> &sum, int count)
+{
+    if (sum.isEmpty() || count <= 0) {
+        return {};
+    }
+    double norm = 0.0;
+    for (double value : sum) {
+        const double mean = value / static_cast<double>(count);
+        norm += mean * mean;
+    }
+    norm = std::sqrt(norm);
+    if (norm <= 0.0 || !std::isfinite(norm)) {
+        return {};
+    }
+
+    QVector<float> centroid;
+    centroid.reserve(sum.size());
+    for (double value : sum) {
+        centroid.push_back(static_cast<float>((value / static_cast<double>(count)) / norm));
+    }
+    return centroid;
+}
+
 } // namespace
 
 RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
@@ -88,10 +151,12 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            int exploration0To100,
                            qint64 nowSecs,
                            QRandomGenerator *rng,
-                           TrackScorer::Weights weights)
+                           TrackScorer::Weights weights,
+                           QHash<qint64, QVector<float>> embeddingsByGroup)
     : m_pool(std::move(pool))
     , m_affinities(std::move(affinities))
     , m_genreIdf(std::move(genreIdf))
+    , m_embeddingsByGroup(std::move(embeddingsByGroup))
     , m_seed(std::move(seed))
     , m_weights(std::move(weights))
     , m_exploration(std::clamp(exploration0To100, 0, 100))
@@ -122,9 +187,11 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            int exploration0To100,
                            qint64 nowSecs,
                            QRandomGenerator *rng,
-                           TrackScorer::Weights weights)
+                           TrackScorer::Weights weights,
+                           QHash<qint64, QVector<float>> embeddingsByGroup)
     : RadioSession(std::move(pool), std::move(affinities), std::move(genreIdf),
-                   TrackScorer::Candidate{}, exploration0To100, nowSecs, rng, std::move(weights))
+                   TrackScorer::Candidate{}, exploration0To100, nowSecs, rng, std::move(weights),
+                   std::move(embeddingsByGroup))
 {
 }
 
@@ -170,6 +237,17 @@ double RadioSession::rollingEnergy() const
     return count > 0 ? sum / count : m_seed.energy;
 }
 
+QVector<float> RadioSession::rollingAudioCentroid() const
+{
+    QVector<double> sum;
+    int count = 0;
+    addEmbedding(sum, count, m_embeddingsByGroup.value(m_seed.contentGroupId));
+    for (qint64 groupId : m_playedContentGroups) {
+        addEmbedding(sum, count, m_embeddingsByGroup.value(groupId));
+    }
+    return normalizedMean(sum, count);
+}
+
 void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
                               const QString &resolvedPath)
 {
@@ -208,6 +286,8 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         context.year = m_seed.year;
         context.contextTempoBpm = rollingTempoBpm();
         context.contextEnergy = rollingEnergy();
+        context.audioCentroid = rollingAudioCentroid();
+        context.embeddingsByGroup = &m_embeddingsByGroup;
         context.nowSecs = m_nowSecs;
         context.exploration0To100 = m_exploration;
 
@@ -303,6 +383,7 @@ void RadioSession::notePlayed(const Track &track)
 
     QStringList genres;
     PlayedScalars scalars;
+    qint64 contentGroupId = -1;
     QString albumKey = FoldKey::albumKey(track.albumArtistName, track.albumTitle);
     QString songKey = FoldKey::songKey(track.musicBrainz.recordingId, track.artistName, track.title);
     const auto it = m_byPath.constFind(track.path);
@@ -313,6 +394,7 @@ void RadioSession::notePlayed(const Track &track)
         genres = GenreTags::informative(it->genresFolded);
         scalars.tempoBpm = it->tempoBpm;
         scalars.energy = it->energy;
+        contentGroupId = it->contentGroupId;
         albumKey = it->albumKey;
         songKey = it->songKey;
     }
@@ -323,6 +405,10 @@ void RadioSession::notePlayed(const Track &track)
     m_playedScalars.push_back(scalars);
     while (m_playedScalars.size() > kThrottleArtists) {
         m_playedScalars.removeFirst();
+    }
+    m_playedContentGroups.push_back(contentGroupId);
+    while (m_playedContentGroups.size() > kThrottleArtists) {
+        m_playedContentGroups.removeFirst();
     }
 
     // Count the album only once: a radio pick already tallied it at pick time;
@@ -411,6 +497,7 @@ QJsonObject RadioSession::constraintState() const
         {QStringLiteral("recentArtists"), stringListToJson(m_recentArtists)},
         {QStringLiteral("playedGenres"), playedGenres},
         {QStringLiteral("playedScalars"), playedScalars},
+        {QStringLiteral("playedContentGroups"), groupListToJson(m_playedContentGroups)},
     };
 }
 
@@ -460,6 +547,12 @@ void RadioSession::restoreConstraintState(const QJsonObject &state)
         }
         while (m_playedScalars.size() > kThrottleArtists) {
             m_playedScalars.removeFirst();
+        }
+    }
+    if (state.contains(QStringLiteral("playedContentGroups"))) {
+        m_playedContentGroups = groupListFromJson(state.value(QStringLiteral("playedContentGroups")));
+        while (m_playedContentGroups.size() > kThrottleArtists) {
+            m_playedContentGroups.removeFirst();
         }
     }
     m_pickReasons.clear();

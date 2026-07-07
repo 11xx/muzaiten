@@ -46,7 +46,8 @@ public:
                  int exploration0To100,
                  qint64 nowSecs,
                  QRandomGenerator *rng = nullptr,
-                 TrackScorer::Weights weights = TrackScorer::defaultWeights());
+                 TrackScorer::Weights weights = TrackScorer::defaultWeights(),
+                 QHash<qint64, QVector<float>> embeddingsByGroup = {});
 
     // Anchorless ambient-radio mode: no fixed seed, so rollingGenres() starts
     // empty and becomes the last few notePlayed() tracks.
@@ -56,7 +57,8 @@ public:
                  int exploration0To100,
                  qint64 nowSecs,
                  QRandomGenerator *rng = nullptr,
-                 TrackScorer::Weights weights = TrackScorer::defaultWeights());
+                 TrackScorer::Weights weights = TrackScorer::defaultWeights(),
+                 QHash<qint64, QVector<float>> embeddingsByGroup = {});
 
     // Up to `count` picks scored against the CURRENT rolling context, resolved to
     // full Tracks via `resolveTrack`. `excludePaths` (typically the live queue)
@@ -113,6 +115,7 @@ private:
     QStringList rollingGenres() const;
     double rollingTempoBpm() const;
     double rollingEnergy() const;
+    QVector<float> rollingAudioCentroid() const;
     // Score-ordered eligible candidates for the current context, honoring the hard
     // constraints (excludePaths + the per-batch recent-artist list).
     void recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
@@ -122,6 +125,7 @@ private:
     QHash<QString, TrackScorer::Affinity> m_affinities;
     QHash<QString, TrackScorer::Candidate> m_byPath; // pool + seed, for notePlayed lookups
     QHash<QString, double> m_genreIdf;
+    QHash<qint64, QVector<float>> m_embeddingsByGroup;
     TrackScorer::Candidate m_seed;
     TrackScorer::Weights m_weights;
     int m_exploration = 30;
@@ -131,6 +135,7 @@ private:
     QStringList m_recentArtists;              // last 3 played/picked (folded, consecutive-deduped)
     QList<QStringList> m_playedGenres;        // last 3 played tracks' folded genres
     QList<PlayedScalars> m_playedScalars;      // last 3 played tracks' known acoustic scalars
+    QList<qint64> m_playedContentGroups;       // last 3 played tracks' feature groups (-1 = unknown)
     QHash<QString, int> m_albumCounts;        // albumKey -> tracks committed this session
     QSet<QString> m_usedPaths;                // never pick/repeat a path twice
     QSet<QString> m_usedSongKeys;             // never pick/repeat a song twice through duplicate files

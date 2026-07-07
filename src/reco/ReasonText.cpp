@@ -26,6 +26,9 @@ QString phraseFor(const QString &name)
     if (name == QStringLiteral("energy")) {
         return QStringLiteral("similar energy");
     }
+    if (name == QStringLiteral("audio")) {
+        return QStringLiteral("sounds similar");
+    }
     if (name == QStringLiteral("rating")) {
         return QStringLiteral("you rate it highly");
     }

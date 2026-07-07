@@ -16,6 +16,7 @@ namespace TrackScorer {
 // One library track under consideration, reduced to the fields scoring needs.
 struct Candidate {
     QString path;
+    qint64 contentGroupId = -1;     // -1 = no features.sqlite content group
     QString songKey;
     QString artistFolded;
     QString albumKey;              // folded "albumartist\nalbum"
@@ -51,6 +52,8 @@ struct SeedContext {
     int year = 0;
     double contextTempoBpm = -1.0;
     double contextEnergy = -1.0;
+    QVector<float> audioCentroid;       // L2-normalized; empty = unknown
+    const QHash<qint64, QVector<float>> *embeddingsByGroup = nullptr;
     qint64 nowSecs = 0;
     int exploration0To100 = 30;        // conservative .. exploratory
 };
@@ -76,6 +79,7 @@ struct Weights {
     double eraSpanYears = 30.0;
     double tempoWeight = 0.4;
     double energyWeight = 0.6;
+    double audioWeight = 1.2;
     double ratingWeight = 1.5;
     double userRatingBoost = 1.25;
     double historyWeight = 1.0;

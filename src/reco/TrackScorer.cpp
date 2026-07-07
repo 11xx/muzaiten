@@ -42,6 +42,7 @@ QStringList weightKeys()
         QStringLiteral("eraSpanYears"),
         QStringLiteral("tempoWeight"),
         QStringLiteral("energyWeight"),
+        QStringLiteral("audioWeight"),
         QStringLiteral("ratingWeight"),
         QStringLiteral("userRatingBoost"),
         QStringLiteral("historyWeight"),
@@ -87,6 +88,19 @@ double linearProximity(double left, double right, double span)
     return std::max(0.0, 1.0 - std::abs(left - right) / span);
 }
 
+double dotProduct(const QVector<float> &left, const QVector<float> &right)
+{
+    if (left.isEmpty() || left.size() != right.size()) {
+        return 0.0;
+    }
+
+    double sum = 0.0;
+    for (qsizetype i = 0; i < left.size(); ++i) {
+        sum += static_cast<double>(left.at(i)) * static_cast<double>(right.at(i));
+    }
+    return std::isfinite(sum) ? sum : 0.0;
+}
+
 } // namespace
 
 namespace TrackScorer {
@@ -106,6 +120,7 @@ QByteArray weightsToJson(const Weights &weights)
     object.insert(QStringLiteral("eraSpanYears"), weights.eraSpanYears);
     object.insert(QStringLiteral("tempoWeight"), weights.tempoWeight);
     object.insert(QStringLiteral("energyWeight"), weights.energyWeight);
+    object.insert(QStringLiteral("audioWeight"), weights.audioWeight);
     object.insert(QStringLiteral("ratingWeight"), weights.ratingWeight);
     object.insert(QStringLiteral("userRatingBoost"), weights.userRatingBoost);
     object.insert(QStringLiteral("historyWeight"), weights.historyWeight);
@@ -158,6 +173,7 @@ Weights weightsFromJson(const QByteArray &json, QString *error)
         || !assignNumber(object, QStringLiteral("eraSpanYears"), weights.eraSpanYears, 0.001, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("tempoWeight"), weights.tempoWeight, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("energyWeight"), weights.energyWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("audioWeight"), weights.audioWeight, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("ratingWeight"), weights.ratingWeight, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("userRatingBoost"), weights.userRatingBoost, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("historyWeight"), weights.historyWeight, 0.0, std::numeric_limits<double>::infinity(), error)
@@ -225,6 +241,17 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
                       weights.energyWeight * linearProximity(candidate.energy,
                                                              seed.contextEnergy,
                                                              kEnergyFalloff));
+    }
+
+    // audio: cosine proximity to the rolling CLAP embedding centroid. Vectors
+    // are stored normalized in features.sqlite and the session normalizes the
+    // centroid; negative cosine is dissimilarity, not a penalty.
+    if (candidate.contentGroupId >= 0 && seed.embeddingsByGroup != nullptr && !seed.audioCentroid.isEmpty()) {
+        const auto it = seed.embeddingsByGroup->constFind(candidate.contentGroupId);
+        if (it != seed.embeddingsByGroup->constEnd()) {
+            pushIfNonZero(scored, QStringLiteral("audio"),
+                          weights.audioWeight * std::max(0.0, dotProduct(it.value(), seed.audioCentroid)));
+        }
     }
 
     // rating: effective rating, with a boost when it is the user's own rating.
