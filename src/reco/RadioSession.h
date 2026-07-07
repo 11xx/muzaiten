@@ -108,7 +108,8 @@ private:
     QStringList rollingGenres() const;
     // Score-ordered eligible candidates for the current context, honoring the hard
     // constraints (excludePaths + the per-batch recent-artist list).
-    void recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored);
+    void recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
+                    const QString &resolvedPath);
 
     QVector<TrackScorer::Candidate> m_pool;
     QHash<QString, TrackScorer::Affinity> m_affinities;

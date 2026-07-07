@@ -142,6 +142,9 @@ add_executable(test_radio
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/features/FeatureStore.cpp
+    ../src/features/QualityRank.cpp
+    ../src/features/SongIdentity.cpp
     ../src/fs/PathResolver.cpp
     ../src/reco/AffinityPool.cpp
     ../src/reco/ArtistRadio.cpp

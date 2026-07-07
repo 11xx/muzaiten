@@ -144,15 +144,23 @@ QStringList RadioSession::rollingGenres() const
     return genres;
 }
 
-void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored)
+void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
+                              const QString &resolvedPath)
 {
     m_usedPaths.insert(candidate.path);
+    const QString reasonPath = resolvedPath.isEmpty() ? candidate.path : resolvedPath;
+    if (!reasonPath.isEmpty()) {
+        m_usedPaths.insert(reasonPath);
+    }
     if (!candidate.songKey.isEmpty()) {
         m_usedSongKeys.insert(candidate.songKey);
     }
     m_albumCounts[candidate.albumKey] += 1;
     m_pickReasons.insert(candidate.path, scored.components);
-    m_pickReasonOrder.push_back(candidate.path);
+    if (reasonPath != candidate.path) {
+        m_pickReasons.insert(reasonPath, scored.components);
+    }
+    m_pickReasonOrder.push_back(reasonPath);
 }
 
 QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludePaths,
@@ -235,10 +243,10 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         }
 
         const TrackScorer::Candidate &chosen = *scored.at(chosenIndex).second;
-        recordPick(chosen, scored.at(chosenIndex).first);
+        const Track resolved = resolveTrack(chosen.path);
+        recordPick(chosen, scored.at(chosenIndex).first, resolved.path);
         pushRecentArtist(batchArtists, chosen.artistFolded, kThrottleArtists);
 
-        const Track resolved = resolveTrack(chosen.path);
         if (!resolved.path.isEmpty()) {
             result.push_back(resolved);
         }

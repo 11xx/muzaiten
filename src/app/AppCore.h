@@ -179,17 +179,23 @@ private:
     QStringList radioFoldedGenresForTrack(const QString &path, const QHash<QString, QString> &genreAliases,
                                           const QSet<QString> &ignoredRadioGenres) const;
     QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
-    TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded) const;
+    QHash<QString, QString> buildResolvedSongKeyMap() const;
+    TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded,
+                                                   const QHash<QString, QString> &resolvedSongKeys) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
                                                             const QHash<QString, QString> &genreAliases,
-                                                            const QSet<QString> &ignoredRadioGenres) const;
+                                                            const QSet<QString> &ignoredRadioGenres,
+                                                            const QHash<QString, QString> &resolvedSongKeys) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
                                                            const QHash<QString, QString> &genreAliases,
-                                                           const QSet<QString> &ignoredRadioGenres) const;
+                                                           const QSet<QString> &ignoredRadioGenres,
+                                                           const QHash<QString, QString> &resolvedSongKeys) const;
     QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases,
                                               const QSet<QString> &ignoredRadioGenres) const;
     TrackScorer::Weights radioScoringWeights() const;
-    QHash<QString, TrackScorer::Affinity> buildRadioAffinities() const;
+    QHash<QString, TrackScorer::Affinity> buildRadioAffinities(const QHash<QString, QString> &resolvedSongKeys) const;
+    Track bestRadioCopyForPick(const Track &track, const QSet<QString> &blockedPaths) const;
+    Track resolveRadioPick(const QString &path, const QSet<QString> &blockedPaths) const;
     void installRadioProvider(bool markPicksAsRadio);
     void recordRadioPicks(const QVector<Track> &picks);
     void saveRadioSessionState();

@@ -2,6 +2,9 @@
 #include "core/GenreTags.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
+#include "features/FeatureStore.h"
+#include "features/QualityRank.h"
+#include "features/SongIdentity.h"
 #include "reco/AffinityPool.h"
 #include "reco/ArtistRadio.h"
 #include "reco/RadioFilters.h"
@@ -16,10 +19,12 @@
 #include <QJsonObject>
 #include <QSet>
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QUuid>
 #include <QtTest>
+#include <QVariant>
 
 #include <cmath>
 
@@ -167,6 +172,7 @@ private slots:
     void rollingContextDriftsGenreWindow();
     void reasonForNonEmptyOnPick();
     void reasonComponentsRoundTripFromPick();
+    void resolvedPickStoresReasonUnderResolvedPath();
     void pickReasonsEnumeratesStoredComponents();
     void reasonSentencePicksTopPhrases();
     void reasonSentenceHandlesPenaltyOnly();
@@ -194,6 +200,9 @@ private slots:
     void sampleArtistsForGenreReturnsDeterministicNames();
     void genrePipeBackfillResplitsStoredMetadata();
     void trackAffinitiesAggregateAllSources();
+    void contentGroupAffinityPoolsDisagreeingTags();
+    void contentGroupSongKeyDedupsRadioSession();
+    void contentGroupResolverQueuesBestOrPinnedCopy();
 
     // GenreTags
     void genreTagsSplitPipeSeparators();
@@ -994,6 +1003,49 @@ void RadioTest::reasonComponentsRoundTripFromPick()
     QVERIFY(session.reasonComponentsFor(QStringLiteral("/never")).isEmpty());
 }
 
+void RadioTest::resolvedPickStoresReasonUnderResolvedPath()
+{
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/low-quality.flac"), QStringLiteral("a"), {QStringLiteral("rock")}, 2000, 90, true,
+                      QStringLiteral("album-low"), QStringLiteral("song:shared")),
+        makeCandidate(QStringLiteral("/best-copy.flac"), QStringLiteral("b"), {QStringLiteral("rock")}, 2000, 50, true,
+                      QStringLiteral("album-best"), QStringLiteral("song:other")),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(1u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QSet<QString> excludeBest{QStringLiteral("/best-copy.flac")};
+    const auto resolveBestCopy = [](const QString &path) {
+        return resolvePathToTrack(path == QStringLiteral("/low-quality.flac")
+                                      ? QStringLiteral("/best-copy.flac")
+                                      : path);
+    };
+
+    const QVector<Track> picks = session.nextTracks(1, excludeBest, resolveBestCopy);
+    QCOMPARE(picks.size(), 1);
+    QCOMPARE(picks.first().path, QStringLiteral("/best-copy.flac"));
+    QVERIFY(!session.reasonComponentsFor(QStringLiteral("/low-quality.flac")).isEmpty());
+    QVERIFY(!session.reasonComponentsFor(QStringLiteral("/best-copy.flac")).isEmpty());
+
+    const QVector<RadioSession::PickReason> reasons = session.pickReasons();
+    QCOMPARE(reasons.size(), 1);
+    QCOMPARE(reasons.first().path, QStringLiteral("/best-copy.flac"));
+
+    const QJsonArray usedPaths = session.constraintState().value(QStringLiteral("usedPaths")).toArray();
+    QStringList used;
+    used.reserve(usedPaths.size());
+    for (const QJsonValue &value : usedPaths) {
+        used.push_back(value.toString());
+    }
+    QVERIFY(used.contains(QStringLiteral("/low-quality.flac")));
+    QVERIFY(used.contains(QStringLiteral("/best-copy.flac")));
+
+    const QVector<Track> later = session.nextTracks(2, {}, resolvePathToTrack);
+    QVERIFY(later.isEmpty());
+}
+
 void RadioTest::pickReasonsEnumeratesStoredComponents()
 {
     QVector<TrackScorer::Candidate> pool{
@@ -1320,7 +1372,8 @@ namespace {
 
 Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStringList &genres,
                   const QString &originalDate, const QString &recordingId = {},
-                  const QString &releaseGroupId = {})
+                  const QString &releaseGroupId = {},
+                  const QStringList &mediaTags = QStringList())
 {
     Track track;
     track.path = dir.filePath(QStringLiteral("Artist/Album/%1").arg(filename));
@@ -1335,14 +1388,257 @@ Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStri
     track.musicBrainz.releaseGroupId = releaseGroupId;
     track.fileSize = 10;
     track.fileMtime = 20;
-    if (!genres.isEmpty()) {
+    if (!genres.isEmpty() || !mediaTags.isEmpty()) {
         MetadataBlob::FullMetadata meta;
-        meta.tags.insert(QStringLiteral("GENRE"), genres);
+        if (!genres.isEmpty()) {
+            meta.tags.insert(QStringLiteral("GENRE"), genres);
+        }
+        if (!mediaTags.isEmpty()) {
+            meta.tags.insert(QStringLiteral("MEDIA"), mediaTags);
+        }
         const MetadataBlob::Encoded encoded = MetadataBlob::encode(meta);
         track.fullMetadataBlob = encoded.data;
         track.fullMetadataRawSize = encoded.rawSize;
     }
     return track;
+}
+
+bool execFeatureFixtureSql(QSqlQuery &query, const QString &sql, QString *error)
+{
+    if (query.exec(sql)) {
+        return true;
+    }
+    if (error != nullptr) {
+        *error = query.lastError().text() + QStringLiteral(": ") + sql;
+    }
+    return false;
+}
+
+QString createRadioFeatureFixture(const QTemporaryDir &dir,
+                                  const QHash<QString, qint64> &contentGroups,
+                                  QString *error)
+{
+    const QString path = dir.filePath(QStringLiteral("features.sqlite"));
+    const QString connectionName =
+        QStringLiteral("radio-feature-fixture-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    bool ok = true;
+
+    {
+        QSqlDatabase fixture = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        fixture.setDatabaseName(path);
+        if (!fixture.open()) {
+            if (error != nullptr) {
+                *error = fixture.lastError().text();
+            }
+            ok = false;
+        }
+
+        if (ok) {
+            QSqlQuery query(fixture);
+            ok = ok && execFeatureFixtureSql(query, QStringLiteral("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)"), error);
+            ok = ok && execFeatureFixtureSql(query, QStringLiteral(
+                                                   "CREATE TABLE files("
+                                                   " path TEXT PRIMARY KEY,"
+                                                   " mtime INTEGER NOT NULL,"
+                                                   " size INTEGER NOT NULL,"
+                                                   " duration_ms INTEGER,"
+                                                   " decode_hash TEXT,"
+                                                   " chromaprint_fp BLOB,"
+                                                   " content_group_id INTEGER,"
+                                                   " analyzed_at INTEGER NOT NULL,"
+                                                   " status TEXT NOT NULL DEFAULT 'ok')"),
+                                               error);
+            ok = ok && execFeatureFixtureSql(query, QStringLiteral(
+                                                   "CREATE TABLE content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT)"),
+                                               error);
+            ok = ok && execFeatureFixtureSql(query, QStringLiteral(
+                                                   "CREATE TABLE features("
+                                                   " content_group_id INTEGER PRIMARY KEY,"
+                                                   " bliss_vector BLOB NOT NULL,"
+                                                   " tempo_bpm REAL,"
+                                                   " loudness REAL,"
+                                                   " energy REAL,"
+                                                   " brightness REAL,"
+                                                   " extractor TEXT NOT NULL,"
+                                                   " version TEXT NOT NULL)"),
+                                               error);
+        }
+
+        if (ok) {
+            QSqlQuery meta(fixture);
+            meta.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES('schema_version', '1')"));
+            if (!meta.exec()) {
+                if (error != nullptr) {
+                    *error = meta.lastError().text();
+                }
+                ok = false;
+            }
+        }
+
+        QSet<qint64> insertedGroups;
+        if (ok) {
+            for (auto it = contentGroups.cbegin(); it != contentGroups.cend(); ++it) {
+                if (it.value() < 0 || insertedGroups.contains(it.value())) {
+                    continue;
+                }
+                QSqlQuery group(fixture);
+                group.prepare(QStringLiteral("INSERT INTO content_groups(id) VALUES(?)"));
+                group.addBindValue(it.value());
+                if (!group.exec()) {
+                    if (error != nullptr) {
+                        *error = group.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+                insertedGroups.insert(it.value());
+            }
+        }
+
+        if (ok) {
+            for (auto it = contentGroups.cbegin(); it != contentGroups.cend(); ++it) {
+                QSqlQuery insert(fixture);
+                insert.prepare(QStringLiteral(
+                    "INSERT INTO files(path, mtime, size, duration_ms, decode_hash, chromaprint_fp, "
+                    "content_group_id, analyzed_at, status) VALUES(?, 1, 1, 1000, ?, ?, ?, 1000, 'ok')"));
+                insert.addBindValue(it.key());
+                insert.addBindValue(QStringLiteral("hash-%1").arg(it.value()));
+                insert.addBindValue(QByteArray::fromHex("01020304"));
+                insert.addBindValue(it.value() >= 0 ? QVariant(it.value()) : QVariant());
+                if (!insert.exec()) {
+                    if (error != nullptr) {
+                        *error = insert.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        fixture.close();
+    }
+
+    QSqlDatabase::removeDatabase(connectionName);
+    return ok ? path : QString();
+}
+
+QHash<QString, QString> resolvedSongKeysFromFixture(Database &db, FeatureStore &features)
+{
+    const auto rows = db.trackMatchRows();
+    QStringList paths;
+    paths.reserve(rows.size());
+    for (const auto &[path, artist, title, recordingMbid] : rows) {
+        Q_UNUSED(artist);
+        Q_UNUSED(title);
+        Q_UNUSED(recordingMbid);
+        paths.push_back(path);
+    }
+
+    const QHash<QString, qint64> groups = features.contentGroupsForPaths(paths);
+    QList<SongIdentity::TrackIdentity> identities;
+    identities.reserve(rows.size());
+    for (const auto &[path, artist, title, recordingMbid] : rows) {
+        identities.push_back({path, artist, title, recordingMbid, groups.value(path, -1)});
+    }
+    return SongIdentity::resolvedSongKeys(identities);
+}
+
+TrackScorer::Candidate candidateFromFixtureRow(const RadioCandidateRow &row,
+                                               const QHash<QString, QString> &resolvedSongKeys)
+{
+    TrackScorer::Candidate candidate;
+    candidate.path = row.path;
+    candidate.songKey = resolvedSongKeys.value(row.path, FoldKey::songKey(row.mbRecordingId, row.artistName, row.title));
+    candidate.artistFolded = FoldKey::fold(row.artistName);
+    candidate.albumKey = FoldKey::albumGroupKey(row.releaseGroupId, row.albumArtistName, row.albumTitle);
+    candidate.genresFolded = row.genresFolded;
+    candidate.year = row.year;
+    candidate.effectiveRating0To100 = row.effectiveRating0To100;
+    candidate.hasUserRating = row.hasUserRating;
+    return candidate;
+}
+
+QVector<TrackScorer::Candidate> fixtureCandidates(Database &db,
+                                                  const QHash<QString, QString> &resolvedSongKeys,
+                                                  int limit = 500)
+{
+    QVector<TrackScorer::Candidate> pool;
+    const QVector<RadioCandidateRow> rows = db.radioFallbackCandidates(limit);
+    pool.reserve(rows.size());
+    for (const RadioCandidateRow &row : rows) {
+        pool.push_back(candidateFromFixtureRow(row, resolvedSongKeys));
+    }
+    return pool;
+}
+
+TrackScorer::Affinity fixtureAffinityFromRow(const ListenHistoryStore::TrackAffinityRow &row)
+{
+    TrackScorer::Affinity affinity;
+    affinity.playEvents = row.playEvents;
+    affinity.finished = row.finished;
+    affinity.skipped = row.skipped;
+    affinity.lastPlayedAtSecs = row.lastPlayedAtSecs;
+    affinity.listenCount = row.listenCount;
+    affinity.baselineMax = row.baselineMax;
+    return affinity;
+}
+
+QStringList mediaTagsFromFixtureDb(Database &db, const QString &path)
+{
+    QStringList media;
+    const MetadataBlob::FullMetadata metadata = db.fullMetadata(path);
+    for (auto it = metadata.tags.cbegin(); it != metadata.tags.cend(); ++it) {
+        if (it.key().compare(QStringLiteral("MEDIA"), Qt::CaseInsensitive) == 0) {
+            media.append(it.value());
+        }
+    }
+    return media;
+}
+
+Track resolveBestFixtureCopy(Database &db, FeatureStore &features, const QString &path,
+                             const QSet<QString> &blockedPaths = {})
+{
+    Track fallback = db.trackForPath(path);
+    if (fallback.path.isEmpty()) {
+        return {};
+    }
+    db.enrichTrackForStatus(fallback);
+
+    const qint64 groupId = features.contentGroupForPath(path);
+    if (groupId < 0) {
+        return fallback;
+    }
+    const QStringList groupPaths = features.pathsInGroup(groupId);
+    if (groupPaths.size() < 2) {
+        return fallback;
+    }
+
+    QVector<QualityRank::Copy> copies;
+    QHash<QString, Track> tracksByPath;
+    copies.reserve(groupPaths.size());
+    tracksByPath.reserve(groupPaths.size());
+    for (const QString &groupPath : groupPaths) {
+        if (blockedPaths.contains(groupPath)) {
+            continue;
+        }
+        Track copy = db.trackForPath(groupPath);
+        if (copy.path.isEmpty()) {
+            continue;
+        }
+        db.enrichTrackForStatus(copy);
+        copies.push_back(QualityRank::Copy{
+            copy.path,
+            copy.codec,
+            copy.bitDepth,
+            copy.sampleRateHz,
+            copy.bitrateKbps,
+            mediaTagsFromFixtureDb(db, copy.path),
+        });
+        tracksByPath.insert(copy.path, copy);
+    }
+
+    const QString bestPath = QualityRank::bestPath(copies, db.contentGroupPin(groupId));
+    return tracksByPath.value(bestPath, fallback);
 }
 
 } // namespace
@@ -1767,6 +2063,161 @@ void RadioTest::trackAffinitiesAggregateAllSources()
     QCOMPARE(row.lastPlayedAtSecs, qint64(1004));
     QCOMPARE(row.listenCount, 5);      // 2 local + 3 imported
     QCOMPARE(row.baselineMax, 42);     // max(42, 30), never 72
+}
+
+void RadioTest::contentGroupAffinityPoolsDisagreeingTags()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("content-group-affinity-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    Track albumCopy = makeDbTrack(dir, QStringLiteral("album-copy.flac"), {QStringLiteral("Rock")},
+                                  QStringLiteral("2001"), QStringLiteral("mbid-album"));
+    Track compilationCopy = makeDbTrack(dir, QStringLiteral("compilation-copy.flac"), {QStringLiteral("Jazz")},
+                                        QStringLiteral("2001"), QStringLiteral("mbid-compilation"));
+    albumCopy.artistName = QStringLiteral("Album Artist");
+    albumCopy.title = QStringLiteral("Album Title");
+    compilationCopy.artistName = QStringLiteral("Compilation Artist");
+    compilationCopy.title = QStringLiteral("Compilation Title");
+    QVERIFY2(db.upsertTrack(albumCopy), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(compilationCopy), qPrintable(db.lastError()));
+
+    QString featureError;
+    const QString featuresPath = createRadioFeatureFixture(dir, {
+                                                               {albumCopy.path, 77},
+                                                               {compilationCopy.path, 77},
+                                                           },
+                                                           &featureError);
+    QVERIFY2(!featuresPath.isEmpty(), qPrintable(featureError));
+    FeatureStore features(featuresPath);
+    QVERIFY(features.isOpen());
+
+    ListenHistoryStore history(dir.filePath(QStringLiteral("history.sqlite")));
+    QVERIFY(history.isOpen());
+    QVERIFY(history.recordListen(albumCopy, 1000, false, false) > 0);
+    QVERIFY(history.recordListen(compilationCopy, 2000, false, false) > 0);
+
+    QHash<QString, TrackScorer::Affinity> affinities;
+    const QHash<QString, ListenHistoryStore::TrackAffinityRow> rows = history.trackAffinities();
+    for (auto it = rows.cbegin(); it != rows.cend(); ++it) {
+        affinities.insert(it.key(), fixtureAffinityFromRow(it.value()));
+    }
+
+    const QHash<QString, QString> resolvedSongKeys = resolvedSongKeysFromFixture(db, features);
+    QCOMPARE(resolvedSongKeys.value(albumCopy.path), resolvedSongKeys.value(compilationCopy.path));
+
+    const QHash<QString, TrackScorer::Affinity> pooled =
+        AffinityPool::poolBySongKey(affinities, resolvedSongKeys);
+    QCOMPARE(pooled.value(albumCopy.path).listenCount, 2);
+    QCOMPARE(pooled.value(compilationCopy.path).listenCount, 2);
+}
+
+void RadioTest::contentGroupSongKeyDedupsRadioSession()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("content-group-radio-dedup-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    Track first = makeDbTrack(dir, QStringLiteral("copy-a.flac"), {QStringLiteral("Rock")},
+                              QStringLiteral("2001"), QStringLiteral("mbid-a"));
+    Track second = makeDbTrack(dir, QStringLiteral("copy-b.flac"), {QStringLiteral("Jazz")},
+                               QStringLiteral("2001"), QStringLiteral("mbid-b"));
+    first.artistName = QStringLiteral("Artist A");
+    first.title = QStringLiteral("Title A");
+    second.artistName = QStringLiteral("Artist B");
+    second.title = QStringLiteral("Title B");
+    QVERIFY2(db.upsertTrack(first), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(second), qPrintable(db.lastError()));
+
+    QString featureError;
+    const QString featuresPath = createRadioFeatureFixture(dir, {
+                                                               {first.path, 78},
+                                                               {second.path, 78},
+                                                           },
+                                                           &featureError);
+    QVERIFY2(!featuresPath.isEmpty(), qPrintable(featureError));
+    FeatureStore features(featuresPath);
+    QVERIFY(features.isOpen());
+
+    const QHash<QString, QString> resolvedSongKeys = resolvedSongKeysFromFixture(db, features);
+    QCOMPARE(resolvedSongKeys.value(first.path), resolvedSongKeys.value(second.path));
+
+    const QVector<TrackScorer::Candidate> pool = fixtureCandidates(db, resolvedSongKeys);
+    QCOMPARE(pool.size(), 2);
+    RadioSession session(pool, {}, {}, 30, 1'000'000'000);
+
+    const QVector<Track> picks = session.nextTracks(10, {}, [&db](const QString &path) {
+        return db.trackForPath(path);
+    });
+    QCOMPARE(picks.size(), 1);
+}
+
+void RadioTest::contentGroupResolverQueuesBestOrPinnedCopy()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("content-group-best-copy-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    Track low = makeDbTrack(dir, QStringLiteral("portable.mp3"), {QStringLiteral("Rock")},
+                            QStringLiteral("2001"), QStringLiteral("mbid-low"));
+    low.codec = QStringLiteral("mp3");
+    low.bitrateKbps = 320;
+    low.sampleRateHz = 44100;
+    Track high = makeDbTrack(dir, QStringLiteral("archive.flac"), {QStringLiteral("Rock")},
+                             QStringLiteral("2001"), QStringLiteral("mbid-high"));
+    high.codec = QStringLiteral("flac");
+    high.bitDepth = 24;
+    high.sampleRateHz = 96000;
+    high.bitrateKbps = 3000;
+    QVERIFY2(db.upsertTrack(low), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(high), qPrintable(db.lastError()));
+
+    QString featureError;
+    const QString featuresPath = createRadioFeatureFixture(dir, {
+                                                               {low.path, 79},
+                                                               {high.path, 79},
+                                                           },
+                                                           &featureError);
+    QVERIFY2(!featuresPath.isEmpty(), qPrintable(featureError));
+    FeatureStore features(featuresPath);
+    QVERIFY(features.isOpen());
+
+    const QHash<QString, QString> resolvedSongKeys = resolvedSongKeysFromFixture(db, features);
+    TrackScorer::Candidate lowCandidate;
+    for (const RadioCandidateRow &row : db.radioFallbackCandidates(10)) {
+        if (row.path == low.path) {
+            lowCandidate = candidateFromFixtureRow(row, resolvedSongKeys);
+            break;
+        }
+    }
+    QVERIFY(!lowCandidate.path.isEmpty());
+    const QVector<TrackScorer::Candidate> pool{lowCandidate};
+
+    RadioSession qualitySession(pool, {}, {}, 30, 1'000'000'000);
+    const QVector<Track> qualityPicks = qualitySession.nextTracks(1, {}, [&db, &features](const QString &path) {
+        return resolveBestFixtureCopy(db, features, path);
+    });
+    QCOMPARE(qualityPicks.size(), 1);
+    QCOMPARE(qualityPicks.first().path, high.path);
+
+    RadioSession blockedSession(pool, {}, {}, 30, 1'000'000'000);
+    const QSet<QString> blockedBest{high.path};
+    const QVector<Track> blockedPicks = blockedSession.nextTracks(1, {}, [&db, &features, blockedBest](const QString &path) {
+        return resolveBestFixtureCopy(db, features, path, blockedBest);
+    });
+    QCOMPARE(blockedPicks.size(), 1);
+    QCOMPARE(blockedPicks.first().path, low.path);
+
+    QVERIFY2(db.setContentGroupPin(79, low.path), qPrintable(db.lastError()));
+    RadioSession pinnedSession(pool, {}, {}, 30, 1'000'000'000);
+    const QVector<Track> pinnedPicks = pinnedSession.nextTracks(1, {}, [&db, &features](const QString &path) {
+        return resolveBestFixtureCopy(db, features, path);
+    });
+    QCOMPARE(pinnedPicks.size(), 1);
+    QCOMPARE(pinnedPicks.first().path, low.path);
 }
 
 // ---- GenreTags --------------------------------------------------------------
