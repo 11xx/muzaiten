@@ -649,3 +649,9 @@ target_include_directories(playlist_match_bench PRIVATE ../src)
 target_link_libraries(playlist_match_bench PRIVATE Qt6::Core Qt6::Sql PkgConfig::ZSTD)
 target_compile_features(playlist_match_bench PRIVATE cxx_std_26)
 endif()
+
+get_property(MUZAITEN_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
+if(MUZAITEN_REGISTERED_TESTS)
+    set_property(TEST ${MUZAITEN_REGISTERED_TESTS} APPEND PROPERTY
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" "QT_QPA_PLATFORMTHEME=")
+endif()

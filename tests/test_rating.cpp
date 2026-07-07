@@ -44,5 +44,5 @@ void RatingTest::mapsClickPositionToHalfStars()
     QCOMPARE(StarRating::ratingFromPosition(rect, QPoint(95, 10)), 100);
 }
 
-QTEST_MAIN(RatingTest)
+QTEST_APPLESS_MAIN(RatingTest)
 #include "test_rating.moc"

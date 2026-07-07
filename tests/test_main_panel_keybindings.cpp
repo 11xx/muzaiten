@@ -69,5 +69,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestMainPanelKeybindings)
+QTEST_APPLESS_MAIN(TestMainPanelKeybindings)
 #include "test_main_panel_keybindings.moc"

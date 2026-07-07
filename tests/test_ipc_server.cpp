@@ -1,10 +1,43 @@
 #include "ipc/IpcServer.h"
 
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <cerrno>
+#include <cstring>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+namespace {
+
+bool localSocketBindBlocked(const QString &path)
+{
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return errno == EPERM;
+    }
+
+    const QByteArray encoded = QFile::encodeName(path);
+    sockaddr_un address {};
+    address.sun_family = AF_UNIX;
+    if (encoded.size() >= static_cast<qsizetype>(sizeof(address.sun_path))) {
+        ::close(fd);
+        return false;
+    }
+    std::memcpy(address.sun_path, encoded.constData(), static_cast<size_t>(encoded.size() + 1));
+    const bool blocked =
+        ::bind(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 && errno == EPERM;
+    ::close(fd);
+    QFile::remove(path);
+    return blocked;
+}
+
+} // namespace
 
 // Exercises the IPC transport: framing, dispatch to the handler, the ok/error
 // reply envelope, and malformed input. The MainWindow-side command semantics
@@ -39,7 +72,12 @@ void IpcServerTest::init()
         }
         return {{QStringLiteral("error"), QStringLiteral("unknown command \"%1\"").arg(command)}};
     });
-    QVERIFY2(m_server->listen(m_path), qPrintable(m_server->lastError()));
+    if (!m_server->listen(m_path)) {
+        if (localSocketBindBlocked(m_dir.filePath(QStringLiteral("probe.sock")))) {
+            QSKIP("local socket binding is blocked by this sandbox");
+        }
+        QVERIFY2(false, qPrintable(m_server->lastError()));
+    }
 }
 
 void IpcServerTest::cleanup()
