@@ -96,6 +96,16 @@ target_compile_features(test_listen_history PRIVATE cxx_std_26)
 add_test(NAME test_listen_history COMMAND test_listen_history)
 set_tests_properties(test_listen_history PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_feature_store
+    test_feature_store.cpp
+    ../src/features/FeatureStore.cpp
+)
+target_include_directories(test_feature_store PRIVATE ../src)
+target_link_libraries(test_feature_store PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_feature_store PRIVATE cxx_std_26)
+add_test(NAME test_feature_store COMMAND test_feature_store)
+set_tests_properties(test_feature_store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_play_events
     test_play_events.cpp
     ../src/scrobble/ListenHistoryStore.cpp

@@ -6,6 +6,7 @@
 #include "db/Database.h"
 #include "db/PlaylistDatabase.h"
 #include "db/SettingsStore.h"
+#include "features/FeatureStore.h"
 #include "fs/LinkRoot.h"
 #include "ipc/IpcServer.h"
 #include "mpris/MprisService.h"
@@ -230,6 +231,7 @@ AppCore::AppCore(QObject *parent)
     const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
     m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
 
+    m_features = std::make_unique<FeatureStore>(featuresPath());
     m_listenHistory = std::make_unique<ListenHistoryStore>(listenHistoryPath());
 
     m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
@@ -410,6 +412,7 @@ Database *AppCore::database() const { return m_database.get(); }
 PlaylistDatabase *AppCore::playlistDatabase() const { return m_playlistDb.get(); }
 SettingsStore *AppCore::settings() const { return m_state.get(); }
 ArtworkCache *AppCore::artworkCache() const { return m_artworkCache.get(); }
+FeatureStore *AppCore::features() const { return m_features.get(); }
 ListenHistoryStore *AppCore::listenHistory() const { return m_listenHistory.get(); }
 ListenTracker *AppCore::listenTracker() const { return m_listenTracker; }
 PlayEventRecorder *AppCore::playEventRecorder() const { return m_playEventRecorder; }
@@ -429,6 +432,11 @@ QString AppCore::databasePath() const
 QString AppCore::playlistDatabasePath() const
 {
     return QDir(AppPaths::dataDir()).filePath(QStringLiteral("playlists.sqlite"));
+}
+
+QString AppCore::featuresPath() const
+{
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
 }
 
 QString AppCore::listenHistoryPath() const

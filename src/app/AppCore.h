@@ -15,6 +15,7 @@
 
 class ArtworkCache;
 class Database;
+class FeatureStore;
 class IpcServer;
 class LastFmScrobbler;
 class ListenBrainzScrobbler;
@@ -58,6 +59,7 @@ public:
     PlaylistDatabase    *playlistDatabase() const;
     SettingsStore       *settings() const;
     ArtworkCache        *artworkCache() const;
+    FeatureStore        *features() const;
     ListenHistoryStore  *listenHistory() const;
     ListenTracker       *listenTracker() const;
     PlayEventRecorder   *playEventRecorder() const;
@@ -117,6 +119,7 @@ public:
 
     QString databasePath() const;
     QString playlistDatabasePath() const;
+    QString featuresPath() const;
     QString listenHistoryPath() const;
     bool scrobbleOffline() const;
     bool trayAvailable() const;
@@ -221,6 +224,7 @@ private:
     std::unique_ptr<PlaylistDatabase>  m_playlistDb;
     std::unique_ptr<SettingsStore>     m_state;
     std::unique_ptr<ArtworkCache>      m_artworkCache;
+    std::unique_ptr<FeatureStore>      m_features;
     std::unique_ptr<ListenHistoryStore> m_listenHistory;
     std::unique_ptr<RadioSession>      m_radioSession;
     PlayerCore       *m_player = nullptr;

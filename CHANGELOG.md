@@ -128,6 +128,9 @@
   fpcalc Chromaprint fingerprints, content groups, incremental scan state, and
   status JSON. Bliss scalar extraction is deliberately not linked because the
   available Rust bliss crates are GPL-only.
+- The app now opens `features.sqlite` read-only when present and exposes a
+  `FeatureStore` seam for later radio consumers, while
+  `muzaitenctl features-status` reports local coverage without a running app.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored

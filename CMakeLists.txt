@@ -60,6 +60,7 @@ set(MUZAITEN_SOURCES
     src/db/Database.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
+    src/features/FeatureStore.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
@@ -185,6 +186,7 @@ set(MUZAITEN_HEADERS
     src/db/PlaylistDatabase.h
     src/db/SettingsStore.h
     src/db/Schema.h
+    src/features/FeatureStore.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
     src/mpd/MpdClient.h
@@ -336,6 +338,7 @@ add_executable(muzaitenctl
     src/app/AppPaths.cpp
     src/ipc/IpcSocket.cpp
     src/db/Database.cpp
+    src/features/FeatureStore.cpp
     src/core/GenreTags.cpp
     src/core/MetadataBlob.cpp
     src/core/Rating.cpp

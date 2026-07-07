@@ -6,8 +6,10 @@
 //   muzaitenctl rate 4 && notify-send "rated $(muzaitenctl status --format artist-title)"
 
 #include "cli/SearchCli.h"
+#include "app/AppPaths.h"
 #include "core/GenreTags.h"
 #include "db/Database.h"
+#include "features/FeatureStore.h"
 #include "ipc/IpcSocket.h"
 #include "reco/TrackScorer.h"
 #include "search/SearchIndex.h"
@@ -16,6 +18,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -65,6 +68,7 @@ void printUsage()
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
+        "  features-status         show features.sqlite coverage (works offline)\n"
         "  radio-genre ignore <genre> | unignore <genre> | list\n"
         "                          curate radio-only ignored folded genres (works offline)\n"
         "  radio-weights get | set <json> | save <name> | apply <name> | list | remove <name>\n"
@@ -241,6 +245,33 @@ QString searchHumanLine(const Search::SearchRecord &r)
         line += QStringLiteral("  %1").arg(formatSeconds(static_cast<double>(r.durationMs) / 1000.0));
     }
     return line;
+}
+
+QString featuresDbPath()
+{
+    return QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
+}
+
+QJsonObject featureStatusJson(const QString &path, bool found, bool open, const FeatureStore::Status &status,
+                              int schemaVersion, const QString &message = {})
+{
+    QJsonObject object{
+        {QStringLiteral("path"), path},
+        {QStringLiteral("found"), found},
+        {QStringLiteral("open"), open},
+        {QStringLiteral("files"), static_cast<double>(status.files)},
+        {QStringLiteral("ok"), static_cast<double>(status.ok)},
+        {QStringLiteral("failed"), static_cast<double>(status.failed)},
+        {QStringLiteral("groups"), static_cast<double>(status.groups)},
+        {QStringLiteral("featured"), static_cast<double>(status.featured)},
+    };
+    if (schemaVersion > 0) {
+        object.insert(QStringLiteral("schema_version"), schemaVersion);
+    }
+    if (!message.isEmpty()) {
+        object.insert(QStringLiteral("message"), message);
+    }
+    return object;
 }
 
 QString oneLine(const QString &value)
@@ -983,6 +1014,52 @@ int runGenreReport(QStringList arguments, bool json)
     return 0;
 }
 
+int runFeaturesStatus(QStringList arguments, bool json)
+{
+    if (!arguments.isEmpty()) {
+        return fail(QStringLiteral("features-status does not take arguments"));
+    }
+
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    const QString path = featuresDbPath();
+    if (!QFileInfo::exists(path)) {
+        const QString message = QStringLiteral("features.sqlite not found");
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(
+                featureStatusJson(path, false, false, {}, -1, message)).toJson(QJsonDocument::Compact)) << '\n';
+        } else {
+            out << message << " at " << path << '\n';
+        }
+        return 0;
+    }
+
+    FeatureStore store(path);
+    if (!store.isOpen()) {
+        const QString message = QStringLiteral("features.sqlite unsupported or unreadable");
+        if (json) {
+            out << QString::fromUtf8(QJsonDocument(
+                featureStatusJson(path, true, false, {}, -1, message)).toJson(QJsonDocument::Compact)) << '\n';
+        }
+        return fail(QStringLiteral("%1 at %2").arg(message, path));
+    }
+
+    const FeatureStore::Status status = store.status();
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(
+            featureStatusJson(path, true, true, status, store.schemaVersion())).toJson(QJsonDocument::Compact)) << '\n';
+        return 0;
+    }
+
+    out << "features.sqlite: " << path << '\n';
+    out << "schema: " << store.schemaVersion() << '\n';
+    out << "files: " << status.files << " (" << status.ok << " ok, "
+        << status.failed << " failed)\n";
+    out << "groups: " << status.groups << '\n';
+    out << "featured: " << status.featured << '\n';
+    return 0;
+}
+
 int runRadioGenre(QStringList arguments, bool json)
 {
     if (arguments.isEmpty()) {
@@ -1172,6 +1249,9 @@ int main(int argc, char **argv)
     }
     if (command == QLatin1String("genre-report")) {
         return runGenreReport(arguments, json);
+    }
+    if (command == QLatin1String("features-status")) {
+        return runFeaturesStatus(arguments, json);
     }
     if (command == QLatin1String("radio-genre")) {
         return runRadioGenre(arguments, json);
