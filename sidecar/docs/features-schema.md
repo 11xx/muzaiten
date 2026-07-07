@@ -77,7 +77,8 @@ The intended scalar mapping is still reserved as:
 
 - `tempo_bpm`: extractor tempo dimension.
 - `loudness`: extractor loudness dimension.
-- `energy`: extractor energy descriptor.
+- `energy`: extractor energy descriptor. App-side radio scoring treats this as
+  a unit-scale value and uses a `1.0` falloff span for energy proximity.
 - `brightness`: extractor brightness descriptor.
 
 Because bliss extraction is not active, there is no authoritative bliss

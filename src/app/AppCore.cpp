@@ -166,6 +166,19 @@ QualityRank::Copy qualityCopyForTrack(const Track &track, const QStringList &med
     };
 }
 
+void applyFeatureScalars(TrackScorer::Candidate &candidate, const FeatureStore::Scalars &scalars)
+{
+    if (!scalars.valid) {
+        return;
+    }
+    if (scalars.tempoBpm > 0.0) {
+        candidate.tempoBpm = scalars.tempoBpm;
+    }
+    if (scalars.energy >= 0.0) {
+        candidate.energy = scalars.energy;
+    }
+}
+
 // Radio settings defaults/limits (plans/music-recommendation-plan.md, "Batch
 // radio queue"). batchSize == 1 must reproduce the pre-batch, pure-JIT
 // behaviour exactly -- see AppCore::startRadio/appendRadioBatch.
@@ -959,6 +972,52 @@ QHash<QString, QString> AppCore::buildResolvedSongKeyMap() const
     return SongIdentity::resolvedSongKeys(identities);
 }
 
+void AppCore::attachRadioScalars(QVector<TrackScorer::Candidate> &candidates) const
+{
+    if (m_features == nullptr || !m_features->isOpen() || candidates.isEmpty()) {
+        return;
+    }
+
+    QStringList paths;
+    paths.reserve(candidates.size());
+    for (const TrackScorer::Candidate &candidate : candidates) {
+        if (!candidate.path.isEmpty()) {
+            paths.push_back(candidate.path);
+        }
+    }
+    const QHash<QString, qint64> groups = m_features->contentGroupsForPaths(paths);
+    if (groups.isEmpty()) {
+        return;
+    }
+
+    QList<qint64> groupIds;
+    QSet<qint64> seenGroups;
+    groupIds.reserve(groups.size());
+    for (auto it = groups.cbegin(); it != groups.cend(); ++it) {
+        if (it.value() < 0 || seenGroups.contains(it.value())) {
+            continue;
+        }
+        seenGroups.insert(it.value());
+        groupIds.push_back(it.value());
+    }
+    const QHash<qint64, FeatureStore::Scalars> scalarsByGroup = m_features->scalarsForGroups(groupIds);
+    if (scalarsByGroup.isEmpty()) {
+        return;
+    }
+
+    for (TrackScorer::Candidate &candidate : candidates) {
+        const qint64 groupId = groups.value(candidate.path, -1);
+        applyFeatureScalars(candidate, scalarsByGroup.value(groupId));
+    }
+}
+
+void AppCore::attachRadioScalars(TrackScorer::Candidate &candidate) const
+{
+    QVector<TrackScorer::Candidate> candidates{candidate};
+    attachRadioScalars(candidates);
+    candidate = candidates.first();
+}
+
 TrackScorer::Candidate AppCore::buildRadioSeedCandidate(const Track &seed,
                                                         const QStringList &seedGenresFolded,
                                                         const QHash<QString, QString> &resolvedSongKeys) const
@@ -974,6 +1033,7 @@ TrackScorer::Candidate AppCore::buildRadioSeedCandidate(const Track &seed,
     seedCandidate.year = trackYear(seed);
     seedCandidate.effectiveRating0To100 = seed.effectiveRating0To100;
     seedCandidate.hasUserRating = seed.hasUserRating;
+    attachRadioScalars(seedCandidate);
     return seedCandidate;
 }
 
@@ -1020,8 +1080,10 @@ QVector<TrackScorer::Candidate> AppCore::buildRadioCandidatePool(const QStringLi
     }
     // User taste flags are path-scoped storage but AppCore applies them at the
     // recommender boundary, after every SQL candidate source has been merged.
-    return RadioFilters::excludeFlaggedCandidates(
+    pool = RadioFilters::excludeFlaggedCandidates(
         pool, m_database->flaggedPaths(Database::TrackFlag::NeverRadio));
+    attachRadioScalars(pool);
+    return pool;
 }
 
 QVector<TrackScorer::Candidate> AppCore::buildRadioFallbackPool(int limit,
@@ -1039,8 +1101,10 @@ QVector<TrackScorer::Candidate> AppCore::buildRadioFallbackPool(int limit,
     for (const RadioCandidateRow &row : rows) {
         pool.push_back(candidateFromRow(row, genreAliases, ignoredRadioGenres, resolvedSongKeys));
     }
-    return RadioFilters::excludeFlaggedCandidates(
+    pool = RadioFilters::excludeFlaggedCandidates(
         pool, m_database->flaggedPaths(Database::TrackFlag::NeverRadio));
+    attachRadioScalars(pool);
+    return pool;
 }
 
 QHash<QString, double> AppCore::buildRadioGenreIdf(const QHash<QString, QString> &genreAliases,

@@ -136,6 +136,10 @@
   queued copy, and playback prefers the highest-quality copy unless the user
   pins a different path. `muzaitenctl duplicate-groups`, `pin-copy`, and
   `unpin-copy` expose the local duplicate sets and per-group override.
+- When `features.sqlite` includes scalar feature rows, radio scoring now adds
+  explainable tempo and energy proximity components to the existing genre, era,
+  rating, and history signals. Libraries without scalar rows keep the previous
+  scores and explanations exactly.
 - Local play-event telemetry: every playback now records how it ended
   (completion, skip, stop, or session end), how much was actually heard, where
   the track came from, and which listening session it belonged to, stored
