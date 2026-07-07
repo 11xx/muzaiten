@@ -508,11 +508,12 @@ void MusicExplorerViewTest::inlineTrackEmptyMenuOffersFullTableActions()
                                                            table->viewport()->height() + 20))));
     QVERIFY(sawMenu);
     QCOMPARE(actions, (QStringList{
-                          QStringLiteral("Play all"),
-                          QStringLiteral("Play all next"),
-                          QStringLiteral("Add all to queue"),
+                          QStringLiteral("Play now (3)"),
+                          QStringLiteral("Play next (3)"),
+                          QStringLiteral("Add to queue (3)"),
+                          QStringLiteral("Copy path"),
                           QStringLiteral("Start Artist Radio"),
-                          QStringLiteral("Responsive options..."),
+                          QStringLiteral("Responsive options…"),
                           QStringLiteral("Reset table layout to defaults"),
                       }));
 }

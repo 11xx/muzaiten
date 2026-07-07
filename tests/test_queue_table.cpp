@@ -186,7 +186,7 @@ private slots:
                               QStringLiteral("Clear play next priority"),
                               QStringLiteral("Clear queue"),
                               QStringLiteral("Save queue as…"),
-                              QStringLiteral("Restore saved queue..."),
+                              QStringLiteral("Restore saved queue…"),
                               QStringLiteral("Detach queue from playlist"),
                           }));
     }

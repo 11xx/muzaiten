@@ -936,6 +936,14 @@ void AlbumGrid::showContextMenu(const QPoint &pos)
         connect(addToQueue, &QAction::triggered, this, [this, albumTitle]() {
             emit albumAddToQueueRequested(albumTitle);
         });
+        QAction *addToPlaylist = menu.addAction(QStringLiteral("Add album to playlist…"));
+        connect(addToPlaylist, &QAction::triggered, this, [this, selectionTitles]() {
+            emit albumAddToPlaylistRequested(selectionTitles);
+        });
+        QAction *startRadio = menu.addAction(QStringLiteral("Start radio from album"));
+        connect(startRadio, &QAction::triggered, this, [this, albumTitle]() {
+            emit albumStartRadioRequested(albumTitle);
+        });
         if (m_queueIsPlaylistSourced) {
             QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
             connect(playNextTemp, &QAction::triggered, this, [this, albumTitle]() {

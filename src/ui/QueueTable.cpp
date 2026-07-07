@@ -17,14 +17,17 @@
 #include "ui/SelectionColors.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
+#include "ui/TrackMenuSections.h"
 
 #include <QAbstractItemView>
 #include <QAbstractTableModel>
 #include <QAction>
 #include <QApplication>
 #include <QActionGroup>
+#include <QClipboard>
 #include <QDataStream>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -42,6 +45,7 @@
 #include <QScrollBar>
 #include <QSet>
 #include <QSignalBlocker>
+#include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -77,6 +81,18 @@ constexpr ColumnSpec columns[] = {
     {"year", "Year", 7, 58, 24},
     {"track", "Track", 8, 36, 49, 12},
 };
+
+QString joinedTrackPaths(const QVector<Track> &tracks)
+{
+    QStringList paths;
+    paths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            paths << track.path;
+        }
+    }
+    return paths.join(QLatin1Char('\n'));
+}
 
 constexpr int kCellHorizontalPadding = 3;
 
@@ -1021,7 +1037,7 @@ void QueueTable::showHeaderMenu(const QPoint &pos)
     }
     menu.addSeparator();
 
-    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
+    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options…"));
     connect(responsiveOptions, &QAction::triggered, this, [this]() {
         ResponsiveColumnOptionsDialog dialog(m_columnLayout, responsiveColumnOptions(), this);
         dialog.exec();
@@ -1072,49 +1088,56 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     }
 
     const Track track = m_store->tracks().at(row);
+    const QVector<int> actionRows = selectedRowsForAction();
+    QVector<Track> actionTracks;
+    actionTracks.reserve(actionRows.size());
+    for (int actionRow : actionRows) {
+        if (actionRow >= 0 && actionRow < m_store->tracks().size()) {
+            const Track candidate = m_store->tracks().at(actionRow);
+            if (!candidate.path.isEmpty()) {
+                actionTracks.push_back(candidate);
+            }
+        }
+    }
     QMenu menu(this);
-    QAction *play = menu.addAction(QStringLiteral("Play"));
-    connect(play, &QAction::triggered, this, [this, row]() {
-        emit trackActivated(row);
-    });
-    QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
-    connect(startRadio, &QAction::triggered, this, [this, track]() {
-        emit startRadioRequested(track);
-    });
-    QAction *neverRadio = menu.addAction(QStringLiteral("Never play on radio"));
-    neverRadio->setCheckable(true);
-    neverRadio->setChecked(static_cast<bool>(m_trackFlagResolver)
-                           && m_trackFlagResolver(track, QStringLiteral("never_radio")));
-    neverRadio->setEnabled(!track.path.isEmpty());
-    connect(neverRadio, &QAction::toggled, this, [this, track](bool on) {
-        emit trackFlagChanged(track, QStringLiteral("never_radio"), on);
-    });
-    QAction *noLearn = menu.addAction(QStringLiteral("Don't learn from this"));
-    noLearn->setCheckable(true);
-    noLearn->setChecked(static_cast<bool>(m_trackFlagResolver)
-                        && m_trackFlagResolver(track, QStringLiteral("no_learn")));
-    noLearn->setEnabled(!track.path.isEmpty());
-    connect(noLearn, &QAction::toggled, this, [this, track](bool on) {
-        emit trackFlagChanged(track, QStringLiteral("no_learn"), on);
-    });
-    menu.addSeparator();
-    QAction *findInLibrary = menu.addAction(QStringLiteral("Find in library"));
-    connect(findInLibrary, &QAction::triggered, this, [this, track]() {
-        emit trackLibraryRequested(track);
-    });
-    QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
-    connect(findFile, &QAction::triggered, this, [this, track]() {
-        emit findFileRequested(track);
-    });
-    QAction *properties = menu.addAction(QStringLiteral("Properties"));
-    connect(properties, &QAction::triggered, this, [this, track]() {
-        emit propertiesRequested(track);
-    });
+    const auto allFlagged = [this, &actionTracks](const QString &flag) {
+        return !actionTracks.isEmpty()
+            && static_cast<bool>(m_trackFlagResolver)
+            && std::all_of(actionTracks.cbegin(), actionTracks.cend(), [this, &flag](const Track &candidate) {
+                   return !candidate.path.isEmpty() && m_trackFlagResolver(candidate, flag);
+               });
+    };
+    const auto setFlagForTracks = [this, actionTracks](const QString &flag, bool on) {
+        for (const Track &candidate : actionTracks) {
+            if (!candidate.path.isEmpty()) {
+                emit trackFlagChanged(candidate, flag, on);
+            }
+        }
+    };
+    TrackMenuSections::Callbacks callbacks;
+    callbacks.playNow = [this, row]() { emit trackActivated(row); };
+    callbacks.addToPlaylist = [this, actionTracks]() {
+        if (!actionTracks.isEmpty()) {
+            emit addToPlaylistRequested(actionTracks);
+        }
+    };
+    callbacks.startRadio = [this, track]() { emit startRadioRequested(track); };
+    callbacks.setNeverRadio = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("never_radio"), on); };
+    callbacks.setNoLearn = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("no_learn"), on); };
+    callbacks.findInLibrary = [this, track]() { emit trackLibraryRequested(track); };
+    callbacks.openContainingDirectory = [this, track]() { emit findFileRequested(track); };
+    callbacks.copyPath = [actionTracks]() { QGuiApplication::clipboard()->setText(joinedTrackPaths(actionTracks)); };
+    callbacks.properties = [this, track]() { emit propertiesRequested(track); };
+    TrackMenuSections::State state;
+    state.trackCount = 1;
+    state.neverRadioChecked = allFlagged(QStringLiteral("never_radio"));
+    state.noLearnChecked = allFlagged(QStringLiteral("no_learn"));
+    TrackMenuSections::appendTrackSections(menu, callbacks, state);
+
     if (track.missing) {
-        const QVector<int> rows = selectedRowsForAction();
         QVector<int> missingRows;
-        missingRows.reserve(rows.size());
-        for (int selectedRow : rows) {
+        missingRows.reserve(actionRows.size());
+        for (int selectedRow : actionRows) {
             if (m_store != nullptr && selectedRow >= 0 && selectedRow < m_store->tracks().size()
                 && m_store->tracks().at(selectedRow).missing) {
                 missingRows.push_back(selectedRow);
@@ -1131,17 +1154,9 @@ void QueueTable::showQueueMenu(const QPoint &pos)
             emit removeAllMissingTracksRequested();
         });
     }
-    menu.addAction(QStringLiteral("Add to playlist…"), this, [this]() {
-        const QVector<int> rows = selectedRowsForAction();
-        QVector<Track> tracks;
-        tracks.reserve(rows.size());
-        for (int r : rows) {
-            if (m_store != nullptr && r >= 0 && r < m_store->tracks().size()) {
-                tracks.push_back(m_store->tracks().at(r));
-            }
-        }
-        if (!tracks.isEmpty()) { emit addToPlaylistRequested(tracks); }
-    });
+    if (!menu.actions().isEmpty() && !menu.actions().last()->isSeparator()) {
+        menu.addSeparator();
+    }
     QAction *removeSelected = menu.addAction(QStringLiteral("Remove selected"));
     connect(removeSelected, &QAction::triggered, this, [this]() {
         QVector<int> rows;
@@ -1179,7 +1194,7 @@ void QueueTable::appendQueueWideActions(QMenu &menu)
     connect(saveQueue, &QAction::triggered, this, [this]() {
         emit saveQueueAsRequested();
     });
-    QAction *restorePrevious = menu.addAction(QStringLiteral("Restore saved queue..."));
+    QAction *restorePrevious = menu.addAction(QStringLiteral("Restore saved queue…"));
     connect(restorePrevious, &QAction::triggered, this, [this]() {
         emit restorePreviousQueueRequested();
     });

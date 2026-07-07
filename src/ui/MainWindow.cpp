@@ -1098,6 +1098,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
 
     connect(m_artistSidebar, &ArtistSidebar::artistSelected, this, &MainWindow::selectArtist);
+    connect(m_artistSidebar, &ArtistSidebar::artistPlayRequested, this, &MainWindow::playArtistReplacingQueue);
+    connect(m_artistSidebar, &ArtistSidebar::artistAddToQueueRequested, this, &MainWindow::addArtistToQueue);
     connect(m_artistSidebar, &ArtistSidebar::startArtistRadioRequested,
             this, &MainWindow::startArtistRadio);
     connect(m_stopScanButton, &QPushButton::clicked, this, &MainWindow::cancelScan);
@@ -1129,6 +1131,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_albumGrid, &AlbumGrid::albumPlayNextTemporaryRequested, this, &MainWindow::playNextAlbumTemporary);
     connect(m_albumGrid, &AlbumGrid::albumAddToQueueTemporaryRequested, this, &MainWindow::addAlbumToQueueTemporary);
+    connect(m_albumGrid, &AlbumGrid::albumStartRadioRequested, this, &MainWindow::startRadioFromAlbum);
     connect(m_albumGrid, &AlbumGrid::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
         QVector<Track> tracks;
         for (const QString &title : titles) {
@@ -1246,6 +1249,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::syncAllSavedRatingTagsRequested, this, &MainWindow::syncAllSavedRatingTags);
     connect(m_playerBar, &PlayerBar::retryPendingRatingTagsRequested, this, &MainWindow::retryPendingRatingTags);
     connect(m_playerBar, &PlayerBar::currentTrackLibraryRequested, this, &MainWindow::jumpToPlayingSong);
+    connect(m_playerBar, &PlayerBar::currentTrackFileRequested, this, [this]() {
+        const Track current = m_player->currentTrack();
+        if (!current.path.isEmpty()) {
+            findTrackFile(current);
+        }
+    });
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
     connect(m_playerBar, &PlayerBar::releaseDeviceRequested, this, &MainWindow::releaseHeldOutputDevice);
@@ -2978,6 +2987,9 @@ SearchView *MainWindow::ensureSearchView()
     m_searchView = new SearchView(m_mainStack, idleReleaseMs());
     m_searchView->setRankConfig(Search::RankConfig::fromJsonString(m_database->setting(QStringLiteral("search.ranking"))));
     m_searchView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    m_searchView->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
+    });
 
     connect(m_searchView, &SearchView::addToQueueRequested, this, [this](const QVector<Track> &tracks) {
         enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
@@ -3001,6 +3013,10 @@ SearchView *MainWindow::ensureSearchView()
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_searchView, &SearchView::searchRankingRequested, this, &MainWindow::configureSearchRanking);
+    connect(m_searchView, &SearchView::startRadioRequested, this, [this](const Track &track) {
+        startRadioFromSeed(track.path);
+    });
+    connect(m_searchView, &SearchView::trackFlagChanged, this, &MainWindow::applyTrackFlag);
 
     m_mainStack->addWidget(m_searchView);
     return m_searchView;
@@ -3174,6 +3190,9 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     m_musicExplorerView = new MusicExplorerView(m_libraryCenterStack);
     m_musicExplorerView->setArtworkCache(m_artworkCache);
     m_musicExplorerView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    m_musicExplorerView->setTrackFlagResolver([this](const Track &track, const QString &flag) {
+        return m_core->trackFlag(track.path, flag);
+    });
     m_musicExplorerView->applyAlbumGridViewSettingsJson(m_albumGrid->viewSettingsJson());
     m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
     m_musicExplorerView->setTrackProvider([this](const Album &album) {
@@ -3188,6 +3207,7 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::albumAddToQueueRequested, this, &MainWindow::addAlbumToQueue);
     connect(m_musicExplorerView, &MusicExplorerView::albumPlayNextTemporaryRequested, this, &MainWindow::playNextAlbumTemporary);
     connect(m_musicExplorerView, &MusicExplorerView::albumAddToQueueTemporaryRequested, this, &MainWindow::addAlbumToQueueTemporary);
+    connect(m_musicExplorerView, &MusicExplorerView::albumStartRadioRequested, this, &MainWindow::startRadioFromAlbum);
     connect(m_musicExplorerView, &MusicExplorerView::albumAddToPlaylistRequested, this, [this](const QStringList &titles) {
         QVector<Track> tracks;
         for (const QString &title : titles) {
@@ -3219,6 +3239,7 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
         startRadioFromSeed(track.path);
     });
     connect(m_musicExplorerView, &MusicExplorerView::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
+    connect(m_musicExplorerView, &MusicExplorerView::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_musicExplorerView, &MusicExplorerView::trackRatingChanged, this, [this](const Track &track, int rating) {
         applyTrackRating(track, rating, QStringLiteral("music_explorer"));
     });
@@ -3394,6 +3415,9 @@ PlaylistView *MainWindow::ensurePlaylistView()
     m_playlistView->setTrackResolver([this](const QString &path) {
         return m_database != nullptr ? m_database->trackForPath(path) : Track();
     });
+    m_playlistView->setTrackFlagResolver([this](const QString &path, const QString &flag) {
+        return m_core->trackFlag(path, flag);
+    });
     m_playlistView->applyViewSettingsJson(m_state->setting(QStringLiteral("playlistView.view")));
     m_playlistView->setSavedQueueEntries(savedQueuePlaylistEntries());
     m_playlistView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
@@ -3440,6 +3464,11 @@ PlaylistView *MainWindow::ensurePlaylistView()
     });
     connect(m_playlistView, &PlaylistView::propertiesForPathRequested, this, [this](const QString &path) {
         showTrackProperties(m_database->trackForPath(path));
+    });
+    connect(m_playlistView, &PlaylistView::trackFlagChanged, this, [this](const QString &path, const QString &flag, bool on) {
+        Track track;
+        track.path = path;
+        applyTrackFlag(track, flag, on);
     });
     connect(m_playlistView, &PlaylistView::startRadioRequested, this, &MainWindow::startRadioFromSeed);
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
@@ -6596,6 +6625,25 @@ void MainWindow::playAlbumsReplacingQueue(const QStringList &albumTitles)
     replaceQueueWithTracks(tracks, 0, QStringLiteral("album"), 0, sourceName);
 }
 
+void MainWindow::playArtistReplacingQueue(const QString &artistName)
+{
+    const QVector<Track> tracks = tracksForArtistName(artistName);
+    replaceQueueWithTracks(tracks, 0, QStringLiteral("artist"), 0, artistName);
+}
+
+void MainWindow::addArtistToQueue(const QString &artistName)
+{
+    enqueueTracksFromMenu(tracksForArtistName(artistName), QueueAddMode::Append, false);
+}
+
+void MainWindow::startRadioFromAlbum(const QString &albumTitle)
+{
+    const QVector<Track> tracks = tracksForAlbumTitle(albumTitle);
+    if (!tracks.isEmpty()) {
+        startRadioFromSeed(tracks.first().path);
+    }
+}
+
 QVector<Track> MainWindow::tracksForAlbumTitle(const QString &albumTitle) const
 {
     if (m_currentArtist.isEmpty() || albumTitle.isEmpty()) {
@@ -6604,6 +6652,17 @@ QVector<Track> MainWindow::tracksForAlbumTitle(const QString &albumTitle) const
     return m_librarySource == LibrarySource::Mpd
         ? m_database->mpdTracksForArtist(m_currentArtist, mpdMusicDirectory(), albumTitle)
         : m_database->tracksForArtist(m_currentArtist, albumTitle);
+}
+
+QVector<Track> MainWindow::tracksForArtistName(const QString &artistName) const
+{
+    const QString trimmed = artistName.trimmed();
+    if (m_database == nullptr || trimmed.isEmpty()) {
+        return {};
+    }
+    return m_librarySource == LibrarySource::Mpd
+        ? m_database->mpdTracksForArtist(trimmed, mpdMusicDirectory())
+        : m_database->tracksForArtist(trimmed);
 }
 
 void MainWindow::playNextAlbum(const QString &albumTitle)

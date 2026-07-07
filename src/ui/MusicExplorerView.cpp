@@ -463,6 +463,7 @@ MusicExplorerView::MusicExplorerView(QWidget *parent)
     connect(m_inlineTrackTable, &TrackTable::propertiesRequested, this, &MusicExplorerView::propertiesRequested);
     connect(m_inlineTrackTable, &TrackTable::startRadioRequested, this, &MusicExplorerView::startRadioRequested);
     connect(m_inlineTrackTable, &TrackTable::startArtistRadioRequested, this, &MusicExplorerView::startArtistRadioRequested);
+    connect(m_inlineTrackTable, &TrackTable::trackFlagChanged, this, &MusicExplorerView::trackFlagChanged);
     connect(m_inlineTrackTable, &TrackTable::trackRatingChanged, this, &MusicExplorerView::trackRatingChanged);
     connect(m_inlineTrackTable, &TrackTable::viewSettingsChanged, this, &MusicExplorerView::trackTableViewSettingsChanged);
     connect(m_scroll->viewport(), &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
@@ -553,6 +554,11 @@ void MusicExplorerView::setTrackProvider(std::function<QVector<Track>(const Albu
 {
     m_trackProvider = std::move(provider);
     refreshExpandedTracks();
+}
+
+void MusicExplorerView::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_inlineTrackTable->setTrackFlagResolver(std::move(resolver));
 }
 
 void MusicExplorerView::setQueueIsPlaylistSourced(bool sourced)
@@ -1264,8 +1270,10 @@ void MusicExplorerView::showAlbumContextMenu(int row, const QPoint &globalPos)
         QAction *addQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
         connect(addQueueTemp, &QAction::triggered, this, [this, album]() { emit albumAddToQueueTemporaryRequested(album.title); });
     }
-    QAction *addPlaylist = menu.addAction(QStringLiteral("Add to playlist..."));
+    QAction *addPlaylist = menu.addAction(QStringLiteral("Add album to playlist…"));
     connect(addPlaylist, &QAction::triggered, this, [this, album]() { emit albumAddToPlaylistRequested(QStringList{album.title}); });
+    QAction *startRadio = menu.addAction(QStringLiteral("Start radio from album"));
+    connect(startRadio, &QAction::triggered, this, [this, album]() { emit albumStartRadioRequested(album.title); });
     menu.exec(globalPos);
 }
 

@@ -11,6 +11,8 @@
 #include <QWidget>
 #include <QVector>
 
+#include <functional>
+
 class QLabel;
 class QLineEdit;
 class QListView;
@@ -53,6 +55,7 @@ public:
     // When true, the context menu also offers "(don't save to playlist)" queue
     // adds (the queue is mirroring a playlist).
     void setQueueIsPlaylistSourced(bool sourced) { m_queueIsPlaylistSourced = sourced; }
+    void setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver);
 
 signals:
     void addToQueueRequested(QVector<Track> tracks);
@@ -67,6 +70,8 @@ signals:
     void findFileRequested(Track track);
     void propertiesRequested(Track track);
     void searchRankingRequested();
+    void startRadioRequested(const Track &track);
+    void trackFlagChanged(const Track &track, const QString &flag, bool on);
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -127,6 +132,7 @@ private:
     Search::ResultRanker m_ranker;
 
     QString   m_dbPath;
+    std::function<bool(const Track &, const QString &)> m_trackFlagResolver;
     bool      m_indexLoaded  = false;  // first batch arrived (or load done) — queries enabled
     bool      m_indexStreaming = false; // a cold streaming build is in progress (main spinner)
     bool      m_indexRefreshing = false; // a background cache-refresh is in progress (secondary spinner)

@@ -11,10 +11,13 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/SearchResultDelegate.h"
 #include "ui/SearchResultsModel.h"
+#include "ui/TrackMenuSections.h"
 
 #include <QAbstractItemView>
+#include <QClipboard>
 #include <QEvent>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHideEvent>
 #include <QItemSelectionModel>
@@ -27,16 +30,34 @@
 #include <QPalette>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QStringList>
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <utility>
 
 Q_DECLARE_METATYPE(QVector<Search::ScoredResult>)
 Q_DECLARE_METATYPE(Search::SearchRecord)
 Q_DECLARE_METATYPE(Search::ScoredResult)
+
+namespace {
+
+QString joinedTrackPaths(const QVector<Track> &tracks)
+{
+    QStringList paths;
+    paths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            paths << track.path;
+        }
+    }
+    return paths.join(QLatin1Char('\n'));
+}
+
+}
 
 // Build a minimal Track from a SearchRecord — sufficient for playback and display.
 static Track trackFromRecord(const Search::SearchRecord &rec)
@@ -374,6 +395,11 @@ void SearchView::setRankConfig(const Search::RankConfig &config)
     submitQuery(); // re-run with the new ranking + exclusions
 }
 
+void SearchView::setTrackFlagResolver(std::function<bool(const Track &, const QString &)> resolver)
+{
+    m_trackFlagResolver = std::move(resolver);
+}
+
 void SearchView::setupWorker(const QString &dbPath)
 {
     if (m_worker) return;
@@ -683,7 +709,7 @@ void SearchView::showContextMenu(const QPoint &pos)
         QAction *clearSearch = menu.addAction(QStringLiteral("Clear search"));
         clearSearch->setEnabled(!m_searchBox->text().isEmpty());
         connect(clearSearch, &QAction::triggered, m_searchBox, &QLineEdit::clear);
-        QAction *searchRanking = menu.addAction(QStringLiteral("Search ranking..."));
+        QAction *searchRanking = menu.addAction(QStringLiteral("Search ranking…"));
         connect(searchRanking, &QAction::triggered, this, [this]() {
             emit searchRankingRequested();
         });
@@ -699,40 +725,41 @@ void SearchView::showContextMenu(const QPoint &pos)
     if (targets.isEmpty()) return;
 
     QMenu menu(this);
-    const QString many = targets.size() > 1
-        ? QStringLiteral(" (%1)").arg(targets.size()) : QString();
-
-    menu.addAction(QStringLiteral("Play now%1").arg(many), this, [this, targets]() {
-        emit playNowRequested(targets);
-    });
-    menu.addAction(QStringLiteral("Add to queue%1").arg(many), this, [this, targets]() {
-        emit addToQueueRequested(targets);
-    });
-    menu.addAction(QStringLiteral("Add to playlist…%1").arg(many), this, [this, targets]() {
-        emit addToPlaylistRequested(targets);
-    });
-    menu.addAction(QStringLiteral("Play next%1").arg(many), this, [this, targets]() {
-        emit playNextRequested(targets);
-    });
+    const auto allFlagged = [this, &targets](const QString &flag) {
+        return !targets.isEmpty()
+            && static_cast<bool>(m_trackFlagResolver)
+            && std::all_of(targets.cbegin(), targets.cend(), [this, &flag](const Track &candidate) {
+                   return !candidate.path.isEmpty() && m_trackFlagResolver(candidate, flag);
+               });
+    };
+    const auto setFlagForTargets = [this, targets](const QString &flag, bool on) {
+        for (const Track &track : targets) {
+            if (!track.path.isEmpty()) {
+                emit trackFlagChanged(track, flag, on);
+            }
+        }
+    };
+    TrackMenuSections::Callbacks callbacks;
+    callbacks.playNow = [this, targets]() { emit playNowRequested(targets); };
+    callbacks.playNext = [this, targets]() { emit playNextRequested(targets); };
+    callbacks.addToQueue = [this, targets]() { emit addToQueueRequested(targets); };
     if (m_queueIsPlaylistSourced) {
-        menu.addAction(QStringLiteral("Play next (don't save to playlist)%1").arg(many), this, [this, targets]() {
-            emit playNextTemporaryRequested(targets);
-        });
-        menu.addAction(QStringLiteral("Add to queue (don't save to playlist)%1").arg(many), this, [this, targets]() {
-            emit addToQueueTemporaryRequested(targets);
-        });
+        callbacks.playNextTemporary = [this, targets]() { emit playNextTemporaryRequested(targets); };
+        callbacks.addToQueueTemporary = [this, targets]() { emit addToQueueTemporaryRequested(targets); };
     }
-    menu.addSeparator();
-    menu.addAction(QStringLiteral("Find in library"), this, [this, single]() {
-        emit findInLibraryRequested(single);
-    });
-    menu.addAction(QStringLiteral("Open containing directory"), this, [this, single]() {
-        emit findFileRequested(single);
-    });
-    menu.addSeparator();
-    menu.addAction(QStringLiteral("Properties"), this, [this, single]() {
-        emit propertiesRequested(single);
-    });
+    callbacks.addToPlaylist = [this, targets]() { emit addToPlaylistRequested(targets); };
+    callbacks.startRadio = [this, single]() { emit startRadioRequested(single); };
+    callbacks.setNeverRadio = [setFlagForTargets](bool on) { setFlagForTargets(QStringLiteral("never_radio"), on); };
+    callbacks.setNoLearn = [setFlagForTargets](bool on) { setFlagForTargets(QStringLiteral("no_learn"), on); };
+    callbacks.findInLibrary = [this, single]() { emit findInLibraryRequested(single); };
+    callbacks.openContainingDirectory = [this, single]() { emit findFileRequested(single); };
+    callbacks.copyPath = [targets]() { QGuiApplication::clipboard()->setText(joinedTrackPaths(targets)); };
+    callbacks.properties = [this, single]() { emit propertiesRequested(single); };
+    TrackMenuSections::State state;
+    state.trackCount = static_cast<int>(targets.size());
+    state.neverRadioChecked = allFlagged(QStringLiteral("never_radio"));
+    state.noLearnChecked = allFlagged(QStringLiteral("no_learn"));
+    TrackMenuSections::appendTrackSections(menu, callbacks, state);
 
     menu.exec(m_resultList->viewport()->mapToGlobal(pos));
 }

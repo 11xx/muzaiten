@@ -15,6 +15,16 @@ endfunction()
 add_muzaiten_test(test_rating test_rating.cpp)
 set_tests_properties(test_rating PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_track_menu_sections
+    test_track_menu_sections.cpp
+    ../src/ui/TrackMenuSections.cpp
+)
+target_include_directories(test_track_menu_sections PRIVATE ../src)
+target_link_libraries(test_track_menu_sections PRIVATE Qt6::Core Qt6::Widgets Qt6::Test)
+target_compile_features(test_track_menu_sections PRIVATE cxx_std_26)
+add_test(NAME test_track_menu_sections COMMAND test_track_menu_sections)
+set_tests_properties(test_track_menu_sections PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_track_info_settings
     test_track_info_settings.cpp
     ../src/core/HumanQuantity.cpp
@@ -427,6 +437,7 @@ add_executable(test_queue_table
     ../src/ui/QueueKeybindings.cpp
     ../src/ui/QueueStore.cpp
     ../src/ui/QueueTable.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/PanelSearchBar.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp
@@ -454,6 +465,7 @@ add_executable(test_playlist_view
     test_playlist_view.cpp
     ../src/db/PlaylistDatabase.cpp
     ../src/ui/PlaylistView.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/IdleReleaseController.cpp
     ../src/ui/PanelSearchBar.cpp
     ../src/search/SearchMatcher.cpp
@@ -482,6 +494,7 @@ add_executable(test_responsive_column_layout
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
     ../src/ui/TrackTable.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp
@@ -562,6 +575,7 @@ add_executable(test_music_explorer_view
     test_music_explorer_view.cpp
     ../src/ui/MusicExplorerView.cpp
     ../src/ui/TrackTable.cpp
+    ../src/ui/TrackMenuSections.cpp
     ../src/ui/DenseTableDelegate.cpp
     ../src/ui/NavigableTableView.cpp
     ../src/ui/RowReorderSupport.cpp

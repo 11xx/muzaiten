@@ -282,10 +282,10 @@ private slots:
                                           Q_ARG(QPoint, QPoint(12, 80))));
         QVERIFY(sawMenu);
         QCOMPARE(actions, (QStringList{
-                              QStringLiteral("Add song..."),
-                              QStringLiteral("Import into this playlist..."),
+                              QStringLiteral("Add song…"),
+                              QStringLiteral("Import into this playlist…"),
                               QStringLiteral("Play playlist"),
-                              QStringLiteral("New playlist..."),
+                              QStringLiteral("New playlist…"),
                           }));
         QCOMPARE(enabled, (QList<bool>{true, true, true, true}));
     }

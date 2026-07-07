@@ -656,7 +656,7 @@ void TrackInfoPanel::showTrackInfoLabelMenu(const QPoint &pos)
     QMenu menu(this);
     QAction *copy = menu.addAction(QStringLiteral("Copy"));
     copy->setEnabled(!text.isEmpty());
-    QAction *configureAction = menu.addAction(QStringLiteral("Configure track information..."));
+    QAction *configureAction = menu.addAction(QStringLiteral("Configure track information…"));
     const QAction *selected = menu.exec(label->mapToGlobal(pos));
     if (selected == copy) {
         QGuiApplication::clipboard()->setText(text);

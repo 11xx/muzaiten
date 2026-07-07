@@ -198,7 +198,8 @@ MUZAITEN_VERBOSE=1 ./build/muzaiten
 - `r` / `s`: cycle repeat / shuffle modes.
 - Queue context menu: play a row, find that row in the library, open its containing directory, remove rows, clear play-next priority, or clear the queue.
 - `Ctrl+scroll` over the queue or file explorers: adjust row height.
-- Context menus on tables, album grid, queue header, and explorer rows expose sorting, visibility, rating, and queue actions.
+- Context menus on tables, album grid, queue header, and explorer rows expose
+  sorting, visibility, rating, queue actions, and `Copy path` for track rows.
 
 ## Library Search
 
@@ -224,7 +225,7 @@ Matching is by **sound/shape, not encoding**: both the query and the library are
 | `F5` (or re-press `4`) | Rebuild the search index |
 | `Ctrl+scroll` | Adjust result row height |
 | Double-click | Play now |
-| Right-click | Context menu: play / queue / play next / find in library / open directory |
+| Right-click | Context menu: play / queue / play next / radio / taste flags / copy path / find in library / open directory |
 
 The result list always keeps a highlighted cursor you move with the arrow or
 `Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style. `Esc`/`Ctrl+G`
@@ -388,7 +389,7 @@ Radio tuning commands (`radio-weights`, `radio-genre`, `genre-alias`,
 `genre-report`) also run client-side against the library database. Weight
 changes are validated before writing and take effect on the next radio session.
 The same weight editor and genre curation live in-app at
-`Radio > Scoring weights...` and `Radio > Genre curation...`.
+`Radio > Scoring weights…` and `Radio > Genre curation…`.
 `radio-learn` fits a small model to your recorded radio picks and early skips
 and is suggestion-only: it saves a `learned-YYYYMMDD` profile for review and
 never touches the active weights (apply it explicitly with
@@ -410,18 +411,18 @@ Unsupported files are hidden by default. Enable `View > List unsupported files i
 
 ## Less Obvious Settings
 
-- `Library > Source directories...`: configure scan-enabled and library-visible roots.
+- `Library > Source directories…`: configure scan-enabled and library-visible roots.
 - `Library > Force full rescan`: ignore fingerprints and re-read enabled source directories.
 - `Library > Rating tags`: sync current, current artist, all saved ratings, or retry pending tag writes.
 - `Library > Audio analysis`: analyze library audio, inspect `features.sqlite` coverage, and manage duplicate-copy groups.
-- `Library > Link roots...`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
-- `Radio > Scoring weights...`: edit radio scoring weights, manage named profiles, or save a learned profile suggested from radio skip history.
-- `Radio > Genre curation...`: edit genre aliases, ignored radio genres, and the folded vocabulary used by radio matching.
-- `Playback > Output profile...`: configure playback output behavior, including software volume, resampling, sink release on pause, and preload settings.
-- `Playback > Resume behavior...`: configure whether position and playback state are restored.
-- `Settings > Track information panel...`: choose the fields shown in the right-side track information pane.
-- `Settings > Album art resolution...`: change the cached artwork size for future artwork cache entries.
-- `Scrobblers > Last.fm API settings...`: connect or disconnect Last.fm. Builds may embed default Last.fm credentials, but users can provide their own in the dialog.
+- `Library > Link roots…`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
+- `Radio > Scoring weights…`: edit radio scoring weights, manage named profiles, or save a learned profile suggested from radio skip history.
+- `Radio > Genre curation…`: edit genre aliases, ignored radio genres, and the folded vocabulary used by radio matching.
+- `Playback > Output profile…`: configure playback output behavior, including software volume, resampling, sink release on pause, and preload settings.
+- `Playback > Resume behavior…`: configure whether position and playback state are restored.
+- `Settings > Track information panel…`: choose the fields shown in the right-side track information pane.
+- `Settings > Album art resolution…`: change the cached artwork size for future artwork cache entries.
+- `Scrobblers > Last.fm API settings…`: connect or disconnect Last.fm. Builds may embed default Last.fm credentials, but users can provide their own in the dialog.
 
 ## Notes
 

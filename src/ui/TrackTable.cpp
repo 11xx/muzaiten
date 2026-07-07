@@ -13,11 +13,14 @@
 #include "ui/RowHeightWheel.h"
 #include "ui/StarRating.h"
 #include "ui/StarRatingDelegate.h"
+#include "ui/TrackMenuSections.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QAbstractTableModel>
+#include <QClipboard>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -27,6 +30,7 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QStringList>
 #include <QByteArray>
 #include <QWheelEvent>
 
@@ -62,6 +66,18 @@ enum TrackRoles {
     TrackRole = Qt::UserRole + 1,
     HoverRatingRole = Qt::UserRole + 2,
 };
+
+QString joinedTrackPaths(const QVector<Track> &tracks)
+{
+    QStringList paths;
+    paths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        if (!track.path.isEmpty()) {
+            paths << track.path;
+        }
+    }
+    return paths.join(QLatin1Char('\n'));
+}
 
 
 class TrackTableModel final : public QAbstractTableModel {
@@ -989,18 +1005,16 @@ void TrackTable::showCellMenu(const QPoint &pos)
         const QVector<Track> tracks = allTracksForContextMenu();
         QMenu menu(this);
         if (!tracks.isEmpty()) {
-            QAction *playAll = menu.addAction(QStringLiteral("Play all"));
-            connect(playAll, &QAction::triggered, this, [this, tracks]() {
-                playAllTracks(tracks);
-            });
-            QAction *playAllNext = menu.addAction(QStringLiteral("Play all next"));
-            connect(playAllNext, &QAction::triggered, this, [this, tracks]() {
-                emit playNextRequested(tracks);
-            });
-            QAction *addAll = menu.addAction(QStringLiteral("Add all to queue"));
-            connect(addAll, &QAction::triggered, this, [this, tracks]() {
-                emit addToQueueRequested(tracks);
-            });
+            TrackMenuSections::Callbacks callbacks;
+            callbacks.playNow = [this, tracks]() { playAllTracks(tracks); };
+            callbacks.playNext = [this, tracks]() { emit playNextRequested(tracks); };
+            callbacks.addToQueue = [this, tracks]() { emit addToQueueRequested(tracks); };
+            callbacks.copyPath = [tracks]() {
+                QGuiApplication::clipboard()->setText(joinedTrackPaths(tracks));
+            };
+            TrackMenuSections::State state;
+            state.trackCount = static_cast<int>(tracks.size());
+            TrackMenuSections::appendTrackSections(menu, callbacks, state);
 
             const QString artistName = singleVisibleArtistForContextMenu();
             if (!artistName.isEmpty()) {
@@ -1022,62 +1036,40 @@ void TrackTable::showCellMenu(const QPoint &pos)
     }
 
     QMenu menu(this);
-    QAction *playNext = menu.addAction(QStringLiteral("Play next"));
-    connect(playNext, &QAction::triggered, this, [this, tracks]() {
-        emit playNextRequested(tracks);
-    });
-    QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
-    connect(addToQueue, &QAction::triggered, this, [this, tracks]() {
-        emit addToQueueRequested(tracks);
-    });
+    const auto allFlagged = [this, &tracks](const QString &flag) {
+        return !tracks.isEmpty()
+            && static_cast<bool>(m_trackFlagResolver)
+            && std::all_of(tracks.cbegin(), tracks.cend(), [this, &flag](const Track &candidate) {
+                   return !candidate.path.isEmpty() && m_trackFlagResolver(candidate, flag);
+               });
+    };
+    const auto setFlagForTracks = [this, tracks](const QString &flag, bool on) {
+        for (const Track &candidate : tracks) {
+            if (!candidate.path.isEmpty()) {
+                emit trackFlagChanged(candidate, flag, on);
+            }
+        }
+    };
+    TrackMenuSections::Callbacks callbacks;
+    callbacks.playNext = [this, tracks]() { emit playNextRequested(tracks); };
+    callbacks.addToQueue = [this, tracks]() { emit addToQueueRequested(tracks); };
     if (m_queueIsPlaylistSourced) {
-        QAction *playNextTemp = menu.addAction(QStringLiteral("Play next (don't save to playlist)"));
-        connect(playNextTemp, &QAction::triggered, this, [this, tracks]() {
-            emit playNextTemporaryRequested(tracks);
-        });
-        QAction *addToQueueTemp = menu.addAction(QStringLiteral("Add to queue (don't save to playlist)"));
-        connect(addToQueueTemp, &QAction::triggered, this, [this, tracks]() {
-            emit addToQueueTemporaryRequested(tracks);
-        });
+        callbacks.playNextTemporary = [this, tracks]() { emit playNextTemporaryRequested(tracks); };
+        callbacks.addToQueueTemporary = [this, tracks]() { emit addToQueueTemporaryRequested(tracks); };
     }
-    QAction *addToPlaylist = menu.addAction(QStringLiteral("Add to playlist…"));
-    connect(addToPlaylist, &QAction::triggered, this, [this, tracks]() {
-        emit addToPlaylistRequested(tracks);
-    });
-
     const Track track = model()->index(index.row(), 0).data(TrackRole).value<Track>();
-
-    menu.addSeparator();
-    QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
-    connect(startRadio, &QAction::triggered, this, [this, track]() {
-        emit startRadioRequested(track);
-    });
-    QAction *neverRadio = menu.addAction(QStringLiteral("Never play on radio"));
-    neverRadio->setCheckable(true);
-    neverRadio->setChecked(static_cast<bool>(m_trackFlagResolver)
-                           && m_trackFlagResolver(track, QStringLiteral("never_radio")));
-    neverRadio->setEnabled(!track.path.isEmpty());
-    connect(neverRadio, &QAction::toggled, this, [this, track](bool on) {
-        emit trackFlagChanged(track, QStringLiteral("never_radio"), on);
-    });
-    QAction *noLearn = menu.addAction(QStringLiteral("Don't learn from this"));
-    noLearn->setCheckable(true);
-    noLearn->setChecked(static_cast<bool>(m_trackFlagResolver)
-                        && m_trackFlagResolver(track, QStringLiteral("no_learn")));
-    noLearn->setEnabled(!track.path.isEmpty());
-    connect(noLearn, &QAction::toggled, this, [this, track](bool on) {
-        emit trackFlagChanged(track, QStringLiteral("no_learn"), on);
-    });
-
-    menu.addSeparator();
-    QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
-    connect(findFile, &QAction::triggered, this, [this, track]() {
-        emit findFileRequested(track);
-    });
-    QAction *properties = menu.addAction(QStringLiteral("Properties"));
-    connect(properties, &QAction::triggered, this, [this, track]() {
-        emit propertiesRequested(track);
-    });
+    callbacks.addToPlaylist = [this, tracks]() { emit addToPlaylistRequested(tracks); };
+    callbacks.startRadio = [this, track]() { emit startRadioRequested(track); };
+    callbacks.setNeverRadio = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("never_radio"), on); };
+    callbacks.setNoLearn = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("no_learn"), on); };
+    callbacks.openContainingDirectory = [this, track]() { emit findFileRequested(track); };
+    callbacks.copyPath = [tracks]() { QGuiApplication::clipboard()->setText(joinedTrackPaths(tracks)); };
+    callbacks.properties = [this, track]() { emit propertiesRequested(track); };
+    TrackMenuSections::State state;
+    state.trackCount = static_cast<int>(tracks.size());
+    state.neverRadioChecked = allFlagged(QStringLiteral("never_radio"));
+    state.noLearnChecked = allFlagged(QStringLiteral("no_learn"));
+    TrackMenuSections::appendTrackSections(menu, callbacks, state);
 
     if (index.column() == 0 && track.hasUserRating) {
         menu.addSeparator();
@@ -1094,7 +1086,7 @@ void TrackTable::appendTableLayoutActions(QMenu &menu)
     if (!menu.actions().isEmpty()) {
         menu.addSeparator();
     }
-    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options..."));
+    QAction *responsiveOptions = menu.addAction(QStringLiteral("Responsive options…"));
     connect(responsiveOptions, &QAction::triggered, this, [this]() {
         ResponsiveColumnOptionsDialog dialog(m_columnLayout, responsiveColumnOptions(), this);
         dialog.exec();

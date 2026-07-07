@@ -4,6 +4,14 @@
 
 ### Added
 
+- Track context menus now share one canonical action builder across the library
+  table, queue, search results, playlist items, file explorers, and Music
+  Explorer inline tracks. The shared menus add `Copy path`, make Search expose
+  Start Radio and taste flags, add taste flags to playlist items, and use
+  consistent ordering, count suffixes, checked flag state, and ellipsis glyphs.
+  Album and artist menus also gained the missing playlist/radio/play-all
+  actions, and the player-bar artwork can now reveal the current track in the
+  library or file manager.
 - Empty-area context menus now expose view-level actions in the queue, library
   track table, search results, Music Explorer, and playlist item table, so a
   right-click on whitespace no longer dead-ends common queue, search, layout,

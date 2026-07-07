@@ -109,7 +109,7 @@ SourceDirectoriesDialog::SourceDirectoriesDialog(QWidget *parent)
     layout->addWidget(m_status);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    QPushButton *add = buttons->addButton(QStringLiteral("Add..."), QDialogButtonBox::ActionRole);
+    QPushButton *add = buttons->addButton(QStringLiteral("Add…"), QDialogButtonBox::ActionRole);
     QPushButton *remove = buttons->addButton(QStringLiteral("Remove"), QDialogButtonBox::ActionRole);
     QPushButton *scanSelected = buttons->addButton(QStringLiteral("Scan Selected"), QDialogButtonBox::ActionRole);
     QPushButton *scanEnabled = buttons->addButton(QStringLiteral("Scan Enabled"), QDialogButtonBox::ActionRole);

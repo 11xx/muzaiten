@@ -166,6 +166,7 @@ set(MUZAITEN_SOURCES
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
+    src/ui/TrackMenuSections.cpp
     src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
     src/ui/ViewKeyReferences.cpp

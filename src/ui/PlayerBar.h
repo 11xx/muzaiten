@@ -27,7 +27,7 @@ public:
     // running: show live status text + Cancel, disable the start actions.
     // idle: hide status unless statusText carries a last-outcome message,
     // hide Cancel, re-enable the start actions. lbResumable relabels the
-    // ListenBrainz action to "Resume..." when a prior import was interrupted.
+    // ListenBrainz action to "Resume…" when a prior import was interrupted.
     void setBackfillStatus(bool running, const QString &statusText, bool lbResumable);
     void setAudioAnalysisRunStatus(bool running, const QString &statusText);
     void setListUnsupportedFiles(bool show);
@@ -91,6 +91,7 @@ signals:
     // availability (it depends on live device-hold state).
     void playbackMenuAboutToShow();
     void currentTrackLibraryRequested();
+    void currentTrackFileRequested();
     void linkRootsRequested();
     void mpdSourceRequested();
     void mpdImportRequested();

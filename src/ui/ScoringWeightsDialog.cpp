@@ -89,7 +89,7 @@ ScoringWeightsDialog::ScoringWeightsDialog(Database *db, QString historyPath, QW
     profileLayout->addWidget(m_profiles);
     auto *profileButtons = new QHBoxLayout;
     auto *applyProfile = new QPushButton(QStringLiteral("Apply profile"), this);
-    auto *saveProfile = new QPushButton(QStringLiteral("Save current as..."), this);
+    auto *saveProfile = new QPushButton(QStringLiteral("Save current as…"), this);
     auto *deleteProfile = new QPushButton(QStringLiteral("Delete"), this);
     profileButtons->addWidget(applyProfile);
     profileButtons->addWidget(saveProfile);
@@ -99,7 +99,7 @@ ScoringWeightsDialog::ScoringWeightsDialog(Database *db, QString historyPath, QW
     root->addLayout(profileLayout);
 
     auto *actions = new QHBoxLayout;
-    auto *suggest = new QPushButton(QStringLiteral("Suggest from listening..."), this);
+    auto *suggest = new QPushButton(QStringLiteral("Suggest from listening…"), this);
     auto *reset = new QPushButton(QStringLiteral("Reset to defaults"), this);
     actions->addWidget(suggest);
     actions->addWidget(reset);
@@ -326,7 +326,7 @@ void ScoringWeightsDialog::showLearnedWeights(const WeightLearner::Result &learn
     }
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-    auto *save = buttons->addButton(QStringLiteral("Save as profile learned-..."), QDialogButtonBox::ActionRole);
+    auto *save = buttons->addButton(QStringLiteral("Save as profile learned-…"), QDialogButtonBox::ActionRole);
     root->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::accept);
     connect(save, &QPushButton::clicked, &dialog, [this, &dialog, &learned]() {

@@ -498,15 +498,15 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     auto *compactMenu = new QMenu(this);
     auto *mpdMenu = new QMenu(QStringLiteral("MPD"), this);
-    QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source..."));
+    QAction *mpdSource = mpdMenu->addAction(QStringLiteral("Configure MPD source…"));
     QAction *mpdImport = mpdMenu->addAction(QStringLiteral("Import MPD library metadata"));
 
     // Everything in here manages the library (sources, scanning, tags) — no
     // file operations — hence the label.
     auto *fileMenu = new QMenu(QStringLiteral("Library"), this);
-    QAction *openLibrary = fileMenu->addAction(QStringLiteral("Open library folder..."));
-    QAction *sourceDirectories = fileMenu->addAction(QStringLiteral("Source directories..."));
-    QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots..."));
+    QAction *openLibrary = fileMenu->addAction(QStringLiteral("Open library folder…"));
+    QAction *sourceDirectories = fileMenu->addAction(QStringLiteral("Source directories…"));
+    QAction *linkRoots = fileMenu->addAction(QStringLiteral("Link roots…"));
     fileMenu->addMenu(mpdMenu); // MPD is a library source, so it lives here
     fileMenu->addSeparator();
     QAction *scanEnabledSources = fileMenu->addAction(QStringLiteral("Scan enabled source directories"));
@@ -535,8 +535,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_cancelAudioAnalysisAction = audioAnalysisMenu->addAction(QStringLiteral("Cancel analysis"));
     m_cancelAudioAnalysisAction->setVisible(false);
     audioAnalysisMenu->addSeparator();
-    QAction *analysisStatus = audioAnalysisMenu->addAction(QStringLiteral("Analysis status..."));
-    QAction *duplicateCopies = audioAnalysisMenu->addAction(QStringLiteral("Duplicate copies..."));
+    QAction *analysisStatus = audioAnalysisMenu->addAction(QStringLiteral("Analysis status…"));
+    QAction *duplicateCopies = audioAnalysisMenu->addAction(QStringLiteral("Duplicate copies…"));
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
     QAction *syncCurrentTrackRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current track rating to file"));
     QAction *syncCurrentArtistRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current artist rated tracks"));
@@ -545,7 +545,7 @@ PlayerBar::PlayerBar(QWidget *parent)
 
     auto *playbackMenu = new QMenu(QStringLiteral("Playback"), this);
     QAction *findCurrentTrack = playbackMenu->addAction(QStringLiteral("Find current track in library"));
-    QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile..."));
+    QAction *playbackOutput = playbackMenu->addAction(QStringLiteral("Output profile…"));
     m_releaseDeviceAction = playbackMenu->addAction(QStringLiteral("Release device"));
     m_releaseDeviceAction->setVisible(false);
     m_releaseDeviceAction->setToolTip(
@@ -553,8 +553,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     // Availability depends on live device-hold state (DSD takeover or a bit-perfect
     // profile holding a card), so refresh it each time the menu opens.
     connect(playbackMenu, &QMenu::aboutToShow, this, &PlayerBar::playbackMenuAboutToShow);
-    QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior..."));
-    QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle..."));
+    QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior…"));
+    QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle…"));
 
     // Radio gets a top-level menu: session control, the mixes, and every
     // radio setting reachable WITHOUT an active session (the radio indicator
@@ -570,14 +570,14 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_radioBarAdventurousAction = radioMenu->addAction(QStringLiteral("Adventurous (this session)"));
     m_radioBarAdventurousAction->setCheckable(true);
     connect(m_radioBarAdventurousAction, &QAction::toggled, this, &PlayerBar::radioAdventurousChanged);
-    QAction *radioExplorationBar = radioMenu->addAction(QStringLiteral("Exploration..."));
+    QAction *radioExplorationBar = radioMenu->addAction(QStringLiteral("Exploration…"));
     connect(radioExplorationBar, &QAction::triggered, this, &PlayerBar::radioExplorationSettingsRequested);
-    QAction *radioBatchSizeBar = radioMenu->addAction(QStringLiteral("Radio batch size..."));
+    QAction *radioBatchSizeBar = radioMenu->addAction(QStringLiteral("Radio batch size…"));
     connect(radioBatchSizeBar, &QAction::triggered, this, &PlayerBar::radioBatchSizeSettingsRequested);
-    QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent..."));
-    QAction *scoringWeights = radioMenu->addAction(QStringLiteral("Scoring weights..."));
+    QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent…"));
+    QAction *scoringWeights = radioMenu->addAction(QStringLiteral("Scoring weights…"));
     radioMenu->addSeparator();
-    QAction *genreCuration = radioMenu->addAction(QStringLiteral("Genre curation..."));
+    QAction *genreCuration = radioMenu->addAction(QStringLiteral("Genre curation…"));
     connect(radioMenu, &QMenu::aboutToShow, this, [this]() {
         m_stopRadioAction->setEnabled(m_radioActive);
         m_radioBarAdventurousAction->setEnabled(m_radioActive);
@@ -585,17 +585,17 @@ PlayerBar::PlayerBar(QWidget *parent)
     });
 
     auto *historyMenu = new QMenu(QStringLiteral("History"), this);
-    QAction *listeningHistory = historyMenu->addAction(QStringLiteral("Listening history..."));
+    QAction *listeningHistory = historyMenu->addAction(QStringLiteral("Listening history…"));
     auto *scrobblersMenu = new StayOpenMenu(QStringLiteral("Scrobblers"), this);
     m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
     m_listenBrainzEnabled->setCheckable(true);
-    QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token..."));
+    QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token…"));
     m_clearListenBrainzBacklog = scrobblersMenu->addAction(QStringLiteral("Clear ListenBrainz backlog"));
     m_clearListenBrainzBacklog->setVisible(false);
     scrobblersMenu->addSeparator();
     m_lastFmEnabled = scrobblersMenu->addAction(QStringLiteral("Last.fm scrobbling"));
     m_lastFmEnabled->setCheckable(true);
-    QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings..."));
+    QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings…"));
     m_clearLastFmBacklog = scrobblersMenu->addAction(QStringLiteral("Clear Last.fm backlog"));
     m_clearLastFmBacklog->setVisible(false);
     scrobblersMenu->addSeparator();
@@ -619,10 +619,10 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_trackInfoPaneVisible = viewMenu->addAction(QStringLiteral("Show track information pane"));
     m_trackInfoPaneVisible->setCheckable(true);
     m_trackInfoPaneVisible->setChecked(true);
-    QAction *trackInfoPaneSettings = viewMenu->addAction(QStringLiteral("Track information panel..."));
-    QAction *albumArtResolution = viewMenu->addAction(QStringLiteral("Album art resolution..."));
-    QAction *playlistMetadataDisplay = viewMenu->addAction(QStringLiteral("Playlist metadata display..."));
-    QAction *customizePanelOrder = viewMenu->addAction(QStringLiteral("Panel order..."));
+    QAction *trackInfoPaneSettings = viewMenu->addAction(QStringLiteral("Track information panel…"));
+    QAction *albumArtResolution = viewMenu->addAction(QStringLiteral("Album art resolution…"));
+    QAction *playlistMetadataDisplay = viewMenu->addAction(QStringLiteral("Playlist metadata display…"));
+    QAction *customizePanelOrder = viewMenu->addAction(QStringLiteral("Panel order…"));
     QAction *resetPanelOrder = viewMenu->addAction(QStringLiteral("Reset panel order to default"));
     viewMenu->addSeparator();
     m_listUnsupportedFiles = viewMenu->addAction(QStringLiteral("List unsupported files in explorer"));
@@ -636,18 +636,18 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *clearPlayNext = queueMenu->addAction(QStringLiteral("Clear play-next priority"));
     QAction *clearQueue = queueMenu->addAction(QStringLiteral("Clear queue"));
     queueMenu->addSeparator();
-    QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as..."));
-    QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore saved queue..."));
-    QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)..."));
-    QAction *savedQueueLimit = queueMenu->addAction(QStringLiteral("Saved queue limits..."));
+    QAction *saveQueue = queueMenu->addAction(QStringLiteral("Save current queue as…"));
+    QAction *restoreQueue = queueMenu->addAction(QStringLiteral("Restore saved queue…"));
+    QAction *mergeQueue = queueMenu->addAction(QStringLiteral("Merge saved queue (play next)…"));
+    QAction *savedQueueLimit = queueMenu->addAction(QStringLiteral("Saved queue limits…"));
     m_mergeSavedQueueAction = mergeQueue;
     queueMenu->setToolTipsVisible(true);
 
     auto *playlistMenu = new QMenu(QStringLiteral("Playlists"), this);
     QAction *showPlaylists = playlistMenu->addAction(QStringLiteral("Show playlists"));
     playlistMenu->addSeparator();
-    QAction *newPlaylist = playlistMenu->addAction(QStringLiteral("New playlist..."));
-    QAction *addSong = playlistMenu->addAction(QStringLiteral("Add song..."));
+    QAction *newPlaylist = playlistMenu->addAction(QStringLiteral("New playlist…"));
+    QAction *addSong = playlistMenu->addAction(QStringLiteral("Add song…"));
     playlistMenu->addSeparator();
     QAction *playPlaylist = playlistMenu->addAction(QStringLiteral("Play playlist"));
     QAction *playNextPlaylist = playlistMenu->addAction(QStringLiteral("Play playlist next"));
@@ -657,7 +657,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *movePlaylistItemDown = playlistMenu->addAction(QStringLiteral("Move selected item down"));
     playlistMenu->addSeparator();
     QAction *renamePlaylist = playlistMenu->addAction(QStringLiteral("Rename playlist"));
-    QAction *exportPlaylist = playlistMenu->addAction(QStringLiteral("Export playlist..."));
+    QAction *exportPlaylist = playlistMenu->addAction(QStringLiteral("Export playlist…"));
     QAction *deletePlaylist = playlistMenu->addAction(QStringLiteral("Delete playlist"));
     m_playlistViewActions = {
         addSong,
@@ -672,16 +672,16 @@ PlayerBar::PlayerBar(QWidget *parent)
     };
 
     auto *settingsMenu = new QMenu(QStringLiteral("Settings"), this);
-    QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking..."));
-    QAction *memoryReclaim = settingsMenu->addAction(QStringLiteral("Memory reclaim..."));
-    QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds..."));
+    QAction *searchRanking = settingsMenu->addAction(QStringLiteral("Search ranking…"));
+    QAction *memoryReclaim = settingsMenu->addAction(QStringLiteral("Memory reclaim…"));
+    QAction *keybindings = settingsMenu->addAction(QStringLiteral("Keybinds…"));
     m_compactMenu = settingsMenu->addAction(QStringLiteral("Use compact menu"));
     m_compactMenu->setCheckable(true);
     m_alwaysShowTray = settingsMenu->addAction(QStringLiteral("Always show system tray icon"));
     m_alwaysShowTray->setCheckable(true);
 
     auto *helpMenu = new QMenu(QStringLiteral("Help"), this);
-    QAction *aboutApp = helpMenu->addAction(QStringLiteral("About muzaiten..."));
+    QAction *aboutApp = helpMenu->addAction(QStringLiteral("About muzaiten…"));
     connect(aboutApp, &QAction::triggered, this, &PlayerBar::aboutRequested);
 
     const QVector<QMenu *> styledMenus{compactMenu, fileMenu, ratingTagsMenu, scanPowerMenu, viewMenu, queueMenu, playlistMenu, playbackMenu, radioMenu, mpdMenu, historyMenu, scrobblersMenu, settingsMenu, helpMenu};
@@ -742,6 +742,21 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_albumArt->setFixedSize(56, 56);
     m_albumArt->setText(QStringLiteral("Album art"));
     m_albumArt->setVisible(false);
+    m_albumArt->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_albumArt, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        if (!m_hasTrack) {
+            return;
+        }
+        QMenu menu(this);
+        QAction *findLibrary = menu.addAction(QStringLiteral("Find in library"));
+        QAction *findFile = menu.addAction(QStringLiteral("Open containing directory"));
+        QAction *selected = menu.exec(m_albumArt->mapToGlobal(pos));
+        if (selected == findLibrary) {
+            emit currentTrackLibraryRequested();
+        } else if (selected == findFile) {
+            emit currentTrackFileRequested();
+        }
+    });
     controls->addWidget(m_albumArt, 0, Qt::AlignVCenter);
 
     m_previous = iconButton(this, QStyle::SP_MediaSkipBackward, QStringLiteral("Previous"));
