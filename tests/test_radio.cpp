@@ -251,6 +251,7 @@ private slots:
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
     void neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags();
+    void featureStoreV3ScalarsFeedTempoEnergyScoring();
     void genreAliasesExpandCandidatesAndMergeCounts();
     void radioWeightProfilesRoundTrip();
     void ignoredRadioGenresRoundTripAndSuppressCandidateJoins();
@@ -1863,6 +1864,11 @@ struct FeatureNeighborRow {
     double cosine = 0.0;
 };
 
+struct FeatureScalarRow {
+    double tempoBpm = -1.0;
+    double energy = -1.0;
+};
+
 bool execFeatureFixtureSql(QSqlQuery &query, const QString &sql, QString *error)
 {
     if (query.exec(sql)) {
@@ -1877,7 +1883,8 @@ bool execFeatureFixtureSql(QSqlQuery &query, const QString &sql, QString *error)
 QString createRadioFeatureFixture(const QTemporaryDir &dir,
                                   const QHash<QString, qint64> &contentGroups,
                                   QString *error,
-                                  const QList<FeatureNeighborRow> &neighbors = {})
+                                  const QList<FeatureNeighborRow> &neighbors = {},
+                                  QHash<qint64, FeatureScalarRow> scalars = {})
 {
     const QString path = dir.filePath(QStringLiteral("features.sqlite"));
     const QString connectionName =
@@ -1915,11 +1922,15 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
             ok = ok && execFeatureFixtureSql(query, QStringLiteral(
                                                    "CREATE TABLE features("
                                                    " content_group_id INTEGER PRIMARY KEY,"
-                                                   " bliss_vector BLOB NOT NULL,"
                                                    " tempo_bpm REAL,"
-                                                   " loudness REAL,"
+                                                   " loudness_lufs REAL,"
+                                                   " loudness_std_db REAL,"
+                                                   " spectral_centroid_mean_hz REAL,"
+                                                   " spectral_centroid_std_hz REAL,"
+                                                   " spectral_flatness_mean REAL,"
+                                                   " zero_crossing_rate REAL,"
+                                                   " onset_rate_hz REAL,"
                                                    " energy REAL,"
-                                                   " brightness REAL,"
                                                    " extractor TEXT NOT NULL,"
                                                    " version TEXT NOT NULL)"),
                                                error);
@@ -1946,7 +1957,7 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
         if (ok) {
             QSqlQuery meta(fixture);
             meta.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES('schema_version', ?)"));
-            meta.addBindValue(neighbors.isEmpty() ? QStringLiteral("1") : QStringLiteral("2"));
+            meta.addBindValue(QStringLiteral("3"));
             if (!meta.exec()) {
                 if (error != nullptr) {
                     *error = meta.lastError().text();
@@ -1985,6 +1996,27 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
                 insert.addBindValue(QStringLiteral("hash-%1").arg(it.value()));
                 insert.addBindValue(QByteArray::fromHex("01020304"));
                 insert.addBindValue(it.value() >= 0 ? QVariant(it.value()) : QVariant());
+                if (!insert.exec()) {
+                    if (error != nullptr) {
+                        *error = insert.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        if (ok) {
+            for (auto it = scalars.cbegin(); it != scalars.cend(); ++it) {
+                QSqlQuery insert(fixture);
+                insert.prepare(QStringLiteral(
+                    "INSERT INTO features(content_group_id, tempo_bpm, loudness_lufs, loudness_std_db, "
+                    "spectral_centroid_mean_hz, spectral_centroid_std_hz, spectral_flatness_mean, "
+                    "zero_crossing_rate, onset_rate_hz, energy, extractor, version) "
+                    "VALUES(?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'fixture', 'dsp')"));
+                insert.addBindValue(it.key());
+                insert.addBindValue(it.value().tempoBpm > 0.0 ? QVariant(it.value().tempoBpm) : QVariant());
+                insert.addBindValue(it.value().energy >= 0.0 ? QVariant(it.value().energy) : QVariant());
                 if (!insert.exec()) {
                     if (error != nullptr) {
                         *error = insert.lastError().text();
@@ -2240,6 +2272,59 @@ void RadioTest::neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags()
     const QVector<TrackScorer::Candidate> filtered = RadioFilters::excludeFlaggedCandidates(
         pool, db.flaggedPaths(Database::TrackFlag::NeverRadio));
     QVERIFY(!containsCandidatePath(filtered, tagPoorNeighbor.path));
+}
+
+void RadioTest::featureStoreV3ScalarsFeedTempoEnergyScoring()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("radio-v3-scalars-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track seed = makeDbTrack(dir, QStringLiteral("seed.flac"), {QStringLiteral("Rock")},
+                                   QStringLiteral("2004"));
+    const Track candidateTrack = makeDbTrack(dir, QStringLiteral("candidate.flac"), {QStringLiteral("Rock")},
+                                             QStringLiteral("2004"));
+    QVERIFY2(db.upsertTrack(seed), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(candidateTrack), qPrintable(db.lastError()));
+
+    QString featureError;
+    const QString featuresPath = createRadioFeatureFixture(dir, {
+                                                               {seed.path, 10},
+                                                               {candidateTrack.path, 11},
+                                                           },
+                                                           &featureError,
+                                                           {},
+                                                           {
+                                                               {10, {120.0, 0.6}},
+                                                               {11, {120.0, 0.6}},
+                                                           });
+    QVERIFY2(!featuresPath.isEmpty(), qPrintable(featureError));
+    FeatureStore features(featuresPath);
+    QVERIFY(features.isOpen());
+    QCOMPARE(features.schemaVersion(), 3);
+
+    const QHash<QString, qint64> groups = features.contentGroupsForPaths({seed.path, candidateTrack.path});
+    const QHash<qint64, FeatureStore::Scalars> scalars = features.scalarsForGroups({10, 11});
+
+    TrackScorer::Candidate candidate = makeCandidate(candidateTrack.path,
+                                                     FoldKey::fold(candidateTrack.artistName),
+                                                     {GenreTags::folded(QStringLiteral("Rock"))},
+                                                     2004);
+    candidate.contentGroupId = groups.value(candidateTrack.path, -1);
+    candidate.tempoBpm = scalars.value(candidate.contentGroupId).tempoBpm;
+    candidate.energy = scalars.value(candidate.contentGroupId).energy;
+
+    TrackScorer::SeedContext context;
+    context.genresFolded = {GenreTags::folded(QStringLiteral("Rock"))};
+    context.genreIdf.insert(GenreTags::folded(QStringLiteral("Rock")), 1.0);
+    context.year = 2004;
+    context.contextTempoBpm = scalars.value(groups.value(seed.path)).tempoBpm;
+    context.contextEnergy = scalars.value(groups.value(seed.path)).energy;
+
+    const TrackScorer::Scored scored = TrackScorer::score(candidate, {}, context);
+    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("tempo")), 0.4));
+    QVERIFY(qFuzzyCompare(componentValue(scored, QStringLiteral("energy")), 0.6));
 }
 
 void RadioTest::genreAliasesExpandCandidatesAndMergeCounts()

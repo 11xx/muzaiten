@@ -126,6 +126,15 @@ target_link_libraries(test_dsp PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_dsp PRIVATE cxx_std_26)
 add_test(NAME test_dsp COMMAND test_dsp)
 
+add_executable(test_indexer_scan
+    test_indexer_scan.cpp
+)
+target_include_directories(test_indexer_scan PRIVATE ../src)
+target_link_libraries(test_indexer_scan PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_indexer_scan PRIVATE cxx_std_26)
+add_dependencies(test_indexer_scan muzaiten-index)
+add_test(NAME test_indexer_scan COMMAND test_indexer_scan)
+
 add_executable(test_quality_rank
     test_quality_rank.cpp
     ../src/features/QualityRank.cpp

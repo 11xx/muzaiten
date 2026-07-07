@@ -17,6 +17,7 @@ private slots:
     void absentFileIsClosed();
     void versionMismatchIsClosed();
     void versionTwoIsOpen();
+    void versionThreeIsOpen();
     void groupLookupsRoundTrip();
     void batchLookupsAndScalarsRoundTrip();
     void statusCountsRows();
@@ -72,17 +73,35 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
             ok = ok && execSql(query, QStringLiteral(
                                       "CREATE TABLE content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT)"),
                                   error);
-            ok = ok && execSql(query, QStringLiteral(
-                                      "CREATE TABLE features("
-                                      " content_group_id INTEGER PRIMARY KEY,"
-                                      " bliss_vector BLOB NOT NULL,"
-                                      " tempo_bpm REAL,"
-                                      " loudness REAL,"
-                                      " energy REAL,"
-                                      " brightness REAL,"
-                                      " extractor TEXT NOT NULL,"
-                                      " version TEXT NOT NULL)"),
-                                  error);
+            if (schemaVersion >= 3) {
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE features("
+                                          " content_group_id INTEGER PRIMARY KEY,"
+                                          " tempo_bpm REAL,"
+                                          " loudness_lufs REAL,"
+                                          " loudness_std_db REAL,"
+                                          " spectral_centroid_mean_hz REAL,"
+                                          " spectral_centroid_std_hz REAL,"
+                                          " spectral_flatness_mean REAL,"
+                                          " zero_crossing_rate REAL,"
+                                          " onset_rate_hz REAL,"
+                                          " energy REAL,"
+                                          " extractor TEXT NOT NULL,"
+                                          " version TEXT NOT NULL)"),
+                                      error);
+            } else {
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE features("
+                                          " content_group_id INTEGER PRIMARY KEY,"
+                                          " bliss_vector BLOB NOT NULL,"
+                                          " tempo_bpm REAL,"
+                                          " loudness REAL,"
+                                          " energy REAL,"
+                                          " brightness REAL,"
+                                          " extractor TEXT NOT NULL,"
+                                          " version TEXT NOT NULL)"),
+                                      error);
+            }
             if (schemaVersion >= 2) {
                 ok = ok && execSql(query, QStringLiteral(
                                           "CREATE TABLE embeddings("
@@ -156,7 +175,36 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
         insertFile(QStringLiteral("/music/broken.flac"), 14, 140, 0, QString(),
                    QByteArray(), std::nullopt, QStringLiteral("decode_failed"));
 
-        if (ok) {
+        if (ok && schemaVersion >= 3) {
+            QSqlQuery featureA(db);
+            featureA.prepare(QStringLiteral(
+                "INSERT INTO features(content_group_id, tempo_bpm, loudness_lufs, loudness_std_db, "
+                "spectral_centroid_mean_hz, spectral_centroid_std_hz, spectral_flatness_mean, "
+                "zero_crossing_rate, onset_rate_hz, energy, extractor, version) "
+                "VALUES(10, 120.5, -12.0, 1.5, 2300.0, 120.0, 0.2, 0.04, 2.0, 0.75, 'fixture', 'dsp')"));
+            if (!featureA.exec()) {
+                if (error != nullptr) {
+                    *error = featureA.lastError().text();
+                }
+                ok = false;
+            }
+        }
+        if (ok && schemaVersion >= 3) {
+            QSqlQuery featureB(db);
+            featureB.prepare(QStringLiteral(
+                "INSERT INTO features(content_group_id, tempo_bpm, loudness_lufs, loudness_std_db, "
+                "spectral_centroid_mean_hz, spectral_centroid_std_hz, spectral_flatness_mean, "
+                "zero_crossing_rate, onset_rate_hz, energy, extractor, version) "
+                "VALUES(11, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'fixture', 'dsp')"));
+            if (!featureB.exec()) {
+                if (error != nullptr) {
+                    *error = featureB.lastError().text();
+                }
+                ok = false;
+            }
+        }
+
+        if (ok && schemaVersion < 3) {
             QSqlQuery featureA(db);
             featureA.prepare(QStringLiteral(
                 "INSERT INTO features(content_group_id, bliss_vector, tempo_bpm, loudness, energy, "
@@ -169,7 +217,7 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
                 ok = false;
             }
         }
-        if (ok) {
+        if (ok && schemaVersion < 3) {
             QSqlQuery featureB(db);
             featureB.prepare(QStringLiteral(
                 "INSERT INTO features(content_group_id, bliss_vector, tempo_bpm, loudness, energy, "
@@ -267,7 +315,7 @@ void FeatureStoreTest::versionMismatchIsClosed()
     QVERIFY(temp.isValid());
 
     QString error;
-    const QString path = createFixture(temp, 3, &error);
+    const QString path = createFixture(temp, 4, &error);
     QVERIFY2(!path.isEmpty(), qPrintable(error));
     FeatureStore store(path);
     QVERIFY(!store.isOpen());
@@ -288,6 +336,27 @@ void FeatureStoreTest::versionTwoIsOpen()
     QCOMPARE(store.schemaVersion(), 2);
     QCOMPARE(store.contentGroupForPath(QStringLiteral("/music/a.flac")), 10);
     QVERIFY(store.scalarsForGroup(10).valid);
+}
+
+void FeatureStoreTest::versionThreeIsOpen()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    QString error;
+    const QString path = createFixture(temp, 3, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    FeatureStore store(path);
+    QVERIFY(store.isOpen());
+    QCOMPARE(store.schemaVersion(), 3);
+    QCOMPARE(store.contentGroupForPath(QStringLiteral("/music/a.flac")), 10);
+
+    const FeatureStore::Scalars groupA = store.scalarsForGroup(10);
+    QVERIFY(groupA.valid);
+    QCOMPARE(groupA.tempoBpm, 120.5);
+    QCOMPARE(groupA.loudness, -12.0);
+    QCOMPARE(groupA.energy, 0.75);
+    QCOMPARE(groupA.brightness, 2300.0);
 }
 
 void FeatureStoreTest::groupLookupsRoundTrip()

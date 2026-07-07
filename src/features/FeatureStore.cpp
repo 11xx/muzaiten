@@ -14,7 +14,7 @@
 namespace {
 
 constexpr int kMinSupportedSchemaVersion = 1;
-constexpr int kMaxSupportedSchemaVersion = 2;
+constexpr int kMaxSupportedSchemaVersion = 3;
 constexpr qsizetype kMaxSqlBindings = 500;
 
 bool isSupportedSchemaVersion(int version)
@@ -49,6 +49,26 @@ FeatureStore::Scalars scalarsFromQuery(const QSqlQuery &query, int firstColumn)
         scalars.brightness = query.value(firstColumn + 3).toDouble();
     }
     return scalars;
+}
+
+QString scalarColumnList(int schemaVersion, bool includeGroupId)
+{
+    QStringList columns;
+    if (includeGroupId) {
+        columns << QStringLiteral("content_group_id");
+    }
+    if (schemaVersion >= 3) {
+        columns << QStringLiteral("tempo_bpm")
+                << QStringLiteral("loudness_lufs")
+                << QStringLiteral("energy")
+                << QStringLiteral("spectral_centroid_mean_hz");
+    } else {
+        columns << QStringLiteral("tempo_bpm")
+                << QStringLiteral("loudness")
+                << QStringLiteral("energy")
+                << QStringLiteral("brightness");
+    }
+    return columns.join(QStringLiteral(", "));
 }
 
 QVector<float> embeddingFromBlob(const QByteArray &blob, int dim)
@@ -247,9 +267,8 @@ FeatureStore::Scalars FeatureStore::scalarsForGroup(qint64 groupId) const
     }
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
-        "SELECT tempo_bpm, loudness, energy, brightness "
-        "FROM features WHERE content_group_id = ?"));
+    query.prepare(QStringLiteral("SELECT %1 FROM features WHERE content_group_id = ?")
+                      .arg(scalarColumnList(m_schemaVersion, false)));
     query.addBindValue(groupId);
     if (!query.exec() || !query.next()) {
         return {};
@@ -267,10 +286,8 @@ QHash<qint64, FeatureStore::Scalars> FeatureStore::scalarsForGroups(const QList<
     for (qsizetype start = 0; start < groupIds.size(); start += kMaxSqlBindings) {
         const qsizetype count = std::min(kMaxSqlBindings, groupIds.size() - start);
         QSqlQuery query(m_db);
-        query.prepare(QStringLiteral(
-            "SELECT content_group_id, tempo_bpm, loudness, energy, brightness "
-            "FROM features WHERE content_group_id IN (%1)")
-                          .arg(placeholders(count)));
+        query.prepare(QStringLiteral("SELECT %1 FROM features WHERE content_group_id IN (%2)")
+                          .arg(scalarColumnList(m_schemaVersion, true), placeholders(count)));
         for (qsizetype i = 0; i < count; ++i) {
             query.addBindValue(groupIds.at(start + i));
         }

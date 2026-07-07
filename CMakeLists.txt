@@ -367,12 +367,22 @@ target_compile_options(muzaitenctl PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
+add_executable(muzaiten-index
+    src/indexer/IndexMain.cpp
+    src/indexer/Dsp.cpp
+)
+target_include_directories(muzaiten-index PRIVATE src)
+target_link_libraries(muzaiten-index PRIVATE Qt6::Core Qt6::Sql)
+target_compile_options(muzaiten-index PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+
 # Installation (freedesktop integration). Lets distro packaging and `make dev`
 # alike drop the binary plus a desktop entry, icon, and AppStream metadata into
 # the standard prefix.
 include(GNUInstallDirs)
 
-install(TARGETS muzaiten muzaitenctl
+install(TARGETS muzaiten muzaitenctl muzaiten-index
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 # The standalone playlist-import helper (convert/youtube subcommands). Deployed
