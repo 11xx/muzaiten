@@ -108,6 +108,24 @@ target_compile_features(test_feature_store PRIVATE cxx_std_26)
 add_test(NAME test_feature_store COMMAND test_feature_store)
 set_tests_properties(test_feature_store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_curation_dialog_data
+    test_curation_dialog_data.cpp
+    ../src/core/GenreTags.cpp
+    ../src/core/MetadataBlob.cpp
+    ../src/core/Rating.cpp
+    ../src/db/Database.cpp
+    ../src/features/FeatureStore.cpp
+    ../src/features/QualityRank.cpp
+    ../src/reco/GenreCuration.cpp
+    ../src/search/fold/Fold.cpp
+    ../src/ui/AudioAnalysisData.cpp
+)
+target_include_directories(test_curation_dialog_data PRIVATE ../src)
+target_link_libraries(test_curation_dialog_data PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig::ZSTD)
+target_compile_features(test_curation_dialog_data PRIVATE cxx_std_26)
+add_test(NAME test_curation_dialog_data COMMAND test_curation_dialog_data)
+set_tests_properties(test_curation_dialog_data PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_song_identity
     test_song_identity.cpp
     ../src/features/SongIdentity.cpp

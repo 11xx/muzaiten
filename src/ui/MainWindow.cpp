@@ -27,8 +27,10 @@
 #include "scrobble/ScrobbleBackfill.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/AudioAnalysisDialogs.h"
 #include "ui/FileExplorerKeybindings.h"
 #include "ui/FileExplorerView.h"
+#include "ui/GenreCurationDialog.h"
 #include "ui/IdleReleaseController.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
@@ -1249,6 +1251,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         m_playerBar->setReleaseDeviceVisible(canReleaseOutputDevice());
     });
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
+    connect(m_playerBar, &PlayerBar::genreCurationRequested, this, &MainWindow::showGenreCuration);
+    connect(m_playerBar, &PlayerBar::analysisStatusRequested, this, &MainWindow::showAnalysisStatus);
+    connect(m_playerBar, &PlayerBar::duplicateCopiesRequested, this, &MainWindow::showDuplicateCopies);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::listeningHistoryRequested, this, &MainWindow::showListeningHistory);
@@ -5419,6 +5424,24 @@ void MainWindow::jumpToTrackInfoAlbum(const QString &artistName, const QString &
     if (!albumTitle.isEmpty() && m_selectedAlbumTitle != albumTitle) {
         selectAlbumFilter(albumTitle);
     }
+}
+
+void MainWindow::showGenreCuration()
+{
+    GenreCurationDialog dialog(m_database, this);
+    dialog.exec();
+}
+
+void MainWindow::showAnalysisStatus()
+{
+    AudioAnalysisStatusDialog dialog(m_core->featuresPath(), this);
+    dialog.exec();
+}
+
+void MainWindow::showDuplicateCopies()
+{
+    DuplicateCopiesDialog dialog(m_database, m_core->featuresPath(), this);
+    dialog.exec();
 }
 
 void MainWindow::configureMpdSource()

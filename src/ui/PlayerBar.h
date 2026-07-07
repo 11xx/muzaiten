@@ -156,6 +156,9 @@ signals:
     void radioAdventurousChanged(bool on);
     void radioExplorationSettingsRequested();
     void radioBatchSizeSettingsRequested();
+    void genreCurationRequested();
+    void analysisStatusRequested();
+    void duplicateCopiesRequested();
     // Menu-bar Radio entries; seeded from whatever is currently playing, so
     // the owner validates there IS a current track and reports otherwise.
     void startRadioFromCurrentRequested();

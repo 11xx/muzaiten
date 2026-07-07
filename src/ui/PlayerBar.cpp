@@ -527,6 +527,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_showGuessedPlaceholders, &QAction::toggled, this, &PlayerBar::showGuessedPlaceholdersChanged);
     QAction *removeMissingTracks = fileMenu->addAction(QStringLiteral("Remove missing tracks"));
     fileMenu->addSeparator();
+    auto *audioAnalysisMenu = fileMenu->addMenu(QStringLiteral("Audio analysis"));
+    QAction *analysisStatus = audioAnalysisMenu->addAction(QStringLiteral("Analysis status..."));
+    QAction *duplicateCopies = audioAnalysisMenu->addAction(QStringLiteral("Duplicate copies..."));
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
     QAction *syncCurrentTrackRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current track rating to file"));
     QAction *syncCurrentArtistRatingTags = ratingTagsMenu->addAction(QStringLiteral("Sync current artist rated tracks"));
@@ -565,6 +568,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *radioBatchSizeBar = radioMenu->addAction(QStringLiteral("Radio batch size..."));
     connect(radioBatchSizeBar, &QAction::triggered, this, &PlayerBar::radioBatchSizeSettingsRequested);
     QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent..."));
+    radioMenu->addSeparator();
+    QAction *genreCuration = radioMenu->addAction(QStringLiteral("Genre curation..."));
     connect(radioMenu, &QMenu::aboutToShow, this, [this]() {
         m_stopRadioAction->setEnabled(m_radioActive);
         m_radioBarAdventurousAction->setEnabled(m_radioActive);
@@ -865,6 +870,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(scanEnabledSources, &QAction::triggered, this, &PlayerBar::scanEnabledSourcesRequested);
     connect(forceRescan, &QAction::triggered, this, &PlayerBar::forceRescanRequested);
     connect(removeMissingTracks, &QAction::triggered, this, &PlayerBar::removeMissingTracksRequested);
+    connect(analysisStatus, &QAction::triggered, this, &PlayerBar::analysisStatusRequested);
+    connect(duplicateCopies, &QAction::triggered, this, &PlayerBar::duplicateCopiesRequested);
     connect(syncCurrentTrackRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentTrackRatingTagsRequested);
     connect(syncCurrentArtistRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentArtistRatingTagsRequested);
     connect(syncAllSavedRatingTags, &QAction::triggered, this, &PlayerBar::syncAllSavedRatingTagsRequested);
@@ -875,6 +882,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
     connect(libraryShuffleSettings, &QAction::triggered, this, &PlayerBar::libraryShuffleSettingsRequested);
     connect(radioShuffleSettings, &QAction::triggered, this, &PlayerBar::radioShuffleSettingsRequested);
+    connect(genreCuration, &QAction::triggered, this, &PlayerBar::genreCurationRequested);
     connect(rediscoveryMix, &QAction::triggered, this, &PlayerBar::rediscoveryMixRequested);
     connect(deepCutsMix, &QAction::triggered, this, &PlayerBar::deepCutsMixRequested);
     connect(startRadioCurrent, &QAction::triggered, this, &PlayerBar::startRadioFromCurrentRequested);

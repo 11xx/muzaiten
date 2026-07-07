@@ -77,6 +77,7 @@ set(MUZAITEN_SOURCES
     src/reco/RadioMix.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
+    src/reco/GenreCuration.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/playback/AudioDeviceControl.cpp
@@ -111,6 +112,8 @@ set(MUZAITEN_SOURCES
     src/search/SearchWorker.cpp
     src/ui/AlbumGrid.cpp
     src/ui/AlbumArtView.cpp
+    src/ui/AudioAnalysisData.cpp
+    src/ui/AudioAnalysisDialogs.cpp
     src/ui/ConditionEditor.cpp
     src/ui/NeighborColumnResizer.cpp
     src/ui/ResponsiveColumnLayout.cpp
@@ -124,6 +127,7 @@ set(MUZAITEN_SOURCES
     src/ui/FileExplorerKeybindings.cpp
     src/ui/IdleReleaseController.cpp
     src/ui/KeybindingsDialog.cpp
+    src/ui/GenreCurationDialog.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/ListeningHistoryDialog.cpp
     src/ui/MainWindow.cpp
@@ -208,6 +212,7 @@ set(MUZAITEN_HEADERS
     src/playback/QtPlaybackBackend.h
     src/reco/AffinityPool.h
     src/reco/ArtistRadio.h
+    src/reco/GenreCuration.h
     src/reco/RadioMix.h
     src/reco/WeightLearner.h
     src/scanner/ArtworkCache.h
@@ -244,6 +249,8 @@ set(MUZAITEN_HEADERS
     src/ui/AlbumGrid.h
     src/ui/AlbumGridDelegate.h
     src/ui/AlbumArtView.h
+    src/ui/AudioAnalysisData.h
+    src/ui/AudioAnalysisDialogs.h
     src/ui/ConditionEditor.h
     src/ui/NeighborColumnResizer.h
     src/ui/ResponsiveColumnLayout.h
@@ -256,6 +263,7 @@ set(MUZAITEN_HEADERS
     src/ui/FileExplorerKeybindings.h
     src/ui/IdleReleaseController.h
     src/ui/KeybindingsDialog.h
+    src/ui/GenreCurationDialog.h
     src/ui/LinkRootsDialog.h
     src/ui/ListeningHistoryDialog.h
     src/ui/KeyBindingTypes.h
@@ -351,6 +359,7 @@ add_executable(muzaitenctl
     src/core/MetadataBlob.cpp
     src/core/Rating.cpp
     src/fs/PathResolver.cpp
+    src/reco/GenreCuration.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/search/Exclusion.cpp

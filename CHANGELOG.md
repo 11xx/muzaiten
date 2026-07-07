@@ -14,6 +14,10 @@
   indicator button's right-click menu still mirrors the session controls).
   A Help menu with About muzaiten shows the exact running version for
   reports.
+- Radio and Library now expose Stage-4 curation in-app: `Radio > Genre
+  curation...` edits aliases and ignored radio genres while showing the folded
+  vocabulary, and `Library > Audio analysis` opens read-only status and
+  duplicate-copy dialogs with pin/unpin controls.
 - Clean-room scalar extraction is now live end to end: `muzaiten-index` is a
   C++ binary built with the app, writes schema-v3 `features.sqlite` rows with
   DSP tempo/loudness/energy/spectral scalars, and replaces the GPL-blocked

@@ -46,7 +46,8 @@ See [CHANGELOG.md](CHANGELOG.md) for release notes and reconstructed development
   listening history, plus content-aware signals when `features.sqlite` is
   built: tempo/energy proximity from clean-room DSP analysis and CLAP
   audio-embedding similarity, with duplicate copies resolved to the best
-  quality. Weights are runtime-tunable, saveable as profiles, and
+  quality. Genre aliases/ignored genres can be curated from the Radio menu.
+  Weights are runtime-tunable, saveable as profiles, and
   `radio-learn` can suggest a profile learned from your own skips.
 - Album artist sidebar, album grid, artist track table, and queue sidebar.
 - Playlists in a dedicated database: import from a pasted tracklist, `m3u`/`m3u8`, `csv`, or `jsonl`/`ndjson`, or fetch a YouTube / YT Music playlist via `yt-dlp`; tracks resolve by sound/shape matching with a live-streaming match preview and multi-candidate triage. Entries keep a metadata snapshot so playlists survive rescans and remember tracks that go missing.
@@ -384,6 +385,7 @@ and prints the preferred library copy for each group.
 Radio tuning commands (`radio-weights`, `radio-genre`, `genre-alias`,
 `genre-report`) also run client-side against the library database. Weight
 changes are validated before writing and take effect on the next radio session.
+The same genre curation lives in-app at `Radio > Genre curation...`.
 `radio-learn` fits a small model to your recorded radio picks and early skips
 and is suggestion-only: it saves a `learned-YYYYMMDD` profile for review and
 never touches the active weights (apply it explicitly with
@@ -408,7 +410,9 @@ Unsupported files are hidden by default. Enable `View > List unsupported files i
 - `Library > Source directories...`: configure scan-enabled and library-visible roots.
 - `Library > Force full rescan`: ignore fingerprints and re-read enabled source directories.
 - `Library > Rating tags`: sync current, current artist, all saved ratings, or retry pending tag writes.
+- `Library > Audio analysis`: inspect `features.sqlite` coverage and duplicate-copy groups.
 - `Library > Link roots...`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
+- `Radio > Genre curation...`: edit genre aliases, ignored radio genres, and the folded vocabulary used by radio matching.
 - `Playback > Output profile...`: configure playback output behavior, including software volume, resampling, sink release on pause, and preload settings.
 - `Playback > Resume behavior...`: configure whether position and playback state are restored.
 - `Settings > Track information panel...`: choose the fields shown in the right-side track information pane.

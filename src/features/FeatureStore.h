@@ -24,6 +24,11 @@ public:
         qint64 failed = 0;
         qint64 groups = 0;
         qint64 featured = 0;
+        QString dspVersion;
+        qint64 embeddedGroups = 0;
+        QString embeddingModel;
+        QString embeddingVersion;
+        qint64 neighborRows = 0;
     };
 
     explicit FeatureStore(const QString &path);

@@ -233,6 +233,9 @@ private:
     int deepReleaseMs() const;
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
+    void showGenreCuration();
+    void showAnalysisStatus();
+    void showDuplicateCopies();
     void configureMpdSource();
     void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;

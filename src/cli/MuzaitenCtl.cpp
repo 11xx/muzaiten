@@ -13,6 +13,7 @@
 #include "features/FeatureStore.h"
 #include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
+#include "reco/GenreCuration.h"
 #include "reco/TrackScorer.h"
 #include "reco/WeightLearner.h"
 #include "search/SearchIndex.h"
@@ -30,7 +31,6 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QProcess>
-#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QSqlDatabase>
@@ -286,6 +286,11 @@ QJsonObject featureStatusJson(const QString &path, bool found, bool open, const 
         {QStringLiteral("failed"), static_cast<double>(status.failed)},
         {QStringLiteral("groups"), static_cast<double>(status.groups)},
         {QStringLiteral("featured"), static_cast<double>(status.featured)},
+        {QStringLiteral("dsp_version"), status.dspVersion},
+        {QStringLiteral("embedded_groups"), static_cast<double>(status.embeddedGroups)},
+        {QStringLiteral("embedding_model"), status.embeddingModel},
+        {QStringLiteral("embedding_version"), status.embeddingVersion},
+        {QStringLiteral("neighbor_rows"), static_cast<double>(status.neighborRows)},
     };
     if (schemaVersion > 0) {
         object.insert(QStringLiteral("schema_version"), schemaVersion);
@@ -706,129 +711,10 @@ bool hasNonAscii(const QString &s)
     return false;
 }
 
-bool hasNonAsciiLetter(const QString &s)
-{
-    for (const QChar c : s) {
-        if (c.isLetter() && c.unicode() > 127) {
-            return true;
-        }
-    }
-    return false;
-}
-
-QString punctuationFoldKey(QString s)
-{
-    static const QRegularExpression nonAlnum(QStringLiteral("[^a-z0-9]"));
-    s.remove(nonAlnum);
-    return s;
-}
-
-bool looksLikeClassifierToken(const QString &genre)
-{
-    static const QRegularExpression classifier(QStringLiteral(
-        "^(?:[a-z]{1,4}:[^\\s].*|\\d+_information:.*|[a-z0-9_.-]{1,32}:[^\\s].*)$"));
-    return classifier.match(genre).hasMatch();
-}
-
-struct GenreReportRow {
-    QString genre;
-    int df = 0;
-    double idf = 0.0;
-    QString canonical;
-    QString status;
-    QStringList sampleArtists;
-    QStringList flags;
-};
-
-QVector<GenreReportRow> buildGenreReportRows(Database &db, int *taggedTrackTotal)
-{
-    int total = 0;
-    const QHash<QString, int> counts = db.genreTrackCounts(&total);
-    if (taggedTrackTotal != nullptr) {
-        *taggedTrackTotal = total;
-    }
-
-    const QHash<QString, QString> aliases = db.genreAliases();
-    const QSet<QString> ignored = db.ignoredRadioGenres();
-    QHash<QString, int> canonicalDf;
-    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
-        const QString canonical = GenreTags::canonical(it.key(), aliases);
-        if (canonical.isEmpty() || GenreTags::isNonGenre(canonical)) {
-            continue;
-        }
-        canonicalDf[canonical] += it.value();
-    }
-
-    QHash<QString, QStringList> nearDupGroups;
-    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
-        const QString key = punctuationFoldKey(it.key());
-        if (!key.isEmpty()) {
-            nearDupGroups[key].append(it.key());
-        }
-    }
-    for (QStringList &group : nearDupGroups) {
-        group.sort(Qt::CaseInsensitive);
-    }
-
-    QVector<GenreReportRow> rows;
-    rows.reserve(counts.size());
-    for (auto it = counts.cbegin(); it != counts.cend(); ++it) {
-        GenreReportRow row;
-        row.genre = it.key();
-        row.df = it.value();
-        row.canonical = GenreTags::canonical(row.genre, aliases);
-        const bool stoplisted = GenreTags::isNonGenre(row.canonical);
-        if (ignored.contains(row.canonical)) {
-            row.status = QStringLiteral("ignored");
-        } else if (stoplisted) {
-            row.status = QStringLiteral("stoplist");
-        } else if (row.canonical != row.genre) {
-            row.status = QStringLiteral("alias");
-        } else {
-            row.status = QStringLiteral("ok");
-        }
-
-        const int dfForIdf = stoplisted ? row.df : canonicalDf.value(row.canonical, row.df);
-        row.idf = std::log(std::max(2.0, static_cast<double>(total) / std::max(1, dfForIdf)));
-        row.sampleArtists = db.sampleArtistsForGenre(row.genre, 3);
-
-        const QString key = punctuationFoldKey(row.genre);
-        const QStringList nearDups = nearDupGroups.value(key);
-        if (nearDups.size() > 1) {
-            for (const QString &other : nearDups) {
-                if (other != row.genre) {
-                    row.flags.append(QStringLiteral("neardup:%1").arg(other));
-                    break;
-                }
-            }
-        }
-        if (hasNonAsciiLetter(row.genre)) {
-            row.flags.append(QStringLiteral("nonascii"));
-        }
-        if (row.genre.contains(QLatin1Char('|')) || row.genre.contains(QLatin1Char(';'))
-            || row.genre.contains(QLatin1Char('/'))) {
-            row.flags.append(QStringLiteral("separator"));
-        }
-        if (looksLikeClassifierToken(row.genre)) {
-            row.flags.append(QStringLiteral("classifier"));
-        }
-
-        rows.append(std::move(row));
-    }
-
-    std::sort(rows.begin(), rows.end(), [](const GenreReportRow &a, const GenreReportRow &b) {
-        if (a.df != b.df) {
-            return a.df > b.df;
-        }
-        return QString::compare(a.genre, b.genre, Qt::CaseInsensitive) < 0;
-    });
-    return rows;
-}
-
-QJsonArray genreRowsToJson(const QVector<GenreReportRow> &rows)
+QJsonArray genreRowsToJson(const QVector<GenreCuration::ReportRow> &rows)
 {
     QJsonArray array;
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         QJsonArray samples;
         for (const QString &artist : row.sampleArtists) {
             samples.append(artist);
@@ -850,12 +736,12 @@ QJsonArray genreRowsToJson(const QVector<GenreReportRow> &rows)
     return array;
 }
 
-void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackTotal)
+void printGenreReportTable(const QVector<GenreCuration::ReportRow> &rows, int taggedTrackTotal)
 {
     int genreWidth = 5;
     int canonicalWidth = 9;
     int sampleWidth = 14;
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         genreWidth = std::max(genreWidth, static_cast<int>(row.genre.size()));
         canonicalWidth = std::max(canonicalWidth, static_cast<int>(row.canonical.size()));
         sampleWidth = std::max(sampleWidth, static_cast<int>(row.sampleArtists.join(QStringLiteral(", ")).size()));
@@ -872,7 +758,7 @@ void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackT
                .arg(QStringLiteral("status"), -8)
                .arg(QStringLiteral("sample_artists"), -sampleWidth)
                .arg(QStringLiteral("flags"));
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         out << QStringLiteral("%1  %2  %3  %4  %5  %6  %7\n")
                    .arg(row.genre, -genreWidth)
                    .arg(row.df, 6)
@@ -885,13 +771,13 @@ void printGenreReportTable(const QVector<GenreReportRow> &rows, int taggedTrackT
     out << "genre-report: end, " << rows.size() << " genres, " << taggedTrackTotal << " tagged tracks\n";
 }
 
-void printGenreReportTsv(const QVector<GenreReportRow> &rows, int taggedTrackTotal)
+void printGenreReportTsv(const QVector<GenreCuration::ReportRow> &rows, int taggedTrackTotal)
 {
     QTextStream out(stdout);
     out.setEncoding(QStringConverter::Utf8);
     out << "# vocabulary_size\t" << rows.size() << "\ttagged_track_total\t" << taggedTrackTotal << '\n';
     out << "genre\tdf\tidf\tcanonical\tstatus\tsample_artists\tflags\n";
-    for (const GenreReportRow &row : rows) {
+    for (const GenreCuration::ReportRow &row : rows) {
         out << tsvField(row.genre) << '\t'
             << row.df << '\t'
             << QString::number(row.idf, 'f', 6) << '\t'
@@ -1814,7 +1700,7 @@ int runGenreReport(QStringList arguments, bool json)
     }
 
     int taggedTrackTotal = 0;
-    const QVector<GenreReportRow> rows = buildGenreReportRows(db, &taggedTrackTotal);
+    const QVector<GenreCuration::ReportRow> rows = GenreCuration::buildReportRows(db, &taggedTrackTotal);
     if (json) {
         QTextStream out(stdout);
         out.setEncoding(QStringConverter::Utf8);
@@ -1870,6 +1756,15 @@ int runFeaturesStatus(QStringList arguments, bool json)
         << status.failed << " failed)\n";
     out << "groups: " << status.groups << '\n';
     out << "featured: " << status.featured << '\n';
+    out << "dsp version: " << (status.dspVersion.isEmpty() ? QStringLiteral("unknown") : status.dspVersion) << '\n';
+    out << "embedded groups: " << status.embeddedGroups;
+    if (!status.embeddingModel.isEmpty() || !status.embeddingVersion.isEmpty()) {
+        out << " (" << (status.embeddingModel.isEmpty() ? QStringLiteral("unknown-model") : status.embeddingModel)
+            << ' ' << (status.embeddingVersion.isEmpty() ? QStringLiteral("unknown-version") : status.embeddingVersion)
+            << ')';
+    }
+    out << '\n';
+    out << "neighbor rows: " << status.neighborRows << '\n';
     return 0;
 }
 
@@ -2088,9 +1983,9 @@ int runRadioGenre(QStringList arguments, bool json)
         return 0;
     }
 
-    const QString folded = GenreTags::folded(arguments.first());
-    const QString canonical = GenreTags::canonical(folded, db.genreAliases());
-    if (canonical.isEmpty()) {
+    QString genreError;
+    const QString canonical = GenreCuration::canonicalGenreInput(db, arguments.first(), &genreError);
+    if (!genreError.isEmpty()) {
         return fail(QStringLiteral("radio-genre %1 needs a non-empty genre").arg(verb));
     }
     const bool ignored = verb == QLatin1String("ignore");
@@ -2180,22 +2075,22 @@ int runGenreAlias(QStringList arguments, bool json)
         return 0;
     }
 
-    const QString canonical = GenreTags::folded(arguments.at(1));
-    if (canonical.isEmpty()) {
-        return fail(QStringLiteral("genre-alias set needs a non-empty canonical genre"));
+    const GenreCuration::AliasValidation validation = GenreCuration::validateAlias(arguments.first(), arguments.at(1));
+    if (!validation.ok()) {
+        return fail(validation.error);
     }
-    if (!db.setGenreAlias(alias, canonical)) {
+    if (!db.setGenreAlias(validation.aliasFolded, validation.canonicalFolded)) {
         return fail(db.lastError());
     }
     if (json) {
         out << QString::fromUtf8(QJsonDocument(QJsonObject{
             {QStringLiteral("ok"), true},
             {QStringLiteral("action"), QStringLiteral("set")},
-            {QStringLiteral("alias"), alias},
-            {QStringLiteral("canonical"), canonical},
+            {QStringLiteral("alias"), validation.aliasFolded},
+            {QStringLiteral("canonical"), validation.canonicalFolded},
         }).toJson(QJsonDocument::Compact)) << '\n';
     } else {
-        out << "genre-alias: " << alias << " -> " << canonical << '\n';
+        out << "genre-alias: " << validation.aliasFolded << " -> " << validation.canonicalFolded << '\n';
     }
     return 0;
 }

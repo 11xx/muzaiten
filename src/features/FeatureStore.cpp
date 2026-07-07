@@ -102,6 +102,22 @@ qint64 scalarCount(QSqlDatabase database, const QString &sql)
     return query.value(0).toLongLong();
 }
 
+bool hasTable(const QSqlDatabase &database, const QString &table)
+{
+    return database.tables().contains(table);
+}
+
+QString metaValue(QSqlDatabase database, const QString &key)
+{
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral("SELECT value FROM meta WHERE key = ?"));
+    query.addBindValue(key);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+    return query.value(0).toString();
+}
+
 } // namespace
 
 FeatureStore::FeatureStore(const QString &path)
@@ -389,5 +405,20 @@ FeatureStore::Status FeatureStore::status() const
     }
     result.groups = scalarCount(m_db, QStringLiteral("SELECT COUNT(*) FROM content_groups"));
     result.featured = scalarCount(m_db, QStringLiteral("SELECT COUNT(*) FROM features"));
+    result.dspVersion = metaValue(m_db, QStringLiteral("dsp_version"));
+    if (hasTable(m_db, QStringLiteral("embeddings"))) {
+        result.embeddedGroups = scalarCount(m_db, QStringLiteral("SELECT COUNT(DISTINCT content_group_id) FROM embeddings"));
+        QSqlQuery embeddingQuery(m_db);
+        if (embeddingQuery.exec(QStringLiteral(
+                "SELECT model, version, COUNT(*) AS n FROM embeddings "
+                "GROUP BY model, version ORDER BY n DESC, model, version LIMIT 1"))
+            && embeddingQuery.next()) {
+            result.embeddingModel = embeddingQuery.value(0).toString();
+            result.embeddingVersion = embeddingQuery.value(1).toString();
+        }
+    }
+    if (hasTable(m_db, QStringLiteral("track_neighbors"))) {
+        result.neighborRows = scalarCount(m_db, QStringLiteral("SELECT COUNT(*) FROM track_neighbors"));
+    }
     return result;
 }
