@@ -10,6 +10,9 @@
 
 namespace {
 
+constexpr double kTempoFalloffBpm = 60.0;
+constexpr double kEnergyFalloff = 1.0;
+
 void pushIfNonZero(TrackScorer::Scored &scored, const QString &name, double value)
 {
     if (value != 0.0) {
@@ -37,6 +40,8 @@ QStringList weightKeys()
         QStringLiteral("genreCrowdingSoftLimit"),
         QStringLiteral("eraWeight"),
         QStringLiteral("eraSpanYears"),
+        QStringLiteral("tempoWeight"),
+        QStringLiteral("energyWeight"),
         QStringLiteral("ratingWeight"),
         QStringLiteral("userRatingBoost"),
         QStringLiteral("historyWeight"),
@@ -74,6 +79,14 @@ bool assignNumber(const QJsonObject &object, const QString &key, double &target,
     return true;
 }
 
+double linearProximity(double left, double right, double span)
+{
+    if (span <= 0.0) {
+        return 0.0;
+    }
+    return std::max(0.0, 1.0 - std::abs(left - right) / span);
+}
+
 } // namespace
 
 namespace TrackScorer {
@@ -91,6 +104,8 @@ QByteArray weightsToJson(const Weights &weights)
     object.insert(QStringLiteral("genreCrowdingSoftLimit"), weights.genreCrowdingSoftLimit);
     object.insert(QStringLiteral("eraWeight"), weights.eraWeight);
     object.insert(QStringLiteral("eraSpanYears"), weights.eraSpanYears);
+    object.insert(QStringLiteral("tempoWeight"), weights.tempoWeight);
+    object.insert(QStringLiteral("energyWeight"), weights.energyWeight);
     object.insert(QStringLiteral("ratingWeight"), weights.ratingWeight);
     object.insert(QStringLiteral("userRatingBoost"), weights.userRatingBoost);
     object.insert(QStringLiteral("historyWeight"), weights.historyWeight);
@@ -141,6 +156,8 @@ Weights weightsFromJson(const QByteArray &json, QString *error)
         || !assignNumber(object, QStringLiteral("genreCrowdingSoftLimit"), weights.genreCrowdingSoftLimit, 1.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("eraWeight"), weights.eraWeight, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("eraSpanYears"), weights.eraSpanYears, 0.001, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("tempoWeight"), weights.tempoWeight, 0.0, std::numeric_limits<double>::infinity(), error)
+        || !assignNumber(object, QStringLiteral("energyWeight"), weights.energyWeight, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("ratingWeight"), weights.ratingWeight, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("userRatingBoost"), weights.userRatingBoost, 0.0, std::numeric_limits<double>::infinity(), error)
         || !assignNumber(object, QStringLiteral("historyWeight"), weights.historyWeight, 0.0, std::numeric_limits<double>::infinity(), error)
@@ -192,6 +209,22 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     if (candidate.year > 0 && seed.year > 0) {
         const double delta = std::min(static_cast<double>(std::abs(candidate.year - seed.year)), weights.eraSpanYears);
         pushIfNonZero(scored, QStringLiteral("era"), weights.eraWeight * (1.0 - delta / weights.eraSpanYears));
+    }
+
+    // tempo/energy: acoustic proximity to the current sonic context. Unknown
+    // values stay silent so a closed or unfeatured FeatureStore preserves the
+    // previous score exactly.
+    if (candidate.tempoBpm > 0.0 && seed.contextTempoBpm > 0.0) {
+        pushIfNonZero(scored, QStringLiteral("tempo"),
+                      weights.tempoWeight * linearProximity(candidate.tempoBpm,
+                                                            seed.contextTempoBpm,
+                                                            kTempoFalloffBpm));
+    }
+    if (candidate.energy >= 0.0 && seed.contextEnergy >= 0.0) {
+        pushIfNonZero(scored, QStringLiteral("energy"),
+                      weights.energyWeight * linearProximity(candidate.energy,
+                                                             seed.contextEnergy,
+                                                             kEnergyFalloff));
     }
 
     // rating: effective rating, with a boost when it is the user's own rating.

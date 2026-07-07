@@ -144,6 +144,32 @@ QStringList RadioSession::rollingGenres() const
     return genres;
 }
 
+double RadioSession::rollingTempoBpm() const
+{
+    double sum = 0.0;
+    int count = 0;
+    for (const PlayedScalars &scalars : m_playedScalars) {
+        if (scalars.tempoBpm > 0.0) {
+            sum += scalars.tempoBpm;
+            ++count;
+        }
+    }
+    return count > 0 ? sum / count : m_seed.tempoBpm;
+}
+
+double RadioSession::rollingEnergy() const
+{
+    double sum = 0.0;
+    int count = 0;
+    for (const PlayedScalars &scalars : m_playedScalars) {
+        if (scalars.energy >= 0.0) {
+            sum += scalars.energy;
+            ++count;
+        }
+    }
+    return count > 0 ? sum / count : m_seed.energy;
+}
+
 void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
                               const QString &resolvedPath)
 {
@@ -180,6 +206,8 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         context.genreIdf = m_genreIdf;
         context.recentArtistsFolded = QSet<QString>(batchArtists.cbegin(), batchArtists.cend());
         context.year = m_seed.year;
+        context.contextTempoBpm = rollingTempoBpm();
+        context.contextEnergy = rollingEnergy();
         context.nowSecs = m_nowSecs;
         context.exploration0To100 = m_exploration;
 
@@ -274,6 +302,7 @@ void RadioSession::notePlayed(const Track &track)
     pushRecentArtist(m_recentArtists, FoldKey::fold(track.artistName), kThrottleArtists);
 
     QStringList genres;
+    PlayedScalars scalars;
     QString albumKey = FoldKey::albumKey(track.albumArtistName, track.albumTitle);
     QString songKey = FoldKey::songKey(track.musicBrainz.recordingId, track.artistName, track.title);
     const auto it = m_byPath.constFind(track.path);
@@ -282,12 +311,18 @@ void RadioSession::notePlayed(const Track &track)
         // and this is the other chokepoint genres enter the rolling context
         // through.
         genres = GenreTags::informative(it->genresFolded);
+        scalars.tempoBpm = it->tempoBpm;
+        scalars.energy = it->energy;
         albumKey = it->albumKey;
         songKey = it->songKey;
     }
     m_playedGenres.push_back(genres);
     while (m_playedGenres.size() > kThrottleArtists) {
         m_playedGenres.removeFirst();
+    }
+    m_playedScalars.push_back(scalars);
+    while (m_playedScalars.size() > kThrottleArtists) {
+        m_playedScalars.removeFirst();
     }
 
     // Count the album only once: a radio pick already tallied it at pick time;
@@ -357,12 +392,25 @@ QJsonObject RadioSession::constraintState() const
         playedGenres.append(stringListToJson(genres));
     }
 
+    QJsonArray playedScalars;
+    for (const PlayedScalars &scalars : m_playedScalars) {
+        QJsonObject object;
+        if (scalars.tempoBpm > 0.0) {
+            object.insert(QStringLiteral("tempoBpm"), scalars.tempoBpm);
+        }
+        if (scalars.energy >= 0.0) {
+            object.insert(QStringLiteral("energy"), scalars.energy);
+        }
+        playedScalars.append(object);
+    }
+
     return QJsonObject{
         {QStringLiteral("usedSongKeys"), stringSetToJson(m_usedSongKeys)},
         {QStringLiteral("usedPaths"), stringSetToJson(m_usedPaths)},
         {QStringLiteral("albumGroupCounts"), albumCounts},
         {QStringLiteral("recentArtists"), stringListToJson(m_recentArtists)},
         {QStringLiteral("playedGenres"), playedGenres},
+        {QStringLiteral("playedScalars"), playedScalars},
     };
 }
 
@@ -398,6 +446,20 @@ void RadioSession::restoreConstraintState(const QJsonObject &state)
         }
         while (m_playedGenres.size() > kThrottleArtists) {
             m_playedGenres.removeFirst();
+        }
+    }
+    if (state.contains(QStringLiteral("playedScalars"))) {
+        m_playedScalars.clear();
+        const QJsonArray rows = state.value(QStringLiteral("playedScalars")).toArray();
+        for (const QJsonValue &row : rows) {
+            const QJsonObject object = row.toObject();
+            PlayedScalars scalars;
+            scalars.tempoBpm = object.value(QStringLiteral("tempoBpm")).toDouble(-1.0);
+            scalars.energy = object.value(QStringLiteral("energy")).toDouble(-1.0);
+            m_playedScalars.push_back(scalars);
+        }
+        while (m_playedScalars.size() > kThrottleArtists) {
+            m_playedScalars.removeFirst();
         }
     }
     m_pickReasons.clear();

@@ -21,6 +21,8 @@ struct Candidate {
     QString albumKey;              // folded "albumartist\nalbum"
     QStringList genresFolded;
     int year = 0;                  // 0 = unknown
+    double tempoBpm = -1.0;         // -1 = unknown
+    double energy = -1.0;           // -1 = unknown, expected unit-ish extractor scale
     int effectiveRating0To100 = -1; // -1 = unrated
     bool hasUserRating = false;
 };
@@ -47,6 +49,8 @@ struct SeedContext {
     QHash<QString, double> genreIdf;
     QSet<QString> recentArtistsFolded; // for the soft same-artist term (not the hard constraint)
     int year = 0;
+    double contextTempoBpm = -1.0;
+    double contextEnergy = -1.0;
     qint64 nowSecs = 0;
     int exploration0To100 = 30;        // conservative .. exploratory
 };
@@ -70,6 +74,8 @@ struct Weights {
     double genreCrowdingSoftLimit = 3.0;
     double eraWeight = 1.0;
     double eraSpanYears = 30.0;
+    double tempoWeight = 0.4;
+    double energyWeight = 0.6;
     double ratingWeight = 1.5;
     double userRatingBoost = 1.25;
     double historyWeight = 1.0;

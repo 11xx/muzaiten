@@ -103,9 +103,16 @@ public:
     static bool isEarlySkip(qint64 playedMs, qint64 durationMs);
 
 private:
+    struct PlayedScalars {
+        double tempoBpm = -1.0;
+        double energy = -1.0;
+    };
+
     // Rolling genre window: seed genres unioned with the last few played tracks'
     // genres — the seed anchors the mood, the window lets it drift.
     QStringList rollingGenres() const;
+    double rollingTempoBpm() const;
+    double rollingEnergy() const;
     // Score-ordered eligible candidates for the current context, honoring the hard
     // constraints (excludePaths + the per-batch recent-artist list).
     void recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
@@ -123,6 +130,7 @@ private:
 
     QStringList m_recentArtists;              // last 3 played/picked (folded, consecutive-deduped)
     QList<QStringList> m_playedGenres;        // last 3 played tracks' folded genres
+    QList<PlayedScalars> m_playedScalars;      // last 3 played tracks' known acoustic scalars
     QHash<QString, int> m_albumCounts;        // albumKey -> tracks committed this session
     QSet<QString> m_usedPaths;                // never pick/repeat a path twice
     QSet<QString> m_usedSongKeys;             // never pick/repeat a song twice through duplicate files

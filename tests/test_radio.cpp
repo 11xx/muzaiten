@@ -33,7 +33,8 @@ namespace {
 TrackScorer::Candidate makeCandidate(const QString &path, const QString &artistFolded,
                                      const QStringList &genresFolded, int year = 0,
                                      int rating = -1, bool hasUserRating = false,
-                                     const QString &albumKey = {}, const QString &songKey = {})
+                                     const QString &albumKey = {}, const QString &songKey = {},
+                                     double tempoBpm = -1.0, double energy = -1.0)
 {
     TrackScorer::Candidate candidate;
     candidate.path = path;
@@ -42,6 +43,8 @@ TrackScorer::Candidate makeCandidate(const QString &path, const QString &artistF
     candidate.albumKey = albumKey.isEmpty() ? (artistFolded + QLatin1String("\nalbum")) : albumKey;
     candidate.genresFolded = genresFolded;
     candidate.year = year;
+    candidate.tempoBpm = tempoBpm;
+    candidate.energy = energy;
     candidate.effectiveRating0To100 = rating;
     candidate.hasUserRating = hasUserRating;
     return candidate;
@@ -60,6 +63,26 @@ double componentValue(const TrackScorer::Scored &scored, const QString &name)
 bool hasComponent(const TrackScorer::Scored &scored, const QString &name)
 {
     for (const TrackScorer::Component &component : scored.components) {
+        if (component.name == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+double componentValue(const QList<TrackScorer::Component> &components, const QString &name)
+{
+    for (const TrackScorer::Component &component : components) {
+        if (component.name == name) {
+            return component.value;
+        }
+    }
+    return 0.0;
+}
+
+bool hasComponent(const QList<TrackScorer::Component> &components, const QString &name)
+{
+    for (const TrackScorer::Component &component : components) {
         if (component.name == name) {
             return true;
         }
@@ -155,6 +178,8 @@ private slots:
     void scoringWeightsJsonRoundTripsAllFields();
     void scoringWeightsJsonRejectsUnknownAndInvalidFields();
     void eraDecaysWithYearGap();
+    void tempoAndEnergyUseSonicProximity();
+    void unknownTempoOrEnergyYieldsNoComponent();
     void skipPenaltyScalesWithSkipRate();
     void recencyPenaltyDecaysWithTime();
     void noveltyAtZeroHistoryScalesWithExploration();
@@ -170,11 +195,13 @@ private slots:
     void noRepeatsWithinSession();
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
+    void rollingSonicContextUsesPlayedMean();
     void reasonForNonEmptyOnPick();
     void reasonComponentsRoundTripFromPick();
     void resolvedPickStoresReasonUnderResolvedPath();
     void pickReasonsEnumeratesStoredComponents();
     void reasonSentencePicksTopPhrases();
+    void reasonSentenceNamesTempoAndEnergy();
     void reasonSentenceHandlesPenaltyOnly();
     void reasonSentenceEmptyOnEmptyInput();
     void reasonBreakdownFormatsSigned();
@@ -555,11 +582,13 @@ void RadioTest::scoringWeightsJsonOverridesDefaults()
 {
     QString error;
     const TrackScorer::Weights weights = TrackScorer::weightsFromJson(
-        R"({"ratingWeight":0.75,"genreWeight":2.0,"skipPenalty":-3.5,"genreCrowdingSoftLimit":2})",
+        R"({"ratingWeight":0.75,"genreWeight":2.0,"tempoWeight":0.9,"energyWeight":1.1,"skipPenalty":-3.5,"genreCrowdingSoftLimit":2})",
         &error);
     QVERIFY(error.isEmpty());
     QVERIFY(qFuzzyCompare(weights.ratingWeight, 0.75));
     QVERIFY(qFuzzyCompare(weights.genreWeight, 2.0));
+    QVERIFY(qFuzzyCompare(weights.tempoWeight, 0.9));
+    QVERIFY(qFuzzyCompare(weights.energyWeight, 1.1));
     QVERIFY(qFuzzyCompare(weights.skipPenalty, -3.5));
     QVERIFY(qFuzzyCompare(weights.genreCrowdingSoftLimit, 2.0));
 
@@ -581,6 +610,8 @@ void RadioTest::scoringWeightsJsonRoundTripsAllFields()
     weights.genreCrowdingSoftLimit = 2.0;
     weights.eraWeight = 0.75;
     weights.eraSpanYears = 12.0;
+    weights.tempoWeight = 0.55;
+    weights.energyWeight = 0.65;
     weights.ratingWeight = 0.6;
     weights.userRatingBoost = 1.4;
     weights.historyWeight = 1.2;
@@ -601,6 +632,8 @@ void RadioTest::scoringWeightsJsonRoundTripsAllFields()
     QVERIFY(qFuzzyCompare(roundTrip.genreCrowdingSoftLimit, weights.genreCrowdingSoftLimit));
     QVERIFY(qFuzzyCompare(roundTrip.eraWeight, weights.eraWeight));
     QVERIFY(qFuzzyCompare(roundTrip.eraSpanYears, weights.eraSpanYears));
+    QVERIFY(qFuzzyCompare(roundTrip.tempoWeight, weights.tempoWeight));
+    QVERIFY(qFuzzyCompare(roundTrip.energyWeight, weights.energyWeight));
     QVERIFY(qFuzzyCompare(roundTrip.ratingWeight, weights.ratingWeight));
     QVERIFY(qFuzzyCompare(roundTrip.userRatingBoost, weights.userRatingBoost));
     QVERIFY(qFuzzyCompare(roundTrip.historyWeight, weights.historyWeight));
@@ -624,6 +657,9 @@ void RadioTest::scoringWeightsJsonRejectsUnknownAndInvalidFields()
 
     TrackScorer::weightsFromJson(R"({"recencyPenalty":1.0})", &error);
     QVERIFY(error.contains(QStringLiteral("recencyPenalty")));
+
+    TrackScorer::weightsFromJson(R"({"energyWeight":-0.1})", &error);
+    QVERIFY(error.contains(QStringLiteral("energyWeight")));
 }
 
 void RadioTest::eraDecaysWithYearGap()
@@ -643,6 +679,58 @@ void RadioTest::eraDecaysWithYearGap()
     QVERIFY(qFuzzyCompare(same, 1.0));
     QVERIFY(qFuzzyCompare(near, 0.5));
     QVERIFY(!hasComponent(farScored, QStringLiteral("era")));  // capped at 30 years → 0
+}
+
+void RadioTest::tempoAndEnergyUseSonicProximity()
+{
+    TrackScorer::SeedContext seed;
+    seed.contextTempoBpm = 120.0;
+    seed.contextEnergy = 0.75;
+
+    TrackScorer::Weights weights = TrackScorer::defaultWeights();
+    weights.tempoWeight = 0.4;
+    weights.energyWeight = 0.6;
+
+    const TrackScorer::Scored adjacent = TrackScorer::score(
+        makeCandidate(QStringLiteral("/near"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 150.0, 0.25),
+        {}, seed, weights);
+    QVERIFY(qFuzzyCompare(componentValue(adjacent, QStringLiteral("tempo")), 0.4 * 0.5));
+    QVERIFY(qFuzzyCompare(componentValue(adjacent, QStringLiteral("energy")), 0.6 * 0.5));
+
+    const TrackScorer::Scored exact = TrackScorer::score(
+        makeCandidate(QStringLiteral("/exact"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 120.0, 0.75),
+        {}, seed, weights);
+    QVERIFY(qFuzzyCompare(componentValue(exact, QStringLiteral("tempo")), 0.4));
+    QVERIFY(qFuzzyCompare(componentValue(exact, QStringLiteral("energy")), 0.6));
+
+    const TrackScorer::Scored distant = TrackScorer::score(
+        makeCandidate(QStringLiteral("/far"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 181.0, 1.9),
+        {}, seed, weights);
+    QVERIFY(!hasComponent(distant, QStringLiteral("tempo")));
+    QVERIFY(!hasComponent(distant, QStringLiteral("energy")));
+}
+
+void RadioTest::unknownTempoOrEnergyYieldsNoComponent()
+{
+    TrackScorer::SeedContext knownContext;
+    knownContext.contextTempoBpm = 120.0;
+    knownContext.contextEnergy = 0.5;
+
+    const TrackScorer::Scored unknownCandidate = TrackScorer::score(
+        makeCandidate(QStringLiteral("/unknown"), QStringLiteral("a"), {}), {}, knownContext);
+    QVERIFY(!hasComponent(unknownCandidate, QStringLiteral("tempo")));
+    QVERIFY(!hasComponent(unknownCandidate, QStringLiteral("energy")));
+
+    TrackScorer::SeedContext unknownContext;
+    const TrackScorer::Scored knownCandidate = TrackScorer::score(
+        makeCandidate(QStringLiteral("/known"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 120.0, 0.5),
+        {}, unknownContext);
+    QVERIFY(!hasComponent(knownCandidate, QStringLiteral("tempo")));
+    QVERIFY(!hasComponent(knownCandidate, QStringLiteral("energy")));
 }
 
 void RadioTest::skipPenaltyScalesWithSkipRate()
@@ -973,6 +1061,36 @@ void RadioTest::rollingContextDriftsGenreWindow()
              "rolling window did not drift genre toward rock");
 }
 
+void RadioTest::rollingSonicContextUsesPlayedMean()
+{
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/target"), QStringLiteral("target"), {}, 0, -1, false,
+                      QStringLiteral("album-target"), QStringLiteral("song-target"), 110.0, 0.5),
+        makeCandidate(QStringLiteral("/feed-a"), QStringLiteral("feed-a"), {}, 0, -1, false,
+                      QStringLiteral("album-feed-a"), QStringLiteral("song-feed-a"), 90.0, 0.2),
+        makeCandidate(QStringLiteral("/feed-b"), QStringLiteral("feed-b"), {}, 0, -1, false,
+                      QStringLiteral("album-feed-b"), QStringLiteral("song-feed-b"), 130.0, 0.8),
+        makeCandidate(QStringLiteral("/feed-unknown"), QStringLiteral("feed-unknown"), {}, 0, -1, false,
+                      QStringLiteral("album-feed-u"), QStringLiteral("song-feed-u")),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"), {}, 0, -1, false,
+                                                QStringLiteral("album-seed"), QStringLiteral("song-seed"), 60.0, 0.0);
+    QRandomGenerator rng(7u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    session.notePlayed(resolvePathToTrack(QStringLiteral("/feed-a")));
+    session.notePlayed(resolvePathToTrack(QStringLiteral("/feed-b")));
+    session.notePlayed(resolvePathToTrack(QStringLiteral("/feed-unknown")));
+
+    const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QCOMPARE(picks.first().path, QStringLiteral("/target"));
+
+    const QList<TrackScorer::Component> components = session.reasonComponentsFor(QStringLiteral("/target"));
+    QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("tempo")), 0.4));
+    QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("energy")), 0.6));
+}
+
 void RadioTest::reasonForNonEmptyOnPick()
 {
     QVector<TrackScorer::Candidate> pool{makeCandidate(QStringLiteral("/t0"), QStringLiteral("a"),
@@ -1085,6 +1203,17 @@ void RadioTest::reasonSentencePicksTopPhrases()
     QCOMPARE(ReasonText::sentence(components),
              QStringLiteral("Radio pick — matches the session's mood · you rate it highly "
                             "(held back: heard recently)"));
+}
+
+void RadioTest::reasonSentenceNamesTempoAndEnergy()
+{
+    const QList<TrackScorer::Component> components{
+        {QStringLiteral("tempo"), 0.4},
+        {QStringLiteral("energy"), 0.6},
+    };
+
+    QCOMPARE(ReasonText::sentence(components),
+             QStringLiteral("Radio pick — similar energy · matches the pace"));
 }
 
 void RadioTest::reasonSentenceHandlesPenaltyOnly()

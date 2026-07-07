@@ -20,6 +20,12 @@ QString phraseFor(const QString &name)
     if (name == QStringLiteral("era")) {
         return QStringLiteral("from a similar era");
     }
+    if (name == QStringLiteral("tempo")) {
+        return QStringLiteral("matches the pace");
+    }
+    if (name == QStringLiteral("energy")) {
+        return QStringLiteral("similar energy");
+    }
     if (name == QStringLiteral("rating")) {
         return QStringLiteral("you rate it highly");
     }
