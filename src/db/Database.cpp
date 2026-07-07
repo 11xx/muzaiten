@@ -2299,6 +2299,62 @@ QVector<RadioCandidateRow> Database::radioFallbackCandidates(int limit) const
     return rows;
 }
 
+QVector<RadioCandidateRow> Database::radioCandidatesForPaths(const QStringList &paths) const
+{
+    QVector<RadioCandidateRow> rows;
+    if (paths.isEmpty()) {
+        return rows;
+    }
+
+    QStringList uniquePaths;
+    QSet<QString> seenPaths;
+    uniquePaths.reserve(paths.size());
+    for (const QString &path : paths) {
+        if (path.isEmpty() || seenPaths.contains(path)) {
+            continue;
+        }
+        seenPaths.insert(path);
+        uniquePaths.push_back(path);
+    }
+    if (uniquePaths.isEmpty()) {
+        return rows;
+    }
+
+    constexpr qsizetype kChunk = 500;
+    for (qsizetype start = 0; start < uniquePaths.size(); start += kChunk) {
+        const qsizetype count = std::min(kChunk, uniquePaths.size() - start);
+        QString sql = QStringLiteral(
+            "SELECT t.path, t.artist_name, t.title, t.album_artist_name, t.album_title, "
+            "t.musicbrainz_recording_id, a.musicbrainz_release_group_id, "
+            "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
+            "t.rating_0_100, utr.rating_0_100, p.status "
+            "FROM tracks t "
+            "LEFT JOIN track_genres g ON g.track_id = t.id "
+            "LEFT JOIN albums a ON a.id = t.album_id "
+            "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+            "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+            "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND t.path IN (%1)")
+            .arg(sqlPlaceholders(count));
+        if (hasScanRoots(m_db)) {
+            sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+        }
+        sql += QStringLiteral(" GROUP BY t.id");
+
+        QSqlQuery query(m_db);
+        query.prepare(sql);
+        for (qsizetype i = 0; i < count; ++i) {
+            query.addBindValue(uniquePaths.at(start + i));
+        }
+        if (!query.exec()) {
+            continue;
+        }
+        while (query.next()) {
+            rows.push_back(readRadioCandidateRow(query));
+        }
+    }
+    return rows;
+}
+
 QStringList Database::localLibraryDirectories(const QString &parentDirectory) const
 {
     QStringList directories;

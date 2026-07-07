@@ -180,14 +180,18 @@ private:
                                           const QSet<QString> &ignoredRadioGenres) const;
     QStringList pathsForSongKeyOfTrack(const QString &trackPath) const;
     QHash<QString, QString> buildResolvedSongKeyMap() const;
-    void attachRadioScalars(QVector<TrackScorer::Candidate> &candidates) const;
-    void attachRadioScalars(TrackScorer::Candidate &candidate) const;
+    void attachRadioFeatures(QVector<TrackScorer::Candidate> &candidates) const;
+    void attachRadioFeatures(TrackScorer::Candidate &candidate) const;
+    QStringList radioNeighborCandidatePaths(const QStringList &anchorPaths) const;
+    QHash<qint64, QVector<float>> radioEmbeddingsForSession(const QVector<TrackScorer::Candidate> &pool,
+                                                            const TrackScorer::Candidate &seed = {}) const;
     TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded,
                                                    const QHash<QString, QString> &resolvedSongKeys) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
                                                             const QHash<QString, QString> &genreAliases,
                                                             const QSet<QString> &ignoredRadioGenres,
-                                                            const QHash<QString, QString> &resolvedSongKeys) const;
+                                                            const QHash<QString, QString> &resolvedSongKeys,
+                                                            const QStringList &neighborAnchorPaths = {}) const;
     QVector<TrackScorer::Candidate> buildRadioFallbackPool(int limit,
                                                            const QHash<QString, QString> &genreAliases,
                                                            const QSet<QString> &ignoredRadioGenres,

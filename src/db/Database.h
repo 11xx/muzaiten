@@ -218,6 +218,10 @@ public:
     // Random-sample fallback for seeds with no genres to match on (same ORDER BY
     // RANDOM() idiom as randomTracks). Genres are still returned when present.
     QVector<RadioCandidateRow> radioFallbackCandidates(int limit = 2000) const;
+    // Targeted radio candidate rows for specific local library paths. Used by
+    // sidecar neighbor augmentation after the feature store has picked group
+    // neighbors and the app has resolved each group to a preferred copy path.
+    QVector<RadioCandidateRow> radioCandidatesForPaths(const QStringList &paths) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);

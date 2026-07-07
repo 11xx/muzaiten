@@ -222,6 +222,7 @@ private slots:
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
+    void neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags();
     void genreAliasesExpandCandidatesAndMergeCounts();
     void radioWeightProfilesRoundTrip();
     void ignoredRadioGenresRoundTripAndSuppressCandidateJoins();
@@ -1652,6 +1653,13 @@ Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStri
     return track;
 }
 
+struct FeatureNeighborRow {
+    qint64 contentGroupId = -1;
+    qint64 neighborGroupId = -1;
+    int rank = 0;
+    double cosine = 0.0;
+};
+
 bool execFeatureFixtureSql(QSqlQuery &query, const QString &sql, QString *error)
 {
     if (query.exec(sql)) {
@@ -1665,7 +1673,8 @@ bool execFeatureFixtureSql(QSqlQuery &query, const QString &sql, QString *error)
 
 QString createRadioFeatureFixture(const QTemporaryDir &dir,
                                   const QHash<QString, qint64> &contentGroups,
-                                  QString *error)
+                                  QString *error,
+                                  const QList<FeatureNeighborRow> &neighbors = {})
 {
     const QString path = dir.filePath(QStringLiteral("features.sqlite"));
     const QString connectionName =
@@ -1711,11 +1720,30 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
                                                    " extractor TEXT NOT NULL,"
                                                    " version TEXT NOT NULL)"),
                                                error);
+            if (!neighbors.isEmpty()) {
+                ok = ok && execFeatureFixtureSql(query, QStringLiteral(
+                                                       "CREATE TABLE embeddings("
+                                                       " content_group_id INTEGER PRIMARY KEY,"
+                                                       " model TEXT NOT NULL,"
+                                                       " version TEXT NOT NULL,"
+                                                       " dim INTEGER NOT NULL,"
+                                                       " vector BLOB NOT NULL)"),
+                                                   error);
+                ok = ok && execFeatureFixtureSql(query, QStringLiteral(
+                                                       "CREATE TABLE track_neighbors("
+                                                       " content_group_id INTEGER NOT NULL,"
+                                                       " neighbor_group_id INTEGER NOT NULL,"
+                                                       " rank INTEGER NOT NULL,"
+                                                       " cosine REAL NOT NULL,"
+                                                       " PRIMARY KEY(content_group_id, rank))"),
+                                                   error);
+            }
         }
 
         if (ok) {
             QSqlQuery meta(fixture);
-            meta.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES('schema_version', '1')"));
+            meta.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES('schema_version', ?)"));
+            meta.addBindValue(neighbors.isEmpty() ? QStringLiteral("1") : QStringLiteral("2"));
             if (!meta.exec()) {
                 if (error != nullptr) {
                     *error = meta.lastError().text();
@@ -1754,6 +1782,26 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
                 insert.addBindValue(QStringLiteral("hash-%1").arg(it.value()));
                 insert.addBindValue(QByteArray::fromHex("01020304"));
                 insert.addBindValue(it.value() >= 0 ? QVariant(it.value()) : QVariant());
+                if (!insert.exec()) {
+                    if (error != nullptr) {
+                        *error = insert.lastError().text();
+                    }
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        if (ok) {
+            for (const FeatureNeighborRow &neighbor : neighbors) {
+                QSqlQuery insert(fixture);
+                insert.prepare(QStringLiteral(
+                    "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine) "
+                    "VALUES(?, ?, ?, ?)"));
+                insert.addBindValue(neighbor.contentGroupId);
+                insert.addBindValue(neighbor.neighborGroupId);
+                insert.addBindValue(neighbor.rank);
+                insert.addBindValue(neighbor.cosine);
                 if (!insert.exec()) {
                     if (error != nullptr) {
                         *error = insert.lastError().text();
@@ -1931,6 +1979,64 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
     // Fallback samples every scanned track regardless of genre.
     const QVector<RadioCandidateRow> fallback = db.radioFallbackCandidates();
     QCOMPARE(fallback.size(), 3);
+}
+
+void RadioTest::neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("radio-neighbor-pool-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track seed = makeDbTrack(dir, QStringLiteral("seed.flac"), {QStringLiteral("Rock")},
+                                   QStringLiteral("2004"));
+    const Track sameGenre = makeDbTrack(dir, QStringLiteral("same.flac"), {QStringLiteral("Rock")},
+                                        QStringLiteral("2005"));
+    const Track tagPoorNeighbor = makeDbTrack(dir, QStringLiteral("neighbor.flac"), {},
+                                              QStringLiteral("2006"));
+    QVERIFY2(db.upsertTrack(seed), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(sameGenre), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(tagPoorNeighbor), qPrintable(db.lastError()));
+
+    QString featureError;
+    const QString featuresPath = createRadioFeatureFixture(dir, {
+                                                               {seed.path, 100},
+                                                               {sameGenre.path, 101},
+                                                               {tagPoorNeighbor.path, 200},
+                                                           },
+                                                           &featureError,
+                                                           {{100, 200, 1, 0.95}});
+    QVERIFY2(!featuresPath.isEmpty(), qPrintable(featureError));
+    FeatureStore features(featuresPath);
+    QVERIFY(features.isOpen());
+
+    const QHash<QString, QString> resolvedSongKeys = resolvedSongKeysFromFixture(db, features);
+    QVector<TrackScorer::Candidate> pool;
+    for (const RadioCandidateRow &row : db.radioCandidates({GenreTags::folded(QStringLiteral("Rock"))})) {
+        pool.push_back(candidateFromFixtureRow(row, resolvedSongKeys));
+    }
+    QVERIFY(containsCandidatePath(pool, seed.path));
+    QVERIFY(containsCandidatePath(pool, sameGenre.path));
+    QVERIFY(!containsCandidatePath(pool, tagPoorNeighbor.path));
+
+    QStringList neighborPaths;
+    const qint64 seedGroup = features.contentGroupForPath(seed.path);
+    const QList<QPair<qint64, double>> neighbors = features.neighborsOfGroup(seedGroup, 200);
+    QCOMPARE(neighbors.size(), 1);
+    const QStringList groupPaths = features.pathsInGroup(neighbors.first().first);
+    QCOMPARE(groupPaths.size(), 1);
+    neighborPaths.push_back(groupPaths.first());
+
+    for (const RadioCandidateRow &row : db.radioCandidatesForPaths(neighborPaths)) {
+        pool.push_back(candidateFromFixtureRow(row, resolvedSongKeys));
+    }
+    QVERIFY(containsCandidatePath(pool, tagPoorNeighbor.path));
+
+    QVERIFY2(db.setTrackFlag(tagPoorNeighbor.path, Database::TrackFlag::NeverRadio, true),
+             qPrintable(db.lastError()));
+    const QVector<TrackScorer::Candidate> filtered = RadioFilters::excludeFlaggedCandidates(
+        pool, db.flaggedPaths(Database::TrackFlag::NeverRadio));
+    QVERIFY(!containsCandidatePath(filtered, tagPoorNeighbor.path));
 }
 
 void RadioTest::genreAliasesExpandCandidatesAndMergeCounts()
