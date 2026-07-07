@@ -18,6 +18,10 @@
   curation...` edits aliases and ignored radio genres while showing the folded
   vocabulary, and `Library > Audio analysis` opens read-only status and
   duplicate-copy dialogs with pin/unpin controls.
+- `Library > Audio analysis > Analyze library audio` now starts the bundled
+  `muzaiten-index` from inside the app, with live menu progress, cancel, and a
+  completion summary. The indexer gained a `--progress` stderr stream so JSON
+  stdout stays machine-readable.
 - `Radio > Scoring weights...` now edits the active scoring weights, manages
   named tuning profiles, and can save suggestion-only learned profiles from the
   same local radio telemetry used by `muzaitenctl radio-learn`.

@@ -528,6 +528,13 @@ PlayerBar::PlayerBar(QWidget *parent)
     QAction *removeMissingTracks = fileMenu->addAction(QStringLiteral("Remove missing tracks"));
     fileMenu->addSeparator();
     auto *audioAnalysisMenu = fileMenu->addMenu(QStringLiteral("Audio analysis"));
+    m_audioAnalysisRunStatusAction = audioAnalysisMenu->addAction(QStringLiteral("Analysis idle"));
+    m_audioAnalysisRunStatusAction->setEnabled(false);
+    m_audioAnalysisRunStatusAction->setVisible(false);
+    m_analyzeAudioAction = audioAnalysisMenu->addAction(QStringLiteral("Analyze library audio"));
+    m_cancelAudioAnalysisAction = audioAnalysisMenu->addAction(QStringLiteral("Cancel analysis"));
+    m_cancelAudioAnalysisAction->setVisible(false);
+    audioAnalysisMenu->addSeparator();
     QAction *analysisStatus = audioAnalysisMenu->addAction(QStringLiteral("Analysis status..."));
     QAction *duplicateCopies = audioAnalysisMenu->addAction(QStringLiteral("Duplicate copies..."));
     auto *ratingTagsMenu = fileMenu->addMenu(QStringLiteral("Rating tags"));
@@ -871,6 +878,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(scanEnabledSources, &QAction::triggered, this, &PlayerBar::scanEnabledSourcesRequested);
     connect(forceRescan, &QAction::triggered, this, &PlayerBar::forceRescanRequested);
     connect(removeMissingTracks, &QAction::triggered, this, &PlayerBar::removeMissingTracksRequested);
+    connect(m_analyzeAudioAction, &QAction::triggered, this, &PlayerBar::audioAnalysisStartRequested);
+    connect(m_cancelAudioAnalysisAction, &QAction::triggered, this, &PlayerBar::audioAnalysisCancelRequested);
     connect(analysisStatus, &QAction::triggered, this, &PlayerBar::analysisStatusRequested);
     connect(duplicateCopies, &QAction::triggered, this, &PlayerBar::duplicateCopiesRequested);
     connect(syncCurrentTrackRatingTags, &QAction::triggered, this, &PlayerBar::syncCurrentTrackRatingTagsRequested);
@@ -990,6 +999,21 @@ void PlayerBar::setBackfillStatus(bool running, const QString &statusText, bool 
     }
     if (m_syncLastFmAction != nullptr) {
         m_syncLastFmAction->setEnabled(!running);
+    }
+}
+
+void PlayerBar::setAudioAnalysisRunStatus(bool running, const QString &statusText)
+{
+    if (m_audioAnalysisRunStatusAction != nullptr) {
+        m_audioAnalysisRunStatusAction->setVisible(running || !statusText.isEmpty());
+        m_audioAnalysisRunStatusAction->setText(statusText.isEmpty() ? QStringLiteral("Analysis idle") : statusText);
+    }
+    if (m_analyzeAudioAction != nullptr) {
+        m_analyzeAudioAction->setEnabled(!running);
+    }
+    if (m_cancelAudioAnalysisAction != nullptr) {
+        m_cancelAudioAnalysisAction->setVisible(running);
+        m_cancelAudioAnalysisAction->setEnabled(running);
     }
 }
 

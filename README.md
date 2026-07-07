@@ -359,7 +359,9 @@ fzf, a bare `search` dumps the whole library as TSV. First run builds the cache
 (a few seconds); later runs are instant.
 
 `semantic-search` also runs client-side, but requires `features.sqlite` to
-exist. Build or refresh it with the C++ indexer that is built alongside the app:
+exist. In the app, run `Library > Audio analysis > Analyze library audio`.
+From a terminal, build or refresh it with the C++ indexer that is built
+alongside the app:
 
 ```sh
 muzaiten-index scan --library ~/.local/share/muzaiten/library.sqlite \
@@ -411,7 +413,7 @@ Unsupported files are hidden by default. Enable `View > List unsupported files i
 - `Library > Source directories...`: configure scan-enabled and library-visible roots.
 - `Library > Force full rescan`: ignore fingerprints and re-read enabled source directories.
 - `Library > Rating tags`: sync current, current artist, all saved ratings, or retry pending tag writes.
-- `Library > Audio analysis`: inspect `features.sqlite` coverage and duplicate-copy groups.
+- `Library > Audio analysis`: analyze library audio, inspect `features.sqlite` coverage, and manage duplicate-copy groups.
 - `Library > Link roots...`: map stored library paths to readable/writable local paths. This is useful when files are mounted at a different location than the indexed path.
 - `Radio > Scoring weights...`: edit radio scoring weights, manage named profiles, or save a learned profile suggested from radio skip history.
 - `Radio > Genre curation...`: edit genre aliases, ignored radio genres, and the folded vocabulary used by radio matching.

@@ -94,6 +94,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QCloseEvent>
+#include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -1254,6 +1255,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::scoringWeightsRequested, this, &MainWindow::showScoringWeights);
     connect(m_playerBar, &PlayerBar::genreCurationRequested, this, &MainWindow::showGenreCuration);
+    connect(m_playerBar, &PlayerBar::audioAnalysisStartRequested, this, &MainWindow::startAudioAnalysis);
+    connect(m_playerBar, &PlayerBar::audioAnalysisCancelRequested, this, &MainWindow::cancelAudioAnalysis);
     connect(m_playerBar, &PlayerBar::analysisStatusRequested, this, &MainWindow::showAnalysisStatus);
     connect(m_playerBar, &PlayerBar::duplicateCopiesRequested, this, &MainWindow::showDuplicateCopies);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
@@ -1604,6 +1607,13 @@ MainWindow::~MainWindow()
     if (m_fillThread != nullptr) {
         m_fillThread->quit();
         m_fillThread->wait(3000);
+    }
+    if (m_audioAnalysisProcess != nullptr) {
+        m_audioAnalysisProcess->terminate();
+        if (!m_audioAnalysisProcess->waitForFinished(3000)) {
+            m_audioAnalysisProcess->kill();
+            m_audioAnalysisProcess->waitForFinished(1000);
+        }
     }
     if (m_mpdImportThread != nullptr) {
         // run() can be blocked on network I/O; cancel() (atomic) makes it and the
@@ -5450,6 +5460,175 @@ void MainWindow::showDuplicateCopies()
 {
     DuplicateCopiesDialog dialog(m_database, m_core->featuresPath(), this);
     dialog.exec();
+}
+
+void MainWindow::startAudioAnalysis()
+{
+    if (m_audioAnalysisProcess != nullptr) {
+        statusBar()->showMessage(QStringLiteral("Audio analysis is already running"), 5000);
+        return;
+    }
+
+    const QString binary = resolveMuzaitenIndexBinary();
+    if (binary.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("muzaiten-index was not found next to the app or on PATH"), 8000);
+        return;
+    }
+
+    m_audioAnalysisStdout.clear();
+    m_audioAnalysisStderr.clear();
+    m_audioAnalysisStderrBuffer.clear();
+    m_audioAnalysisCancelRequested = false;
+
+    auto *process = new QProcess(this);
+    m_audioAnalysisProcess = process;
+    connect(process, &QProcess::readyReadStandardOutput, this, &MainWindow::readAudioAnalysisStdout);
+    connect(process, &QProcess::readyReadStandardError, this, &MainWindow::readAudioAnalysisStderr);
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, &MainWindow::finishAudioAnalysis);
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (process != m_audioAnalysisProcess || error != QProcess::FailedToStart) {
+            return;
+        }
+        const QString detail = process->errorString();
+        m_audioAnalysisProcess = nullptr;
+        m_playerBar->setAudioAnalysisRunStatus(false, QString());
+        process->deleteLater();
+        statusBar()->showMessage(QStringLiteral("Audio analysis failed to start: %1").arg(detail), 10000);
+    });
+
+    process->setProgram(binary);
+    process->setArguments({
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        databasePath(),
+        QStringLiteral("--features"),
+        m_core->featuresPath(),
+        QStringLiteral("--json"),
+        QStringLiteral("--progress"),
+    });
+
+    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Analyzing..."));
+    statusBar()->showMessage(QStringLiteral("Starting audio analysis..."));
+    process->start();
+}
+
+void MainWindow::cancelAudioAnalysis()
+{
+    if (m_audioAnalysisProcess == nullptr) {
+        return;
+    }
+    QProcess *process = m_audioAnalysisProcess;
+    m_audioAnalysisCancelRequested = true;
+    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Canceling analysis..."));
+    statusBar()->showMessage(QStringLiteral("Canceling audio analysis..."), 4000);
+    process->terminate();
+    QTimer::singleShot(3000, this, [this, process]() {
+        if (m_audioAnalysisProcess == process && process->state() != QProcess::NotRunning) {
+            process->kill();
+        }
+    });
+}
+
+void MainWindow::readAudioAnalysisStdout()
+{
+    if (m_audioAnalysisProcess != nullptr) {
+        m_audioAnalysisStdout.append(m_audioAnalysisProcess->readAllStandardOutput());
+    }
+}
+
+void MainWindow::readAudioAnalysisStderr()
+{
+    if (m_audioAnalysisProcess == nullptr) {
+        return;
+    }
+    m_audioAnalysisStderrBuffer.append(m_audioAnalysisProcess->readAllStandardError());
+    qsizetype newline = -1;
+    while ((newline = m_audioAnalysisStderrBuffer.indexOf('\n')) >= 0) {
+        const QByteArray line = m_audioAnalysisStderrBuffer.left(newline);
+        m_audioAnalysisStderrBuffer.remove(0, newline + 1);
+        handleAudioAnalysisProgressLine(QString::fromUtf8(line).trimmed());
+    }
+}
+
+void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStatus)
+{
+    QProcess *process = m_audioAnalysisProcess;
+    if (process == nullptr) {
+        return;
+    }
+
+    readAudioAnalysisStdout();
+    readAudioAnalysisStderr();
+    if (!m_audioAnalysisStderrBuffer.isEmpty()) {
+        handleAudioAnalysisProgressLine(QString::fromUtf8(m_audioAnalysisStderrBuffer).trimmed());
+        m_audioAnalysisStderrBuffer.clear();
+    }
+
+    m_audioAnalysisProcess = nullptr;
+    m_playerBar->setAudioAnalysisRunStatus(false, QString());
+
+    if (m_audioAnalysisCancelRequested) {
+        statusBar()->showMessage(QStringLiteral("Audio analysis canceled"), 5000);
+    } else if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+        QString detail = QString::fromUtf8(m_audioAnalysisStderr).trimmed();
+        if (detail.isEmpty()) {
+            detail = process->errorString();
+        }
+        if (detail.isEmpty()) {
+            detail = QStringLiteral("exit code %1").arg(exitCode);
+        }
+        statusBar()->showMessage(QStringLiteral("Audio analysis failed: %1").arg(detail.left(240)), 10000);
+    } else {
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(m_audioAnalysisStdout, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            statusBar()->showMessage(QStringLiteral("Audio analysis finished but returned invalid JSON: %1")
+                                         .arg(parseError.errorString()),
+                                     10000);
+        } else {
+            const QJsonObject object = document.object();
+            statusBar()->showMessage(QStringLiteral("Audio analysis: scanned %1, skipped %2, failed %3, groups %4")
+                                         .arg(object.value(QStringLiteral("scanned")).toInt())
+                                         .arg(object.value(QStringLiteral("skipped")).toInt())
+                                         .arg(object.value(QStringLiteral("failed")).toInt())
+                                         .arg(object.value(QStringLiteral("groups")).toInt()),
+                                     10000);
+        }
+    }
+
+    m_audioAnalysisStdout.clear();
+    m_audioAnalysisStderr.clear();
+    m_audioAnalysisStderrBuffer.clear();
+    m_audioAnalysisCancelRequested = false;
+    process->deleteLater();
+}
+
+void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
+{
+    if (line.isEmpty()) {
+        return;
+    }
+    static const QRegularExpression progressPattern(QStringLiteral("^progress\\s+(\\d+)/(\\d+)$"));
+    const QRegularExpressionMatch match = progressPattern.match(line);
+    if (match.hasMatch()) {
+        m_playerBar->setAudioAnalysisRunStatus(
+            true,
+            QStringLiteral("Analyzing... %1/%2").arg(match.captured(1), match.captured(2)));
+        return;
+    }
+    m_audioAnalysisStderr.append(line.toUtf8());
+    m_audioAnalysisStderr.append('\n');
+}
+
+QString MainWindow::resolveMuzaitenIndexBinary() const
+{
+    const QString sibling = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("muzaiten-index"));
+    const QFileInfo siblingInfo(sibling);
+    if (siblingInfo.exists() && siblingInfo.isExecutable()) {
+        return siblingInfo.absoluteFilePath();
+    }
+    return QStandardPaths::findExecutable(QStringLiteral("muzaiten-index"));
 }
 
 void MainWindow::configureMpdSource()

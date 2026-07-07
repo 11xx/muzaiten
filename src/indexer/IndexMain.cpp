@@ -27,6 +27,7 @@
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <functional>
 #include <future>
 #include <limits>
 #include <map>
@@ -57,6 +58,7 @@ struct ScanOptions {
     int limit = -1;
     int jobs = 0;
     bool json = false;
+    bool progress = false;
 };
 
 struct StatusOptions {
@@ -505,18 +507,28 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
     return analysis;
 }
 
-std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, int jobs)
+std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, int jobs,
+                                         const std::function<void(int, int)> &progress = {})
 {
     if (pending.empty()) {
         return {};
     }
     const std::size_t workerCount = jobs > 0 ? static_cast<std::size_t>(jobs) : std::thread::hardware_concurrency();
     const std::size_t boundedWorkers = std::max<std::size_t>(1, workerCount);
+    const int total = static_cast<int>(pending.size());
+    int analyzed = 0;
+    auto appendAnalysis = [&](FileAnalysis analysis, std::vector<FileAnalysis> &analyses) {
+        analyses.push_back(std::move(analysis));
+        ++analyzed;
+        if (progress) {
+            progress(analyzed, total);
+        }
+    };
     if (boundedWorkers == 1 || pending.size() == 1) {
         std::vector<FileAnalysis> analyses;
         analyses.reserve(pending.size());
         for (const Candidate &candidate : pending) {
-            analyses.push_back(analyzeCandidate(candidate));
+            appendAnalysis(analyzeCandidate(candidate), analyses);
         }
         return analyses;
     }
@@ -526,7 +538,7 @@ std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, 
     analyses.reserve(pending.size());
     for (const Candidate &candidate : pending) {
         while (futures.size() >= boundedWorkers) {
-            analyses.push_back(futures.front().get());
+            appendAnalysis(futures.front().get(), analyses);
             futures.pop_front();
         }
         futures.push_back(std::async(std::launch::async, [candidate]() {
@@ -534,7 +546,7 @@ std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, 
         }));
     }
     while (!futures.empty()) {
-        analyses.push_back(futures.front().get());
+        appendAnalysis(futures.front().get(), analyses);
         futures.pop_front();
     }
     return analyses;
@@ -1015,6 +1027,14 @@ void emitPlain(const QJsonObject &object)
     }
 }
 
+void emitProgress(int analyzed, int total)
+{
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
+    err << "progress " << analyzed << '/' << total << '\n';
+    err.flush();
+}
+
 int runScan(const ScanOptions &options)
 {
     SqlConnection connection;
@@ -1042,7 +1062,16 @@ int runScan(const ScanOptions &options)
         return 0;
     }
 
-    const std::vector<FileAnalysis> analyses = analyzePending(pending, options.jobs);
+    int lastProgress = 0;
+    const auto progress = options.progress
+        ? std::function<void(int, int)>([&lastProgress](int analyzed, int total) {
+              if (analyzed == total || analyzed - lastProgress >= 25) {
+                  emitProgress(analyzed, total);
+                  lastProgress = analyzed;
+              }
+          })
+        : std::function<void(int, int)>();
+    const std::vector<FileAnalysis> analyses = analyzePending(pending, options.jobs, progress);
     int failed = 0;
     for (const FileAnalysis &analysis : analyses) {
         if (analysis.status != QLatin1String("ok")) {
@@ -1076,7 +1105,7 @@ void printUsage()
     std::fputs(
         "Usage: muzaiten-index <scan|status> [options]\n"
         "\n"
-        "scan --library PATH --features PATH [--limit N] [--jobs N] [--json]\n"
+        "scan --library PATH --features PATH [--limit N] [--jobs N] [--json] [--progress]\n"
         "status --features PATH [--json]\n",
         stderr);
 }
@@ -1135,6 +1164,8 @@ ScanOptions parseScan(QStringList arguments)
             options.stage = parseStage(arguments.at(++index));
         } else if (word == QLatin1String("--json")) {
             options.json = true;
+        } else if (word == QLatin1String("--progress")) {
+            options.progress = true;
         } else {
             fail(QStringLiteral("unknown scan option \"%1\"").arg(word));
         }

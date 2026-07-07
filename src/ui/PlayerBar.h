@@ -29,6 +29,7 @@ public:
     // hide Cancel, re-enable the start actions. lbResumable relabels the
     // ListenBrainz action to "Resume..." when a prior import was interrupted.
     void setBackfillStatus(bool running, const QString &statusText, bool lbResumable);
+    void setAudioAnalysisRunStatus(bool running, const QString &statusText);
     void setListUnsupportedFiles(bool show);
     // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
     void setScanProfile(int profile);
@@ -144,6 +145,8 @@ signals:
     void currentTrackRatingChanged(int rating0To100);
     void repeatModeChangeRequested(RepeatMode mode);
     void shuffleModeChangeRequested(ShuffleMode mode);
+    void audioAnalysisStartRequested();
+    void audioAnalysisCancelRequested();
     void libraryShuffleSettingsRequested();
     void radioShuffleSettingsRequested();
     void rediscoveryMixRequested();
@@ -210,6 +213,9 @@ private:
     class QAction *m_importListenBrainzAction = nullptr;
     class QAction *m_syncLastFmAction = nullptr;
     class QAction *m_cancelBackfillAction = nullptr;
+    class QAction *m_audioAnalysisRunStatusAction = nullptr;
+    class QAction *m_analyzeAudioAction = nullptr;
+    class QAction *m_cancelAudioAnalysisAction = nullptr;
     class QAction *m_mergeSavedQueueAction = nullptr;
     class QAction *m_releaseDeviceAction = nullptr;
     QList<class QAction *> m_playlistViewActions;

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QByteArray>
 #include <QMainWindow>
+#include <QProcess>
 #include <QSet>
 #include <QStringList>
 
@@ -237,6 +239,13 @@ private:
     void showGenreCuration();
     void showAnalysisStatus();
     void showDuplicateCopies();
+    void startAudioAnalysis();
+    void cancelAudioAnalysis();
+    void readAudioAnalysisStdout();
+    void readAudioAnalysisStderr();
+    void finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStatus);
+    void handleAudioAnalysisProgressLine(const QString &line);
+    QString resolveMuzaitenIndexBinary() const;
     void configureMpdSource();
     void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;
@@ -498,6 +507,11 @@ private:
     // running->idle transition (finished/failed) can pop a transient
     // status-bar message exactly once, instead of on every progress tick.
     bool m_backfillWasRunning = false;
+    QProcess *m_audioAnalysisProcess = nullptr;
+    QByteArray m_audioAnalysisStdout;
+    QByteArray m_audioAnalysisStderr;
+    QByteArray m_audioAnalysisStderrBuffer;
+    bool m_audioAnalysisCancelRequested = false;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;

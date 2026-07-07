@@ -97,15 +97,18 @@ void ffmpeg(const QStringList &arguments)
              qPrintable(error.isEmpty() ? QString::fromUtf8(stderrBytes) : error));
 }
 
-QJsonObject runIndexer(const QStringList &arguments)
+QJsonObject runIndexer(const QStringList &arguments, QByteArray *stderrBytes = nullptr)
 {
     QByteArray stdoutBytes;
-    QByteArray stderrBytes;
+    QByteArray capturedStderr;
     QString error;
-    if (!runProcess(muzaitenIndexPath(), arguments, &stdoutBytes, &stderrBytes, &error)) {
-        const QByteArray message = (error.isEmpty() ? QString::fromUtf8(stderrBytes) : error).toUtf8();
+    if (!runProcess(muzaitenIndexPath(), arguments, &stdoutBytes, &capturedStderr, &error)) {
+        const QByteArray message = (error.isEmpty() ? QString::fromUtf8(capturedStderr) : error).toUtf8();
         QTest::qFail(message.constData(), __FILE__, __LINE__);
         return {};
+    }
+    if (stderrBytes != nullptr) {
+        *stderrBytes = capturedStderr;
     }
 
     QJsonParseError parseError;
@@ -333,6 +336,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     const QString features = dir.filePath(QStringLiteral("features.sqlite"));
     createLibrary(library, {sineFlac, sineWav, sineMp3, padded, click120, click90, pink, silence});
 
+    QByteArray progressStderr;
     const QJsonObject first = runIndexer({
         QStringLiteral("scan"),
         QStringLiteral("--library"),
@@ -342,7 +346,12 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
         QStringLiteral("--jobs"),
         QStringLiteral("2"),
         QStringLiteral("--json"),
-    });
+        QStringLiteral("--progress"),
+    }, &progressStderr);
+    const QString progressLog = QString::fromUtf8(progressStderr);
+    QVERIFY2(progressLog.contains(QRegularExpression(QStringLiteral("^progress 8/8$"),
+                                                     QRegularExpression::MultilineOption)),
+             qPrintable(progressLog));
     QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 3);
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 8);
     QCOMPARE(first.value(QStringLiteral("skipped")).toInt(), 0);
