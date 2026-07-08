@@ -349,14 +349,28 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
         QStringLiteral("--progress"),
     }, &progressStderr);
     const QString progressLog = QString::fromUtf8(progressStderr);
-    QVERIFY2(progressLog.contains(QRegularExpression(QStringLiteral("^progress 8/8$"),
-                                                     QRegularExpression::MultilineOption)),
+    QVERIFY2(progressLog.contains(QRegularExpression(
+                 QStringLiteral("^progress \\d+/\\d+ elapsed=[0-9.]+ rate=([0-9.]+|-) eta=(\\d+|-)$"),
+                 QRegularExpression::MultilineOption)),
              qPrintable(progressLog));
+    const qsizetype groupingIndex = progressLog.indexOf(QStringLiteral("phase grouping"));
+    const qsizetype featuresIndex = progressLog.indexOf(QStringLiteral("phase features"));
+    QVERIFY2(groupingIndex >= 0, qPrintable(progressLog));
+    QVERIFY2(featuresIndex > groupingIndex, qPrintable(progressLog));
     QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 3);
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 8);
     QCOMPARE(first.value(QStringLiteral("skipped")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("failed")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("dsp_version")).toString(), QString::fromLatin1(Dsp::kDspVersion));
+    QVERIFY(first.contains(QStringLiteral("elapsed_secs")));
+    const QJsonObject timings = first.value(QStringLiteral("timings")).toObject();
+    for (const QString &stage : {QStringLiteral("decode"), QStringLiteral("hash"), QStringLiteral("dsp"), QStringLiteral("fp")}) {
+        const QJsonObject stats = timings.value(stage).toObject();
+        QVERIFY2(stats.contains(QStringLiteral("total_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("mean_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("p50_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("p95_ms")), qPrintable(stage));
+    }
     QVERIFY(first.value(QStringLiteral("featured_groups")).toInt() >= 6);
 
     QString connectionName;

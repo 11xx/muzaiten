@@ -5653,12 +5653,20 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
     if (line.isEmpty()) {
         return;
     }
-    static const QRegularExpression progressPattern(QStringLiteral("^progress\\s+(\\d+)/(\\d+)$"));
+    static const QRegularExpression progressPattern(QStringLiteral("^progress\\s+(\\d+)/(\\d+)(?:\\s+.*)?$"));
     const QRegularExpressionMatch match = progressPattern.match(line);
     if (match.hasMatch()) {
         m_playerBar->setAudioAnalysisRunStatus(
             true,
             QStringLiteral("Analyzing... %1/%2").arg(match.captured(1), match.captured(2)));
+        return;
+    }
+    if (line == QLatin1String("phase grouping")) {
+        m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Grouping tracks..."));
+        return;
+    }
+    if (line == QLatin1String("phase features")) {
+        m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Writing features..."));
         return;
     }
     m_audioAnalysisStderr.append(line.toUtf8());

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- `muzaiten-index scan` now reports elapsed time, per-stage timing aggregates,
+  rich progress/ETA lines, phase markers, and optional per-file `--verbose`
+  timing lines while keeping JSON output on stdout.
+
 ## [2026.07.07]
 
 ### Added

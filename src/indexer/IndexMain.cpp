@@ -19,6 +19,7 @@
 #include <QtEndian>
 
 #include <algorithm>
+#include <chrono>
 #include <bit>
 #include <cmath>
 #include <cstdio>
@@ -59,6 +60,7 @@ struct ScanOptions {
     int jobs = 0;
     bool json = false;
     bool progress = false;
+    bool verbose = false;
 };
 
 struct StatusOptions {
@@ -76,7 +78,13 @@ struct DecodedAudio {
     QByteArray pcm;
     std::vector<float> samples;
     qint64 durationMs = 0;
-    QString decodeHash;
+};
+
+struct StageTimings {
+    qint64 decodeMs = 0;
+    qint64 hashMs = 0;
+    qint64 dspMs = 0;
+    qint64 fpMs = 0;
 };
 
 struct FileAnalysis {
@@ -86,6 +94,7 @@ struct FileAnalysis {
     QByteArray chromaprint;
     std::optional<Dsp::ScalarFeatures> scalars;
     QString status = QStringLiteral("decode_failed");
+    StageTimings timings;
 };
 
 struct GroupRow {
@@ -131,6 +140,13 @@ private:
 [[noreturn]] void fail(const QString &message)
 {
     throw std::runtime_error(message.toStdString());
+}
+
+qint64 elapsedMs(std::chrono::steady_clock::time_point started)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - started)
+        .count();
 }
 
 void execSql(QSqlDatabase &database, const QString &sql)
@@ -426,8 +442,6 @@ DecodedAudio decodeCanonical(const QString &path)
     decoded.samples = std::move(samples);
     decoded.durationMs = static_cast<qint64>(
         std::llround(static_cast<double>(sampleCount) * 1000.0 / static_cast<double>(Dsp::kSampleRateHz)));
-    decoded.decodeHash = QString::fromLatin1(
-        QCryptographicHash::hash(decoded.pcm, QCryptographicHash::Sha256).toHex());
     return decoded;
 }
 
@@ -491,12 +505,23 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
     FileAnalysis analysis;
     analysis.candidate = candidate;
     try {
+        const auto decodeStarted = std::chrono::steady_clock::now();
         DecodedAudio decoded = decodeCanonical(candidate.path);
+        analysis.timings.decodeMs = elapsedMs(decodeStarted);
         analysis.durationMs = decoded.durationMs;
-        analysis.decodeHash = decoded.decodeHash;
+
+        const auto hashStarted = std::chrono::steady_clock::now();
+        analysis.decodeHash = QString::fromLatin1(
+            QCryptographicHash::hash(decoded.pcm, QCryptographicHash::Sha256).toHex());
+        analysis.timings.hashMs = elapsedMs(hashStarted);
+
+        const auto dspStarted = std::chrono::steady_clock::now();
         analysis.scalars = Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
+        analysis.timings.dspMs = elapsedMs(dspStarted);
         try {
+            const auto fpStarted = std::chrono::steady_clock::now();
             analysis.chromaprint = fpcalcFingerprint(candidate.path);
+            analysis.timings.fpMs = elapsedMs(fpStarted);
             analysis.status = QStringLiteral("ok");
         } catch (const std::exception &) {
             analysis.status = QStringLiteral("fp_failed");
@@ -508,7 +533,7 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
 }
 
 std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, int jobs,
-                                         const std::function<void(int, int)> &progress = {})
+                                         const std::function<void(const FileAnalysis &, int, int)> &completion = {})
 {
     if (pending.empty()) {
         return {};
@@ -518,11 +543,11 @@ std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, 
     const int total = static_cast<int>(pending.size());
     int analyzed = 0;
     auto appendAnalysis = [&](FileAnalysis analysis, std::vector<FileAnalysis> &analyses) {
-        analyses.push_back(std::move(analysis));
         ++analyzed;
-        if (progress) {
-            progress(analyzed, total);
+        if (completion) {
+            completion(analysis, analyzed, total);
         }
+        analyses.push_back(std::move(analysis));
     };
     if (boundedWorkers == 1 || pending.size() == 1) {
         std::vector<FileAnalysis> analyses;
@@ -984,7 +1009,63 @@ QJsonObject statusJson(QSqlDatabase &database)
     };
 }
 
-QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured)
+QJsonObject timingStatsJson(std::vector<qint64> values)
+{
+    if (values.empty()) {
+        return QJsonObject{
+            {QStringLiteral("total_ms"), 0},
+            {QStringLiteral("mean_ms"), 0.0},
+            {QStringLiteral("p50_ms"), 0},
+            {QStringLiteral("p95_ms"), 0},
+        };
+    }
+    std::sort(values.begin(), values.end());
+    qint64 total = 0;
+    for (const qint64 value : values) {
+        total += value;
+    }
+    const auto percentile = [&](double fraction) {
+        const auto index = static_cast<std::size_t>(
+            std::clamp<std::size_t>(
+                static_cast<std::size_t>(std::ceil(fraction * static_cast<double>(values.size()))) - 1,
+                0,
+                values.size() - 1));
+        return values.at(index);
+    };
+    return QJsonObject{
+        {QStringLiteral("total_ms"), static_cast<double>(total)},
+        {QStringLiteral("mean_ms"), static_cast<double>(total) / static_cast<double>(values.size())},
+        {QStringLiteral("p50_ms"), static_cast<double>(percentile(0.50))},
+        {QStringLiteral("p95_ms"), static_cast<double>(percentile(0.95))},
+    };
+}
+
+QJsonObject timingsJson(const std::vector<FileAnalysis> &analyses)
+{
+    std::vector<qint64> decode;
+    std::vector<qint64> hash;
+    std::vector<qint64> dsp;
+    std::vector<qint64> fp;
+    decode.reserve(analyses.size());
+    hash.reserve(analyses.size());
+    dsp.reserve(analyses.size());
+    fp.reserve(analyses.size());
+    for (const FileAnalysis &analysis : analyses) {
+        decode.push_back(analysis.timings.decodeMs);
+        hash.push_back(analysis.timings.hashMs);
+        dsp.push_back(analysis.timings.dspMs);
+        fp.push_back(analysis.timings.fpMs);
+    }
+    return QJsonObject{
+        {QStringLiteral("decode"), timingStatsJson(std::move(decode))},
+        {QStringLiteral("hash"), timingStatsJson(std::move(hash))},
+        {QStringLiteral("dsp"), timingStatsJson(std::move(dsp))},
+        {QStringLiteral("fp"), timingStatsJson(std::move(fp))},
+    };
+}
+
+QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
+                     double elapsedSecs = 0.0, const QJsonObject &timings = {})
 {
     return QJsonObject{
         {QStringLiteral("schema_version"), kSchemaVersion},
@@ -994,6 +1075,8 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         {QStringLiteral("groups"), groups},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
         {QStringLiteral("featured_groups"), featured},
+        {QStringLiteral("elapsed_secs"), elapsedSecs},
+        {QStringLiteral("timings"), timings.isEmpty() ? timingsJson({}) : timings},
     };
 }
 
@@ -1027,25 +1110,64 @@ void emitPlain(const QJsonObject &object)
     }
 }
 
-void emitProgress(int analyzed, int total)
+void emitVerboseFile(const FileAnalysis &analysis)
 {
     QTextStream err(stderr);
     err.setEncoding(QStringConverter::Utf8);
-    err << "progress " << analyzed << '/' << total << '\n';
+    err << "file " << analysis.status
+        << " decode=" << analysis.timings.decodeMs
+        << " hash=" << analysis.timings.hashMs
+        << " dsp=" << analysis.timings.dspMs
+        << " fp=" << analysis.timings.fpMs
+        << ' ' << analysis.candidate.path << '\n';
+    err.flush();
+}
+
+void emitProgress(int analyzed, int total, std::chrono::steady_clock::time_point started)
+{
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
+    const double elapsedSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const double rate = elapsedSecs > 0.0 ? static_cast<double>(analyzed) / elapsedSecs : 0.0;
+    const QString eta = rate > 0.0
+        ? QString::number(static_cast<qint64>(std::ceil(static_cast<double>(total - analyzed) / rate)))
+        : QStringLiteral("-");
+    err << "progress " << analyzed << '/' << total
+        << " elapsed=" << QString::number(elapsedSecs, 'f', 1)
+        << " rate=" << QString::number(rate, 'f', 1)
+        << " eta=" << eta << '\n';
+    err.flush();
+}
+
+void emitPhase(const QString &phase)
+{
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
+    err << "phase " << phase << '\n';
     err.flush();
 }
 
 int runScan(const ScanOptions &options)
 {
+    const auto scanStarted = std::chrono::steady_clock::now();
     SqlConnection connection;
     QSqlDatabase database = openFeaturesDatabase(options.featuresPath, connection);
     initSchema(database);
 
     if (options.stage == Stage::Features) {
+        if (options.progress) {
+            emitPhase(QStringLiteral("grouping"));
+        }
         const int groups = regroupContent(database, false);
+        if (options.progress) {
+            emitPhase(QStringLiteral("features"));
+        }
         ensureFeatureRows(database, {});
         const int featured = currentFeatureCount(database);
-        const QJsonObject payload = scanJson(0, 0, 0, groups, featured);
+        const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
+                                             std::chrono::duration<double>(
+                                                 std::chrono::steady_clock::now() - scanStarted)
+                                                 .count());
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
@@ -1054,24 +1176,39 @@ int runScan(const ScanOptions &options)
     const auto [pending, skipped] = splitPending(database, candidates);
     if (pending.empty()) {
         if (options.stage == Stage::All) {
+            if (options.progress) {
+                emitPhase(QStringLiteral("features"));
+            }
             ensureFeatureRows(database, {});
         }
         const QJsonObject payload =
-            scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database));
+            scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count());
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
 
     int lastProgress = 0;
-    const auto progress = options.progress
-        ? std::function<void(int, int)>([&lastProgress](int analyzed, int total) {
-              if (analyzed == total || analyzed - lastProgress >= 25) {
-                  emitProgress(analyzed, total);
-                  lastProgress = analyzed;
-              }
-          })
-        : std::function<void(int, int)>();
-    const std::vector<FileAnalysis> analyses = analyzePending(pending, options.jobs, progress);
+    auto lastProgressEmit = scanStarted;
+    const auto completion = (options.progress || options.verbose)
+        ? std::function<void(const FileAnalysis &, int, int)>(
+              [&](const FileAnalysis &analysis, int analyzed, int total) {
+                  if (options.verbose) {
+                      emitVerboseFile(analysis);
+                  }
+                  if (!options.progress) {
+                      return;
+                  }
+                  const auto now = std::chrono::steady_clock::now();
+                  if (analyzed == total || analyzed - lastProgress >= 25
+                      || std::chrono::duration_cast<std::chrono::seconds>(now - lastProgressEmit).count() >= 2) {
+                      emitProgress(analyzed, total, scanStarted);
+                      lastProgress = analyzed;
+                      lastProgressEmit = now;
+                  }
+              })
+        : std::function<void(const FileAnalysis &, int, int)>();
+    const std::vector<FileAnalysis> analyses = analyzePending(pending, options.jobs, completion);
     int failed = 0;
     for (const FileAnalysis &analysis : analyses) {
         if (analysis.status != QLatin1String("ok")) {
@@ -1080,12 +1217,20 @@ int runScan(const ScanOptions &options)
         upsertFile(database, analysis);
     }
 
+    if (options.progress) {
+        emitPhase(QStringLiteral("grouping"));
+    }
     const int groups = regroupContent(database, options.stage == Stage::All);
     if (options.stage == Stage::All) {
+        if (options.progress) {
+            emitPhase(QStringLiteral("features"));
+        }
         ensureFeatureRows(database, scalarMapFromAnalyses(analyses));
     }
     const QJsonObject payload =
-        scanJson(static_cast<int>(analyses.size()), skipped, failed, groups, currentFeatureCount(database));
+        scanJson(static_cast<int>(analyses.size()), skipped, failed, groups, currentFeatureCount(database),
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
+                 timingsJson(analyses));
     options.json ? emitJson(payload) : emitPlain(payload);
     return 0;
 }
@@ -1105,7 +1250,7 @@ void printUsage()
     std::fputs(
         "Usage: muzaiten-index <scan|status> [options]\n"
         "\n"
-        "scan --library PATH --features PATH [--limit N] [--jobs N] [--json] [--progress]\n"
+        "scan --library PATH --features PATH [--limit N] [--jobs N] [--json] [--progress] [--verbose]\n"
         "status --features PATH [--json]\n",
         stderr);
 }
@@ -1166,6 +1311,8 @@ ScanOptions parseScan(QStringList arguments)
             options.json = true;
         } else if (word == QLatin1String("--progress")) {
             options.progress = true;
+        } else if (word == QLatin1String("--verbose")) {
+            options.verbose = true;
         } else {
             fail(QStringLiteral("unknown scan option \"%1\"").arg(word));
         }
