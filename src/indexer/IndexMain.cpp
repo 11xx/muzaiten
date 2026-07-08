@@ -43,6 +43,12 @@
 
 #include <chromaprint.h>
 
+#ifdef Q_OS_LINUX
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 constexpr int kSchemaVersion = 3;
@@ -59,15 +65,28 @@ enum class Stage {
     All,
 };
 
+enum class Power {
+    Unspecified,
+    Background,
+    Balanced,
+    Turbo,
+};
+
 struct ScanOptions {
     QString libraryPath;
     QString featuresPath;
     Stage stage = Stage::All;
+    Power power = Power::Unspecified;
     int limit = -1;
     int jobs = 0;
     bool json = false;
     bool progress = false;
     bool verbose = false;
+};
+
+struct EffectivePower {
+    Power power = Power::Turbo;
+    int jobs = 1;
 };
 
 struct StatusOptions {
@@ -180,6 +199,58 @@ void requestStop(int)
 bool stopRequested()
 {
     return g_stopRequested.load(std::memory_order_relaxed);
+}
+
+std::size_t hardwareThreads()
+{
+    return std::max<std::size_t>(1, std::thread::hardware_concurrency());
+}
+
+QString powerName(Power power)
+{
+    switch (power) {
+    case Power::Background:
+        return QStringLiteral("background");
+    case Power::Balanced:
+        return QStringLiteral("balanced");
+    case Power::Turbo:
+    case Power::Unspecified:
+        return QStringLiteral("turbo");
+    }
+    return QStringLiteral("turbo");
+}
+
+EffectivePower resolvePower(const ScanOptions &options)
+{
+    const std::size_t cores = hardwareThreads();
+    const Power effectivePower = options.power == Power::Unspecified ? Power::Turbo : options.power;
+    int mappedJobs = static_cast<int>(cores);
+    if (effectivePower == Power::Background) {
+        mappedJobs = static_cast<int>(std::max<std::size_t>(1, cores / 4));
+    } else if (effectivePower == Power::Balanced) {
+        mappedJobs = static_cast<int>(std::max<std::size_t>(2, cores / 2));
+    }
+    if (options.jobs > 0) {
+        mappedJobs = options.jobs;
+    }
+    return {effectivePower, std::max(1, mappedJobs)};
+}
+
+void applyPowerPriority(Power power)
+{
+#ifdef Q_OS_LINUX
+    if (power == Power::Background) {
+        setpriority(PRIO_PROCESS, 0, 19);
+        constexpr int ioprioWhoProcess = 1;
+        constexpr int ioprioClassIdle = 3;
+        constexpr int ioprioClassShift = 13;
+        syscall(SYS_ioprio_set, ioprioWhoProcess, 0, ioprioClassIdle << ioprioClassShift);
+    } else if (power == Power::Balanced) {
+        setpriority(PRIO_PROCESS, 0, 10);
+    }
+#else
+    Q_UNUSED(power);
+#endif
 }
 
 qint64 elapsedMs(std::chrono::steady_clock::time_point started)
@@ -1129,7 +1200,8 @@ QJsonObject timingsJson(const TimingAccumulator &timings)
 }
 
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
-                     double elapsedSecs = 0.0, const QJsonObject &timings = {}, bool canceled = false)
+                     double elapsedSecs = 0.0, const QJsonObject &timings = {}, bool canceled = false,
+                     const QString &power = QStringLiteral("turbo"), int jobs = 1)
 {
     return QJsonObject{
         {QStringLiteral("schema_version"), kSchemaVersion},
@@ -1137,6 +1209,8 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         {QStringLiteral("skipped"), skipped},
         {QStringLiteral("failed"), failed},
         {QStringLiteral("canceled"), canceled},
+        {QStringLiteral("power"), power},
+        {QStringLiteral("jobs"), jobs},
         {QStringLiteral("groups"), groups},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
         {QStringLiteral("featured_groups"), featured},
@@ -1238,6 +1312,12 @@ int runScan(const ScanOptions &options)
     std::signal(SIGTERM, requestStop);
     std::signal(SIGINT, requestStop);
 
+    const EffectivePower effective = resolvePower(options);
+    if (options.power != Power::Unspecified) {
+        applyPowerPriority(effective.power);
+    }
+    const QString effectivePowerName = powerName(effective.power);
+
     const auto scanStarted = std::chrono::steady_clock::now();
     SqlConnection connection;
     QSqlDatabase database = openFeaturesDatabase(options.featuresPath, connection);
@@ -1256,7 +1336,11 @@ int runScan(const ScanOptions &options)
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
                                              std::chrono::duration<double>(
                                                  std::chrono::steady_clock::now() - scanStarted)
-                                                 .count());
+                                                 .count(),
+                                             {},
+                                             false,
+                                             effectivePowerName,
+                                             effective.jobs);
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
@@ -1278,7 +1362,11 @@ int runScan(const ScanOptions &options)
         }
         const QJsonObject payload =
             scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
-                     std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count());
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
+                     {},
+                     false,
+                     effectivePowerName,
+                     effective.jobs);
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
@@ -1332,7 +1420,7 @@ int runScan(const ScanOptions &options)
         ++uncommitted;
         commitIfNeeded(false);
     };
-    analyzePending(pending, options.jobs, completion);
+    analyzePending(pending, effective.jobs, completion);
     commitIfNeeded(true);
     commitTransaction(database);
 
@@ -1341,7 +1429,9 @@ int runScan(const ScanOptions &options)
             scanJson(scanned, skipped, failed, currentGroupCount(database), currentFeatureCount(database),
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
                      timingsJson(timings),
-                     true);
+                     true,
+                     effectivePowerName,
+                     effective.jobs);
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
@@ -1359,7 +1449,10 @@ int runScan(const ScanOptions &options)
     const QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
                  std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
-                 timingsJson(timings));
+                 timingsJson(timings),
+                 false,
+                 effectivePowerName,
+                 effective.jobs);
     options.json ? emitJson(payload) : emitPlain(payload);
     return 0;
 }
@@ -1379,7 +1472,7 @@ void printUsage()
     std::fputs(
         "Usage: muzaiten-index <scan|status> [options]\n"
         "\n"
-        "scan --library PATH --features PATH [--limit N] [--jobs N] [--json] [--progress] [--verbose]\n"
+        "scan --library PATH --features PATH [--limit N] [--jobs N] [--power background|balanced|turbo] [--json] [--progress] [--verbose]\n"
         "status --features PATH [--json]\n",
         stderr);
 }
@@ -1396,6 +1489,20 @@ Stage parseStage(const QString &value)
         return Stage::All;
     }
     fail(QStringLiteral("--stage must be identity, features, or all"));
+}
+
+Power parsePower(const QString &value)
+{
+    if (value == QLatin1String("background")) {
+        return Power::Background;
+    }
+    if (value == QLatin1String("balanced")) {
+        return Power::Balanced;
+    }
+    if (value == QLatin1String("turbo")) {
+        return Power::Turbo;
+    }
+    fail(QStringLiteral("--power must be background, balanced, or turbo"));
 }
 
 ScanOptions parseScan(QStringList arguments)
@@ -1436,6 +1543,11 @@ ScanOptions parseScan(QStringList arguments)
                 fail(QStringLiteral("scan --stage needs a value"));
             }
             options.stage = parseStage(arguments.at(++index));
+        } else if (word == QLatin1String("--power")) {
+            if (index + 1 >= arguments.size()) {
+                fail(QStringLiteral("scan --power needs a value"));
+            }
+            options.power = parsePower(arguments.at(++index));
         } else if (word == QLatin1String("--json")) {
             options.json = true;
         } else if (word == QLatin1String("--progress")) {

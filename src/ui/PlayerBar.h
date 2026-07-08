@@ -33,6 +33,7 @@ public:
     void setListUnsupportedFiles(bool show);
     // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
     void setScanProfile(int profile);
+    void setAnalysisPower(int power);
     void setShowGuessedPlaceholders(bool show);
     void setExplorerOptionsVisible(bool visible);
     void setQueueViewLayoutActive(bool active);
@@ -78,6 +79,7 @@ signals:
     void scanEnabledSourcesRequested();
     void forceRescanRequested();
     void scanProfileChanged(int profile);
+    void analysisPowerChanged(int power);
     void showGuessedPlaceholdersChanged(bool show);
     void removeMissingTracksRequested();
     void syncCurrentTrackRatingTagsRequested();
@@ -203,6 +205,7 @@ private:
     class QAction *m_alwaysShowTray = nullptr;
     class QAction *m_listUnsupportedFiles = nullptr;
     class QAction *m_scanProfileActions[3] = {nullptr, nullptr, nullptr};
+    class QAction *m_analysisPowerActions[3] = {nullptr, nullptr, nullptr};
     class QAction *m_showGuessedPlaceholders = nullptr;
     class QAction *m_trackInfoPaneVisible = nullptr;
     class QAction *m_listenBrainzEnabled = nullptr;

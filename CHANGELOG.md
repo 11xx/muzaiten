@@ -14,6 +14,10 @@
   analysis now skips zero filterbank weights, reuses per-thread filterbanks,
   groups tracks with a duration sliding window, and computes chromaprints
   in-process after a conformance check against fpcalc-era fingerprints.
+- Audio analysis now has explicit power levels. `muzaiten-index scan --power`
+  accepts `background`, `balanced`, and `turbo`, reports the effective power
+  and job count in JSON, and the app persists `Library > Audio analysis >
+  Analysis power` with a background default.
 
 ## [2026.07.07]
 

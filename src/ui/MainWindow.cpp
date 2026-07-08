@@ -1225,6 +1225,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         }
     });
     m_playerBar->setScanProfile(scanProfileSetting());
+    connect(m_playerBar, &PlayerBar::analysisPowerChanged, this, [this](int power) {
+        static const char *const names[3] = {"background", "balanced", "turbo"};
+        if (power >= 0 && power <= 2) {
+            m_state->setSetting(QStringLiteral("analysis.power"), QString::fromLatin1(names[power]));
+        }
+    });
+    m_playerBar->setAnalysisPower(analysisPowerSetting());
     m_database->setGuessedPlaceholdersVisible(guessedPlaceholdersEnabled());
     m_playerBar->setShowGuessedPlaceholders(guessedPlaceholdersEnabled());
     connect(m_playerBar, &PlayerBar::showGuessedPlaceholdersChanged, this, [this](bool show) {
@@ -1915,6 +1922,18 @@ int MainWindow::scanProfileSetting() const
         return 2;
     }
     return 1;
+}
+
+int MainWindow::analysisPowerSetting() const
+{
+    const QString value = m_state->setting(QStringLiteral("analysis.power"), QStringLiteral("background"));
+    if (value == QStringLiteral("balanced")) {
+        return 1;
+    }
+    if (value == QStringLiteral("turbo")) {
+        return 2;
+    }
+    return 0;
 }
 
 bool MainWindow::guessedPlaceholdersEnabled() const
@@ -5542,12 +5561,16 @@ void MainWindow::startAudioAnalysis()
     });
 
     process->setProgram(binary);
+    static const char *const analysisPowerNames[3] = {"background", "balanced", "turbo"};
+    const int analysisPower = analysisPowerSetting();
     process->setArguments({
         QStringLiteral("scan"),
         QStringLiteral("--library"),
         databasePath(),
         QStringLiteral("--features"),
         m_core->featuresPath(),
+        QStringLiteral("--power"),
+        QString::fromLatin1(analysisPowerNames[std::clamp(analysisPower, 0, 2)]),
         QStringLiteral("--json"),
         QStringLiteral("--progress"),
     });

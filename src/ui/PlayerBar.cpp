@@ -531,6 +531,17 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_audioAnalysisRunStatusAction = audioAnalysisMenu->addAction(QStringLiteral("Analysis idle"));
     m_audioAnalysisRunStatusAction->setEnabled(false);
     m_audioAnalysisRunStatusAction->setVisible(false);
+    auto *analysisPowerMenu = audioAnalysisMenu->addMenu(QStringLiteral("Analysis power"));
+    auto *analysisPowerGroup = new QActionGroup(this);
+    analysisPowerGroup->setExclusive(true);
+    const char *analysisPowerLabels[3] = {"Background", "Balanced", "Turbo"};
+    for (int i = 0; i < 3; ++i) {
+        m_analysisPowerActions[i] = analysisPowerMenu->addAction(QString::fromLatin1(analysisPowerLabels[i]));
+        m_analysisPowerActions[i]->setCheckable(true);
+        analysisPowerGroup->addAction(m_analysisPowerActions[i]);
+        connect(m_analysisPowerActions[i], &QAction::triggered, this, [this, i]() { emit analysisPowerChanged(i); });
+    }
+    m_analysisPowerActions[0]->setChecked(true);
     m_analyzeAudioAction = audioAnalysisMenu->addAction(QStringLiteral("Analyze library audio"));
     m_cancelAudioAnalysisAction = audioAnalysisMenu->addAction(QStringLiteral("Cancel analysis"));
     m_cancelAudioAnalysisAction->setVisible(false);
@@ -1104,6 +1115,14 @@ void PlayerBar::setScanProfile(int profile)
     // setChecked emits toggled, not triggered (which is what scanProfileChanged is
     // wired to), so this reflects the stored value without re-emitting.
     m_scanProfileActions[profile]->setChecked(true);
+}
+
+void PlayerBar::setAnalysisPower(int power)
+{
+    if (power < 0 || power > 2 || m_analysisPowerActions[power] == nullptr) {
+        return;
+    }
+    m_analysisPowerActions[power]->setChecked(true);
 }
 
 void PlayerBar::setShowGuessedPlaceholders(bool show)

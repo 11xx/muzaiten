@@ -18,6 +18,7 @@
 #include <QTest>
 #include <QUuid>
 #include <QVariant>
+#include <QVector>
 #include <QtEndian>
 
 #include <bit>
@@ -25,6 +26,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <thread>
 
 class IndexerScanTest final : public QObject {
     Q_OBJECT
@@ -32,6 +34,7 @@ class IndexerScanTest final : public QObject {
 private slots:
     void generatedFixtureMatrixWritesSchemaV3Features();
     void groupIdsStayStableWhenLibraryGrows();
+    void powerOptionsReportEffectiveJobs();
     void cancelPersistsCompletedRowsAndRerunSkipsThem();
 };
 
@@ -792,6 +795,42 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
 
     db.close();
     QSqlDatabase::removeDatabase(connectionName);
+}
+
+void IndexerScanTest::powerOptionsReportEffectiveJobs()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    const int cores = static_cast<int>(std::max<std::size_t>(1, std::thread::hardware_concurrency()));
+    struct Case {
+        QString power;
+        QStringList extra;
+        int expectedJobs;
+    };
+    const QVector<Case> cases{
+        {QStringLiteral("background"), {}, std::max(1, cores / 4)},
+        {QStringLiteral("balanced"), {}, std::max(2, cores / 2)},
+        {QStringLiteral("turbo"), {}, cores},
+        {QStringLiteral("background"), {QStringLiteral("--jobs"), QStringLiteral("3")}, 3},
+    };
+
+    for (const Case &item : cases) {
+        QStringList args{
+            QStringLiteral("scan"),
+            QStringLiteral("--stage"),
+            QStringLiteral("features"),
+            QStringLiteral("--features"),
+            dir.filePath(QStringLiteral("%1.sqlite").arg(item.power + item.extra.join(QString()))),
+            QStringLiteral("--power"),
+            item.power,
+            QStringLiteral("--json"),
+        };
+        args.append(item.extra);
+        const QJsonObject result = runIndexer(args);
+        QCOMPARE(result.value(QStringLiteral("power")).toString(), item.power);
+        QCOMPARE(result.value(QStringLiteral("jobs")).toInt(), item.expectedJobs);
+    }
 }
 
 void IndexerScanTest::cancelPersistsCompletedRowsAndRerunSkipsThem()
