@@ -85,6 +85,7 @@ private slots:
     void clickTrackOnsetRateMatchesClickDensity();
     void sineEnergyLandsInTheMatchingStftBin();
     void melFiltersAreNonnegativeAndCoverTheBand();
+    void sparseMelApplyMatchesDenseReferenceExactly();
     void fullScaleSineLoudnessIsNearTheoreticalValue();
     void halvingAmplitudeDropsLoudnessSixDb();
     void steadyToneHasNegligibleBlockSpread();
@@ -175,6 +176,30 @@ void DspTest::melFiltersAreNonnegativeAndCoverTheBand()
             anyPositive = anyPositive || w > 0.0;
         }
         QVERIFY2(anyPositive, "empty mel filter");
+    }
+}
+
+void DspTest::sparseMelApplyMatchesDenseReferenceExactly()
+{
+    const Dsp::MelBank bank = Dsp::MelBank::slaney(128, 2048, 22050.0);
+    const Dsp::PowerSpectrogram spec = Dsp::powerSpectrogram(makeNoise(Dsp::kSampleRateHz * 5, 11), 2048, 512);
+    QVERIFY(!spec.frames.empty());
+
+    const std::vector<double> &frame = spec.frames.at(spec.frames.size() / 2);
+    std::vector<double> dense(bank.weights.size(), 0.0);
+    for (std::size_t m = 0; m < bank.weights.size(); ++m) {
+        const std::vector<double> &filter = bank.weights[m];
+        double sum = 0.0;
+        for (std::size_t k = 0; k < filter.size() && k < frame.size(); ++k) {
+            sum += filter[k] * frame[k];
+        }
+        dense[m] = sum;
+    }
+
+    const std::vector<double> sparse = bank.apply(frame);
+    QCOMPARE(sparse.size(), dense.size());
+    for (std::size_t i = 0; i < dense.size(); ++i) {
+        QCOMPARE(sparse[i], dense[i]);
     }
 }
 

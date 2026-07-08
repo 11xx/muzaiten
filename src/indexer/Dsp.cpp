@@ -5,6 +5,8 @@
 #include <complex>
 #include <limits>
 #include <numbers>
+#include <optional>
+#include <utility>
 
 namespace {
 
@@ -246,6 +248,7 @@ MelBank MelBank::slaney(std::size_t nMels, std::size_t nFft, double sampleRate)
 
     MelBank bank;
     bank.weights.assign(nMels, std::vector<double>(nBins, 0.0));
+    bank.sparseSpans.reserve(nMels);
     for (std::size_t m = 0; m < nMels; ++m) {
         const double lower = melPoints[m];
         const double center = melPoints[m + 1];
@@ -258,6 +261,19 @@ MelBank MelBank::slaney(std::size_t nMels, std::size_t nFft, double sampleRate)
             const double falling = (upper - freq) / (upper - center);
             bank.weights[m][k] = std::max(0.0, std::min(rising, falling)) * enorm;
         }
+        std::size_t begin = 0;
+        while (begin < nBins && bank.weights[m][begin] == 0.0) {
+            ++begin;
+        }
+        std::size_t end = nBins;
+        while (end > begin && bank.weights[m][end - 1] == 0.0) {
+            --end;
+        }
+        const std::size_t offset = bank.sparseWeights.size();
+        for (std::size_t k = begin; k < end; ++k) {
+            bank.sparseWeights.push_back(bank.weights[m][k]);
+        }
+        bank.sparseSpans.push_back({begin, end, offset});
     }
     return bank;
 }
@@ -265,6 +281,18 @@ MelBank MelBank::slaney(std::size_t nMels, std::size_t nFft, double sampleRate)
 std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
 {
     std::vector<double> out(weights.size(), 0.0);
+    if (sparseSpans.size() == weights.size()) {
+        for (std::size_t m = 0; m < sparseSpans.size(); ++m) {
+            const SparseSpan &span = sparseSpans[m];
+            double sum = 0.0;
+            const std::size_t end = std::min(span.end, powerFrame.size());
+            for (std::size_t k = span.begin; k < end; ++k) {
+                sum += sparseWeights[span.offset + (k - span.begin)] * powerFrame[k];
+            }
+            out[m] = sum;
+        }
+        return out;
+    }
     for (std::size_t m = 0; m < weights.size(); ++m) {
         double sum = 0.0;
         const std::vector<double> &filter = weights[m];
@@ -274,6 +302,15 @@ std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
         out[m] = sum;
     }
     return out;
+}
+
+const MelBank &cachedMelBank(unsigned sampleRate)
+{
+    thread_local std::optional<std::pair<unsigned, MelBank>> cached;
+    if (!cached || cached->first != sampleRate) {
+        cached = std::make_pair(sampleRate, MelBank::slaney(kNMels, kNFft, static_cast<double>(sampleRate)));
+    }
+    return cached->second;
 }
 
 std::vector<double> onsetEnvelope(const PowerSpectrogram &spectrogram, const MelBank &melBank)
@@ -559,7 +596,7 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
         return std::nullopt;
     }
 
-    const MelBank melBank = MelBank::slaney(kNMels, kNFft, rate);
+    const MelBank &melBank = cachedMelBank(sampleRate);
     const std::vector<double> envelope = onsetEnvelope(spectrogram, melBank);
     const double frameRate = rate / static_cast<double>(kHop);
 

@@ -10,6 +10,10 @@
 - `muzaiten-index scan` now streams completed analysis rows to `features.sqlite`
   during long runs and exits cleanly with `"canceled": true` after SIGTERM or
   SIGINT, so canceling a scan preserves completed work for the next run.
+- `muzaiten-index scan` is substantially faster on large libraries: mel
+  analysis now skips zero filterbank weights, reuses per-thread filterbanks,
+  groups tracks with a duration sliding window, and computes chromaprints
+  in-process after a conformance check against fpcalc-era fingerprints.
 
 ## [2026.07.07]
 

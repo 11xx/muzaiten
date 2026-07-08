@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -17,8 +18,11 @@
 #include <QTest>
 #include <QUuid>
 #include <QVariant>
+#include <QtEndian>
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 
@@ -32,6 +36,9 @@ private slots:
 };
 
 namespace {
+
+constexpr double kFingerprintBerGate = 0.05;
+constexpr int kChromaprintOffsetFrames = 3;
 
 QString muzaitenIndexPath()
 {
@@ -139,6 +146,87 @@ QJsonObject parseJsonObject(const QByteArray &bytes)
     return document.object();
 }
 
+QByteArray encodeFingerprint(const QJsonArray &fingerprint)
+{
+    QByteArray blob;
+    blob.resize(static_cast<qsizetype>(fingerprint.size() * static_cast<qsizetype>(sizeof(qint32))));
+    auto *data = reinterpret_cast<uchar *>(blob.data());
+    for (qsizetype index = 0; index < fingerprint.size(); ++index) {
+        const auto raw = static_cast<quint32>(fingerprint.at(index).toDouble());
+        qToLittleEndian<qint32>(static_cast<qint32>(raw),
+                                data + index * static_cast<qsizetype>(sizeof(qint32)));
+    }
+    return blob;
+}
+
+QByteArray fpcalcFingerprint(const QString &path)
+{
+    QByteArray stdoutBytes;
+    QByteArray stderrBytes;
+    QString error;
+    const QStringList args{
+        QStringLiteral("-raw"),
+        QStringLiteral("-json"),
+        QStringLiteral("-length"),
+        QStringLiteral("120"),
+        path,
+    };
+    if (!runProcess(QStringLiteral("fpcalc"), args, &stdoutBytes, &stderrBytes, &error)) {
+        const QByteArray message = (error.isEmpty() ? QString::fromUtf8(stderrBytes) : error).toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        return {};
+    }
+    const QJsonObject object = parseJsonObject(stdoutBytes);
+    return encodeFingerprint(object.value(QStringLiteral("fingerprint")).toArray());
+}
+
+std::vector<qint32> decodeFingerprint(const QByteArray &blob)
+{
+    std::vector<qint32> values;
+    if (blob.size() % static_cast<qsizetype>(sizeof(qint32)) != 0) {
+        return values;
+    }
+    const qsizetype count = blob.size() / static_cast<qsizetype>(sizeof(qint32));
+    values.reserve(static_cast<std::size_t>(count));
+    const auto *data = reinterpret_cast<const uchar *>(blob.constData());
+    for (qsizetype index = 0; index < count; ++index) {
+        values.push_back(qFromLittleEndian<qint32>(
+            data + index * static_cast<qsizetype>(sizeof(qint32))));
+    }
+    return values;
+}
+
+double bitErrorRate(const std::vector<qint32> &left, const std::vector<qint32> &right, int offset)
+{
+    const std::size_t leftStart = offset >= 0 ? static_cast<std::size_t>(offset) : 0;
+    const std::size_t rightStart = offset < 0 ? static_cast<std::size_t>(-offset) : 0;
+    if (leftStart >= left.size() || rightStart >= right.size()) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const std::size_t overlap = std::min(left.size() - leftStart, right.size() - rightStart);
+    if (overlap == 0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    quint64 errors = 0;
+    for (std::size_t index = 0; index < overlap; ++index) {
+        const std::uint32_t diff = static_cast<std::uint32_t>(
+            left[leftStart + index] ^ right[rightStart + index]);
+        errors += std::popcount(diff);
+    }
+    return static_cast<double>(errors) / (static_cast<double>(overlap) * 32.0);
+}
+
+double bestBitErrorRate(const QByteArray &leftBlob, const QByteArray &rightBlob)
+{
+    const std::vector<qint32> left = decodeFingerprint(leftBlob);
+    const std::vector<qint32> right = decodeFingerprint(rightBlob);
+    double best = std::numeric_limits<double>::infinity();
+    for (int offset = -kChromaprintOffsetFrames; offset <= kChromaprintOffsetFrames; ++offset) {
+        best = std::min(best, bitErrorRate(left, right, offset));
+    }
+    return best;
+}
+
 bool execSql(QSqlQuery &query, const QString &sql, QString *error)
 {
     if (query.exec(sql)) {
@@ -227,6 +315,30 @@ QString decodeHashFor(QSqlDatabase &db, const QString &path)
         return {};
     }
     return query.value(0).toString();
+}
+
+QByteArray chromaprintFor(QSqlDatabase &db, const QString &path)
+{
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("SELECT chromaprint_fp FROM files WHERE path = ?"));
+    query.addBindValue(path);
+    if (!query.exec() || !query.next()) {
+        const QByteArray message = QStringLiteral("missing chromaprint for %1: %2")
+                                       .arg(path, query.lastError().text())
+                                       .toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        return {};
+    }
+    return query.value(0).toByteArray();
+}
+
+void replaceStoredFingerprint(QSqlDatabase &db, const QString &path, const QByteArray &fingerprint)
+{
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("UPDATE files SET chromaprint_fp = ? WHERE path = ?"));
+    query.addBindValue(fingerprint);
+    query.addBindValue(path);
+    QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
 }
 
 std::optional<double> optionalFeature(QSqlDatabase &db, qint64 groupId, const QString &column)
@@ -417,6 +529,21 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QSqlDatabase db = openReadOnly(features, &connectionName);
     QVERIFY(db.open());
 
+    for (const QString &file : {sineFlac, sineWav, sineMp3, padded, click120, click90, pink, silence}) {
+        const QByteArray indexed = chromaprintFor(db, file);
+        const QByteArray fpcalc = fpcalcFingerprint(file);
+        const auto indexedValues = decodeFingerprint(indexed);
+        const auto fpcalcValues = decodeFingerprint(fpcalc);
+        QVERIFY2(!indexedValues.empty(), qPrintable(file));
+        QVERIFY2(!fpcalcValues.empty(), qPrintable(file));
+        const double lengthRatio = static_cast<double>(indexedValues.size()) / static_cast<double>(fpcalcValues.size());
+        QVERIFY2(lengthRatio >= 0.9 && lengthRatio <= 1.1,
+                 qPrintable(QStringLiteral("%1 fingerprint length ratio %2").arg(file).arg(lengthRatio)));
+        const double ber = bestBitErrorRate(indexed, fpcalc);
+        QVERIFY2(ber < kFingerprintBerGate,
+                 qPrintable(QStringLiteral("%1 BER %2").arg(file).arg(ber)));
+    }
+
     const qint64 sineGroup = groupFor(db, sineFlac);
     QCOMPARE(groupFor(db, sineWav), sineGroup);
     QCOMPARE(groupFor(db, sineMp3), sineGroup);
@@ -526,6 +653,20 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
         QStringLiteral("--json"),
     };
     runIndexer(scanArgs);
+
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-fpcalc-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            replaceStoredFingerprint(db, tone, fpcalcFingerprint(tone));
+            replaceStoredFingerprint(db, click, fpcalcFingerprint(click));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 
     qint64 toneGroup = -1;
     qint64 clickGroup = -1;

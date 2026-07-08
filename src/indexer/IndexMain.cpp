@@ -6,7 +6,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -35,11 +34,14 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <queue>
 #include <stdexcept>
 #include <thread>
 #include <vector>
+
+#include <chromaprint.h>
 
 namespace {
 
@@ -470,15 +472,19 @@ DecodedAudio decodeCanonical(const QString &path)
 
     const qsizetype sampleCount = pcm.size() / static_cast<qsizetype>(sizeof(float));
     std::vector<float> samples;
-    samples.reserve(static_cast<std::size_t>(sampleCount));
-    const auto *data = reinterpret_cast<const uchar *>(pcm.constData());
-    for (qsizetype index = 0; index < sampleCount; ++index) {
-        const quint32 raw = qFromLittleEndian<quint32>(
-            data + index * static_cast<qsizetype>(sizeof(quint32)));
-        float sample = 0.0F;
-        static_assert(sizeof(sample) == sizeof(raw));
-        std::memcpy(&sample, &raw, sizeof(sample));
-        samples.push_back(sample);
+    samples.resize(static_cast<std::size_t>(sampleCount));
+    if constexpr (std::endian::native == std::endian::little) {
+        std::memcpy(samples.data(), pcm.constData(), static_cast<std::size_t>(pcm.size()));
+    } else {
+        const auto *data = reinterpret_cast<const uchar *>(pcm.constData());
+        for (qsizetype index = 0; index < sampleCount; ++index) {
+            const quint32 raw = qFromLittleEndian<quint32>(
+                data + index * static_cast<qsizetype>(sizeof(quint32)));
+            float sample = 0.0F;
+            static_assert(sizeof(sample) == sizeof(raw));
+            std::memcpy(&sample, &raw, sizeof(sample));
+            samples[static_cast<std::size_t>(index)] = sample;
+        }
     }
 
     DecodedAudio decoded;
@@ -489,59 +495,64 @@ DecodedAudio decodeCanonical(const QString &path)
     return decoded;
 }
 
-QByteArray encodeFingerprint(const QJsonArray &fingerprint)
+QByteArray encodeRawFingerprint(const uint32_t *fingerprint, int size)
 {
     QByteArray blob;
-    blob.resize(static_cast<qsizetype>(fingerprint.size() * static_cast<qsizetype>(sizeof(qint32))));
+    blob.resize(static_cast<qsizetype>(size * static_cast<int>(sizeof(qint32))));
     auto *data = reinterpret_cast<uchar *>(blob.data());
-    for (qsizetype index = 0; index < fingerprint.size(); ++index) {
-        const QJsonValue value = fingerprint.at(index);
-        if (!value.isDouble()) {
-            fail(QStringLiteral("fpcalc returned a non-numeric fingerprint value"));
-        }
-        bool ok = false;
-        const qint32 raw = QString::number(value.toInt()).toInt(&ok);
-        if (!ok) {
-            fail(QStringLiteral("fpcalc returned an invalid fingerprint value"));
-        }
-        qToLittleEndian<qint32>(raw, data + index * static_cast<qsizetype>(sizeof(qint32)));
+    for (int index = 0; index < size; ++index) {
+        qToLittleEndian<qint32>(static_cast<qint32>(fingerprint[index]),
+                                data + static_cast<qsizetype>(index) * static_cast<qsizetype>(sizeof(qint32)));
     }
     return blob;
 }
 
-QByteArray fpcalcFingerprint(const QString &path)
+QByteArray chromaprintFingerprint(const std::vector<float> &samples, int sampleRate)
 {
-    QProcess process;
-    process.start(QStringLiteral("fpcalc"), {
-        QStringLiteral("-raw"),
-        QStringLiteral("-json"),
-        QStringLiteral("-length"),
-        QStringLiteral("120"),
-        path,
-    });
-    if (!process.waitForStarted(5000)) {
-        fail(QStringLiteral("spawning fpcalc for %1").arg(path));
-    }
-    if (!process.waitForFinished(kProcessTimeoutMs)) {
-        process.kill();
-        process.waitForFinished(1000);
-        fail(QStringLiteral("fpcalc timed out for %1").arg(path));
-    }
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        const QString detail = compactProcessError(process);
-        fail(QStringLiteral("fpcalc failed for %1%2").arg(path, detail.isEmpty() ? QString() : QStringLiteral(": ") + detail));
+    const std::size_t cappedSamples = std::min<std::size_t>(
+        samples.size(), static_cast<std::size_t>(sampleRate) * 120U);
+    std::vector<int16_t> pcm;
+    pcm.reserve(cappedSamples);
+    for (std::size_t index = 0; index < cappedSamples; ++index) {
+        const float clamped = std::clamp(samples[index], -1.0F, 1.0F);
+        pcm.push_back(static_cast<int16_t>(std::lrint(static_cast<double>(clamped) * 32767.0)));
     }
 
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(process.readAllStandardOutput(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        fail(QStringLiteral("fpcalc returned invalid JSON for %1").arg(path));
+    ChromaprintContext *ctx = chromaprint_new(CHROMAPRINT_ALGORITHM_DEFAULT);
+    if (ctx == nullptr) {
+        fail(QStringLiteral("creating chromaprint context"));
     }
-    const QJsonArray fingerprint = document.object().value(QStringLiteral("fingerprint")).toArray();
-    if (fingerprint.isEmpty()) {
-        fail(QStringLiteral("fpcalc returned an empty fingerprint for %1").arg(path));
+    auto freeContext = [&]() {
+        chromaprint_free(ctx);
+        ctx = nullptr;
+    };
+    if (!chromaprint_start(ctx, sampleRate, 1)) {
+        freeContext();
+        fail(QStringLiteral("starting chromaprint"));
     }
-    return encodeFingerprint(fingerprint);
+    if (!pcm.empty()
+        && !chromaprint_feed(ctx, pcm.data(), static_cast<int>(pcm.size()))) {
+        freeContext();
+        fail(QStringLiteral("feeding chromaprint"));
+    }
+    if (!chromaprint_finish(ctx)) {
+        freeContext();
+        fail(QStringLiteral("finishing chromaprint"));
+    }
+
+    uint32_t *raw = nullptr;
+    int size = 0;
+    if (!chromaprint_get_raw_fingerprint(ctx, &raw, &size) || raw == nullptr || size <= 0) {
+        if (raw != nullptr) {
+            chromaprint_dealloc(raw);
+        }
+        freeContext();
+        fail(QStringLiteral("chromaprint returned an empty fingerprint"));
+    }
+    const QByteArray encoded = encodeRawFingerprint(raw, size);
+    chromaprint_dealloc(raw);
+    freeContext();
+    return encoded;
 }
 
 FileAnalysis analyzeCandidate(const Candidate &candidate)
@@ -564,7 +575,7 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
         analysis.timings.dspMs = elapsedMs(dspStarted);
         try {
             const auto fpStarted = std::chrono::steady_clock::now();
-            analysis.chromaprint = fpcalcFingerprint(candidate.path);
+            analysis.chromaprint = chromaprintFingerprint(decoded.samples, Dsp::kSampleRateHz);
             analysis.timings.fpMs = elapsedMs(fpStarted);
             analysis.status = QStringLiteral("ok");
         } catch (const std::exception &) {
@@ -783,10 +794,20 @@ std::vector<std::vector<std::size_t>> groupedRows(const std::vector<GroupRow> &r
         }
     }
 
-    for (std::size_t left = 0; left < rows.size(); ++left) {
-        for (std::size_t right = left + 1; right < rows.size(); ++right) {
-            if (std::llabs(rows[left].durationMs - rows[right].durationMs) > kDurationBucketMs) {
-                continue;
+    std::vector<std::size_t> byDuration(rows.size());
+    std::iota(byDuration.begin(), byDuration.end(), 0);
+    std::sort(byDuration.begin(), byDuration.end(), [&rows](std::size_t left, std::size_t right) {
+        if (rows[left].durationMs != rows[right].durationMs) {
+            return rows[left].durationMs < rows[right].durationMs;
+        }
+        return rows[left].path < rows[right].path;
+    });
+    for (std::size_t leftPos = 0; leftPos < byDuration.size(); ++leftPos) {
+        const std::size_t left = byDuration[leftPos];
+        for (std::size_t rightPos = leftPos + 1; rightPos < byDuration.size(); ++rightPos) {
+            const std::size_t right = byDuration[rightPos];
+            if (rows[right].durationMs - rows[left].durationMs > kDurationBucketMs) {
+                break;
             }
             if (bestBitErrorRate(rows[left].chromaprint, rows[right].chromaprint) < kChromaprintBerThreshold) {
                 unionFind.unite(left, right);

@@ -31,6 +31,7 @@ find_package(Qt6 6.11 REQUIRED COMPONENTS Core DBus Gui Multimedia Network Widge
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+pkg_check_modules(Chromaprint REQUIRED IMPORTED_TARGET libchromaprint)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-audio-1.0
@@ -388,7 +389,7 @@ add_executable(muzaiten-index
     src/indexer/Dsp.cpp
 )
 target_include_directories(muzaiten-index PRIVATE src)
-target_link_libraries(muzaiten-index PRIVATE Qt6::Core Qt6::Sql)
+target_link_libraries(muzaiten-index PRIVATE Qt6::Core Qt6::Sql PkgConfig::Chromaprint)
 target_compile_options(muzaiten-index PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
