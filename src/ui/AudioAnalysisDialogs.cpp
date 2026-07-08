@@ -4,8 +4,10 @@
 
 #include <QAbstractItemView>
 #include <QDialogButtonBox>
+#include <QDateTime>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -15,7 +17,11 @@
 #include <QSplitter>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QVBoxLayout>
+
+#include <cmath>
+#include <utility>
 
 namespace {
 
@@ -27,6 +33,17 @@ QString yesNo(bool value)
 QString countText(qint64 value)
 {
     return QLocale().toString(value);
+}
+
+// Meta rows store power lowercase ("background"); display it like the menu
+// labels ("Background") so both status sections read the same.
+QString powerText(QString value)
+{
+    if (value.isEmpty()) {
+        return QStringLiteral("unknown");
+    }
+    value[0] = value.at(0).toUpper();
+    return value;
 }
 
 QLabel *valueLabel(const QString &text, QWidget *parent)
@@ -54,11 +71,15 @@ QTableWidgetItem *numericItem(qint64 value)
 
 } // namespace
 
-AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(const QString &featuresPath, QWidget *parent)
+AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
+    const QString &featuresPath,
+    std::function<AudioAnalysisData::LiveStatus()> liveStatus,
+    QWidget *parent)
     : QDialog(parent)
+    , m_liveStatus(std::move(liveStatus))
 {
     setWindowTitle(QStringLiteral("Analysis status"));
-    resize(560, 360);
+    resize(640, 460);
 
     auto *root = new QVBoxLayout(this);
     auto *form = new QFormLayout;
@@ -90,11 +111,76 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(const QString &featuresPath
         }
         form->addRow(QStringLiteral("Embedded groups"), valueLabel(embeddingText, this));
         form->addRow(QStringLiteral("Neighbor rows"), valueLabel(countText(status.neighborRows), this));
+        if (summary.lastRun.present) {
+            auto *lastGroup = new QGroupBox(QStringLiteral("Last analysis"), this);
+            auto *lastForm = new QFormLayout(lastGroup);
+            lastForm->addRow(QStringLiteral("Finished"),
+                             valueLabel(QLocale().toString(QDateTime::fromSecsSinceEpoch(summary.lastRun.finishedAt),
+                                                           QLocale::ShortFormat),
+                                        lastGroup));
+            lastForm->addRow(QStringLiteral("Elapsed"),
+                             valueLabel(AudioAnalysisData::spacedDuration(static_cast<qint64>(std::llround(summary.lastRun.elapsedSecs))),
+                                        lastGroup));
+            lastForm->addRow(QStringLiteral("Files"),
+                             valueLabel(QStringLiteral("%1 scanned, %2 skipped, %3 failed")
+                                            .arg(countText(summary.lastRun.scanned),
+                                                 countText(summary.lastRun.skipped),
+                                                 countText(summary.lastRun.failed)),
+                                        lastGroup));
+            lastForm->addRow(QStringLiteral("Mean per track"),
+                             valueLabel(QStringLiteral("%1 ms").arg(QString::number(summary.lastRun.meanMsPerTrack, 'f', 1)),
+                                        lastGroup));
+            lastForm->addRow(QStringLiteral("Power"),
+                             valueLabel(powerText(summary.lastRun.power), lastGroup));
+            root->addWidget(lastGroup);
+        }
+    }
+
+    if (m_liveStatus) {
+        auto *liveGroup = new QGroupBox(QStringLiteral("Current analysis"), this);
+        auto *liveForm = new QFormLayout(liveGroup);
+        m_liveRunning = valueLabel(QString(), liveGroup);
+        m_liveProgress = valueLabel(QString(), liveGroup);
+        m_liveRate = valueLabel(QString(), liveGroup);
+        m_liveEta = valueLabel(QString(), liveGroup);
+        m_liveElapsed = valueLabel(QString(), liveGroup);
+        m_livePower = valueLabel(QString(), liveGroup);
+        liveForm->addRow(QStringLiteral("Running"), m_liveRunning);
+        liveForm->addRow(QStringLiteral("Progress"), m_liveProgress);
+        liveForm->addRow(QStringLiteral("Rate"), m_liveRate);
+        liveForm->addRow(QStringLiteral("ETA"), m_liveEta);
+        liveForm->addRow(QStringLiteral("Elapsed"), m_liveElapsed);
+        liveForm->addRow(QStringLiteral("Power"), m_livePower);
+        root->addWidget(liveGroup);
+
+        m_liveTimer = new QTimer(this);
+        m_liveTimer->setInterval(1000);
+        connect(m_liveTimer, &QTimer::timeout, this, &AudioAnalysisStatusDialog::refreshLiveStatus);
+        refreshLiveStatus();
+        m_liveTimer->start();
     }
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
     root->addWidget(buttons);
+}
+
+void AudioAnalysisStatusDialog::refreshLiveStatus()
+{
+    if (!m_liveStatus || m_liveRunning == nullptr) {
+        return;
+    }
+    const AudioAnalysisData::LiveStatus status = m_liveStatus();
+    m_liveRunning->setText(yesNo(status.running));
+    m_liveProgress->setText(status.total > 0
+                                ? QStringLiteral("%1 / %2").arg(countText(status.analyzed), countText(status.total))
+                                : QStringLiteral("0 / 0"));
+    m_liveRate->setText(status.rate >= 0.0 ? QStringLiteral("%1/s").arg(QString::number(status.rate, 'f', 1))
+                                           : QStringLiteral("-"));
+    m_liveEta->setText(status.etaSecs.has_value() ? AudioAnalysisData::compactDuration(*status.etaSecs)
+                                                  : QStringLiteral("-"));
+    m_liveElapsed->setText(AudioAnalysisData::clockDuration(static_cast<qint64>(std::llround(status.elapsedSecs))));
+    m_livePower->setText(status.power.isEmpty() ? QStringLiteral("-") : status.power);
 }
 
 DuplicateCopiesDialog::DuplicateCopiesDialog(Database *db, const QString &featuresPath, QWidget *parent)

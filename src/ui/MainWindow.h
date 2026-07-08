@@ -10,6 +10,7 @@
 #include "core/Track.h"
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
+#include "ui/AudioAnalysisData.h"
 
 #include <functional>
 #include <memory>
@@ -246,6 +247,7 @@ private:
     void readAudioAnalysisStderr();
     void finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStatus);
     void handleAudioAnalysisProgressLine(const QString &line);
+    AudioAnalysisData::LiveStatus audioAnalysisLiveStatus() const;
     QString resolveMuzaitenIndexBinary() const;
     void configureMpdSource();
     void importMpdLibraryMetadata();
@@ -378,6 +380,7 @@ private:
     void ensureDirectoryScanned(const QString &directory);
     QStringList nextFillChunk();
     int scanProfileSetting() const;  // 0 Background, 1 Balanced, 2 Turbo
+    int analysisPowerSetting() const; // 0 Background, 1 Balanced, 2 Turbo
     bool guessedPlaceholdersEnabled() const;  // scan.guessedPlaceholders setting (default on)
     void scheduleIncrementalRefresh();  // throttled browse/explorer refresh during ingest
     void flushIncrementalRefresh();     // force a refresh now and stop the throttle
@@ -517,6 +520,7 @@ private:
     QByteArray m_audioAnalysisStderr;
     QByteArray m_audioAnalysisStderrBuffer;
     bool m_audioAnalysisCancelRequested = false;
+    AudioAnalysisData::LiveStatus m_audioAnalysisRunState;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;

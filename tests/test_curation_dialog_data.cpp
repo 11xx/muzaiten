@@ -23,6 +23,7 @@ private slots:
     void aliasValidationFoldsAndRejectsSelf();
     void genreReportRowsMarkAliasAndIgnoredGenres();
     void statusSummaryIncludesEmbeddingCoverage();
+    void audioAnalysisProgressLabelsAreHumanReadable();
     void duplicateGroupsRankCopiesAndRespectPins();
 };
 
@@ -85,7 +86,14 @@ void createFeatureDb(const QString &path, const QVector<QPair<QString, qint64>> 
         QVERIFY2(execSql(db, QStringLiteral(
                              "INSERT INTO meta(key, value) VALUES"
                              "('schema_version', '3'),"
-                             "('dsp_version', 'muzaiten-dsp-test')"),
+                             "('dsp_version', 'muzaiten-dsp-test'),"
+                             "('last_scan_finished_at', '1767225600'),"
+                             "('last_scan_elapsed_secs', '2530.0'),"
+                             "('last_scan_scanned', '12'),"
+                             "('last_scan_skipped', '3'),"
+                             "('last_scan_failed', '1'),"
+                             "('last_scan_mean_ms_per_track', '1200.5'),"
+                             "('last_scan_power', 'background')"),
                          &error),
                  qPrintable(error));
         QVERIFY2(execSql(db, QStringLiteral(
@@ -251,6 +259,30 @@ void CurationDialogDataTest::statusSummaryIncludesEmbeddingCoverage()
     QCOMPARE(summary.status.embeddingModel, QStringLiteral("test-clap"));
     QCOMPARE(summary.status.embeddingVersion, QStringLiteral("v1"));
     QCOMPARE(summary.status.neighborRows, qint64(2));
+    QVERIFY(summary.lastRun.present);
+    QCOMPARE(summary.lastRun.elapsedSecs, 2530.0);
+    QCOMPARE(summary.lastRun.scanned, 12);
+    QCOMPARE(summary.lastRun.skipped, 3);
+    QCOMPARE(summary.lastRun.failed, 1);
+    QCOMPARE(summary.lastRun.meanMsPerTrack, 1200.5);
+    QCOMPARE(summary.lastRun.power, QStringLiteral("background"));
+}
+
+void CurationDialogDataTest::audioAnalysisProgressLabelsAreHumanReadable()
+{
+    AudioAnalysisData::LiveStatus status;
+    status.analyzed = 1234;
+    status.total = 56789;
+    status.rate = 1.4;
+    status.etaSecs = 3900;
+    status.elapsedSecs = 192;
+    QCOMPARE(AudioAnalysisData::compactDuration(3900), QStringLiteral("1h05m"));
+    QCOMPARE(AudioAnalysisData::compactDuration(750), QStringLiteral("12m30s"));
+    QCOMPARE(AudioAnalysisData::compactDuration(45), QStringLiteral("45s"));
+    QCOMPARE(AudioAnalysisData::progressLabel(status),
+             QStringLiteral("Analyzing… 1234/56789 · 1.4/s · ~1h05m left · 03:12 elapsed"));
+    QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0),
+             QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201 — 42m 10s (2.1s/track)"));
 }
 
 void CurationDialogDataTest::duplicateGroupsRankCopiesAndRespectPins()

@@ -74,8 +74,16 @@ public:
 
     std::vector<double> apply(const std::vector<double> &powerFrame) const;
 
+    struct SparseSpan {
+        std::size_t begin = 0;
+        std::size_t end = 0;
+        std::size_t offset = 0;
+    };
+
     // weights[m][k] over the nFft/2+1 linear bins.
     std::vector<std::vector<double>> weights;
+    std::vector<SparseSpan> sparseSpans;
+    std::vector<double> sparseWeights;
 };
 
 // Spectral-flux onset strength: per-band dB difference between consecutive

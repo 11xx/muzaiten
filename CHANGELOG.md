@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added
+
+- `muzaiten-index scan` now reports elapsed time, per-stage timing aggregates,
+  rich progress/ETA lines, phase markers, and optional per-file `--verbose`
+  timing lines while keeping JSON output on stdout.
+- `muzaiten-index scan` now streams completed analysis rows to `features.sqlite`
+  during long runs and exits cleanly with `"canceled": true` after SIGTERM or
+  SIGINT, so canceling a scan preserves completed work for the next run.
+- `muzaiten-index scan` is substantially faster on large libraries: mel
+  analysis now skips zero filterbank weights, reuses per-thread filterbanks,
+  groups tracks with a duration sliding window, and computes chromaprints
+  in-process after a conformance check against fpcalc-era fingerprints.
+- Audio analysis now has explicit power levels. `muzaiten-index scan --power`
+  accepts `background`, `balanced`, and `turbo`, reports the effective power
+  and job count in JSON, and the app persists `Library > Audio analysis >
+  Analysis power` with a background default.
+- Audio analysis progress in the app now shows count, rate, ETA, elapsed time,
+  and final elapsed/per-track summaries; the status dialog also shows live scan
+  state and the last successful analysis run.
+
+### Fixed
+
+- Incremental audio analysis scans (and cancel + resume) no longer wipe the
+  whole `features` table and serially re-analyze every unchanged group
+  representative; existing feature rows are preserved and only stale or new
+  groups are recomputed. A scan that analyzed nothing also no longer
+  overwrites the last-run summary.
+
 ## [2026.07.07]
 
 ### Added

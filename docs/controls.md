@@ -32,7 +32,8 @@ search options in search, sort/alignment in the album views.
 
 - `Library > Source directories…` — scan-enabled and library-visible roots;
   `Library > Link roots…` maps stored paths to local mounts.
-- `Library > Audio analysis ▸` — run the audio analyzer, inspect coverage,
+- `Library > Audio analysis ▸` — run the audio analyzer, choose
+  `Analysis power ▸ Background`, `Balanced`, or `Turbo`, inspect coverage,
   manage duplicate copies ([radio.md](radio.md)).
 - `Playback > Output profile…` — output device, software volume,
   resampling, sink release on pause, preload. Native bit-perfect DSD

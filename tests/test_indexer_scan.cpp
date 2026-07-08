@@ -3,7 +3,9 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -16,10 +18,15 @@
 #include <QTest>
 #include <QUuid>
 #include <QVariant>
+#include <QVector>
+#include <QtEndian>
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
+#include <thread>
 
 class IndexerScanTest final : public QObject {
     Q_OBJECT
@@ -27,9 +34,15 @@ class IndexerScanTest final : public QObject {
 private slots:
     void generatedFixtureMatrixWritesSchemaV3Features();
     void groupIdsStayStableWhenLibraryGrows();
+    void powerOptionsReportEffectiveJobs();
+    void cancelPersistsCompletedRowsAndRerunSkipsThem();
+    void incrementalRescanPreservesFeatureRows();
 };
 
 namespace {
+
+constexpr double kFingerprintBerGate = 0.05;
+constexpr int kChromaprintOffsetFrames = 3;
 
 QString muzaitenIndexPath()
 {
@@ -123,6 +136,101 @@ QJsonObject runIndexer(const QStringList &arguments, QByteArray *stderrBytes = n
     return document.object();
 }
 
+QJsonObject parseJsonObject(const QByteArray &bytes)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        const QByteArray message = QStringLiteral("invalid JSON: %1\n%2")
+                                       .arg(parseError.errorString(), QString::fromUtf8(bytes))
+                                       .toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        return {};
+    }
+    return document.object();
+}
+
+QByteArray encodeFingerprint(const QJsonArray &fingerprint)
+{
+    QByteArray blob;
+    blob.resize(static_cast<qsizetype>(fingerprint.size() * static_cast<qsizetype>(sizeof(qint32))));
+    auto *data = reinterpret_cast<uchar *>(blob.data());
+    for (qsizetype index = 0; index < fingerprint.size(); ++index) {
+        const auto raw = static_cast<quint32>(fingerprint.at(index).toDouble());
+        qToLittleEndian<qint32>(static_cast<qint32>(raw),
+                                data + index * static_cast<qsizetype>(sizeof(qint32)));
+    }
+    return blob;
+}
+
+QByteArray fpcalcFingerprint(const QString &path)
+{
+    QByteArray stdoutBytes;
+    QByteArray stderrBytes;
+    QString error;
+    const QStringList args{
+        QStringLiteral("-raw"),
+        QStringLiteral("-json"),
+        QStringLiteral("-length"),
+        QStringLiteral("120"),
+        path,
+    };
+    if (!runProcess(QStringLiteral("fpcalc"), args, &stdoutBytes, &stderrBytes, &error)) {
+        const QByteArray message = (error.isEmpty() ? QString::fromUtf8(stderrBytes) : error).toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        return {};
+    }
+    const QJsonObject object = parseJsonObject(stdoutBytes);
+    return encodeFingerprint(object.value(QStringLiteral("fingerprint")).toArray());
+}
+
+std::vector<qint32> decodeFingerprint(const QByteArray &blob)
+{
+    std::vector<qint32> values;
+    if (blob.size() % static_cast<qsizetype>(sizeof(qint32)) != 0) {
+        return values;
+    }
+    const qsizetype count = blob.size() / static_cast<qsizetype>(sizeof(qint32));
+    values.reserve(static_cast<std::size_t>(count));
+    const auto *data = reinterpret_cast<const uchar *>(blob.constData());
+    for (qsizetype index = 0; index < count; ++index) {
+        values.push_back(qFromLittleEndian<qint32>(
+            data + index * static_cast<qsizetype>(sizeof(qint32))));
+    }
+    return values;
+}
+
+double bitErrorRate(const std::vector<qint32> &left, const std::vector<qint32> &right, int offset)
+{
+    const std::size_t leftStart = offset >= 0 ? static_cast<std::size_t>(offset) : 0;
+    const std::size_t rightStart = offset < 0 ? static_cast<std::size_t>(-offset) : 0;
+    if (leftStart >= left.size() || rightStart >= right.size()) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const std::size_t overlap = std::min(left.size() - leftStart, right.size() - rightStart);
+    if (overlap == 0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    quint64 errors = 0;
+    for (std::size_t index = 0; index < overlap; ++index) {
+        const std::uint32_t diff = static_cast<std::uint32_t>(
+            left[leftStart + index] ^ right[rightStart + index]);
+        errors += std::popcount(diff);
+    }
+    return static_cast<double>(errors) / (static_cast<double>(overlap) * 32.0);
+}
+
+double bestBitErrorRate(const QByteArray &leftBlob, const QByteArray &rightBlob)
+{
+    const std::vector<qint32> left = decodeFingerprint(leftBlob);
+    const std::vector<qint32> right = decodeFingerprint(rightBlob);
+    double best = std::numeric_limits<double>::infinity();
+    for (int offset = -kChromaprintOffsetFrames; offset <= kChromaprintOffsetFrames; ++offset) {
+        best = std::min(best, bitErrorRate(left, right, offset));
+    }
+    return best;
+}
+
 bool execSql(QSqlQuery &query, const QString &sql, QString *error)
 {
     if (query.exec(sql)) {
@@ -213,6 +321,30 @@ QString decodeHashFor(QSqlDatabase &db, const QString &path)
     return query.value(0).toString();
 }
 
+QByteArray chromaprintFor(QSqlDatabase &db, const QString &path)
+{
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("SELECT chromaprint_fp FROM files WHERE path = ?"));
+    query.addBindValue(path);
+    if (!query.exec() || !query.next()) {
+        const QByteArray message = QStringLiteral("missing chromaprint for %1: %2")
+                                       .arg(path, query.lastError().text())
+                                       .toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        return {};
+    }
+    return query.value(0).toByteArray();
+}
+
+void replaceStoredFingerprint(QSqlDatabase &db, const QString &path, const QByteArray &fingerprint)
+{
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("UPDATE files SET chromaprint_fp = ? WHERE path = ?"));
+    query.addBindValue(fingerprint);
+    query.addBindValue(path);
+    QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
+}
+
 std::optional<double> optionalFeature(QSqlDatabase &db, qint64 groupId, const QString &column)
 {
     QSqlQuery query(db);
@@ -252,6 +384,30 @@ QStringList featureRows(QSqlDatabase &db)
         rows << columns.join(QLatin1Char('|'));
     }
     return rows;
+}
+
+int fileRowCount(const QString &featuresPath)
+{
+    QString connectionName;
+    QSqlDatabase db = openReadOnly(featuresPath, &connectionName);
+    if (!db.open()) {
+        const QByteArray message = db.lastError().text().toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        QSqlDatabase::removeDatabase(connectionName);
+        return 0;
+    }
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM files")) || !query.next()) {
+        const QByteArray message = query.lastError().text().toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+        return 0;
+    }
+    const int count = query.value(0).toInt();
+    db.close();
+    QSqlDatabase::removeDatabase(connectionName);
+    return count;
 }
 
 double ffmpegIntegratedLufs(const QString &path)
@@ -349,19 +505,48 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
         QStringLiteral("--progress"),
     }, &progressStderr);
     const QString progressLog = QString::fromUtf8(progressStderr);
-    QVERIFY2(progressLog.contains(QRegularExpression(QStringLiteral("^progress 8/8$"),
-                                                     QRegularExpression::MultilineOption)),
+    QVERIFY2(progressLog.contains(QRegularExpression(
+                 QStringLiteral("^progress \\d+/\\d+ elapsed=[0-9.]+ rate=([0-9.]+|-) eta=(\\d+|-)$"),
+                 QRegularExpression::MultilineOption)),
              qPrintable(progressLog));
+    const qsizetype groupingIndex = progressLog.indexOf(QStringLiteral("phase grouping"));
+    const qsizetype featuresIndex = progressLog.indexOf(QStringLiteral("phase features"));
+    QVERIFY2(groupingIndex >= 0, qPrintable(progressLog));
+    QVERIFY2(featuresIndex > groupingIndex, qPrintable(progressLog));
     QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 3);
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 8);
     QCOMPARE(first.value(QStringLiteral("skipped")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("failed")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("dsp_version")).toString(), QString::fromLatin1(Dsp::kDspVersion));
+    QVERIFY(first.contains(QStringLiteral("elapsed_secs")));
+    const QJsonObject timings = first.value(QStringLiteral("timings")).toObject();
+    for (const QString &stage : {QStringLiteral("decode"), QStringLiteral("hash"), QStringLiteral("dsp"), QStringLiteral("fp")}) {
+        const QJsonObject stats = timings.value(stage).toObject();
+        QVERIFY2(stats.contains(QStringLiteral("total_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("mean_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("p50_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("p95_ms")), qPrintable(stage));
+    }
     QVERIFY(first.value(QStringLiteral("featured_groups")).toInt() >= 6);
 
     QString connectionName;
     QSqlDatabase db = openReadOnly(features, &connectionName);
     QVERIFY(db.open());
+
+    for (const QString &file : {sineFlac, sineWav, sineMp3, padded, click120, click90, pink, silence}) {
+        const QByteArray indexed = chromaprintFor(db, file);
+        const QByteArray fpcalc = fpcalcFingerprint(file);
+        const auto indexedValues = decodeFingerprint(indexed);
+        const auto fpcalcValues = decodeFingerprint(fpcalc);
+        QVERIFY2(!indexedValues.empty(), qPrintable(file));
+        QVERIFY2(!fpcalcValues.empty(), qPrintable(file));
+        const double lengthRatio = static_cast<double>(indexedValues.size()) / static_cast<double>(fpcalcValues.size());
+        QVERIFY2(lengthRatio >= 0.9 && lengthRatio <= 1.1,
+                 qPrintable(QStringLiteral("%1 fingerprint length ratio %2").arg(file).arg(lengthRatio)));
+        const double ber = bestBitErrorRate(indexed, fpcalc);
+        QVERIFY2(ber < kFingerprintBerGate,
+                 qPrintable(QStringLiteral("%1 BER %2").arg(file).arg(ber)));
+    }
 
     const qint64 sineGroup = groupFor(db, sineFlac);
     QCOMPARE(groupFor(db, sineWav), sineGroup);
@@ -472,6 +657,20 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
         QStringLiteral("--json"),
     };
     runIndexer(scanArgs);
+
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-fpcalc-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            replaceStoredFingerprint(db, tone, fpcalcFingerprint(tone));
+            replaceStoredFingerprint(db, click, fpcalcFingerprint(click));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 
     qint64 toneGroup = -1;
     qint64 clickGroup = -1;
@@ -597,6 +796,231 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
 
     db.close();
     QSqlDatabase::removeDatabase(connectionName);
+}
+
+void IndexerScanTest::powerOptionsReportEffectiveJobs()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    const int cores = static_cast<int>(std::max<std::size_t>(1, std::thread::hardware_concurrency()));
+    struct Case {
+        QString power;
+        QStringList extra;
+        int expectedJobs;
+    };
+    const QVector<Case> cases{
+        {QStringLiteral("background"), {}, std::max(1, cores / 4)},
+        {QStringLiteral("balanced"), {}, std::max(2, cores / 2)},
+        {QStringLiteral("turbo"), {}, cores},
+        {QStringLiteral("background"), {QStringLiteral("--jobs"), QStringLiteral("3")}, 3},
+    };
+
+    for (const Case &item : cases) {
+        QStringList args{
+            QStringLiteral("scan"),
+            QStringLiteral("--stage"),
+            QStringLiteral("features"),
+            QStringLiteral("--features"),
+            dir.filePath(QStringLiteral("%1.sqlite").arg(item.power + item.extra.join(QString()))),
+            QStringLiteral("--power"),
+            item.power,
+            QStringLiteral("--json"),
+        };
+        args.append(item.extra);
+        const QJsonObject result = runIndexer(args);
+        QCOMPARE(result.value(QStringLiteral("power")).toString(), item.power);
+        QCOMPARE(result.value(QStringLiteral("jobs")).toInt(), item.expectedJobs);
+    }
+}
+
+void IndexerScanTest::cancelPersistsCompletedRowsAndRerunSkipsThem()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    requireTool(QStringLiteral("fpcalc"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir audioDir(dir.filePath(QStringLiteral("audio")));
+    QVERIFY(QDir().mkpath(audioDir.absolutePath()));
+
+    QStringList files;
+    for (int index = 0; index < 4; ++index) {
+        const QString file = audioDir.filePath(QStringLiteral("cancel-%1.wav").arg(index));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("sine=frequency=%1:duration=120:sample_rate=44100").arg(330 + index * 70),
+                file});
+        files << file;
+    }
+
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, files);
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        library,
+        QStringLiteral("--features"),
+        features,
+        QStringLiteral("--jobs"),
+        QStringLiteral("1"),
+        QStringLiteral("--json"),
+        QStringLiteral("--progress"),
+    };
+
+    QProcess process;
+    process.setReadChannel(QProcess::StandardError);
+    process.start(muzaitenIndexPath(), scanArgs);
+    QVERIFY2(process.waitForStarted(5000), qPrintable(process.errorString()));
+
+    QByteArray stderrBytes;
+    QElapsedTimer timer;
+    timer.start();
+    bool sawProgress = false;
+    const QRegularExpression progressPattern(QStringLiteral("^progress\\s+\\d+/\\d+"),
+                                             QRegularExpression::MultilineOption);
+    while (timer.elapsed() < 120000 && process.state() != QProcess::NotRunning && !sawProgress) {
+        if (process.waitForReadyRead(1000)) {
+            stderrBytes.append(process.readAllStandardError());
+            sawProgress = QString::fromUtf8(stderrBytes).contains(progressPattern);
+        }
+    }
+    QVERIFY2(sawProgress, qPrintable(QString::fromUtf8(stderrBytes)));
+
+    process.terminate();
+    QVERIFY2(process.waitForFinished(120000), qPrintable(process.errorString()));
+    stderrBytes.append(process.readAllStandardError());
+    const QByteArray stdoutBytes = process.readAllStandardOutput();
+    QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(process.exitCode(), 0);
+
+    const QJsonObject canceled = parseJsonObject(stdoutBytes);
+    QVERIFY(canceled.value(QStringLiteral("canceled")).toBool());
+    QVERIFY(canceled.value(QStringLiteral("scanned")).toInt() > 0);
+    const int persisted = fileRowCount(features);
+    QVERIFY(persisted > 0);
+    QCOMPARE(persisted, canceled.value(QStringLiteral("scanned")).toInt());
+
+    const QJsonObject rerun = runIndexer(scanArgs);
+    QCOMPARE(rerun.value(QStringLiteral("canceled")).toBool(), false);
+    QCOMPARE(rerun.value(QStringLiteral("skipped")).toInt(), persisted);
+    QCOMPARE(rerun.value(QStringLiteral("scanned")).toInt(), files.size() - persisted);
+}
+
+void IndexerScanTest::incrementalRescanPreservesFeatureRows()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir audioDir(dir.filePath(QStringLiteral("audio")));
+    QVERIFY(QDir().mkpath(audioDir.absolutePath()));
+
+    // Synthetic steady signals produce chromaprints degenerate enough to
+    // BER-match each other (even 440 vs 660 sines), so distinct durations
+    // beyond the ±2 s grouping bucket are what guarantee separate groups.
+    const QString toneA = audioDir.filePath(QStringLiteral("tone-a.wav"));
+    const QString toneB = audioDir.filePath(QStringLiteral("tone-b.wav"));
+    const QString added = audioDir.filePath(QStringLiteral("tone-added.wav"));
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("sine=frequency=440:duration=10:sample_rate=44100"), toneA});
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("sine=frequency=660:duration=15:sample_rate=44100"), toneB});
+
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {toneA, toneB});
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        library,
+        QStringLiteral("--features"),
+        features,
+        QStringLiteral("--json"),
+    };
+    const QJsonObject first = runIndexer(scanArgs);
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 2);
+
+    qint64 toneAGroup = -1;
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        toneAGroup = groupFor(db, toneA);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    // Plant a sentinel in toneA's feature row: incremental rescans must keep
+    // the row (freshness is keyed on the dsp version), not wipe + recompute.
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-sentinel-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery update(db);
+            update.prepare(QStringLiteral("UPDATE features SET tempo_bpm = 999.5 WHERE content_group_id = ?"));
+            update.addBindValue(toneAGroup);
+            QVERIFY2(update.exec(), qPrintable(update.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=pink:duration=20:amplitude=0.2:sample_rate=44100"), added});
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-grow-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(library);
+            QVERIFY(db.open());
+            const QPair<qint64, qint64> stats = fileStats(added);
+            QSqlQuery insert(db);
+            insert.prepare(QStringLiteral(
+                "INSERT INTO tracks(path, file_mtime, file_size, missing) VALUES(?, ?, ?, 0)"));
+            insert.addBindValue(added);
+            insert.addBindValue(stats.first);
+            insert.addBindValue(stats.second);
+            QVERIFY2(insert.exec(), qPrintable(insert.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    const QJsonObject second = runIndexer(scanArgs);
+    QCOMPARE(second.value(QStringLiteral("scanned")).toInt(), 1);
+    QCOMPARE(second.value(QStringLiteral("skipped")).toInt(), 2);
+
+    const QJsonObject third = runIndexer(scanArgs);
+    QCOMPARE(third.value(QStringLiteral("scanned")).toInt(), 0);
+
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        const std::optional<double> tempo = optionalFeature(db, toneAGroup, QStringLiteral("tempo_bpm"));
+        QVERIFY2(tempo.has_value(), "sentinel feature row was wiped by a rescan");
+        QCOMPARE(*tempo, 999.5);
+        const qint64 addedGroup = groupFor(db, added);
+        QVERIFY(addedGroup != toneAGroup);
+        QSqlQuery count(db);
+        QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM features")));
+        QVERIFY(count.next());
+        QCOMPARE(count.value(0).toInt(), 3);
+        // The no-op third run must not clobber the incremental run's summary.
+        QSqlQuery meta(db);
+        QVERIFY(meta.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'last_scan_scanned'")));
+        QVERIFY(meta.next());
+        QCOMPARE(meta.value(0).toString(), QStringLiteral("1"));
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 }
 
 QTEST_MAIN(IndexerScanTest)

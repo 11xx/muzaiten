@@ -1225,6 +1225,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         }
     });
     m_playerBar->setScanProfile(scanProfileSetting());
+    connect(m_playerBar, &PlayerBar::analysisPowerChanged, this, [this](int power) {
+        static const char *const names[3] = {"background", "balanced", "turbo"};
+        if (power >= 0 && power <= 2) {
+            m_state->setSetting(QStringLiteral("analysis.power"), QString::fromLatin1(names[power]));
+        }
+    });
+    m_playerBar->setAnalysisPower(analysisPowerSetting());
     m_database->setGuessedPlaceholdersVisible(guessedPlaceholdersEnabled());
     m_playerBar->setShowGuessedPlaceholders(guessedPlaceholdersEnabled());
     connect(m_playerBar, &PlayerBar::showGuessedPlaceholdersChanged, this, [this](bool show) {
@@ -1915,6 +1922,18 @@ int MainWindow::scanProfileSetting() const
         return 2;
     }
     return 1;
+}
+
+int MainWindow::analysisPowerSetting() const
+{
+    const QString value = m_state->setting(QStringLiteral("analysis.power"), QStringLiteral("background"));
+    if (value == QStringLiteral("balanced")) {
+        return 1;
+    }
+    if (value == QStringLiteral("turbo")) {
+        return 2;
+    }
+    return 0;
 }
 
 bool MainWindow::guessedPlaceholdersEnabled() const
@@ -5496,7 +5515,9 @@ void MainWindow::showScoringWeights()
 
 void MainWindow::showAnalysisStatus()
 {
-    AudioAnalysisStatusDialog dialog(m_core->featuresPath(), this);
+    AudioAnalysisStatusDialog dialog(m_core->featuresPath(),
+                                     [this]() { return audioAnalysisLiveStatus(); },
+                                     this);
     dialog.exec();
 }
 
@@ -5523,6 +5544,7 @@ void MainWindow::startAudioAnalysis()
     m_audioAnalysisStderr.clear();
     m_audioAnalysisStderrBuffer.clear();
     m_audioAnalysisCancelRequested = false;
+    m_audioAnalysisRunState = {};
 
     auto *process = new QProcess(this);
     m_audioAnalysisProcess = process;
@@ -5536,23 +5558,33 @@ void MainWindow::startAudioAnalysis()
         }
         const QString detail = process->errorString();
         m_audioAnalysisProcess = nullptr;
+        m_audioAnalysisRunState = {};
         m_playerBar->setAudioAnalysisRunStatus(false, QString());
         process->deleteLater();
         statusBar()->showMessage(QStringLiteral("Audio analysis failed to start: %1").arg(detail), 10000);
     });
 
     process->setProgram(binary);
+    static const char *const analysisPowerNames[3] = {"background", "balanced", "turbo"};
+    static const char *const analysisPowerLabels[3] = {"Background", "Balanced", "Turbo"};
+    const int analysisPower = analysisPowerSetting();
+    const int boundedAnalysisPower = std::clamp(analysisPower, 0, 2);
     process->setArguments({
         QStringLiteral("scan"),
         QStringLiteral("--library"),
         databasePath(),
         QStringLiteral("--features"),
         m_core->featuresPath(),
+        QStringLiteral("--power"),
+        QString::fromLatin1(analysisPowerNames[boundedAnalysisPower]),
         QStringLiteral("--json"),
         QStringLiteral("--progress"),
     });
 
-    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Analyzing..."));
+    m_audioAnalysisRunState.running = true;
+    m_audioAnalysisRunState.power = QString::fromLatin1(analysisPowerLabels[boundedAnalysisPower]);
+
+    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Analyzing…"));
     statusBar()->showMessage(QStringLiteral("Starting audio analysis..."));
     process->start();
 }
@@ -5632,12 +5664,17 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
                                      10000);
         } else {
             const QJsonObject object = document.object();
-            statusBar()->showMessage(QStringLiteral("Audio analysis: scanned %1, skipped %2, failed %3, groups %4")
-                                         .arg(object.value(QStringLiteral("scanned")).toInt())
-                                         .arg(object.value(QStringLiteral("skipped")).toInt())
-                                         .arg(object.value(QStringLiteral("failed")).toInt())
-                                         .arg(object.value(QStringLiteral("groups")).toInt()),
-                                     10000);
+            if (object.value(QStringLiteral("canceled")).toBool()) {
+                statusBar()->showMessage(QStringLiteral("Audio analysis canceled"), 5000);
+            } else {
+                statusBar()->showMessage(
+                    AudioAnalysisData::finalSummary(object.value(QStringLiteral("scanned")).toInt(),
+                                                    object.value(QStringLiteral("skipped")).toInt(),
+                                                    object.value(QStringLiteral("failed")).toInt(),
+                                                    object.value(QStringLiteral("groups")).toInt(),
+                                                    object.value(QStringLiteral("elapsed_secs")).toDouble()),
+                    10000);
+            }
         }
     }
 
@@ -5645,6 +5682,7 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
     m_audioAnalysisStderr.clear();
     m_audioAnalysisStderrBuffer.clear();
     m_audioAnalysisCancelRequested = false;
+    m_audioAnalysisRunState.running = false;
     process->deleteLater();
 }
 
@@ -5653,16 +5691,42 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
     if (line.isEmpty()) {
         return;
     }
-    static const QRegularExpression progressPattern(QStringLiteral("^progress\\s+(\\d+)/(\\d+)$"));
+    static const QRegularExpression progressPattern(
+        QStringLiteral("^progress\\s+(\\d+)/(\\d+)(?:\\s+elapsed=([0-9.]+)\\s+rate=([0-9.]+|-)\\s+eta=(\\d+|-))?$"));
     const QRegularExpressionMatch match = progressPattern.match(line);
     if (match.hasMatch()) {
-        m_playerBar->setAudioAnalysisRunStatus(
-            true,
-            QStringLiteral("Analyzing... %1/%2").arg(match.captured(1), match.captured(2)));
+        m_audioAnalysisRunState.running = true;
+        m_audioAnalysisRunState.analyzed = match.captured(1).toInt();
+        m_audioAnalysisRunState.total = match.captured(2).toInt();
+        if (!match.captured(3).isEmpty()) {
+            m_audioAnalysisRunState.elapsedSecs = match.captured(3).toDouble();
+        }
+        if (!match.captured(4).isEmpty() && match.captured(4) != QLatin1String("-")) {
+            m_audioAnalysisRunState.rate = match.captured(4).toDouble();
+        }
+        if (!match.captured(5).isEmpty() && match.captured(5) != QLatin1String("-")) {
+            m_audioAnalysisRunState.etaSecs = match.captured(5).toLongLong();
+        } else {
+            m_audioAnalysisRunState.etaSecs.reset();
+        }
+        m_playerBar->setAudioAnalysisRunStatus(true, AudioAnalysisData::progressLabel(m_audioAnalysisRunState));
+        return;
+    }
+    if (line == QLatin1String("phase grouping")) {
+        m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Grouping tracks..."));
+        return;
+    }
+    if (line == QLatin1String("phase features")) {
+        m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Writing features..."));
         return;
     }
     m_audioAnalysisStderr.append(line.toUtf8());
     m_audioAnalysisStderr.append('\n');
+}
+
+AudioAnalysisData::LiveStatus MainWindow::audioAnalysisLiveStatus() const
+{
+    return m_audioAnalysisRunState;
 }
 
 QString MainWindow::resolveMuzaitenIndexBinary() const

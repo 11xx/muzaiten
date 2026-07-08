@@ -5,10 +5,16 @@
 #include "db/Database.h"
 #include "features/QualityRank.h"
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QHash>
+#include <QLocale>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QUuid>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -65,9 +71,118 @@ QString qualitySummary(const Track &track, const QStringList &mediaTags, int qua
     return parts.join(QLatin1Char(' '));
 }
 
+QHash<QString, QString> loadMetaRows(const QString &featuresPath)
+{
+    QHash<QString, QString> values;
+    const QString connectionName =
+        QStringLiteral("audio-analysis-meta-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(featuresPath);
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT key, value FROM meta"))) {
+                while (query.next()) {
+                    values.insert(query.value(0).toString(), query.value(1).toString());
+                }
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    return values;
+}
+
+int intMeta(const QHash<QString, QString> &meta, const QString &key)
+{
+    bool ok = false;
+    const int value = meta.value(key).toInt(&ok);
+    return ok ? value : 0;
+}
+
+double doubleMeta(const QHash<QString, QString> &meta, const QString &key)
+{
+    bool ok = false;
+    const double value = meta.value(key).toDouble(&ok);
+    return ok ? value : 0.0;
+}
+
 } // namespace
 
 namespace AudioAnalysisData {
+
+QString compactDuration(qint64 seconds)
+{
+    seconds = std::max<qint64>(0, seconds);
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1h%2m").arg(hours).arg(minutes, 2, 10, QLatin1Char('0'));
+    }
+    if (minutes > 0) {
+        return QStringLiteral("%1m%2s").arg(minutes).arg(secs, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1s").arg(secs);
+}
+
+QString clockDuration(qint64 seconds)
+{
+    seconds = std::max<qint64>(0, seconds);
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(secs, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1:%2")
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(secs, 2, 10, QLatin1Char('0'));
+}
+
+QString spacedDuration(qint64 seconds)
+{
+    seconds = std::max<qint64>(0, seconds);
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1h %2m %3s").arg(hours).arg(minutes).arg(secs);
+    }
+    if (minutes > 0) {
+        return QStringLiteral("%1m %2s").arg(minutes).arg(secs);
+    }
+    return QStringLiteral("%1s").arg(secs);
+}
+
+QString progressLabel(const LiveStatus &status)
+{
+    QString label = QStringLiteral("Analyzing… %1/%2").arg(status.analyzed).arg(status.total);
+    if (status.rate >= 0.0) {
+        label += QStringLiteral(" · %1/s").arg(QString::number(status.rate, 'f', 1));
+    }
+    if (status.etaSecs.has_value()) {
+        label += QStringLiteral(" · ~%1 left").arg(compactDuration(*status.etaSecs));
+    }
+    label += QStringLiteral(" · %1 elapsed").arg(clockDuration(static_cast<qint64>(std::llround(status.elapsedSecs))));
+    return label;
+}
+
+QString finalSummary(int scanned, int skipped, int failed, int groups, double elapsedSecs)
+{
+    const double secsPerTrack = scanned > 0 ? elapsedSecs / static_cast<double>(scanned) : 0.0;
+    return QStringLiteral("Audio analysis: scanned %1, skipped %2, failed %3, groups %4 — %5 (%6s/track)")
+        .arg(scanned)
+        .arg(skipped)
+        .arg(failed)
+        .arg(groups)
+        .arg(spacedDuration(static_cast<qint64>(std::llround(elapsedSecs))))
+        .arg(QString::number(secsPerTrack, 'f', 1));
+}
 
 StatusSummary loadStatus(const QString &featuresPath)
 {
@@ -88,6 +203,17 @@ StatusSummary loadStatus(const QString &featuresPath)
 
     summary.schemaVersion = store.schemaVersion();
     summary.status = store.status();
+    const QHash<QString, QString> meta = loadMetaRows(featuresPath);
+    if (meta.contains(QStringLiteral("last_scan_finished_at"))) {
+        summary.lastRun.present = true;
+        summary.lastRun.finishedAt = meta.value(QStringLiteral("last_scan_finished_at")).toLongLong();
+        summary.lastRun.elapsedSecs = doubleMeta(meta, QStringLiteral("last_scan_elapsed_secs"));
+        summary.lastRun.scanned = intMeta(meta, QStringLiteral("last_scan_scanned"));
+        summary.lastRun.skipped = intMeta(meta, QStringLiteral("last_scan_skipped"));
+        summary.lastRun.failed = intMeta(meta, QStringLiteral("last_scan_failed"));
+        summary.lastRun.meanMsPerTrack = doubleMeta(meta, QStringLiteral("last_scan_mean_ms_per_track"));
+        summary.lastRun.power = meta.value(QStringLiteral("last_scan_power"));
+    }
     return summary;
 }
 
