@@ -36,7 +36,6 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
-#include <queue>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -912,7 +911,8 @@ std::vector<std::vector<std::size_t>> groupedRows(const std::vector<GroupRow> &r
 // its id; only genuinely new content gets a new id, and rows keyed to ids
 // that no longer exist are removed.
 std::vector<qint64> assignStableGroupIds(const std::vector<GroupRow> &rows,
-                                         const std::vector<std::vector<std::size_t>> &groups)
+                                         const std::vector<std::vector<std::size_t>> &groups,
+                                         qint64 reservedMaxId)
 {
     // The old representative (first path in load order, which is sorted) is
     // the tie-breaker when an old group's members end up split across new
@@ -971,7 +971,10 @@ std::vector<qint64> assignStableGroupIds(const std::vector<GroupRow> &rows,
     }
 
     // Pass 3: genuinely new content gets fresh ids past every id ever seen.
-    qint64 nextId = maxOldId + 1;
+    // reservedMaxId covers ids held by rows outside the regroup input
+    // (surviving features/embeddings/neighbors rows), so a fresh id can never
+    // collide with — and silently inherit — a stale row's data.
+    qint64 nextId = std::max(maxOldId, reservedMaxId) + 1;
     for (qint64 &id : assigned) {
         if (id < 0) {
             id = nextId++;
@@ -1000,20 +1003,47 @@ void deleteOrphanedGroupRows(QSqlDatabase &database)
     }
 }
 
-int regroupContent(QSqlDatabase &database, bool clearFeatures)
+qint64 countScalar(QSqlDatabase &database, const QString &sql);
+
+// Highest group id referenced anywhere in the store, including rows the
+// regroup input does not see (features/embeddings/neighbors whose files
+// changed or vanished). Fresh ids must start past ALL of them.
+qint64 maxReservedGroupId(QSqlDatabase &database)
+{
+    qint64 maxId = 0;
+    const auto consider = [&](const QString &sql) {
+        maxId = std::max(maxId, countScalar(database, sql));
+    };
+    consider(QStringLiteral("SELECT COALESCE(MAX(content_group_id), 0) FROM files"));
+    consider(QStringLiteral("SELECT COALESCE(MAX(id), 0) FROM content_groups"));
+    consider(QStringLiteral("SELECT COALESCE(MAX(content_group_id), 0) FROM features"));
+    const QStringList tables = database.tables();
+    if (tables.contains(QStringLiteral("embeddings"))) {
+        consider(QStringLiteral("SELECT COALESCE(MAX(content_group_id), 0) FROM embeddings"));
+    }
+    if (tables.contains(QStringLiteral("track_neighbors"))) {
+        consider(QStringLiteral(
+            "SELECT COALESCE(MAX(MAX(content_group_id), MAX(neighbor_group_id)), 0) FROM track_neighbors"));
+    }
+    return maxId;
+}
+
+// Feature rows are NOT cleared here: they stay keyed to their stable group
+// ids, featureRowFresh() skips the still-valid ones, and
+// deleteOrphanedGroupRows() removes the rest. Wiping them would force
+// ensureFeatureRows to re-decode every unchanged representative serially
+// on any incremental scan or cancel+resume.
+int regroupContent(QSqlDatabase &database)
 {
     const std::vector<GroupRow> rows = loadGroupRows(database);
     const std::vector<std::vector<std::size_t>> groups = groupedRows(rows);
-    const std::vector<qint64> groupIds = assignStableGroupIds(rows, groups);
+    const std::vector<qint64> groupIds = assignStableGroupIds(rows, groups, maxReservedGroupId(database));
 
     if (!database.transaction()) {
         fail(database.lastError().text());
     }
     execSql(database, QStringLiteral("UPDATE files SET content_group_id = NULL"));
     execSql(database, QStringLiteral("DELETE FROM content_groups"));
-    if (clearFeatures) {
-        execSql(database, QStringLiteral("DELETE FROM features"));
-    }
 
     for (std::size_t g = 0; g < groups.size(); ++g) {
         QSqlQuery insertGroup(database);
@@ -1354,7 +1384,7 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("grouping"));
         }
-        const int groups = regroupContent(database, false);
+        const int groups = regroupContent(database);
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
@@ -1380,18 +1410,17 @@ int runScan(const ScanOptions &options)
                 if (options.progress) {
                     emitPhase(QStringLiteral("grouping"));
                 }
-                regroupContent(database, true);
+                regroupContent(database);
             }
             if (options.progress) {
                 emitPhase(QStringLiteral("features"));
             }
             ensureFeatureRows(database, {});
         }
+        // No last-scan summary here: a run that analyzed nothing must not
+        // clobber the meta rows describing the last real scan.
         const double elapsedSecs =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
-        if (options.stage == Stage::All) {
-            writeLastScanSummary(database, 0, skipped, 0, elapsedSecs, effectivePowerName);
-        }
         const QJsonObject payload =
             scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
                      elapsedSecs,
@@ -1471,7 +1500,7 @@ int runScan(const ScanOptions &options)
     if (options.progress) {
         emitPhase(QStringLiteral("grouping"));
     }
-    const int groups = regroupContent(database, options.stage == Stage::All);
+    const int groups = regroupContent(database);
     if (options.stage == Stage::All) {
         if (options.progress) {
             emitPhase(QStringLiteral("features"));

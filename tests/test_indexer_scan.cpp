@@ -36,6 +36,7 @@ private slots:
     void groupIdsStayStableWhenLibraryGrows();
     void powerOptionsReportEffectiveJobs();
     void cancelPersistsCompletedRowsAndRerunSkipsThem();
+    void incrementalRescanPreservesFeatureRows();
 };
 
 namespace {
@@ -905,6 +906,121 @@ void IndexerScanTest::cancelPersistsCompletedRowsAndRerunSkipsThem()
     QCOMPARE(rerun.value(QStringLiteral("canceled")).toBool(), false);
     QCOMPARE(rerun.value(QStringLiteral("skipped")).toInt(), persisted);
     QCOMPARE(rerun.value(QStringLiteral("scanned")).toInt(), files.size() - persisted);
+}
+
+void IndexerScanTest::incrementalRescanPreservesFeatureRows()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir audioDir(dir.filePath(QStringLiteral("audio")));
+    QVERIFY(QDir().mkpath(audioDir.absolutePath()));
+
+    // Synthetic steady signals produce chromaprints degenerate enough to
+    // BER-match each other (even 440 vs 660 sines), so distinct durations
+    // beyond the ±2 s grouping bucket are what guarantee separate groups.
+    const QString toneA = audioDir.filePath(QStringLiteral("tone-a.wav"));
+    const QString toneB = audioDir.filePath(QStringLiteral("tone-b.wav"));
+    const QString added = audioDir.filePath(QStringLiteral("tone-added.wav"));
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("sine=frequency=440:duration=10:sample_rate=44100"), toneA});
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("sine=frequency=660:duration=15:sample_rate=44100"), toneB});
+
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {toneA, toneB});
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        library,
+        QStringLiteral("--features"),
+        features,
+        QStringLiteral("--json"),
+    };
+    const QJsonObject first = runIndexer(scanArgs);
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 2);
+
+    qint64 toneAGroup = -1;
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        toneAGroup = groupFor(db, toneA);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    // Plant a sentinel in toneA's feature row: incremental rescans must keep
+    // the row (freshness is keyed on the dsp version), not wipe + recompute.
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-sentinel-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery update(db);
+            update.prepare(QStringLiteral("UPDATE features SET tempo_bpm = 999.5 WHERE content_group_id = ?"));
+            update.addBindValue(toneAGroup);
+            QVERIFY2(update.exec(), qPrintable(update.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=pink:duration=20:amplitude=0.2:sample_rate=44100"), added});
+    {
+        const QString connectionName = QStringLiteral("indexer-scan-grow-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(library);
+            QVERIFY(db.open());
+            const QPair<qint64, qint64> stats = fileStats(added);
+            QSqlQuery insert(db);
+            insert.prepare(QStringLiteral(
+                "INSERT INTO tracks(path, file_mtime, file_size, missing) VALUES(?, ?, ?, 0)"));
+            insert.addBindValue(added);
+            insert.addBindValue(stats.first);
+            insert.addBindValue(stats.second);
+            QVERIFY2(insert.exec(), qPrintable(insert.lastError().text()));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    const QJsonObject second = runIndexer(scanArgs);
+    QCOMPARE(second.value(QStringLiteral("scanned")).toInt(), 1);
+    QCOMPARE(second.value(QStringLiteral("skipped")).toInt(), 2);
+
+    const QJsonObject third = runIndexer(scanArgs);
+    QCOMPARE(third.value(QStringLiteral("scanned")).toInt(), 0);
+
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        const std::optional<double> tempo = optionalFeature(db, toneAGroup, QStringLiteral("tempo_bpm"));
+        QVERIFY2(tempo.has_value(), "sentinel feature row was wiped by a rescan");
+        QCOMPARE(*tempo, 999.5);
+        const qint64 addedGroup = groupFor(db, added);
+        QVERIFY(addedGroup != toneAGroup);
+        QSqlQuery count(db);
+        QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM features")));
+        QVERIFY(count.next());
+        QCOMPARE(count.value(0).toInt(), 3);
+        // The no-op third run must not clobber the incremental run's summary.
+        QSqlQuery meta(db);
+        QVERIFY(meta.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'last_scan_scanned'")));
+        QVERIFY(meta.next());
+        QCOMPARE(meta.value(0).toString(), QStringLiteral("1"));
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 }
 
 QTEST_MAIN(IndexerScanTest)

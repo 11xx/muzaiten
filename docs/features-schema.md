@@ -104,7 +104,10 @@ AcoustID lookup is intentionally out of scope.
 lexicographically first successfully analyzed path in the group, matching the
 embedder representative policy. Each scan buffers the canonical PCM once for a
 changed file, feeds it to the SHA-256 identity hash, Chromaprint, and
-`Dsp::analyze`, and writes scalar rows after grouping.
+`Dsp::analyze`, and writes scalar rows after grouping. Rows persist across
+rescans: a group that keeps its id keeps its feature row as long as the row's
+`version` matches the current `Dsp::kDspVersion`, so incremental scans only
+compute features for new or stale groups.
 
 ## Scan JSON
 

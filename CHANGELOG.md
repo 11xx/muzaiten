@@ -22,6 +22,14 @@
   and final elapsed/per-track summaries; the status dialog also shows live scan
   state and the last successful analysis run.
 
+### Fixed
+
+- Incremental audio analysis scans (and cancel + resume) no longer wipe the
+  whole `features` table and serially re-analyze every unchanged group
+  representative; existing feature rows are preserved and only stale or new
+  groups are recomputed. A scan that analyzed nothing also no longer
+  overwrites the last-run summary.
+
 ## [2026.07.07]
 
 ### Added
