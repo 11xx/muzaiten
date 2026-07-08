@@ -520,6 +520,7 @@ private:
     QByteArray m_audioAnalysisStderr;
     QByteArray m_audioAnalysisStderrBuffer;
     bool m_audioAnalysisCancelRequested = false;
+    bool m_audioAnalysisRestartPending = false;  // power changed mid-run: stop, then relaunch
     AudioAnalysisData::LiveStatus m_audioAnalysisRunState;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;

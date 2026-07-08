@@ -543,7 +543,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     }
     m_analysisPowerActions[0]->setChecked(true);
     m_analyzeAudioAction = audioAnalysisMenu->addAction(QStringLiteral("Analyze library audio"));
-    m_cancelAudioAnalysisAction = audioAnalysisMenu->addAction(QStringLiteral("Cancel analysis"));
+    m_cancelAudioAnalysisAction = audioAnalysisMenu->addAction(QStringLiteral("Stop analysis"));
     m_cancelAudioAnalysisAction->setVisible(false);
     audioAnalysisMenu->addSeparator();
     QAction *analysisStatus = audioAnalysisMenu->addAction(QStringLiteral("Analysis status…"));

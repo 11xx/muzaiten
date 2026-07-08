@@ -22,6 +22,13 @@
   and final elapsed/per-track summaries; the status dialog also shows live scan
   state and the last successful analysis run.
 
+### Changed
+
+- Changing `Analysis power` while a scan is running now applies immediately:
+  the scan stops (keeping all completed work) and restarts at the new power.
+- The audio-analysis menu action is now `Stop analysis`, and stopping says
+  explicitly that completed work is saved and the next run resumes.
+
 ### Fixed
 
 - Incremental audio analysis scans (and cancel + resume) no longer wipe the

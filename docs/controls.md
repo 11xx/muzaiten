@@ -34,7 +34,10 @@ search options in search, sort/alignment in the album views.
   `Library > Link roots…` maps stored paths to local mounts.
 - `Library > Audio analysis ▸` — run the audio analyzer, choose
   `Analysis power ▸ Background`, `Balanced`, or `Turbo`, inspect coverage,
-  manage duplicate copies ([radio.md](radio.md)).
+  manage duplicate copies ([radio.md](radio.md)). `Stop analysis` keeps all
+  completed work — running the analyzer again resumes where it stopped —
+  and changing the power during a scan applies immediately by restarting
+  the scan at the new level.
 - `Playback > Output profile…` — output device, software volume,
   resampling, sink release on pause, preload. Native bit-perfect DSD
   (`.dsf`) needs a direct-capable device selected here with resampling

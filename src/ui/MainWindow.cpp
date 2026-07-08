@@ -1227,8 +1227,18 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_playerBar->setScanProfile(scanProfileSetting());
     connect(m_playerBar, &PlayerBar::analysisPowerChanged, this, [this](int power) {
         static const char *const names[3] = {"background", "balanced", "turbo"};
-        if (power >= 0 && power <= 2) {
-            m_state->setSetting(QStringLiteral("analysis.power"), QString::fromLatin1(names[power]));
+        if (power < 0 || power > 2) {
+            return;
+        }
+        const QString value = QString::fromLatin1(names[power]);
+        const QString previous = m_state->setting(QStringLiteral("analysis.power"), QStringLiteral("background"));
+        m_state->setSetting(QStringLiteral("analysis.power"), value);
+        // Apply live: stop the running scan (completed work is committed as
+        // it streams) and restart it at the new power once it exits.
+        if (value != previous && m_audioAnalysisProcess != nullptr) {
+            m_audioAnalysisRestartPending = true;
+            statusBar()->showMessage(QStringLiteral("Applying %1 analysis power — restarting analysis...").arg(value), 6000);
+            cancelAudioAnalysis();
         }
     });
     m_playerBar->setAnalysisPower(analysisPowerSetting());
@@ -5559,6 +5569,7 @@ void MainWindow::startAudioAnalysis()
         const QString detail = process->errorString();
         m_audioAnalysisProcess = nullptr;
         m_audioAnalysisRunState = {};
+        m_audioAnalysisRestartPending = false;
         m_playerBar->setAudioAnalysisRunStatus(false, QString());
         process->deleteLater();
         statusBar()->showMessage(QStringLiteral("Audio analysis failed to start: %1").arg(detail), 10000);
@@ -5596,8 +5607,10 @@ void MainWindow::cancelAudioAnalysis()
     }
     QProcess *process = m_audioAnalysisProcess;
     m_audioAnalysisCancelRequested = true;
-    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Canceling analysis..."));
-    statusBar()->showMessage(QStringLiteral("Canceling audio analysis..."), 4000);
+    m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Stopping analysis..."));
+    if (!m_audioAnalysisRestartPending) {
+        statusBar()->showMessage(QStringLiteral("Stopping audio analysis..."), 4000);
+    }
     process->terminate();
     QTimer::singleShot(3000, this, [this, process]() {
         if (m_audioAnalysisProcess == process && process->state() != QProcess::NotRunning) {
@@ -5644,8 +5657,16 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
     m_audioAnalysisProcess = nullptr;
     m_playerBar->setAudioAnalysisRunStatus(false, QString());
 
+    // A power change mid-run stops the scan and restarts it below; only a
+    // user-requested stop earns the "run again to resume" message.
+    const bool restartRequested = m_audioAnalysisRestartPending && m_audioAnalysisCancelRequested;
+    m_audioAnalysisRestartPending = false;
+
     if (m_audioAnalysisCancelRequested) {
-        statusBar()->showMessage(QStringLiteral("Audio analysis canceled"), 5000);
+        if (!restartRequested) {
+            statusBar()->showMessage(
+                QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
+        }
     } else if (exitStatus != QProcess::NormalExit || exitCode != 0) {
         QString detail = QString::fromUtf8(m_audioAnalysisStderr).trimmed();
         if (detail.isEmpty()) {
@@ -5665,7 +5686,8 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
         } else {
             const QJsonObject object = document.object();
             if (object.value(QStringLiteral("canceled")).toBool()) {
-                statusBar()->showMessage(QStringLiteral("Audio analysis canceled"), 5000);
+                statusBar()->showMessage(
+                    QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
             } else {
                 statusBar()->showMessage(
                     AudioAnalysisData::finalSummary(object.value(QStringLiteral("scanned")).toInt(),
@@ -5684,6 +5706,10 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
     m_audioAnalysisCancelRequested = false;
     m_audioAnalysisRunState.running = false;
     process->deleteLater();
+
+    if (restartRequested) {
+        startAudioAnalysis();
+    }
 }
 
 void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
