@@ -5558,6 +5558,7 @@ void MainWindow::startAudioAnalysis()
         }
         const QString detail = process->errorString();
         m_audioAnalysisProcess = nullptr;
+        m_audioAnalysisRunState = {};
         m_playerBar->setAudioAnalysisRunStatus(false, QString());
         process->deleteLater();
         statusBar()->showMessage(QStringLiteral("Audio analysis failed to start: %1").arg(detail), 10000);

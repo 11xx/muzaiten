@@ -35,6 +35,17 @@ QString countText(qint64 value)
     return QLocale().toString(value);
 }
 
+// Meta rows store power lowercase ("background"); display it like the menu
+// labels ("Background") so both status sections read the same.
+QString powerText(QString value)
+{
+    if (value.isEmpty()) {
+        return QStringLiteral("unknown");
+    }
+    value[0] = value.at(0).toUpper();
+    return value;
+}
+
 QLabel *valueLabel(const QString &text, QWidget *parent)
 {
     auto *label = new QLabel(text, parent);
@@ -120,8 +131,7 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
                              valueLabel(QStringLiteral("%1 ms").arg(QString::number(summary.lastRun.meanMsPerTrack, 'f', 1)),
                                         lastGroup));
             lastForm->addRow(QStringLiteral("Power"),
-                             valueLabel(summary.lastRun.power.isEmpty() ? QStringLiteral("unknown") : summary.lastRun.power,
-                                        lastGroup));
+                             valueLabel(powerText(summary.lastRun.power), lastGroup));
             root->addWidget(lastGroup);
         }
     }
