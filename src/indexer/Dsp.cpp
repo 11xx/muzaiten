@@ -304,6 +304,8 @@ std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
     return out;
 }
 
+namespace {
+
 const MelBank &cachedMelBank(unsigned sampleRate)
 {
     thread_local std::optional<std::pair<unsigned, MelBank>> cached;
@@ -312,6 +314,8 @@ const MelBank &cachedMelBank(unsigned sampleRate)
     }
     return cached->second;
 }
+
+} // namespace
 
 std::vector<double> onsetEnvelope(const PowerSpectrogram &spectrogram, const MelBank &melBank)
 {
