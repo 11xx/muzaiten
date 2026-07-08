@@ -8,7 +8,11 @@ BUILD_DIR                  ?= build
 CMAKE                      ?= cmake
 CTEST                      ?= ctest
 CMAKE_GENERATOR            ?= Ninja
-CMAKE_BUILD_TYPE           ?=
+# An empty build type means NO optimization flags at all in CMake — dev
+# builds and every benchmark run against them were silently -O0 (DSP ~10x
+# slower than the shipped Release binary). RelWithDebInfo keeps -O2 with
+# debug info; override with CMAKE_BUILD_TYPE=Debug when chasing a bug.
+CMAKE_BUILD_TYPE           ?= RelWithDebInfo
 # User-space by default: a plain `make install` lands in ~/.local (no sudo).
 # Override for a system install: `make install PREFIX=/usr` (run with sudo).
 PREFIX                     ?= $(HOME)/.local
