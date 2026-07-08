@@ -26,6 +26,9 @@
 
 - Changing `Analysis power` while a scan is running now applies immediately:
   the scan stops (keeping all completed work) and restarts at the new power.
+- The analysis progress rate (and its ETA) now reports recent throughput
+  over roughly the last minute instead of the lifetime average, which after
+  hours of scanning barely moved and hid the effect of power changes.
 - The audio-analysis menu action is now `Stop analysis`, and stopping says
   explicitly that completed work is saved and the next run resumes.
 

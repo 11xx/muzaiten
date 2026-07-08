@@ -87,7 +87,10 @@ phase grouping
 phase features
 ```
 
-stdout remains JSON-only when `--json` is used.
+`elapsed` is total scan wall time; `rate` (and the `eta` derived from it) is
+recent throughput over roughly the last minute, so it reflects power changes
+and slowdowns instead of averaging them away. stdout remains JSON-only when
+`--json` is used.
 
 ## Related binaries
 

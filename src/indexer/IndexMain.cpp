@@ -1339,12 +1339,42 @@ void emitVerboseFile(const FileAnalysis &analysis)
     err.flush();
 }
 
-void emitProgress(int analyzed, int total, std::chrono::steady_clock::time_point started)
+// Recent throughput over a sliding window, not the lifetime average: after
+// hours of scanning the lifetime mean barely moves, which hides the effect
+// of a power change (or any slowdown) from the rate/ETA display.
+class ProgressRate final {
+public:
+    double update(double elapsedSecs, int analyzed)
+    {
+        m_samples.push_back({elapsedSecs, analyzed});
+        while (m_samples.size() > 2 && elapsedSecs - m_samples.front().elapsedSecs > kWindowSecs) {
+            m_samples.pop_front();
+        }
+        const Sample &oldest = m_samples.front();
+        const double span = elapsedSecs - oldest.elapsedSecs;
+        if (span >= kMinSpanSecs && analyzed > oldest.analyzed) {
+            return static_cast<double>(analyzed - oldest.analyzed) / span;
+        }
+        return elapsedSecs > 0.0 ? static_cast<double>(analyzed) / elapsedSecs : 0.0;
+    }
+
+private:
+    struct Sample {
+        double elapsedSecs = 0.0;
+        int analyzed = 0;
+    };
+    static constexpr double kWindowSecs = 60.0;
+    static constexpr double kMinSpanSecs = 2.0;
+    std::deque<Sample> m_samples;
+};
+
+void emitProgress(int analyzed, int total, std::chrono::steady_clock::time_point started,
+                  ProgressRate &recentRate)
 {
     QTextStream err(stderr);
     err.setEncoding(QStringConverter::Utf8);
     const double elapsedSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    const double rate = elapsedSecs > 0.0 ? static_cast<double>(analyzed) / elapsedSecs : 0.0;
+    const double rate = recentRate.update(elapsedSecs, analyzed);
     const QString eta = rate > 0.0
         ? QString::number(static_cast<qint64>(std::ceil(static_cast<double>(total - analyzed) / rate)))
         : QStringLiteral("-");
@@ -1458,6 +1488,7 @@ int runScan(const ScanOptions &options)
         lastCommit = now;
     };
 
+    ProgressRate recentRate;
     const auto completion = [&](FileAnalysis &&analysis, int analyzed, int total) {
         if (options.verbose) {
             emitVerboseFile(analysis);
@@ -1466,7 +1497,7 @@ int runScan(const ScanOptions &options)
             const auto now = std::chrono::steady_clock::now();
             if (analyzed == total || analyzed - lastProgress >= 25
                 || std::chrono::duration_cast<std::chrono::seconds>(now - lastProgressEmit).count() >= 2) {
-                emitProgress(analyzed, total, scanStarted);
+                emitProgress(analyzed, total, scanStarted, recentRate);
                 lastProgress = analyzed;
                 lastProgressEmit = now;
             }
