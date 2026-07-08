@@ -19,9 +19,12 @@
 #include <QtEndian>
 
 #include <algorithm>
-#include <chrono>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -29,10 +32,11 @@
 #include <deque>
 #include <exception>
 #include <functional>
-#include <future>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <queue>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -45,6 +49,7 @@ constexpr double kChromaprintBerThreshold = 0.15;
 constexpr int kChromaprintOffsetFrames = 3;
 constexpr qint64 kDurationBucketMs = 2'000;
 constexpr const char *kExtractor = "muzaiten-dsp";
+std::atomic_bool g_stopRequested = false;
 
 enum class Stage {
     Identity,
@@ -85,6 +90,29 @@ struct StageTimings {
     qint64 hashMs = 0;
     qint64 dspMs = 0;
     qint64 fpMs = 0;
+};
+
+struct TimingAccumulator {
+    std::vector<qint64> decode;
+    std::vector<qint64> hash;
+    std::vector<qint64> dsp;
+    std::vector<qint64> fp;
+
+    void reserve(std::size_t count)
+    {
+        decode.reserve(count);
+        hash.reserve(count);
+        dsp.reserve(count);
+        fp.reserve(count);
+    }
+
+    void add(const StageTimings &timings)
+    {
+        decode.push_back(timings.decodeMs);
+        hash.push_back(timings.hashMs);
+        dsp.push_back(timings.dspMs);
+        fp.push_back(timings.fpMs);
+    }
 };
 
 struct FileAnalysis {
@@ -140,6 +168,16 @@ private:
 [[noreturn]] void fail(const QString &message)
 {
     throw std::runtime_error(message.toStdString());
+}
+
+void requestStop(int)
+{
+    g_stopRequested.store(true, std::memory_order_relaxed);
+}
+
+bool stopRequested()
+{
+    return g_stopRequested.load(std::memory_order_relaxed);
 }
 
 qint64 elapsedMs(std::chrono::steady_clock::time_point started)
@@ -360,15 +398,21 @@ std::vector<Candidate> loadCandidates(const QString &libraryPath, int limit)
 std::pair<std::vector<Candidate>, int> splitPending(QSqlDatabase &database,
                                                     const std::vector<Candidate> &candidates)
 {
+    QHash<QString, QPair<qint64, qint64>> known;
+    QSqlQuery existing(database);
+    if (!existing.exec(QStringLiteral("SELECT path, mtime, size FROM files"))) {
+        fail(existing.lastError().text());
+    }
+    while (existing.next()) {
+        known.insert(existing.value(0).toString(),
+                     {existing.value(1).toLongLong(), existing.value(2).toLongLong()});
+    }
+
     std::vector<Candidate> pending;
     int skipped = 0;
     for (const Candidate &candidate : candidates) {
-        QSqlQuery query(database);
-        prepareOrFail(query, QStringLiteral("SELECT mtime, size FROM files WHERE path = ?"));
-        query.addBindValue(candidate.path);
-        execPrepared(query);
-        if (query.next() && query.value(0).toLongLong() == candidate.mtime
-            && query.value(1).toLongLong() == candidate.size) {
+        const auto it = known.constFind(candidate.path);
+        if (it != known.constEnd() && it->first == candidate.mtime && it->second == candidate.size) {
             ++skipped;
         } else {
             pending.push_back(candidate);
@@ -532,49 +576,66 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
     return analysis;
 }
 
-std::vector<FileAnalysis> analyzePending(const std::vector<Candidate> &pending, int jobs,
-                                         const std::function<void(const FileAnalysis &, int, int)> &completion = {})
+void analyzePending(const std::vector<Candidate> &pending, int jobs,
+                    const std::function<void(FileAnalysis &&, int, int)> &completion)
 {
     if (pending.empty()) {
-        return {};
+        return;
     }
     const std::size_t workerCount = jobs > 0 ? static_cast<std::size_t>(jobs) : std::thread::hardware_concurrency();
     const std::size_t boundedWorkers = std::max<std::size_t>(1, workerCount);
     const int total = static_cast<int>(pending.size());
-    int analyzed = 0;
-    auto appendAnalysis = [&](FileAnalysis analysis, std::vector<FileAnalysis> &analyses) {
-        ++analyzed;
-        if (completion) {
-            completion(analysis, analyzed, total);
-        }
-        analyses.push_back(std::move(analysis));
-    };
-    if (boundedWorkers == 1 || pending.size() == 1) {
-        std::vector<FileAnalysis> analyses;
-        analyses.reserve(pending.size());
-        for (const Candidate &candidate : pending) {
-            appendAnalysis(analyzeCandidate(candidate), analyses);
-        }
-        return analyses;
+
+    std::atomic_size_t nextIndex = 0;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::deque<FileAnalysis> completed;
+    std::size_t runningWorkers = boundedWorkers;
+
+    std::vector<std::thread> workers;
+    workers.reserve(boundedWorkers);
+    for (std::size_t worker = 0; worker < boundedWorkers; ++worker) {
+        workers.emplace_back([&]() {
+            while (!stopRequested()) {
+                const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
+                if (index >= pending.size()) {
+                    break;
+                }
+                FileAnalysis analysis = analyzeCandidate(pending[index]);
+                {
+                    std::lock_guard lock(mutex);
+                    completed.push_back(std::move(analysis));
+                }
+                ready.notify_one();
+            }
+            {
+                std::lock_guard lock(mutex);
+                --runningWorkers;
+            }
+            ready.notify_one();
+        });
     }
 
-    std::deque<std::future<FileAnalysis>> futures;
-    std::vector<FileAnalysis> analyses;
-    analyses.reserve(pending.size());
-    for (const Candidate &candidate : pending) {
-        while (futures.size() >= boundedWorkers) {
-            appendAnalysis(futures.front().get(), analyses);
-            futures.pop_front();
+    int analyzed = 0;
+    while (true) {
+        std::unique_lock lock(mutex);
+        ready.wait(lock, [&]() { return !completed.empty() || runningWorkers == 0; });
+        while (!completed.empty()) {
+            FileAnalysis analysis = std::move(completed.front());
+            completed.pop_front();
+            lock.unlock();
+            ++analyzed;
+            completion(std::move(analysis), analyzed, total);
+            lock.lock();
         }
-        futures.push_back(std::async(std::launch::async, [candidate]() {
-            return analyzeCandidate(candidate);
-        }));
+        if (runningWorkers == 0) {
+            break;
+        }
     }
-    while (!futures.empty()) {
-        appendAnalysis(futures.front().get(), analyses);
-        futures.pop_front();
+
+    for (std::thread &worker : workers) {
+        worker.join();
     }
-    return analyses;
 }
 
 void upsertFile(QSqlDatabase &database, const FileAnalysis &analysis)
@@ -883,21 +944,17 @@ int regroupContent(QSqlDatabase &database, bool clearFeatures)
     return static_cast<int>(groups.size());
 }
 
-QHash<QString, ScalarExtraction> scalarMapFromAnalyses(const std::vector<FileAnalysis> &analyses)
+void recordScalarExtraction(QHash<QString, ScalarExtraction> &extracted, const FileAnalysis &analysis)
 {
-    QHash<QString, ScalarExtraction> extracted;
-    for (const FileAnalysis &analysis : analyses) {
-        if (analysis.status != QLatin1String("ok")) {
-            continue;
-        }
-        ScalarExtraction row;
-        row.known = analysis.scalars.has_value();
-        if (analysis.scalars) {
-            row.features = *analysis.scalars;
-        }
-        extracted.insert(analysis.candidate.path, row);
+    if (analysis.status != QLatin1String("ok")) {
+        return;
     }
-    return extracted;
+    ScalarExtraction row;
+    row.known = analysis.scalars.has_value();
+    if (analysis.scalars) {
+        row.features = *analysis.scalars;
+    }
+    extracted.insert(analysis.candidate.path, row);
 }
 
 bool featureRowFresh(QSqlDatabase &database, qint64 groupId)
@@ -1040,38 +1097,25 @@ QJsonObject timingStatsJson(std::vector<qint64> values)
     };
 }
 
-QJsonObject timingsJson(const std::vector<FileAnalysis> &analyses)
+QJsonObject timingsJson(const TimingAccumulator &timings)
 {
-    std::vector<qint64> decode;
-    std::vector<qint64> hash;
-    std::vector<qint64> dsp;
-    std::vector<qint64> fp;
-    decode.reserve(analyses.size());
-    hash.reserve(analyses.size());
-    dsp.reserve(analyses.size());
-    fp.reserve(analyses.size());
-    for (const FileAnalysis &analysis : analyses) {
-        decode.push_back(analysis.timings.decodeMs);
-        hash.push_back(analysis.timings.hashMs);
-        dsp.push_back(analysis.timings.dspMs);
-        fp.push_back(analysis.timings.fpMs);
-    }
     return QJsonObject{
-        {QStringLiteral("decode"), timingStatsJson(std::move(decode))},
-        {QStringLiteral("hash"), timingStatsJson(std::move(hash))},
-        {QStringLiteral("dsp"), timingStatsJson(std::move(dsp))},
-        {QStringLiteral("fp"), timingStatsJson(std::move(fp))},
+        {QStringLiteral("decode"), timingStatsJson(timings.decode)},
+        {QStringLiteral("hash"), timingStatsJson(timings.hash)},
+        {QStringLiteral("dsp"), timingStatsJson(timings.dsp)},
+        {QStringLiteral("fp"), timingStatsJson(timings.fp)},
     };
 }
 
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
-                     double elapsedSecs = 0.0, const QJsonObject &timings = {})
+                     double elapsedSecs = 0.0, const QJsonObject &timings = {}, bool canceled = false)
 {
     return QJsonObject{
         {QStringLiteral("schema_version"), kSchemaVersion},
         {QStringLiteral("scanned"), scanned},
         {QStringLiteral("skipped"), skipped},
         {QStringLiteral("failed"), failed},
+        {QStringLiteral("canceled"), canceled},
         {QStringLiteral("groups"), groups},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
         {QStringLiteral("featured_groups"), featured},
@@ -1088,6 +1132,26 @@ int currentGroupCount(QSqlDatabase &database)
 int currentFeatureCount(QSqlDatabase &database)
 {
     return static_cast<int>(countScalar(database, QStringLiteral("SELECT COUNT(*) FROM features")));
+}
+
+bool hasUngroupedOkRows(QSqlDatabase &database)
+{
+    return countScalar(database, QStringLiteral(
+               "SELECT COUNT(*) FROM files WHERE status = 'ok' AND content_group_id IS NULL")) > 0;
+}
+
+void beginTransaction(QSqlDatabase &database)
+{
+    if (!database.transaction()) {
+        fail(database.lastError().text());
+    }
+}
+
+void commitTransaction(QSqlDatabase &database)
+{
+    if (!database.commit()) {
+        fail(database.lastError().text());
+    }
 }
 
 void emitJson(const QJsonObject &object)
@@ -1149,6 +1213,10 @@ void emitPhase(const QString &phase)
 
 int runScan(const ScanOptions &options)
 {
+    g_stopRequested.store(false, std::memory_order_relaxed);
+    std::signal(SIGTERM, requestStop);
+    std::signal(SIGINT, requestStop);
+
     const auto scanStarted = std::chrono::steady_clock::now();
     SqlConnection connection;
     QSqlDatabase database = openFeaturesDatabase(options.featuresPath, connection);
@@ -1176,6 +1244,12 @@ int runScan(const ScanOptions &options)
     const auto [pending, skipped] = splitPending(database, candidates);
     if (pending.empty()) {
         if (options.stage == Stage::All) {
+            if (hasUngroupedOkRows(database)) {
+                if (options.progress) {
+                    emitPhase(QStringLiteral("grouping"));
+                }
+                regroupContent(database, true);
+            }
             if (options.progress) {
                 emitPhase(QStringLiteral("features"));
             }
@@ -1190,31 +1264,65 @@ int runScan(const ScanOptions &options)
 
     int lastProgress = 0;
     auto lastProgressEmit = scanStarted;
-    const auto completion = (options.progress || options.verbose)
-        ? std::function<void(const FileAnalysis &, int, int)>(
-              [&](const FileAnalysis &analysis, int analyzed, int total) {
-                  if (options.verbose) {
-                      emitVerboseFile(analysis);
-                  }
-                  if (!options.progress) {
-                      return;
-                  }
-                  const auto now = std::chrono::steady_clock::now();
-                  if (analyzed == total || analyzed - lastProgress >= 25
-                      || std::chrono::duration_cast<std::chrono::seconds>(now - lastProgressEmit).count() >= 2) {
-                      emitProgress(analyzed, total, scanStarted);
-                      lastProgress = analyzed;
-                      lastProgressEmit = now;
-                  }
-              })
-        : std::function<void(const FileAnalysis &, int, int)>();
-    const std::vector<FileAnalysis> analyses = analyzePending(pending, options.jobs, completion);
+    TimingAccumulator timings;
+    timings.reserve(pending.size());
+    QHash<QString, ScalarExtraction> extracted;
+    int scanned = 0;
     int failed = 0;
-    for (const FileAnalysis &analysis : analyses) {
+
+    beginTransaction(database);
+    int uncommitted = 0;
+    auto lastCommit = std::chrono::steady_clock::now();
+    const auto commitIfNeeded = [&](bool force) {
+        const auto now = std::chrono::steady_clock::now();
+        if (!force && uncommitted < 25
+            && std::chrono::duration_cast<std::chrono::seconds>(now - lastCommit).count() < 5) {
+            return;
+        }
+        if (uncommitted == 0) {
+            return;
+        }
+        commitTransaction(database);
+        beginTransaction(database);
+        uncommitted = 0;
+        lastCommit = now;
+    };
+
+    const auto completion = [&](FileAnalysis &&analysis, int analyzed, int total) {
+        if (options.verbose) {
+            emitVerboseFile(analysis);
+        }
+        if (options.progress) {
+            const auto now = std::chrono::steady_clock::now();
+            if (analyzed == total || analyzed - lastProgress >= 25
+                || std::chrono::duration_cast<std::chrono::seconds>(now - lastProgressEmit).count() >= 2) {
+                emitProgress(analyzed, total, scanStarted);
+                lastProgress = analyzed;
+                lastProgressEmit = now;
+            }
+        }
         if (analysis.status != QLatin1String("ok")) {
             ++failed;
         }
+        timings.add(analysis.timings);
+        recordScalarExtraction(extracted, analysis);
         upsertFile(database, analysis);
+        ++scanned;
+        ++uncommitted;
+        commitIfNeeded(false);
+    };
+    analyzePending(pending, options.jobs, completion);
+    commitIfNeeded(true);
+    commitTransaction(database);
+
+    if (stopRequested()) {
+        const QJsonObject payload =
+            scanJson(scanned, skipped, failed, currentGroupCount(database), currentFeatureCount(database),
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
+                     timingsJson(timings),
+                     true);
+        options.json ? emitJson(payload) : emitPlain(payload);
+        return 0;
     }
 
     if (options.progress) {
@@ -1225,12 +1333,12 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        ensureFeatureRows(database, scalarMapFromAnalyses(analyses));
+        ensureFeatureRows(database, extracted);
     }
     const QJsonObject payload =
-        scanJson(static_cast<int>(analyses.size()), skipped, failed, groups, currentFeatureCount(database),
+        scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
                  std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
-                 timingsJson(analyses));
+                 timingsJson(timings));
     options.json ? emitJson(payload) : emitPlain(payload);
     return 0;
 }

@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,6 +28,7 @@ class IndexerScanTest final : public QObject {
 private slots:
     void generatedFixtureMatrixWritesSchemaV3Features();
     void groupIdsStayStableWhenLibraryGrows();
+    void cancelPersistsCompletedRowsAndRerunSkipsThem();
 };
 
 namespace {
@@ -116,6 +118,20 @@ QJsonObject runIndexer(const QStringList &arguments, QByteArray *stderrBytes = n
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         const QByteArray message = QStringLiteral("invalid indexer JSON: %1\n%2")
                                        .arg(parseError.errorString(), QString::fromUtf8(stdoutBytes))
+                                       .toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        return {};
+    }
+    return document.object();
+}
+
+QJsonObject parseJsonObject(const QByteArray &bytes)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        const QByteArray message = QStringLiteral("invalid JSON: %1\n%2")
+                                       .arg(parseError.errorString(), QString::fromUtf8(bytes))
                                        .toUtf8();
         QTest::qFail(message.constData(), __FILE__, __LINE__);
         return {};
@@ -252,6 +268,30 @@ QStringList featureRows(QSqlDatabase &db)
         rows << columns.join(QLatin1Char('|'));
     }
     return rows;
+}
+
+int fileRowCount(const QString &featuresPath)
+{
+    QString connectionName;
+    QSqlDatabase db = openReadOnly(featuresPath, &connectionName);
+    if (!db.open()) {
+        const QByteArray message = db.lastError().text().toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        QSqlDatabase::removeDatabase(connectionName);
+        return 0;
+    }
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM files")) || !query.next()) {
+        const QByteArray message = query.lastError().text().toUtf8();
+        QTest::qFail(message.constData(), __FILE__, __LINE__);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+        return 0;
+    }
+    const int count = query.value(0).toInt();
+    db.close();
+    QSqlDatabase::removeDatabase(connectionName);
+    return count;
 }
 
 double ffmpegIntegratedLufs(const QString &path)
@@ -611,6 +651,80 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
 
     db.close();
     QSqlDatabase::removeDatabase(connectionName);
+}
+
+void IndexerScanTest::cancelPersistsCompletedRowsAndRerunSkipsThem()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    requireTool(QStringLiteral("fpcalc"));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir audioDir(dir.filePath(QStringLiteral("audio")));
+    QVERIFY(QDir().mkpath(audioDir.absolutePath()));
+
+    QStringList files;
+    for (int index = 0; index < 4; ++index) {
+        const QString file = audioDir.filePath(QStringLiteral("cancel-%1.wav").arg(index));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("sine=frequency=%1:duration=120:sample_rate=44100").arg(330 + index * 70),
+                file});
+        files << file;
+    }
+
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, files);
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"),
+        QStringLiteral("--library"),
+        library,
+        QStringLiteral("--features"),
+        features,
+        QStringLiteral("--jobs"),
+        QStringLiteral("1"),
+        QStringLiteral("--json"),
+        QStringLiteral("--progress"),
+    };
+
+    QProcess process;
+    process.setReadChannel(QProcess::StandardError);
+    process.start(muzaitenIndexPath(), scanArgs);
+    QVERIFY2(process.waitForStarted(5000), qPrintable(process.errorString()));
+
+    QByteArray stderrBytes;
+    QElapsedTimer timer;
+    timer.start();
+    bool sawProgress = false;
+    const QRegularExpression progressPattern(QStringLiteral("^progress\\s+\\d+/\\d+"),
+                                             QRegularExpression::MultilineOption);
+    while (timer.elapsed() < 120000 && process.state() != QProcess::NotRunning && !sawProgress) {
+        if (process.waitForReadyRead(1000)) {
+            stderrBytes.append(process.readAllStandardError());
+            sawProgress = QString::fromUtf8(stderrBytes).contains(progressPattern);
+        }
+    }
+    QVERIFY2(sawProgress, qPrintable(QString::fromUtf8(stderrBytes)));
+
+    process.terminate();
+    QVERIFY2(process.waitForFinished(120000), qPrintable(process.errorString()));
+    stderrBytes.append(process.readAllStandardError());
+    const QByteArray stdoutBytes = process.readAllStandardOutput();
+    QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(process.exitCode(), 0);
+
+    const QJsonObject canceled = parseJsonObject(stdoutBytes);
+    QVERIFY(canceled.value(QStringLiteral("canceled")).toBool());
+    QVERIFY(canceled.value(QStringLiteral("scanned")).toInt() > 0);
+    const int persisted = fileRowCount(features);
+    QVERIFY(persisted > 0);
+    QCOMPARE(persisted, canceled.value(QStringLiteral("scanned")).toInt());
+
+    const QJsonObject rerun = runIndexer(scanArgs);
+    QCOMPARE(rerun.value(QStringLiteral("canceled")).toBool(), false);
+    QCOMPARE(rerun.value(QStringLiteral("skipped")).toInt(), persisted);
+    QCOMPARE(rerun.value(QStringLiteral("scanned")).toInt(), files.size() - persisted);
 }
 
 QTEST_MAIN(IndexerScanTest)

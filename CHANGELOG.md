@@ -7,6 +7,9 @@
 - `muzaiten-index scan` now reports elapsed time, per-stage timing aggregates,
   rich progress/ETA lines, phase markers, and optional per-file `--verbose`
   timing lines while keeping JSON output on stdout.
+- `muzaiten-index scan` now streams completed analysis rows to `features.sqlite`
+  during long runs and exits cleanly with `"canceled": true` after SIGTERM or
+  SIGINT, so canceling a scan preserves completed work for the next run.
 
 ## [2026.07.07]
 
