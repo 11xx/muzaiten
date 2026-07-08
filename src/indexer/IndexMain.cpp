@@ -1249,6 +1249,33 @@ void commitTransaction(QSqlDatabase &database)
     }
 }
 
+void upsertMeta(QSqlDatabase &database, const QString &key, const QString &value)
+{
+    QSqlQuery query(database);
+    prepareOrFail(query, QStringLiteral(
+                             "INSERT INTO meta(key, value) VALUES(?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
+    query.addBindValue(key);
+    query.addBindValue(value);
+    execPrepared(query);
+}
+
+void writeLastScanSummary(QSqlDatabase &database, int scanned, int skipped, int failed,
+                          double elapsedSecs, const QString &power)
+{
+    const double meanMsPerTrack = scanned > 0
+        ? elapsedSecs * 1000.0 / static_cast<double>(scanned)
+        : 0.0;
+    upsertMeta(database, QStringLiteral("last_scan_finished_at"),
+               QString::number(QDateTime::currentSecsSinceEpoch()));
+    upsertMeta(database, QStringLiteral("last_scan_elapsed_secs"), QString::number(elapsedSecs, 'f', 3));
+    upsertMeta(database, QStringLiteral("last_scan_scanned"), QString::number(scanned));
+    upsertMeta(database, QStringLiteral("last_scan_skipped"), QString::number(skipped));
+    upsertMeta(database, QStringLiteral("last_scan_failed"), QString::number(failed));
+    upsertMeta(database, QStringLiteral("last_scan_mean_ms_per_track"), QString::number(meanMsPerTrack, 'f', 3));
+    upsertMeta(database, QStringLiteral("last_scan_power"), power);
+}
+
 void emitJson(const QJsonObject &object)
 {
     QTextStream out(stdout);
@@ -1360,9 +1387,14 @@ int runScan(const ScanOptions &options)
             }
             ensureFeatureRows(database, {});
         }
+        const double elapsedSecs =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
+        if (options.stage == Stage::All) {
+            writeLastScanSummary(database, 0, skipped, 0, elapsedSecs, effectivePowerName);
+        }
         const QJsonObject payload =
             scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
-                     std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
+                     elapsedSecs,
                      {},
                      false,
                      effectivePowerName,
@@ -1446,9 +1478,14 @@ int runScan(const ScanOptions &options)
         }
         ensureFeatureRows(database, extracted);
     }
+    const double elapsedSecs =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
+    if (options.stage == Stage::All) {
+        writeLastScanSummary(database, scanned, skipped, failed, elapsedSecs, effectivePowerName);
+    }
     const QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
-                 std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
+                 elapsedSecs,
                  timingsJson(timings),
                  false,
                  effectivePowerName,

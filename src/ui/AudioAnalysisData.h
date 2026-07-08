@@ -3,8 +3,11 @@
 #include "features/FeatureStore.h"
 
 #include <QVector>
+#include <QDateTime>
 #include <QString>
 #include <QStringList>
+
+#include <optional>
 
 class Database;
 
@@ -17,6 +20,26 @@ struct StatusSummary {
     int schemaVersion = -1;
     FeatureStore::Status status;
     QString message;
+    struct LastRun {
+        bool present = false;
+        qint64 finishedAt = 0;
+        double elapsedSecs = 0.0;
+        int scanned = 0;
+        int skipped = 0;
+        int failed = 0;
+        double meanMsPerTrack = 0.0;
+        QString power;
+    } lastRun;
+};
+
+struct LiveStatus {
+    bool running = false;
+    int analyzed = 0;
+    int total = 0;
+    double rate = -1.0;
+    std::optional<qint64> etaSecs;
+    double elapsedSecs = 0.0;
+    QString power;
 };
 
 struct DuplicateCopy {
@@ -44,6 +67,11 @@ struct DuplicateGroup {
 };
 
 StatusSummary loadStatus(const QString &featuresPath);
+QString compactDuration(qint64 seconds);
+QString clockDuration(qint64 seconds);
+QString spacedDuration(qint64 seconds);
+QString progressLabel(const LiveStatus &status);
+QString finalSummary(int scanned, int skipped, int failed, int groups, double elapsedSecs);
 QVector<DuplicateGroup> loadDuplicateGroups(Database &db, const FeatureStore &features,
                                             int minSize = 2, int limit = 200);
 QString copyDisplayTitle(const DuplicateCopy &copy);

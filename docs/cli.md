@@ -66,6 +66,29 @@ range, so listens later added *behind* that range are never revisited. Run
 force the next import to re-walk full history (imported-listen dedup keeps
 re-walks safe); `reset` is refused while a backfill is running.
 
+## Audio indexer
+
+`muzaiten-index` is the standalone analyzer used by the app:
+
+```sh
+muzaiten-index scan --library library.sqlite --features features.sqlite --json
+muzaiten-index scan --library library.sqlite --features features.sqlite --power background --progress
+muzaiten-index scan --library library.sqlite --features features.sqlite --verbose
+muzaiten-index status --features features.sqlite --json
+```
+
+`--power background|balanced|turbo` controls worker count and process
+priority; `--jobs N` overrides only the worker count. `--verbose` writes
+per-file timing lines to stderr. With `--progress`, stderr carries:
+
+```text
+progress <n>/<m> elapsed=<s> rate=<r> eta=<s>
+phase grouping
+phase features
+```
+
+stdout remains JSON-only when `--json` is used.
+
 ## Related binaries
 
 - `muzaiten-index` — the audio analysis indexer (identity, duplicate

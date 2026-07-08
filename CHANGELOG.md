@@ -18,6 +18,9 @@
   accepts `background`, `balanced`, and `turbo`, reports the effective power
   and job count in JSON, and the app persists `Library > Audio analysis >
   Analysis power` with a background default.
+- Audio analysis progress in the app now shows count, rate, ETA, elapsed time,
+  and final elapsed/per-track summaries; the status dialog also shows live scan
+  state and the last successful analysis run.
 
 ## [2026.07.07]
 

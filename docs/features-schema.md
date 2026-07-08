@@ -64,6 +64,13 @@ databases may not contain them until the embedder runs.
 - `dsp_version`: the value of `Dsp::kDspVersion`, currently
   `muzaiten-dsp-v1`.
 - `created_at`: Unix epoch seconds when the database was first initialized.
+- `last_scan_finished_at`: Unix epoch seconds for the last successful full
+  audio analysis scan.
+- `last_scan_elapsed_secs`: wall time for that scan.
+- `last_scan_scanned`, `last_scan_skipped`, `last_scan_failed`: file counts
+  from the last successful full scan.
+- `last_scan_mean_ms_per_track`: elapsed milliseconds per scanned track.
+- `last_scan_power`: `background`, `balanced`, or `turbo`.
 
 Schema v1/v2 files are upgraded in place by `muzaiten-index scan`; the old
 `features` table is dropped and recreated because no shipped database contains
@@ -74,8 +81,9 @@ authoritative scalar rows from the blocked bliss plan.
 - `decode_hash`: SHA-256 over the canonical `ffmpeg` decode:
   `f32le`, mono, 22050 Hz. This is exact decoded-audio identity for this
   canonical path.
-- `chromaprint_fp`: raw `fpcalc -raw -json -length 120` fingerprint integers,
-  stored as little-endian signed 32-bit values.
+- `chromaprint_fp`: raw Chromaprint fingerprint integers for the first 120 s,
+  stored as little-endian signed 32-bit values and kept compatible with
+  `fpcalc -raw -json -length 120` output.
 - `content_group_id`: assigned by the indexer after grouping.
 - `status`: `ok`, `decode_failed`, or `fp_failed`.
 
@@ -95,8 +103,20 @@ AcoustID lookup is intentionally out of scope.
 `features` contains one row per content group. The representative is the
 lexicographically first successfully analyzed path in the group, matching the
 embedder representative policy. Each scan buffers the canonical PCM once for a
-changed file, feeds it to both the SHA-256 identity hash and `Dsp::analyze`, and
-writes scalar rows after grouping.
+changed file, feeds it to the SHA-256 identity hash, Chromaprint, and
+`Dsp::analyze`, and writes scalar rows after grouping.
+
+## Scan JSON
+
+`muzaiten-index scan --json` includes the stable count fields
+`scanned`, `skipped`, `failed`, `groups`, and `featured_groups`, plus:
+
+- `elapsed_secs`: scan wall time.
+- `power`: effective analysis power (`background`, `balanced`, or `turbo`).
+- `jobs`: effective worker count after `--power` and `--jobs` resolution.
+- `canceled`: true when SIGTERM/SIGINT requested a cooperative stop.
+- `timings`: per-stage `decode`, `hash`, `dsp`, and `fp` aggregates with
+  `total_ms`, `mean_ms`, `p50_ms`, and `p95_ms`.
 
 NULL means the extractor could not report that value for the representative.
 Near-silence has NULL loudness and energy; a flat or empty onset envelope

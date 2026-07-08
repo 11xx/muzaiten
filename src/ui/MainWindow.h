@@ -10,6 +10,7 @@
 #include "core/Track.h"
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
+#include "ui/AudioAnalysisData.h"
 
 #include <functional>
 #include <memory>
@@ -246,6 +247,7 @@ private:
     void readAudioAnalysisStderr();
     void finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStatus);
     void handleAudioAnalysisProgressLine(const QString &line);
+    AudioAnalysisData::LiveStatus audioAnalysisLiveStatus() const;
     QString resolveMuzaitenIndexBinary() const;
     void configureMpdSource();
     void importMpdLibraryMetadata();
@@ -518,6 +520,7 @@ private:
     QByteArray m_audioAnalysisStderr;
     QByteArray m_audioAnalysisStderrBuffer;
     bool m_audioAnalysisCancelRequested = false;
+    AudioAnalysisData::LiveStatus m_audioAnalysisRunState;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;
