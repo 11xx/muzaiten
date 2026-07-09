@@ -5699,11 +5699,7 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
                 statusBar()->showMessage(
                     QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
             } else {
-                const QJsonValue featuresWrittenValue = object.value(QStringLiteral("features_written"));
-                const int featuresWritten =
-                    featuresWrittenValue.isDouble() || featuresWrittenValue.isString()
-                        ? featuresWrittenValue.toInt(-1)
-                        : -1;
+                const int featuresWritten = object.value(QStringLiteral("features_written")).toInt(-1);
                 statusBar()->showMessage(
                     AudioAnalysisData::finalSummary(object.value(QStringLiteral("scanned")).toInt(),
                                                     object.value(QStringLiteral("skipped")).toInt(),
@@ -5720,7 +5716,9 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
     m_audioAnalysisStderr.clear();
     m_audioAnalysisStderrBuffer.clear();
     m_audioAnalysisCancelRequested = false;
-    m_audioAnalysisRunState.running = false;
+    // Full reset (not just running=false) so a reopened status dialog shows
+    // Idle instead of the last run's frozen phase and counters.
+    m_audioAnalysisRunState = {};
     process->deleteLater();
 
     if (restartRequested) {
