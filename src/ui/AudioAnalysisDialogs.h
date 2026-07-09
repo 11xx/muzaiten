@@ -27,6 +27,7 @@ private:
 
     std::function<AudioAnalysisData::LiveStatus()> m_liveStatus;
     QLabel *m_liveRunning = nullptr;
+    QLabel *m_livePhase = nullptr;
     QLabel *m_liveProgress = nullptr;
     QLabel *m_liveRate = nullptr;
     QLabel *m_liveEta = nullptr;
