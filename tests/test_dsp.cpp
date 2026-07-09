@@ -71,6 +71,52 @@ std::vector<double> impulseEnvelope(double bpm, double frameRate, double secs)
 
 constexpr double kFrameRate = static_cast<double>(Dsp::kSampleRateHz) / 512.0;
 
+// Music-like deterministic mix; kept byte-identical with tests/bench_dsp.cpp
+// so the bench's --goldens output and this file's oracle describe the same
+// audio.
+std::vector<float> makeMix(double secs)
+{
+    const std::vector<float> clicks = makeClicks(123.0, secs);
+    const std::vector<float> low = makeSine(220.0, 0.3, secs);
+    const std::vector<float> high = makeSine(3520.0, 0.1, secs);
+    const std::vector<float> bed = makeNoise(clicks.size(), 42);
+    std::vector<float> out(clicks.size());
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        out[i] = 0.5F * clicks[i] + low[i] + high[i] + 0.05F * bed[i];
+    }
+    return out;
+}
+
+// The v1 oracle uses one shared tolerance: tight enough that any semantic
+// change to the analyzer trips it, loose enough to absorb FMA/libm noise
+// across build regimes. Values near zero (cancellation residue) collapse
+// into the absolute floor by design.
+bool nearGolden(double actual, double expected)
+{
+    return std::abs(actual - expected) <= std::max(1e-9, 1e-9 * std::abs(expected));
+}
+
+bool nearGolden(const std::optional<double> &actual, const std::optional<double> &expected)
+{
+    if (actual.has_value() != expected.has_value()) {
+        return false;
+    }
+    return !expected.has_value() || nearGolden(*actual, *expected);
+}
+
+struct GoldenRow {
+    const char *fixture;
+    std::optional<double> tempoBpm;
+    std::optional<double> loudnessLufs;
+    std::optional<double> loudnessStdDb;
+    double centroidMeanHz;
+    double centroidStdHz;
+    double flatnessMean;
+    double zcr;
+    double onsetRateHz;
+    std::optional<double> energy;
+};
+
 } // namespace
 
 class DspTest : public QObject
@@ -96,6 +142,7 @@ private slots:
     void sineCentroidSitsAtItsFrequencyAndIsTonal();
     void noiseIsFlatterAndBrighterThanALowSine();
     void sineZeroCrossingRateTracksFrequency();
+    void v1GoldenScalarsMatchPinnedOracle();
 };
 
 void DspTest::tooShortInputYieldsNothing()
@@ -289,6 +336,67 @@ void DspTest::sineZeroCrossingRateTracksFrequency()
     const double expected = 2.0 * 1000.0 / Dsp::kSampleRateHz;
     QVERIFY2(std::abs(rate - expected) < 0.1 * expected,
              qPrintable(QStringLiteral("zcr %1").arg(rate)));
+}
+
+void DspTest::v1GoldenScalarsMatchPinnedOracle()
+{
+    // muzaiten-dsp-v1 oracle, captured 2026-07-09 at master@8e46549 via
+    // `bench_dsp --goldens` (RelWithDebInfo, generic x86-64, gcc, no FMA
+    // contraction pinned yet). Regime-scoped reference: bit-exactness across
+    // refactors is proven by diffing the bench's full-precision output; this
+    // test guards against *semantic* drift with a tolerance that absorbs
+    // FMA/libm noise. Never widen a tolerance to pass — a failure here means
+    // scalar meaning moved and the DSP version must say so.
+    std::vector<float> quietNoise = makeNoise(Dsp::kSampleRateHz * 10, 7);
+    for (float &sample : quietNoise) {
+        sample *= 0.01F;
+    }
+    const std::vector<std::pair<GoldenRow, std::vector<float>>> cases = {
+        {{"silence-10s", std::nullopt, std::nullopt, std::nullopt, 0.0, 0.0, 0.0, 0.0, 0.0,
+          std::nullopt},
+         std::vector<float>(Dsp::kSampleRateHz * 10, 0.0F)},
+        {{"sine440-10s", 112.34714673913044, -9.6644690533454369, 0.00017316047801089145,
+          439.97390961613837, 0.34491538285773432, 6.8534369758426706e-07,
+          0.039904942879559542, 0.0, 0.50671061893309133},
+         makeSine(440.0, 0.5, 10.0)},
+        {{"quiet-noise-10s", 123.046875, -41.847875202932698, 0.038684863534371436,
+          5498.6712804053541, 134.40748654491614, 0.56008263486076393, 0.49851019732515794,
+          9.7923615139211133, 0.40000000000000002},
+         quietNoise},
+        {{"noise-10s", 123.046875, -1.8478750090323097, 0.038684864062500948,
+          5498.6712803356886, 134.4074865790883, 0.56008263477821707, 0.49851019732515794,
+          9.7923615139211133, 1.0},
+         makeNoise(Dsp::kSampleRateHz * 10, 7)},
+        {{"clicks120-30s", 117.45383522727273, -36.523361991074935, 4.2632564145606011e-14,
+          5512.5000000000118, 6.8923732343424907e-11, 1.0000000000000036, 0.0,
+          1.9666547745743035, 0.13111031830495357},
+         makeClicks(120.0, 30.0)},
+        {{"mix-30s", 123.046875, -13.067526800504618, 0.011740588257490931,
+          633.21220193502609, 10.671009353426417, 0.010179760571680022,
+          0.073301698112922323, 7.5332877805727554, 0.8386494639899077},
+         makeMix(30.0)},
+    };
+
+    for (const auto &[golden, samples] : cases) {
+        const auto features = Dsp::analyze(samples, Dsp::kSampleRateHz);
+        QVERIFY2(features.has_value(), golden.fixture);
+        const auto check = [&](const char *field, bool ok) {
+            QVERIFY2(ok, qPrintable(QStringLiteral("%1: %2 moved off the v1 oracle")
+                                        .arg(QLatin1String(golden.fixture), QLatin1String(field))));
+        };
+        check("tempo_bpm", nearGolden(features->tempoBpm, golden.tempoBpm));
+        check("loudness_lufs", nearGolden(features->loudnessLufs, golden.loudnessLufs));
+        check("loudness_std_db", nearGolden(features->loudnessStdDb, golden.loudnessStdDb));
+        check("centroid_mean_hz", nearGolden(features->spectralCentroidMeanHz, golden.centroidMeanHz));
+        check("centroid_std_hz", nearGolden(features->spectralCentroidStdHz, golden.centroidStdHz));
+        check("flatness_mean", nearGolden(features->spectralFlatnessMean, golden.flatnessMean));
+        check("zcr", nearGolden(features->zeroCrossingRate, golden.zcr));
+        check("onset_rate_hz", nearGolden(features->onsetRateHz, golden.onsetRateHz));
+        check("energy", nearGolden(features->energy, golden.energy));
+    }
+
+    // Short-input contract stays pinned alongside the numeric oracle.
+    QVERIFY(!Dsp::analyze(makeSine(440.0, 0.5, 1.0), Dsp::kSampleRateHz).has_value());
 }
 
 QTEST_APPLESS_MAIN(DspTest)
