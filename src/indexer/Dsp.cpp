@@ -595,13 +595,85 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
         return std::nullopt;
     }
 
-    const PowerSpectrogram spectrogram = powerSpectrogram(samples, kNFft, kHop);
-    if (spectrogram.frames.empty()) {
-        return std::nullopt;
+    // Stream STFT frames instead of materializing the full linear-bin
+    // spectrogram (~85 MB per 4 min and duration-scaled — the memory tax
+    // that multiplied across parallel workers). Each frame feeds the
+    // spectral accumulators immediately and survives only as its 128-bin
+    // mel projection; the compact mel matrix must be kept whole because the
+    // top_db floor needs the global mel max before dB conversion.
+    //
+    // This walk must stay semantically identical to the dense reference
+    // path (powerSpectrogram/onsetEnvelope/spectralStats, kept for tests
+    // and oracle tooling): same loops, same summation order. test_dsp's
+    // golden oracle and bench_dsp --goldens diffs guard that equivalence.
+    const std::vector<float> padded = reflectPad(samples, kNFft / 2);
+    const std::vector<double> window = hannWindow(kNFft);
+    std::vector<std::complex<double>> buffer(kNFft);
+    std::vector<double> binFreqs(kNFft / 2 + 1);
+    for (std::size_t k = 0; k < binFreqs.size(); ++k) {
+        binFreqs[k] = static_cast<double>(k) * rate / static_cast<double>(kNFft);
     }
 
     const MelBank &melBank = cachedMelBank(sampleRate);
-    const std::vector<double> envelope = onsetEnvelope(spectrogram, melBank);
+    std::vector<std::vector<double>> melPowers;
+    std::vector<double> centroids;
+    double flatnessSum = 0.0;
+    std::size_t flatnessFrames = 0;
+    double maxPower = kAmin;
+
+    for (std::size_t start = 0; start + kNFft <= padded.size(); start += kHop) {
+        for (std::size_t i = 0; i < kNFft; ++i) {
+            buffer[i] = {static_cast<double>(padded[start + i]) * window[i], 0.0};
+        }
+        fftRadix2(buffer);
+
+        std::vector<double> powerFrame(kNFft / 2 + 1);
+        for (std::size_t k = 0; k <= kNFft / 2; ++k) {
+            powerFrame[k] = std::norm(buffer[k]);
+        }
+
+        double total = 0.0;
+        for (double p : powerFrame) {
+            total += p;
+        }
+        if (!(total < kSilentFramePower)) {
+            double weightedFreq = 0.0;
+            double logSum = 0.0;
+            for (std::size_t k = 0; k < powerFrame.size(); ++k) {
+                weightedFreq += powerFrame[k] * binFreqs[k];
+                logSum += std::log(std::max(powerFrame[k], kAmin));
+            }
+            centroids.push_back(weightedFreq / total);
+
+            const double logMean = logSum / static_cast<double>(powerFrame.size());
+            const double arithMean = total / static_cast<double>(powerFrame.size());
+            flatnessSum += std::exp(logMean) / std::max(arithMean, kAmin);
+            ++flatnessFrames;
+        }
+
+        melPowers.push_back(melBank.apply(powerFrame));
+        for (double p : melPowers.back()) {
+            maxPower = std::max(maxPower, p);
+        }
+    }
+    if (melPowers.empty()) {
+        return std::nullopt;
+    }
+
+    const double floorDb = 10.0 * std::log10(maxPower) - kTopDb;
+    for (std::vector<double> &frame : melPowers) {
+        for (double &p : frame) {
+            p = std::max(10.0 * std::log10(std::max(p, kAmin)), floorDb);
+        }
+    }
+    std::vector<double> envelope{0.0};
+    for (std::size_t t = 1; t < melPowers.size(); ++t) {
+        double flux = 0.0;
+        for (std::size_t m = 0; m < melPowers[t].size(); ++m) {
+            flux += std::max(melPowers[t][m] - melPowers[t - 1][m], 0.0);
+        }
+        envelope.push_back(flux / static_cast<double>(melPowers[t].size()));
+    }
     const double frameRate = rate / static_cast<double>(kHop);
 
     ScalarFeatures features;
@@ -612,10 +684,22 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     features.loudnessLufs = loudness.integratedLufs;
     features.loudnessStdDb = loudness.blockStdDb;
 
-    const SpectralStats spectral = spectralStats(spectrogram, rate);
-    features.spectralCentroidMeanHz = spectral.centroidMeanHz;
-    features.spectralCentroidStdHz = spectral.centroidStdHz;
-    features.spectralFlatnessMean = spectral.flatnessMean;
+    if (!centroids.empty()) {
+        double mean = 0.0;
+        for (double c : centroids) {
+            mean += c;
+        }
+        mean /= static_cast<double>(centroids.size());
+        double variance = 0.0;
+        for (double c : centroids) {
+            variance += (c - mean) * (c - mean);
+        }
+        variance /= static_cast<double>(centroids.size());
+
+        features.spectralCentroidMeanHz = mean;
+        features.spectralCentroidStdHz = std::sqrt(variance);
+        features.spectralFlatnessMean = flatnessSum / static_cast<double>(flatnessFrames);
+    }
     features.zeroCrossingRate = zeroCrossingRate(samples);
 
     if (loudness.integratedLufs) {
