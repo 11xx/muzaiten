@@ -119,6 +119,11 @@ bool nearGolden(const std::optional<double> &actual, const std::optional<double>
     return !expected.has_value() || nearGolden(*actual, *expected);
 }
 
+bool nearAbsolute(double actual, double expected, double tolerance)
+{
+    return std::abs(actual - expected) <= tolerance;
+}
+
 struct GoldenRow {
     const char *fixture;
     std::optional<double> tempoBpm;
@@ -158,7 +163,7 @@ private slots:
     void noiseIsFlatterAndBrighterThanALowSine();
     void sineZeroCrossingRateTracksFrequency();
     void cleanRoomRealFftMatchesV1Reference();
-    void v1GoldenScalarsMatchPinnedOracle();
+    void v2ScalarsStayWithinMeasuredV1Tolerance();
 };
 
 void DspTest::tooShortInputYieldsNothing()
@@ -425,15 +430,21 @@ void DspTest::cleanRoomRealFftMatchesV1Reference()
     }
 }
 
-void DspTest::v1GoldenScalarsMatchPinnedOracle()
+void DspTest::v2ScalarsStayWithinMeasuredV1Tolerance()
 {
     // muzaiten-dsp-v1 oracle, captured 2026-07-09 at master@8e46549 via
     // `bench_dsp --goldens` (RelWithDebInfo, generic x86-64, gcc, no FMA
     // contraction pinned yet). Regime-scoped reference: bit-exactness across
     // refactors is proven by diffing the bench's full-precision output; this
-    // test guards against *semantic* drift with a tolerance that absorbs
-    // FMA/libm noise. Never widen a tolerance to pass — a failure here means
-    // scalar meaning moved and the DSP version must say so.
+    // test is also the v2 comparison oracle. The fixed float real FFT leaves
+    // tempo, loudness, ZCR, onset rate, and energy exact on this corpus; only
+    // spectral reductions move. Measured maxima across these hostile fixtures
+    // plus the isolated 6.3-hour DSF/high-resolution corpus were 6.2e-6 Hz
+    // centroid mean, 4.4e-5 Hz centroid std (near-zero click residue), and
+    // 1.7e-10 flatness. The field-specific gates below bound those named
+    // effects instead of hiding them behind one global epsilon.
+    constexpr double kCentroidToleranceHz = 1e-4;
+    constexpr double kFlatnessTolerance = 1e-9;
     std::vector<float> quietNoise = makeNoise(Dsp::kSampleRateHz * 10, 7);
     for (float &sample : quietNoise) {
         sample *= 0.01F;
@@ -472,15 +483,21 @@ void DspTest::v1GoldenScalarsMatchPinnedOracle()
         const auto features = Dsp::analyze(samples, Dsp::kSampleRateHz);
         QVERIFY2(features.has_value(), golden.fixture);
         const auto check = [&](const char *field, bool ok) {
-            QVERIFY2(ok, qPrintable(QStringLiteral("%1: %2 moved off the v1 oracle")
+            QVERIFY2(ok, qPrintable(QStringLiteral("%1: %2 exceeds the measured v1-to-v2 gate")
                                         .arg(QLatin1String(golden.fixture), QLatin1String(field))));
         };
         check("tempo_bpm", nearGolden(features->tempoBpm, golden.tempoBpm));
         check("loudness_lufs", nearGolden(features->loudnessLufs, golden.loudnessLufs));
         check("loudness_std_db", nearGolden(features->loudnessStdDb, golden.loudnessStdDb));
-        check("centroid_mean_hz", nearGolden(features->spectralCentroidMeanHz, golden.centroidMeanHz));
-        check("centroid_std_hz", nearGolden(features->spectralCentroidStdHz, golden.centroidStdHz));
-        check("flatness_mean", nearGolden(features->spectralFlatnessMean, golden.flatnessMean));
+        check("centroid_mean_hz", nearAbsolute(features->spectralCentroidMeanHz,
+                                                golden.centroidMeanHz,
+                                                kCentroidToleranceHz));
+        check("centroid_std_hz", nearAbsolute(features->spectralCentroidStdHz,
+                                               golden.centroidStdHz,
+                                               kCentroidToleranceHz));
+        check("flatness_mean", nearAbsolute(features->spectralFlatnessMean,
+                                             golden.flatnessMean,
+                                             kFlatnessTolerance));
         check("zcr", nearGolden(features->zeroCrossingRate, golden.zcr));
         check("onset_rate_hz", nearGolden(features->onsetRateHz, golden.onsetRateHz));
         check("energy", nearGolden(features->energy, golden.energy));

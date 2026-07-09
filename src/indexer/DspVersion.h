@@ -11,6 +11,6 @@
 // row in the features table so stale rows can be recomputed selectively.
 namespace Dsp {
 
-inline constexpr const char *kDspVersion = "muzaiten-dsp-v1";
+inline constexpr const char *kDspVersion = "muzaiten-dsp-v2";
 
 } // namespace Dsp

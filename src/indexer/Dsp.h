@@ -64,6 +64,8 @@ struct PowerSpectrogram {
     std::size_t bins() const { return nFft / 2 + 1; }
 };
 
+// The production 2048-point size shares analyze()'s fixed real-FFT path.
+// Other sizes retain the complex reference transform for oracle tooling.
 PowerSpectrogram powerSpectrogram(const std::vector<float> &samples, std::size_t nFft,
                                   std::size_t hop);
 

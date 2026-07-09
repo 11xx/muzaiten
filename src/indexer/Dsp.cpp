@@ -3,6 +3,7 @@
 #include "indexer/Fft.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -45,6 +46,36 @@ std::vector<double> hannWindow(std::size_t n)
         window[i] = 0.5 - 0.5 * std::cos(phase);
     }
     return window;
+}
+
+const std::array<float, kNFft> &analysisWindow()
+{
+    static const std::array<float, kNFft> window = [] {
+        std::array<float, kNFft> values{};
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            const double phase = 2.0 * std::numbers::pi * static_cast<double>(i) /
+                                 static_cast<double>(values.size());
+            values[i] = static_cast<float>(0.5 - 0.5 * std::cos(phase));
+        }
+        return values;
+    }();
+    return window;
+}
+
+void powerFrame2048(const float *source,
+                    std::array<float, kNFft> &windowed,
+                    double *power,
+                    Fft::RealFft2048::Workspace &workspace) noexcept
+{
+    const std::array<float, kNFft> &window = analysisWindow();
+    for (std::size_t i = 0; i < kNFft; ++i) {
+        windowed[i] = source[i] * window[i];
+    }
+    static const Fft::RealFft2048 transform;
+    transform.forwardPower(windowed,
+                           std::span<double, Fft::RealFft2048::kBins>(
+                               power, Fft::RealFft2048::kBins),
+                           workspace);
 }
 
 void reflectPadInto(const std::vector<float> &samples, std::size_t pad, std::vector<float> &out)
@@ -191,10 +222,23 @@ PowerSpectrogram powerSpectrogram(const std::vector<float> &samples, std::size_t
                                   std::size_t hop)
 {
     const std::vector<float> padded = reflectPad(samples, nFft / 2);
-    const std::vector<double> window = hannWindow(nFft);
 
     PowerSpectrogram spectrogram;
     spectrogram.nFft = nFft;
+    if (nFft == kNFft) {
+        std::array<float, kNFft> windowed{};
+        Fft::RealFft2048::Workspace workspace;
+        for (std::size_t start = 0; start + nFft <= padded.size(); start += hop) {
+            std::vector<double> frame(Fft::RealFft2048::kBins);
+            powerFrame2048(padded.data() + start, windowed, frame.data(), workspace);
+            spectrogram.frames.push_back(std::move(frame));
+        }
+        return spectrogram;
+    }
+
+    // Arbitrary-size support is retained for oracle tooling only. Production
+    // analysis and all in-tree consumers use the fixed real transform above.
+    const std::vector<double> window = hannWindow(nFft);
     std::vector<std::complex<double>> buffer(nFft);
     for (std::size_t start = 0; start + nFft <= padded.size(); start += hop) {
         for (std::size_t i = 0; i < nFft; ++i) {
@@ -585,10 +629,10 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     // mel projection; the compact mel matrix must be kept whole because the
     // top_db floor needs the global mel max before dB conversion.
     //
-    // This walk must stay semantically identical to the dense reference
-    // path (powerSpectrogram/onsetEnvelope/spectralStats, kept for tests
-    // and oracle tooling): same loops, same summation order. test_dsp's
-    // golden oracle and bench_dsp --goldens diffs guard that equivalence.
+    // The 2048-point dense helper and this streaming walk share the same
+    // fixed real-FFT frame path. Power and every downstream reduction remain
+    // double precision; test_dsp's field-specific v1->v2 gates pin the small
+    // spectral-only change introduced by float transform arithmetic.
     //
     // Hot buffers live in thread-local scratch reused across tracks on the
     // same worker; analyze stays pure to callers. The mel matrix is one
@@ -596,7 +640,8 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     // allocation.
     struct AnalysisScratch {
         std::vector<float> padded;
-        std::vector<std::complex<double>> buffer;
+        std::array<float, kNFft> windowed{};
+        Fft::RealFft2048::Workspace fftWorkspace;
         std::vector<double> powerFrame;
         std::vector<double> melPowers;
     };
@@ -604,8 +649,6 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
 
     reflectPadInto(samples, kNFft / 2, scratch.padded);
     const std::vector<float> &padded = scratch.padded;
-    static const std::vector<double> window = hannWindow(kNFft);
-    scratch.buffer.assign(kNFft, {});
     std::vector<double> binFreqs(kNFft / 2 + 1);
     for (std::size_t k = 0; k < binFreqs.size(); ++k) {
         binFreqs[k] = static_cast<double>(k) * rate / static_cast<double>(kNFft);
@@ -628,15 +671,8 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
 
     std::size_t frame = 0;
     for (std::size_t start = 0; start + kNFft <= padded.size(); start += kHop, ++frame) {
-        std::vector<std::complex<double>> &buffer = scratch.buffer;
-        for (std::size_t i = 0; i < kNFft; ++i) {
-            buffer[i] = {static_cast<double>(padded[start + i]) * window[i], 0.0};
-        }
-        Fft::complexRadix2Reference(buffer);
-
-        for (std::size_t k = 0; k <= kNFft / 2; ++k) {
-            powerFrame[k] = std::norm(buffer[k]);
-        }
+        powerFrame2048(padded.data() + start, scratch.windowed,
+                       powerFrame.data(), scratch.fftWorkspace);
 
         double total = 0.0;
         for (double p : powerFrame) {

@@ -117,6 +117,18 @@ stores produced by canceling and resuming a refresh. A missing or empty
 `meta.dsp_version` is shown as unknown but does not override per-row freshness:
 matching rows remain readable and non-matching rows remain stale.
 
+The active scalar version is `muzaiten-dsp-v2`. It replaces the 2048-point
+complex-double STFT with Muzaiten's allocation-free fixed-size real-float FFT,
+while retaining double-precision power values and downstream reductions.
+Measured v1-to-v2 comparisons kept tempo, loudness, loudness spread, onset
+rate, zero-crossing rate, and energy exact on the deterministic oracle and an
+isolated 6.3-hour corpus containing DSD64/128/256 and 96/192 kHz 24-bit FLAC.
+Only spectral fields moved: at most `0.0001 Hz` under the committed centroid
+gate and `1e-9` under the flatness gate. Existing v1 rows are intentionally
+stale after upgrading and are refreshed through the normal resumable
+**Writing features** phase; identity hashes, Chromaprint, and content groups
+do not change.
+
 ## Scan JSON
 
 `muzaiten-index scan --json` includes the stable count fields

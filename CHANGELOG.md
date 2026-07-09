@@ -35,6 +35,14 @@
 
 ### Changed
 
+- Scalar analysis is now `muzaiten-dsp-v2`: a first-party, allocation-free
+  fixed-2048 real FFT replaces the complex-double STFT while keeping
+  double-precision power and reductions. A four-minute analysis fixture drops
+  from about 893 ms to 141 ms on the reference development machine. Existing
+  v1 scalar rows refresh through the normal progress/cancel/resume feature
+  phase; decoded identity, Chromaprint groups, tempo, energy, loudness, onset
+  rate, and zero-crossing semantics are unchanged, with only tightly bounded
+  spectral floating-point deltas.
 - Scalar features are now consumed only when their per-row DSP version matches
   the running build, so radio never treats an untouched old store or a
   cancel/resume mixed-version store as current. The analysis status dialog,

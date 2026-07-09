@@ -1202,14 +1202,15 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QVERIFY(QDir().mkpath(audioDirPath));
     const QDir audioDir(audioDirPath);
 
-    // Many differently-duration click/noise reps so feature fill lasts long
-    // enough for progress emits + SIGTERM to land mid-phase (jobs=1).
-    constexpr int kFeatureCancelItems = 24;
+    // More than the 25-item progress cadence guarantees a non-final progress
+    // line even when an optimized analyzer finishes the corpus in under two
+    // seconds. Differently-duration reps keep the groups distinct.
+    constexpr int kFeatureCancelItems = 32;
     QStringList paths;
     for (int index = 0; index < kFeatureCancelItems; ++index) {
         const QString path = audioDir.filePath(QStringLiteral("feat-cancel-%1.wav").arg(index));
-        // Long enough that feature fill exceeds the 2s progress cadence so the
-        // test can observe mid-phase n/m before the last tick.
+        // Long enough to exercise real decoding/DSP without making the test's
+        // cancellation trigger depend on wall-clock speed.
         const int duration = 20 + index * 3;
         if (index % 3 == 0) {
             ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
