@@ -93,6 +93,9 @@ for the following `progress` lines (and may reset UI counters); the same
 `progress n/m elapsed= rate= eta=` line shape is reused. After `phase
 features`, `n/m` counts **stale representative groups** (missing, older, or
 NULL `features.version` rows for the active DSP version), not files.
+Representative decode/DSP work uses the same resolved `--power` / `--jobs`
+worker count as file analysis; feature-row writes remain serialized on the
+indexer thread for SQLite safety.
 
 `elapsed` is total scan wall time; `rate` and `eta` are **phase-local** recent
 throughput (roughly the last minute within the current phase). Right after a

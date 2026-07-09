@@ -1137,7 +1137,7 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
         QStringLiteral("--stage"),
         QStringLiteral("features"),
         QStringLiteral("--jobs"),
-        QStringLiteral("1"),
+        QStringLiteral("2"),
         QStringLiteral("--json"),
         QStringLiteral("--progress"),
     }, &progressStderr);
@@ -1184,10 +1184,11 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QVERIFY(QDir().mkpath(audioDirPath));
     const QDir audioDir(audioDirPath);
 
-// Many differently-duration click/noise reps so feature fill lasts long
+    // Many differently-duration click/noise reps so feature fill lasts long
     // enough for progress emits + SIGTERM to land mid-phase (jobs=1).
+    constexpr int kFeatureCancelItems = 24;
     QStringList paths;
-    for (int index = 0; index < 12; ++index) {
+    for (int index = 0; index < kFeatureCancelItems; ++index) {
         const QString path = audioDir.filePath(QStringLiteral("feat-cancel-%1.wav").arg(index));
         // Long enough that feature fill exceeds the 2s progress cadence so the
         // test can observe mid-phase n/m before the last tick.
@@ -1231,7 +1232,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
         QStringLiteral("identity"),
     };
     const QJsonObject first = runIndexer(identityArgs);
-    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 12);
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), kFeatureCancelItems);
 
     runIndexer({
         QStringLiteral("scan"),
@@ -1240,7 +1241,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
         QStringLiteral("--features"),
         features,
         QStringLiteral("--jobs"),
-        QStringLiteral("1"),
+        QStringLiteral("2"),
         QStringLiteral("--json"),
         QStringLiteral("--stage"),
         QStringLiteral("features"),
@@ -1367,7 +1368,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
         QStringLiteral("--stage"),
         QStringLiteral("features"),
         QStringLiteral("--jobs"),
-        QStringLiteral("1"),
+        QStringLiteral("2"),
         QStringLiteral("--json"),
         QStringLiteral("--progress"),
     }, &resumeStderr);

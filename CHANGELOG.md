@@ -35,6 +35,9 @@
 
 ### Changed
 
+- Feature fill now uses the configured analysis worker count to decode and
+  analyze stale group representatives concurrently while keeping
+  `features.sqlite` writes serialized and resumable.
 - Changing `Analysis power` while a scan is running now applies immediately:
   the scan stops (keeping all completed work) and restarts at the new power.
 - The analysis progress rate (and its ETA) now reports recent throughput

@@ -293,18 +293,19 @@ QVariant scalarVariant(const std::optional<Dsp::ScalarFeatures> &features, doubl
 
 void bindScalarRow(QSqlQuery &query, qint64 groupId, const std::optional<Dsp::ScalarFeatures> &features)
 {
-    query.addBindValue(groupId);
-    query.addBindValue(features ? optionalVariant(features->tempoBpm) : QVariant());
-    query.addBindValue(features ? optionalVariant(features->loudnessLufs) : QVariant());
-    query.addBindValue(features ? optionalVariant(features->loudnessStdDb) : QVariant());
-    query.addBindValue(scalarVariant(features, &Dsp::ScalarFeatures::spectralCentroidMeanHz));
-    query.addBindValue(scalarVariant(features, &Dsp::ScalarFeatures::spectralCentroidStdHz));
-    query.addBindValue(scalarVariant(features, &Dsp::ScalarFeatures::spectralFlatnessMean));
-    query.addBindValue(scalarVariant(features, &Dsp::ScalarFeatures::zeroCrossingRate));
-    query.addBindValue(scalarVariant(features, &Dsp::ScalarFeatures::onsetRateHz));
-    query.addBindValue(features ? optionalVariant(features->energy) : QVariant());
-    query.addBindValue(QString::fromLatin1(kExtractor));
-    query.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+    int bindIndex = 0;
+    query.bindValue(bindIndex++, groupId);
+    query.bindValue(bindIndex++, features ? optionalVariant(features->tempoBpm) : QVariant());
+    query.bindValue(bindIndex++, features ? optionalVariant(features->loudnessLufs) : QVariant());
+    query.bindValue(bindIndex++, features ? optionalVariant(features->loudnessStdDb) : QVariant());
+    query.bindValue(bindIndex++, scalarVariant(features, &Dsp::ScalarFeatures::spectralCentroidMeanHz));
+    query.bindValue(bindIndex++, scalarVariant(features, &Dsp::ScalarFeatures::spectralCentroidStdHz));
+    query.bindValue(bindIndex++, scalarVariant(features, &Dsp::ScalarFeatures::spectralFlatnessMean));
+    query.bindValue(bindIndex++, scalarVariant(features, &Dsp::ScalarFeatures::zeroCrossingRate));
+    query.bindValue(bindIndex++, scalarVariant(features, &Dsp::ScalarFeatures::onsetRateHz));
+    query.bindValue(bindIndex++, features ? optionalVariant(features->energy) : QVariant());
+    query.bindValue(bindIndex++, QString::fromLatin1(kExtractor));
+    query.bindValue(bindIndex, QString::fromLatin1(Dsp::kDspVersion));
 }
 
 QSqlDatabase openFeaturesDatabase(const QString &path, SqlConnection &connection)
@@ -1079,16 +1080,6 @@ void recordScalarExtraction(QHash<QString, ScalarExtraction> &extracted, const F
     extracted.insert(analysis.candidate.path, row);
 }
 
-bool featureRowFresh(QSqlDatabase &database, qint64 groupId)
-{
-    QSqlQuery query(database);
-    prepareOrFail(query, QStringLiteral("SELECT version FROM features WHERE content_group_id = ?"));
-    query.addBindValue(groupId);
-    execPrepared(query);
-    return query.next() && !query.value(0).isNull()
-        && query.value(0).toString() == QLatin1String(Dsp::kDspVersion);
-}
-
 std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
                                                             const QHash<QString, ScalarExtraction> &extracted)
 {
@@ -1112,6 +1103,93 @@ struct StaleRep {
     qint64 groupId = 0;
     QString path;
 };
+
+struct FeatureAnalysis {
+    StaleRep representative;
+    std::optional<Dsp::ScalarFeatures> scalars;
+    bool failed = false;
+};
+
+FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
+                                             const QHash<QString, ScalarExtraction> &extracted)
+{
+    FeatureAnalysis analysis;
+    analysis.representative = representative;
+    try {
+        analysis.scalars = scalarsForRepresentative(representative.path, extracted);
+    } catch (const std::exception &) {
+        analysis.failed = true;
+    }
+    return analysis;
+}
+
+void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
+                                   const QHash<QString, ScalarExtraction> &extracted, int jobs,
+                                   const std::function<void(FeatureAnalysis &&, int, int)> &completion)
+{
+    if (representatives.empty()) {
+        return;
+    }
+
+    const std::size_t workerCount = static_cast<std::size_t>(std::max(1, jobs));
+    const std::size_t maxCompleted = workerCount;
+    const int total = static_cast<int>(representatives.size());
+    std::atomic_size_t nextIndex = 0;
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::deque<FeatureAnalysis> completed;
+    std::size_t runningWorkers = workerCount;
+
+    std::vector<std::thread> workers;
+    workers.reserve(workerCount);
+    for (std::size_t worker = 0; worker < workerCount; ++worker) {
+        workers.emplace_back([&]() {
+            while (!stopRequested()) {
+                const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
+                if (index >= representatives.size()) {
+                    break;
+                }
+                FeatureAnalysis analysis = analyzeFeatureRepresentative(representatives[index], extracted);
+                {
+                    std::unique_lock lock(mutex);
+                    ready.wait(lock, [&]() { return completed.size() < maxCompleted || stopRequested(); });
+                    if (stopRequested()) {
+                        break;
+                    }
+                    completed.push_back(std::move(analysis));
+                }
+                ready.notify_one();
+            }
+            {
+                std::lock_guard lock(mutex);
+                --runningWorkers;
+            }
+            ready.notify_one();
+        });
+    }
+
+    int processed = 0;
+    while (true) {
+        std::unique_lock lock(mutex);
+        ready.wait(lock, [&]() { return !completed.empty() || runningWorkers == 0; });
+        while (!completed.empty()) {
+            FeatureAnalysis analysis = std::move(completed.front());
+            completed.pop_front();
+            ready.notify_all();
+            lock.unlock();
+            ++processed;
+            completion(std::move(analysis), processed, total);
+            lock.lock();
+        }
+        if (runningWorkers == 0) {
+            break;
+        }
+    }
+
+    for (std::thread &worker : workers) {
+        worker.join();
+    }
+}
 
 // Phase-local rate for feature fill: emit rate=- eta=- until the phase window
 // is warm (≥2 s span with movement). Never falls back to lifetime n/elapsed
@@ -1201,7 +1279,7 @@ std::vector<StaleRep> materializeStaleReps(QSqlDatabase &database)
 
 FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                                     const QHash<QString, ScalarExtraction> &extracted,
-                                    bool progress,
+                                    int jobs, bool progress,
                                     std::chrono::steady_clock::time_point scanStarted)
 {
     FeatureFillResult result;
@@ -1232,57 +1310,41 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
         lastProgressEmit = std::chrono::steady_clock::now();
     }
 
-    for (const StaleRep &rep : stale) {
-        if (stopRequested()) {
-            result.canceled = true;
-            break;
-        }
-
-        std::optional<Dsp::ScalarFeatures> scalars;
-        try {
-            scalars = scalarsForRepresentative(rep.path, extracted);
-        } catch (const std::exception &) {
+    QSqlQuery upsert(database);
+    prepareOrFail(upsert, QStringLiteral(
+                              "INSERT INTO features("
+                              " content_group_id, tempo_bpm, loudness_lufs, loudness_std_db,"
+                              " spectral_centroid_mean_hz, spectral_centroid_std_hz,"
+                              " spectral_flatness_mean, zero_crossing_rate, onset_rate_hz,"
+                              " energy, extractor, version)"
+                              " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                              " ON CONFLICT(content_group_id) DO UPDATE SET"
+                              " tempo_bpm = excluded.tempo_bpm,"
+                              " loudness_lufs = excluded.loudness_lufs,"
+                              " loudness_std_db = excluded.loudness_std_db,"
+                              " spectral_centroid_mean_hz = excluded.spectral_centroid_mean_hz,"
+                              " spectral_centroid_std_hz = excluded.spectral_centroid_std_hz,"
+                              " spectral_flatness_mean = excluded.spectral_flatness_mean,"
+                              " zero_crossing_rate = excluded.zero_crossing_rate,"
+                              " onset_rate_hz = excluded.onset_rate_hz,"
+                              " energy = excluded.energy,"
+                              " extractor = excluded.extractor,"
+                              " version = excluded.version"));
+    const auto completion = [&](FeatureAnalysis &&analysis, int processed, int) {
+        result.processed = processed;
+        if (analysis.failed) {
             ++result.failed;
-            ++result.processed;
-            maybeEmit(result.processed == result.total || result.canceled);
-            if (stopRequested()) {
-                result.canceled = true;
-                break;
-            }
-            continue;
+        } else {
+            bindScalarRow(upsert, analysis.representative.groupId, analysis.scalars);
+            execPrepared(upsert);
+            ++result.written;
         }
-
-        if (stopRequested()) {
-            result.canceled = true;
-            break;
-        }
-
-        QSqlQuery upsert(database);
-        prepareOrFail(upsert, QStringLiteral(
-                                  "INSERT INTO features("
-                                  " content_group_id, tempo_bpm, loudness_lufs, loudness_std_db,"
-                                  " spectral_centroid_mean_hz, spectral_centroid_std_hz,"
-                                  " spectral_flatness_mean, zero_crossing_rate, onset_rate_hz,"
-                                  " energy, extractor, version)"
-                                  " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                                  " ON CONFLICT(content_group_id) DO UPDATE SET"
-                                  " tempo_bpm = excluded.tempo_bpm,"
-                                  " loudness_lufs = excluded.loudness_lufs,"
-                                  " loudness_std_db = excluded.loudness_std_db,"
-                                  " spectral_centroid_mean_hz = excluded.spectral_centroid_mean_hz,"
-                                  " spectral_centroid_std_hz = excluded.spectral_centroid_std_hz,"
-                                  " spectral_flatness_mean = excluded.spectral_flatness_mean,"
-                                  " zero_crossing_rate = excluded.zero_crossing_rate,"
-                                  " onset_rate_hz = excluded.onset_rate_hz,"
-                                  " energy = excluded.energy,"
-                                  " extractor = excluded.extractor,"
-                                  " version = excluded.version"));
-        bindScalarRow(upsert, rep.groupId, scalars);
-        execPrepared(upsert);
-        ++result.written;
-        ++result.processed;
         maybeEmit(result.processed == result.total);
-    }
+    };
+    // Workers only decode and analyze. The main thread owns this QSqlQuery so
+    // the feature database remains a single-writer SQLite connection.
+    analyzeFeatureRepresentatives(stale, extracted, jobs, completion);
+    result.canceled = stopRequested();
 
     if (progress && (result.canceled || lastProgress != result.processed)) {
         emitFeatureProgress(result.processed, result.total, scanStarted, phaseStarted, phaseRate);
@@ -1564,7 +1626,7 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        const FeatureFillResult fill = ensureFeatureRows(database, {}, options.progress, scanStarted);
+        const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
         const int featured = currentFeatureCount(database);
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
                                              std::chrono::duration<double>(
@@ -1594,7 +1656,7 @@ int runScan(const ScanOptions &options)
             if (options.progress) {
                 emitPhase(QStringLiteral("features"));
             }
-            fill = ensureFeatureRows(database, {}, options.progress, scanStarted);
+            fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
             fillPtr = &fill;
         }
         // No last-scan summary here: a run that analyzed nothing must not
@@ -1689,7 +1751,7 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        fill = ensureFeatureRows(database, extracted, options.progress, scanStarted);
+        fill = ensureFeatureRows(database, extracted, effective.jobs, options.progress, scanStarted);
         fillPtr = &fill;
     }
     const double elapsedSecs =
