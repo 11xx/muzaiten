@@ -128,9 +128,21 @@ void printGolden(const char *fixture, const std::vector<float> &samples)
     std::printf("\n");
 }
 
+// Tone, hard silence gap, tone: the only fixture whose frame stream mixes
+// silent and non-silent frames, pinning the kSilentFramePower skip path.
+std::vector<float> makeGappedTone()
+{
+    const std::vector<float> tone = makeSine(880.0, 0.6, 4.0);
+    std::vector<float> out(tone);
+    out.insert(out.end(), Dsp::kSampleRateHz * 2, 0.0F);
+    out.insert(out.end(), tone.begin(), tone.end());
+    return out;
+}
+
 int runGoldens()
 {
     printGolden("silence-10s", std::vector<float>(Dsp::kSampleRateHz * 10, 0.0F));
+    printGolden("tone-gap-tone-10s", makeGappedTone());
     printGolden("sine440-10s", makeSine(440.0, 0.5, 10.0));
     std::vector<float> quiet = makeNoise(Dsp::kSampleRateHz * 10, 7);
     for (float &sample : quiet) {

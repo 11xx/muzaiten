@@ -87,6 +87,18 @@ std::vector<float> makeMix(double secs)
     return out;
 }
 
+// Tone, hard silence gap, tone; kept byte-identical with bench_dsp.cpp. The
+// only fixture whose frame stream mixes silent and non-silent frames, so it
+// pins the kSilentFramePower skip path the other fixtures never branch on.
+std::vector<float> makeGappedTone()
+{
+    const std::vector<float> tone = makeSine(880.0, 0.6, 4.0);
+    std::vector<float> out(tone);
+    out.insert(out.end(), Dsp::kSampleRateHz * 2, 0.0F);
+    out.insert(out.end(), tone.begin(), tone.end());
+    return out;
+}
+
 // The v1 oracle uses one shared tolerance: tight enough that any semantic
 // change to the analyzer trips it, loose enough to absorb FMA/libm noise
 // across build regimes. Values near zero (cancellation residue) collapse
@@ -355,6 +367,10 @@ void DspTest::v1GoldenScalarsMatchPinnedOracle()
         {{"silence-10s", std::nullopt, std::nullopt, std::nullopt, 0.0, 0.0, 0.0, 0.0, 0.0,
           std::nullopt},
          std::vector<float>(Dsp::kSampleRateHz * 10, 0.0F)},
+        {{"tone-gap-tone-10s", 30.046329941860463, -7.8136234982408661, 4.7033343975730224,
+          879.78140147729061, 2.1343771918360384, 2.6010183789833646e-05,
+          0.063850629708071233, 0.1998441125290023, 0.55705047087044957},
+         makeGappedTone()},
         {{"sine440-10s", 112.34714673913044, -9.6644690533454369, 0.00017316047801089145,
           439.97390961613837, 0.34491538285773432, 6.8534369758426706e-07,
           0.039904942879559542, 0.0, 0.50671061893309133},
