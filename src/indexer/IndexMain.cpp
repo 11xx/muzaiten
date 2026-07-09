@@ -1085,7 +1085,8 @@ bool featureRowFresh(QSqlDatabase &database, qint64 groupId)
     prepareOrFail(query, QStringLiteral("SELECT version FROM features WHERE content_group_id = ?"));
     query.addBindValue(groupId);
     execPrepared(query);
-    return query.next() && query.value(0).toString() == QLatin1String(Dsp::kDspVersion);
+    return query.next() && !query.value(0).isNull()
+        && query.value(0).toString() == QLatin1String(Dsp::kDspVersion);
 }
 
 std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
@@ -1099,29 +1100,161 @@ std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
     return Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
 }
 
-int ensureFeatureRows(QSqlDatabase &database, const QHash<QString, ScalarExtraction> &extracted)
-{
-    QSqlQuery reps(database);
-    if (!reps.exec(QStringLiteral(
-            "SELECT content_group_id, MIN(path) AS path "
-            "FROM files "
-            "WHERE content_group_id IS NOT NULL AND status = 'ok' "
-            "GROUP BY content_group_id ORDER BY content_group_id"))) {
-        fail(reps.lastError().text());
+struct FeatureFillResult {
+    int processed = 0;
+    int written = 0;
+    int failed = 0;
+    int total = 0;
+    bool canceled = false;
+};
+
+struct StaleRep {
+    qint64 groupId = 0;
+    QString path;
+};
+
+// Phase-local rate for feature fill: emit rate=- eta=- until the phase window
+// is warm (≥2 s span with movement). Never falls back to lifetime n/elapsed
+// after the feature phase starts (that would re-show file-phase thruput).
+class FeatureProgressRate final {
+public:
+    struct Snapshot {
+        QString rateText = QStringLiteral("-");
+        QString etaText = QStringLiteral("-");
+    };
+
+    Snapshot update(double phaseElapsedSecs, int processed, int total)
+    {
+        m_samples.push_back({phaseElapsedSecs, processed});
+        while (m_samples.size() > 2 && phaseElapsedSecs - m_samples.front().elapsedSecs > kWindowSecs) {
+            m_samples.pop_front();
+        }
+        const Sample &oldest = m_samples.front();
+        const double span = phaseElapsedSecs - oldest.elapsedSecs;
+        if (span < kMinSpanSecs || processed <= oldest.processed) {
+            return {};
+        }
+        const double rate = static_cast<double>(processed - oldest.processed) / span;
+        Snapshot snapshot;
+        snapshot.rateText = QString::number(rate, 'f', 1);
+        if (rate > 0.0 && total > processed) {
+            snapshot.etaText =
+                QString::number(static_cast<qint64>(std::ceil(static_cast<double>(total - processed) / rate)));
+        } else if (total <= processed) {
+            snapshot.etaText = QStringLiteral("0");
+        }
+        return snapshot;
     }
 
-    int written = 0;
+private:
+    struct Sample {
+        double elapsedSecs = 0.0;
+        int processed = 0;
+    };
+    static constexpr double kWindowSecs = 60.0;
+    static constexpr double kMinSpanSecs = 2.0;
+    std::deque<Sample> m_samples;
+};
+
+void emitFeatureProgress(int processed, int total,
+                         std::chrono::steady_clock::time_point scanStarted,
+                         std::chrono::steady_clock::time_point phaseStarted,
+                         FeatureProgressRate &phaseRate)
+{
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
+    const double elapsedSecs =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
+    const double phaseElapsedSecs =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - phaseStarted).count();
+    const auto snapshot = phaseRate.update(phaseElapsedSecs, processed, total);
+    err << "progress " << processed << '/' << total
+        << " elapsed=" << QString::number(elapsedSecs, 'f', 1)
+        << " rate=" << snapshot.rateText
+        << " eta=" << snapshot.etaText << '\n';
+    err.flush();
+}
+
+std::vector<StaleRep> materializeStaleReps(QSqlDatabase &database)
+{
+    // Matches featureRowFresh: missing row, older version, and NULL version
+    // are stale; exact current version is fresh. Representative is MIN(path)
+    // over ok file rows — same as the previous serial loop.
+    QSqlQuery reps(database);
+    prepareOrFail(reps, QStringLiteral(
+                            "SELECT f.content_group_id, MIN(f.path) AS path "
+                            "FROM files f "
+                            "LEFT JOIN features feat ON feat.content_group_id = f.content_group_id "
+                            "WHERE f.content_group_id IS NOT NULL AND f.status = 'ok' "
+                            "  AND (feat.version IS NULL OR feat.version != ?) "
+                            "GROUP BY f.content_group_id "
+                            "ORDER BY f.content_group_id"));
+    reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+    execPrepared(reps);
+
+    std::vector<StaleRep> stale;
     while (reps.next()) {
-        const qint64 groupId = reps.value(0).toLongLong();
-        if (featureRowFresh(database, groupId)) {
-            continue;
+        stale.push_back(StaleRep{reps.value(0).toLongLong(), reps.value(1).toString()});
+    }
+    return stale;
+}
+
+FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
+                                    const QHash<QString, ScalarExtraction> &extracted,
+                                    bool progress,
+                                    std::chrono::steady_clock::time_point scanStarted)
+{
+    FeatureFillResult result;
+    const std::vector<StaleRep> stale = materializeStaleReps(database);
+    result.total = static_cast<int>(stale.size());
+
+    const auto phaseStarted = std::chrono::steady_clock::now();
+    FeatureProgressRate phaseRate;
+    int lastProgress = -1;
+    auto lastProgressEmit = phaseStarted;
+    const auto maybeEmit = [&](bool force) {
+        if (!progress) {
+            return;
         }
-        const QString path = reps.value(1).toString();
+        const auto now = std::chrono::steady_clock::now();
+        if (!force && result.processed != result.total && result.processed - lastProgress < 25
+            && std::chrono::duration_cast<std::chrono::seconds>(now - lastProgressEmit).count() < 2) {
+            return;
+        }
+        emitFeatureProgress(result.processed, result.total, scanStarted, phaseStarted, phaseRate);
+        lastProgress = result.processed;
+        lastProgressEmit = now;
+    };
+
+    if (progress) {
+        emitFeatureProgress(0, result.total, scanStarted, phaseStarted, phaseRate);
+        lastProgress = 0;
+        lastProgressEmit = std::chrono::steady_clock::now();
+    }
+
+    for (const StaleRep &rep : stale) {
+        if (stopRequested()) {
+            result.canceled = true;
+            break;
+        }
+
         std::optional<Dsp::ScalarFeatures> scalars;
         try {
-            scalars = scalarsForRepresentative(path, extracted);
+            scalars = scalarsForRepresentative(rep.path, extracted);
         } catch (const std::exception &) {
+            ++result.failed;
+            ++result.processed;
+            maybeEmit(result.processed == result.total || result.canceled);
+            if (stopRequested()) {
+                result.canceled = true;
+                break;
+            }
             continue;
+        }
+
+        if (stopRequested()) {
+            result.canceled = true;
+            break;
         }
 
         QSqlQuery upsert(database);
@@ -1144,11 +1277,17 @@ int ensureFeatureRows(QSqlDatabase &database, const QHash<QString, ScalarExtract
                                   " energy = excluded.energy,"
                                   " extractor = excluded.extractor,"
                                   " version = excluded.version"));
-        bindScalarRow(upsert, groupId, scalars);
+        bindScalarRow(upsert, rep.groupId, scalars);
         execPrepared(upsert);
-        ++written;
+        ++result.written;
+        ++result.processed;
+        maybeEmit(result.processed == result.total);
     }
-    return written;
+
+    if (progress && (result.canceled || lastProgress != result.processed)) {
+        emitFeatureProgress(result.processed, result.total, scanStarted, phaseStarted, phaseRate);
+    }
+    return result;
 }
 
 qint64 countScalar(QSqlDatabase &database, const QString &sql)
@@ -1231,9 +1370,10 @@ QJsonObject timingsJson(const TimingAccumulator &timings)
 
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
                      double elapsedSecs = 0.0, const QJsonObject &timings = {}, bool canceled = false,
-                     const QString &power = QStringLiteral("turbo"), int jobs = 1)
+                     const QString &power = QStringLiteral("turbo"), int jobs = 1,
+                     const FeatureFillResult *featureFill = nullptr)
 {
-    return QJsonObject{
+    QJsonObject object{
         {QStringLiteral("schema_version"), kSchemaVersion},
         {QStringLiteral("scanned"), scanned},
         {QStringLiteral("skipped"), skipped},
@@ -1247,6 +1387,12 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         {QStringLiteral("elapsed_secs"), elapsedSecs},
         {QStringLiteral("timings"), timings.isEmpty() ? timingsJson({}) : timings},
     };
+    if (featureFill != nullptr) {
+        object.insert(QStringLiteral("feature_groups_processed"), featureFill->processed);
+        object.insert(QStringLiteral("features_written"), featureFill->written);
+        object.insert(QStringLiteral("feature_groups_failed"), featureFill->failed);
+    }
+    return object;
 }
 
 int currentGroupCount(QSqlDatabase &database)
@@ -1418,16 +1564,17 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        ensureFeatureRows(database, {});
+        const FeatureFillResult fill = ensureFeatureRows(database, {}, options.progress, scanStarted);
         const int featured = currentFeatureCount(database);
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
                                              std::chrono::duration<double>(
                                                  std::chrono::steady_clock::now() - scanStarted)
                                                  .count(),
                                              {},
-                                             false,
+                                             fill.canceled,
                                              effectivePowerName,
-                                             effective.jobs);
+                                             effective.jobs,
+                                             &fill);
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
@@ -1435,6 +1582,8 @@ int runScan(const ScanOptions &options)
     const std::vector<Candidate> candidates = loadCandidates(options.libraryPath, options.limit);
     const auto [pending, skipped] = splitPending(database, candidates);
     if (pending.empty()) {
+        FeatureFillResult fill;
+        const FeatureFillResult *fillPtr = nullptr;
         if (options.stage == Stage::All) {
             if (hasUngroupedOkRows(database)) {
                 if (options.progress) {
@@ -1445,7 +1594,8 @@ int runScan(const ScanOptions &options)
             if (options.progress) {
                 emitPhase(QStringLiteral("features"));
             }
-            ensureFeatureRows(database, {});
+            fill = ensureFeatureRows(database, {}, options.progress, scanStarted);
+            fillPtr = &fill;
         }
         // No last-scan summary here: a run that analyzed nothing must not
         // clobber the meta rows describing the last real scan.
@@ -1455,9 +1605,10 @@ int runScan(const ScanOptions &options)
             scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
                      elapsedSecs,
                      {},
-                     false,
+                     fill.canceled,
                      effectivePowerName,
-                     effective.jobs);
+                     effective.jobs,
+                     fillPtr);
         options.json ? emitJson(payload) : emitPlain(payload);
         return 0;
     }
@@ -1532,24 +1683,28 @@ int runScan(const ScanOptions &options)
         emitPhase(QStringLiteral("grouping"));
     }
     const int groups = regroupContent(database);
+    FeatureFillResult fill;
+    const FeatureFillResult *fillPtr = nullptr;
     if (options.stage == Stage::All) {
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        ensureFeatureRows(database, extracted);
+        fill = ensureFeatureRows(database, extracted, options.progress, scanStarted);
+        fillPtr = &fill;
     }
     const double elapsedSecs =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
-    if (options.stage == Stage::All) {
+    if (options.stage == Stage::All && !fill.canceled) {
         writeLastScanSummary(database, scanned, skipped, failed, elapsedSecs, effectivePowerName);
     }
     const QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
                  elapsedSecs,
                  timingsJson(timings),
-                 false,
+                 fill.canceled,
                  effectivePowerName,
-                 effective.jobs);
+                 effective.jobs,
+                 fillPtr);
     options.json ? emitJson(payload) : emitPlain(payload);
     return 0;
 }
