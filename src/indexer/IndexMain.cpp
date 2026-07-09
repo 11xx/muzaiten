@@ -1153,9 +1153,10 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
                 {
                     std::unique_lock lock(mutex);
                     ready.wait(lock, [&]() { return completed.size() < maxCompleted || stopRequested(); });
-                    if (stopRequested()) {
-                        break;
-                    }
+                    // Push even on stop: this analysis is already paid for, and
+                    // the caller drains the queue before finishing, so the row
+                    // stays durable. The bound may overshoot by one per worker
+                    // during shutdown, which is harmless.
                     completed.push_back(std::move(analysis));
                 }
                 ready.notify_one();
@@ -1241,10 +1242,9 @@ void emitFeatureProgress(int processed, int total,
 {
     QTextStream err(stderr);
     err.setEncoding(QStringConverter::Utf8);
-    const double elapsedSecs =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
-    const double phaseElapsedSecs =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - phaseStarted).count();
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsedSecs = std::chrono::duration<double>(now - scanStarted).count();
+    const double phaseElapsedSecs = std::chrono::duration<double>(now - phaseStarted).count();
     const auto snapshot = phaseRate.update(phaseElapsedSecs, processed, total);
     err << "progress " << processed << '/' << total
         << " elapsed=" << QString::number(elapsedSecs, 'f', 1)
