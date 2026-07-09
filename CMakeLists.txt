@@ -384,12 +384,27 @@ target_compile_options(muzaitenctl PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
-add_executable(muzaiten-index
-    src/indexer/IndexMain.cpp
+# The scalar analyzer is its own target so every consumer (indexer, tests,
+# bench) compiles ONE translation unit with pinned floating-point behavior:
+# -ffp-contract=off forbids FMA contraction, which would otherwise let a
+# user's ambient -march=native (AUR muzaiten-git/-dev builds honor their
+# CXXFLAGS) produce different scalar bits for the same audio at the same
+# dsp_version. Determinism here is a correctness property of the versioned
+# feature store, not an optimization preference.
+add_library(muzaiten_dsp STATIC
     src/indexer/Dsp.cpp
 )
+target_include_directories(muzaiten_dsp PUBLIC src)
+target_compile_features(muzaiten_dsp PUBLIC cxx_std_26)
+target_compile_options(muzaiten_dsp PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-ffp-contract=off -Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+
+add_executable(muzaiten-index
+    src/indexer/IndexMain.cpp
+)
 target_include_directories(muzaiten-index PRIVATE src)
-target_link_libraries(muzaiten-index PRIVATE Qt6::Core Qt6::Sql PkgConfig::Chromaprint)
+target_link_libraries(muzaiten-index PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)
 target_compile_options(muzaiten-index PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )

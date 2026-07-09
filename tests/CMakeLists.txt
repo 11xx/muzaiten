@@ -150,10 +150,9 @@ add_test(NAME test_song_identity COMMAND test_song_identity)
 
 add_executable(test_dsp
     test_dsp.cpp
-    ../src/indexer/Dsp.cpp
 )
 target_include_directories(test_dsp PRIVATE ../src)
-target_link_libraries(test_dsp PRIVATE Qt6::Core Qt6::Test)
+target_link_libraries(test_dsp PRIVATE muzaiten_dsp Qt6::Core Qt6::Test)
 target_compile_features(test_dsp PRIVATE cxx_std_26)
 add_test(NAME test_dsp COMMAND test_dsp)
 
@@ -162,9 +161,9 @@ add_test(NAME test_dsp COMMAND test_dsp)
 # an otherwise idle machine, and its --goldens output is a diff artifact.
 add_executable(bench_dsp
     bench_dsp.cpp
-    ../src/indexer/Dsp.cpp
 )
 target_include_directories(bench_dsp PRIVATE ../src)
+target_link_libraries(bench_dsp PRIVATE muzaiten_dsp)
 target_compile_features(bench_dsp PRIVATE cxx_std_26)
 
 add_executable(test_indexer_scan
