@@ -157,6 +157,16 @@ target_link_libraries(test_dsp PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_dsp PRIVATE cxx_std_26)
 add_test(NAME test_dsp COMMAND test_dsp)
 
+# DSP stage benchmark + v1 oracle printer. Built by default so it can never
+# silently rot, but NOT a registered test: its timings are only meaningful on
+# an otherwise idle machine, and its --goldens output is a diff artifact.
+add_executable(bench_dsp
+    bench_dsp.cpp
+    ../src/indexer/Dsp.cpp
+)
+target_include_directories(bench_dsp PRIVATE ../src)
+target_compile_features(bench_dsp PRIVATE cxx_std_26)
+
 add_executable(test_indexer_scan
     test_indexer_scan.cpp
 )
