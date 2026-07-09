@@ -271,6 +271,7 @@ void CurationDialogDataTest::statusSummaryIncludesEmbeddingCoverage()
 void CurationDialogDataTest::audioAnalysisProgressLabelsAreHumanReadable()
 {
     AudioAnalysisData::LiveStatus status;
+    status.phase = AudioAnalysisData::LiveStatus::Phase::AnalyzingFiles;
     status.analyzed = 1234;
     status.total = 56789;
     status.rate = 1.4;
@@ -281,8 +282,21 @@ void CurationDialogDataTest::audioAnalysisProgressLabelsAreHumanReadable()
     QCOMPARE(AudioAnalysisData::compactDuration(45), QStringLiteral("45s"));
     QCOMPARE(AudioAnalysisData::progressLabel(status),
              QStringLiteral("Analyzing… 1234/56789 · 1.4/s · ~1h05m left · 03:12 elapsed"));
+
+    status.phase = AudioAnalysisData::LiveStatus::Phase::WritingFeatures;
+    status.analyzed = 700;
+    status.total = 70590;
+    status.rate = 0.5;
+    status.etaSecs = 139780;
+    status.elapsedSecs = 7200;
+    QCOMPARE(AudioAnalysisData::phaseLabel(status.phase), QStringLiteral("Writing features"));
+    QCOMPARE(AudioAnalysisData::progressLabel(status),
+             QStringLiteral("Writing features… 700/70590 groups · 0.5/s · ~38h49m left · 2:00:00 elapsed"));
+
     QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0),
              QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201 — 42m 10s (2.1s/track)"));
+    QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0, 64012),
+             QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201, features written 64012 — 42m 10s (2.1s/track)"));
 }
 
 void CurationDialogDataTest::duplicateGroupsRankCopiesAndRespectPins()
