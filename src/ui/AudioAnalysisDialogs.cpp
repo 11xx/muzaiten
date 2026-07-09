@@ -83,6 +83,7 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
 
     auto *root = new QVBoxLayout(this);
     auto *form = new QFormLayout;
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     root->addLayout(form, 1);
 
     const AudioAnalysisData::StatusSummary summary = AudioAnalysisData::loadStatus(featuresPath);
@@ -114,6 +115,7 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
         if (summary.lastRun.present) {
             auto *lastGroup = new QGroupBox(QStringLiteral("Last analysis"), this);
             auto *lastForm = new QFormLayout(lastGroup);
+            lastForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
             lastForm->addRow(QStringLiteral("Finished"),
                              valueLabel(QLocale().toString(QDateTime::fromSecsSinceEpoch(summary.lastRun.finishedAt),
                                                            QLocale::ShortFormat),
@@ -139,13 +141,16 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
     if (m_liveStatus) {
         auto *liveGroup = new QGroupBox(QStringLiteral("Current analysis"), this);
         auto *liveForm = new QFormLayout(liveGroup);
+        liveForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         m_liveRunning = valueLabel(QString(), liveGroup);
+        m_livePhase = valueLabel(QString(), liveGroup);
         m_liveProgress = valueLabel(QString(), liveGroup);
         m_liveRate = valueLabel(QString(), liveGroup);
         m_liveEta = valueLabel(QString(), liveGroup);
         m_liveElapsed = valueLabel(QString(), liveGroup);
         m_livePower = valueLabel(QString(), liveGroup);
         liveForm->addRow(QStringLiteral("Running"), m_liveRunning);
+        liveForm->addRow(QStringLiteral("Phase"), m_livePhase);
         liveForm->addRow(QStringLiteral("Progress"), m_liveProgress);
         liveForm->addRow(QStringLiteral("Rate"), m_liveRate);
         liveForm->addRow(QStringLiteral("ETA"), m_liveEta);
@@ -172,9 +177,19 @@ void AudioAnalysisStatusDialog::refreshLiveStatus()
     }
     const AudioAnalysisData::LiveStatus status = m_liveStatus();
     m_liveRunning->setText(yesNo(status.running));
-    m_liveProgress->setText(status.total > 0
-                                ? QStringLiteral("%1 / %2").arg(countText(status.analyzed), countText(status.total))
-                                : QStringLiteral("0 / 0"));
+    if (m_livePhase != nullptr) {
+        m_livePhase->setText(AudioAnalysisData::phaseLabel(status.phase));
+    }
+    if (status.phase == AudioAnalysisData::LiveStatus::Phase::WritingFeatures) {
+        m_liveProgress->setText(status.total > 0
+                                    ? QStringLiteral("%1 / %2 groups")
+                                          .arg(countText(status.analyzed), countText(status.total))
+                                    : QStringLiteral("0 / 0 groups"));
+    } else {
+        m_liveProgress->setText(status.total > 0
+                                    ? QStringLiteral("%1 / %2").arg(countText(status.analyzed), countText(status.total))
+                                    : QStringLiteral("0 / 0"));
+    }
     m_liveRate->setText(status.rate >= 0.0 ? QStringLiteral("%1/s").arg(QString::number(status.rate, 'f', 1))
                                            : QStringLiteral("-"));
     m_liveEta->setText(status.etaSecs.has_value() ? AudioAnalysisData::compactDuration(*status.etaSecs)

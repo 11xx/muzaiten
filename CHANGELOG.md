@@ -4,6 +4,17 @@
 
 ### Added
 
+- Feature-fill progress is now first-class: after `phase features`,
+  `muzaiten-index` reports stale group n/m progress (with phase-local rate/
+  ETA), JSON counters `feature_groups_processed` / `features_written` /
+  `feature_groups_failed`, and the app menu + Analysis status dialog show a
+  feature-domain progress line and Phase row instead of a frozen
+  “Writing features…” label on finished file counters.
+- Stopping analysis during the features phase now cooperates with the indexer
+  cancel path (with a longer GUI kill backstop while writing features) so
+  completed group feature rows stay durable and the next run resumes a smaller
+  stale set.
+
 - `muzaiten-index scan` now reports elapsed time, per-stage timing aggregates,
   rich progress/ETA lines, phase markers, and optional per-file `--verbose`
   timing lines while keeping JSON output on stdout.
@@ -24,6 +35,9 @@
 
 ### Changed
 
+- Feature fill now uses the configured analysis worker count to decode and
+  analyze stale group representatives concurrently while keeping
+  `features.sqlite` writes serialized and resumable.
 - Changing `Analysis power` while a scan is running now applies immediately:
   the scan stops (keeping all completed work) and restarts at the new power.
 - The analysis progress rate (and its ETA) now reports recent throughput
@@ -34,6 +48,9 @@
 
 ### Fixed
 
+- The Analysis status dialog `Files` row no longer clips large counts such as
+  `99,159 (98,561 ok, 598 failed)` at the default size; form fields grow with
+  the dialog width.
 - Incremental audio analysis scans (and cancel + resume) no longer wipe the
   whole `features` table and serially re-analyze every unchanged group
   representative; existing feature rows are preserved and only stale or new

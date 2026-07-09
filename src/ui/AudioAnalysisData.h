@@ -33,7 +33,15 @@ struct StatusSummary {
 };
 
 struct LiveStatus {
+    enum class Phase {
+        Idle,
+        AnalyzingFiles,
+        Grouping,
+        WritingFeatures,
+    };
+
     bool running = false;
+    Phase phase = Phase::Idle;
     int analyzed = 0;
     int total = 0;
     double rate = -1.0;
@@ -71,7 +79,9 @@ QString compactDuration(qint64 seconds);
 QString clockDuration(qint64 seconds);
 QString spacedDuration(qint64 seconds);
 QString progressLabel(const LiveStatus &status);
-QString finalSummary(int scanned, int skipped, int failed, int groups, double elapsedSecs);
+QString phaseLabel(LiveStatus::Phase phase);
+QString finalSummary(int scanned, int skipped, int failed, int groups, double elapsedSecs,
+                     int featuresWritten = -1);
 QVector<DuplicateGroup> loadDuplicateGroups(Database &db, const FeatureStore &features,
                                             int minSize = 2, int limit = 200);
 QString copyDisplayTitle(const DuplicateCopy &copy);

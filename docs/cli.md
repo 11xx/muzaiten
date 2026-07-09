@@ -85,12 +85,34 @@ per-file timing lines to stderr. With `--progress`, stderr carries:
 progress <n>/<m> elapsed=<s> rate=<r> eta=<s>
 phase grouping
 phase features
+progress <n>/<m> elapsed=<s> rate=<r> eta=<s>
 ```
 
-`elapsed` is total scan wall time; `rate` (and the `eta` derived from it) is
-recent throughput over roughly the last minute, so it reflects power changes
-and slowdowns instead of averaging them away. stdout remains JSON-only when
-`--json` is used.
+Progress keeps one dialect across phases. `phase <name>` switches the domain
+for the following `progress` lines (and may reset UI counters); the same
+`progress n/m elapsed= rate= eta=` line shape is reused. After `phase
+features`, `n/m` counts **stale representative groups** (missing, older, or
+NULL `features.version` rows for the active DSP version), not files.
+Representative decode/DSP work uses the same resolved `--power` / `--jobs`
+worker count as file analysis; feature-row writes remain serialized on the
+indexer thread for SQLite safety.
+
+`elapsed` is total scan wall time; `rate` and `eta` are **phase-local** recent
+throughput (roughly the last minute within the current phase). Right after a
+phase boundary the indexer may emit `rate=- eta=-` until the phase window is
+warm enough (about 2 s of movement). There is no second stream name such as
+`features-progress`.
+
+Scan JSON may include feature-fill counters when that phase ran:
+`feature_groups_processed`, `features_written` (includes NULL-scalar rows
+written as current version), and `feature_groups_failed` (decode/analyze
+exceptions that stay stale for a rerun). The inventory field
+`featured_groups` remains the features-table row count. A stop that lands
+during the features phase returns
+`"canceled": true` and does not write the last-scan summary meta; completed
+feature rows stay durable.
+
+stdout remains JSON-only when `--json` is used.
 
 ## Related binaries
 

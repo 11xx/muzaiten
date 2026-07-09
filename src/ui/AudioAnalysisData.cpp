@@ -159,9 +159,30 @@ QString spacedDuration(qint64 seconds)
     return QStringLiteral("%1s").arg(secs);
 }
 
+QString phaseLabel(LiveStatus::Phase phase)
+{
+    switch (phase) {
+    case LiveStatus::Phase::AnalyzingFiles:
+        return QStringLiteral("Analyzing files");
+    case LiveStatus::Phase::Grouping:
+        return QStringLiteral("Grouping");
+    case LiveStatus::Phase::WritingFeatures:
+        return QStringLiteral("Writing features");
+    case LiveStatus::Phase::Idle:
+        break;
+    }
+    return QStringLiteral("Idle");
+}
+
 QString progressLabel(const LiveStatus &status)
 {
-    QString label = QStringLiteral("Analyzing… %1/%2").arg(status.analyzed).arg(status.total);
+    QString label;
+    if (status.phase == LiveStatus::Phase::WritingFeatures) {
+        label = QStringLiteral("Writing features… %1/%2 groups").arg(status.analyzed).arg(status.total);
+    } else {
+        // File-phase label is byte-stable for existing tests and menu UX.
+        label = QStringLiteral("Analyzing… %1/%2").arg(status.analyzed).arg(status.total);
+    }
     if (status.rate >= 0.0) {
         label += QStringLiteral(" · %1/s").arg(QString::number(status.rate, 'f', 1));
     }
@@ -172,16 +193,23 @@ QString progressLabel(const LiveStatus &status)
     return label;
 }
 
-QString finalSummary(int scanned, int skipped, int failed, int groups, double elapsedSecs)
+QString finalSummary(int scanned, int skipped, int failed, int groups, double elapsedSecs,
+                     int featuresWritten)
 {
     const double secsPerTrack = scanned > 0 ? elapsedSecs / static_cast<double>(scanned) : 0.0;
-    return QStringLiteral("Audio analysis: scanned %1, skipped %2, failed %3, groups %4 — %5 (%6s/track)")
-        .arg(scanned)
-        .arg(skipped)
-        .arg(failed)
-        .arg(groups)
-        .arg(spacedDuration(static_cast<qint64>(std::llround(elapsedSecs))))
-        .arg(QString::number(secsPerTrack, 'f', 1));
+    QString summary =
+        QStringLiteral("Audio analysis: scanned %1, skipped %2, failed %3, groups %4")
+            .arg(scanned)
+            .arg(skipped)
+            .arg(failed)
+            .arg(groups);
+    if (featuresWritten >= 0) {
+        summary += QStringLiteral(", features written %1").arg(featuresWritten);
+    }
+    summary += QStringLiteral(" — %1 (%2s/track)")
+                   .arg(spacedDuration(static_cast<qint64>(std::llround(elapsedSecs))))
+                   .arg(QString::number(secsPerTrack, 'f', 1));
+    return summary;
 }
 
 StatusSummary loadStatus(const QString &featuresPath)

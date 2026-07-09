@@ -86,8 +86,11 @@ vocabulary with track counts for context. CLI equivalents: `genre-alias`,
 `muzaiten-index` over your library with live progress: one canonical decode
 per file computes exact audio identity, Chromaprint content groups
 (duplicate detection across formats/codecs), and clean-room DSP scalars
-(tempo, loudness, energy, brightness) into `features.sqlite`. Terminal
-equivalent:
+(tempo, loudness, energy, brightness) into `features.sqlite`. Progress
+moves through file analysis, grouping, then a **Writing features** phase
+that refreshes only missing or stale group feature rows (with its own n/m,
+rate, and ETA). Stopping mid-run keeps completed work; the next analysis
+resumes remaining files and stale groups. Terminal equivalent:
 
 ```sh
 muzaiten-index scan --library ~/.local/share/muzaiten/library.sqlite \
