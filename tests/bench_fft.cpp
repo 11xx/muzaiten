@@ -80,13 +80,29 @@ int main(int argc, char **argv)
     if (argc == 2 && std::strcmp(argv[1], "--bins") == 0) {
         return printBins();
     }
+
+    enum class Mode {
+        Compare,
+        ReferenceOnly,
+        ProbeOnly,
+    };
+    Mode mode = Mode::Compare;
+    int firstNumber = 1;
+    if (argc >= 2 && std::strcmp(argv[1], "--reference-only") == 0) {
+        mode = Mode::ReferenceOnly;
+        firstNumber = 2;
+    } else if (argc >= 2 && std::strcmp(argv[1], "--probe-only") == 0) {
+        mode = Mode::ProbeOnly;
+        firstNumber = 2;
+    }
+
     int repetitions = 20'000;
     int trials = 7;
-    if (argc >= 2) {
-        repetitions = std::max(1, std::atoi(argv[1]));
+    if (argc > firstNumber) {
+        repetitions = std::max(1, std::atoi(argv[firstNumber]));
     }
-    if (argc >= 3) {
-        trials = std::max(1, std::atoi(argv[2]));
+    if (argc > firstNumber + 1) {
+        trials = std::max(1, std::atoi(argv[firstNumber + 1]));
     }
 
     const auto input = makeFixture();
@@ -119,29 +135,40 @@ int main(int argc, char **argv)
     double bestProbe = 0.0;
     double checksum = 0.0;
     for (int trial = 0; trial < trials; ++trial) {
-        const Measurement referenceTime = measure(repetitions, [&](std::size_t repetition) {
-            for (std::size_t i = 0; i < input.size(); ++i) {
-                reference[i] = {static_cast<double>(input[i]), 0.0};
-            }
-            Fft::complexRadix2Reference(reference);
-            return std::norm(reference[(repetition * 17U) % Fft::RealFft2048::kBins]);
-        });
-        const Measurement probeTime = measure(repetitions, [&](std::size_t repetition) {
-            plan.forwardPower(input, power, workspace);
-            return power[(repetition * 17U) % Fft::RealFft2048::kBins];
-        });
-        bestReference = trial == 0 ? referenceTime.nsPerTransform
-                                   : std::min(bestReference, referenceTime.nsPerTransform);
-        bestProbe = trial == 0 ? probeTime.nsPerTransform
-                               : std::min(bestProbe, probeTime.nsPerTransform);
-        checksum += referenceTime.checksum + probeTime.checksum;
+        if (mode != Mode::ProbeOnly) {
+            const Measurement referenceTime = measure(repetitions, [&](std::size_t repetition) {
+                for (std::size_t i = 0; i < input.size(); ++i) {
+                    reference[i] = {static_cast<double>(input[i]), 0.0};
+                }
+                Fft::complexRadix2Reference(reference);
+                return std::norm(reference[(repetition * 17U) % Fft::RealFft2048::kBins]);
+            });
+            bestReference = trial == 0 ? referenceTime.nsPerTransform
+                                       : std::min(bestReference, referenceTime.nsPerTransform);
+            checksum += referenceTime.checksum;
+        }
+        if (mode != Mode::ReferenceOnly) {
+            const Measurement probeTime = measure(repetitions, [&](std::size_t repetition) {
+                plan.forwardPower(input, power, workspace);
+                return power[(repetition * 17U) % Fft::RealFft2048::kBins];
+            });
+            bestProbe = trial == 0 ? probeTime.nsPerTransform
+                                   : std::min(bestProbe, probeTime.nsPerTransform);
+            checksum += probeTime.checksum;
+        }
     }
 
     std::printf("bench_fft: %d transforms x %d trials (best; current machine load applies)\n",
                 repetitions, trials);
-    std::printf("  reference complex<double> radix-2: %8.1f ns/transform\n", bestReference);
-    std::printf("  clean real<float> radix-4+power: %8.1f ns/transform\n", bestProbe);
-    std::printf("  speedup: %.2fx\n", bestReference / bestProbe);
+    if (mode != Mode::ProbeOnly) {
+        std::printf("  reference complex<double> radix-2: %8.1f ns/transform\n", bestReference);
+    }
+    if (mode != Mode::ReferenceOnly) {
+        std::printf("  clean real<float> radix-4+power: %8.1f ns/transform\n", bestProbe);
+    }
+    if (mode == Mode::Compare) {
+        std::printf("  speedup: %.2fx\n", bestReference / bestProbe);
+    }
     std::printf("  max relative complex-bin error: %.9g\n", maxRelativeBinError);
     std::printf("  max relative power error: %.9g\n", maxRelativePowerError);
     std::printf("  checksum: %.17g\n", checksum);

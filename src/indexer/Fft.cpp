@@ -4,11 +4,15 @@
 #include <numbers>
 #include <utility>
 
+#if defined(__SSE2__)
+#include <xmmintrin.h>
+#endif
+
 namespace {
 
 constexpr std::size_t kRadix4Digits = 5; // 1024 == 4^5
 
-std::uint16_t reverseBase4(std::size_t value)
+constexpr std::uint16_t reverseBase4(std::size_t value)
 {
     std::uint16_t reversed = 0;
     for (std::size_t digit = 0; digit < kRadix4Digits; ++digit) {
@@ -18,8 +22,32 @@ std::uint16_t reverseBase4(std::size_t value)
     return reversed;
 }
 
-void radix4NoTwiddle(float &ar, float &ai, float &br, float &bi,
-                     float &cr, float &ci, float &dr, float &di)
+struct DigitSwap {
+    std::uint16_t first;
+    std::uint16_t second;
+};
+
+consteval auto makeDigitSwaps()
+{
+    // A five-digit base-4 number has 4^3 palindromes. Every other index
+    // belongs to one two-element reversal cycle.
+    constexpr std::size_t swapCount = (1'024 - 64) / 2;
+    std::array<DigitSwap, swapCount> swaps{};
+    std::size_t next = 0;
+    for (std::size_t index = 1; index < 1'024; ++index) {
+        const std::uint16_t reversed = reverseBase4(index);
+        if (index < reversed) {
+            swaps[next++] = {static_cast<std::uint16_t>(index), reversed};
+        }
+    }
+    return swaps;
+}
+
+inline constexpr auto kDigitSwaps = makeDigitSwaps();
+
+[[gnu::always_inline]] inline void radix4NoTwiddle(
+    float &ar, float &ai, float &br, float &bi,
+    float &cr, float &ci, float &dr, float &di)
 {
     const float sumAcReal = ar + cr;
     const float sumAcImag = ai + ci;
@@ -46,6 +74,129 @@ void multiplyTwiddle(float &real, float &imag, float twiddleReal, float twiddleI
     const float productImag = real * twiddleImag + imag * twiddleReal;
     real = productReal;
     imag = productImag;
+}
+
+#if defined(__SSE2__)
+[[gnu::always_inline]] inline void radix4Vector(
+    __m128 &ar, __m128 &ai, __m128 &br, __m128 &bi,
+    __m128 &cr, __m128 &ci, __m128 &dr, __m128 &di) noexcept
+{
+    const __m128 sumAcReal = _mm_add_ps(ar, cr);
+    const __m128 sumAcImag = _mm_add_ps(ai, ci);
+    const __m128 diffAcReal = _mm_sub_ps(ar, cr);
+    const __m128 diffAcImag = _mm_sub_ps(ai, ci);
+    const __m128 sumBdReal = _mm_add_ps(br, dr);
+    const __m128 sumBdImag = _mm_add_ps(bi, di);
+    const __m128 diffBdReal = _mm_sub_ps(br, dr);
+    const __m128 diffBdImag = _mm_sub_ps(bi, di);
+
+    ar = _mm_add_ps(sumAcReal, sumBdReal);
+    ai = _mm_add_ps(sumAcImag, sumBdImag);
+    br = _mm_add_ps(diffAcReal, diffBdImag);
+    bi = _mm_sub_ps(diffAcImag, diffBdReal);
+    cr = _mm_sub_ps(sumAcReal, sumBdReal);
+    ci = _mm_sub_ps(sumAcImag, sumBdImag);
+    dr = _mm_sub_ps(diffAcReal, diffBdImag);
+    di = _mm_add_ps(diffAcImag, diffBdReal);
+}
+
+[[gnu::always_inline]] inline void multiplyTwiddleVector(
+    __m128 &real, __m128 &imag, __m128 twiddleReal, __m128 twiddleImag) noexcept
+{
+    const __m128 productReal =
+        _mm_sub_ps(_mm_mul_ps(real, twiddleReal), _mm_mul_ps(imag, twiddleImag));
+    const __m128 productImag =
+        _mm_add_ps(_mm_mul_ps(real, twiddleImag), _mm_mul_ps(imag, twiddleReal));
+    real = productReal;
+    imag = productImag;
+}
+#endif
+
+template<std::size_t Length>
+inline constexpr std::size_t kStageTwiddleOffset = [] {
+    std::size_t offset = 0;
+    for (std::size_t length = Fft::RealFft2048::kPackedSize; length > Length;
+         length >>= 2U) {
+        offset += 3 * (length / 4);
+    }
+    return offset;
+}();
+
+template<std::size_t Length>
+[[gnu::always_inline]] inline void radix4Stage(
+    Fft::RealFft2048::Workspace &workspace,
+    const std::array<float, Fft::RealFft2048::kStageTwiddleCount> &twiddleReal,
+    const std::array<float, Fft::RealFft2048::kStageTwiddleCount> &twiddleImag) noexcept
+{
+    constexpr std::size_t quarter = Length / 4;
+    constexpr std::size_t twiddleOffset = kStageTwiddleOffset<Length>;
+    for (std::size_t base = 0; base < Fft::RealFft2048::kPackedSize; base += Length) {
+        radix4NoTwiddle(workspace.real[base], workspace.imag[base],
+                        workspace.real[base + quarter], workspace.imag[base + quarter],
+                        workspace.real[base + 2 * quarter], workspace.imag[base + 2 * quarter],
+                        workspace.real[base + 3 * quarter], workspace.imag[base + 3 * quarter]);
+
+        std::size_t j = 1;
+#if defined(__SSE2__)
+        for (; j + 3 < quarter; j += 4) {
+            const std::size_t a = base + j;
+            const std::size_t b = a + quarter;
+            const std::size_t c = b + quarter;
+            const std::size_t d = c + quarter;
+            __m128 ar = _mm_loadu_ps(workspace.real.data() + a);
+            __m128 ai = _mm_loadu_ps(workspace.imag.data() + a);
+            __m128 br = _mm_loadu_ps(workspace.real.data() + b);
+            __m128 bi = _mm_loadu_ps(workspace.imag.data() + b);
+            __m128 cr = _mm_loadu_ps(workspace.real.data() + c);
+            __m128 ci = _mm_loadu_ps(workspace.imag.data() + c);
+            __m128 dr = _mm_loadu_ps(workspace.real.data() + d);
+            __m128 di = _mm_loadu_ps(workspace.imag.data() + d);
+            radix4Vector(ar, ai, br, bi, cr, ci, dr, di);
+
+            multiplyTwiddleVector(
+                br, bi,
+                _mm_loadu_ps(twiddleReal.data() + twiddleOffset + j),
+                _mm_loadu_ps(twiddleImag.data() + twiddleOffset + j));
+            multiplyTwiddleVector(
+                cr, ci,
+                _mm_loadu_ps(twiddleReal.data() + twiddleOffset + quarter + j),
+                _mm_loadu_ps(twiddleImag.data() + twiddleOffset + quarter + j));
+            multiplyTwiddleVector(
+                dr, di,
+                _mm_loadu_ps(twiddleReal.data() + twiddleOffset + 2 * quarter + j),
+                _mm_loadu_ps(twiddleImag.data() + twiddleOffset + 2 * quarter + j));
+
+            _mm_storeu_ps(workspace.real.data() + a, ar);
+            _mm_storeu_ps(workspace.imag.data() + a, ai);
+            _mm_storeu_ps(workspace.real.data() + b, br);
+            _mm_storeu_ps(workspace.imag.data() + b, bi);
+            _mm_storeu_ps(workspace.real.data() + c, cr);
+            _mm_storeu_ps(workspace.imag.data() + c, ci);
+            _mm_storeu_ps(workspace.real.data() + d, dr);
+            _mm_storeu_ps(workspace.imag.data() + d, di);
+        }
+#endif
+        for (; j < quarter; ++j) {
+            const std::size_t a = base + j;
+            const std::size_t b = a + quarter;
+            const std::size_t c = b + quarter;
+            const std::size_t d = c + quarter;
+            radix4NoTwiddle(workspace.real[a], workspace.imag[a],
+                            workspace.real[b], workspace.imag[b],
+                            workspace.real[c], workspace.imag[c],
+                            workspace.real[d], workspace.imag[d]);
+
+            multiplyTwiddle(workspace.real[b], workspace.imag[b],
+                            twiddleReal[twiddleOffset + j],
+                            twiddleImag[twiddleOffset + j]);
+            multiplyTwiddle(workspace.real[c], workspace.imag[c],
+                            twiddleReal[twiddleOffset + quarter + j],
+                            twiddleImag[twiddleOffset + quarter + j]);
+            multiplyTwiddle(workspace.real[d], workspace.imag[d],
+                            twiddleReal[twiddleOffset + 2 * quarter + j],
+                            twiddleImag[twiddleOffset + 2 * quarter + j]);
+        }
+    }
 }
 
 } // namespace
@@ -84,11 +235,20 @@ void complexRadix2Reference(std::vector<std::complex<double>> &buffer)
 RealFft2048::RealFft2048() noexcept
 {
     constexpr double twoPi = 2.0 * std::numbers::pi;
-    for (std::size_t k = 0; k < kPackedSize; ++k) {
-        const double angle = -twoPi * static_cast<double>(k) / static_cast<double>(kPackedSize);
-        m_complexTwiddleReal[k] = static_cast<float>(std::cos(angle));
-        m_complexTwiddleImag[k] = static_cast<float>(std::sin(angle));
-        m_digitReversed[k] = reverseBase4(k);
+    std::size_t twiddleOffset = 0;
+    for (std::size_t length = kPackedSize; length > 4; length >>= 2U) {
+        const std::size_t quarter = length / 4;
+        const std::size_t step = kPackedSize / length;
+        for (std::size_t factor = 1; factor <= 3; ++factor) {
+            for (std::size_t j = 0; j < quarter; ++j) {
+                const std::size_t k = factor * j * step;
+                const double angle =
+                    -twoPi * static_cast<double>(k) / static_cast<double>(kPackedSize);
+                m_stageTwiddleReal[twiddleOffset] = static_cast<float>(std::cos(angle));
+                m_stageTwiddleImag[twiddleOffset] = static_cast<float>(std::sin(angle));
+                ++twiddleOffset;
+            }
+        }
     }
     for (std::size_t k = 0; k < kBins; ++k) {
         const double angle = -twoPi * static_cast<double>(k) / static_cast<double>(kSize);
@@ -100,42 +260,32 @@ RealFft2048::RealFft2048() noexcept
 void RealFft2048::transformPacked(std::span<const float, kSize> input,
                                   Workspace &workspace) const noexcept
 {
+#if defined(__SSE2__)
+    // The source is interleaved real/imag pairs while the transform uses
+    // structure-of-arrays. Four packed samples become two aligned vectors;
+    // this is an exact data shuffle, so it cannot alter floating-point results.
+    for (std::size_t i = 0; i < kPackedSize; i += 4) {
+        const __m128 first = _mm_loadu_ps(input.data() + 2 * i);
+        const __m128 second = _mm_loadu_ps(input.data() + 2 * i + 4);
+        const __m128 real = _mm_shuffle_ps(first, second, _MM_SHUFFLE(2, 0, 2, 0));
+        const __m128 imag = _mm_shuffle_ps(first, second, _MM_SHUFFLE(3, 1, 3, 1));
+        _mm_store_ps(workspace.real.data() + i, real);
+        _mm_store_ps(workspace.imag.data() + i, imag);
+    }
+#else
     for (std::size_t i = 0; i < kPackedSize; ++i) {
         workspace.real[i] = input[2 * i];
         workspace.imag[i] = input[2 * i + 1];
     }
+#endif
 
-    // Radix-4 DIF leaves output in base-4 digit-reversed order. Reconstruction
-    // reads through m_digitReversed directly, avoiding a separate permutation.
-    for (std::size_t length = kPackedSize; length > 4; length >>= 2U) {
-        const std::size_t quarter = length / 4;
-        const std::size_t twiddleStep = kPackedSize / length;
-        for (std::size_t base = 0; base < kPackedSize; base += length) {
-            radix4NoTwiddle(workspace.real[base], workspace.imag[base],
-                            workspace.real[base + quarter], workspace.imag[base + quarter],
-                            workspace.real[base + 2 * quarter], workspace.imag[base + 2 * quarter],
-                            workspace.real[base + 3 * quarter], workspace.imag[base + 3 * quarter]);
-
-            for (std::size_t j = 1; j < quarter; ++j) {
-                const std::size_t a = base + j;
-                const std::size_t b = a + quarter;
-                const std::size_t c = b + quarter;
-                const std::size_t d = c + quarter;
-                radix4NoTwiddle(workspace.real[a], workspace.imag[a],
-                                workspace.real[b], workspace.imag[b],
-                                workspace.real[c], workspace.imag[c],
-                                workspace.real[d], workspace.imag[d]);
-
-                const std::size_t twiddle = j * twiddleStep;
-                multiplyTwiddle(workspace.real[b], workspace.imag[b],
-                                m_complexTwiddleReal[twiddle], m_complexTwiddleImag[twiddle]);
-                multiplyTwiddle(workspace.real[c], workspace.imag[c],
-                                m_complexTwiddleReal[2 * twiddle], m_complexTwiddleImag[2 * twiddle]);
-                multiplyTwiddle(workspace.real[d], workspace.imag[d],
-                                m_complexTwiddleReal[3 * twiddle], m_complexTwiddleImag[3 * twiddle]);
-            }
-        }
-    }
+    // Each stage is a separate compile-time instance. The production size is
+    // fixed, so this removes stage divisions and lets the compiler specialize
+    // the address arithmetic without adding a planner or runtime dispatch.
+    radix4Stage<1'024>(workspace, m_stageTwiddleReal, m_stageTwiddleImag);
+    radix4Stage<256>(workspace, m_stageTwiddleReal, m_stageTwiddleImag);
+    radix4Stage<64>(workspace, m_stageTwiddleReal, m_stageTwiddleImag);
+    radix4Stage<16>(workspace, m_stageTwiddleReal, m_stageTwiddleImag);
 
     for (std::size_t base = 0; base < kPackedSize; base += 4) {
         radix4NoTwiddle(workspace.real[base], workspace.imag[base],
@@ -143,16 +293,23 @@ void RealFft2048::transformPacked(std::span<const float, kSize> input,
                         workspace.real[base + 2], workspace.imag[base + 2],
                         workspace.real[base + 3], workspace.imag[base + 3]);
     }
+
+    // Pay the base-4 digit reversal once so the two reconstruction consumers
+    // walk natural-order bins. Sequential forward/reverse streams are cheaper
+    // than two table-indexed random loads per bin in the power loop.
+    for (const DigitSwap swap : kDigitSwaps) {
+        std::swap(workspace.real[swap.first], workspace.real[swap.second]);
+        std::swap(workspace.imag[swap.first], workspace.imag[swap.second]);
+    }
 }
 
-ComplexFloat RealFft2048::reconstructBin(const Workspace &workspace, std::size_t bin) const noexcept
+[[gnu::always_inline]] inline ComplexFloat RealFft2048::reconstructBin(
+    const Workspace &workspace, std::size_t bin) const noexcept
 {
-    const std::size_t packedIndex = m_digitReversed[bin];
-    const std::size_t mirrorIndex = m_digitReversed[kPackedSize - bin];
-    const float aReal = workspace.real[packedIndex];
-    const float aImag = workspace.imag[packedIndex];
-    const float bReal = workspace.real[mirrorIndex];
-    const float bImag = -workspace.imag[mirrorIndex];
+    const float aReal = workspace.real[bin];
+    const float aImag = workspace.imag[bin];
+    const float bReal = workspace.real[kPackedSize - bin];
+    const float bImag = -workspace.imag[kPackedSize - bin];
 
     const float evenReal = 0.5F * (aReal + bReal);
     const float evenImag = 0.5F * (aImag + bImag);

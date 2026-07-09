@@ -29,6 +29,7 @@ public:
     static constexpr std::size_t kSize = 2'048;
     static constexpr std::size_t kPackedSize = kSize / 2;
     static constexpr std::size_t kBins = kSize / 2 + 1;
+    static constexpr std::size_t kStageTwiddleCount = 1'020;
 
     struct Workspace {
         alignas(64) std::array<float, kPackedSize> real{};
@@ -51,13 +52,13 @@ public:
 private:
     void transformPacked(std::span<const float, kSize> input,
                          Workspace &workspace) const noexcept;
-    ComplexFloat reconstructBin(const Workspace &workspace, std::size_t bin) const noexcept;
+    [[gnu::always_inline]] ComplexFloat reconstructBin(
+        const Workspace &workspace, std::size_t bin) const noexcept;
 
-    alignas(64) std::array<float, kPackedSize> m_complexTwiddleReal{};
-    alignas(64) std::array<float, kPackedSize> m_complexTwiddleImag{};
+    alignas(64) std::array<float, kStageTwiddleCount> m_stageTwiddleReal{};
+    alignas(64) std::array<float, kStageTwiddleCount> m_stageTwiddleImag{};
     alignas(64) std::array<float, kBins> m_realTwiddleReal{};
     alignas(64) std::array<float, kBins> m_realTwiddleImag{};
-    std::array<std::uint16_t, kPackedSize> m_digitReversed{};
 };
 
 } // namespace Fft
