@@ -106,8 +106,9 @@ warm enough (about 2 s of movement). There is no second stream name such as
 Scan JSON may include feature-fill counters when that phase ran:
 `feature_groups_processed`, `features_written` (includes NULL-scalar rows
 written as current version), and `feature_groups_failed` (decode/analyze
-exceptions that stay stale for a rerun). inventory field `featured_groups`
-is still the table count. A stop that lands during features returns
+exceptions that stay stale for a rerun). The inventory field
+`featured_groups` remains the features-table row count. A stop that lands
+during the features phase returns
 `"canceled": true` and does not write the last-scan summary meta; completed
 feature rows stay durable.
 
