@@ -5593,6 +5593,7 @@ void MainWindow::startAudioAnalysis()
     });
 
     m_audioAnalysisRunState.running = true;
+    m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::AnalyzingFiles;
     m_audioAnalysisRunState.power = QString::fromLatin1(analysisPowerLabels[boundedAnalysisPower]);
 
     m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Analyzing…"));
@@ -5612,7 +5613,16 @@ void MainWindow::cancelAudioAnalysis()
         statusBar()->showMessage(QStringLiteral("Stopping audio analysis..."), 4000);
     }
     process->terminate();
-    QTimer::singleShot(3000, this, [this, process]() {
+    // Feature fill is serial per representative: a long decode can legitimately
+    // take far longer than the file-phase 3s backstop. Use a long phase-aware
+    // grace so SIGTERM can produce canceled=true before SIGKILL.
+    constexpr int kFilePhaseKillGraceMs = 3000;
+    constexpr int kFeaturesPhaseKillGraceMs = 120000;
+    const int killGraceMs =
+        m_audioAnalysisRunState.phase == AudioAnalysisData::LiveStatus::Phase::WritingFeatures
+            ? kFeaturesPhaseKillGraceMs
+            : kFilePhaseKillGraceMs;
+    QTimer::singleShot(killGraceMs, this, [this, process]() {
         if (m_audioAnalysisProcess == process && process->state() != QProcess::NotRunning) {
             process->kill();
         }
@@ -5689,12 +5699,18 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
                 statusBar()->showMessage(
                     QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
             } else {
+                const QJsonValue featuresWrittenValue = object.value(QStringLiteral("features_written"));
+                const int featuresWritten =
+                    featuresWrittenValue.isDouble() || featuresWrittenValue.isString()
+                        ? featuresWrittenValue.toInt(-1)
+                        : -1;
                 statusBar()->showMessage(
                     AudioAnalysisData::finalSummary(object.value(QStringLiteral("scanned")).toInt(),
                                                     object.value(QStringLiteral("skipped")).toInt(),
                                                     object.value(QStringLiteral("failed")).toInt(),
                                                     object.value(QStringLiteral("groups")).toInt(),
-                                                    object.value(QStringLiteral("elapsed_secs")).toDouble()),
+                                                    object.value(QStringLiteral("elapsed_secs")).toDouble(),
+                                                    featuresWritten),
                     10000);
             }
         }
@@ -5722,13 +5738,20 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
     const QRegularExpressionMatch match = progressPattern.match(line);
     if (match.hasMatch()) {
         m_audioAnalysisRunState.running = true;
+        if (m_audioAnalysisRunState.phase == AudioAnalysisData::LiveStatus::Phase::Idle) {
+            m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::AnalyzingFiles;
+        }
         m_audioAnalysisRunState.analyzed = match.captured(1).toInt();
         m_audioAnalysisRunState.total = match.captured(2).toInt();
         if (!match.captured(3).isEmpty()) {
             m_audioAnalysisRunState.elapsedSecs = match.captured(3).toDouble();
         }
-        if (!match.captured(4).isEmpty() && match.captured(4) != QLatin1String("-")) {
-            m_audioAnalysisRunState.rate = match.captured(4).toDouble();
+        if (!match.captured(4).isEmpty()) {
+            if (match.captured(4) == QLatin1String("-")) {
+                m_audioAnalysisRunState.rate = -1.0;
+            } else {
+                m_audioAnalysisRunState.rate = match.captured(4).toDouble();
+            }
         }
         if (!match.captured(5).isEmpty() && match.captured(5) != QLatin1String("-")) {
             m_audioAnalysisRunState.etaSecs = match.captured(5).toLongLong();
@@ -5738,12 +5761,20 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
         m_playerBar->setAudioAnalysisRunStatus(true, AudioAnalysisData::progressLabel(m_audioAnalysisRunState));
         return;
     }
-    if (line == QLatin1String("phase grouping")) {
-        m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Grouping tracks..."));
-        return;
-    }
-    if (line == QLatin1String("phase features")) {
-        m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Writing features..."));
+    if (line == QLatin1String("phase grouping")
+        || line == QLatin1String("phase features")) {
+        m_audioAnalysisRunState.running = true;
+        m_audioAnalysisRunState.analyzed = 0;
+        m_audioAnalysisRunState.total = 0;
+        m_audioAnalysisRunState.rate = -1.0;
+        m_audioAnalysisRunState.etaSecs.reset();
+        if (line == QLatin1String("phase grouping")) {
+            m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::Grouping;
+            m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Grouping tracks..."));
+        } else {
+            m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::WritingFeatures;
+            m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Writing features..."));
+        }
         return;
     }
     m_audioAnalysisStderr.append(line.toUtf8());
