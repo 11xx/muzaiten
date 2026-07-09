@@ -76,13 +76,14 @@ std::vector<double> hannWindow(std::size_t n)
     return window;
 }
 
-std::vector<float> reflectPad(const std::vector<float> &samples, std::size_t pad)
+void reflectPadInto(const std::vector<float> &samples, std::size_t pad, std::vector<float> &out)
 {
+    out.clear();
     if (samples.size() < 2) {
-        return samples;
+        out.assign(samples.begin(), samples.end());
+        return;
     }
     const std::size_t edge = std::min(pad, samples.size() - 1);
-    std::vector<float> out;
     out.reserve(samples.size() + 2 * edge);
     for (std::size_t i = edge; i >= 1; --i) {
         out.push_back(samples[i]);
@@ -91,6 +92,12 @@ std::vector<float> reflectPad(const std::vector<float> &samples, std::size_t pad
     for (std::size_t i = 0; i < edge; ++i) {
         out.push_back(samples[samples.size() - 2 - i]);
     }
+}
+
+std::vector<float> reflectPad(const std::vector<float> &samples, std::size_t pad)
+{
+    std::vector<float> out;
+    reflectPadInto(samples, pad, out);
     return out;
 }
 
@@ -281,6 +288,12 @@ MelBank MelBank::slaney(std::size_t nMels, std::size_t nFft, double sampleRate)
 std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
 {
     std::vector<double> out(weights.size(), 0.0);
+    applyInto(powerFrame, out.data());
+    return out;
+}
+
+void MelBank::applyInto(const std::vector<double> &powerFrame, double *out) const
+{
     if (sparseSpans.size() == weights.size()) {
         for (std::size_t m = 0; m < sparseSpans.size(); ++m) {
             const SparseSpan &span = sparseSpans[m];
@@ -291,7 +304,7 @@ std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
             }
             out[m] = sum;
         }
-        return out;
+        return;
     }
     for (std::size_t m = 0; m < weights.size(); ++m) {
         double sum = 0.0;
@@ -301,7 +314,6 @@ std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
         }
         out[m] = sum;
     }
-    return out;
 }
 
 namespace {
@@ -606,28 +618,51 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     // path (powerSpectrogram/onsetEnvelope/spectralStats, kept for tests
     // and oracle tooling): same loops, same summation order. test_dsp's
     // golden oracle and bench_dsp --goldens diffs guard that equivalence.
-    const std::vector<float> padded = reflectPad(samples, kNFft / 2);
-    const std::vector<double> window = hannWindow(kNFft);
-    std::vector<std::complex<double>> buffer(kNFft);
+    //
+    // Hot buffers live in thread-local scratch reused across tracks on the
+    // same worker; analyze stays pure to callers. The mel matrix is one
+    // flat frames×kNMels block so the walk performs no per-frame heap
+    // allocation.
+    struct AnalysisScratch {
+        std::vector<float> padded;
+        std::vector<std::complex<double>> buffer;
+        std::vector<double> powerFrame;
+        std::vector<double> melPowers;
+    };
+    thread_local AnalysisScratch scratch;
+
+    reflectPadInto(samples, kNFft / 2, scratch.padded);
+    const std::vector<float> &padded = scratch.padded;
+    static const std::vector<double> window = hannWindow(kNFft);
+    scratch.buffer.assign(kNFft, {});
     std::vector<double> binFreqs(kNFft / 2 + 1);
     for (std::size_t k = 0; k < binFreqs.size(); ++k) {
         binFreqs[k] = static_cast<double>(k) * rate / static_cast<double>(kNFft);
     }
 
     const MelBank &melBank = cachedMelBank(sampleRate);
-    std::vector<std::vector<double>> melPowers;
+    const std::size_t melFrames =
+        padded.size() >= kNFft ? (padded.size() - kNFft) / kHop + 1 : 0;
+    if (melFrames == 0) {
+        return std::nullopt;
+    }
+    scratch.powerFrame.resize(kNFft / 2 + 1);
+    scratch.melPowers.resize(melFrames * kNMels);
+    std::vector<double> &powerFrame = scratch.powerFrame;
+    std::vector<double> &melPowers = scratch.melPowers;
     std::vector<double> centroids;
     double flatnessSum = 0.0;
     std::size_t flatnessFrames = 0;
     double maxPower = kAmin;
 
-    for (std::size_t start = 0; start + kNFft <= padded.size(); start += kHop) {
+    std::size_t frame = 0;
+    for (std::size_t start = 0; start + kNFft <= padded.size(); start += kHop, ++frame) {
+        std::vector<std::complex<double>> &buffer = scratch.buffer;
         for (std::size_t i = 0; i < kNFft; ++i) {
             buffer[i] = {static_cast<double>(padded[start + i]) * window[i], 0.0};
         }
         fftRadix2(buffer);
 
-        std::vector<double> powerFrame(kNFft / 2 + 1);
         for (std::size_t k = 0; k <= kNFft / 2; ++k) {
             powerFrame[k] = std::norm(buffer[k]);
         }
@@ -651,28 +686,27 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
             ++flatnessFrames;
         }
 
-        melPowers.push_back(melBank.apply(powerFrame));
-        for (double p : melPowers.back()) {
-            maxPower = std::max(maxPower, p);
+        double *melFrame = melPowers.data() + frame * kNMels;
+        melBank.applyInto(powerFrame, melFrame);
+        for (std::size_t m = 0; m < kNMels; ++m) {
+            maxPower = std::max(maxPower, melFrame[m]);
         }
-    }
-    if (melPowers.empty()) {
-        return std::nullopt;
     }
 
     const double floorDb = 10.0 * std::log10(maxPower) - kTopDb;
-    for (std::vector<double> &frame : melPowers) {
-        for (double &p : frame) {
-            p = std::max(10.0 * std::log10(std::max(p, kAmin)), floorDb);
-        }
+    for (double &p : melPowers) {
+        p = std::max(10.0 * std::log10(std::max(p, kAmin)), floorDb);
     }
     std::vector<double> envelope{0.0};
-    for (std::size_t t = 1; t < melPowers.size(); ++t) {
+    envelope.reserve(melFrames);
+    for (std::size_t t = 1; t < melFrames; ++t) {
+        const double *current = melPowers.data() + t * kNMels;
+        const double *previous = current - kNMels;
         double flux = 0.0;
-        for (std::size_t m = 0; m < melPowers[t].size(); ++m) {
-            flux += std::max(melPowers[t][m] - melPowers[t - 1][m], 0.0);
+        for (std::size_t m = 0; m < kNMels; ++m) {
+            flux += std::max(current[m] - previous[m], 0.0);
         }
-        envelope.push_back(flux / static_cast<double>(melPowers[t].size()));
+        envelope.push_back(flux / static_cast<double>(kNMels));
     }
     const double frameRate = rate / static_cast<double>(kHop);
 

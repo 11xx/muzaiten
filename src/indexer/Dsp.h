@@ -73,6 +73,10 @@ public:
     static MelBank slaney(std::size_t nMels, std::size_t nFft, double sampleRate);
 
     std::vector<double> apply(const std::vector<double> &powerFrame) const;
+    // Same projection into caller-owned storage of nMels doubles; every
+    // output bin is written. Lets the analyzer fill a flat mel matrix
+    // without one heap allocation per frame.
+    void applyInto(const std::vector<double> &powerFrame, double *out) const;
 
     struct SparseSpan {
         std::size_t begin = 0;
