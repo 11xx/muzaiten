@@ -1,5 +1,7 @@
 #include "indexer/Dsp.h"
 
+#include "indexer/Fft.h"
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -34,37 +36,6 @@ constexpr double kBlockOverlap = 0.75;
 constexpr double kAbsoluteGateLufs = -70.0;
 constexpr double kRelativeGateLu = -10.0;
 constexpr double kLufsOffset = -0.691;
-
-// In-place iterative radix-2 FFT; kNFft is a power of two by construction,
-// which is the whole reason no FFT library is needed.
-void fftRadix2(std::vector<std::complex<double>> &buffer)
-{
-    const std::size_t n = buffer.size();
-    for (std::size_t i = 1, j = 0; i < n; ++i) {
-        std::size_t bit = n >> 1;
-        for (; j & bit; bit >>= 1) {
-            j ^= bit;
-        }
-        j |= bit;
-        if (i < j) {
-            std::swap(buffer[i], buffer[j]);
-        }
-    }
-    for (std::size_t len = 2; len <= n; len <<= 1) {
-        const double angle = -2.0 * std::numbers::pi / static_cast<double>(len);
-        const std::complex<double> root(std::cos(angle), std::sin(angle));
-        for (std::size_t start = 0; start < n; start += len) {
-            std::complex<double> twiddle(1.0, 0.0);
-            for (std::size_t k = 0; k < len / 2; ++k) {
-                const std::complex<double> even = buffer[start + k];
-                const std::complex<double> odd = buffer[start + k + len / 2] * twiddle;
-                buffer[start + k] = even + odd;
-                buffer[start + k + len / 2] = even - odd;
-                twiddle *= root;
-            }
-        }
-    }
-}
 
 std::vector<double> hannWindow(std::size_t n)
 {
@@ -229,7 +200,7 @@ PowerSpectrogram powerSpectrogram(const std::vector<float> &samples, std::size_t
         for (std::size_t i = 0; i < nFft; ++i) {
             buffer[i] = {static_cast<double>(padded[start + i]) * window[i], 0.0};
         }
-        fftRadix2(buffer);
+        Fft::complexRadix2Reference(buffer);
         std::vector<double> frame(nFft / 2 + 1);
         for (std::size_t k = 0; k <= nFft / 2; ++k) {
             frame[k] = std::norm(buffer[k]);
@@ -661,7 +632,7 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
         for (std::size_t i = 0; i < kNFft; ++i) {
             buffer[i] = {static_cast<double>(padded[start + i]) * window[i], 0.0};
         }
-        fftRadix2(buffer);
+        Fft::complexRadix2Reference(buffer);
 
         for (std::size_t k = 0; k <= kNFft / 2; ++k) {
             powerFrame[k] = std::norm(buffer[k]);

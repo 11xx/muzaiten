@@ -1,8 +1,11 @@
 #include "indexer/Dsp.h"
+#include "indexer/Fft.h"
 
 #include <QTest>
 
+#include <array>
 #include <cmath>
+#include <complex>
 #include <numbers>
 
 // Ported 1:1 from the Rust original's unit tests (archived at
@@ -154,6 +157,7 @@ private slots:
     void sineCentroidSitsAtItsFrequencyAndIsTonal();
     void noiseIsFlatterAndBrighterThanALowSine();
     void sineZeroCrossingRateTracksFrequency();
+    void cleanRoomRealFftMatchesV1Reference();
     void v1GoldenScalarsMatchPinnedOracle();
 };
 
@@ -348,6 +352,77 @@ void DspTest::sineZeroCrossingRateTracksFrequency()
     const double expected = 2.0 * 1000.0 / Dsp::kSampleRateHz;
     QVERIFY2(std::abs(rate - expected) < 0.1 * expected,
              qPrintable(QStringLiteral("zcr %1").arg(rate)));
+}
+
+void DspTest::cleanRoomRealFftMatchesV1Reference()
+{
+    using Frame = std::array<float, Fft::RealFft2048::kSize>;
+    std::vector<std::pair<QString, Frame>> fixtures;
+
+    fixtures.emplace_back(QStringLiteral("silence"), Frame{});
+
+    Frame firstImpulse{};
+    firstImpulse.front() = 1.0F;
+    fixtures.emplace_back(QStringLiteral("first-impulse"), firstImpulse);
+
+    Frame lastImpulse{};
+    lastImpulse.back() = 1.0F;
+    fixtures.emplace_back(QStringLiteral("last-impulse"), lastImpulse);
+
+    Frame dc{};
+    dc.fill(0.25F);
+    fixtures.emplace_back(QStringLiteral("dc"), dc);
+
+    Frame nyquist{};
+    for (std::size_t i = 0; i < nyquist.size(); ++i) {
+        nyquist[i] = i % 2 == 0 ? 0.5F : -0.5F;
+    }
+    fixtures.emplace_back(QStringLiteral("nyquist"), nyquist);
+
+    Frame mixed{};
+    const std::vector<float> noise = makeNoise(mixed.size(), 73);
+    for (std::size_t i = 0; i < mixed.size(); ++i) {
+        const double phase = 2.0 * std::numbers::pi * static_cast<double>(i) /
+                             static_cast<double>(mixed.size());
+        mixed[i] = static_cast<float>(0.7 * std::sin(43.0 * phase) +
+                                      0.2 * std::cos(317.0 * phase) + 0.03 * noise[i]);
+    }
+    fixtures.emplace_back(QStringLiteral("mixed"), mixed);
+
+    Fft::RealFft2048 plan;
+    Fft::RealFft2048::Workspace workspace;
+    std::array<Fft::ComplexFloat, Fft::RealFft2048::kBins> output{};
+    std::array<double, Fft::RealFft2048::kBins> power{};
+
+    for (const auto &[name, input] : fixtures) {
+        std::vector<std::complex<double>> reference(input.size());
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            reference[i] = {static_cast<double>(input[i]), 0.0};
+        }
+        Fft::complexRadix2Reference(reference);
+        plan.forward(input, output, workspace);
+        plan.forwardPower(input, power, workspace);
+
+        for (std::size_t bin = 0; bin < output.size(); ++bin) {
+            const std::complex<double> candidate(output[bin].real, output[bin].imag);
+            const double binScale = std::max(1.0, std::abs(reference[bin]));
+            QVERIFY2(std::abs(candidate - reference[bin]) <= 5e-4 * binScale,
+                     qPrintable(QStringLiteral("%1 bin %2 candidate=(%3,%4) reference=(%5,%6)")
+                                    .arg(name)
+                                    .arg(bin)
+                                    .arg(candidate.real(), 0, 'g', 12)
+                                    .arg(candidate.imag(), 0, 'g', 12)
+                                    .arg(reference[bin].real(), 0, 'g', 12)
+                                    .arg(reference[bin].imag(), 0, 'g', 12)));
+            const double referencePower = std::norm(reference[bin]);
+            QVERIFY2(std::abs(power[bin] - referencePower) <= 1e-3 * std::max(1.0, referencePower),
+                     qPrintable(QStringLiteral("%1 power bin %2 candidate=%3 reference=%4")
+                                    .arg(name)
+                                    .arg(bin)
+                                    .arg(power[bin], 0, 'g', 12)
+                                    .arg(referencePower, 0, 'g', 12)));
+        }
+    }
 }
 
 void DspTest::v1GoldenScalarsMatchPinnedOracle()

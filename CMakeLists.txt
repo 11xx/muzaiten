@@ -393,6 +393,7 @@ target_compile_options(muzaitenctl PRIVATE
 # feature store, not an optimization preference.
 add_library(muzaiten_dsp STATIC
     src/indexer/Dsp.cpp
+    src/indexer/Fft.cpp
 )
 target_include_directories(muzaiten_dsp PUBLIC src)
 target_compile_features(muzaiten_dsp PUBLIC cxx_std_26)

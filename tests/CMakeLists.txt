@@ -166,6 +166,16 @@ target_include_directories(bench_dsp PRIVATE ../src)
 target_link_libraries(bench_dsp PRIVATE muzaiten_dsp)
 target_compile_features(bench_dsp PRIVATE cxx_std_26)
 
+# Fixed-size clean-room real-FFT probe. Like bench_dsp, it is built by default
+# but not registered with CTest because timing is a product decision, not a
+# hermetic pass/fail test.
+add_executable(bench_fft
+    bench_fft.cpp
+)
+target_include_directories(bench_fft PRIVATE ../src)
+target_link_libraries(bench_fft PRIVATE muzaiten_dsp)
+target_compile_features(bench_fft PRIVATE cxx_std_26)
+
 add_executable(test_indexer_scan
     test_indexer_scan.cpp
 )
