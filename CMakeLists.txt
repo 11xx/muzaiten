@@ -399,6 +399,7 @@ target_include_directories(muzaiten_dsp PUBLIC src)
 target_compile_features(muzaiten_dsp PUBLIC cxx_std_26)
 target_compile_options(muzaiten_dsp PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-ffp-contract=off -Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>
 )
 
 add_executable(muzaiten-index
