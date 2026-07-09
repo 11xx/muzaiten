@@ -61,8 +61,9 @@ databases may not contain them until the embedder runs.
 
 - `schema_version`: `3`.
 - `indexer_version`: `cpp`.
-- `dsp_version`: the value of `Dsp::kDspVersion`, currently
-  `muzaiten-dsp-v1`.
+- `dsp_version`: the analyzer version recorded when the indexer last opened the
+  store. It is diagnostic; app-side freshness is decided from each feature
+  row's `version` against the version expected by the running build.
 - `created_at`: Unix epoch seconds when the database was first initialized.
 - `last_scan_finished_at`: Unix epoch seconds for the last successful full
   audio analysis scan.
@@ -109,11 +110,22 @@ rescans: a group that keeps its id keeps its feature row as long as the row's
 `version` matches the current `Dsp::kDspVersion`, so incremental scans only
 compute features for new or stale groups.
 
+The app and radio serve scalar rows only when `features.version` matches the
+DSP version expected by the running build. This strict row-level check also
+covers an untouched old store after an application upgrade and mixed-version
+stores produced by canceling and resuming a refresh. A missing or empty
+`meta.dsp_version` is shown as unknown but does not override per-row freshness:
+matching rows remain readable and non-matching rows remain stale.
+
 ## Scan JSON
 
 `muzaiten-index scan --json` includes the stable count fields
 `scanned`, `skipped`, `failed`, `groups`, and `featured_groups`, plus:
 
+- `featured_fresh`: existing feature rows whose `version` matches this build.
+- `featured_stale`: existing feature rows awaiting re-analysis because their
+  `version` does not match this build. Missing group rows are pending work but
+  are not included in either existing-row count.
 - `elapsed_secs`: scan wall time.
 - `power`: effective analysis power (`background`, `balanced`, or `turbo`).
 - `jobs`: effective worker count after `--power` and `--jobs` resolution.

@@ -96,14 +96,21 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
     if (summary.open) {
         const FeatureStore::Status status = summary.status;
         form->addRow(QStringLiteral("Schema version"), valueLabel(QString::number(summary.schemaVersion), this));
-        form->addRow(QStringLiteral("DSP version"),
-                     valueLabel(status.dspVersion.isEmpty() ? QStringLiteral("unknown") : status.dspVersion, this));
+        QString dspVersionText = status.dspVersion.isEmpty() ? QStringLiteral("unknown") : status.dspVersion;
+        if (!status.expectedDspVersion.isEmpty() && status.dspVersion != status.expectedDspVersion) {
+            dspVersionText += QStringLiteral(" (this build expects %1)").arg(status.expectedDspVersion);
+        }
+        form->addRow(QStringLiteral("DSP version"), valueLabel(dspVersionText, this));
         form->addRow(QStringLiteral("Files"),
                      valueLabel(QStringLiteral("%1 (%2 ok, %3 failed)")
                                     .arg(countText(status.files), countText(status.ok), countText(status.failed)),
                                 this));
         form->addRow(QStringLiteral("Content groups"), valueLabel(countText(status.groups), this));
-        form->addRow(QStringLiteral("Featured groups"), valueLabel(countText(status.featured), this));
+        QString featuredText = countText(status.featured);
+        if (status.featuredStale > 0) {
+            featuredText += QStringLiteral(" (%1 stale, awaiting re-analysis)").arg(countText(status.featuredStale));
+        }
+        form->addRow(QStringLiteral("Featured groups"), valueLabel(featuredText, this));
         QString embeddingText = countText(status.embeddedGroups);
         if (!status.embeddingModel.isEmpty() || !status.embeddingVersion.isEmpty()) {
             embeddingText += QStringLiteral(" (%1 %2)")

@@ -15,14 +15,15 @@
 // Deliberately Qt-free: pure math over std containers, usable from any
 // binary and trivially compilable standalone for oracle cross-checks.
 
+#include "indexer/DspVersion.h"
+
 #include <optional>
 #include <vector>
 
 namespace Dsp {
 
-// Bump whenever any extraction algorithm or constant changes; stored in the
-// features table so stale rows can be recomputed selectively.
-inline constexpr const char *kDspVersion = "muzaiten-dsp-v1";
+// kDspVersion lives in DspVersion.h so the app-side read path can compare
+// row freshness against this binary's version without linking the analyzer.
 
 inline constexpr unsigned kSampleRateHz = 22'050;
 

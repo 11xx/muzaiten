@@ -5,6 +5,7 @@
 #include "features/FeatureStore.h"
 #include "features/QualityRank.h"
 #include "features/SongIdentity.h"
+#include "indexer/DspVersion.h"
 #include "reco/AffinityPool.h"
 #include "reco/ArtistRadio.h"
 #include "reco/RadioFilters.h"
@@ -2044,10 +2045,11 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
                     "INSERT INTO features(content_group_id, tempo_bpm, loudness_lufs, loudness_std_db, "
                     "spectral_centroid_mean_hz, spectral_centroid_std_hz, spectral_flatness_mean, "
                     "zero_crossing_rate, onset_rate_hz, energy, extractor, version) "
-                    "VALUES(?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'fixture', 'dsp')"));
+                    "VALUES(?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'fixture', ?)"));
                 insert.addBindValue(it.key());
                 insert.addBindValue(it.value().tempoBpm > 0.0 ? QVariant(it.value().tempoBpm) : QVariant());
                 insert.addBindValue(it.value().energy >= 0.0 ? QVariant(it.value().energy) : QVariant());
+                insert.addBindValue(QLatin1String(Dsp::kDspVersion));
                 if (!insert.exec()) {
                     if (error != nullptr) {
                         *error = insert.lastError().text();

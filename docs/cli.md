@@ -97,6 +97,13 @@ Representative decode/DSP work uses the same resolved `--power` / `--jobs`
 worker count as file analysis; feature-row writes remain serialized on the
 indexer thread for SQLite safety.
 
+Both `muzaiten-index status --json` and scan JSON retain `featured_groups` as
+the total number of existing feature rows and add `featured_fresh` /
+`featured_stale` counts for the running build. `muzaitenctl features-status`
+shows the same split and reports when the store's recorded DSP version differs
+from the version expected by the installed binary. Missing or empty store
+version metadata is displayed as `unknown`; row versions remain the authority.
+
 `elapsed` is total scan wall time; `rate` and `eta` are **phase-local** recent
 throughput (roughly the last minute within the current phase). Right after a
 phase boundary the indexer may emit `rate=- eta=-` until the phase window is
@@ -107,7 +114,9 @@ Scan JSON may include feature-fill counters when that phase ran:
 `feature_groups_processed`, `features_written` (includes NULL-scalar rows
 written as current version), and `feature_groups_failed` (decode/analyze
 exceptions that stay stale for a rerun). The inventory field
-`featured_groups` remains the features-table row count. A stop that lands
+`featured_groups` remains the features-table row count, while
+`featured_fresh` / `featured_stale` split that inventory by the version this
+build expects. A stop that lands
 during the features phase returns
 `"canceled": true` and does not write the last-scan summary meta; completed
 feature rows stay durable.

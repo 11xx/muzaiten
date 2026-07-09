@@ -1361,6 +1361,18 @@ qint64 countScalar(QSqlDatabase &database, const QString &sql)
     return query.value(0).toLongLong();
 }
 
+// Feature rows written by a different analyzer version than this binary's;
+// they are recomputed on the next scan and, until then, hidden from the
+// app-side read path (FeatureStore filters by expected version).
+qint64 staleFeatureCount(QSqlDatabase &database)
+{
+    QSqlQuery query(database);
+    prepareOrFail(query, QStringLiteral("SELECT COUNT(*) FROM features WHERE version != ?"));
+    query.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+    execPrepared(query);
+    return query.next() ? query.value(0).toLongLong() : 0;
+}
+
 QJsonObject statusJson(QSqlDatabase &database)
 {
     QJsonObject statuses;
@@ -1377,6 +1389,7 @@ QJsonObject statusJson(QSqlDatabase &database)
 
     const qint64 groups = countScalar(database, QStringLiteral("SELECT COUNT(*) FROM content_groups"));
     const qint64 featured = countScalar(database, QStringLiteral("SELECT COUNT(*) FROM features"));
+    const qint64 featuredStale = staleFeatureCount(database);
     return QJsonObject{
         {QStringLiteral("schema_version"), kSchemaVersion},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
@@ -1385,6 +1398,8 @@ QJsonObject statusJson(QSqlDatabase &database)
         {QStringLiteral("groups"), static_cast<double>(groups)},
         {QStringLiteral("features"), static_cast<double>(featured)},
         {QStringLiteral("featured_groups"), static_cast<double>(featured)},
+        {QStringLiteral("featured_fresh"), static_cast<double>(featured - featuredStale)},
+        {QStringLiteral("featured_stale"), static_cast<double>(featuredStale)},
         {QStringLiteral("pending"), 0},
     };
 }
@@ -1431,9 +1446,9 @@ QJsonObject timingsJson(const TimingAccumulator &timings)
 }
 
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
-                     double elapsedSecs = 0.0, const QJsonObject &timings = {}, bool canceled = false,
-                     const QString &power = QStringLiteral("turbo"), int jobs = 1,
-                     const FeatureFillResult *featureFill = nullptr)
+                     int featuredStale, double elapsedSecs = 0.0, const QJsonObject &timings = {},
+                     bool canceled = false, const QString &power = QStringLiteral("turbo"),
+                     int jobs = 1, const FeatureFillResult *featureFill = nullptr)
 {
     QJsonObject object{
         {QStringLiteral("schema_version"), kSchemaVersion},
@@ -1446,6 +1461,8 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         {QStringLiteral("groups"), groups},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
         {QStringLiteral("featured_groups"), featured},
+        {QStringLiteral("featured_fresh"), featured - featuredStale},
+        {QStringLiteral("featured_stale"), featuredStale},
         {QStringLiteral("elapsed_secs"), elapsedSecs},
         {QStringLiteral("timings"), timings.isEmpty() ? timingsJson({}) : timings},
     };
@@ -1629,6 +1646,7 @@ int runScan(const ScanOptions &options)
         const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
         const int featured = currentFeatureCount(database);
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
+                                             static_cast<int>(staleFeatureCount(database)),
                                              std::chrono::duration<double>(
                                                  std::chrono::steady_clock::now() - scanStarted)
                                                  .count(),
@@ -1665,6 +1683,7 @@ int runScan(const ScanOptions &options)
             std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
         const QJsonObject payload =
             scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
+                     static_cast<int>(staleFeatureCount(database)),
                      elapsedSecs,
                      {},
                      fill.canceled,
@@ -1732,6 +1751,7 @@ int runScan(const ScanOptions &options)
     if (stopRequested()) {
         const QJsonObject payload =
             scanJson(scanned, skipped, failed, currentGroupCount(database), currentFeatureCount(database),
+                     static_cast<int>(staleFeatureCount(database)),
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
                      timingsJson(timings),
                      true,
@@ -1761,6 +1781,7 @@ int runScan(const ScanOptions &options)
     }
     const QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
+                 static_cast<int>(staleFeatureCount(database)),
                  elapsedSecs,
                  timingsJson(timings),
                  fill.canceled,

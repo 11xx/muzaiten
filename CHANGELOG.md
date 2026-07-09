@@ -35,6 +35,11 @@
 
 ### Changed
 
+- Scalar features are now consumed only when their per-row DSP version matches
+  the running build, so radio never treats an untouched old store or a
+  cancel/resume mixed-version store as current. The analysis status dialog,
+  `muzaitenctl features-status`, and `muzaiten-index` JSON now expose the stale
+  portion without redefining the existing total featured count.
 - Feature fill now uses the configured analysis worker count to decode and
   analyze stale group representatives concurrently while keeping
   `features.sqlite` writes serialized and resumable.

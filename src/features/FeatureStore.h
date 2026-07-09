@@ -24,7 +24,14 @@ public:
         qint64 failed = 0;
         qint64 groups = 0;
         qint64 featured = 0;
+        // Split of `featured` by row `version` against the DSP version this
+        // binary expects; stale rows exist mid-migration (cancel/resume) or
+        // when an old store meets a newer binary, and are never served as
+        // current scalars.
+        qint64 featuredFresh = 0;
+        qint64 featuredStale = 0;
         QString dspVersion;
+        QString expectedDspVersion;
         qint64 embeddedGroups = 0;
         QString embeddingModel;
         QString embeddingVersion;

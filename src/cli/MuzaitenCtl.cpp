@@ -287,7 +287,10 @@ QJsonObject featureStatusJson(const QString &path, bool found, bool open, const 
         {QStringLiteral("failed"), static_cast<double>(status.failed)},
         {QStringLiteral("groups"), static_cast<double>(status.groups)},
         {QStringLiteral("featured"), static_cast<double>(status.featured)},
+        {QStringLiteral("featured_fresh"), static_cast<double>(status.featuredFresh)},
+        {QStringLiteral("featured_stale"), static_cast<double>(status.featuredStale)},
         {QStringLiteral("dsp_version"), status.dspVersion},
+        {QStringLiteral("expected_dsp_version"), status.expectedDspVersion},
         {QStringLiteral("embedded_groups"), static_cast<double>(status.embeddedGroups)},
         {QStringLiteral("embedding_model"), status.embeddingModel},
         {QStringLiteral("embedding_version"), status.embeddingVersion},
@@ -1643,8 +1646,16 @@ int runFeaturesStatus(QStringList arguments, bool json)
     out << "files: " << status.files << " (" << status.ok << " ok, "
         << status.failed << " failed)\n";
     out << "groups: " << status.groups << '\n';
-    out << "featured: " << status.featured << '\n';
-    out << "dsp version: " << (status.dspVersion.isEmpty() ? QStringLiteral("unknown") : status.dspVersion) << '\n';
+    out << "featured: " << status.featured;
+    if (status.featuredStale > 0) {
+        out << " (" << status.featuredStale << " stale, awaiting re-analysis)";
+    }
+    out << '\n';
+    out << "dsp version: " << (status.dspVersion.isEmpty() ? QStringLiteral("unknown") : status.dspVersion);
+    if (!status.expectedDspVersion.isEmpty() && status.dspVersion != status.expectedDspVersion) {
+        out << " (this build expects " << status.expectedDspVersion << ')';
+    }
+    out << '\n';
     out << "embedded groups: " << status.embeddedGroups;
     if (!status.embeddingModel.isEmpty() || !status.embeddingVersion.isEmpty()) {
         out << " (" << (status.embeddingModel.isEmpty() ? QStringLiteral("unknown-model") : status.embeddingModel)
