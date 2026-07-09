@@ -1289,7 +1289,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
                                            QStringLiteral("--stage"),
                                            QStringLiteral("features"),
                                            QStringLiteral("--jobs"),
-                                           QStringLiteral("1"),
+                                           QStringLiteral("2"),
                                            QStringLiteral("--json"),
                                            QStringLiteral("--progress"),
                                        });
