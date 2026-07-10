@@ -98,8 +98,12 @@ copies it into the group row without decoding audio. Missing or stale per-file
 rows use the same resolved `--power` / `--jobs` worker count as file analysis,
 then backfill the per-file cache. Feature-row writes remain serialized on the
 indexer thread for SQLite safety. A feature-only run also avoids rebuilding
-already-complete content groups; `phase grouping` remains in the progress
-protocol but is normally instantaneous on an unchanged store.
+already-complete content groups. On normal changed-file scans, `phase grouping`
+rechecks only the new or changed tracks and the previous groups they can split;
+unaffected groups retain their connectivity and ids without pairwise
+Chromaprint work. Initial scans and recovery from pre-existing ungrouped rows
+still perform an exact full regroup. `phase grouping` remains in the progress
+protocol and is normally instantaneous on an unchanged store.
 
 Both `muzaiten-index status --json` and scan JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /

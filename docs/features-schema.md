@@ -106,7 +106,7 @@ contains authoritative rows in that shape. Schema v3 upgrades add
 
 ## Grouping
 
-Grouping is recomputed after changed files are analyzed:
+Grouping uses these two identity relations after changed files are analyzed:
 
 1. Files with identical `decode_hash` are unioned into the same group.
 2. Files whose durations differ by at most 2000 ms are compared by Chromaprint
@@ -114,6 +114,15 @@ Grouping is recomputed after changed files are analyzed:
    are unioned.
 
 AcoustID lookup is intentionally out of scope.
+
+The first scan computes those relations across every successful file. Normal
+incremental scans instead treat each unaffected existing group as an already
+known connected component and compare only new or changed files plus all
+members of a changed file's previous group. This preserves exact split, merge,
+and stable-group-id behavior without repeating Chromaprint comparisons between
+unchanged groups. A full regroup remains the recovery path when successful
+ungrouped rows predate the current process, such as after cancellation between
+file analysis and grouping.
 
 ## Per-file Feature Rows
 
