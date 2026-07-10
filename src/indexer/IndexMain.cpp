@@ -1313,26 +1313,61 @@ void emitFeatureProgress(int processed, int total,
     err.flush();
 }
 
-std::vector<StaleRep> materializeStaleReps(QSqlDatabase &database)
+// A stale group whose representative already has fresh per-file scalars:
+// the group row is written by copying these values — no decode. The ten
+// variants are the nine scalar columns plus extractor, preserved exactly as
+// the file row stores them.
+struct StaleRepCopy {
+    qint64 groupId = 0;
+    QVariantList scalarRow;
+};
+
+struct MaterializedStaleReps {
+    std::vector<StaleRepCopy> copies;
+    std::vector<StaleRep> decodes;
+};
+
+MaterializedStaleReps materializeStaleReps(QSqlDatabase &database)
 {
     // Matches featureRowFresh: missing row, older version, and NULL version
     // are stale; exact current version is fresh. Representative is MIN(path)
-    // over ok file rows — same as the previous serial loop.
+    // over ok file rows — same as the previous serial loop. The outer join
+    // against file_features splits the stale set into copyable groups
+    // (representative has fresh per-file scalars) and groups that still
+    // need a decode.
     QSqlQuery reps(database);
     prepareOrFail(reps, QStringLiteral(
-                            "SELECT f.content_group_id, MIN(f.path) AS path "
-                            "FROM files f "
-                            "LEFT JOIN features feat ON feat.content_group_id = f.content_group_id "
-                            "WHERE f.content_group_id IS NOT NULL AND f.status = 'ok' "
-                            "  AND (feat.version IS NULL OR feat.version != ?) "
-                            "GROUP BY f.content_group_id "
-                            "ORDER BY f.content_group_id"));
+                            "SELECT s.content_group_id, s.path, ff.version IS NOT NULL,"
+                            " ff.tempo_bpm, ff.loudness_lufs, ff.loudness_std_db,"
+                            " ff.spectral_centroid_mean_hz, ff.spectral_centroid_std_hz,"
+                            " ff.spectral_flatness_mean, ff.zero_crossing_rate,"
+                            " ff.onset_rate_hz, ff.energy, ff.extractor "
+                            "FROM (SELECT f.content_group_id AS content_group_id,"
+                            "             MIN(f.path) AS path "
+                            "      FROM files f "
+                            "      LEFT JOIN features feat"
+                            "        ON feat.content_group_id = f.content_group_id "
+                            "      WHERE f.content_group_id IS NOT NULL AND f.status = 'ok' "
+                            "        AND (feat.version IS NULL OR feat.version != ?) "
+                            "      GROUP BY f.content_group_id) s "
+                            "LEFT JOIN file_features ff ON ff.path = s.path AND ff.version = ? "
+                            "ORDER BY s.content_group_id"));
+    reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     execPrepared(reps);
 
-    std::vector<StaleRep> stale;
+    MaterializedStaleReps stale;
     while (reps.next()) {
-        stale.push_back(StaleRep{reps.value(0).toLongLong(), reps.value(1).toString()});
+        if (reps.value(2).toBool()) {
+            QVariantList row;
+            row.reserve(10);
+            for (int column = 3; column <= 12; ++column) {
+                row.push_back(reps.value(column));
+            }
+            stale.copies.push_back(StaleRepCopy{reps.value(0).toLongLong(), std::move(row)});
+        } else {
+            stale.decodes.push_back(StaleRep{reps.value(0).toLongLong(), reps.value(1).toString()});
+        }
     }
     return stale;
 }
@@ -1343,8 +1378,8 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                                     std::chrono::steady_clock::time_point scanStarted)
 {
     FeatureFillResult result;
-    const std::vector<StaleRep> stale = materializeStaleReps(database);
-    result.total = static_cast<int>(stale.size());
+    const MaterializedStaleReps stale = materializeStaleReps(database);
+    result.total = static_cast<int>(stale.copies.size() + stale.decodes.size());
 
     const auto phaseStarted = std::chrono::steady_clock::now();
     FeatureProgressRate phaseRate;
@@ -1390,20 +1425,68 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                               " energy = excluded.energy,"
                               " extractor = excluded.extractor,"
                               " version = excluded.version"));
+    // Copy path first: stale groups whose representative already has fresh
+    // per-file scalars become pure SQL upserts — no decode, no workers. The
+    // variants pass through exactly as the file row stores them; version is
+    // the expected one by construction of the materializing join.
+    for (const StaleRepCopy &copy : stale.copies) {
+        if (stopRequested()) {
+            break;
+        }
+        int bindIndex = 0;
+        upsert.bindValue(bindIndex++, copy.groupId);
+        for (const QVariant &value : copy.scalarRow) {
+            upsert.bindValue(bindIndex++, value);
+        }
+        upsert.bindValue(bindIndex, QString::fromLatin1(Dsp::kDspVersion));
+        execPrepared(upsert);
+        ++result.processed;
+        ++result.written;
+        maybeEmit(result.processed == result.total);
+    }
+    const int copiesDone = result.processed;
+
+    // Decode fallback for representatives without a fresh per-file row —
+    // and the backfill: every decoded representative gets its file_features
+    // row written here, so the next version bump's refresh copies instead.
+    QSqlQuery fileUpsert(database);
+    prepareOrFail(fileUpsert, QStringLiteral(
+                                  "INSERT INTO file_features("
+                                  " path, tempo_bpm, loudness_lufs, loudness_std_db,"
+                                  " spectral_centroid_mean_hz, spectral_centroid_std_hz,"
+                                  " spectral_flatness_mean, zero_crossing_rate, onset_rate_hz,"
+                                  " energy, extractor, version)"
+                                  " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                                  " ON CONFLICT(path) DO UPDATE SET"
+                                  " tempo_bpm = excluded.tempo_bpm,"
+                                  " loudness_lufs = excluded.loudness_lufs,"
+                                  " loudness_std_db = excluded.loudness_std_db,"
+                                  " spectral_centroid_mean_hz = excluded.spectral_centroid_mean_hz,"
+                                  " spectral_centroid_std_hz = excluded.spectral_centroid_std_hz,"
+                                  " spectral_flatness_mean = excluded.spectral_flatness_mean,"
+                                  " zero_crossing_rate = excluded.zero_crossing_rate,"
+                                  " onset_rate_hz = excluded.onset_rate_hz,"
+                                  " energy = excluded.energy,"
+                                  " extractor = excluded.extractor,"
+                                  " version = excluded.version"));
     const auto completion = [&](FeatureAnalysis &&analysis, int processed, int) {
-        result.processed = processed;
+        result.processed = copiesDone + processed;
         if (analysis.failed) {
             ++result.failed;
         } else {
             bindScalarRow(upsert, analysis.representative.groupId, analysis.scalars);
             execPrepared(upsert);
+            bindScalarRow(fileUpsert, analysis.representative.path, analysis.scalars);
+            execPrepared(fileUpsert);
             ++result.written;
         }
         maybeEmit(result.processed == result.total);
     };
-    // Workers only decode and analyze. The main thread owns this QSqlQuery so
-    // the feature database remains a single-writer SQLite connection.
-    analyzeFeatureRepresentatives(stale, extracted, jobs, completion);
+    // Workers only decode and analyze. The main thread owns these QSqlQuery
+    // objects so the feature database remains a single-writer connection.
+    if (!stopRequested()) {
+        analyzeFeatureRepresentatives(stale.decodes, extracted, jobs, completion);
+    }
     result.canceled = stopRequested();
 
     if (progress && (result.canceled || lastProgress != result.processed)) {

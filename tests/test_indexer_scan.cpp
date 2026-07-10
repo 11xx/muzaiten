@@ -1348,6 +1348,11 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QCOMPARE(process.exitCode(), 0);
 
     const QJsonObject canceledPayload = parseJsonObject(stdoutBytes);
+    // With per-file scalar rows fresh, this refresh runs on the SQL copy
+    // path: the mid-phase progress line at the 25-item cadence gives the
+    // terminate() above a real window because every copy is an autocommit
+    // write with a stopRequested() check between rows. The assertions below
+    // therefore pin cancel/durability/resume semantics for copies too.
     QVERIFY2(canceledPayload.value(QStringLiteral("canceled")).toBool(),
              qPrintable(QString::fromUtf8(stdoutBytes) + QString::fromUtf8(stderrBytes)));
     const int writtenOnCancel = canceledPayload.value(QStringLiteral("features_written")).toInt();
