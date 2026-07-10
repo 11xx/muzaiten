@@ -174,22 +174,25 @@ Biquad kWeightHighPass(double rate)
     };
 }
 
-void applyBiquad(std::vector<double> &samples, const Biquad &f)
-{
+// Per-sample biquad recurrence with explicit state, so the K-weighting
+// cascade can stream without materializing whole-track double arrays. The
+// arithmetic expression matches the historical whole-array pass exactly.
+struct BiquadState {
     double x1 = 0.0;
     double x2 = 0.0;
     double y1 = 0.0;
     double y2 = 0.0;
-    for (double &sample : samples) {
-        const double x0 = sample;
+
+    double step(const Biquad &f, double x0)
+    {
         const double y0 = f.b0 * x0 + f.b1 * x1 + f.b2 * x2 - f.a1 * y1 - f.a2 * y2;
         x2 = x1;
         x1 = x0;
         y2 = y1;
         y1 = y0;
-        sample = y0;
+        return y0;
     }
-}
+};
 
 std::vector<double> autocorrelate(const double *frame, std::size_t n)
 {
@@ -467,24 +470,49 @@ std::optional<double> estimateBpm(const std::vector<double> &envelope, double fr
 
 Loudness gatedLoudness(const std::vector<float> &samples, double sampleRate)
 {
-    std::vector<double> weighted(samples.begin(), samples.end());
-    applyBiquad(weighted, kWeightHighShelf(sampleRate));
-    applyBiquad(weighted, kWeightHighPass(sampleRate));
-
     const auto blockLen = static_cast<std::size_t>(kBlockSecs * sampleRate);
     const auto step = static_cast<std::size_t>((1.0 - kBlockOverlap) * kBlockSecs * sampleRate);
-    if (blockLen == 0 || step == 0 || weighted.size() < blockLen) {
+    if (blockLen == 0 || step == 0 || samples.size() < blockLen) {
         return {};
     }
 
-    // Mean-square power z_j per 400 ms block (BS.1770 eq. 1), mono gain 1.0.
+    // Stream the K-weighting cascade through a one-block ring instead of
+    // materializing whole-track double arrays (8 bytes/sample twice over,
+    // duration-scaled — the last big per-worker allocation after the
+    // spectrogram went away). Each 400 ms block (BS.1770 eq. 1, mono gain
+    // 1.0) still sums its own window in ascending order, so every block
+    // power matches the previous whole-array formulation bit for bit; the
+    // 4x overlap re-summation is retained deliberately for that reason.
+    const Biquad shelf = kWeightHighShelf(sampleRate);
+    const Biquad highPass = kWeightHighPass(sampleRate);
+    BiquadState shelfState;
+    BiquadState highPassState;
+    std::vector<double> ring(blockLen, 0.0);
     std::vector<double> blockPower;
-    for (std::size_t start = 0; start + blockLen <= weighted.size(); start += step) {
-        double sumSq = 0.0;
-        for (std::size_t i = start; i < start + blockLen; ++i) {
-            sumSq += weighted[i] * weighted[i];
+    blockPower.reserve(samples.size() / step + 1);
+    std::size_t writePos = 0;         // == i % blockLen, carried
+    std::size_t untilBlockEnd = blockLen; // samples left before a block completes
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        const double weighted = highPassState.step(highPass, shelfState.step(shelf, samples[i]));
+        ring[writePos] = weighted;
+        if (++writePos == blockLen) {
+            writePos = 0;
         }
-        blockPower.push_back(sumSq / static_cast<double>(blockLen));
+        if (--untilBlockEnd == 0) {
+            untilBlockEnd = step;
+            // The block's oldest sample sits at writePos; summing the two
+            // contiguous runs visits the window in ascending sample order,
+            // matching the historical whole-array loop addition for
+            // addition.
+            double sumSq = 0.0;
+            for (std::size_t slot = writePos; slot < blockLen; ++slot) {
+                sumSq += ring[slot] * ring[slot];
+            }
+            for (std::size_t slot = 0; slot < writePos; ++slot) {
+                sumSq += ring[slot] * ring[slot];
+            }
+            blockPower.push_back(sumSq / static_cast<double>(blockLen));
+        }
     }
 
     std::vector<double> blockLufs;
@@ -639,7 +667,7 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     // flat frames×kNMels block so the walk performs no per-frame heap
     // allocation.
     struct AnalysisScratch {
-        std::vector<float> padded;
+        std::array<float, kNFft> boundaryFrame{};
         std::array<float, kNFft> windowed{};
         Fft::RealFft2048::Workspace fftWorkspace;
         std::vector<double> powerFrame;
@@ -647,8 +675,22 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     };
     thread_local AnalysisScratch scratch;
 
-    reflectPadInto(samples, kNFft / 2, scratch.padded);
-    const std::vector<float> &padded = scratch.padded;
+    // Reflected padding is virtual: interior frames read the caller's samples
+    // directly, and only the handful of frames overlapping either reflected
+    // edge are assembled into a fixed staging frame. Same values as the old
+    // materialized padded copy (another 4 bytes/sample, duration-scaled)
+    // without ever allocating it.
+    const std::size_t edge = std::min(kNFft / 2, samples.size() - 1);
+    const std::size_t paddedSize = samples.size() + 2 * edge;
+    const auto reflectedSample = [&](std::size_t p) {
+        if (p < edge) {
+            return samples[edge - p];
+        }
+        if (p < edge + samples.size()) {
+            return samples[p - edge];
+        }
+        return samples[samples.size() - 2 - (p - edge - samples.size())];
+    };
     std::vector<double> binFreqs(kNFft / 2 + 1);
     for (std::size_t k = 0; k < binFreqs.size(); ++k) {
         binFreqs[k] = static_cast<double>(k) * rate / static_cast<double>(kNFft);
@@ -656,7 +698,7 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
 
     const MelBank &melBank = cachedMelBank(sampleRate);
     const std::size_t melFrames =
-        padded.size() >= kNFft ? (padded.size() - kNFft) / kHop + 1 : 0;
+        paddedSize >= kNFft ? (paddedSize - kNFft) / kHop + 1 : 0;
     if (melFrames == 0) {
         return std::nullopt;
     }
@@ -670,8 +712,17 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     double maxPower = kAmin;
 
     std::size_t frame = 0;
-    for (std::size_t start = 0; start + kNFft <= padded.size(); start += kHop, ++frame) {
-        powerFrame2048(padded.data() + start, scratch.windowed,
+    for (std::size_t start = 0; start + kNFft <= paddedSize; start += kHop, ++frame) {
+        const float *source = nullptr;
+        if (start >= edge && start + kNFft <= edge + samples.size()) {
+            source = samples.data() + (start - edge);
+        } else {
+            for (std::size_t i = 0; i < kNFft; ++i) {
+                scratch.boundaryFrame[i] = reflectedSample(start + i);
+            }
+            source = scratch.boundaryFrame.data();
+        }
+        powerFrame2048(source, scratch.windowed,
                        powerFrame.data(), scratch.fftWorkspace);
 
         double total = 0.0;
