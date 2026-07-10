@@ -505,7 +505,11 @@ QString compactProcessError(QProcess &process)
     return value;
 }
 
-DecodedAudio decodeCanonical(const QString &path)
+// keepRawPcm retains the raw f32le byte stream alongside the float samples;
+// only the identity path needs it (decode_hash is defined over those bytes).
+// Callers that just analyze should drop it — for an hour-long track the byte
+// copy alone is ~320 MB per worker.
+DecodedAudio decodeCanonical(const QString &path, bool keepRawPcm = true)
 {
     QProcess process;
     process.start(QStringLiteral("ffmpeg"), {
@@ -559,7 +563,11 @@ DecodedAudio decodeCanonical(const QString &path)
     }
 
     DecodedAudio decoded;
-    decoded.pcm = std::move(pcm);
+    if (keepRawPcm) {
+        decoded.pcm = std::move(pcm);
+    } else {
+        pcm = QByteArray();
+    }
     decoded.samples = std::move(samples);
     decoded.durationMs = static_cast<qint64>(
         std::llround(static_cast<double>(sampleCount) * 1000.0 / static_cast<double>(Dsp::kSampleRateHz)));
@@ -640,6 +648,9 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
         analysis.decodeHash = QString::fromLatin1(
             QCryptographicHash::hash(decoded.pcm, QCryptographicHash::Sha256).toHex());
         analysis.timings.hashMs = elapsedMs(hashStarted);
+        // The raw byte copy exists only for the hash above; release it so the
+        // worker holds one PCM copy, not two, through DSP and Chromaprint.
+        decoded.pcm = QByteArray();
 
         const auto dspStarted = std::chrono::steady_clock::now();
         analysis.scalars = Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
@@ -1087,7 +1098,8 @@ std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
     if (it != extracted.constEnd()) {
         return it->known ? std::optional<Dsp::ScalarFeatures>(it->features) : std::nullopt;
     }
-    DecodedAudio decoded = decodeCanonical(path);
+    // Feature refresh never hashes, so skip the raw byte copy entirely.
+    const DecodedAudio decoded = decodeCanonical(path, false);
     return Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
 }
 
