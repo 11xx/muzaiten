@@ -12,6 +12,8 @@ dependencies = [
 model = [
     "laion-clap==1.1.7",
     "torch>=2.3",
+    # laion-clap 1.1.7 imports torchvision without declaring it
+    "torchvision>=0.18",
 ]
 
 [project.scripts]
