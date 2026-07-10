@@ -53,7 +53,8 @@
   stable uniformly distributed window instead of decoding and discarding the
   rest of every track, with up to four bounded decodes running concurrently;
   an empty beyond-EOF seek caused by inaccurate duration metadata falls back
-  to the first bounded window.
+  to the first bounded window, as does a seek that stalls for 30 seconds on a
+  poorly indexed container.
 - Scalar analysis is now `muzaiten-dsp-v2`: a first-party, allocation-free
   fixed-2048 real FFT replaces the complex-double STFT while keeping
   double-precision power and reductions. A four-minute analysis fixture drops

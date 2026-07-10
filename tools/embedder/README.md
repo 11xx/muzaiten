@@ -24,7 +24,8 @@ stable uniformly distributed window using the indexed duration instead of
 decoding the rest of every track only to discard it; up to four of those
 bounded windows decode concurrently before inference. If container metadata
 overstates the decodable duration and a seek lands beyond EOF, the scanner
-falls back to the first 10-second window.
+falls back to the first 10-second window. The same fallback applies when a
+poorly seekable file does not produce its window within 30 seconds.
 
 Tests use a fake embedder and do not download model weights. The real CLAP stack
 is installed separately:

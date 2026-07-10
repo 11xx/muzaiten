@@ -23,6 +23,7 @@ MODEL_AMODEL = "HTSAT-base"
 MODEL_SAMPLE_RATE = 48_000
 MODEL_WINDOW_SECONDS = 10
 DECODE_WORKERS = 4
+SEEK_TIMEOUT_SECONDS = 30
 DEVICE_CHOICES = ("auto", "cuda", "cpu")
 
 
@@ -149,7 +150,19 @@ def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
         raise RuntimeError("numpy is required for real audio embedding") from exc
 
     command = _decode_audio_command(path, duration_ms)
-    completed = subprocess.run(command, check=True, capture_output=True)
+    try:
+        completed = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            timeout=SEEK_TIMEOUT_SECONDS if "-ss" in command else None,
+        )
+    except subprocess.TimeoutExpired:
+        completed = subprocess.run(
+            _decode_audio_command(path),
+            check=True,
+            capture_output=True,
+        )
     if not completed.stdout and "-ss" in command:
         # Indexed/container durations can overstate the decodable stream. A
         # successful seek beyond EOF produces no bytes, so keep the decode
