@@ -870,6 +870,120 @@ std::vector<GroupRow> loadGroupRows(QSqlDatabase &database)
     return rows;
 }
 
+bool groupRowAffected(const GroupRow &row, const QSet<qint64> &affectedGroupIds)
+{
+    return row.oldGroupId < 0 || affectedGroupIds.contains(row.oldGroupId);
+}
+
+// Incremental grouping needs metadata for every row so stable components and
+// exact hashes remain globally visible, but Chromaprint payloads only for an
+// affected row and its duration-neighborhood candidates. On the field store
+// the blobs alone occupy roughly 339 MiB; materializing all of them after five
+// changes would throw away most of the incremental path's memory advantage.
+std::vector<GroupRow> loadIncrementalGroupRows(
+    QSqlDatabase &database, const QSet<qint64> &affectedGroupIds)
+{
+    QSqlQuery metadata(database);
+    if (!metadata.exec(QStringLiteral(
+            "SELECT path, duration_ms, decode_hash, content_group_id "
+            "FROM files "
+            "WHERE status = 'ok' "
+            "  AND duration_ms IS NOT NULL "
+            "  AND decode_hash IS NOT NULL "
+            "  AND chromaprint_fp IS NOT NULL "
+            "ORDER BY path"))) {
+        fail(metadata.lastError().text());
+    }
+
+    std::vector<GroupRow> rows;
+    while (metadata.next()) {
+        rows.push_back({
+            metadata.value(0).toString(),
+            metadata.value(1).toLongLong(),
+            metadata.value(2).toString(),
+            {},
+            metadata.value(3).isNull() ? -1 : metadata.value(3).toLongLong(),
+        });
+    }
+
+    std::vector<std::size_t> byDuration(rows.size());
+    std::iota(byDuration.begin(), byDuration.end(), 0);
+    std::sort(byDuration.begin(), byDuration.end(), [&rows](std::size_t left, std::size_t right) {
+        if (rows[left].durationMs != rows[right].durationMs) {
+            return rows[left].durationMs < rows[right].durationMs;
+        }
+        return rows[left].path < rows[right].path;
+    });
+
+    std::vector<bool> fingerprintNeeded(rows.size(), false);
+    for (std::size_t affected = 0; affected < rows.size(); ++affected) {
+        if (!groupRowAffected(rows[affected], affectedGroupIds)) {
+            continue;
+        }
+        const qint64 minimum = rows[affected].durationMs - kDurationBucketMs;
+        const qint64 maximum = rows[affected].durationMs + kDurationBucketMs;
+        auto candidate = std::lower_bound(
+            byDuration.begin(), byDuration.end(), minimum,
+            [&rows](std::size_t index, qint64 duration) {
+                return rows[index].durationMs < duration;
+            });
+        for (; candidate != byDuration.end()
+               && rows[*candidate].durationMs <= maximum; ++candidate) {
+            fingerprintNeeded[*candidate] = true;
+        }
+    }
+
+    const std::size_t needed = static_cast<std::size_t>(
+        std::count(fingerprintNeeded.begin(), fingerprintNeeded.end(), true));
+    if (needed == 0) {
+        return rows;
+    }
+
+    // Point lookups minimize blob I/O for the normal small-delta case. Once a
+    // quarter of the corpus is needed, one ordered scan is cheaper than many
+    // B-tree probes and the memory is inherent in that large affected set.
+    if (needed * 4 >= rows.size()) {
+        QSqlQuery fingerprints(database);
+        if (!fingerprints.exec(QStringLiteral(
+                "SELECT chromaprint_fp FROM files "
+                "WHERE status = 'ok' "
+                "  AND duration_ms IS NOT NULL "
+                "  AND decode_hash IS NOT NULL "
+                "  AND chromaprint_fp IS NOT NULL "
+                "ORDER BY path"))) {
+            fail(fingerprints.lastError().text());
+        }
+        std::size_t index = 0;
+        while (fingerprints.next() && index < rows.size()) {
+            if (fingerprintNeeded[index]) {
+                rows[index].chromaprint = decodeFingerprint(fingerprints.value(0).toByteArray());
+            }
+            ++index;
+        }
+        if (index != rows.size()) {
+            fail(QStringLiteral("incremental fingerprint row count changed during grouping"));
+        }
+        return rows;
+    }
+
+    QSqlQuery fingerprint(database);
+    prepareOrFail(fingerprint, QStringLiteral(
+        "SELECT chromaprint_fp FROM files WHERE path = ?"));
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        if (!fingerprintNeeded[index]) {
+            continue;
+        }
+        fingerprint.bindValue(0, rows[index].path);
+        execPrepared(fingerprint);
+        if (!fingerprint.next()) {
+            fail(QStringLiteral("incremental fingerprint row disappeared during grouping"));
+        }
+        rows[index].chromaprint = decodeFingerprint(fingerprint.value(0).toByteArray());
+        fingerprint.finish();
+    }
+    return rows;
+}
+
 double bitErrorRate(const std::vector<qint32> &left, const std::vector<qint32> &right, int offset)
 {
     const std::size_t leftStart = offset >= 0 ? static_cast<std::size_t>(offset) : 0;
@@ -1006,7 +1120,7 @@ std::vector<std::vector<std::size_t>> incrementallyGroupedRows(
     QHash<qint64, std::size_t> stableGroupRepresentative;
     for (std::size_t index = 0; index < rows.size(); ++index) {
         const qint64 oldGroupId = rows[index].oldGroupId;
-        affected[index] = oldGroupId < 0 || affectedGroupIds.contains(oldGroupId);
+        affected[index] = groupRowAffected(rows[index], affectedGroupIds);
         if (affected[index]) {
             continue;
         }
@@ -1226,7 +1340,7 @@ int regroupContent(QSqlDatabase &database)
 int regroupContentIncrementally(QSqlDatabase &database,
                                 const QSet<qint64> &affectedGroupIds)
 {
-    const std::vector<GroupRow> rows = loadGroupRows(database);
+    const std::vector<GroupRow> rows = loadIncrementalGroupRows(database, affectedGroupIds);
     const std::vector<std::vector<std::size_t>> groups =
         incrementallyGroupedRows(rows, affectedGroupIds);
     const std::vector<qint64> groupIds =
