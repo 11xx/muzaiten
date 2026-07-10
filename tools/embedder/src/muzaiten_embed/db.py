@@ -21,6 +21,7 @@ MAX_SCHEMA_VERSION = 4
 class Representative:
     content_group_id: int
     path: Path
+    duration_ms: int | None
 
 
 @dataclass(frozen=True)
@@ -96,16 +97,27 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 def representative_groups(conn: sqlite3.Connection, limit: int | None = None) -> list[Representative]:
     sql = (
+        "WITH representatives AS ("
         "SELECT content_group_id, MIN(path) AS path FROM files "
         "WHERE content_group_id IS NOT NULL AND status = 'ok' "
-        "GROUP BY content_group_id ORDER BY content_group_id"
+        "GROUP BY content_group_id) "
+        "SELECT r.content_group_id, r.path, f.duration_ms "
+        "FROM representatives r JOIN files f ON f.path = r.path "
+        "ORDER BY r.content_group_id"
     )
     params: tuple[int, ...] = ()
     if limit is not None:
         sql += " LIMIT ?"
         params = (limit,)
     rows = conn.execute(sql, params).fetchall()
-    return [Representative(int(row["content_group_id"]), Path(row["path"])) for row in rows]
+    return [
+        Representative(
+            int(row["content_group_id"]),
+            Path(row["path"]),
+            int(row["duration_ms"]) if row["duration_ms"] is not None else None,
+        )
+        for row in rows
+    ]
 
 
 def normalize_vector(values: Sequence[float]) -> tuple[float, ...]:

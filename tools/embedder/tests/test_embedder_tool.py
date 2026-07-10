@@ -12,7 +12,7 @@ import pytest
 
 from muzaiten_embed import db
 from muzaiten_embed.cli import build_parser, main
-from muzaiten_embed.model import device_label, probe_device, resolve_device
+from muzaiten_embed.model import _decode_audio_command, device_label, probe_device, resolve_device
 from muzaiten_embed.ops import neighbors, query_embedding, scan, status
 
 
@@ -24,11 +24,19 @@ class FakeEmbedder:
     version: str = "fixture"
     calls: list[Path] = field(default_factory=list)
     batches: list[list[Path]] = field(default_factory=list)
+    duration_batches: list[list[int | None]] = field(default_factory=list)
 
-    def embed_audio_paths(self, paths: Sequence[Path]) -> Sequence[Sequence[float]]:
+    def embed_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[Sequence[float]]:
         batch = list(paths)
         self.calls.extend(batch)
         self.batches.append(batch)
+        self.duration_batches.append(
+            list(durations_ms) if durations_ms is not None else [None] * len(batch)
+        )
         return [self.vectors[path] for path in batch]
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:
@@ -40,10 +48,14 @@ class FakeEmbedder:
 
 
 class FailingSecondBatchEmbedder(FakeEmbedder):
-    def embed_audio_paths(self, paths: Sequence[Path]) -> Sequence[Sequence[float]]:
+    def embed_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[Sequence[float]]:
         if self.batches:
             raise RuntimeError("fixture batch failure")
-        return super().embed_audio_paths(paths)
+        return super().embed_audio_paths(paths, durations_ms)
 
 
 @pytest.fixture
@@ -118,6 +130,7 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
         [Path("/music/a-copy.flac"), Path("/music/b.flac")],
         [Path("/music/c.flac")],
     ]
+    assert fake.duration_batches == [[3000, 3000], [3000]]
 
     with db.connect(features_path) as conn:
         assert db.read_schema_version(conn) == 2
@@ -300,6 +313,20 @@ def test_query_embedding_normalizes_fake_text_vector() -> None:
     fake = FakeEmbedder({}, text_vectors={"piano": (3.0, 4.0)})
 
     assert query_embedding("piano", fake) == pytest.approx((0.6, 0.8))
+
+
+def test_audio_decode_is_bounded_to_a_stable_ten_second_window() -> None:
+    long_path = Path("/music/long.flac")
+    long_command = _decode_audio_command(long_path, duration_ms=240_000)
+    repeated_command = _decode_audio_command(long_path, duration_ms=240_000)
+    short_command = _decode_audio_command(Path("/music/short.flac"), duration_ms=3_000)
+
+    assert long_command == repeated_command
+    offset = float(long_command[long_command.index("-ss") + 1])
+    assert 0.0 <= offset <= 230.0
+    assert "-ss" not in short_command
+    assert long_command[long_command.index("-t") + 1] == "10"
+    assert short_command[short_command.index("-t") + 1] == "10"
 
 
 def test_cli_status_json_does_not_load_real_model(features_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

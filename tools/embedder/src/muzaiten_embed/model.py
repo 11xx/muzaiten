@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -20,6 +21,8 @@ MODEL_URL = (
 MODEL_SHA256 = "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd"
 MODEL_AMODEL = "HTSAT-base"
 MODEL_SAMPLE_RATE = 48_000
+MODEL_WINDOW_SECONDS = 10
+DECODE_WORKERS = 4
 DEVICE_CHOICES = ("auto", "cuda", "cpu")
 
 
@@ -105,28 +108,51 @@ def _verify_sha256(path: Path) -> None:
         raise RuntimeError(f"cached CLAP checkpoint has wrong SHA-256: {path}")
 
 
-def decode_audio_ffmpeg(path: Path):
-    try:
-        import numpy as np
-    except ImportError as exc:  # pragma: no cover - exercised only without dependencies
-        raise RuntimeError("numpy is required for real audio embedding") from exc
-
+def _decode_audio_command(path: Path, duration_ms: int | None = None) -> list[str]:
     command = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-i",
-        str(path),
-        "-ac",
-        "1",
-        "-ar",
-        str(MODEL_SAMPLE_RATE),
-        "-f",
-        "f32le",
-        "-",
     ]
-    completed = subprocess.run(command, check=True, capture_output=True)
+    window_ms = MODEL_WINDOW_SECONDS * 1000
+    if duration_ms is not None and duration_ms > window_ms:
+        # Non-fusion CLAP selects one uniformly random 10-second training
+        # window after loading the whole track. A stable path hash preserves
+        # that uniform corpus distribution without decoding discarded audio.
+        span_ms = duration_ms - window_ms
+        sample = int.from_bytes(hashlib.sha256(os.fsencode(path)).digest()[:8], "big")
+        offset_ms = sample * span_ms // ((1 << 64) - 1)
+        command.extend(["-ss", f"{offset_ms / 1000:.3f}"])
+    command.extend(
+        [
+            "-i",
+            str(path),
+            "-t",
+            str(MODEL_WINDOW_SECONDS),
+            "-ac",
+            "1",
+            "-ar",
+            str(MODEL_SAMPLE_RATE),
+            "-f",
+            "f32le",
+            "-",
+        ]
+    )
+    return command
+
+
+def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
+    try:
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - exercised only without dependencies
+        raise RuntimeError("numpy is required for real audio embedding") from exc
+
+    completed = subprocess.run(
+        _decode_audio_command(path, duration_ms),
+        check=True,
+        capture_output=True,
+    )
     audio = np.frombuffer(completed.stdout, dtype="<f4").astype("float32", copy=True)
     if audio.size == 0:
         raise RuntimeError(f"ffmpeg decoded no audio from {path}")
@@ -158,8 +184,23 @@ class RealClapEmbedder:
     def embed_audio_path(self, path: Path) -> Sequence[float]:
         return self.embed_audio_paths([path])[0]
 
-    def embed_audio_paths(self, paths: Sequence[Path]) -> Sequence[Sequence[float]]:
-        decoded = [decode_audio_ffmpeg(path).reshape(-1) for path in paths]
+    def embed_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[Sequence[float]]:
+        durations = [None] * len(paths) if durations_ms is None else durations_ms
+        if len(durations) != len(paths):
+            raise ValueError(
+                f"received {len(durations)} durations for {len(paths)} audio paths"
+            )
+        if not paths:
+            return []
+        with ThreadPoolExecutor(max_workers=min(DECODE_WORKERS, len(paths))) as executor:
+            decoded = [
+                audio.reshape(-1)
+                for audio in executor.map(decode_audio_ffmpeg, paths, durations)
+            ]
         embedding = self._model.get_audio_embedding_from_data(
             x=decoded,
             use_tensor=False,

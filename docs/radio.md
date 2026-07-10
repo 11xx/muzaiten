@@ -124,7 +124,10 @@ uv run muzaiten-embed neighbors --features ~/.local/share/muzaiten/features.sqli
 the chosen device at startup; an explicit `--device cuda` fails rather than
 silently falling back to CPU. `scan` uses bounded eight-file inference batches
 by default; tune them with `--batch-size N`. Completed batches are durable, so
-a retry skips them. See `tools/embedder/README.md` for details.
+a retry skips them. Each group uses a stable uniformly distributed 10-second
+window—the input length consumed by non-fusion CLAP—without decoding the
+discarded remainder of long tracks; up to four windows decode concurrently.
+See `tools/embedder/README.md` for details.
 
 With embeddings present, radio pools get augmented with sonic neighbors
 (tag-poor tracks surface because they *sound* right) and free-text semantic

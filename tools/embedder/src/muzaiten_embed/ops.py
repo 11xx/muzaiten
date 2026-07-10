@@ -41,7 +41,10 @@ def scan(
         ]
         for start in range(0, len(pending), batch_size):
             batch = pending[start : start + batch_size]
-            vectors = embedder.embed_audio_paths([item.path for item in batch])
+            vectors = embedder.embed_audio_paths(
+                [item.path for item in batch],
+                [item.duration_ms for item in batch],
+            )
             if len(vectors) != len(batch):
                 raise RuntimeError(
                     f"embedder returned {len(vectors)} vectors for {len(batch)} audio paths"
