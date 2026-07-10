@@ -6,7 +6,7 @@ import sys
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import numpy as np
 
@@ -213,10 +213,14 @@ def rebuild_neighbors(
     version: str,
     top_k: int = 100,
     block_size: int = 1024,
+    progress: Callable[[int, int], None] | None = None,
+    canceled: Callable[[], bool] | None = None,
 ) -> int:
     group_ids, matrix = _load_embedding_matrix(conn, model, version)
     conn.execute("DELETE FROM track_neighbors")
     total = int(group_ids.size)
+    if progress is not None:
+        progress(0, total)
     if total < 2:
         conn.commit()
         return 0
@@ -226,6 +230,9 @@ def rebuild_neighbors(
     keep = min(top_k, total - 1)
     inserted = 0
     for start in range(0, total, block_size):
+        if canceled is not None and canceled():
+            conn.commit()
+            raise InterruptedError("neighbor rebuild canceled")
         stop = min(start + block_size, total)
         similarities = matrix[start:stop] @ matrix.T
         for local, source_index in enumerate(range(start, stop)):
@@ -249,7 +256,9 @@ def rebuild_neighbors(
                 ],
             )
             inserted += int(chosen.size)
-    conn.commit()
+        conn.commit()
+        if progress is not None:
+            progress(stop, total)
     return inserted
 
 

@@ -6,6 +6,10 @@
   CLAP provider is packaged independently as `muzaiten-features-clap` from
   `tools/features-clap`. The retired executable, distribution, and import names
   are not installed or retained as compatibility aliases.
+- The CLAP provider now speaks a versioned one-request JSON/JSONL protocol and
+  exposes a stable feature revision. Model inspection and download are separate:
+  scans and text queries never download weights implicitly, while explicit
+  downloads stream byte progress, verify SHA-256, and install atomically.
 
 ## [2026.07.10]
 

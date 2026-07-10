@@ -1,131 +1,61 @@
 from __future__ import annotations
 
-import argparse
 import json
+import signal
 import sys
-from pathlib import Path
+import threading
 from typing import Sequence
 
-from .model import (
-    DEVICE_CHOICES,
-    MODEL_NAME,
-    MODEL_VERSION,
-    RealClapEmbedder,
-    device_label,
-    probe_device,
-    resolve_device,
-)
-from .ops import neighbors, query_embedding, scan, status
+from .protocol import ProtocolError, encode_event, event, parse_request, run_request
 
-
-def _positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 1:
-        raise argparse.ArgumentTypeError("must be at least 1")
-    return parsed
-
-
-def _add_device_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--device",
-        choices=DEVICE_CHOICES,
-        default="auto",
-        help="inference device (default: auto = cuda when available, else cpu)",
-    )
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="muzaiten-features-clap")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    scan_parser = subparsers.add_parser("scan", help="embed content-group representatives")
-    scan_parser.add_argument("--features", required=True, type=Path)
-    scan_parser.add_argument("--limit", type=int)
-    scan_parser.add_argument(
-        "--batch-size",
-        type=_positive_int,
-        default=8,
-        help="audio files submitted per inference batch (default: 8)",
-    )
-    scan_parser.add_argument("--json", action="store_true")
-    _add_device_argument(scan_parser)
-
-    neighbors_parser = subparsers.add_parser("neighbors", help="rebuild cosine neighbors")
-    neighbors_parser.add_argument("--features", required=True, type=Path)
-    neighbors_parser.add_argument("--top-k", type=int, default=100)
-    neighbors_parser.add_argument("--json", action="store_true")
-
-    status_parser = subparsers.add_parser("status", help="show embedding coverage")
-    status_parser.add_argument("--features", required=True, type=Path)
-    status_parser.add_argument("--json", action="store_true")
-
-    query_parser = subparsers.add_parser("query", help="embed a text query")
-    query_parser.add_argument("text")
-    query_parser.add_argument("--json", action="store_true")
-    _add_device_argument(query_parser)
-
-    return parser
-
-
-def _select_device(choice: str) -> str:
-    device = resolve_device(choice)
-    print(f"muzaiten-features-clap: using device {device_label(device)}", file=sys.stderr)
-    return device
+EXIT_INVALID = 2
+EXIT_COMPONENT_MISSING = 3
+EXIT_OPERATIONAL = 4
+EXIT_CANCELED = 130
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    if argv:
+        print("muzaiten-features-clap accepts one JSON request on stdin", file=sys.stderr)
+        return EXIT_INVALID
+
+    canceled = threading.Event()
+    previous = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: canceled.set())
+    request_id = "invalid"
     try:
-        if args.command == "scan":
-            embedder = RealClapEmbedder(device=_select_device(args.device))
-            result = scan(
-                args.features,
-                embedder,
-                limit=args.limit,
-                batch_size=args.batch_size,
-            )
-            payload = result.as_dict() | {
-                "model": embedder.model,
-                "version": embedder.version,
-                "device": embedder.device,
-                "batch_size": args.batch_size,
-            }
-            return _emit(payload, args.json)
-        if args.command == "neighbors":
-            count = neighbors(args.features, MODEL_NAME, MODEL_VERSION, top_k=args.top_k)
-            return _emit({"neighbor_rows": count, "model": MODEL_NAME, "version": MODEL_VERSION}, args.json)
-        if args.command == "status":
-            payload = status(args.features, MODEL_NAME, MODEL_VERSION).as_dict()
-            device = probe_device()
-            payload.update(
-                {
-                    "model": MODEL_NAME,
-                    "version": MODEL_VERSION,
-                    "device": device if device else "unavailable (model extra not installed)",
-                }
-            )
-            return _emit(payload, args.json)
-        if args.command == "query":
-            embedder = RealClapEmbedder(device=_select_device(args.device))
-            vector = query_embedding(args.text, embedder)
-            payload = {
-                "model": embedder.model,
-                "version": embedder.version,
-                "device": embedder.device,
-                "dim": len(vector),
-                "vector": list(vector),
-            }
-            return _emit(payload, args.json)
-    except Exception as exc:  # noqa: BLE001 - CLI boundary
-        print(f"muzaiten-features-clap: {exc}", file=sys.stderr)
-        return 1
-    return 2
+        try:
+            payload = json.load(sys.stdin)
+        except (json.JSONDecodeError, UnicodeError) as exc:
+            _emit(event(request_id, "error", code="invalid_request", message=str(exc)))
+            return EXIT_INVALID
+        request = parse_request(payload)
+        request_id = request.request_id
+        result = run_request(request, _emit, canceled.is_set)
+        if canceled.is_set():
+            raise InterruptedError("operation canceled")
+        _emit(event(request_id, "result", result=result))
+        return 0
+    except ProtocolError as exc:
+        _emit(event(request_id, "error", code="invalid_request", message=str(exc)))
+        return EXIT_INVALID
+    except (FileNotFoundError, ModuleNotFoundError) as exc:
+        code = "model_missing" if "checkpoint" in str(exc).lower() else "component_missing"
+        _emit(event(request_id, "error", code=code, message=str(exc)))
+        return EXIT_COMPONENT_MISSING
+    except InterruptedError as exc:
+        _emit(event(request_id, "error", code="canceled", message=str(exc)))
+        return EXIT_CANCELED
+    except Exception as exc:  # noqa: BLE001 - protocol boundary
+        message = str(exc)
+        if "optional dependencies" in message:
+            _emit(event(request_id, "error", code="component_missing", message=message))
+            return EXIT_COMPONENT_MISSING
+        _emit(event(request_id, "error", code="operation_failed", message=message))
+        return EXIT_OPERATIONAL
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
-def _emit(payload: dict[str, object], as_json: bool) -> int:
-    if as_json:
-        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-    else:
-        for key, value in payload.items():
-            print(f"{key}: {value}")
-    return 0
+def _emit(payload: dict[str, object]) -> None:
+    print(encode_event(payload), flush=True)

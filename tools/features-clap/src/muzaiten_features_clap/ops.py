@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from . import db
 from .embedder import Embedder
@@ -26,6 +27,8 @@ def scan(
     embedder: Embedder,
     limit: int | None = None,
     batch_size: int = 8,
+    progress: Callable[[int, int], None] | None = None,
+    canceled: Callable[[], bool] | None = None,
 ) -> ScanResult:
     if batch_size < 1:
         raise ValueError("batch size must be at least 1")
@@ -39,7 +42,11 @@ def scan(
             for representative in representatives
             if representative.content_group_id not in existing
         ]
+        if progress is not None:
+            progress(0, len(pending))
         for start in range(0, len(pending), batch_size):
+            if canceled is not None and canceled():
+                raise InterruptedError("semantic scan canceled")
             batch = pending[start : start + batch_size]
             vectors = embedder.embed_audio_paths(
                 [item.path for item in batch],
@@ -61,6 +68,8 @@ def scan(
             # Each batch is a durable resume point: a later decode/model failure
             # leaves completed work available for the next scan to skip.
             conn.commit()
+            if progress is not None:
+                progress(embedded, len(pending))
         skipped = len(representatives) - len(pending)
         return ScanResult(len(representatives), embedded, skipped)
 
@@ -70,10 +79,19 @@ def neighbors(
     model: str,
     version: str,
     top_k: int = 100,
+    progress: Callable[[int, int], None] | None = None,
+    canceled: Callable[[], bool] | None = None,
 ) -> int:
     with db.connect(features_path) as conn:
         db.ensure_schema(conn)
-        return db.rebuild_neighbors(conn, model, version, top_k=top_k)
+        return db.rebuild_neighbors(
+            conn,
+            model,
+            version,
+            top_k=top_k,
+            progress=progress,
+            canceled=canceled,
+        )
 
 
 def status(features_path: Path, model: str, version: str) -> db.Status:

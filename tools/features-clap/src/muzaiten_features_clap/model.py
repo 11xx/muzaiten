@@ -8,7 +8,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from .db import normalize_vector
 
@@ -22,6 +22,10 @@ MODEL_SHA256 = "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd
 MODEL_AMODEL = "HTSAT-base"
 MODEL_SAMPLE_RATE = 48_000
 MODEL_WINDOW_SECONDS = 10
+MODEL_APPROXIMATE_BYTES = 630_000_000
+MODEL_LICENSE = "CC0-1.0"
+# Changes only when model input, preprocessing, or output semantics change.
+FEATURE_REVISION = "clap-htsat-base-audio-window-v1"
 DECODE_WORKERS = 4
 SEEK_TIMEOUT_SECONDS = 30
 DEVICE_CHOICES = ("auto", "cuda", "cpu")
@@ -69,13 +73,37 @@ class ModelDownload:
     downloaded: bool
 
 
+@dataclass(frozen=True)
+class CheckpointStatus:
+    path: Path
+    present: bool
+    valid: bool
+
+
 def model_cache_dir() -> Path:
     base = os.environ.get("XDG_CACHE_HOME")
     root = Path(base) if base else Path.home() / ".cache"
     return root / "muzaiten" / "models"
 
 
-def ensure_checkpoint() -> ModelDownload:
+def checkpoint_status(*, verify: bool = True) -> CheckpointStatus:
+    path = model_cache_dir() / MODEL_VERSION
+    if not path.exists():
+        return CheckpointStatus(path, present=False, valid=False)
+    if not verify:
+        return CheckpointStatus(path, present=True, valid=True)
+    try:
+        _verify_sha256(path)
+    except RuntimeError:
+        return CheckpointStatus(path, present=True, valid=False)
+    return CheckpointStatus(path, present=True, valid=True)
+
+
+def download_checkpoint(
+    progress: Callable[[int, int | None], None] | None = None,
+    canceled: Callable[[], bool] | None = None,
+    opener: Callable[..., object] = urllib.request.urlopen,
+) -> ModelDownload:
     cache_dir = model_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / MODEL_VERSION
@@ -83,20 +111,35 @@ def ensure_checkpoint() -> ModelDownload:
         _verify_sha256(path)
         return ModelDownload(path, downloaded=False)
 
-    with tempfile.NamedTemporaryFile(dir=cache_dir, delete=False) as temp:
-        temp_path = Path(temp.name)
-        digest = hashlib.sha256()
-        with urllib.request.urlopen(MODEL_URL, timeout=60) as response:  # noqa: S310
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                temp.write(chunk)
-    if digest.hexdigest() != MODEL_SHA256:
-        temp_path.unlink(missing_ok=True)
-        raise RuntimeError("downloaded CLAP checkpoint failed SHA-256 verification")
-    temp_path.replace(path)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=cache_dir, delete=False) as temp:
+            temp_path = Path(temp.name)
+            digest = hashlib.sha256()
+            with opener(MODEL_URL, timeout=60) as response:  # type: ignore[call-arg] # noqa: S310
+                length = response.headers.get("Content-Length")
+                total = int(length) if length else None
+                completed = 0
+                if progress is not None:
+                    progress(completed, total)
+                while True:
+                    if canceled is not None and canceled():
+                        raise InterruptedError("checkpoint download canceled")
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    temp.write(chunk)
+                    completed += len(chunk)
+                    if progress is not None:
+                        progress(completed, total)
+        if digest.hexdigest() != MODEL_SHA256:
+            raise RuntimeError("downloaded CLAP checkpoint failed SHA-256 verification")
+        temp_path.replace(path)
+    except BaseException:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
     return ModelDownload(path, downloaded=True)
 
 
@@ -192,7 +235,16 @@ class RealClapEmbedder:
             ) from exc
 
         self.device = device if device is not None else resolve_device("auto")
-        checkpoint_path = checkpoint if checkpoint is not None else ensure_checkpoint().path
+        if checkpoint is None:
+            current = checkpoint_status()
+            if not current.present or not current.valid:
+                raise FileNotFoundError(
+                    f"CLAP checkpoint is missing or invalid: {current.path}; "
+                    "run `muzaiten-features model download`"
+                )
+            checkpoint_path = current.path
+        else:
+            checkpoint_path = checkpoint
         self._model = laion_clap.CLAP_Module(
             enable_fusion=False,
             amodel=MODEL_AMODEL,

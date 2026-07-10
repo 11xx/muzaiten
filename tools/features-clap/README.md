@@ -1,42 +1,37 @@
 # muzaiten-features-clap
 
-`muzaiten-features-clap` is a standalone tool for adding CLAP embeddings and
-precomputed content-group neighbors to `features.sqlite`. It is not linked into
-the Qt application.
+`muzaiten-features-clap` is the optional CLAP capability provider used by the
+native `muzaiten-features` orchestrator. It is a small Python package by
+default; NumPy/PyTorch/torchvision and LAION-CLAP are confined to the `model`
+extra.
+
+Install it in user space with a backend selected by uv:
 
 ```sh
-uv run muzaiten-features-clap scan --features /path/to/features.sqlite
-uv run muzaiten-features-clap neighbors --features /path/to/features.sqlite
-uv run muzaiten-features-clap status --features /path/to/features.sqlite --json
-uv run muzaiten-features-clap query "warm piano with brushed drums" --json
+uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
 ```
 
-The model-loading commands (`scan`, `query`) accept `--device auto|cuda|cpu`
-(default `auto` = CUDA when available, else CPU) and log the chosen device to
-stderr at startup, so a silent CPU fallback is visible immediately. An explicit
-`--device cuda` fails instead of quietly falling back. `status` reports the
-device an `auto` run would pick. `scan` submits eight audio files per model
-call by default so CUDA is used efficiently; `--batch-size N` tunes that
-bounded batch for the available host/GPU memory. Each completed batch is
-committed, so rerunning after a failure resumes by skipping durable rows.
-Because non-fusion CLAP consumes one 10-second window, the scanner seeks to a
-stable uniformly distributed window using the indexed duration instead of
-decoding the rest of every track only to discard it; up to four of those
-bounded windows decode concurrently before inference. If container metadata
-overstates the decodable duration and a seek lands beyond EOF, the scanner
-falls back to the first 10-second window. The same fallback applies when a
-poorly seekable file does not produce its window within 30 seconds.
+The provider is not a human-facing command. One process handles one versioned
+JSON request on stdin and emits JSONL events on stdout. Supported operations are
+`capabilities`, `status`, `model-download`, `scan`, `neighbors`, and `query`.
+Diagnostics go to stderr. `muzaiten-features` owns provider discovery,
+orchestration, locking, progress presentation, and cancellation.
 
-Tests use a fake embedder and do not download model weights. The real CLAP stack
-is installed separately:
+Model download is always explicit. `scan` and `query` never fetch weights; they
+return `model_missing` until `muzaiten-features model download` has installed
+and SHA-256-verified the checkpoint atomically. `status` reports the source,
+license, approximate size, cache path, checksum, device availability, and
+current presence without loading LAION-CLAP.
+
+`FEATURE_REVISION` describes the input, preprocessing, and output semantics of
+the stored vectors. It deliberately does not follow package or protocol
+versions, so routine provider releases do not invalidate a large embedding
+corpus.
+
+Tests use fake inference and fake downloads; they do not download model weights:
 
 ```sh
-uv sync --extra model
+uv sync --group dev
+uv run python -m pytest
+uv run ruff check .
 ```
-
-The intended checkpoint is
-`music_audioset_epoch_15_esc_90.14.pt` from `lukewys/laion_clap` on Hugging
-Face. The repository and checkpoint are marked CC0-1.0; the checkpoint is
-downloaded on first real-model use into `$XDG_CACHE_HOME/muzaiten/models/` (or
-`~/.cache/muzaiten/models/`) and verified by SHA-256 before loading. Model
-weights are never committed.

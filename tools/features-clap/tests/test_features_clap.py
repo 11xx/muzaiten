@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import sqlite3
 import sys
@@ -11,8 +13,16 @@ from typing import Sequence
 import pytest
 
 from muzaiten_features_clap import db
-from muzaiten_features_clap.cli import build_parser, main
-from muzaiten_features_clap.model import _decode_audio_command, device_label, probe_device, resolve_device
+from muzaiten_features_clap.cli import main
+from muzaiten_features_clap import model
+from muzaiten_features_clap.model import (
+    _decode_audio_command,
+    checkpoint_status,
+    device_label,
+    download_checkpoint,
+    probe_device,
+    resolve_device,
+)
 from muzaiten_features_clap.ops import neighbors, query_embedding, scan, status
 
 
@@ -329,17 +339,36 @@ def test_audio_decode_is_bounded_to_a_stable_ten_second_window() -> None:
     assert short_command[short_command.index("-t") + 1] == "10"
 
 
-def test_cli_status_json_does_not_load_real_model(features_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = main(["status", "--features", str(features_path), "--json"])
+def test_protocol_status_does_not_load_real_model(
+    features_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "request_id": "status-1",
+                    "operation": "status",
+                    "parameters": {"features": str(features_path)},
+                }
+            )
+        ),
+    )
+    exit_code = main()
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    payload = json.loads(out)
-    assert payload["schema_version"] == 1
-    assert payload["groups"] == 4
-    assert payload["embeddings"] == 0
-    assert payload["neighbor_rows"] == 0
-    assert payload["model"] == "laion-clap-music-audioset"
+    payload = json.loads(out)["result"]
+    assert payload["store"]["schema_version"] == 1
+    assert payload["store"]["groups"] == 4
+    assert payload["store"]["embeddings"] == 0
+    assert payload["store"]["neighbor_rows"] == 0
+    assert payload["model"]["name"] == "laion-clap-music-audioset"
+    assert payload["feature_revision"] == "clap-htsat-base-audio-window-v1"
 
 
 def _fake_torch(cuda_available: bool, name: str = "NVIDIA GeForce RTX 3080") -> SimpleNamespace:
@@ -391,27 +420,131 @@ def test_probe_device_is_none_without_torch(monkeypatch: pytest.MonkeyPatch) -> 
     assert probe_device() is None
 
 
-def test_cli_rejects_unknown_device() -> None:
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["scan", "--features", "x.sqlite", "--device", "tpu"])
+@pytest.mark.parametrize(
+    "parameters,message",
+    [
+        ({"features": "x.sqlite", "device": 7}, "device must be a string"),
+        ({"features": "x.sqlite", "batch_size": 0}, "batch_size must be a positive integer"),
+    ],
+)
+def test_protocol_rejects_invalid_scan_parameters(
+    parameters: dict[str, object],
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "request_id": "invalid-scan",
+                    "operation": "scan",
+                    "parameters": parameters,
+                }
+            )
+        ),
+    )
+    exit_code = main()
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert message in payload["message"]
 
 
-def test_cli_rejects_non_positive_scan_batch_size() -> None:
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["scan", "--features", "x.sqlite", "--batch-size", "0"])
+class FakeDownloadResponse:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.offset = 0
+        self.headers = {"Content-Length": str(len(payload))}
+
+    def __enter__(self) -> FakeDownloadResponse:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, size: int) -> bytes:
+        chunk = self.payload[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
 
 
-def test_cli_status_reports_device_probe(
+def test_model_download_reports_bytes_verifies_and_installs_atomically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"fixture checkpoint bytes"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(model, "MODEL_SHA256", hashlib.sha256(payload).hexdigest())
+    progress: list[tuple[int, int | None]] = []
+
+    result = download_checkpoint(
+        progress=lambda completed, total: progress.append((completed, total)),
+        opener=lambda *_args, **_kwargs: FakeDownloadResponse(payload),
+    )
+
+    assert result.downloaded is True
+    assert result.path.read_bytes() == payload
+    assert progress == [(0, len(payload)), (len(payload), len(payload))]
+    assert not [path for path in tmp_path.iterdir() if path != result.path]
+
+
+def test_model_download_checksum_failure_keeps_existing_state_clean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model, "model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(model, "MODEL_SHA256", "0" * 64)
+
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        download_checkpoint(opener=lambda *_args, **_kwargs: FakeDownloadResponse(b"bad"))
+
+    assert list(tmp_path.iterdir()) == []
+    assert checkpoint_status().present is False
+
+
+def test_model_download_cancellation_removes_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model, "model_cache_dir", lambda: tmp_path)
+
+    with pytest.raises(InterruptedError, match="canceled"):
+        download_checkpoint(
+            canceled=lambda: True,
+            opener=lambda *_args, **_kwargs: FakeDownloadResponse(b"unused"),
+        )
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_protocol_status_reports_device_probe(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
 
-    exit_code = main(["status", "--features", str(features_path), "--json"])
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "request_id": "status-device",
+                    "operation": "status",
+                }
+            )
+        ),
+    )
+    exit_code = main()
 
     assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
+    payload = json.loads(capsys.readouterr().out)["result"]
     assert payload["device"] == "cuda"
 
 
