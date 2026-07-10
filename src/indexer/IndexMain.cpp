@@ -340,7 +340,7 @@ QStringList tableColumns(QSqlDatabase &database, const QString &table)
     return columns;
 }
 
-bool featuresTableIsV3(QSqlDatabase &database)
+bool featuresTableHasCurrentShape(QSqlDatabase &database)
 {
     const QStringList columns = tableColumns(database, QStringLiteral("features"));
     const QStringList expected{
@@ -384,7 +384,7 @@ void initSchema(QSqlDatabase &database)
     // version-based drop here would wipe every existing store's feature
     // rows on first open after an upgrade. Only the pre-v3 bliss-era table
     // fails the shape check.
-    if (!featuresTableIsV3(database)) {
+    if (!featuresTableHasCurrentShape(database)) {
         execSql(database, QStringLiteral("DROP TABLE IF EXISTS features"));
     }
     execSql(database, QStringLiteral(
@@ -773,16 +773,8 @@ void upsertFile(QSqlDatabase &database, const FileAnalysis &analysis)
     execPrepared(query);
 }
 
-// Durable twin of recordScalarExtraction: persist the per-file scalars so a
-// later feature phase (this run or any future one) can copy them instead of
-// decoding the file again. Same rule — only ok analyses; NULL scalars mean
-// "analyzed, no features" and are a final answer, not pending work.
-void upsertFileFeatures(QSqlDatabase &database, const FileAnalysis &analysis)
+void prepareFileFeaturesUpsert(QSqlQuery &query)
 {
-    if (analysis.status != QLatin1String("ok")) {
-        return;
-    }
-    QSqlQuery query(database);
     prepareOrFail(query, QStringLiteral(
                              "INSERT INTO file_features("
                              " path, tempo_bpm, loudness_lufs, loudness_std_db,"
@@ -802,7 +794,17 @@ void upsertFileFeatures(QSqlDatabase &database, const FileAnalysis &analysis)
                              " energy = excluded.energy,"
                              " extractor = excluded.extractor,"
                              " version = excluded.version"));
-    bindScalarRow(query, analysis.candidate.path, analysis.scalars);
+}
+
+// Durable twin of recordScalarExtraction: persist the per-file scalars so a
+// later feature phase (this run or any future one) can copy them instead of
+// decoding the file again. The caller owns one prepared query for the whole
+// phase; preparing this upsert once per file would add avoidable SQLite work
+// to the hot completion path.
+void upsertFileFeatures(QSqlQuery &query, const QString &path,
+                        const std::optional<Dsp::ScalarFeatures> &features)
+{
+    bindScalarRow(query, path, features);
     execPrepared(query);
 }
 
@@ -1454,25 +1456,7 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
     // and the backfill: every decoded representative gets its file_features
     // row written here, so the next version bump's refresh copies instead.
     QSqlQuery fileUpsert(database);
-    prepareOrFail(fileUpsert, QStringLiteral(
-                                  "INSERT INTO file_features("
-                                  " path, tempo_bpm, loudness_lufs, loudness_std_db,"
-                                  " spectral_centroid_mean_hz, spectral_centroid_std_hz,"
-                                  " spectral_flatness_mean, zero_crossing_rate, onset_rate_hz,"
-                                  " energy, extractor, version)"
-                                  " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                                  " ON CONFLICT(path) DO UPDATE SET"
-                                  " tempo_bpm = excluded.tempo_bpm,"
-                                  " loudness_lufs = excluded.loudness_lufs,"
-                                  " loudness_std_db = excluded.loudness_std_db,"
-                                  " spectral_centroid_mean_hz = excluded.spectral_centroid_mean_hz,"
-                                  " spectral_centroid_std_hz = excluded.spectral_centroid_std_hz,"
-                                  " spectral_flatness_mean = excluded.spectral_flatness_mean,"
-                                  " zero_crossing_rate = excluded.zero_crossing_rate,"
-                                  " onset_rate_hz = excluded.onset_rate_hz,"
-                                  " energy = excluded.energy,"
-                                  " extractor = excluded.extractor,"
-                                  " version = excluded.version"));
+    prepareFileFeaturesUpsert(fileUpsert);
     const auto completion = [&](FeatureAnalysis &&analysis, int processed, int) {
         result.processed = copiesDone + processed;
         if (analysis.failed) {
@@ -1480,8 +1464,7 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
         } else {
             bindScalarRow(upsert, analysis.representative.groupId, analysis.scalars);
             execPrepared(upsert);
-            bindScalarRow(fileUpsert, analysis.representative.path, analysis.scalars);
-            execPrepared(fileUpsert);
+            upsertFileFeatures(fileUpsert, analysis.representative.path, analysis.scalars);
             ++result.written;
         }
         maybeEmit(result.processed == result.total);
@@ -1786,7 +1769,15 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("grouping"));
         }
-        const int groups = regroupContent(database);
+        // Identity scans leave every successful file grouped before they
+        // return. A feature-only refresh must not rebuild 99k-file
+        // Chromaprint groups merely to copy stale scalar rows; regroup only
+        // when an interrupted/external workflow actually left ok rows
+        // ungrouped. Keep emitting the existing phase marker so the progress
+        // wire protocol and GUI state machine do not change.
+        const int groups = hasUngroupedOkRows(database)
+            ? regroupContent(database)
+            : currentGroupCount(database);
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
@@ -1849,6 +1840,8 @@ int runScan(const ScanOptions &options)
     int scanned = 0;
     int failed = 0;
 
+    QSqlQuery fileFeaturesUpsert(database);
+    prepareFileFeaturesUpsert(fileFeaturesUpsert);
     beginTransaction(database);
     int uncommitted = 0;
     auto lastCommit = std::chrono::steady_clock::now();
@@ -1887,7 +1880,9 @@ int runScan(const ScanOptions &options)
         timings.add(analysis.timings);
         recordScalarExtraction(extracted, analysis);
         upsertFile(database, analysis);
-        upsertFileFeatures(database, analysis);
+        if (analysis.status == QLatin1String("ok")) {
+            upsertFileFeatures(fileFeaturesUpsert, analysis.candidate.path, analysis.scalars);
+        }
         ++scanned;
         ++uncommitted;
         commitIfNeeded(false);

@@ -11,7 +11,10 @@ from typing import Iterable, Sequence
 import numpy as np
 
 SCHEMA_VERSION = 2
-MAX_SCHEMA_VERSION = 3
+# Schema v4 only adds indexer-private per-file scalar rows. Embedding and
+# neighbor tables retain their v2 shape, so the standalone tool can operate
+# on v4 stores without migrating or downgrading them.
+MAX_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)

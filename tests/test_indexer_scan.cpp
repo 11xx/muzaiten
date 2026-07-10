@@ -32,7 +32,7 @@ class IndexerScanTest final : public QObject {
     Q_OBJECT
 
 private slots:
-    void generatedFixtureMatrixWritesSchemaV3Features();
+    void generatedFixtureMatrixWritesSchemaV4Features();
     void groupIdsStayStableWhenLibraryGrows();
     void powerOptionsReportEffectiveJobs();
     void cancelPersistsCompletedRowsAndRerunSkipsThem();
@@ -456,7 +456,7 @@ double ffmpegIntegratedLufs(const QString &path)
 
 } // namespace
 
-void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
+void IndexerScanTest::generatedFixtureMatrixWritesSchemaV4Features()
 {
     requireTool(QStringLiteral("ffmpeg"));
     requireTool(QStringLiteral("fpcalc"));
@@ -550,6 +550,33 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QString connectionName;
     QSqlDatabase db = openReadOnly(features, &connectionName);
     QVERIFY(db.open());
+
+    // PF-1 contract: every successful file analysis persists its scalar
+    // result immediately, not only whichever paths later become group
+    // representatives. Optional scalar fields remain SQL NULL and the row
+    // itself is still a fresh, final result.
+    {
+        QSqlQuery fileFeatureCount(db);
+        fileFeatureCount.prepare(QStringLiteral(
+            "SELECT COUNT(*), SUM(version = ?) FROM file_features"));
+        fileFeatureCount.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+        QVERIFY(fileFeatureCount.exec());
+        QVERIFY(fileFeatureCount.next());
+        QCOMPARE(fileFeatureCount.value(0).toInt(), 8);
+        QCOMPARE(fileFeatureCount.value(1).toInt(), 8);
+
+        QSqlQuery silentFileFeatures(db);
+        silentFileFeatures.prepare(QStringLiteral(
+            "SELECT tempo_bpm, loudness_lufs, energy, version "
+            "FROM file_features WHERE path = ?"));
+        silentFileFeatures.addBindValue(silence);
+        QVERIFY(silentFileFeatures.exec());
+        QVERIFY(silentFileFeatures.next());
+        QVERIFY(silentFileFeatures.value(0).isNull());
+        QVERIFY(silentFileFeatures.value(1).isNull());
+        QVERIFY(silentFileFeatures.value(2).isNull());
+        QCOMPARE(silentFileFeatures.value(3).toString(), QString::fromLatin1(Dsp::kDspVersion));
+    }
 
     for (const QString &file : {sineFlac, sineWav, sineMp3, padded, click120, click90, pink, silence}) {
         const QByteArray indexed = chromaprintFor(db, file);
@@ -1557,7 +1584,12 @@ void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
             QVERIFY(db.open());
             QSqlQuery stale(db);
             QVERIFY(stale.exec(QStringLiteral("UPDATE features SET version='old'")));
-            QVERIFY(stale.exec(QStringLiteral("UPDATE file_features SET version='old'")));
+            // Poison the stale cache too: a version-blind copy would leak
+            // these impossible values into current group rows. The fallback
+            // must decode, replace each representative's cache row, and copy
+            // none of these sentinels.
+            QVERIFY(stale.exec(QStringLiteral(
+                "UPDATE file_features SET version='old', tempo_bpm=999, energy=999")));
             db.close();
         }
         QSqlDatabase::removeDatabase(connectionName);
@@ -1570,10 +1602,39 @@ void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
     });
     QCOMPARE(migration.value(QStringLiteral("features_written")).toInt(), groups);
     QCOMPARE(migration.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        {
+            QSqlQuery freshRepresentatives(db);
+            freshRepresentatives.prepare(QStringLiteral(
+                "SELECT COUNT(*) FROM ("
+                " SELECT content_group_id, MIN(path) AS path FROM files "
+                " WHERE content_group_id IS NOT NULL AND status='ok' "
+                " GROUP BY content_group_id"
+                ") reps JOIN file_features ff ON ff.path=reps.path "
+                "WHERE ff.version=?"));
+            freshRepresentatives.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+            QVERIFY(freshRepresentatives.exec());
+            QVERIFY(freshRepresentatives.next());
+            QCOMPARE(freshRepresentatives.value(0).toInt(), groups);
+
+            QSqlQuery poison(db);
+            QVERIFY(poison.exec(QStringLiteral(
+                "SELECT COUNT(*) FROM features WHERE tempo_bpm=999 OR energy=999")));
+            QVERIFY(poison.next());
+            QCOMPARE(poison.value(0).toInt(), 0);
+        }
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 
     // Second forced refresh with fresh per-file rows — and NO audio on disk.
     // Success is only possible on the pure copy path; any attempted decode
-    // would surface as feature_groups_failed.
+    // would surface as feature_groups_failed. The trigger additionally proves
+    // the feature-only command does not rebuild already-clean content groups;
+    // that unrelated O(files) work would erase the warm-path latency win.
     {
         QString connectionName = QStringLiteral("copy-test2-%1")
                                      .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -1583,6 +1644,9 @@ void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
             QVERIFY(db.open());
             QSqlQuery stale(db);
             QVERIFY(stale.exec(QStringLiteral("UPDATE features SET version='old'")));
+            QVERIFY(stale.exec(QStringLiteral(
+                "CREATE TRIGGER reject_unneeded_regroup BEFORE DELETE ON content_groups "
+                "BEGIN SELECT RAISE(ABORT, 'feature-only refresh regrouped clean store'); END")));
             db.close();
         }
         QSqlDatabase::removeDatabase(connectionName);
