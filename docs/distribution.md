@@ -109,8 +109,9 @@ MUZAITEN_LASTFM_API_KEY=... MUZAITEN_LASTFM_SHARED_SECRET=... ./packaging/build-
 
 This produces, under `dist/`:
 
-- `muzaiten-<version>-<arch>.tar.zst` — a prefixed tree (`usr/bin/muzaiten` and
-  the `muzaitenctl` CLI, plus the desktop entry, icon, metainfo, and license), and
+- `muzaiten-<version>-<arch>.tar.zst` — a prefixed tree containing `muzaiten`,
+  `muzaitenctl`, `muzaiten-features`, and the lightweight `muzaiten-import`
+  helper, plus the desktop entry, icon, metainfo, and license; and
 - `muzaiten-<version>-<arch>.tar.zst.sha256`.
 
 `<version>` is the date-based `YYYY.MM.DD.N.g<sha>` derived from `HEAD`, where
@@ -120,6 +121,20 @@ already exists (`YYYY.MM.DD.1`, then `.2`, and so on). Build the artifact from
 the tested, tagged release commit, then upload both files to the Codeberg release
 attached to that tag. The tarball name still uses `<version>`, not the shorter
 tag name.
+
+The optional Python provider is not bundled into native artifacts. Build its
+pure-Python wheel and sdist independently:
+
+```sh
+cd tools/features-clap
+uv build --no-sources
+```
+
+The base wheel depends only on NumPy; LAION-CLAP, PyTorch, and torchvision are
+confined to `[model]`. Recheck the PyPI project endpoint immediately before a
+separately approved first publication; this repository prepares metadata and
+commands but does not upload or claim the name. Core AUR packages list
+`muzaiten-features-clap` only as an optional dependency.
 
 ### Dry-running the prebuilt-dist packaging (dev)
 

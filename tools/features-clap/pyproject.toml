@@ -3,14 +3,17 @@ name = "muzaiten-features-clap"
 version = "0.1.0"
 description = "Optional CLAP capability provider for muzaiten features"
 readme = "README.md"
+license = "Unlicense"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy>=1.23.5,<2.0.0",
+    "numpy>=1.23.5",
 ]
 
 [project.optional-dependencies]
 model = [
     "laion-clap==1.1.7",
+    # numba 0.66 (via librosa) rejects NumPy 2.5; NumPy 2.4 is smoke-tested.
+    "numpy<2.5",
     "torch>=2.3",
     # laion-clap 1.1.7 imports torchvision without declaring it
     "torchvision>=0.18",
@@ -18,6 +21,11 @@ model = [
 
 [project.scripts]
 muzaiten-features-clap = "muzaiten_features_clap.cli:main"
+
+[project.urls]
+Homepage = "https://codeberg.org/11xx/muzaiten"
+Documentation = "https://codeberg.org/11xx/muzaiten/src/branch/master/docs/semantic-analysis.md"
+Issues = "https://codeberg.org/11xx/muzaiten/issues"
 
 [dependency-groups]
 dev = [

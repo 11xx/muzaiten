@@ -15,7 +15,8 @@ optdepends=('gst-plugins-good: extra audio decoders and sinks'
             'gst-plugins-bad: additional codecs and native DSF DSD playback'
             'gst-libav: DSD demux and DSD-to-PCM decode'
             'mpd: browse an MPD library alongside local sources'
-            'yt-dlp: enrich YouTube playlist imports with metadata')
+            'yt-dlp: enrich YouTube playlist imports with metadata'
+            'muzaiten-features-clap: optional semantic audio analysis and search provider')
 provides=('muzaiten')
 conflicts=('muzaiten' 'muzaiten-git')
 options=('!strip')  # build-release.sh already strips the binary
