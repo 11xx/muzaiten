@@ -402,12 +402,12 @@ target_compile_options(muzaiten_dsp PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:GNU,Clang>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>
 )
 
-add_executable(muzaiten-index
-    src/indexer/IndexMain.cpp
+add_executable(muzaiten-features
+    src/indexer/FeaturesMain.cpp
 )
-target_include_directories(muzaiten-index PRIVATE src)
-target_link_libraries(muzaiten-index PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)
-target_compile_options(muzaiten-index PRIVATE
+target_include_directories(muzaiten-features PRIVATE src)
+target_link_libraries(muzaiten-features PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)
+target_compile_options(muzaiten-features PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
 
@@ -416,7 +416,7 @@ target_compile_options(muzaiten-index PRIVATE
 # the standard prefix.
 include(GNUInstallDirs)
 
-install(TARGETS muzaiten muzaitenctl muzaiten-index
+install(TARGETS muzaiten muzaitenctl muzaiten-features
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 # The standalone playlist-import helper (convert/youtube subcommands). Deployed

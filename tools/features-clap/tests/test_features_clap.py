@@ -10,10 +10,10 @@ from typing import Sequence
 
 import pytest
 
-from muzaiten_embed import db
-from muzaiten_embed.cli import build_parser, main
-from muzaiten_embed.model import _decode_audio_command, device_label, probe_device, resolve_device
-from muzaiten_embed.ops import neighbors, query_embedding, scan, status
+from muzaiten_features_clap import db
+from muzaiten_features_clap.cli import build_parser, main
+from muzaiten_features_clap.model import _decode_audio_command, device_label, probe_device, resolve_device
+from muzaiten_features_clap.ops import neighbors, query_embedding, scan, status
 
 
 @dataclass

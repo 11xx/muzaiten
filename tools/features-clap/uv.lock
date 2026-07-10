@@ -898,7 +898,7 @@ wheels = [
 ]
 
 [[package]]
-name = "muzaiten-embed"
+name = "muzaiten-features-clap"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

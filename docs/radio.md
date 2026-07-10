@@ -83,7 +83,7 @@ vocabulary with track counts for context. CLI equivalents: `genre-alias`,
 ## Audio analysis (content-aware tier)
 
 `Library > Audio analysis > Analyze library audio` runs the bundled
-`muzaiten-index` over your library with live progress: one canonical decode
+`muzaiten-features` over your library with live progress: one canonical decode
 per file computes exact audio identity, Chromaprint content groups
 (duplicate detection across formats/codecs), and clean-room DSP scalars
 (tempo, loudness, energy, brightness) into `features.sqlite`. Progress
@@ -93,7 +93,7 @@ rate, and ETA). Stopping mid-run keeps completed work; the next analysis
 resumes remaining files and stale groups. Terminal equivalent:
 
 ```sh
-muzaiten-index scan --library ~/.local/share/muzaiten/library.sqlite \
+muzaiten-features scan --library ~/.local/share/muzaiten/library.sqlite \
   --features ~/.local/share/muzaiten/features.sqlite --json --progress
 ```
 
@@ -111,13 +111,13 @@ constants are unchanged. Upgrading marks v1 scalar rows stale until the normal
 resumable feature phase refreshes them; stale rows never enter scoring.
 
 **CLAP embeddings** (audio similarity + free-text search) are computed by
-the optional Python tool in `tools/embedder` — kept out of the app because
+the optional Python tool in `tools/features-clap` — kept out of the app because
 it downloads a ~2 GB model on first use:
 
 ```sh
-cd tools/embedder
-uv run muzaiten-embed scan --features ~/.local/share/muzaiten/features.sqlite
-uv run muzaiten-embed neighbors --features ~/.local/share/muzaiten/features.sqlite
+cd tools/features-clap
+uv run muzaiten-features-clap scan --features ~/.local/share/muzaiten/features.sqlite
+uv run muzaiten-features-clap neighbors --features ~/.local/share/muzaiten/features.sqlite
 ```
 
 `scan` (and `query`) accept `--device auto|cuda|cpu` (default `auto`) and log
@@ -127,7 +127,7 @@ by default; tune them with `--batch-size N`. Completed batches are durable, so
 a retry skips them. Each group uses a stable uniformly distributed 10-second
 window—the input length consumed by non-fusion CLAP—without decoding the
 discarded remainder of long tracks; up to four windows decode concurrently.
-See `tools/embedder/README.md` for details.
+See `tools/features-clap/README.md` for details.
 
 With embeddings present, radio pools get augmented with sonic neighbors
 (tag-poor tracks surface because they *sound* right) and free-text semantic

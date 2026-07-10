@@ -1,7 +1,7 @@
 [project]
-name = "muzaiten-embed"
+name = "muzaiten-features-clap"
 version = "0.1.0"
-description = "Standalone muzaiten CLAP embedding tool"
+description = "Optional CLAP capability provider for muzaiten features"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,7 +17,7 @@ model = [
 ]
 
 [project.scripts]
-muzaiten-embed = "muzaiten_embed.cli:main"
+muzaiten-features-clap = "muzaiten_features_clap.cli:main"
 
 [dependency-groups]
 dev = [

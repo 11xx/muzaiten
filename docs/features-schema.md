@@ -1,6 +1,6 @@
 # features.sqlite Schema
 
-`features.sqlite` is written by the `muzaiten-index` C++ binary built with the
+`features.sqlite` is written by the `muzaiten-features` C++ binary built with the
 Qt application. The app and `muzaitenctl` treat this database as read-only.
 
 Schema version: `4`
@@ -69,7 +69,7 @@ track_neighbors(
 );
 ```
 
-The embedding tables are created by `tools/embedder`; fresh `muzaiten-index`
+The embedding tables are created by `tools/features-clap`; fresh `muzaiten-features`
 databases may not contain them until the embedder runs.
 
 ## Meta Keys
@@ -88,7 +88,7 @@ databases may not contain them until the embedder runs.
 - `last_scan_mean_ms_per_track`: elapsed milliseconds per scanned track.
 - `last_scan_power`: `background`, `balanced`, or `turbo`.
 
-Schema v1/v2 files are upgraded in place by `muzaiten-index scan`; their old
+Schema v1/v2 files are upgraded in place by `muzaiten-features scan`; their old
 bliss-era `features` shape is dropped and recreated because no shipped database
 contains authoritative rows in that shape. Schema v3 upgrades add
 `file_features` without dropping existing group feature rows.
@@ -185,7 +185,7 @@ do not change.
 
 ## Scan JSON
 
-`muzaiten-index scan --json` includes the stable count fields
+`muzaiten-features scan --json` includes the stable count fields
 `scanned`, `skipped`, `failed`, `groups`, and `featured_groups`, plus:
 
 - `featured_fresh`: existing feature rows whose `version` matches this build.
@@ -237,7 +237,7 @@ Caveats:
 
 ## Embedding Rows
 
-`tools/embedder` adds CLAP embeddings and cosine neighbors. It upgrades
+`tools/features-clap` adds CLAP embeddings and cosine neighbors. It upgrades
 schema-1 databases to schema 2, accepts schema 3 and 4 without downgrading
 them, and is not linked into the Qt application. Schema v4's `file_features`
 table is indexer-private and does not change embedding or neighbor rows.

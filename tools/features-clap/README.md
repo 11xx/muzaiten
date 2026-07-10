@@ -1,14 +1,14 @@
-# muzaiten-embed
+# muzaiten-features-clap
 
-`muzaiten-embed` is a standalone tool for adding CLAP embeddings and
+`muzaiten-features-clap` is a standalone tool for adding CLAP embeddings and
 precomputed content-group neighbors to `features.sqlite`. It is not linked into
 the Qt application.
 
 ```sh
-uv run muzaiten-embed scan --features /path/to/features.sqlite
-uv run muzaiten-embed neighbors --features /path/to/features.sqlite
-uv run muzaiten-embed status --features /path/to/features.sqlite --json
-uv run muzaiten-embed query "warm piano with brushed drums" --json
+uv run muzaiten-features-clap scan --features /path/to/features.sqlite
+uv run muzaiten-features-clap neighbors --features /path/to/features.sqlite
+uv run muzaiten-features-clap status --features /path/to/features.sqlite --json
+uv run muzaiten-features-clap query "warm piano with brushed drums" --json
 ```
 
 The model-loading commands (`scan`, `query`) accept `--device auto|cuda|cpu`

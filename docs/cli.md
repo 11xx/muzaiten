@@ -49,7 +49,7 @@ muzaitenctl pin-copy <group-id> <path> | unpin-copy <group-id>
 
 Search details and query syntax: [search.md](search.md). The analysis
 pipeline that produces `features.sqlite` (the in-app runner,
-`muzaiten-index`, and the optional CLAP embedder): [radio.md](radio.md).
+`muzaiten-features`, and the optional CLAP embedder): [radio.md](radio.md).
 
 ## Scrobble backfill
 
@@ -68,13 +68,13 @@ re-walks safe); `reset` is refused while a backfill is running.
 
 ## Audio indexer
 
-`muzaiten-index` is the standalone analyzer used by the app:
+`muzaiten-features` is the standalone analyzer used by the app:
 
 ```sh
-muzaiten-index scan --library library.sqlite --features features.sqlite --json
-muzaiten-index scan --library library.sqlite --features features.sqlite --power background --progress
-muzaiten-index scan --library library.sqlite --features features.sqlite --verbose
-muzaiten-index status --features features.sqlite --json
+muzaiten-features scan --library library.sqlite --features features.sqlite --json
+muzaiten-features scan --library library.sqlite --features features.sqlite --power background --progress
+muzaiten-features scan --library library.sqlite --features features.sqlite --verbose
+muzaiten-features status --features features.sqlite --json
 ```
 
 `--power background|balanced|turbo` controls worker count and process
@@ -105,7 +105,7 @@ Chromaprint work. Initial scans and recovery from pre-existing ungrouped rows
 still perform an exact full regroup. `phase grouping` remains in the progress
 protocol and is normally instantaneous on an unchanged store.
 
-Both `muzaiten-index status --json` and scan JSON retain `featured_groups` as
+Both `muzaiten-features status --json` and scan JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /
 `featured_stale` counts for the running build. `muzaitenctl features-status`
 shows the same split and reports when the store's recorded DSP version differs
@@ -133,13 +133,13 @@ stdout remains JSON-only when `--json` is used.
 
 ## Related binaries
 
-- `muzaiten-index` — the audio analysis indexer (identity, duplicate
+- `muzaiten-features` — the audio analysis indexer (identity, duplicate
   groups, DSP scalars). See [radio.md](radio.md) and
   [features-schema.md](features-schema.md).
 - `muzaiten-import` — playlist conversion (`convert`/`youtube`
   subcommands). See [playlist-import-jsonl.md](playlist-import-jsonl.md).
-- `tools/embedder` — optional CLAP embedding sidecar (Python/uv). Its
+- `tools/features-clap` — optional CLAP embedding sidecar (Python/uv). Its
   model-loading commands take `--device auto|cuda|cpu` (default `auto`) and
   log the chosen device at startup; `scan` accepts `--batch-size N` (default
   eight) and commits each completed batch for resumability. See
-  `tools/embedder/README.md`.
+  `tools/features-clap/README.md`.

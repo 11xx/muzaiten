@@ -2,18 +2,23 @@
 
 ## [Unreleased]
 
+- The audio-analysis executable is now `muzaiten-features`, and the optional
+  CLAP provider is packaged independently as `muzaiten-features-clap` from
+  `tools/features-clap`. The retired executable, distribution, and import names
+  are not installed or retained as compatibility aliases.
+
 ## [2026.07.10]
 
 ### Added
 
-- The CLAP embedder (`tools/embedder`) now makes its inference device explicit:
-  `muzaiten-embed scan`/`query` accept `--device auto|cuda|cpu` (default
+- The CLAP embedder (`tools/features-clap`) now makes its inference device explicit:
+  `muzaiten-features-clap scan`/`query` accept `--device auto|cuda|cpu` (default
   `auto`), log the chosen device (with GPU name) at startup so a silent CPU
   fallback can't burn a run, fail fast when `--device cuda` finds no usable
   CUDA device, and report the device in JSON output; `status` shows the device
   an `auto` run would pick.
 - Feature-fill progress is now first-class: after `phase features`,
-  `muzaiten-index` reports stale group n/m progress (with phase-local rate/
+  `muzaiten-features` reports stale group n/m progress (with phase-local rate/
   ETA), JSON counters `feature_groups_processed` / `features_written` /
   `feature_groups_failed`, and the app menu + Analysis status dialog show a
   feature-domain progress line and Phase row instead of a frozen
@@ -27,17 +32,17 @@
   the audio, while a missing or stale fallback decodes once and backfills the
   cache for subsequent retries.
 
-- `muzaiten-index scan` now reports elapsed time, per-stage timing aggregates,
+- `muzaiten-features scan` now reports elapsed time, per-stage timing aggregates,
   rich progress/ETA lines, phase markers, and optional per-file `--verbose`
   timing lines while keeping JSON output on stdout.
-- `muzaiten-index scan` now streams completed analysis rows to `features.sqlite`
+- `muzaiten-features scan` now streams completed analysis rows to `features.sqlite`
   during long runs and exits cleanly with `"canceled": true` after SIGTERM or
   SIGINT, so canceling a scan preserves completed work for the next run.
-- `muzaiten-index scan` is substantially faster on large libraries: mel
+- `muzaiten-features scan` is substantially faster on large libraries: mel
   analysis now skips zero filterbank weights, reuses per-thread filterbanks,
   groups tracks with a duration sliding window, and computes chromaprints
   in-process after a conformance check against fpcalc-era fingerprints.
-- Audio analysis now has explicit power levels. `muzaiten-index scan --power`
+- Audio analysis now has explicit power levels. `muzaiten-features scan --power`
   accepts `background`, `balanced`, and `turbo`, reports the effective power
   and job count in JSON, and the app persists `Library > Audio analysis >
   Analysis power` with a background default.
@@ -47,7 +52,7 @@
 
 ### Changed
 
-- `muzaiten-embed scan` now submits bounded audio batches to CLAP (eight files
+- `muzaiten-features-clap scan` now submits bounded audio batches to CLAP (eight files
   by default, configurable with `--batch-size`) instead of starving CUDA with
   one-file model calls. Each completed batch is committed as a durable resume
   point, so a later decode/model failure does not discard earlier work. Since
@@ -76,7 +81,7 @@
 - Scalar features are now consumed only when their per-row DSP version matches
   the running build, so radio never treats an untouched old store or a
   cancel/resume mixed-version store as current. The analysis status dialog,
-  `muzaitenctl features-status`, and `muzaiten-index` JSON now expose the stale
+  `muzaitenctl features-status`, and `muzaiten-features` JSON now expose the stale
   portion without redefining the existing total featured count.
 - Feature fill now uses the configured analysis worker count to decode and
   analyze stale group representatives concurrently while keeping
@@ -134,7 +139,7 @@
   track from the error state rebuilds the pipeline, so a genuinely unplayable
   file reports its error once and the next play works instead of requiring a
   track switch to revive playback.
-- `muzaiten-embed neighbors` now scales to real libraries: the cosine
+- `muzaiten-features-clap neighbors` now scales to real libraries: the cosine
   neighbor rebuild works in fixed-size blocks instead of materializing the
   full group-by-group similarity matrix (24 GB at 77k groups) and ranking it
   in pure Python. Ranking semantics are unchanged (highest cosine first,
@@ -182,17 +187,17 @@
   vocabulary, and `Library > Audio analysis` opens read-only status and
   duplicate-copy dialogs with pin/unpin controls.
 - `Library > Audio analysis > Analyze library audio` now starts the bundled
-  `muzaiten-index` from inside the app, with live menu progress, cancel, and a
+  `muzaiten-features` from inside the app, with live menu progress, cancel, and a
   completion summary. The indexer gained a `--progress` stderr stream so JSON
   stdout stays machine-readable.
 - `Radio > Scoring weights...` now edits the active scoring weights, manages
   named tuning profiles, and can save suggestion-only learned profiles from the
   same local radio telemetry used by `muzaitenctl radio-learn`.
-- Clean-room scalar extraction is now live end to end: `muzaiten-index` is a
+- Clean-room scalar extraction is now live end to end: `muzaiten-features` is a
   C++ binary built with the app, writes schema-v3 `features.sqlite` rows with
   DSP tempo/loudness/energy/spectral scalars, and replaces the GPL-blocked
   bliss sidecar plan. The Rust indexer crate and top-level `sidecar/` layout
-  were retired; the optional CLAP embedder now lives under `tools/embedder`.
+  were retired; the optional CLAP embedder now lives under `tools/features-clap`.
 - Start Radio: seed a radio session from any library track
   (`muzaitenctl start-radio <path>` / `stop-radio`, plus a UI entry). Picks are
   scored by genre, era, rating and listening affinity, with a novelty bonus for
@@ -344,7 +349,7 @@
   that have no embeddings.
 - `muzaitenctl semantic-search "<text>"` now performs CLI-only free-text
   semantic library search by embedding the query through the optional
-  `muzaiten-embed` sidecar, cosine-ranking stored CLAP content-group
+  `muzaiten-features-clap` sidecar, cosine-ranking stored CLAP content-group
   embeddings, and returning each group as its preferred library copy with a
   score.
 - Local play-event telemetry: every playback now records how it ended

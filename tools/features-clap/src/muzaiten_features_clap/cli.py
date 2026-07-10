@@ -35,7 +35,7 @@ def _add_device_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="muzaiten-embed")
+    parser = argparse.ArgumentParser(prog="muzaiten-features-clap")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     scan_parser = subparsers.add_parser("scan", help="embed content-group representatives")
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _select_device(choice: str) -> str:
     device = resolve_device(choice)
-    print(f"muzaiten-embed: using device {device_label(device)}", file=sys.stderr)
+    print(f"muzaiten-features-clap: using device {device_label(device)}", file=sys.stderr)
     return device
 
 
@@ -117,7 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             return _emit(payload, args.json)
     except Exception as exc:  # noqa: BLE001 - CLI boundary
-        print(f"muzaiten-embed: {exc}", file=sys.stderr)
+        print(f"muzaiten-features-clap: {exc}", file=sys.stderr)
         return 1
     return 2
 

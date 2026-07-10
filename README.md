@@ -85,7 +85,7 @@ sudo make install PREFIX=/usr      # system-wide instead
 make uninstall                     # reverse it (mirrors the PREFIX used)
 ```
 
-This installs the app, the `muzaitenctl` CLI, the `muzaiten-index` audio
+This installs the app, the `muzaitenctl` CLI, the `muzaiten-features` audio
 analyzer, and the `muzaiten-import` playlist tool, plus desktop entry and
 icon. Packaging details and the Last.fm credential model:
 [docs/distribution.md](docs/distribution.md).

@@ -42,7 +42,7 @@ def resolve_device(choice: str) -> str:
     except ImportError as exc:  # pragma: no cover - depends on optional extra
         raise RuntimeError(
             "device selection requires optional dependencies; run "
-            "`uv sync --extra model` in tools/embedder"
+            "`uv sync --extra model` in tools/features-clap"
         ) from exc
 
     cuda_available = torch.cuda.is_available()
@@ -188,7 +188,7 @@ class RealClapEmbedder:
         except ImportError as exc:  # pragma: no cover - depends on optional extra
             raise RuntimeError(
                 "real CLAP embedding requires optional dependencies; run "
-                "`uv sync --extra model` in tools/embedder"
+                "`uv sync --extra model` in tools/features-clap"
             ) from exc
 
         self.device = device if device is not None else resolve_device("auto")

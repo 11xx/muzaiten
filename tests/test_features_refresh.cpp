@@ -54,7 +54,7 @@ QString muzaitenIndexPath()
 {
     QDir buildDir(QCoreApplication::applicationDirPath());
     buildDir.cdUp();
-    return buildDir.filePath(QStringLiteral("muzaiten-index"));
+    return buildDir.filePath(QStringLiteral("muzaiten-features"));
 }
 
 void requireTool(const QString &name)
@@ -741,7 +741,7 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
     }
     QCOMPARE(toneFeatureBefore.size(), 1);
 
-    // Plant embedder-owned rows the way tools/embedder writes them; a
+    // Plant embedder-owned rows the way tools/features-clap writes them; a
     // regroup must never orphan or misassociate these while their content
     // still exists.
     {
@@ -1884,4 +1884,4 @@ void IndexerScanTest::orphanedFileFeatureRowsAreSwept()
 }
 
 QTEST_MAIN(IndexerScanTest)
-#include "test_indexer_scan.moc"
+#include "test_features_refresh.moc"

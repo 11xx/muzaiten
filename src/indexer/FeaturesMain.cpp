@@ -167,7 +167,7 @@ struct ScalarExtraction {
 class SqlConnection final {
 public:
     SqlConnection()
-        : m_name(QStringLiteral("muzaiten-index-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
+        : m_name(QStringLiteral("muzaiten-features-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
         , m_database(QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_name))
     {
     }
@@ -2217,7 +2217,7 @@ int runStatus(const StatusOptions &options)
 void printUsage()
 {
     std::fputs(
-        "Usage: muzaiten-index <scan|status> [options]\n"
+        "Usage: muzaiten-features <scan|status> [options]\n"
         "\n"
         "scan --library PATH --features PATH [--limit N] [--jobs N] [--power background|balanced|turbo] [--json] [--progress] [--verbose]\n"
         "status --features PATH [--json]\n",
@@ -2362,7 +2362,7 @@ int main(int argc, char **argv)
         }
         fail(QStringLiteral("unknown command \"%1\"").arg(command));
     } catch (const std::exception &error) {
-        std::fprintf(stderr, "muzaiten-index: %s\n", error.what());
+        std::fprintf(stderr, "muzaiten-features: %s\n", error.what());
         return 1;
     }
 }

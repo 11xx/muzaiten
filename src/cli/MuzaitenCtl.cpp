@@ -79,7 +79,7 @@ void printUsage()
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
         "  semantic-search [--limit N] <text>\n"
-        "                          CLAP text-to-library search (requires muzaiten-embed)\n"
+        "                          CLAP text-to-library search (requires muzaiten-features-clap)\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
         "  features-status         show features.sqlite coverage (works offline)\n"
         "  duplicate-groups [--min-size N]  inspect features.sqlite duplicate groups\n"
@@ -494,10 +494,10 @@ QString compactProcessError(QString value)
 
 QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
 {
-    const QString executable = QStandardPaths::findExecutable(QStringLiteral("muzaiten-embed"));
+    const QString executable = QStandardPaths::findExecutable(QStringLiteral("muzaiten-features-clap"));
     if (executable.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool (muzaiten-embed not found)");
+            *error = QStringLiteral("semantic search requires the embedder tool (muzaiten-features-clap not found)");
         }
         return {};
     }
@@ -506,7 +506,7 @@ QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
     process.start(executable, {QStringLiteral("query"), text, QStringLiteral("--json")});
     if (!process.waitForStarted(5000)) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool (could not start muzaiten-embed)");
+            *error = QStringLiteral("semantic search requires the embedder tool (could not start muzaiten-features-clap)");
         }
         return {};
     }
@@ -602,7 +602,7 @@ QVector<SemanticSearchResult> rankSemanticMatches(const QVector<float> &queryVec
     const QHash<qint64, QVector<float>> embeddings = features.embeddingsForGroups(groupList);
     if (embeddings.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("features.sqlite has no embeddings; run muzaiten-embed scan first");
+            *error = QStringLiteral("features.sqlite has no embeddings; run muzaiten-features-clap scan first");
         }
         return {};
     }

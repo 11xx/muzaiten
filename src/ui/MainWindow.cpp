@@ -5546,7 +5546,7 @@ void MainWindow::startAudioAnalysis()
 
     const QString binary = resolveMuzaitenIndexBinary();
     if (binary.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("muzaiten-index was not found next to the app or on PATH"), 8000);
+        statusBar()->showMessage(QStringLiteral("muzaiten-features was not found next to the app or on PATH"), 8000);
         return;
     }
 
@@ -5786,12 +5786,12 @@ AudioAnalysisData::LiveStatus MainWindow::audioAnalysisLiveStatus() const
 
 QString MainWindow::resolveMuzaitenIndexBinary() const
 {
-    const QString sibling = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("muzaiten-index"));
+    const QString sibling = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("muzaiten-features"));
     const QFileInfo siblingInfo(sibling);
     if (siblingInfo.exists() && siblingInfo.isExecutable()) {
         return siblingInfo.absoluteFilePath();
     }
-    return QStandardPaths::findExecutable(QStringLiteral("muzaiten-index"));
+    return QStandardPaths::findExecutable(QStringLiteral("muzaiten-features"));
 }
 
 void MainWindow::configureMpdSource()
