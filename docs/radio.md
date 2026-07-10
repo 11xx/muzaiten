@@ -122,7 +122,9 @@ uv run muzaiten-embed neighbors --features ~/.local/share/muzaiten/features.sqli
 
 `scan` (and `query`) accept `--device auto|cuda|cpu` (default `auto`) and log
 the chosen device at startup; an explicit `--device cuda` fails rather than
-silently falling back to CPU. See `tools/embedder/README.md` for details.
+silently falling back to CPU. `scan` uses bounded eight-file inference batches
+by default; tune them with `--batch-size N`. Completed batches are durable, so
+a retry skips them. See `tools/embedder/README.md` for details.
 
 With embeddings present, radio pools get augmented with sonic neighbors
 (tag-poor tracks surface because they *sound* right) and free-text semantic

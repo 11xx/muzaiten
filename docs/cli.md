@@ -140,4 +140,6 @@ stdout remains JSON-only when `--json` is used.
   subcommands). See [playlist-import-jsonl.md](playlist-import-jsonl.md).
 - `tools/embedder` — optional CLAP embedding sidecar (Python/uv). Its
   model-loading commands take `--device auto|cuda|cpu` (default `auto`) and
-  log the chosen device at startup; see `tools/embedder/README.md`.
+  log the chosen device at startup; `scan` accepts `--batch-size N` (default
+  eight) and commits each completed batch for resumability. See
+  `tools/embedder/README.md`.

@@ -23,6 +23,13 @@ class FakeEmbedder:
     model: str = "fake-clap"
     version: str = "fixture"
     calls: list[Path] = field(default_factory=list)
+    batches: list[list[Path]] = field(default_factory=list)
+
+    def embed_audio_paths(self, paths: Sequence[Path]) -> Sequence[Sequence[float]]:
+        batch = list(paths)
+        self.calls.extend(batch)
+        self.batches.append(batch)
+        return [self.vectors[path] for path in batch]
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:
         self.calls.append(path)
@@ -30,6 +37,13 @@ class FakeEmbedder:
 
     def embed_text(self, text: str) -> Sequence[float]:
         return self.text_vectors[text]
+
+
+class FailingSecondBatchEmbedder(FakeEmbedder):
+    def embed_audio_paths(self, paths: Sequence[Path]) -> Sequence[Sequence[float]]:
+        if self.batches:
+            raise RuntimeError("fixture batch failure")
+        return super().embed_audio_paths(paths)
 
 
 @pytest.fixture
@@ -93,12 +107,16 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
         },
     )
 
-    first = scan(features_path, fake, limit=3)
+    first = scan(features_path, fake, limit=3, batch_size=2)
     assert first.as_dict() == {"groups": 3, "embedded": 3, "skipped": 0}
     assert fake.calls == [
         Path("/music/a-copy.flac"),
         Path("/music/b.flac"),
         Path("/music/c.flac"),
+    ]
+    assert fake.batches == [
+        [Path("/music/a-copy.flac"), Path("/music/b.flac")],
+        [Path("/music/c.flac")],
     ]
 
     with db.connect(features_path) as conn:
@@ -114,13 +132,40 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
         assert db.unpack_vector(rows[0]["vector"], 2) == pytest.approx((1.0, 0.0))
         assert db.unpack_vector(rows[1]["vector"], 2) == pytest.approx((0.0, 1.0))
 
-    second = scan(features_path, fake, limit=3)
+    second = scan(features_path, fake, limit=3, batch_size=2)
     assert second.as_dict() == {"groups": 3, "embedded": 0, "skipped": 3}
     assert fake.calls == [
         Path("/music/a-copy.flac"),
         Path("/music/b.flac"),
         Path("/music/c.flac"),
     ]
+
+
+def test_scan_rejects_non_positive_batch_size(features_path: Path) -> None:
+    fake = FakeEmbedder({})
+
+    with pytest.raises(ValueError, match="batch size must be at least 1"):
+        scan(features_path, fake, batch_size=0)
+
+
+def test_scan_commits_each_completed_batch(features_path: Path) -> None:
+    fake = FailingSecondBatchEmbedder(
+        {
+            Path("/music/a-copy.flac"): (1.0, 0.0),
+            Path("/music/b.flac"): (0.0, 1.0),
+            Path("/music/c.flac"): (1.0, 1.0),
+            Path("/music/d.flac"): (-1.0, 0.0),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="fixture batch failure"):
+        scan(features_path, fake, batch_size=2)
+
+    with db.connect(features_path) as conn:
+        group_ids = conn.execute(
+            "SELECT content_group_id FROM embeddings ORDER BY content_group_id"
+        ).fetchall()
+    assert [int(row["content_group_id"]) for row in group_ids] == [10, 11]
 
 
 @pytest.mark.parametrize("schema_version", [3, 4])
@@ -322,6 +367,11 @@ def test_probe_device_is_none_without_torch(monkeypatch: pytest.MonkeyPatch) -> 
 def test_cli_rejects_unknown_device() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["scan", "--features", "x.sqlite", "--device", "tpu"])
+
+
+def test_cli_rejects_non_positive_scan_batch_size() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["scan", "--features", "x.sqlite", "--batch-size", "0"])
 
 
 def test_cli_status_reports_device_probe(

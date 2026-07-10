@@ -15,7 +15,10 @@ The model-loading commands (`scan`, `query`) accept `--device auto|cuda|cpu`
 (default `auto` = CUDA when available, else CPU) and log the chosen device to
 stderr at startup, so a silent CPU fallback is visible immediately. An explicit
 `--device cuda` fails instead of quietly falling back. `status` reports the
-device an `auto` run would pick.
+device an `auto` run would pick. `scan` submits eight audio files per model
+call by default so CUDA is used efficiently; `--batch-size N` tunes that
+bounded batch for the available host/GPU memory. Each completed batch is
+committed, so rerunning after a failure resumes by skipping durable rows.
 
 Tests use a fake embedder and do not download model weights. The real CLAP stack
 is installed separately:

@@ -18,6 +18,13 @@ from .model import (
 from .ops import neighbors, query_embedding, scan, status
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
 def _add_device_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--device",
@@ -34,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser = subparsers.add_parser("scan", help="embed content-group representatives")
     scan_parser.add_argument("--features", required=True, type=Path)
     scan_parser.add_argument("--limit", type=int)
+    scan_parser.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=8,
+        help="audio files submitted per inference batch (default: 8)",
+    )
     scan_parser.add_argument("--json", action="store_true")
     _add_device_argument(scan_parser)
 
@@ -65,11 +78,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "scan":
             embedder = RealClapEmbedder(device=_select_device(args.device))
-            result = scan(args.features, embedder, limit=args.limit)
+            result = scan(
+                args.features,
+                embedder,
+                limit=args.limit,
+                batch_size=args.batch_size,
+            )
             payload = result.as_dict() | {
                 "model": embedder.model,
                 "version": embedder.version,
                 "device": embedder.device,
+                "batch_size": args.batch_size,
             }
             return _emit(payload, args.json)
         if args.command == "neighbors":

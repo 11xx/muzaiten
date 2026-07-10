@@ -21,27 +21,44 @@ class ScanResult:
         }
 
 
-def scan(features_path: Path, embedder: Embedder, limit: int | None = None) -> ScanResult:
+def scan(
+    features_path: Path,
+    embedder: Embedder,
+    limit: int | None = None,
+    batch_size: int = 8,
+) -> ScanResult:
+    if batch_size < 1:
+        raise ValueError("batch size must be at least 1")
     with db.connect(features_path) as conn:
         db.ensure_schema(conn)
         representatives = db.representative_groups(conn, limit=limit)
         existing = db.existing_embedding_groups(conn, embedder.model, embedder.version)
         embedded = 0
-        skipped = 0
-        for representative in representatives:
-            if representative.content_group_id in existing:
-                skipped += 1
-                continue
-            vector = embedder.embed_audio_path(representative.path)
-            db.upsert_embedding(
-                conn,
-                representative.content_group_id,
-                embedder.model,
-                embedder.version,
-                vector,
-            )
-            embedded += 1
-        conn.commit()
+        pending = [
+            representative
+            for representative in representatives
+            if representative.content_group_id not in existing
+        ]
+        for start in range(0, len(pending), batch_size):
+            batch = pending[start : start + batch_size]
+            vectors = embedder.embed_audio_paths([item.path for item in batch])
+            if len(vectors) != len(batch):
+                raise RuntimeError(
+                    f"embedder returned {len(vectors)} vectors for {len(batch)} audio paths"
+                )
+            for representative, vector in zip(batch, vectors, strict=True):
+                db.upsert_embedding(
+                    conn,
+                    representative.content_group_id,
+                    embedder.model,
+                    embedder.version,
+                    vector,
+                )
+                embedded += 1
+            # Each batch is a durable resume point: a later decode/model failure
+            # leaves completed work available for the next scan to skip.
+            conn.commit()
+        skipped = len(representatives) - len(pending)
         return ScanResult(len(representatives), embedded, skipped)
 
 

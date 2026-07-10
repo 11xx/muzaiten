@@ -45,6 +45,10 @@
 
 ### Changed
 
+- `muzaiten-embed scan` now submits bounded audio batches to CLAP (eight files
+  by default, configurable with `--batch-size`) instead of starving CUDA with
+  one-file model calls. Each completed batch is committed as a durable resume
+  point, so a later decode/model failure does not discard earlier work.
 - Scalar analysis is now `muzaiten-dsp-v2`: a first-party, allocation-free
   fixed-2048 real FFT replaces the complex-double STFT while keeping
   double-precision power and reductions. A four-minute analysis fixture drops

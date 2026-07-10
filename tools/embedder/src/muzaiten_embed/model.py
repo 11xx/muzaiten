@@ -156,11 +156,19 @@ class RealClapEmbedder:
         self._model.load_ckpt(str(checkpoint_path), verbose=False)
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:
+        return self.embed_audio_paths([path])[0]
+
+    def embed_audio_paths(self, paths: Sequence[Path]) -> Sequence[Sequence[float]]:
+        decoded = [decode_audio_ffmpeg(path).reshape(-1) for path in paths]
         embedding = self._model.get_audio_embedding_from_data(
-            x=decode_audio_ffmpeg(path),
+            x=decoded,
             use_tensor=False,
         )
-        return normalize_vector(_first_row(embedding))
+        if len(embedding) != len(paths):
+            raise RuntimeError(
+                f"CLAP returned {len(embedding)} embeddings for {len(paths)} audio paths"
+            )
+        return [normalize_vector(row) for row in embedding]
 
     def embed_text(self, text: str) -> Sequence[float]:
         embedding = self._model.get_text_embedding([text], use_tensor=False)
