@@ -14,6 +14,10 @@
   cancel path (with a longer GUI kill backstop while writing features) so
   completed group feature rows stay durable and the next run resumes a smaller
   stale set.
+- Audio analysis now persists versioned per-file scalar results in schema v4.
+  Group feature rows can be rebuilt from those compact rows without reopening
+  the audio, while a missing or stale fallback decodes once and backfills the
+  cache for subsequent retries.
 
 - `muzaiten-index scan` now reports elapsed time, per-stage timing aggregates,
   rich progress/ETA lines, phase markers, and optional per-file `--verbose`
@@ -59,6 +63,10 @@
 - Feature fill now uses the configured analysis worker count to decode and
   analyze stale group representatives concurrently while keeping
   `features.sqlite` writes serialized and resumable.
+- Feature-only refreshes copy fresh representative scalars and skip redundant
+  Chromaprint regrouping when all successful files already have group ids. On
+  the measured 77,590-group store, a warm refresh completes in about 2.7
+  seconds with zero decodes instead of repeating hours of audio work.
 - Changing `Analysis power` while a scan is running now applies immediately:
   the scan stops (keeping all completed work) and restarts at the new power.
 - The analysis progress rate (and its ETA) now reports recent throughput
