@@ -148,11 +148,17 @@ def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
     except ImportError as exc:  # pragma: no cover - exercised only without dependencies
         raise RuntimeError("numpy is required for real audio embedding") from exc
 
-    completed = subprocess.run(
-        _decode_audio_command(path, duration_ms),
-        check=True,
-        capture_output=True,
-    )
+    command = _decode_audio_command(path, duration_ms)
+    completed = subprocess.run(command, check=True, capture_output=True)
+    if not completed.stdout and "-ss" in command:
+        # Indexed/container durations can overstate the decodable stream. A
+        # successful seek beyond EOF produces no bytes, so keep the decode
+        # bounded and fall back to the first model window.
+        completed = subprocess.run(
+            _decode_audio_command(path),
+            check=True,
+            capture_output=True,
+        )
     audio = np.frombuffer(completed.stdout, dtype="<f4").astype("float32", copy=True)
     if audio.size == 0:
         raise RuntimeError(f"ffmpeg decoded no audio from {path}")

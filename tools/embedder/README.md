@@ -22,7 +22,9 @@ committed, so rerunning after a failure resumes by skipping durable rows.
 Because non-fusion CLAP consumes one 10-second window, the scanner seeks to a
 stable uniformly distributed window using the indexed duration instead of
 decoding the rest of every track only to discard it; up to four of those
-bounded windows decode concurrently before inference.
+bounded windows decode concurrently before inference. If container metadata
+overstates the decodable duration and a seek lands beyond EOF, the scanner
+falls back to the first 10-second window.
 
 Tests use a fake embedder and do not download model weights. The real CLAP stack
 is installed separately:
