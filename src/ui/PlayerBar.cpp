@@ -542,6 +542,12 @@ PlayerBar::PlayerBar(QWidget *parent)
         connect(m_analysisPowerActions[i], &QAction::triggered, this, [this, i]() { emit analysisPowerChanged(i); });
     }
     m_analysisPowerActions[0]->setChecked(true);
+    m_semanticAnalysisEnabledAction = audioAnalysisMenu->addAction(
+        QStringLiteral("Generate semantic/audio-similarity features"));
+    m_semanticAnalysisEnabledAction->setCheckable(true);
+    QAction *semanticProviderSetup = audioAnalysisMenu->addAction(QStringLiteral("Semantic provider setup…"));
+    QAction *semanticModelDownload = audioAnalysisMenu->addAction(QStringLiteral("Download semantic model…"));
+    audioAnalysisMenu->addSeparator();
     m_analyzeAudioAction = audioAnalysisMenu->addAction(QStringLiteral("Analyze library audio"));
     m_cancelAudioAnalysisAction = audioAnalysisMenu->addAction(QStringLiteral("Stop analysis"));
     m_cancelAudioAnalysisAction->setVisible(false);
@@ -905,6 +911,12 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(forceRescan, &QAction::triggered, this, &PlayerBar::forceRescanRequested);
     connect(removeMissingTracks, &QAction::triggered, this, &PlayerBar::removeMissingTracksRequested);
     connect(m_analyzeAudioAction, &QAction::triggered, this, &PlayerBar::audioAnalysisStartRequested);
+    connect(m_semanticAnalysisEnabledAction, &QAction::toggled,
+            this, &PlayerBar::semanticAnalysisEnabledChanged);
+    connect(semanticProviderSetup, &QAction::triggered,
+            this, &PlayerBar::semanticProviderSetupRequested);
+    connect(semanticModelDownload, &QAction::triggered,
+            this, &PlayerBar::semanticModelDownloadRequested);
     connect(m_cancelAudioAnalysisAction, &QAction::triggered, this, &PlayerBar::audioAnalysisCancelRequested);
     connect(analysisStatus, &QAction::triggered, this, &PlayerBar::analysisStatusRequested);
     connect(duplicateCopies, &QAction::triggered, this, &PlayerBar::duplicateCopiesRequested);
@@ -1123,6 +1135,15 @@ void PlayerBar::setAnalysisPower(int power)
         return;
     }
     m_analysisPowerActions[power]->setChecked(true);
+}
+
+void PlayerBar::setSemanticAnalysisEnabled(bool enabled)
+{
+    if (m_semanticAnalysisEnabledAction == nullptr) {
+        return;
+    }
+    const QSignalBlocker blocker(m_semanticAnalysisEnabledAction);
+    m_semanticAnalysisEnabledAction->setChecked(enabled);
 }
 
 void PlayerBar::setShowGuessedPlaceholders(bool show)

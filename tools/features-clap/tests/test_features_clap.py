@@ -32,6 +32,7 @@ class FakeEmbedder:
     text_vectors: dict[str, tuple[float, ...]] = field(default_factory=dict)
     model: str = "fake-clap"
     version: str = "fixture"
+    dimension: int = 2
     calls: list[Path] = field(default_factory=list)
     batches: list[list[Path]] = field(default_factory=list)
     duration_batches: list[list[int | None]] = field(default_factory=list)
@@ -143,14 +144,13 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
     assert fake.duration_batches == [[3000, 3000], [3000]]
 
     with db.connect(features_path) as conn:
-        assert db.read_schema_version(conn) == 2
+        assert db.read_schema_version(conn) == 5
         rows = conn.execute(
-            "SELECT content_group_id, model, version, dim, vector FROM embeddings "
+            "SELECT content_group_id, generation_id, dim, vector FROM embeddings "
             "ORDER BY content_group_id",
         ).fetchall()
         assert [int(row["content_group_id"]) for row in rows] == [10, 11, 12]
-        assert {row["model"] for row in rows} == {"fake-clap"}
-        assert {row["version"] for row in rows} == {"fixture"}
+        assert len({int(row["generation_id"]) for row in rows}) == 1
         assert {int(row["dim"]) for row in rows} == {2}
         assert db.unpack_vector(rows[0]["vector"], 2) == pytest.approx((1.0, 0.0))
         assert db.unpack_vector(rows[1]["vector"], 2) == pytest.approx((0.0, 1.0))
@@ -189,6 +189,43 @@ def test_scan_commits_each_completed_batch(features_path: Path) -> None:
             "SELECT content_group_id FROM embeddings ORDER BY content_group_id"
         ).fetchall()
     assert [int(row["content_group_id"]) for row in group_ids] == [10, 11]
+
+
+def test_generation_change_activates_partial_new_corpus_and_hides_old_neighbors(
+    features_path: Path,
+) -> None:
+    fake = FakeEmbedder(
+        {
+            Path("/music/a-copy.flac"): (1.0, 0.0),
+            Path("/music/b.flac"): (0.0, 1.0),
+            Path("/music/c.flac"): (1.0, 1.0),
+            Path("/music/d.flac"): (-1.0, 0.0),
+        }
+    )
+    scan(features_path, fake, checkpoint_sha256="sha-a", feature_revision="revision-a")
+    neighbors(features_path, fake.model, fake.version, top_k=1)
+    scan(
+        features_path,
+        fake,
+        limit=1,
+        checkpoint_sha256="sha-b",
+        feature_revision="revision-b",
+    )
+
+    with db.connect(features_path) as conn:
+        active = conn.execute(
+            "SELECT id, checkpoint_sha256, feature_revision FROM semantic_generations "
+            "WHERE active <> 0"
+        ).fetchone()
+        assert active is not None
+        assert active["checkpoint_sha256"] == "sha-b"
+        assert active["feature_revision"] == "revision-b"
+        assert db._count(  # noqa: SLF001 - schema contract assertion
+            conn, "SELECT COUNT(*) FROM embeddings WHERE generation_id = ?", (active["id"],)
+        ) == 1
+        assert db._count(  # noqa: SLF001 - schema contract assertion
+            conn, "SELECT COUNT(*) FROM track_neighbors WHERE generation_id = ?", (active["id"],)
+        ) == 0
 
 
 @pytest.mark.parametrize("schema_version", [3, 4])
@@ -241,7 +278,7 @@ def test_current_indexer_schemas_are_accepted_without_downgrade(
 
     with db.connect(path) as conn:
         db.ensure_schema(conn)
-        assert db.read_schema_version(conn) == schema_version
+        assert db.read_schema_version(conn) == 5
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'embeddings'").fetchone() is not None
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'track_neighbors'").fetchone() is not None
 
@@ -296,6 +333,7 @@ def test_status_reports_coverage_before_and_after_scan(features_path: Path) -> N
         "embeddings": 0,
         "model_embeddings": 0,
         "neighbor_rows": 0,
+        "active_generation_id": None,
     }
 
     fake = FakeEmbedder(
@@ -311,11 +349,12 @@ def test_status_reports_coverage_before_and_after_scan(features_path: Path) -> N
 
     after = status(features_path, fake.model, fake.version)
     assert after.as_dict() == {
-        "schema_version": 2,
+        "schema_version": 5,
         "groups": 4,
         "embeddings": 2,
         "model_embeddings": 2,
         "neighbor_rows": 2,
+        "active_generation_id": 1,
     }
 
 
@@ -593,8 +632,11 @@ def test_blockwise_neighbors_match_naive_reference(tmp_path: Path) -> None:
         conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '2')")
     with db.connect(path) as conn:
         db.ensure_schema(conn)
+        generation_id = db.ensure_generation(
+            conn, "clap", "fake-clap", "fixture-sha", "fixture-revision", dim
+        )
         for group_id, vector in zip(group_ids, vectors):
-            db.upsert_embedding(conn, group_id, "fake-clap", "fixture", vector)
+            db.upsert_embedding(conn, group_id, generation_id, vector)
         conn.commit()
 
         stored = [
@@ -605,7 +647,7 @@ def test_blockwise_neighbors_match_naive_reference(tmp_path: Path) -> None:
         ]
         expected = _naive_neighbor_reference(group_ids, stored, top_k=10)
 
-        inserted = db.rebuild_neighbors(conn, "fake-clap", "fixture", top_k=10, block_size=17)
+        inserted = db.rebuild_neighbors(conn, generation_id, top_k=10, block_size=17)
 
         actual = [
             (int(row["content_group_id"]), int(row["neighbor_group_id"]), int(row["rank"]))

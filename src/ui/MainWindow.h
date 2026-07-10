@@ -240,6 +240,8 @@ private:
     void showScoringWeights();
     void showGenreCuration();
     void showAnalysisStatus();
+    void configureSemanticProvider();
+    void downloadSemanticModel();
     void showDuplicateCopies();
     void startAudioAnalysis();
     void cancelAudioAnalysis();
@@ -517,11 +519,13 @@ private:
     bool m_backfillWasRunning = false;
     QProcess *m_audioAnalysisProcess = nullptr;
     QByteArray m_audioAnalysisStdout;
+    QByteArray m_audioAnalysisStdoutBuffer;
     QByteArray m_audioAnalysisStderr;
     QByteArray m_audioAnalysisStderrBuffer;
     bool m_audioAnalysisCancelRequested = false;
     bool m_audioAnalysisRestartPending = false;  // power changed mid-run: stop, then relaunch
     AudioAnalysisData::LiveStatus m_audioAnalysisRunState;
+    QProcess *m_semanticModelProcess = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;

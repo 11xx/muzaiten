@@ -3,7 +3,7 @@
 `features.sqlite` is written by the `muzaiten-features` C++ binary built with the
 Qt application. The app and `muzaitenctl` treat this database as read-only.
 
-Schema version: `4`
+Schema version: `5`
 
 ```sql
 meta(key TEXT PRIMARY KEY, value TEXT);
@@ -52,12 +52,26 @@ file_features(
     version TEXT NOT NULL
 );
 
-embeddings(
-    content_group_id INTEGER PRIMARY KEY,
+semantic_generations(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capability TEXT NOT NULL,
     model TEXT NOT NULL,
-    version TEXT NOT NULL,
+    checkpoint_sha256 TEXT NOT NULL,
+    feature_revision TEXT NOT NULL,
+    vector_dim INTEGER NOT NULL,
+    provider_path TEXT,
+    provider_version TEXT,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    active INTEGER NOT NULL DEFAULT 0
+);
+
+embeddings(
+    content_group_id INTEGER NOT NULL,
+    generation_id INTEGER NOT NULL,
     dim INTEGER NOT NULL,
-    vector BLOB NOT NULL
+    vector BLOB NOT NULL,
+    PRIMARY KEY(content_group_id, generation_id)
 );
 
 track_neighbors(
@@ -65,16 +79,20 @@ track_neighbors(
     neighbor_group_id INTEGER NOT NULL,
     rank INTEGER NOT NULL,
     cosine REAL NOT NULL,
-    PRIMARY KEY(content_group_id, rank)
+    generation_id INTEGER NOT NULL,
+    algorithm_revision TEXT NOT NULL,
+    top_k INTEGER NOT NULL,
+    PRIMARY KEY(content_group_id, generation_id, rank)
 );
 ```
 
-The embedding tables are created by `tools/features-clap`; fresh `muzaiten-features`
-databases may not contain them until the embedder runs.
+The native orchestrator creates the complete schema. The optional provider
+writes only generation-scoped embeddings and neighbors while the native parent
+holds the feature-store lock.
 
 ## Meta Keys
 
-- `schema_version`: `4`.
+- `schema_version`: `5`.
 - `indexer_version`: `cpp`.
 - `dsp_version`: the analyzer version recorded when the indexer last opened the
   store. It is diagnostic; app-side freshness is decided from each feature
@@ -88,10 +106,11 @@ databases may not contain them until the embedder runs.
 - `last_scan_mean_ms_per_track`: elapsed milliseconds per scanned track.
 - `last_scan_power`: `background`, `balanced`, or `turbo`.
 
-Schema v1/v2 files are upgraded in place by `muzaiten-features scan`; their old
+Schema v1/v2 files are upgraded in place by `muzaiten-features refresh`; their old
 bliss-era `features` shape is dropped and recreated because no shipped database
-contains authoritative rows in that shape. Schema v3 upgrades add
-`file_features` without dropping existing group feature rows.
+contains authoritative rows in that shape. Schema v3/v4 scalar rows are
+preserved. The v5 migration assigns a uniform known CLAP corpus to its current
+generation; mixed or unknown semantic rows become inactive and require refresh.
 
 ## Identity Columns
 
@@ -185,7 +204,7 @@ do not change.
 
 ## Scan JSON
 
-`muzaiten-features scan --json` includes the stable count fields
+`muzaiten-features refresh --json` includes the stable count fields
 `scanned`, `skipped`, `failed`, `groups`, and `featured_groups`, plus:
 
 - `featured_fresh`: existing feature rows whose `version` matches this build.
@@ -237,23 +256,23 @@ Caveats:
 
 ## Embedding Rows
 
-`tools/features-clap` adds CLAP embeddings and cosine neighbors. It upgrades
-schema-1 databases to schema 2, accepts schema 3 and 4 without downgrading
-them, and is not linked into the Qt application. Schema v4's `file_features`
-table is indexer-private and does not change embedding or neighbor rows.
+`muzaiten-features-clap` supplies CLAP embeddings and cosine neighbors through
+the native orchestrator. Only one semantic capability generation is active in
+v1. Activating a different checkpoint/revision/dimension hides old rows
+immediately; partial new coverage is therefore truthful and resumable.
 
-`embeddings` contains one row per content group for the active model:
+`embeddings` contains one row per content group and generation:
 
 - `content_group_id`: the content group being represented.
-- `model`: model family identifier, currently `laion-clap-music-audioset`.
-- `version`: checkpoint filename, currently
-  `music_audioset_epoch_15_esc_90.14.pt`.
+- `generation_id`: provenance row containing capability, model, checkpoint
+  SHA-256, stable feature revision, vector dimension, provider diagnostics,
+  timestamps, and active state.
 - `dim`: number of `float32` values in `vector`.
 - `vector`: little-endian `float32` values, L2-normalized before storage.
 
-The embedder uses the lexicographically first successfully analyzed path in a
-content group as the representative audio file. Model weights are downloaded
-outside the repository into the user cache and verified by SHA-256 before use.
+The provider uses the lexicographically first successfully analyzed path in a
+content group as representative audio. Model download is explicit, cached
+outside the repository, checksum-verified, and atomic.
 
 ## Neighbor Rows
 
@@ -264,6 +283,9 @@ embedding vectors. Rows are regenerated as a full table:
 - `neighbor_group_id`: neighboring group.
 - `rank`: one-based rank within the source group's neighbors.
 - `cosine`: cosine similarity from the vector dot product.
+- `generation_id`: embedding generation used for both endpoints.
+- `algorithm_revision` and `top_k`: provenance required by readers; stale or
+  insufficient neighbor sets are rejected.
 
 The embedder stores the top 100 neighbors per source group by default and breaks
 equal-score ties by `neighbor_group_id` for deterministic output.

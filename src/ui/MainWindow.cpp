@@ -1284,6 +1284,17 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::audioAnalysisStartRequested, this, &MainWindow::startAudioAnalysis);
     connect(m_playerBar, &PlayerBar::audioAnalysisCancelRequested, this, &MainWindow::cancelAudioAnalysis);
     connect(m_playerBar, &PlayerBar::analysisStatusRequested, this, &MainWindow::showAnalysisStatus);
+    connect(m_playerBar, &PlayerBar::semanticAnalysisEnabledChanged, this, [this](bool enabled) {
+        m_state->setSetting(QStringLiteral("analysis.semantic.enabled"),
+                            enabled ? QStringLiteral("true") : QStringLiteral("false"));
+    });
+    connect(m_playerBar, &PlayerBar::semanticProviderSetupRequested,
+            this, &MainWindow::configureSemanticProvider);
+    connect(m_playerBar, &PlayerBar::semanticModelDownloadRequested,
+            this, &MainWindow::downloadSemanticModel);
+    m_playerBar->setSemanticAnalysisEnabled(
+        m_state->setting(QStringLiteral("analysis.semantic.enabled"), QStringLiteral("false"))
+            == QLatin1String("true"));
     connect(m_playerBar, &PlayerBar::duplicateCopiesRequested, this, &MainWindow::showDuplicateCopies);
     connect(m_playerBar, &PlayerBar::mpdSourceRequested, this, &MainWindow::configureMpdSource);
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
@@ -5531,6 +5542,117 @@ void MainWindow::showAnalysisStatus()
     dialog.exec();
 }
 
+void MainWindow::configureSemanticProvider()
+{
+    const QString binary = resolveMuzaitenIndexBinary();
+    QJsonObject status;
+    if (!binary.isEmpty()) {
+        QProcess process;
+        process.start(binary, {QStringLiteral("status"), QStringLiteral("--features"),
+                               m_core->featuresPath(), QStringLiteral("--json")});
+        if (process.waitForFinished(10'000) && process.exitCode() == 0) {
+            status = QJsonDocument::fromJson(process.readAllStandardOutput()).object()
+                         .value(QStringLiteral("semantic")).toObject();
+        }
+    }
+    const QString saved = m_state->setting(QStringLiteral("analysis.semantic.providerPath"));
+    QMessageBox box(this);
+    box.setWindowTitle(QStringLiteral("Semantic provider setup"));
+    box.setIcon(QMessageBox::Information);
+    box.setText(status.value(QStringLiteral("state")).toString(QStringLiteral("Provider status unavailable")));
+    box.setInformativeText(QStringLiteral("Configured path: %1\nResolved path: %2\nDiscovery source: %3")
+                               .arg(saved.isEmpty() ? QStringLiteral("Automatic") : saved,
+                                    status.value(QStringLiteral("provider_path")).toString(QStringLiteral("none")),
+                                    status.value(QStringLiteral("provider_source")).toString(QStringLiteral("none"))));
+    box.setDetailedText(QStringLiteral(
+        "Install command:\nuv tool install 'muzaiten-features-clap[model]' --torch-backend auto\n\n"
+        "The application never runs uv. This command is copyable and must be run by you."));
+    QPushButton *automatic = box.addButton(QStringLiteral("Use automatic discovery"), QMessageBox::ActionRole);
+    QPushButton *choose = box.addButton(QStringLiteral("Choose executable…"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    box.exec();
+    if (box.clickedButton() == automatic) {
+        m_state->removeSetting(QStringLiteral("analysis.semantic.providerPath"));
+    } else if (box.clickedButton() == choose) {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Choose muzaiten-features-clap"),
+            saved.isEmpty() ? QDir::homePath() : saved);
+        if (!path.isEmpty()) {
+            m_state->setSetting(QStringLiteral("analysis.semantic.providerPath"), path);
+        }
+    }
+}
+
+void MainWindow::downloadSemanticModel()
+{
+    if (m_semanticModelProcess != nullptr) {
+        statusBar()->showMessage(QStringLiteral("Semantic model download is already running"), 5000);
+        return;
+    }
+    const QString binary = resolveMuzaitenIndexBinary();
+    if (binary.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("muzaiten-features was not found"), 8000);
+        return;
+    }
+    QProcess statusProcess;
+    statusProcess.start(binary, {QStringLiteral("status"), QStringLiteral("--features"),
+                                 m_core->featuresPath(), QStringLiteral("--json")});
+    if (!statusProcess.waitForFinished(10'000) || statusProcess.exitCode() != 0) {
+        statusBar()->showMessage(QStringLiteral("Semantic provider is not ready; open Semantic provider setup"), 8000);
+        return;
+    }
+    const QJsonObject semantic = QJsonDocument::fromJson(statusProcess.readAllStandardOutput()).object()
+                                     .value(QStringLiteral("semantic")).toObject();
+    const QJsonObject model = semantic.value(QStringLiteral("provider")).toObject()
+                                  .value(QStringLiteral("model")).toObject();
+    if (model.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Semantic provider is not ready; open Semantic provider setup"), 8000);
+        return;
+    }
+    const QString consent = QStringLiteral(
+        "Source: %1\nLicense: %2\nExpected size: about %3 MB\nCache: %4\nSHA-256: %5\n\nDownload and verify this model?")
+                                .arg(model.value(QStringLiteral("source")).toString(),
+                                     model.value(QStringLiteral("license")).toString())
+                                .arg(model.value(QStringLiteral("approximate_bytes")).toDouble() / 1'000'000.0,
+                                     0, 'f', 0)
+                                .arg(model.value(QStringLiteral("cache_path")).toString(),
+                                     model.value(QStringLiteral("sha256")).toString());
+    if (QMessageBox::question(this, QStringLiteral("Download semantic model"), consent)
+        != QMessageBox::Yes) {
+        return;
+    }
+    auto *process = new QProcess(this);
+    m_semanticModelProcess = process;
+    process->setProgram(binary);
+    process->setArguments({QStringLiteral("model"), QStringLiteral("download"),
+                           QStringLiteral("--progress=jsonl")});
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
+        const QList<QByteArray> lines = process->readAllStandardOutput().split('\n');
+        for (const QByteArray &line : lines) {
+            const QJsonObject event = QJsonDocument::fromJson(line).object();
+            if (event.value(QStringLiteral("event")).toString() == QLatin1String("progress")) {
+                const double completed = event.value(QStringLiteral("completed")).toDouble();
+                const double total = event.value(QStringLiteral("total")).toDouble();
+                statusBar()->showMessage(total > 0
+                    ? QStringLiteral("Downloading semantic model… %1%").arg(completed * 100.0 / total, 0, 'f', 1)
+                    : QStringLiteral("Downloading semantic model…"));
+            }
+        }
+    });
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, [this, process](int exitCode, QProcess::ExitStatus status) {
+        m_semanticModelProcess = nullptr;
+        statusBar()->showMessage(status == QProcess::NormalExit && exitCode == 0
+            ? QStringLiteral("Semantic model is ready")
+            : QStringLiteral("Semantic model download failed: %1")
+                  .arg(QString::fromUtf8(process->readAllStandardError()).trimmed()),
+            10000);
+        process->deleteLater();
+    });
+    statusBar()->showMessage(QStringLiteral("Starting semantic model download…"));
+    process->start();
+}
+
 void MainWindow::showDuplicateCopies()
 {
     DuplicateCopiesDialog dialog(m_database, m_core->featuresPath(), this);
@@ -5551,6 +5673,7 @@ void MainWindow::startAudioAnalysis()
     }
 
     m_audioAnalysisStdout.clear();
+    m_audioAnalysisStdoutBuffer.clear();
     m_audioAnalysisStderr.clear();
     m_audioAnalysisStderrBuffer.clear();
     m_audioAnalysisCancelRequested = false;
@@ -5581,15 +5704,14 @@ void MainWindow::startAudioAnalysis()
     const int analysisPower = analysisPowerSetting();
     const int boundedAnalysisPower = std::clamp(analysisPower, 0, 2);
     process->setArguments({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         databasePath(),
         QStringLiteral("--features"),
         m_core->featuresPath(),
         QStringLiteral("--power"),
         QString::fromLatin1(analysisPowerNames[boundedAnalysisPower]),
-        QStringLiteral("--json"),
-        QStringLiteral("--progress"),
+        QStringLiteral("--progress=jsonl"),
     });
 
     m_audioAnalysisRunState.running = true;
@@ -5632,7 +5754,15 @@ void MainWindow::cancelAudioAnalysis()
 void MainWindow::readAudioAnalysisStdout()
 {
     if (m_audioAnalysisProcess != nullptr) {
-        m_audioAnalysisStdout.append(m_audioAnalysisProcess->readAllStandardOutput());
+        const QByteArray chunk = m_audioAnalysisProcess->readAllStandardOutput();
+        m_audioAnalysisStdout.append(chunk);
+        m_audioAnalysisStdoutBuffer.append(chunk);
+        for (qsizetype newline = m_audioAnalysisStdoutBuffer.indexOf('\n'); newline >= 0;
+             newline = m_audioAnalysisStdoutBuffer.indexOf('\n')) {
+            const QByteArray line = m_audioAnalysisStdoutBuffer.left(newline);
+            m_audioAnalysisStdoutBuffer.remove(0, newline + 1);
+            handleAudioAnalysisProgressLine(QString::fromUtf8(line).trimmed());
+        }
     }
 }
 
@@ -5687,14 +5817,18 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
         }
         statusBar()->showMessage(QStringLiteral("Audio analysis failed: %1").arg(detail.left(240)), 10000);
     } else {
+        const QList<QByteArray> lines = m_audioAnalysisStdout.trimmed().split('\n');
         QJsonParseError parseError;
-        const QJsonDocument document = QJsonDocument::fromJson(m_audioAnalysisStdout, &parseError);
+        const QJsonDocument document = lines.isEmpty()
+            ? QJsonDocument()
+            : QJsonDocument::fromJson(lines.last(), &parseError);
         if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
             statusBar()->showMessage(QStringLiteral("Audio analysis finished but returned invalid JSON: %1")
                                          .arg(parseError.errorString()),
                                      10000);
         } else {
-            const QJsonObject object = document.object();
+            const QJsonObject terminal = document.object();
+            const QJsonObject object = terminal.value(QStringLiteral("result")).toObject();
             if (object.value(QStringLiteral("canceled")).toBool()) {
                 statusBar()->showMessage(
                     QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
@@ -5713,6 +5847,7 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
     }
 
     m_audioAnalysisStdout.clear();
+    m_audioAnalysisStdoutBuffer.clear();
     m_audioAnalysisStderr.clear();
     m_audioAnalysisStderrBuffer.clear();
     m_audioAnalysisCancelRequested = false;
@@ -5730,6 +5865,52 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
 {
     if (line.isEmpty()) {
         return;
+    }
+    QJsonParseError jsonError;
+    const QJsonDocument eventDocument = QJsonDocument::fromJson(line.toUtf8(), &jsonError);
+    if (jsonError.error == QJsonParseError::NoError && eventDocument.isObject()) {
+        const QJsonObject event = eventDocument.object();
+        const QString kind = event.value(QStringLiteral("event")).toString();
+        const QString phase = event.value(QStringLiteral("phase")).toString();
+        if (kind == QLatin1String("progress")) {
+            m_audioAnalysisRunState.running = true;
+            m_audioAnalysisRunState.analyzed = event.value(QStringLiteral("completed")).toInt();
+            m_audioAnalysisRunState.total = event.value(QStringLiteral("total")).toInt();
+            m_audioAnalysisRunState.rate = event.contains(QStringLiteral("rate"))
+                ? event.value(QStringLiteral("rate")).toDouble()
+                : -1.0;
+            if (event.contains(QStringLiteral("eta_seconds"))) {
+                m_audioAnalysisRunState.etaSecs = event.value(QStringLiteral("eta_seconds")).toInteger();
+            } else {
+                m_audioAnalysisRunState.etaSecs.reset();
+            }
+            if (phase == QLatin1String("scalar-features")) {
+                m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::WritingFeatures;
+            } else if (phase == QLatin1String("semantic-embeddings")) {
+                m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::SemanticEmbeddings;
+            } else if (phase == QLatin1String("semantic-neighbors")) {
+                m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::SemanticNeighbors;
+            } else if (phase == QLatin1String("model-download")) {
+                m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::ModelDownload;
+            } else {
+                m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::AnalyzingFiles;
+            }
+            m_playerBar->setAudioAnalysisRunStatus(
+                true, AudioAnalysisData::progressLabel(m_audioAnalysisRunState));
+            return;
+        }
+        if (kind == QLatin1String("phase")) {
+            m_audioAnalysisRunState.running = true;
+            m_audioAnalysisRunState.phase = phase == QLatin1String("grouping")
+                ? AudioAnalysisData::LiveStatus::Phase::Grouping
+                : AudioAnalysisData::LiveStatus::Phase::WritingFeatures;
+            m_playerBar->setAudioAnalysisRunStatus(
+                true, AudioAnalysisData::phaseLabel(m_audioAnalysisRunState.phase) + QStringLiteral("…"));
+            return;
+        }
+        if (kind == QLatin1String("result")) {
+            return;
+        }
     }
     static const QRegularExpression progressPattern(
         QStringLiteral("^progress\\s+(\\d+)/(\\d+)(?:\\s+elapsed=([0-9.]+)\\s+rate=([0-9.]+|-)\\s+eta=(\\d+|-))?$"));

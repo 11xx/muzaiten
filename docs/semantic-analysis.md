@@ -1,0 +1,65 @@
+# Semantic Analysis
+
+Semantic audio similarity and free-text search are optional. Native identity,
+duplicate grouping, and scalar analysis work without Python, PyTorch, or model
+files. The saved setting `analysis.semantic.enabled` defaults to `false`.
+
+## Install the provider
+
+The GUI never runs uv. Install the provider yourself in user space:
+
+```sh
+uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
+```
+
+`--torch-backend` is a uv preview feature. Muzaiten's tested packaging uses uv
+0.11.x; if automatic backend selection is unsuitable, use uv's documented CPU
+or CUDA backend selector for the target host. The base provider package remains
+small; the model stack is confined to the `model` extra.
+
+Provider discovery is ordered and handshake-gated: `--provider`,
+`MUZAITEN_FEATURES_CLAP`, the saved GUI path, a sibling executable, uv tool-bin
+locations, then `PATH`. `muzaiten-features status --json` reports the accepted
+path and source. The GUI's provider setup dialog can select a custom executable
+or reset to automatic discovery.
+
+## Consent and model lifecycle
+
+Neither semantic scans nor text queries download weights. Use **Library > Audio
+analysis > Download semantic model…** or:
+
+```sh
+muzaiten-features model download --progress=jsonl
+```
+
+Before consent, the GUI shows the source, CC0-1.0 license, expected size, cache
+path, and SHA-256. Download writes a temporary file, streams byte progress,
+verifies the checksum, and atomically installs it. A missing model is reported
+as `model_missing` (exit 3).
+
+## Refresh and search
+
+Enable **Generate semantic/audio-similarity features**, then run the normal
+audio analysis command. The orchestrator serializes native files, grouping,
+scalar features, semantic embeddings, and—only when needed—neighbors while
+holding `features.sqlite.lock` across all writing phases. Completed inference
+batches are resumable.
+
+```sh
+muzaiten-features refresh --semantic --progress=jsonl
+muzaitenctl semantic-search "melancholic shoegaze" --limit 10
+```
+
+`muzaitenctl` asks `muzaiten-features query --json` for the text vector, then
+keeps ranking and preferred-copy selection locally. Query provenance must match
+the active semantic generation. The hidden `--query-vector-json` option remains
+available only for deterministic tests.
+
+## Provenance
+
+Schema v5 records one active semantic generation: capability, checkpoint hash,
+stable feature revision, vector dimension, provider diagnostics, and timestamps.
+Embeddings and neighbors are generation-scoped. Activating a changed generation
+hides stale rows immediately and exposes truthful partial coverage during a
+resumable refresh; matching legacy CLAP rows migrate into the known generation,
+while mixed or unknown rows stay inactive.

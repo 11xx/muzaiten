@@ -66,33 +66,33 @@ range, so listens later added *behind* that range are never revisited. Run
 force the next import to re-walk full history (imported-listen dedup keeps
 re-walks safe); `reset` is refused while a backfill is running.
 
-## Audio indexer
+## Feature orchestration
 
-`muzaiten-features` is the standalone analyzer used by the app:
+`muzaiten-features` is the native analyzer and optional-provider orchestrator
+used by the app. Paths default through the same XDG/AppPaths rules as the GUI:
 
 ```sh
-muzaiten-features scan --library library.sqlite --features features.sqlite --json
-muzaiten-features scan --library library.sqlite --features features.sqlite --power background --progress
-muzaiten-features scan --library library.sqlite --features features.sqlite --verbose
-muzaiten-features status --features features.sqlite --json
+muzaiten-features refresh --json
+muzaiten-features refresh --semantic --progress=jsonl
+muzaiten-features refresh --no-semantic --power background
+muzaiten-features status --json
+muzaiten-features doctor
+muzaiten-features model download --progress=jsonl
+muzaiten-features query "warm piano with brushed drums" --json
+muzaiten-features neighbors --force
 ```
 
-`--power background|balanced|turbo` controls worker count and process
+Semantic analysis reads `analysis.semantic.enabled` from `state.sqlite` and is
+disabled by default. `--semantic` and `--no-semantic` override one refresh
+without changing the saved setting. Native-only refreshes do not discover or
+start Python. `--provider PATH` overrides provider discovery.
+
+`--power background|balanced|turbo` controls native worker count and process
 priority; `--jobs N` overrides only the worker count. `--verbose` writes
-per-file timing lines to stderr. With `--progress`, stderr carries:
-
-```text
-progress <n>/<m> elapsed=<s> rate=<r> eta=<s>
-phase grouping
-phase features
-progress <n>/<m> elapsed=<s> rate=<r> eta=<s>
-```
-
-Progress keeps one dialect across phases. `phase <name>` switches the domain
-for the following `progress` lines (and may reset UI counters); the same
-`progress n/m elapsed= rate= eta=` line shape is reused. After `phase
-features`, `n/m` counts **stale representative groups** (missing, older, or
-NULL `features.version` rows for the active DSP version), not files.
+per-file diagnostics to stderr. `--progress=jsonl` writes versioned phase,
+progress, and one terminal result event to stdout; stderr remains diagnostic.
+After the scalar-feature phase, counters describe stale representative groups,
+not files. Provider embedding and neighbor events use the same JSONL stream.
 When a representative has a fresh persisted per-file scalar row, the indexer
 copies it into the group row without decoding audio. Missing or stale per-file
 rows use the same resolved `--power` / `--jobs` worker count as file analysis,
@@ -105,20 +105,18 @@ Chromaprint work. Initial scans and recovery from pre-existing ungrouped rows
 still perform an exact full regroup. `phase grouping` remains in the progress
 protocol and is normally instantaneous on an unchanged store.
 
-Both `muzaiten-features status --json` and scan JSON retain `featured_groups` as
+Both `muzaiten-features status --json` and refresh JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /
 `featured_stale` counts for the running build. `muzaitenctl features-status`
 shows the same split and reports when the store's recorded DSP version differs
 from the version expected by the installed binary. Missing or empty store
 version metadata is displayed as `unknown`; row versions remain the authority.
 
-`elapsed` is total scan wall time; `rate` and `eta` are **phase-local** recent
-throughput (roughly the last minute within the current phase). Right after a
-phase boundary the indexer may emit `rate=- eta=-` until the phase window is
-warm enough (about 2 s of movement). There is no second stream name such as
-`features-progress`.
+Rates and ETAs are phase-local. Exit codes are 0 success/no-op, 2 invalid input,
+3 missing optional provider/model component, 4 operational failure, 5 lock
+busy, and 130 canceled.
 
-Scan JSON may include feature-fill counters when that phase ran:
+Refresh JSON may include feature-fill counters when that phase ran:
 `feature_groups_processed`, `features_written` (includes NULL-scalar rows
 written as current version), and `feature_groups_failed` (decode/analyze
 exceptions that stay stale for a rerun). The inventory field
@@ -129,17 +127,15 @@ during the features phase returns
 `"canceled": true` and does not write the last-scan summary meta; completed
 feature rows stay durable.
 
-stdout remains JSON-only when `--json` is used.
+`--json` emits one terminal object and cannot be combined with
+`--progress=jsonl`.
 
 ## Related binaries
 
-- `muzaiten-features` — the audio analysis indexer (identity, duplicate
-  groups, DSP scalars). See [radio.md](radio.md) and
+- `muzaiten-features` — native audio analysis plus optional semantic-provider
+  orchestration. See [semantic-analysis.md](semantic-analysis.md), [radio.md](radio.md), and
   [features-schema.md](features-schema.md).
 - `muzaiten-import` — playlist conversion (`convert`/`youtube`
   subcommands). See [playlist-import-jsonl.md](playlist-import-jsonl.md).
-- `tools/features-clap` — optional CLAP embedding sidecar (Python/uv). Its
-  model-loading commands take `--device auto|cuda|cpu` (default `auto`) and
-  log the chosen device at startup; `scan` accepts `--batch-size N` (default
-  eight) and commits each completed batch for resumability. See
-  `tools/features-clap/README.md`.
+- `muzaiten-features-clap` — optional protocol provider installed separately.
+  It is not a human-facing CLI; invoke it through `muzaiten-features`.

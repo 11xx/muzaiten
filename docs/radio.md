@@ -93,8 +93,7 @@ rate, and ETA). Stopping mid-run keeps completed work; the next analysis
 resumes remaining files and stale groups. Terminal equivalent:
 
 ```sh
-muzaiten-features scan --library ~/.local/share/muzaiten/library.sqlite \
-  --features ~/.local/share/muzaiten/features.sqlite --json --progress
+muzaiten-features refresh --progress=jsonl
 ```
 
 `Library > Audio analysis > Analysis status…` (or
@@ -110,24 +109,23 @@ oracle and an isolated DSF/high-resolution corpus, including a deliberate
 constants are unchanged. Upgrading marks v1 scalar rows stale until the normal
 resumable feature phase refreshes them; stale rows never enter scoring.
 
-**CLAP embeddings** (audio similarity + free-text search) are computed by
-the optional Python tool in `tools/features-clap` — kept out of the app because
-it downloads a ~2 GB model on first use:
+**CLAP embeddings** (audio similarity + free-text search) are opt-in and
+provided by the separately installed `muzaiten-features-clap` package. Native
+analysis never needs Python. Install the provider yourself—the GUI never runs
+uv—and explicitly consent to the model download:
 
 ```sh
-cd tools/features-clap
-uv run muzaiten-features-clap scan --features ~/.local/share/muzaiten/features.sqlite
-uv run muzaiten-features-clap neighbors --features ~/.local/share/muzaiten/features.sqlite
+uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
+muzaiten-features model download
+muzaiten-features refresh --semantic
 ```
 
-`scan` (and `query`) accept `--device auto|cuda|cpu` (default `auto`) and log
-the chosen device at startup; an explicit `--device cuda` fails rather than
-silently falling back to CPU. `scan` uses bounded eight-file inference batches
-by default; tune them with `--batch-size N`. Completed batches are durable, so
-a retry skips them. Each group uses a stable uniformly distributed 10-second
-window—the input length consumed by non-fusion CLAP—without decoding the
-discarded remainder of long tracks; up to four windows decode concurrently.
-See `tools/features-clap/README.md` for details.
+The saved policy is disabled by default. The orchestrator discovers and
+handshakes the provider, holds the same feature-store lock across native and
+semantic phases, uses durable inference batches, and rebuilds neighbors only
+after embeddings change. Scans and queries never download the model implicitly.
+See [semantic-analysis.md](semantic-analysis.md) for provider setup, device,
+consent, progress, and provenance details.
 
 With embeddings present, radio pools get augmented with sonic neighbors
 (tag-poor tracks surface because they *sound* right) and free-text semantic

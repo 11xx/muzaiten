@@ -16,9 +16,7 @@
 namespace {
 
 constexpr int kMinSupportedSchemaVersion = 1;
-// v4 adds the indexer-private file_features table; the app read path is
-// unchanged from v3 (it never reads per-file rows).
-constexpr int kMaxSupportedSchemaVersion = 4;
+constexpr int kMaxSupportedSchemaVersion = 5;
 constexpr qsizetype kMaxSqlBindings = 500;
 
 bool isSupportedSchemaVersion(int version)
@@ -336,8 +334,11 @@ QVector<float> FeatureStore::embeddingForGroup(qint64 groupId) const
     }
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
-        "SELECT dim, vector FROM embeddings WHERE content_group_id = ?"));
+    query.prepare(m_schemaVersion >= 5
+        ? QStringLiteral(
+              "SELECT e.dim, e.vector FROM embeddings e JOIN semantic_generations g"
+              " ON g.id = e.generation_id AND g.active <> 0 WHERE e.content_group_id = ?")
+        : QStringLiteral("SELECT dim, vector FROM embeddings WHERE content_group_id = ?"));
     query.addBindValue(groupId);
     if (!query.exec() || !query.next()) {
         return {};
@@ -355,10 +356,16 @@ QHash<qint64, QVector<float>> FeatureStore::embeddingsForGroups(const QList<qint
     for (qsizetype start = 0; start < groupIds.size(); start += kMaxSqlBindings) {
         const qsizetype count = std::min(kMaxSqlBindings, groupIds.size() - start);
         QSqlQuery query(m_db);
-        query.prepare(QStringLiteral(
-            "SELECT content_group_id, dim, vector FROM embeddings "
-            "WHERE content_group_id IN (%1)")
-                          .arg(placeholders(count)));
+        query.prepare(m_schemaVersion >= 5
+            ? QStringLiteral(
+                  "SELECT e.content_group_id, e.dim, e.vector FROM embeddings e"
+                  " JOIN semantic_generations g ON g.id = e.generation_id AND g.active <> 0"
+                  " WHERE e.content_group_id IN (%1)")
+                  .arg(placeholders(count))
+            : QStringLiteral(
+                  "SELECT content_group_id, dim, vector FROM embeddings "
+                  "WHERE content_group_id IN (%1)")
+                  .arg(placeholders(count)));
         for (qsizetype i = 0; i < count; ++i) {
             query.addBindValue(groupIds.at(start + i));
         }
@@ -383,10 +390,19 @@ QList<QPair<qint64, double>> FeatureStore::neighborsOfGroup(qint64 groupId, int 
     }
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
-        "SELECT neighbor_group_id, cosine FROM track_neighbors "
-        "WHERE content_group_id = ? ORDER BY rank LIMIT ?"));
+    query.prepare(m_schemaVersion >= 5
+        ? QStringLiteral(
+              "SELECT n.neighbor_group_id, n.cosine FROM track_neighbors n"
+              " JOIN semantic_generations g ON g.id = n.generation_id AND g.active <> 0"
+              " WHERE n.content_group_id = ? AND n.algorithm_revision = 'cosine-blockwise-v1'"
+              " AND n.top_k >= ? ORDER BY n.rank LIMIT ?")
+        : QStringLiteral(
+              "SELECT neighbor_group_id, cosine FROM track_neighbors "
+              "WHERE content_group_id = ? ORDER BY rank LIMIT ?"));
     query.addBindValue(groupId);
+    if (m_schemaVersion >= 5) {
+        query.addBindValue(limit);
+    }
     query.addBindValue(limit);
     if (!query.exec()) {
         return rows;
@@ -395,6 +411,28 @@ QList<QPair<qint64, double>> FeatureStore::neighborsOfGroup(qint64 groupId, int 
         rows.push_back({query.value(0).toLongLong(), query.value(1).toDouble()});
     }
     return rows;
+}
+
+FeatureStore::SemanticGeneration FeatureStore::activeSemanticGeneration() const
+{
+    SemanticGeneration generation;
+    if (!isOpen() || m_schemaVersion < 5 || !hasTable(m_db, QStringLiteral("semantic_generations"))) {
+        return generation;
+    }
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral(
+            "SELECT id, capability, model, checkpoint_sha256, feature_revision, vector_dim"
+            " FROM semantic_generations WHERE active <> 0 ORDER BY id DESC LIMIT 1"))
+        || !query.next()) {
+        return generation;
+    }
+    generation.id = query.value(0).toLongLong();
+    generation.capability = query.value(1).toString();
+    generation.model = query.value(2).toString();
+    generation.checkpointSha256 = query.value(3).toString();
+    generation.featureRevision = query.value(4).toString();
+    generation.vectorDimension = query.value(5).toInt();
+    return generation;
 }
 
 FeatureStore::Status FeatureStore::status() const
@@ -427,18 +465,37 @@ FeatureStore::Status FeatureStore::status() const
     result.dspVersion = metaValue(m_db, QStringLiteral("dsp_version"));
     result.expectedDspVersion = QLatin1String(Dsp::kDspVersion);
     if (hasTable(m_db, QStringLiteral("embeddings"))) {
-        result.embeddedGroups = scalarCount(m_db, QStringLiteral("SELECT COUNT(DISTINCT content_group_id) FROM embeddings"));
+        result.embeddedGroups = scalarCount(
+            m_db,
+            m_schemaVersion >= 5
+                ? QStringLiteral(
+                      "SELECT COUNT(DISTINCT e.content_group_id) FROM embeddings e"
+                      " JOIN semantic_generations g ON g.id = e.generation_id AND g.active <> 0")
+                : QStringLiteral("SELECT COUNT(DISTINCT content_group_id) FROM embeddings"));
         QSqlQuery embeddingQuery(m_db);
-        if (embeddingQuery.exec(QStringLiteral(
-                "SELECT model, version, COUNT(*) AS n FROM embeddings "
-                "GROUP BY model, version ORDER BY n DESC, model, version LIMIT 1"))
+        const QString embeddingSql = m_schemaVersion >= 5
+            ? QStringLiteral(
+                  "SELECT g.model, g.feature_revision, COUNT(*) AS n FROM embeddings e"
+                  " JOIN semantic_generations g ON g.id = e.generation_id AND g.active <> 0"
+                  " GROUP BY g.id LIMIT 1")
+            : QStringLiteral(
+                  "SELECT model, version, COUNT(*) AS n FROM embeddings "
+                  "GROUP BY model, version ORDER BY n DESC, model, version LIMIT 1");
+        if (embeddingQuery.exec(embeddingSql)
             && embeddingQuery.next()) {
             result.embeddingModel = embeddingQuery.value(0).toString();
             result.embeddingVersion = embeddingQuery.value(1).toString();
         }
     }
     if (hasTable(m_db, QStringLiteral("track_neighbors"))) {
-        result.neighborRows = scalarCount(m_db, QStringLiteral("SELECT COUNT(*) FROM track_neighbors"));
+        result.neighborRows = scalarCount(
+            m_db,
+            m_schemaVersion >= 5
+                ? QStringLiteral(
+                      "SELECT COUNT(*) FROM track_neighbors n JOIN semantic_generations g"
+                      " ON g.id = n.generation_id AND g.active <> 0"
+                      " WHERE n.algorithm_revision = 'cosine-blockwise-v1'")
+                : QStringLiteral("SELECT COUNT(*) FROM track_neighbors"));
     }
     return result;
 }

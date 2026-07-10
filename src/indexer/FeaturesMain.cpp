@@ -1,3 +1,5 @@
+#include "app/AppPaths.h"
+#include "features/ProviderClient.h"
 #include "indexer/Dsp.h"
 
 #include <QByteArray>
@@ -7,7 +9,9 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QProcess>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -50,13 +54,19 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 4;
+constexpr int kSchemaVersion = 5;
 constexpr int kProcessTimeoutMs = 10 * 60 * 1000;
 constexpr double kChromaprintBerThreshold = 0.15;
 constexpr int kChromaprintOffsetFrames = 3;
 constexpr qint64 kDurationBucketMs = 2'000;
 constexpr const char *kExtractor = "muzaiten-dsp";
+constexpr const char *kSemanticModel = "laion-clap-music-audioset";
+constexpr const char *kSemanticCheckpoint = "music_audioset_epoch_15_esc_90.14.pt";
+constexpr const char *kSemanticCheckpointSha256 = "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd";
+constexpr const char *kSemanticFeatureRevision = "clap-htsat-base-audio-window-v1";
 std::atomic_bool g_stopRequested = false;
+bool g_progressJsonl = false;
+QString g_progressRequestId;
 
 enum class Stage {
     Identity,
@@ -71,9 +81,11 @@ enum class Power {
     Turbo,
 };
 
-struct ScanOptions {
+struct RefreshOptions {
     QString libraryPath;
     QString featuresPath;
+    QString statePath;
+    QString providerPath;
     Stage stage = Stage::All;
     Power power = Power::Unspecified;
     int limit = -1;
@@ -81,6 +93,7 @@ struct ScanOptions {
     bool json = false;
     bool progress = false;
     bool verbose = false;
+    std::optional<bool> semantic;
 };
 
 struct EffectivePower {
@@ -90,7 +103,20 @@ struct EffectivePower {
 
 struct StatusOptions {
     QString featuresPath;
+    QString statePath;
+    QString providerPath;
     bool json = false;
+};
+
+struct ProviderOptions {
+    QString featuresPath;
+    QString statePath;
+    QString providerPath;
+    QString device = QStringLiteral("auto");
+    QString text;
+    bool json = false;
+    bool progress = false;
+    bool force = false;
 };
 
 struct Candidate {
@@ -191,9 +217,53 @@ private:
     QSqlDatabase m_database;
 };
 
+QString readStateSetting(const QString &statePath, const QString &key, const QString &fallback = {})
+{
+    if (!QFileInfo::exists(statePath)) {
+        return fallback;
+    }
+    SqlConnection connection;
+    QSqlDatabase &database = connection.database();
+    database.setDatabaseName(statePath);
+    database.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
+    if (!database.open()) {
+        return fallback;
+    }
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral("SELECT value FROM settings WHERE key = ?"));
+    query.addBindValue(key);
+    return query.exec() && query.next() ? query.value(0).toString() : fallback;
+}
+
+bool settingEnabled(const QString &value)
+{
+    const QString normalized = value.trimmed().toLower();
+    return normalized == QLatin1String("1") || normalized == QLatin1String("true")
+        || normalized == QLatin1String("yes") || normalized == QLatin1String("on");
+}
+
 [[noreturn]] void fail(const QString &message)
 {
     throw std::runtime_error(message.toStdString());
+}
+
+class CommandError final : public std::runtime_error {
+public:
+    CommandError(int code, const QString &message)
+        : std::runtime_error(message.toStdString())
+        , m_code(code)
+    {
+    }
+
+    int code() const { return m_code; }
+
+private:
+    int m_code;
+};
+
+[[noreturn]] void failWithCode(int code, const QString &message)
+{
+    throw CommandError(code, message);
 }
 
 void requestStop(int)
@@ -225,7 +295,7 @@ QString powerName(Power power)
     return QStringLiteral("turbo");
 }
 
-EffectivePower resolvePower(const ScanOptions &options)
+EffectivePower resolvePower(const RefreshOptions &options)
 {
     const std::size_t cores = hardwareThreads();
     const Power effectivePower = options.power == Power::Unspecified ? Power::Turbo : options.power;
@@ -366,6 +436,106 @@ bool featuresTableHasCurrentShape(QSqlDatabase &database)
     return columns == expected;
 }
 
+void initSemanticSchema(QSqlDatabase &database)
+{
+    execSql(database, QStringLiteral(
+                          "CREATE TABLE IF NOT EXISTS semantic_generations("
+                          " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                          " capability TEXT NOT NULL,"
+                          " model TEXT NOT NULL,"
+                          " checkpoint_sha256 TEXT NOT NULL,"
+                          " feature_revision TEXT NOT NULL,"
+                          " vector_dim INTEGER NOT NULL,"
+                          " provider_path TEXT,"
+                          " provider_version TEXT,"
+                          " created_at INTEGER NOT NULL,"
+                          " completed_at INTEGER,"
+                          " active INTEGER NOT NULL DEFAULT 0,"
+                          " UNIQUE(capability, model, checkpoint_sha256, feature_revision, vector_dim))"));
+
+    const bool legacyEmbeddings = database.tables().contains(QStringLiteral("embeddings"))
+        && !tableColumns(database, QStringLiteral("embeddings")).contains(QStringLiteral("generation_id"));
+    const bool legacyNeighbors = database.tables().contains(QStringLiteral("track_neighbors"))
+        && !tableColumns(database, QStringLiteral("track_neighbors")).contains(QStringLiteral("generation_id"));
+    if (legacyEmbeddings) {
+        execSql(database, QStringLiteral("ALTER TABLE embeddings RENAME TO embeddings_v4"));
+    }
+    if (legacyNeighbors) {
+        execSql(database, QStringLiteral("ALTER TABLE track_neighbors RENAME TO track_neighbors_v4"));
+    }
+    execSql(database, QStringLiteral(
+                          "CREATE TABLE IF NOT EXISTS embeddings("
+                          " content_group_id INTEGER NOT NULL,"
+                          " generation_id INTEGER NOT NULL,"
+                          " dim INTEGER NOT NULL,"
+                          " vector BLOB NOT NULL,"
+                          " PRIMARY KEY(content_group_id, generation_id),"
+                          " FOREIGN KEY(generation_id) REFERENCES semantic_generations(id))"));
+    execSql(database, QStringLiteral(
+                          "CREATE TABLE IF NOT EXISTS track_neighbors("
+                          " content_group_id INTEGER NOT NULL,"
+                          " neighbor_group_id INTEGER NOT NULL,"
+                          " rank INTEGER NOT NULL,"
+                          " cosine REAL NOT NULL,"
+                          " generation_id INTEGER NOT NULL,"
+                          " algorithm_revision TEXT NOT NULL,"
+                          " top_k INTEGER NOT NULL,"
+                          " PRIMARY KEY(content_group_id, generation_id, rank),"
+                          " FOREIGN KEY(generation_id) REFERENCES semantic_generations(id))"));
+
+    if (!legacyEmbeddings) {
+        if (legacyNeighbors) {
+            execSql(database, QStringLiteral("DROP TABLE track_neighbors_v4"));
+        }
+        return;
+    }
+
+    QSqlQuery provenance(database);
+    const bool known = provenance.exec(QStringLiteral(
+                           "SELECT COUNT(DISTINCT model || char(0) || version || char(0) || dim),"
+                           " MIN(model), MIN(version), MIN(dim), COUNT(*) FROM embeddings_v4"))
+        && provenance.next()
+        && provenance.value(0).toInt() == 1
+        && provenance.value(1).toString() == QLatin1String(kSemanticModel)
+        && provenance.value(2).toString() == QLatin1String(kSemanticCheckpoint)
+        && provenance.value(3).toInt() == 512;
+    const int rowCount = provenance.isValid() ? provenance.value(4).toInt() : 0;
+    if (rowCount > 0) {
+        QSqlQuery generation(database);
+        generation.prepare(QStringLiteral(
+            "INSERT INTO semantic_generations(capability, model, checkpoint_sha256, feature_revision,"
+            " vector_dim, provider_path, provider_version, created_at, completed_at, active)"
+            " VALUES('clap', ?, ?, ?, ?, 'legacy-v4-migration', NULL, ?, ?, ?)"));
+        generation.addBindValue(known ? QLatin1String(kSemanticModel) : QStringLiteral("legacy-unknown"));
+        generation.addBindValue(known ? QLatin1String(kSemanticCheckpointSha256) : QStringLiteral("unknown"));
+        generation.addBindValue(known ? QLatin1String(kSemanticFeatureRevision) : QStringLiteral("unknown"));
+        generation.addBindValue(provenance.value(3).toInt());
+        generation.addBindValue(QDateTime::currentSecsSinceEpoch());
+        generation.addBindValue(known ? QDateTime::currentSecsSinceEpoch() : QVariant());
+        generation.addBindValue(known ? 1 : 0);
+        execPrepared(generation);
+        const qint64 generationId = generation.lastInsertId().toLongLong();
+        execSql(database, QStringLiteral(
+                              "INSERT INTO embeddings(content_group_id, generation_id, dim, vector)"
+                              " SELECT content_group_id, %1, dim, vector FROM embeddings_v4")
+                              .arg(generationId));
+        if (known && legacyNeighbors) {
+            execSql(database, QStringLiteral(
+                                  "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine,"
+                                  " generation_id, algorithm_revision, top_k)"
+                                  " SELECT content_group_id, neighbor_group_id, rank, cosine, %1,"
+                                  " 'cosine-blockwise-v1',"
+                                  " (SELECT COALESCE(MAX(rank), 0) FROM track_neighbors_v4)"
+                                  " FROM track_neighbors_v4")
+                                  .arg(generationId));
+        }
+    }
+    execSql(database, QStringLiteral("DROP TABLE embeddings_v4"));
+    if (legacyNeighbors) {
+        execSql(database, QStringLiteral("DROP TABLE track_neighbors_v4"));
+    }
+}
+
 void initSchema(QSqlDatabase &database)
 {
     execSql(database, QStringLiteral(
@@ -427,6 +597,8 @@ void initSchema(QSqlDatabase &database)
                           " energy REAL,"
                           " extractor TEXT NOT NULL,"
                           " version TEXT NOT NULL)"));
+
+    initSemanticSchema(database);
 
     QSqlQuery created(database);
     prepareOrFail(created, QStringLiteral("INSERT OR IGNORE INTO meta(key, value) VALUES('created_at', ?)"));
@@ -1561,12 +1733,31 @@ void emitFeatureProgress(int processed, int total,
                          std::chrono::steady_clock::time_point phaseStarted,
                          FeatureProgressRate &phaseRate)
 {
-    QTextStream err(stderr);
-    err.setEncoding(QStringConverter::Utf8);
     const auto now = std::chrono::steady_clock::now();
     const double elapsedSecs = std::chrono::duration<double>(now - scanStarted).count();
     const double phaseElapsedSecs = std::chrono::duration<double>(now - phaseStarted).count();
     const auto snapshot = phaseRate.update(phaseElapsedSecs, processed, total);
+    if (g_progressJsonl) {
+        QJsonObject payload{
+            {QStringLiteral("protocol_version"), 1},
+            {QStringLiteral("request_id"), g_progressRequestId},
+            {QStringLiteral("event"), QStringLiteral("progress")},
+            {QStringLiteral("phase"), QStringLiteral("scalar-features")},
+            {QStringLiteral("completed"), processed},
+            {QStringLiteral("total"), total},
+            {QStringLiteral("unit"), QStringLiteral("groups")},
+        };
+        if (snapshot.rateText != QLatin1String("-")) {
+            payload.insert(QStringLiteral("rate"), snapshot.rateText.toDouble());
+        }
+        if (snapshot.etaText != QLatin1String("-")) {
+            payload.insert(QStringLiteral("eta_seconds"), snapshot.etaText.toLongLong());
+        }
+        QTextStream(stdout) << QJsonDocument(payload).toJson(QJsonDocument::Compact) << '\n';
+        return;
+    }
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
     err << "progress " << processed << '/' << total
         << " elapsed=" << QString::number(elapsedSecs, 'f', 1)
         << " rate=" << snapshot.rateText
@@ -1981,13 +2172,30 @@ private:
 void emitProgress(int analyzed, int total, std::chrono::steady_clock::time_point started,
                   ProgressRate &recentRate)
 {
-    QTextStream err(stderr);
-    err.setEncoding(QStringConverter::Utf8);
     const double elapsedSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     const double rate = recentRate.update(elapsedSecs, analyzed);
     const QString eta = rate > 0.0
         ? QString::number(static_cast<qint64>(std::ceil(static_cast<double>(total - analyzed) / rate)))
         : QStringLiteral("-");
+    if (g_progressJsonl) {
+        QJsonObject payload{
+            {QStringLiteral("protocol_version"), 1},
+            {QStringLiteral("request_id"), g_progressRequestId},
+            {QStringLiteral("event"), QStringLiteral("progress")},
+            {QStringLiteral("phase"), QStringLiteral("native-files")},
+            {QStringLiteral("completed"), analyzed},
+            {QStringLiteral("total"), total},
+            {QStringLiteral("unit"), QStringLiteral("files")},
+            {QStringLiteral("rate"), rate},
+        };
+        if (eta != QLatin1String("-")) {
+            payload.insert(QStringLiteral("eta_seconds"), eta.toLongLong());
+        }
+        QTextStream(stdout) << QJsonDocument(payload).toJson(QJsonDocument::Compact) << '\n';
+        return;
+    }
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
     err << "progress " << analyzed << '/' << total
         << " elapsed=" << QString::number(elapsedSecs, 'f', 1)
         << " rate=" << QString::number(rate, 'f', 1)
@@ -1997,13 +2205,23 @@ void emitProgress(int analyzed, int total, std::chrono::steady_clock::time_point
 
 void emitPhase(const QString &phase)
 {
+    if (g_progressJsonl) {
+        const QJsonObject payload{
+            {QStringLiteral("protocol_version"), 1},
+            {QStringLiteral("request_id"), g_progressRequestId},
+            {QStringLiteral("event"), QStringLiteral("phase")},
+            {QStringLiteral("phase"), phase},
+        };
+        QTextStream(stdout) << QJsonDocument(payload).toJson(QJsonDocument::Compact) << '\n';
+        return;
+    }
     QTextStream err(stderr);
     err.setEncoding(QStringConverter::Utf8);
     err << "phase " << phase << '\n';
     err.flush();
 }
 
-int runScan(const ScanOptions &options)
+QJsonObject runNativeRefresh(const RefreshOptions &options)
 {
     g_stopRequested.store(false, std::memory_order_relaxed);
     std::signal(SIGTERM, requestStop);
@@ -2048,8 +2266,7 @@ int runScan(const ScanOptions &options)
                                              effectivePowerName,
                                              effective.jobs,
                                              &fill);
-        options.json ? emitJson(payload) : emitPlain(payload);
-        return 0;
+        return payload;
     }
 
     const std::vector<Candidate> candidates = loadCandidates(options.libraryPath, options.limit);
@@ -2089,8 +2306,7 @@ int runScan(const ScanOptions &options)
                      effectivePowerName,
                      effective.jobs,
                      fillPtr);
-        options.json ? emitJson(payload) : emitPlain(payload);
-        return 0;
+        return payload;
     }
 
     int lastProgress = 0;
@@ -2167,8 +2383,7 @@ int runScan(const ScanOptions &options)
                      true,
                      effectivePowerName,
                      effective.jobs);
-        options.json ? emitJson(payload) : emitPlain(payload);
-        return 0;
+        return payload;
     }
 
     if (options.progress) {
@@ -2200,7 +2415,113 @@ int runScan(const ScanOptions &options)
                  effectivePowerName,
                  effective.jobs,
                  fillPtr);
-    options.json ? emitJson(payload) : emitPlain(payload);
+    return payload;
+}
+
+void emitTerminalResult(const QJsonObject &payload, bool json, bool progressJsonl)
+{
+    if (progressJsonl) {
+        const QJsonObject event{
+            {QStringLiteral("protocol_version"), 1},
+            {QStringLiteral("request_id"), g_progressRequestId},
+            {QStringLiteral("event"), QStringLiteral("result")},
+            {QStringLiteral("result"), payload},
+        };
+        QTextStream(stdout) << QJsonDocument(event).toJson(QJsonDocument::Compact) << '\n';
+    } else if (json) {
+        emitJson(payload);
+    } else {
+        emitPlain(payload);
+    }
+}
+
+int providerFailureCode(const FeatureProvider::Invocation &invocation)
+{
+    if (invocation.exitCode == 2 || invocation.exitCode == 3 || invocation.exitCode == 5
+        || invocation.exitCode == 130) {
+        return invocation.exitCode;
+    }
+    return 4;
+}
+
+int runRefresh(const RefreshOptions &options)
+{
+    g_progressJsonl = options.progress;
+    g_progressRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+    QLockFile lock(options.featuresPath + QStringLiteral(".lock"));
+    if (!lock.tryLock(0)) {
+        failWithCode(5, QStringLiteral("feature store is busy: %1").arg(lock.error()));
+    }
+
+    QJsonObject result = runNativeRefresh(options);
+    if (result.value(QStringLiteral("canceled")).toBool() || stopRequested()) {
+        emitTerminalResult(result, options.json, options.progress);
+        return 130;
+    }
+
+    const bool semanticEnabled = options.semantic.value_or(settingEnabled(readStateSetting(
+        options.statePath, QStringLiteral("analysis.semantic.enabled"), QStringLiteral("false"))));
+    if (!semanticEnabled) {
+        result.insert(QStringLiteral("semantic"), QJsonObject{{QStringLiteral("state"), QStringLiteral("disabled")}});
+        emitTerminalResult(result, options.json, options.progress);
+        return 0;
+    }
+
+    const QString savedProvider = readStateSetting(
+        options.statePath, QStringLiteral("analysis.semantic.providerPath"));
+    const auto provider = FeatureProvider::discover(options.providerPath, savedProvider);
+    if (!provider) {
+        failWithCode(3, QStringLiteral("semantic analysis is enabled but muzaiten-features-clap was not found or failed its capability handshake"));
+    }
+    const QString device = readStateSetting(
+        options.statePath, QStringLiteral("analysis.semantic.device"), QStringLiteral("auto"));
+    QJsonObject scanParameters{
+        {QStringLiteral("features"), options.featuresPath},
+        {QStringLiteral("device"), device},
+    };
+    if (options.limit > 0) {
+        scanParameters.insert(QStringLiteral("limit"), options.limit);
+    }
+    const FeatureProvider::Invocation scan = FeatureProvider::invoke(
+        provider->path,
+        QStringLiteral("scan"),
+        scanParameters,
+        options.progress,
+        stopRequested,
+        0);
+    if (scan.exitCode != 0) {
+        failWithCode(providerFailureCode(scan),
+                     QStringLiteral("CLAP provider scan failed (%1): %2")
+                         .arg(scan.errorCode, scan.errorMessage));
+    }
+
+    QJsonObject semantic{
+        {QStringLiteral("state"), QStringLiteral("ready")},
+        {QStringLiteral("provider_path"), provider->path},
+        {QStringLiteral("provider_source"), provider->source},
+        {QStringLiteral("capabilities"), provider->capabilities},
+        {QStringLiteral("scan"), scan.result},
+    };
+    if (scan.result.value(QStringLiteral("embedded")).toInt() > 0) {
+        const FeatureProvider::Invocation neighbor = FeatureProvider::invoke(
+            provider->path,
+            QStringLiteral("neighbors"),
+            QJsonObject{{QStringLiteral("features"), options.featuresPath}},
+            options.progress,
+            stopRequested,
+            0);
+        if (neighbor.exitCode != 0) {
+            failWithCode(providerFailureCode(neighbor),
+                         QStringLiteral("CLAP provider neighbor rebuild failed (%1): %2")
+                             .arg(neighbor.errorCode, neighbor.errorMessage));
+        }
+        semantic.insert(QStringLiteral("neighbors"), neighbor.result);
+    } else {
+        semantic.insert(QStringLiteral("neighbors"), QJsonObject{{QStringLiteral("state"), QStringLiteral("unchanged")}});
+    }
+    result.insert(QStringLiteral("semantic"), semantic);
+    emitTerminalResult(result, options.json, options.progress);
     return 0;
 }
 
@@ -2209,18 +2530,177 @@ int runStatus(const StatusOptions &options)
     SqlConnection connection;
     QSqlDatabase database = openFeaturesDatabase(options.featuresPath, connection);
     initSchema(database);
-    const QJsonObject payload = statusJson(database);
+    QJsonObject payload = statusJson(database);
+    const bool enabled = settingEnabled(readStateSetting(
+        options.statePath, QStringLiteral("analysis.semantic.enabled"), QStringLiteral("false")));
+    QJsonObject semantic{{QStringLiteral("enabled"), enabled}};
+    const QString savedProvider = readStateSetting(
+        options.statePath, QStringLiteral("analysis.semantic.providerPath"));
+    if (const auto provider = FeatureProvider::discover(options.providerPath, savedProvider)) {
+        semantic.insert(QStringLiteral("state"), QStringLiteral("provider-ready"));
+        semantic.insert(QStringLiteral("provider_path"), provider->path);
+        semantic.insert(QStringLiteral("provider_source"), provider->source);
+        const auto providerStatus = FeatureProvider::invoke(
+            provider->path,
+            QStringLiteral("status"),
+            QJsonObject{{QStringLiteral("features"), options.featuresPath}},
+            false,
+            [] { return false; });
+        if (providerStatus.exitCode == 0) {
+            semantic.insert(QStringLiteral("provider"), providerStatus.result);
+            const QJsonObject model = providerStatus.result.value(QStringLiteral("model")).toObject();
+            if (!model.value(QStringLiteral("present")).toBool()
+                || !model.value(QStringLiteral("valid")).toBool()) {
+                semantic.insert(QStringLiteral("state"), QStringLiteral("model-missing"));
+            } else if (!providerStatus.result.value(QStringLiteral("model_extra_installed")).toBool()) {
+                semantic.insert(QStringLiteral("state"), QStringLiteral("provider-missing-component"));
+            }
+        } else {
+            semantic.insert(QStringLiteral("state"), QStringLiteral("provider-error"));
+            semantic.insert(QStringLiteral("error"), providerStatus.errorMessage);
+        }
+    } else {
+        semantic.insert(QStringLiteral("state"), QStringLiteral("provider-missing"));
+    }
+    payload.insert(QStringLiteral("semantic"), semantic);
     options.json ? emitJson(payload) : emitPlain(payload);
     return 0;
+}
+
+ProviderOptions parseProviderOptions(QStringList arguments, bool queryCommand)
+{
+    ProviderOptions options;
+    for (int index = 0; index < arguments.size(); ++index) {
+        const QString word = arguments.at(index);
+        if (word == QLatin1String("--features") || word == QLatin1String("--state")
+            || word == QLatin1String("--provider") || word == QLatin1String("--device")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("%1 needs a value").arg(word));
+            }
+            const QString value = arguments.at(++index);
+            if (word == QLatin1String("--features")) {
+                options.featuresPath = value;
+            } else if (word == QLatin1String("--state")) {
+                options.statePath = value;
+            } else if (word == QLatin1String("--provider")) {
+                options.providerPath = value;
+            } else {
+                if (value != QLatin1String("auto") && value != QLatin1String("cuda")
+                    && value != QLatin1String("cpu")) {
+                    failWithCode(2, QStringLiteral("--device must be auto, cuda, or cpu"));
+                }
+                options.device = value;
+            }
+        } else if (word == QLatin1String("--json")) {
+            options.json = true;
+        } else if (word == QLatin1String("--progress=jsonl")) {
+            options.progress = true;
+        } else if (word == QLatin1String("--force")) {
+            options.force = true;
+        } else if (queryCommand && !word.startsWith(QLatin1String("--")) && options.text.isEmpty()) {
+            options.text = word;
+        } else {
+            failWithCode(2, QStringLiteral("unknown option \"%1\"").arg(word));
+        }
+    }
+    if (options.featuresPath.isEmpty()) {
+        options.featuresPath = QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
+    }
+    if (options.statePath.isEmpty()) {
+        options.statePath = QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite"));
+    }
+    if (options.json && options.progress) {
+        failWithCode(2, QStringLiteral("accepts only one of --json and --progress=jsonl"));
+    }
+    if (queryCommand && options.text.trimmed().isEmpty()) {
+        failWithCode(2, QStringLiteral("query needs non-empty text"));
+    }
+    return options;
+}
+
+FeatureProvider::Resolved requireProvider(const ProviderOptions &options)
+{
+    const QString saved = readStateSetting(
+        options.statePath, QStringLiteral("analysis.semantic.providerPath"));
+    const auto provider = FeatureProvider::discover(options.providerPath, saved);
+    if (!provider) {
+        failWithCode(3, QStringLiteral("muzaiten-features-clap was not found or failed its capability handshake"));
+    }
+    return *provider;
+}
+
+int runProviderOperation(const ProviderOptions &options,
+                         const QString &operation,
+                         const QJsonObject &parameters,
+                         bool lockStore)
+{
+    g_stopRequested.store(false, std::memory_order_relaxed);
+    std::signal(SIGTERM, requestStop);
+    std::signal(SIGINT, requestStop);
+    g_progressJsonl = options.progress;
+    g_progressRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    std::optional<QLockFile> lock;
+    if (lockStore) {
+        lock.emplace(options.featuresPath + QStringLiteral(".lock"));
+        if (!lock->tryLock(0)) {
+            failWithCode(5, QStringLiteral("feature store is busy"));
+        }
+    }
+    const FeatureProvider::Resolved provider = requireProvider(options);
+    const FeatureProvider::Invocation invocation = FeatureProvider::invoke(
+        provider.path, operation, parameters, options.progress, stopRequested,
+        operation == QLatin1String("query") ? kProcessTimeoutMs : 0);
+    if (invocation.exitCode != 0) {
+        failWithCode(providerFailureCode(invocation),
+                     QStringLiteral("provider %1 failed (%2): %3")
+                         .arg(operation, invocation.errorCode, invocation.errorMessage));
+    }
+    QJsonObject result = invocation.result;
+    result.insert(QStringLiteral("provider_path"), provider.path);
+    result.insert(QStringLiteral("provider_source"), provider.source);
+    emitTerminalResult(result, options.json, options.progress);
+    return 0;
+}
+
+int runModelDownload(const ProviderOptions &options)
+{
+    return runProviderOperation(options, QStringLiteral("model-download"), {}, false);
+}
+
+int runQuery(const ProviderOptions &options)
+{
+    return runProviderOperation(
+        options,
+        QStringLiteral("query"),
+        QJsonObject{{QStringLiteral("text"), options.text},
+                    {QStringLiteral("device"), options.device}},
+        false);
+}
+
+int runNeighbors(const ProviderOptions &options)
+{
+    if (!options.force) {
+        failWithCode(2, QStringLiteral("neighbors requires --force"));
+    }
+    return runProviderOperation(
+        options,
+        QStringLiteral("neighbors"),
+        QJsonObject{{QStringLiteral("features"), options.featuresPath}},
+        true);
 }
 
 void printUsage()
 {
     std::fputs(
-        "Usage: muzaiten-features <scan|status> [options]\n"
+        "Usage: muzaiten-features <refresh|status|doctor|model download|query|neighbors> [options]\n"
         "\n"
-        "scan --library PATH --features PATH [--limit N] [--jobs N] [--power background|balanced|turbo] [--json] [--progress] [--verbose]\n"
-        "status --features PATH [--json]\n",
+        "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
+        "        [--limit N] [--jobs N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
+        "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
+        "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
+        "model download [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
+        "query TEXT [--state PATH] [--provider PATH] [--device auto|cuda|cpu] [--json]\n"
+        "neighbors --force [--features PATH] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n",
         stderr);
 }
 
@@ -2235,7 +2715,7 @@ Stage parseStage(const QString &value)
     if (value == QLatin1String("all")) {
         return Stage::All;
     }
-    fail(QStringLiteral("--stage must be identity, features, or all"));
+    failWithCode(2, QStringLiteral("--stage must be identity, features, or all"));
 }
 
 Power parsePower(const QString &value)
@@ -2249,67 +2729,87 @@ Power parsePower(const QString &value)
     if (value == QLatin1String("turbo")) {
         return Power::Turbo;
     }
-    fail(QStringLiteral("--power must be background, balanced, or turbo"));
+    failWithCode(2, QStringLiteral("--power must be background, balanced, or turbo"));
 }
 
-ScanOptions parseScan(QStringList arguments)
+RefreshOptions parseRefresh(QStringList arguments)
 {
-    ScanOptions options;
+    RefreshOptions options;
     for (int index = 0; index < arguments.size(); ++index) {
         const QString word = arguments.at(index);
         if (word == QLatin1String("--library")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("scan --library needs a path"));
+                failWithCode(2, QStringLiteral("refresh --library needs a path"));
             }
             options.libraryPath = arguments.at(++index);
         } else if (word == QLatin1String("--features")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("scan --features needs a path"));
+                failWithCode(2, QStringLiteral("refresh --features needs a path"));
             }
             options.featuresPath = arguments.at(++index);
+        } else if (word == QLatin1String("--state")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("refresh --state needs a path"));
+            }
+            options.statePath = arguments.at(++index);
+        } else if (word == QLatin1String("--provider")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("refresh --provider needs a path"));
+            }
+            options.providerPath = arguments.at(++index);
         } else if (word == QLatin1String("--limit")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("scan --limit needs a positive integer"));
+                failWithCode(2, QStringLiteral("refresh --limit needs a positive integer"));
             }
             bool ok = false;
             options.limit = arguments.at(++index).toInt(&ok);
             if (!ok || options.limit <= 0) {
-                fail(QStringLiteral("scan --limit needs a positive integer"));
+                failWithCode(2, QStringLiteral("refresh --limit needs a positive integer"));
             }
         } else if (word == QLatin1String("--jobs")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("scan --jobs needs a positive integer"));
+                failWithCode(2, QStringLiteral("refresh --jobs needs a positive integer"));
             }
             bool ok = false;
             options.jobs = arguments.at(++index).toInt(&ok);
             if (!ok || options.jobs <= 0) {
-                fail(QStringLiteral("scan --jobs needs a positive integer"));
+                failWithCode(2, QStringLiteral("refresh --jobs needs a positive integer"));
             }
         } else if (word == QLatin1String("--stage")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("scan --stage needs a value"));
+                failWithCode(2, QStringLiteral("refresh --stage needs a value"));
             }
             options.stage = parseStage(arguments.at(++index));
         } else if (word == QLatin1String("--power")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("scan --power needs a value"));
+                failWithCode(2, QStringLiteral("refresh --power needs a value"));
             }
             options.power = parsePower(arguments.at(++index));
         } else if (word == QLatin1String("--json")) {
             options.json = true;
-        } else if (word == QLatin1String("--progress")) {
+        } else if (word == QLatin1String("--progress=jsonl")) {
             options.progress = true;
+        } else if (word == QLatin1String("--semantic")) {
+            options.semantic = true;
+        } else if (word == QLatin1String("--no-semantic")) {
+            options.semantic = false;
         } else if (word == QLatin1String("--verbose")) {
             options.verbose = true;
         } else {
-            fail(QStringLiteral("unknown scan option \"%1\"").arg(word));
+            failWithCode(2, QStringLiteral("unknown refresh option \"%1\"").arg(word));
         }
     }
     if (options.featuresPath.isEmpty()) {
-        fail(QStringLiteral("scan needs --features"));
+        options.featuresPath = QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
     }
-    if (options.stage != Stage::Features && options.libraryPath.isEmpty()) {
-        fail(QStringLiteral("scan needs --library"));
+    if (options.libraryPath.isEmpty()) {
+        options.libraryPath = QDir(AppPaths::dataDir()).filePath(QStringLiteral("library.sqlite"));
+    }
+    if (options.statePath.isEmpty()) {
+        options.statePath = QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite"));
+    }
+    if (options.json && options.progress) {
+        failWithCode(2, QStringLiteral("refresh accepts only one of --json and --progress=jsonl"));
     }
     return options;
 }
@@ -2321,17 +2821,30 @@ StatusOptions parseStatus(QStringList arguments)
         const QString word = arguments.at(index);
         if (word == QLatin1String("--features")) {
             if (index + 1 >= arguments.size()) {
-                fail(QStringLiteral("status --features needs a path"));
+                failWithCode(2, QStringLiteral("status --features needs a path"));
             }
             options.featuresPath = arguments.at(++index);
         } else if (word == QLatin1String("--json")) {
             options.json = true;
+        } else if (word == QLatin1String("--state")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("status --state needs a path"));
+            }
+            options.statePath = arguments.at(++index);
+        } else if (word == QLatin1String("--provider")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("status --provider needs a path"));
+            }
+            options.providerPath = arguments.at(++index);
         } else {
-            fail(QStringLiteral("unknown status option \"%1\"").arg(word));
+            failWithCode(2, QStringLiteral("unknown status option \"%1\"").arg(word));
         }
     }
     if (options.featuresPath.isEmpty()) {
-        fail(QStringLiteral("status needs --features"));
+        options.featuresPath = QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
+    }
+    if (options.statePath.isEmpty()) {
+        options.statePath = QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite"));
     }
     return options;
 }
@@ -2350,19 +2863,37 @@ int main(int argc, char **argv)
 
     const QString command = arguments.takeFirst();
     try {
-        if (command == QLatin1String("scan")) {
-            return runScan(parseScan(arguments));
+        if (command == QLatin1String("refresh")) {
+            return runRefresh(parseRefresh(arguments));
         }
         if (command == QLatin1String("status")) {
             return runStatus(parseStatus(arguments));
+        }
+        if (command == QLatin1String("doctor")) {
+            return runStatus(parseStatus(arguments));
+        }
+        if (command == QLatin1String("model")) {
+            if (arguments.isEmpty() || arguments.takeFirst() != QLatin1String("download")) {
+                failWithCode(2, QStringLiteral("model requires the download subcommand"));
+            }
+            return runModelDownload(parseProviderOptions(arguments, false));
+        }
+        if (command == QLatin1String("query")) {
+            return runQuery(parseProviderOptions(arguments, true));
+        }
+        if (command == QLatin1String("neighbors")) {
+            return runNeighbors(parseProviderOptions(arguments, false));
         }
         if (command == QLatin1String("--help") || command == QLatin1String("-h")) {
             printUsage();
             return 0;
         }
-        fail(QStringLiteral("unknown command \"%1\"").arg(command));
+        failWithCode(2, QStringLiteral("unknown command \"%1\"").arg(command));
+    } catch (const CommandError &error) {
+        std::fprintf(stderr, "muzaiten-features: %s\n", error.what());
+        return error.code();
     } catch (const std::exception &error) {
         std::fprintf(stderr, "muzaiten-features: %s\n", error.what());
-        return 1;
+        return 4;
     }
 }

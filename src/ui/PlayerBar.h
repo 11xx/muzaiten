@@ -34,6 +34,7 @@ public:
     // 0 = Background, 1 = Balanced, 2 = Turbo (matches ScanPipeline::Profile order).
     void setScanProfile(int profile);
     void setAnalysisPower(int power);
+    void setSemanticAnalysisEnabled(bool enabled);
     void setShowGuessedPlaceholders(bool show);
     void setExplorerOptionsVisible(bool visible);
     void setQueueViewLayoutActive(bool active);
@@ -165,6 +166,9 @@ signals:
     void scoringWeightsRequested();
     void genreCurationRequested();
     void analysisStatusRequested();
+    void semanticAnalysisEnabledChanged(bool enabled);
+    void semanticProviderSetupRequested();
+    void semanticModelDownloadRequested();
     void duplicateCopiesRequested();
     // Menu-bar Radio entries; seeded from whatever is currently playing, so
     // the owner validates there IS a current track and reports otherwise.
@@ -219,6 +223,7 @@ private:
     class QAction *m_cancelBackfillAction = nullptr;
     class QAction *m_audioAnalysisRunStatusAction = nullptr;
     class QAction *m_analyzeAudioAction = nullptr;
+    class QAction *m_semanticAnalysisEnabledAction = nullptr;
     class QAction *m_cancelAudioAnalysisAction = nullptr;
     class QAction *m_mergeSavedQueueAction = nullptr;
     class QAction *m_releaseDeviceAction = nullptr;

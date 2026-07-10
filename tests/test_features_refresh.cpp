@@ -32,7 +32,7 @@ class IndexerScanTest final : public QObject {
     Q_OBJECT
 
 private slots:
-    void generatedFixtureMatrixWritesSchemaV4Features();
+    void generatedFixtureMatrixWritesSchemaV5Features();
     void groupIdsStayStableWhenLibraryGrows();
     void incrementalRegroupSplitsAndMergesAffectedGroup();
     void powerOptionsReportEffectiveJobs();
@@ -126,12 +126,24 @@ QJsonObject runIndexer(const QStringList &arguments, QByteArray *stderrBytes = n
         QTest::qFail(message.constData(), __FILE__, __LINE__);
         return {};
     }
+    const bool jsonl = arguments.contains(QStringLiteral("--progress=jsonl"));
     if (stderrBytes != nullptr) {
-        *stderrBytes = capturedStderr;
+        *stderrBytes = jsonl ? stdoutBytes : capturedStderr;
     }
 
     QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(stdoutBytes, &parseError);
+    QByteArray resultBytes = stdoutBytes;
+    if (jsonl) {
+        const QList<QByteArray> lines = stdoutBytes.trimmed().split('\n');
+        if (!lines.isEmpty()) {
+            const QJsonDocument terminal = QJsonDocument::fromJson(lines.last(), &parseError);
+            if (terminal.isObject()
+                && terminal.object().value(QStringLiteral("event")).toString() == QLatin1String("result")) {
+                return terminal.object().value(QStringLiteral("result")).toObject();
+            }
+        }
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(resultBytes, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
         const QByteArray message = QStringLiteral("invalid indexer JSON: %1\n%2")
                                        .arg(parseError.errorString(), QString::fromUtf8(stdoutBytes))
@@ -154,6 +166,16 @@ QJsonObject parseJsonObject(const QByteArray &bytes)
         return {};
     }
     return document.object();
+}
+
+QJsonObject parseJsonlResult(const QByteArray &bytes)
+{
+    const QList<QByteArray> lines = bytes.trimmed().split('\n');
+    if (lines.isEmpty()) {
+        return {};
+    }
+    const QJsonObject terminal = parseJsonObject(lines.last());
+    return terminal.value(QStringLiteral("result")).toObject();
 }
 
 QByteArray encodeFingerprint(const QJsonArray &fingerprint)
@@ -457,7 +479,7 @@ double ffmpegIntegratedLufs(const QString &path)
 
 } // namespace
 
-void IndexerScanTest::generatedFixtureMatrixWritesSchemaV4Features()
+void IndexerScanTest::generatedFixtureMatrixWritesSchemaV5Features()
 {
     requireTool(QStringLiteral("ffmpeg"));
     requireTool(QStringLiteral("fpcalc"));
@@ -500,36 +522,32 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV4Features()
 
     QByteArray progressStderr;
     const QJsonObject first = runIndexer({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
         features,
         QStringLiteral("--jobs"),
         QStringLiteral("2"),
-        QStringLiteral("--json"),
-        QStringLiteral("--progress"),
+        QStringLiteral("--progress=jsonl"),
     }, &progressStderr);
     const QString progressLog = QString::fromUtf8(progressStderr);
-    QVERIFY2(progressLog.contains(QRegularExpression(
-                 QStringLiteral("^progress \\d+/\\d+ elapsed=[0-9.]+ rate=([0-9.]+|-) eta=(\\d+|-)$"),
-                 QRegularExpression::MultilineOption)),
+    QVERIFY2(progressLog.contains(QStringLiteral("\"event\":\"progress\"")),
              qPrintable(progressLog));
-    const qsizetype groupingIndex = progressLog.indexOf(QStringLiteral("phase grouping"));
-    const qsizetype featuresIndex = progressLog.indexOf(QStringLiteral("phase features"));
+    const qsizetype groupingIndex = progressLog.indexOf(QStringLiteral("\"phase\":\"grouping\""));
+    const qsizetype featuresIndex = progressLog.indexOf(QStringLiteral("\"phase\":\"features\""));
     QVERIFY2(groupingIndex >= 0, qPrintable(progressLog));
     QVERIFY2(featuresIndex > groupingIndex, qPrintable(progressLog));
     const QString afterFeatures = progressLog.mid(featuresIndex);
-    QVERIFY2(afterFeatures.contains(QRegularExpression(
-                 QStringLiteral("^progress 0/\\d+ elapsed=[0-9.]+ rate=- eta=-$"),
-                 QRegularExpression::MultilineOption)),
+    QVERIFY2(afterFeatures.contains(QStringLiteral("\"completed\":0"))
+                 && afterFeatures.contains(QStringLiteral("\"phase\":\"scalar-features\"")),
              qPrintable(afterFeatures));
     QVERIFY(first.contains(QStringLiteral("feature_groups_processed")));
     QVERIFY(first.contains(QStringLiteral("features_written")));
     QVERIFY(first.contains(QStringLiteral("feature_groups_failed")));
     QVERIFY(first.value(QStringLiteral("features_written")).toInt() >= 6);
     QCOMPARE(first.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
-    QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 4);
+    QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 5);
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 8);
     QCOMPARE(first.value(QStringLiteral("skipped")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("failed")).toInt(), 0);
@@ -635,7 +653,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV4Features()
     QSqlDatabase::removeDatabase(connectionName);
 
     const QJsonObject second = runIndexer({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -660,7 +678,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV4Features()
         features,
         QStringLiteral("--json"),
     });
-    QCOMPARE(status.value(QStringLiteral("schema_version")).toInt(), 4);
+    QCOMPARE(status.value(QStringLiteral("schema_version")).toInt(), 5);
     QCOMPARE(status.value(QStringLiteral("dsp_version")).toString(), QString::fromLatin1(Dsp::kDspVersion));
     QCOMPARE(status.value(QStringLiteral("files")).toInt(), 8);
     QCOMPARE(status.value(QStringLiteral("statuses")).toObject().value(QStringLiteral("ok")).toInt(), 8);
@@ -698,7 +716,7 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
     createLibrary(library, {tone, click});
 
     const QStringList scanArgs{
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -769,17 +787,26 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
                              &error),
                      qPrintable(error));
             QSqlQuery insert(db);
+            QVERIFY2(execSql(query, QStringLiteral(
+                                       "INSERT INTO semantic_generations("
+                                       "capability, model, checkpoint_sha256, feature_revision, vector_dim,"
+                                       " created_at, active) VALUES('clap', 'test-model', 'test-sha', 'v1', 2, 1, 1)"),
+                             &error), qPrintable(error));
+            const qint64 generationId = query.lastInsertId().toLongLong();
             insert.prepare(QStringLiteral(
-                "INSERT INTO embeddings(content_group_id, model, version, dim, vector)"
-                " VALUES(?, 'test-model', 'v1', 2, x'0000803f00000000')"));
+                "INSERT INTO embeddings(content_group_id, generation_id, dim, vector)"
+                " VALUES(?, ?, 2, x'0000803f00000000')"));
             insert.addBindValue(toneGroup);
+            insert.addBindValue(generationId);
             QVERIFY2(insert.exec(), qPrintable(insert.lastError().text()));
             QSqlQuery neighbor(db);
             neighbor.prepare(QStringLiteral(
-                "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine)"
-                " VALUES(?, ?, 1, 0.5)"));
+                "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine,"
+                " generation_id, algorithm_revision, top_k)"
+                " VALUES(?, ?, 1, 0.5, ?, 'cosine-blockwise-v1', 1)"));
             neighbor.addBindValue(toneGroup);
             neighbor.addBindValue(clickGroup);
+            neighbor.addBindValue(generationId);
             QVERIFY2(neighbor.exec(), qPrintable(neighbor.lastError().text()));
             // A one-file addition must not rebuild/delete stable components.
             // The full-regroup path deletes every group before reinserting it;
@@ -840,7 +867,9 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
     QCOMPARE(toneFeatureAfter, toneFeatureBefore);
 
     QSqlQuery embedding(db);
-    embedding.prepare(QStringLiteral("SELECT model FROM embeddings WHERE content_group_id = ?"));
+    embedding.prepare(QStringLiteral(
+        "SELECT g.model FROM embeddings e JOIN semantic_generations g ON g.id = e.generation_id"
+        " WHERE e.content_group_id = ?"));
     embedding.addBindValue(toneGroup);
     QVERIFY2(embedding.exec() && embedding.next(), "planted embedding lost its group");
     QCOMPARE(embedding.value(0).toString(), QStringLiteral("test-model"));
@@ -880,7 +909,7 @@ void IndexerScanTest::incrementalRegroupSplitsAndMergesAffectedGroup()
     const QString features = dir.filePath(QStringLiteral("features.sqlite"));
     createLibrary(library, {original, copy, stable});
     const QStringList scanArgs{
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features, QStringLiteral("--jobs"),
         QStringLiteral("1"), QStringLiteral("--json"),
     };
@@ -1008,7 +1037,7 @@ void IndexerScanTest::powerOptionsReportEffectiveJobs()
 
     for (const Case &item : cases) {
         QStringList args{
-            QStringLiteral("scan"),
+            QStringLiteral("refresh"),
             QStringLiteral("--stage"),
             QStringLiteral("features"),
             QStringLiteral("--features"),
@@ -1048,44 +1077,41 @@ void IndexerScanTest::cancelPersistsCompletedRowsAndRerunSkipsThem()
     createLibrary(library, files);
 
     const QStringList scanArgs{
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
         features,
         QStringLiteral("--jobs"),
         QStringLiteral("1"),
-        QStringLiteral("--json"),
-        QStringLiteral("--progress"),
+        QStringLiteral("--progress=jsonl"),
     };
 
     QProcess process;
-    process.setReadChannel(QProcess::StandardError);
+    process.setReadChannel(QProcess::StandardOutput);
     process.start(muzaitenIndexPath(), scanArgs);
     QVERIFY2(process.waitForStarted(5000), qPrintable(process.errorString()));
 
-    QByteArray stderrBytes;
+    QByteArray progressBytes;
     QElapsedTimer timer;
     timer.start();
     bool sawProgress = false;
-    const QRegularExpression progressPattern(QStringLiteral("^progress\\s+\\d+/\\d+"),
-                                             QRegularExpression::MultilineOption);
+    const QRegularExpression progressPattern(QStringLiteral("\"event\":\"progress\""));
     while (timer.elapsed() < 120000 && process.state() != QProcess::NotRunning && !sawProgress) {
         if (process.waitForReadyRead(1000)) {
-            stderrBytes.append(process.readAllStandardError());
-            sawProgress = QString::fromUtf8(stderrBytes).contains(progressPattern);
+            progressBytes.append(process.readAllStandardOutput());
+            sawProgress = QString::fromUtf8(progressBytes).contains(progressPattern);
         }
     }
-    QVERIFY2(sawProgress, qPrintable(QString::fromUtf8(stderrBytes)));
+    QVERIFY2(sawProgress, qPrintable(QString::fromUtf8(progressBytes)));
 
     process.terminate();
     QVERIFY2(process.waitForFinished(120000), qPrintable(process.errorString()));
-    stderrBytes.append(process.readAllStandardError());
-    const QByteArray stdoutBytes = process.readAllStandardOutput();
+    progressBytes.append(process.readAllStandardOutput());
     QCOMPARE(process.exitStatus(), QProcess::NormalExit);
-    QCOMPARE(process.exitCode(), 0);
+    QCOMPARE(process.exitCode(), 130);
 
-    const QJsonObject canceled = parseJsonObject(stdoutBytes);
+    const QJsonObject canceled = parseJsonlResult(progressBytes);
     QVERIFY(canceled.value(QStringLiteral("canceled")).toBool());
     QVERIFY(canceled.value(QStringLiteral("scanned")).toInt() > 0);
     const int persisted = fileRowCount(features);
@@ -1123,7 +1149,7 @@ void IndexerScanTest::incrementalRescanPreservesFeatureRows()
     createLibrary(library, {toneA, toneB});
 
     const QStringList scanArgs{
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -1245,7 +1271,7 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
     createLibrary(library, paths);
 
     const QJsonObject first = runIndexer({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -1317,7 +1343,7 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
 
     QByteArray progressStderr;
     const QJsonObject refresh = runIndexer({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -1326,16 +1352,14 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
         QStringLiteral("features"),
         QStringLiteral("--jobs"),
         QStringLiteral("2"),
-        QStringLiteral("--json"),
-        QStringLiteral("--progress"),
+        QStringLiteral("--progress=jsonl"),
     }, &progressStderr);
     const QString progressLog = QString::fromUtf8(progressStderr);
-    const qsizetype featuresIndex = progressLog.indexOf(QStringLiteral("phase features"));
+    const qsizetype featuresIndex = progressLog.indexOf(QStringLiteral("\"phase\":\"features\""));
     QVERIFY2(featuresIndex >= 0, qPrintable(progressLog));
     const QString afterFeatures = progressLog.mid(featuresIndex);
-    QVERIFY2(afterFeatures.contains(QRegularExpression(
-                 QStringLiteral("^progress 0/%1 elapsed=[0-9.]+ rate=- eta=-$").arg(expectedStale),
-                 QRegularExpression::MultilineOption)),
+    QVERIFY2(afterFeatures.contains(QStringLiteral("\"completed\":0"))
+                 && afterFeatures.contains(QStringLiteral("\"total\":%1").arg(expectedStale)),
              qPrintable(afterFeatures));
     QCOMPARE(refresh.value(QStringLiteral("feature_groups_processed")).toInt(), expectedStale);
     QCOMPARE(refresh.value(QStringLiteral("features_written")).toInt(), expectedStale);
@@ -1411,7 +1435,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     createLibrary(library, paths);
 
     const QStringList identityArgs{
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -1426,7 +1450,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), kFeatureCancelItems);
 
     runIndexer({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -1470,9 +1494,9 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     }
 
     QProcess process;
-    process.setReadChannel(QProcess::StandardError);
+    process.setReadChannel(QProcess::StandardOutput);
     process.start(muzaitenIndexPath(), {
-                                           QStringLiteral("scan"),
+                                           QStringLiteral("refresh"),
                                            QStringLiteral("--library"),
                                            library,
                                            QStringLiteral("--features"),
@@ -1481,24 +1505,22 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
                                            QStringLiteral("features"),
                                            QStringLiteral("--jobs"),
                                            QStringLiteral("2"),
-                                           QStringLiteral("--json"),
-                                           QStringLiteral("--progress"),
+                                           QStringLiteral("--progress=jsonl"),
                                        });
     QVERIFY2(process.waitForStarted(5000), qPrintable(process.errorString()));
 
     QElapsedTimer timer;
     timer.start();
     bool sawLiveProgress = false;
-    QByteArray stderrBytes;
-    QByteArray stdoutBytes;
+    QByteArray progressBytes;
     // Wait for nonzero mid-phase progress (cadence ≥2s or ≥25), then stop.
-    const QRegularExpression midProgress(QStringLiteral("^progress ([1-9]\\d*)/(\\d+)"),
-                                         QRegularExpression::MultilineOption);
+    const QRegularExpression midProgress(
+        QStringLiteral("\"completed\":([1-9]\\d*).*\"event\":\"progress\".*\"total\":(\\d+)"));
     while (timer.elapsed() < 180'000 && process.state() != QProcess::NotRunning && !sawLiveProgress) {
         if (process.waitForReadyRead(200)) {
-            stderrBytes += process.readAllStandardError();
+            progressBytes += process.readAllStandardOutput();
             QRegularExpressionMatchIterator it =
-                midProgress.globalMatch(QString::fromUtf8(stderrBytes));
+                midProgress.globalMatch(QString::fromUtf8(progressBytes));
             while (it.hasNext()) {
                 const QRegularExpressionMatch match = it.next();
                 const int n = match.captured(1).toInt();
@@ -1510,22 +1532,21 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
             }
         }
     }
-    QVERIFY2(sawLiveProgress, qPrintable(QString::fromUtf8(stderrBytes)));
+    QVERIFY2(sawLiveProgress, qPrintable(QString::fromUtf8(progressBytes)));
     process.terminate();
     QVERIFY2(process.waitForFinished(180'000), qPrintable(process.errorString()));
-    stderrBytes += process.readAllStandardError();
-    stdoutBytes += process.readAllStandardOutput();
+    progressBytes += process.readAllStandardOutput();
     QCOMPARE(process.exitStatus(), QProcess::NormalExit);
-    QCOMPARE(process.exitCode(), 0);
+    QCOMPARE(process.exitCode(), 130);
 
-    const QJsonObject canceledPayload = parseJsonObject(stdoutBytes);
+    const QJsonObject canceledPayload = parseJsonlResult(progressBytes);
     // With per-file scalar rows fresh, this refresh runs on the SQL copy
     // path: the mid-phase progress line at the 25-item cadence gives the
     // terminate() above a real window because every copy is an autocommit
     // write with a stopRequested() check between rows. The assertions below
     // therefore pin cancel/durability/resume semantics for copies too.
     QVERIFY2(canceledPayload.value(QStringLiteral("canceled")).toBool(),
-             qPrintable(QString::fromUtf8(stdoutBytes) + QString::fromUtf8(stderrBytes)));
+             qPrintable(QString::fromUtf8(progressBytes)));
     const int writtenOnCancel = canceledPayload.value(QStringLiteral("features_written")).toInt();
     QVERIFY(writtenOnCancel >= 1);
     QVERIFY(writtenOnCancel < featureCountBefore);
@@ -1559,7 +1580,7 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
 
     QByteArray resumeStderr;
     const QJsonObject resume = runIndexer({
-        QStringLiteral("scan"),
+        QStringLiteral("refresh"),
         QStringLiteral("--library"),
         library,
         QStringLiteral("--features"),
@@ -1568,14 +1589,13 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
         QStringLiteral("features"),
         QStringLiteral("--jobs"),
         QStringLiteral("2"),
-        QStringLiteral("--json"),
-        QStringLiteral("--progress"),
+        QStringLiteral("--progress=jsonl"),
     }, &resumeStderr);
     const QString resumeLog = QString::fromUtf8(resumeStderr);
-    const qsizetype resumeFeatures = resumeLog.indexOf(QStringLiteral("phase features"));
+    const qsizetype resumeFeatures = resumeLog.indexOf(QStringLiteral("\"phase\":\"features\""));
     QVERIFY2(resumeFeatures >= 0, qPrintable(resumeLog));
-    const QRegularExpression zeroProgress(QStringLiteral("^progress 0/(\\d+) "),
-                                          QRegularExpression::MultilineOption);
+    const QRegularExpression zeroProgress(
+        QStringLiteral("\"completed\":0.*\"event\":\"progress\".*\"total\":(\\d+)"));
     const QRegularExpressionMatch match = zeroProgress.match(resumeLog.mid(resumeFeatures));
     QVERIFY2(match.hasMatch(), qPrintable(resumeLog));
     QCOMPARE(match.captured(1).toInt(), staleAfterCancel);
@@ -1622,7 +1642,7 @@ void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
     createLibrary(library, paths);
 
     const QJsonObject first = runIndexer({
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features,
         QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
     });
@@ -1650,13 +1670,13 @@ void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
     }
 
     const QJsonObject rescan = runIndexer({
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features,
         QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
     });
     QCOMPARE(rescan.value(QStringLiteral("scanned")).toInt(), 0);
     QCOMPARE(rescan.value(QStringLiteral("featured_groups")).toInt(), featuredBefore);
-    QCOMPARE(rescan.value(QStringLiteral("schema_version")).toInt(), 4);
+    QCOMPARE(rescan.value(QStringLiteral("schema_version")).toInt(), 5);
 
     {
         QString connectionName;
@@ -1665,7 +1685,7 @@ void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
         QSqlQuery meta(db);
         QVERIFY(meta.exec(QStringLiteral("SELECT value FROM meta WHERE key='schema_version'")));
         QVERIFY(meta.next());
-        QCOMPARE(meta.value(0).toString(), QStringLiteral("4"));
+        QCOMPARE(meta.value(0).toString(), QStringLiteral("5"));
         QSqlQuery count(db);
         QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM features")));
         QVERIFY(count.next());
@@ -1705,7 +1725,7 @@ void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
     createLibrary(library, paths);
 
     const QStringList scanArgs{
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features,
         QStringLiteral("--jobs"), QStringLiteral("2"), QStringLiteral("--json"),
     };
@@ -1737,7 +1757,7 @@ void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
         QSqlDatabase::removeDatabase(connectionName);
     }
     const QJsonObject migration = runIndexer({
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features, QStringLiteral("--stage"),
         QStringLiteral("features"), QStringLiteral("--jobs"), QStringLiteral("2"),
         QStringLiteral("--json"),
@@ -1797,7 +1817,7 @@ void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
         QVERIFY(QFile::remove(path));
     }
     const QJsonObject copies = runIndexer({
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features, QStringLiteral("--stage"),
         QStringLiteral("features"), QStringLiteral("--jobs"), QStringLiteral("2"),
         QStringLiteral("--json"),
@@ -1832,7 +1852,7 @@ void IndexerScanTest::orphanedFileFeatureRowsAreSwept()
     const QString features = dir.filePath(QStringLiteral("features.sqlite"));
     createLibrary(library, paths);
     runIndexer({
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features,
         QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
     });
@@ -1863,7 +1883,7 @@ void IndexerScanTest::orphanedFileFeatureRowsAreSwept()
     QVERIFY(QFile::remove(library));
     createLibrary(library, QStringList() << paths.at(1) << extra);
     runIndexer({
-        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("refresh"), QStringLiteral("--library"), library,
         QStringLiteral("--features"), features,
         QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
     });

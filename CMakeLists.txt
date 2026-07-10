@@ -404,6 +404,8 @@ target_compile_options(muzaiten_dsp PRIVATE
 
 add_executable(muzaiten-features
     src/indexer/FeaturesMain.cpp
+    src/app/AppPaths.cpp
+    src/features/ProviderClient.cpp
 )
 target_include_directories(muzaiten-features PRIVATE src)
 target_link_libraries(muzaiten-features PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)

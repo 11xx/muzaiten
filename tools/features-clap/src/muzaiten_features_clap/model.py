@@ -224,6 +224,7 @@ def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
 class RealClapEmbedder:
     model = MODEL_NAME
     version = MODEL_VERSION
+    dimension = 512
 
     def __init__(self, checkpoint: Path | None = None, device: str | None = None) -> None:
         try:

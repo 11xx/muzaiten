@@ -90,6 +90,16 @@ analyzer, and the `muzaiten-import` playlist tool, plus desktop entry and
 icon. Packaging details and the Last.fm credential model:
 [docs/distribution.md](docs/distribution.md).
 
+Semantic/audio-similarity analysis is disabled by default and separately
+installed. The app never runs uv or downloads a model without consent:
+
+```sh
+uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
+```
+
+Setup, model provenance, CPU/CUDA choices, and refresh behavior:
+[docs/semantic-analysis.md](docs/semantic-analysis.md).
+
 ## Build
 
 Dependencies: CMake 4.x, Ninja, a C++26 compiler, Qt 6.11+ (Core, DBus,
@@ -128,6 +138,7 @@ scrobble backfill. Full reference: [docs/cli.md](docs/cli.md).
 | [docs/state-and-paths.md](docs/state-and-paths.md) | XDG paths, overrides, config file |
 | [docs/data-safety.md](docs/data-safety.md) | The library-safety contract |
 | [docs/features-schema.md](docs/features-schema.md) | `features.sqlite` layout (analysis data) |
+| [docs/semantic-analysis.md](docs/semantic-analysis.md) | Optional CLAP provider, model consent, provenance |
 | [docs/distribution.md](docs/distribution.md) | Packaging, releases, credential model |
 
 ## Notes

@@ -10,17 +10,24 @@
   exposes a stable feature revision. Model inspection and download are separate:
   scans and text queries never download weights implicitly, while explicit
   downloads stream byte progress, verify SHA-256, and install atomically.
+- `muzaiten-features refresh` now owns path resolution, persisted opt-in policy,
+  provider discovery/handshake, serial native and semantic phases, cancellation,
+  and `features.sqlite.lock`. The GUI consumes structured JSONL, exposes the
+  semantic opt-in, provider setup, and explicit model-download consent, and
+  reports missing-provider/model, cancellation, and operational failures.
+- `features.sqlite` schema v5 scopes embeddings and neighbors to one active
+  provenance generation. Readers hide stale generations and reject stale
+  neighbors; matching legacy CLAP corpora migrate in place while mixed or
+  unknown semantic rows remain inactive. Semantic search now obtains query
+  vectors through `muzaiten-features` and verifies the generation fingerprint.
 
 ## [2026.07.10]
 
 ### Added
 
-- The CLAP embedder (`tools/features-clap`) now makes its inference device explicit:
-  `muzaiten-features-clap scan`/`query` accept `--device auto|cuda|cpu` (default
-  `auto`), log the chosen device (with GPU name) at startup so a silent CPU
-  fallback can't burn a run, fail fast when `--device cuda` finds no usable
-  CUDA device, and report the device in JSON output; `status` shows the device
-  an `auto` run would pick.
+- The CLAP provider now makes its inference device explicit: scan/query accept
+  `auto`, `cuda`, or `cpu`, report the selected device, and fail fast when CUDA
+  is explicitly requested but unavailable.
 - Feature-fill progress is now first-class: after `phase features`,
   `muzaiten-features` reports stale group n/m progress (with phase-local rate/
   ETA), JSON counters `feature_groups_processed` / `features_written` /
@@ -36,17 +43,17 @@
   the audio, while a missing or stale fallback decodes once and backfills the
   cache for subsequent retries.
 
-- `muzaiten-features scan` now reports elapsed time, per-stage timing aggregates,
+- `muzaiten-features refresh` now reports elapsed time, per-stage timing aggregates,
   rich progress/ETA lines, phase markers, and optional per-file `--verbose`
   timing lines while keeping JSON output on stdout.
-- `muzaiten-features scan` now streams completed analysis rows to `features.sqlite`
+- `muzaiten-features refresh` now streams completed analysis rows to `features.sqlite`
   during long runs and exits cleanly with `"canceled": true` after SIGTERM or
   SIGINT, so canceling a scan preserves completed work for the next run.
-- `muzaiten-features scan` is substantially faster on large libraries: mel
+- `muzaiten-features refresh` is substantially faster on large libraries: mel
   analysis now skips zero filterbank weights, reuses per-thread filterbanks,
   groups tracks with a duration sliding window, and computes chromaprints
   in-process after a conformance check against fpcalc-era fingerprints.
-- Audio analysis now has explicit power levels. `muzaiten-features scan --power`
+- Audio analysis now has explicit power levels. `muzaiten-features refresh --power`
   accepts `background`, `balanced`, and `turbo`, reports the effective power
   and job count in JSON, and the app persists `Library > Audio analysis >
   Analysis power` with a background default.
@@ -56,7 +63,7 @@
 
 ### Changed
 
-- `muzaiten-features-clap scan` now submits bounded audio batches to CLAP (eight files
+- `CLAP provider scan operation` now submits bounded audio batches to CLAP (eight files
   by default, configurable with `--batch-size`) instead of starving CUDA with
   one-file model calls. Each completed batch is committed as a durable resume
   point, so a later decode/model failure does not discard earlier work. Since
@@ -143,7 +150,7 @@
   track from the error state rebuilds the pipeline, so a genuinely unplayable
   file reports its error once and the next play works instead of requiring a
   track switch to revive playback.
-- `muzaiten-features-clap neighbors` now scales to real libraries: the cosine
+- `CLAP provider neighbor operation` now scales to real libraries: the cosine
   neighbor rebuild works in fixed-size blocks instead of materializing the
   full group-by-group similarity matrix (24 GB at 77k groups) and ranking it
   in pure Python. Ranking semantics are unchanged (highest cosine first,
@@ -353,7 +360,7 @@
   that have no embeddings.
 - `muzaitenctl semantic-search "<text>"` now performs CLI-only free-text
   semantic library search by embedding the query through the optional
-  `muzaiten-features-clap` sidecar, cosine-ranking stored CLAP content-group
+  semantic provider, cosine-ranking stored CLAP content-group
   embeddings, and returning each group as its preferred library copy with a
   score.
 - Local play-event telemetry: every playback now records how it ended

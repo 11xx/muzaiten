@@ -134,6 +134,11 @@ def run_request(
                 _progress_event(request, "semantic-embeddings", completed, total, "groups", started)
             ),
             canceled=canceled,
+            checkpoint_sha256=MODEL_SHA256,
+            feature_revision=FEATURE_REVISION,
+            vector_dim=512,
+            provider_path="muzaiten-features-clap",
+            provider_version=__version__,
         )
         return {
             **result.as_dict(),

@@ -38,6 +38,9 @@ struct LiveStatus {
         AnalyzingFiles,
         Grouping,
         WritingFeatures,
+        SemanticEmbeddings,
+        SemanticNeighbors,
+        ModelDownload,
     };
 
     bool running = false;

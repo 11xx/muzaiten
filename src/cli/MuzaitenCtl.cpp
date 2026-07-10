@@ -492,12 +492,16 @@ QString compactProcessError(QString value)
     return value;
 }
 
-QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
+QVector<float> queryEmbeddingViaFeatures(const QString &text, QJsonObject *metadata, QString *error)
 {
-    const QString executable = QStandardPaths::findExecutable(QStringLiteral("muzaiten-features-clap"));
+    const QString sibling = QDir(QCoreApplication::applicationDirPath())
+                                .filePath(QStringLiteral("muzaiten-features"));
+    const QString executable = QFileInfo(sibling).isExecutable()
+        ? sibling
+        : QStandardPaths::findExecutable(QStringLiteral("muzaiten-features"));
     if (executable.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool (muzaiten-features-clap not found)");
+            *error = QStringLiteral("semantic search requires muzaiten-features");
         }
         return {};
     }
@@ -506,7 +510,7 @@ QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
     process.start(executable, {QStringLiteral("query"), text, QStringLiteral("--json")});
     if (!process.waitForStarted(5000)) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool (could not start muzaiten-features-clap)");
+            *error = QStringLiteral("semantic search could not start muzaiten-features");
         }
         return {};
     }
@@ -514,7 +518,7 @@ QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
         process.kill();
         process.waitForFinished(1000);
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool (query timed out)");
+            *error = QStringLiteral("semantic search query through muzaiten-features timed out");
         }
         return {};
     }
@@ -524,16 +528,21 @@ QVector<float> queryEmbeddingViaEmbedder(const QString &text, QString *error)
             detail = QStringLiteral("query failed");
         }
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool: %1").arg(compactProcessError(detail));
+            *error = QStringLiteral("semantic search requires a ready CLAP provider: %1").arg(compactProcessError(detail));
         }
         return {};
     }
 
     QString parseError;
-    QVector<float> vector = parseQueryVectorJson(process.readAllStandardOutput(), &parseError);
+    const QByteArray output = process.readAllStandardOutput();
+    const QJsonDocument document = QJsonDocument::fromJson(output);
+    if (metadata != nullptr && document.isObject()) {
+        *metadata = document.object();
+    }
+    QVector<float> vector = parseQueryVectorJson(output, &parseError);
     if (vector.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires the embedder tool: %1").arg(parseError);
+            *error = QStringLiteral("semantic search requires a ready CLAP provider: %1").arg(parseError);
         }
         return {};
     }
@@ -602,7 +611,7 @@ QVector<SemanticSearchResult> rankSemanticMatches(const QVector<float> &queryVec
     const QHash<qint64, QVector<float>> embeddings = features.embeddingsForGroups(groupList);
     if (embeddings.isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("features.sqlite has no embeddings; run muzaiten-features-clap scan first");
+            *error = QStringLiteral("features.sqlite has no active embeddings; run muzaiten-features refresh --semantic");
         }
         return {};
     }
@@ -1532,12 +1541,28 @@ int runSemanticSearch(QStringList arguments, bool json)
     }
 
     QString vectorError;
+    QJsonObject queryMetadata;
     const QVector<float> queryVector = queryVectorJson.isEmpty()
-        ? queryEmbeddingViaEmbedder(queryText, &vectorError)
+        ? queryEmbeddingViaFeatures(queryText, &queryMetadata, &vectorError)
         : parseQueryVectorJson(queryVectorJson, &vectorError);
     if (queryVector.isEmpty()) {
         return fail(vectorError.isEmpty() ? QStringLiteral("semantic-search could not build a query embedding")
                                           : vectorError);
+    }
+    if (queryVectorJson.isEmpty() && features.schemaVersion() >= 5) {
+        const auto generation = features.activeSemanticGeneration();
+        const bool matches = generation.valid()
+            && queryMetadata.value(QStringLiteral("capability")).toString() == generation.capability
+            && queryMetadata.value(QStringLiteral("model")).toString() == generation.model
+            && queryMetadata.value(QStringLiteral("checkpoint_sha256")).toString()
+                == generation.checkpointSha256
+            && queryMetadata.value(QStringLiteral("feature_revision")).toString()
+                == generation.featureRevision
+            && queryMetadata.value(QStringLiteral("dim")).toInt() == generation.vectorDimension;
+        if (!matches) {
+            return fail(QStringLiteral(
+                "semantic query generation does not match the active features.sqlite generation; refresh semantic features"));
+        }
     }
 
     QString rankError;

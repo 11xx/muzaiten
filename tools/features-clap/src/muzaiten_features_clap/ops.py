@@ -29,13 +29,30 @@ def scan(
     batch_size: int = 8,
     progress: Callable[[int, int], None] | None = None,
     canceled: Callable[[], bool] | None = None,
+    capability: str = "clap",
+    checkpoint_sha256: str = "unknown",
+    feature_revision: str = "unknown",
+    vector_dim: int | None = None,
+    provider_path: str | None = None,
+    provider_version: str | None = None,
 ) -> ScanResult:
     if batch_size < 1:
         raise ValueError("batch size must be at least 1")
     with db.connect(features_path) as conn:
         db.ensure_schema(conn)
+        dimension = vector_dim if vector_dim is not None else int(getattr(embedder, "dimension", 512))
+        generation_id = db.ensure_generation(
+            conn,
+            capability,
+            embedder.model,
+            checkpoint_sha256,
+            feature_revision,
+            dimension,
+            provider_path,
+            provider_version,
+        )
         representatives = db.representative_groups(conn, limit=limit)
-        existing = db.existing_embedding_groups(conn, embedder.model, embedder.version)
+        existing = db.existing_embedding_groups(conn, generation_id)
         embedded = 0
         pending = [
             representative
@@ -60,8 +77,7 @@ def scan(
                 db.upsert_embedding(
                     conn,
                     representative.content_group_id,
-                    embedder.model,
-                    embedder.version,
+                    generation_id,
                     vector,
                 )
                 embedded += 1
@@ -71,6 +87,8 @@ def scan(
             if progress is not None:
                 progress(embedded, len(pending))
         skipped = len(representatives) - len(pending)
+        if limit is None and embedded + skipped == len(representatives):
+            db.complete_generation(conn, generation_id)
         return ScanResult(len(representatives), embedded, skipped)
 
 
@@ -84,10 +102,14 @@ def neighbors(
 ) -> int:
     with db.connect(features_path) as conn:
         db.ensure_schema(conn)
+        row = conn.execute(
+            "SELECT id FROM semantic_generations WHERE active <> 0 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            raise ValueError("features.sqlite has no active semantic generation")
         return db.rebuild_neighbors(
             conn,
-            model,
-            version,
+            int(row["id"]),
             top_k=top_k,
             progress=progress,
             canceled=canceled,

@@ -38,6 +38,17 @@ public:
         qint64 neighborRows = 0;
     };
 
+    struct SemanticGeneration {
+        qint64 id = -1;
+        QString capability;
+        QString model;
+        QString checkpointSha256;
+        QString featureRevision;
+        int vectorDimension = 0;
+
+        bool valid() const { return id >= 0 && vectorDimension > 0; }
+    };
+
     explicit FeatureStore(const QString &path);
     ~FeatureStore();
 
@@ -55,6 +66,7 @@ public:
     QVector<float> embeddingForGroup(qint64 groupId) const;
     QHash<qint64, QVector<float>> embeddingsForGroups(const QList<qint64> &groupIds) const;
     QList<QPair<qint64, double>> neighborsOfGroup(qint64 groupId, int limit) const;
+    SemanticGeneration activeSemanticGeneration() const;
     Status status() const;
 
 private:

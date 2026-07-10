@@ -511,7 +511,7 @@ private slots:
         QCOMPARE(ctl.exitStatus(), QProcess::NormalExit);
         QCOMPARE(ctl.exitCode(), 1);
         QVERIFY(QString::fromUtf8(ctl.readAllStandardError())
-                    .contains(QStringLiteral("semantic search requires the embedder tool")));
+                    .contains(QStringLiteral("semantic search requires a ready CLAP provider")));
     }
 
     void radioLearnDryRunAndSaveUseJoinedTelemetry()

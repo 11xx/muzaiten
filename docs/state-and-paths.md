@@ -32,8 +32,16 @@ MUZAITEN_DEV_STATE=1 muzaiten
 MUZAITEN_DATA_DIR=... MUZAITEN_STATE_DIR=... MUZAITEN_CACHE_DIR=... MUZAITEN_CONFIG_DIR=... muzaiten
 ```
 
-`muzaitenctl` resolves the same `MUZAITEN_*` environment, so client
-commands target the matching instance.
+`muzaitenctl` and `muzaiten-features` resolve the same `MUZAITEN_*`
+environment, so client and analysis commands target the matching instance.
+Explicit analyzer automation can additionally pass `--library`, `--features`,
+and `--state` paths.
+
+Semantic policy lives in `state.sqlite` under
+`analysis.semantic.enabled` (default `false`),
+`analysis.semantic.providerPath` (default automatic), and
+`analysis.semantic.device` (default `auto`). Model weights live under the XDG
+cache at `muzaiten/models/`, never in the data or state databases.
 
 ## Config file
 

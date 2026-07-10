@@ -187,7 +187,9 @@ void AudioAnalysisStatusDialog::refreshLiveStatus()
     if (m_livePhase != nullptr) {
         m_livePhase->setText(AudioAnalysisData::phaseLabel(status.phase));
     }
-    if (status.phase == AudioAnalysisData::LiveStatus::Phase::WritingFeatures) {
+    if (status.phase == AudioAnalysisData::LiveStatus::Phase::WritingFeatures
+        || status.phase == AudioAnalysisData::LiveStatus::Phase::SemanticEmbeddings
+        || status.phase == AudioAnalysisData::LiveStatus::Phase::SemanticNeighbors) {
         m_liveProgress->setText(status.total > 0
                                     ? QStringLiteral("%1 / %2 groups")
                                           .arg(countText(status.analyzed), countText(status.total))

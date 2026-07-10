@@ -21,6 +21,7 @@ private slots:
     void versionTwoIsOpen();
     void versionThreeIsOpen();
     void versionFourIsOpen();
+    void versionFiveReadsOnlyActiveGeneration();
     void groupLookupsRoundTrip();
     void batchLookupsAndScalarsRoundTrip();
     void statusCountsRows();
@@ -107,7 +108,25 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
                                           " version TEXT NOT NULL)"),
                                       error);
             }
-            if (schemaVersion >= 2) {
+            if (schemaVersion >= 5) {
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE semantic_generations("
+                                          " id INTEGER PRIMARY KEY, capability TEXT, model TEXT,"
+                                          " checkpoint_sha256 TEXT, feature_revision TEXT, vector_dim INTEGER,"
+                                          " active INTEGER)"), error);
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE embeddings("
+                                          " content_group_id INTEGER, generation_id INTEGER, dim INTEGER,"
+                                          " vector BLOB, PRIMARY KEY(content_group_id, generation_id))"), error);
+                ok = ok && execSql(query, QStringLiteral(
+                                          "CREATE TABLE track_neighbors("
+                                          " content_group_id INTEGER, neighbor_group_id INTEGER, rank INTEGER,"
+                                          " cosine REAL, generation_id INTEGER, algorithm_revision TEXT, top_k INTEGER,"
+                                          " PRIMARY KEY(content_group_id, generation_id, rank))"), error);
+                ok = ok && execSql(query, QStringLiteral(
+                                          "INSERT INTO semantic_generations VALUES(1, 'clap', 'fixture-model',"
+                                          " 'fixture-sha', 'fixture-revision', 2, 1)"), error);
+            } else if (schemaVersion >= 2) {
                 ok = ok && execSql(query, QStringLiteral(
                                           "CREATE TABLE embeddings("
                                           " content_group_id INTEGER PRIMARY KEY,"
@@ -240,7 +259,13 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
             }
         }
 
-        if (ok && schemaVersion >= 2) {
+        if (ok && schemaVersion >= 5) {
+            QSqlQuery embeddingA(db);
+            embeddingA.prepare(QStringLiteral(
+                "INSERT INTO embeddings(content_group_id, generation_id, dim, vector) VALUES(10, 1, 2, ?)"));
+            embeddingA.addBindValue(QByteArray::fromHex("0000803f00000000"));
+            ok = embeddingA.exec();
+        } else if (ok && schemaVersion >= 2) {
             QSqlQuery embeddingA(db);
             embeddingA.prepare(QStringLiteral(
                 "INSERT INTO embeddings(content_group_id, model, version, dim, vector) "
@@ -253,7 +278,13 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
                 ok = false;
             }
         }
-        if (ok && schemaVersion >= 2) {
+        if (ok && schemaVersion >= 5) {
+            QSqlQuery embeddingB(db);
+            embeddingB.prepare(QStringLiteral(
+                "INSERT INTO embeddings(content_group_id, generation_id, dim, vector) VALUES(11, 1, 2, ?)"));
+            embeddingB.addBindValue(QByteArray::fromHex("000000000000803f"));
+            ok = embeddingB.exec();
+        } else if (ok && schemaVersion >= 2) {
             QSqlQuery embeddingB(db);
             embeddingB.prepare(QStringLiteral(
                 "INSERT INTO embeddings(content_group_id, model, version, dim, vector) "
@@ -266,7 +297,13 @@ bool createFixtureDatabase(const QString &path, int schemaVersion, QString *erro
                 ok = false;
             }
         }
-        if (ok && schemaVersion >= 2) {
+        if (ok && schemaVersion >= 5) {
+            QSqlQuery neighbors(db);
+            ok = ok && execSql(neighbors, QStringLiteral(
+                                      "INSERT INTO track_neighbors VALUES(10, 11, 1, 0.5, 1, 'cosine-blockwise-v1', 100)"), error);
+            ok = ok && execSql(neighbors, QStringLiteral(
+                                      "INSERT INTO track_neighbors VALUES(11, 10, 1, 0.5, 1, 'cosine-blockwise-v1', 100)"), error);
+        } else if (ok && schemaVersion >= 2) {
             QSqlQuery neighbors(db);
             ok = ok && execSql(neighbors, QStringLiteral(
                                       "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine) "
@@ -376,7 +413,7 @@ void FeatureStoreTest::versionMismatchIsClosed()
     QVERIFY(temp.isValid());
 
     QString error;
-    const QString path = createFixture(temp, 5, &error);
+    const QString path = createFixture(temp, 6, &error);
     QVERIFY2(!path.isEmpty(), qPrintable(error));
     FeatureStore store(path);
     QVERIFY(!store.isOpen());
@@ -398,6 +435,58 @@ void FeatureStoreTest::versionFourIsOpen()
     QVERIFY(store.isOpen());
     QCOMPARE(store.schemaVersion(), 4);
     QVERIFY(store.scalarsForGroup(10).valid);
+}
+
+void FeatureStoreTest::versionFiveReadsOnlyActiveGeneration()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    QString error;
+    const QString path = createFixture(temp, 5, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    {
+        const QString connectionName = QStringLiteral("feature-generation-%1").arg(QUuid::createUuid().toString());
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(path);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec(QStringLiteral(
+                "INSERT INTO semantic_generations VALUES(2, 'clap', 'new-model', 'new-sha', 'new-revision', 2, 0)")));
+            QVERIFY(query.exec(QStringLiteral(
+                "INSERT INTO embeddings VALUES(10, 2, 2, x'000000000000803f')")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    {
+        FeatureStore store(path);
+        QVERIFY(store.isOpen());
+        QCOMPARE(store.schemaVersion(), 5);
+        QCOMPARE(store.embeddingForGroup(10).at(0), 1.0F);
+        QCOMPARE(store.neighborsOfGroup(10, 1).size(), 1);
+        const auto generation = store.activeSemanticGeneration();
+        QVERIFY(generation.valid());
+        QCOMPARE(generation.model, QStringLiteral("fixture-model"));
+    }
+    {
+        const QString connectionName = QStringLiteral("feature-activate-%1").arg(QUuid::createUuid().toString());
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(path);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec(QStringLiteral("UPDATE semantic_generations SET active = (id = 2)")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    FeatureStore partial(path);
+    QCOMPARE(partial.embeddingForGroup(10).at(1), 1.0F);
+    QVERIFY(partial.embeddingForGroup(11).isEmpty());
+    QVERIFY(partial.neighborsOfGroup(10, 1).isEmpty());
+    QCOMPARE(partial.activeSemanticGeneration().featureRevision, QStringLiteral("new-revision"));
 }
 
 void FeatureStoreTest::versionTwoIsOpen()
