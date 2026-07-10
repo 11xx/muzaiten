@@ -97,6 +97,12 @@ struct Candidate {
     QString path;
     qint64 mtime = 0;
     qint64 size = 0;
+    // Group membership before this path was selected for re-analysis. The
+    // file upsert clears content_group_id; retaining the old id in memory
+    // lets the normal scan recompute only the component whose changed member
+    // may have split or merged. -1 means a genuinely new/previously
+    // ungrouped path.
+    qint64 previousGroupId = -1;
 };
 
 struct DecodedAudio {
@@ -486,24 +492,37 @@ std::vector<Candidate> loadCandidates(const QString &libraryPath, int limit)
 std::pair<std::vector<Candidate>, int> splitPending(QSqlDatabase &database,
                                                     const std::vector<Candidate> &candidates)
 {
-    QHash<QString, QPair<qint64, qint64>> known;
+    struct KnownFile {
+        qint64 mtime = 0;
+        qint64 size = 0;
+        qint64 groupId = -1;
+    };
+    QHash<QString, KnownFile> known;
     QSqlQuery existing(database);
-    if (!existing.exec(QStringLiteral("SELECT path, mtime, size FROM files"))) {
+    if (!existing.exec(QStringLiteral(
+            "SELECT path, mtime, size, content_group_id FROM files"))) {
         fail(existing.lastError().text());
     }
     while (existing.next()) {
-        known.insert(existing.value(0).toString(),
-                     {existing.value(1).toLongLong(), existing.value(2).toLongLong()});
+        known.insert(existing.value(0).toString(), {
+            existing.value(1).toLongLong(),
+            existing.value(2).toLongLong(),
+            existing.value(3).isNull() ? -1 : existing.value(3).toLongLong(),
+        });
     }
 
     std::vector<Candidate> pending;
     int skipped = 0;
     for (const Candidate &candidate : candidates) {
         const auto it = known.constFind(candidate.path);
-        if (it != known.constEnd() && it->first == candidate.mtime && it->second == candidate.size) {
+        if (it != known.constEnd() && it->mtime == candidate.mtime && it->size == candidate.size) {
             ++skipped;
         } else {
-            pending.push_back(candidate);
+            Candidate pendingCandidate = candidate;
+            if (it != known.constEnd()) {
+                pendingCandidate.previousGroupId = it->groupId;
+            }
+            pending.push_back(std::move(pendingCandidate));
         }
     }
     return {pending, skipped};
@@ -915,6 +934,29 @@ private:
     std::vector<std::size_t> m_parent;
 };
 
+std::vector<std::vector<std::size_t>> collectGroups(const std::vector<GroupRow> &rows,
+                                                    UnionFind &unionFind)
+{
+    std::map<std::size_t, std::vector<std::size_t>> byRoot;
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        byRoot[unionFind.find(index)].push_back(index);
+    }
+
+    std::vector<std::vector<std::size_t>> groups;
+    groups.reserve(byRoot.size());
+    for (auto &entry : byRoot) {
+        std::vector<std::size_t> members = std::move(entry.second);
+        std::sort(members.begin(), members.end(), [&rows](std::size_t left, std::size_t right) {
+            return rows[left].path < rows[right].path;
+        });
+        groups.push_back(std::move(members));
+    }
+    std::sort(groups.begin(), groups.end(), [&rows](const auto &left, const auto &right) {
+        return rows[left.front()].path < rows[right.front()].path;
+    });
+    return groups;
+}
+
 std::vector<std::vector<std::size_t>> groupedRows(const std::vector<GroupRow> &rows)
 {
     UnionFind unionFind(rows.size());
@@ -947,24 +989,73 @@ std::vector<std::vector<std::size_t>> groupedRows(const std::vector<GroupRow> &r
         }
     }
 
-    std::map<std::size_t, std::vector<std::size_t>> byRoot;
+    return collectGroups(rows, unionFind);
+}
+
+// Existing groups are already connected components. A normal incremental
+// scan only needs to reconsider new/changed rows and every old component that
+// lost a changed member; stable components can be unioned by id without
+// repeating all of their pairwise Chromaprint comparisons. Comparisons with at
+// least one affected row still use the exact full-regroup predicates, so a
+// changed bridge can split its former group and a new bridge can merge groups.
+std::vector<std::vector<std::size_t>> incrementallyGroupedRows(
+    const std::vector<GroupRow> &rows, const QSet<qint64> &affectedGroupIds)
+{
+    UnionFind unionFind(rows.size());
+    std::vector<bool> affected(rows.size(), false);
+    QHash<qint64, std::size_t> stableGroupRepresentative;
     for (std::size_t index = 0; index < rows.size(); ++index) {
-        byRoot[unionFind.find(index)].push_back(index);
+        const qint64 oldGroupId = rows[index].oldGroupId;
+        affected[index] = oldGroupId < 0 || affectedGroupIds.contains(oldGroupId);
+        if (affected[index]) {
+            continue;
+        }
+        const auto it = stableGroupRepresentative.constFind(oldGroupId);
+        if (it == stableGroupRepresentative.constEnd()) {
+            stableGroupRepresentative.insert(oldGroupId, index);
+        } else {
+            unionFind.unite(it.value(), index);
+        }
     }
 
-    std::vector<std::vector<std::size_t>> groups;
-    groups.reserve(byRoot.size());
-    for (auto &entry : byRoot) {
-        std::vector<std::size_t> members = std::move(entry.second);
-        std::sort(members.begin(), members.end(), [&rows](std::size_t left, std::size_t right) {
-            return rows[left].path < rows[right].path;
-        });
-        groups.push_back(std::move(members));
+    // Exact decoded identity is cheap to index and authoritative. Unioning it
+    // globally also heals any historical duplicate groups without adding a
+    // quadratic pass.
+    std::map<QString, std::size_t> byHash;
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const auto [it, inserted] = byHash.emplace(rows[index].decodeHash, index);
+        if (!inserted) {
+            unionFind.unite(it->second, index);
+        }
     }
-    std::sort(groups.begin(), groups.end(), [&rows](const auto &left, const auto &right) {
-        return rows[left.front()].path < rows[right.front()].path;
+
+    std::vector<std::size_t> byDuration(rows.size());
+    std::iota(byDuration.begin(), byDuration.end(), 0);
+    std::sort(byDuration.begin(), byDuration.end(), [&rows](std::size_t left, std::size_t right) {
+        if (rows[left].durationMs != rows[right].durationMs) {
+            return rows[left].durationMs < rows[right].durationMs;
+        }
+        return rows[left].path < rows[right].path;
     });
-    return groups;
+    for (std::size_t leftPos = 0; leftPos < byDuration.size(); ++leftPos) {
+        const std::size_t left = byDuration[leftPos];
+        for (std::size_t rightPos = leftPos + 1; rightPos < byDuration.size(); ++rightPos) {
+            const std::size_t right = byDuration[rightPos];
+            if (rows[right].durationMs - rows[left].durationMs > kDurationBucketMs) {
+                break;
+            }
+            if ((!affected[left] && !affected[right])
+                || unionFind.find(left) == unionFind.find(right)) {
+                continue;
+            }
+            if (bestBitErrorRate(rows[left].chromaprint, rows[right].chromaprint)
+                < kChromaprintBerThreshold) {
+                unionFind.unite(left, right);
+            }
+        }
+    }
+
+    return collectGroups(rows, unionFind);
 }
 
 // Group ids must be STABLE across rescans: features, embeddings, and
@@ -1125,6 +1216,56 @@ int regroupContent(QSqlDatabase &database)
             execPrepared(updateFile);
         }
     }
+    deleteOrphanedGroupRows(database);
+    if (!database.commit()) {
+        fail(database.lastError().text());
+    }
+    return static_cast<int>(groups.size());
+}
+
+int regroupContentIncrementally(QSqlDatabase &database,
+                                const QSet<qint64> &affectedGroupIds)
+{
+    const std::vector<GroupRow> rows = loadGroupRows(database);
+    const std::vector<std::vector<std::size_t>> groups =
+        incrementallyGroupedRows(rows, affectedGroupIds);
+    const std::vector<qint64> groupIds =
+        assignStableGroupIds(rows, groups, maxReservedGroupId(database));
+
+    if (!database.transaction()) {
+        fail(database.lastError().text());
+    }
+    QSqlQuery insertGroup(database);
+    prepareOrFail(insertGroup, QStringLiteral(
+        "INSERT OR IGNORE INTO content_groups(id) VALUES(?)"));
+    QSqlQuery updateFile(database);
+    prepareOrFail(updateFile, QStringLiteral(
+        "UPDATE files SET content_group_id = ? WHERE path = ?"));
+
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+        insertGroup.bindValue(0, groupIds[g]);
+        execPrepared(insertGroup);
+        for (std::size_t member : groups[g]) {
+            if (rows[member].oldGroupId == groupIds[g]) {
+                continue;
+            }
+            updateFile.bindValue(0, groupIds[g]);
+            updateFile.bindValue(1, rows[member].path);
+            execPrepared(updateFile);
+        }
+    }
+
+    // Match the full rebuild's treatment of rows that cannot participate in
+    // grouping, then remove only group ids no longer referenced after a
+    // split/merge. Stable components and their rows are never rewritten.
+    execSql(database, QStringLiteral(
+        "UPDATE files SET content_group_id = NULL "
+        "WHERE status != 'ok' OR duration_ms IS NULL OR decode_hash IS NULL "
+        "OR chromaprint_fp IS NULL"));
+    execSql(database, QStringLiteral(
+        "DELETE FROM content_groups WHERE id NOT IN ("
+        " SELECT DISTINCT content_group_id FROM files"
+        " WHERE content_group_id IS NOT NULL)"));
     deleteOrphanedGroupRows(database);
     if (!database.commit()) {
         fail(database.lastError().text());
@@ -1799,6 +1940,12 @@ int runScan(const ScanOptions &options)
 
     const std::vector<Candidate> candidates = loadCandidates(options.libraryPath, options.limit);
     const auto [pending, skipped] = splitPending(database, candidates);
+    // Ungrouped successful rows that predate this process (for example after
+    // canceling between file analysis and grouping) have lost their previous
+    // group-id context. Preserve exact split semantics by taking the full
+    // fallback in that rare recovery case; rows made pending below retain
+    // their previous ids in Candidate and use the incremental path.
+    const bool hadUngroupedOkRows = hasUngroupedOkRows(database);
     if (pending.empty()) {
         FeatureFillResult fill;
         const FeatureFillResult *fillPtr = nullptr;
@@ -1837,6 +1984,12 @@ int runScan(const ScanOptions &options)
     TimingAccumulator timings;
     timings.reserve(pending.size());
     QHash<QString, ScalarExtraction> extracted;
+    QSet<qint64> affectedGroupIds;
+    for (const Candidate &candidate : pending) {
+        if (candidate.previousGroupId >= 0) {
+            affectedGroupIds.insert(candidate.previousGroupId);
+        }
+    }
     int scanned = 0;
     int failed = 0;
 
@@ -1907,7 +2060,9 @@ int runScan(const ScanOptions &options)
     if (options.progress) {
         emitPhase(QStringLiteral("grouping"));
     }
-    const int groups = regroupContent(database);
+    const int groups = hadUngroupedOkRows
+        ? regroupContent(database)
+        : regroupContentIncrementally(database, affectedGroupIds);
     FeatureFillResult fill;
     const FeatureFillResult *fillPtr = nullptr;
     if (options.stage == Stage::All) {

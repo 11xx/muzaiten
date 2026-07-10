@@ -67,6 +67,12 @@
   Chromaprint regrouping when all successful files already have group ids. On
   the measured 77,590-group store, a warm refresh completes in about 2.7
   seconds with zero decodes instead of repeating hours of audio work.
+- Changed-file scans now regroup only new or changed tracks and the old groups
+  they can split or merge, while preserving unaffected connected components
+  and stable ids. An exact copied 99,159-file / five-change run spent about
+  1.8 seconds grouping and 2.85 seconds end to end, replacing a full-library
+  regroup observed running for more than 17 minutes. Initial scans and
+  interrupted-state recovery retain the exact full regroup fallback.
 - Changing `Analysis power` while a scan is running now applies immediately:
   the scan stops (keeping all completed work) and restarts at the new power.
 - The analysis progress rate (and its ETA) now reports recent throughput

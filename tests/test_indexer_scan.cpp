@@ -34,6 +34,7 @@ class IndexerScanTest final : public QObject {
 private slots:
     void generatedFixtureMatrixWritesSchemaV4Features();
     void groupIdsStayStableWhenLibraryGrows();
+    void incrementalRegroupSplitsAndMergesAffectedGroup();
     void powerOptionsReportEffectiveJobs();
     void cancelPersistsCompletedRowsAndRerunSkipsThem();
     void incrementalRescanPreservesFeatureRows();
@@ -780,6 +781,15 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
             neighbor.addBindValue(toneGroup);
             neighbor.addBindValue(clickGroup);
             QVERIFY2(neighbor.exec(), qPrintable(neighbor.lastError().text()));
+            // A one-file addition must not rebuild/delete stable components.
+            // The full-regroup path deletes every group before reinserting it;
+            // this trigger makes that accidental fallback a hard failure.
+            QVERIFY2(execSql(query, QStringLiteral(
+                "CREATE TRIGGER preserve_existing_groups BEFORE DELETE ON content_groups "
+                "WHEN OLD.id IN (%1, %2) "
+                "BEGIN SELECT RAISE(ABORT, 'stable group was rebuilt'); END")
+                .arg(toneGroup)
+                .arg(clickGroup), &error), qPrintable(error));
             db.close();
         }
         QSqlDatabase::removeDatabase(connectionName);
@@ -844,6 +854,138 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
 
     db.close();
     QSqlDatabase::removeDatabase(connectionName);
+}
+
+void IndexerScanTest::incrementalRegroupSplitsAndMergesAffectedGroup()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir audioDir(dir.filePath(QStringLiteral("audio")));
+    QVERIFY(QDir().mkpath(audioDir.absolutePath()));
+    const QString original = audioDir.filePath(QStringLiteral("a-original.flac"));
+    const QString copy = audioDir.filePath(QStringLiteral("b-copy.flac"));
+    const QString stable = audioDir.filePath(QStringLiteral("z-stable.flac"));
+
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("sine=frequency=440:duration=8:sample_rate=44100"), original});
+    QVERIFY(QFile::copy(original, copy));
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=pink:duration=11:amplitude=0.2:sample_rate=44100:seed=77"),
+            stable});
+
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {original, copy, stable});
+    const QStringList scanArgs{
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features, QStringLiteral("--jobs"),
+        QStringLiteral("1"), QStringLiteral("--json"),
+    };
+    runIndexer(scanArgs);
+
+    qint64 originalGroup = -1;
+    qint64 stableGroup = -1;
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        originalGroup = groupFor(db, original);
+        QCOMPARE(groupFor(db, copy), originalGroup);
+        stableGroup = groupFor(db, stable);
+        QVERIFY(stableGroup != originalGroup);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    // Protect the unrelated component: incremental split/merge may delete an
+    // affected id that becomes orphaned, but it must never rebuild this one.
+    {
+        const QString connectionName = QStringLiteral("incremental-trigger-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery trigger(db);
+            QVERIFY(trigger.exec(QStringLiteral(
+                "CREATE TRIGGER preserve_stable_group BEFORE DELETE ON content_groups "
+                "WHEN OLD.id=%1 BEGIN SELECT RAISE(ABORT, 'stable group was rebuilt'); END")
+                .arg(stableGroup)));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    const auto markChanged = [&](const QString &path) {
+        const QString connectionName = QStringLiteral("incremental-library-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(library);
+            QVERIFY(db.open());
+            QSqlQuery update(db);
+            update.prepare(QStringLiteral(
+                "UPDATE tracks SET file_mtime=file_mtime+1, file_size=? WHERE path=?"));
+            update.addBindValue(QFileInfo(path).size());
+            update.addBindValue(path);
+            QVERIFY(update.exec());
+            QCOMPARE(update.numRowsAffected(), 1);
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    };
+
+    // Changing one member can split a previously transitive component. The
+    // untouched member keeps the stable id; the changed path gets a fresh id.
+    QVERIFY(QFile::remove(copy));
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=white:duration=13:amplitude=0.2:sample_rate=44100:seed=91"),
+            copy});
+    markChanged(copy);
+    const QJsonObject split = runIndexer(scanArgs);
+    QCOMPARE(split.value(QStringLiteral("scanned")).toInt(), 1);
+
+    qint64 splitGroup = -1;
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QCOMPARE(groupFor(db, original), originalGroup);
+        splitGroup = groupFor(db, copy);
+        QVERIFY(splitGroup != originalGroup);
+        QCOMPARE(groupFor(db, stable), stableGroup);
+        QCOMPARE(split.value(QStringLiteral("groups")).toInt(), 3);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    // Restoring exact decoded identity merges only the two affected groups;
+    // the smaller surviving old id wins and the transient split id is swept.
+    QVERIFY(QFile::remove(copy));
+    QVERIFY(QFile::copy(original, copy));
+    markChanged(copy);
+    const QJsonObject merged = runIndexer(scanArgs);
+    QCOMPARE(merged.value(QStringLiteral("scanned")).toInt(), 1);
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QCOMPARE(groupFor(db, original), originalGroup);
+        QCOMPARE(groupFor(db, copy), originalGroup);
+        QCOMPARE(groupFor(db, stable), stableGroup);
+        QCOMPARE(merged.value(QStringLiteral("groups")).toInt(), 2);
+        QSqlQuery transient(db);
+        transient.prepare(QStringLiteral("SELECT COUNT(*) FROM content_groups WHERE id=?"));
+        transient.addBindValue(splitGroup);
+        QVERIFY(transient.exec());
+        QVERIFY(transient.next());
+        QCOMPARE(transient.value(0).toInt(), 0);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 }
 
 void IndexerScanTest::powerOptionsReportEffectiveJobs()
@@ -1087,8 +1229,8 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
         QStringLiteral("aevalsrc=(lt(mod(t\\,0.5)\\,0.002))*0.9:duration=6:sample_rate=44100"),
         QStringLiteral("aevalsrc=(lt(mod(t\\,0.6666667)\\,0.002))*0.9:duration=8:sample_rate=44100"),
         QStringLiteral("aevalsrc=(lt(mod(t\\,0.4)\\,0.002))*0.9:duration=10:sample_rate=44100"),
-        QStringLiteral("anoisesrc=color=pink:duration=5:amplitude=0.2:sample_rate=44100"),
-        QStringLiteral("anoisesrc=color=brown:duration=9:amplitude=0.2:sample_rate=44100"),
+        QStringLiteral("anoisesrc=color=pink:duration=5:amplitude=0.2:sample_rate=44100:seed=41"),
+        QStringLiteral("anoisesrc=color=brown:duration=9:amplitude=0.2:sample_rate=44100:seed=42"),
         QStringLiteral("sine=frequency=440:duration=7:sample_rate=44100"),
     };
     QStringList paths;
