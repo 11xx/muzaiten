@@ -11,6 +11,12 @@ uv run muzaiten-embed status --features /path/to/features.sqlite --json
 uv run muzaiten-embed query "warm piano with brushed drums" --json
 ```
 
+The model-loading commands (`scan`, `query`) accept `--device auto|cuda|cpu`
+(default `auto` = CUDA when available, else CPU) and log the chosen device to
+stderr at startup, so a silent CPU fallback is visible immediately. An explicit
+`--device cuda` fails instead of quietly falling back. `status` reports the
+device an `auto` run would pick.
+
 Tests use a fake embedder and do not download model weights. The real CLAP stack
 is installed separately:
 

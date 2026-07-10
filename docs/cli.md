@@ -138,4 +138,6 @@ stdout remains JSON-only when `--json` is used.
   [features-schema.md](features-schema.md).
 - `muzaiten-import` — playlist conversion (`convert`/`youtube`
   subcommands). See [playlist-import-jsonl.md](playlist-import-jsonl.md).
-- `tools/embedder` — optional CLAP embedding sidecar (Python/uv).
+- `tools/embedder` — optional CLAP embedding sidecar (Python/uv). Its
+  model-loading commands take `--device auto|cuda|cpu` (default `auto`) and
+  log the chosen device at startup; see `tools/embedder/README.md`.
