@@ -40,6 +40,8 @@ private slots:
     void featurePhaseProgressAndStaleDenom();
     void featurePhaseCancelPreservesWrittenRows();
     void schemaV3StoreUpgradesInPlaceKeepingFeatureRows();
+    void forcedRefreshCopiesWithoutTouchingAudio();
+    void orphanedFileFeatureRowsAreSwept();
 };
 
 namespace {
@@ -1504,6 +1506,172 @@ void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_features'")));
         QVERIFY(table.next());
         QCOMPARE(table.value(0).toInt(), 1);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+}
+
+void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioDirPath));
+    const QDir audioDir(audioDirPath);
+    QStringList paths;
+    for (int i = 0; i < 4; ++i) {
+        const QString path = audioDir.filePath(QStringLiteral("copy%1.wav").arg(i));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("anoisesrc=color=pink:duration=%1:amplitude=0.2:sample_rate=44100:seed=%2")
+                    .arg(6 + i * 3)
+                    .arg(i),
+                path});
+        paths.push_back(path);
+    }
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, paths);
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("2"), QStringLiteral("--json"),
+    };
+    const QJsonObject first = runIndexer(scanArgs);
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 4);
+    const int groups = first.value(QStringLiteral("featured_groups")).toInt();
+    QVERIFY(groups >= 2);
+
+    // Migration shape: BOTH group and per-file rows stale (an older-version
+    // store meeting a newer binary). The refresh must decode representatives
+    // and, as a side effect, backfill fresh file_features rows.
+    {
+        QString connectionName = QStringLiteral("copy-test-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery stale(db);
+            QVERIFY(stale.exec(QStringLiteral("UPDATE features SET version='old'")));
+            QVERIFY(stale.exec(QStringLiteral("UPDATE file_features SET version='old'")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    const QJsonObject migration = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features, QStringLiteral("--stage"),
+        QStringLiteral("features"), QStringLiteral("--jobs"), QStringLiteral("2"),
+        QStringLiteral("--json"),
+    });
+    QCOMPARE(migration.value(QStringLiteral("features_written")).toInt(), groups);
+    QCOMPARE(migration.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+
+    // Second forced refresh with fresh per-file rows — and NO audio on disk.
+    // Success is only possible on the pure copy path; any attempted decode
+    // would surface as feature_groups_failed.
+    {
+        QString connectionName = QStringLiteral("copy-test2-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery stale(db);
+            QVERIFY(stale.exec(QStringLiteral("UPDATE features SET version='old'")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    for (const QString &path : paths) {
+        QVERIFY(QFile::remove(path));
+    }
+    const QJsonObject copies = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features, QStringLiteral("--stage"),
+        QStringLiteral("features"), QStringLiteral("--jobs"), QStringLiteral("2"),
+        QStringLiteral("--json"),
+    });
+    QCOMPARE(copies.value(QStringLiteral("features_written")).toInt(), groups);
+    QCOMPARE(copies.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+    QCOMPARE(copies.value(QStringLiteral("featured_stale")).toInt(), 0);
+    QCOMPARE(copies.value(QStringLiteral("canceled")).toBool(), false);
+}
+
+void IndexerScanTest::orphanedFileFeatureRowsAreSwept()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioDirPath));
+    const QDir audioDir(audioDirPath);
+    QStringList paths;
+    for (int i = 0; i < 2; ++i) {
+        const QString path = audioDir.filePath(QStringLiteral("sweep%1.wav").arg(i));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("anoisesrc=color=pink:duration=%1:amplitude=0.2:sample_rate=44100:seed=%2")
+                    .arg(6 + i * 3)
+                    .arg(10 + i),
+                path});
+        paths.push_back(path);
+    }
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, paths);
+    runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+
+    // Simulate a pruned files row; the per-file scalar row must follow it on
+    // the next scan that regroups (adding a third file forces that path).
+    {
+        QString connectionName = QStringLiteral("sweep-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery prune(db);
+            prune.prepare(QStringLiteral("DELETE FROM files WHERE path = ?"));
+            prune.addBindValue(paths.first());
+            QVERIFY(prune.exec());
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    const QString extra = audioDir.filePath(QStringLiteral("sweep-extra.wav"));
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=pink:duration=12:amplitude=0.2:sample_rate=44100:seed=99"),
+            extra});
+    // The pruned file leaves the library too, or the rescan would simply
+    // re-analyze it and rewrite the very row the sweep should remove.
+    QVERIFY(QFile::remove(library));
+    createLibrary(library, QStringList() << paths.at(1) << extra);
+    runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QSqlQuery gone(db);
+        gone.prepare(QStringLiteral("SELECT COUNT(*) FROM file_features WHERE path = ?"));
+        gone.addBindValue(paths.first());
+        QVERIFY(gone.exec());
+        QVERIFY(gone.next());
+        QCOMPARE(gone.value(0).toInt(), 0);
         db.close();
         QSqlDatabase::removeDatabase(connectionName);
     }

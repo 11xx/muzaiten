@@ -1061,6 +1061,10 @@ void deleteOrphanedGroupRows(QSqlDatabase &database)
                               "(SELECT id FROM content_groups) OR neighbor_group_id NOT IN "
                               "(SELECT id FROM content_groups)"));
     }
+    // Per-file scalar rows follow their files row's lifecycle exactly.
+    execSql(database, QStringLiteral(
+                          "DELETE FROM file_features WHERE path NOT IN "
+                          "(SELECT path FROM files)"));
 }
 
 qint64 countScalar(QSqlDatabase &database, const QString &sql);
