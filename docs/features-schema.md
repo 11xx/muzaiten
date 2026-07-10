@@ -122,7 +122,10 @@ members of a changed file's previous group. This preserves exact split, merge,
 and stable-group-id behavior without repeating Chromaprint comparisons between
 unchanged groups. A full regroup remains the recovery path when successful
 ungrouped rows predate the current process, such as after cancellation between
-file analysis and grouping.
+file analysis and grouping. The incremental path keeps lightweight metadata and
+exact hashes globally visible but hydrates Chromaprint blobs only for affected
+tracks and candidates within their duration windows; a large affected set
+automatically switches back to one ordered blob scan.
 
 ## Per-file Feature Rows
 

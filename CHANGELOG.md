@@ -72,7 +72,9 @@
   and stable ids. An exact copied 99,159-file / five-change run spent about
   1.8 seconds grouping and 2.85 seconds end to end, replacing a full-library
   regroup observed running for more than 17 minutes. Initial scans and
-  interrupted-state recovery retain the exact full regroup fallback.
+  interrupted-state recovery retain the exact full regroup fallback. Loading
+  Chromaprint only for affected duration neighborhoods reduced peak RSS from
+  about 894 MiB to 380 MiB in a paired replay while slightly improving time.
 - Changing `Analysis power` while a scan is running now applies immediately:
   the scan stops (keeping all completed work) and restarts at the new power.
 - The analysis progress rate (and its ETA) now reports recent throughput
