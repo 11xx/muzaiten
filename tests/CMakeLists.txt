@@ -148,14 +148,44 @@ target_link_libraries(test_song_identity PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_song_identity PRIVATE cxx_std_26)
 add_test(NAME test_song_identity COMMAND test_song_identity)
 
+# The DSP oracle instruments generate fixture audio in float expressions
+# (e.g. makeMix's multiply-add chains), so they need the same FMA-contraction
+# pin as muzaiten_dsp itself: without it, an ambient -march=native build
+# contracts the GENERATOR and shifts the fixture audio by ULPs, which reads
+# as (bounded, gate-passing) golden drift that the analyzer never caused.
+set(MUZAITEN_DSP_ORACLE_FLAGS
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-ffp-contract=off>)
+
 add_executable(test_dsp
     test_dsp.cpp
-    ../src/indexer/Dsp.cpp
 )
 target_include_directories(test_dsp PRIVATE ../src)
-target_link_libraries(test_dsp PRIVATE Qt6::Core Qt6::Test)
+target_link_libraries(test_dsp PRIVATE muzaiten_dsp Qt6::Core Qt6::Test)
 target_compile_features(test_dsp PRIVATE cxx_std_26)
+target_compile_options(test_dsp PRIVATE ${MUZAITEN_DSP_ORACLE_FLAGS})
 add_test(NAME test_dsp COMMAND test_dsp)
+
+# DSP stage benchmark + v1 oracle printer. Built by default so it can never
+# silently rot, but NOT a registered test: its timings are only meaningful on
+# an otherwise idle machine, and its --goldens output is a diff artifact.
+add_executable(bench_dsp
+    bench_dsp.cpp
+)
+target_include_directories(bench_dsp PRIVATE ../src)
+target_link_libraries(bench_dsp PRIVATE muzaiten_dsp)
+target_compile_features(bench_dsp PRIVATE cxx_std_26)
+target_compile_options(bench_dsp PRIVATE ${MUZAITEN_DSP_ORACLE_FLAGS})
+
+# Fixed-size clean-room real-FFT probe. Like bench_dsp, it is built by default
+# but not registered with CTest because timing is a product decision, not a
+# hermetic pass/fail test.
+add_executable(bench_fft
+    bench_fft.cpp
+)
+target_include_directories(bench_fft PRIVATE ../src)
+target_link_libraries(bench_fft PRIVATE muzaiten_dsp)
+target_compile_features(bench_fft PRIVATE cxx_std_26)
+target_compile_options(bench_fft PRIVATE ${MUZAITEN_DSP_ORACLE_FLAGS})
 
 add_executable(test_indexer_scan
     test_indexer_scan.cpp

@@ -15,14 +15,15 @@
 // Deliberately Qt-free: pure math over std containers, usable from any
 // binary and trivially compilable standalone for oracle cross-checks.
 
+#include "indexer/DspVersion.h"
+
 #include <optional>
 #include <vector>
 
 namespace Dsp {
 
-// Bump whenever any extraction algorithm or constant changes; stored in the
-// features table so stale rows can be recomputed selectively.
-inline constexpr const char *kDspVersion = "muzaiten-dsp-v1";
+// kDspVersion lives in DspVersion.h so the app-side read path can compare
+// row freshness against this binary's version without linking the analyzer.
 
 inline constexpr unsigned kSampleRateHz = 22'050;
 
@@ -63,6 +64,8 @@ struct PowerSpectrogram {
     std::size_t bins() const { return nFft / 2 + 1; }
 };
 
+// The production 2048-point size shares analyze()'s fixed real-FFT path.
+// Other sizes retain the complex reference transform for oracle tooling.
 PowerSpectrogram powerSpectrogram(const std::vector<float> &samples, std::size_t nFft,
                                   std::size_t hop);
 
@@ -73,6 +76,10 @@ public:
     static MelBank slaney(std::size_t nMels, std::size_t nFft, double sampleRate);
 
     std::vector<double> apply(const std::vector<double> &powerFrame) const;
+    // Same projection into caller-owned storage of nMels doubles; every
+    // output bin is written. Lets the analyzer fill a flat mel matrix
+    // without one heap allocation per frame.
+    void applyInto(const std::vector<double> &powerFrame, double *out) const;
 
     struct SparseSpan {
         std::size_t begin = 0;

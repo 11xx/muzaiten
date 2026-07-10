@@ -540,6 +540,9 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
         QVERIFY2(stats.contains(QStringLiteral("p95_ms")), qPrintable(stage));
     }
     QVERIFY(first.value(QStringLiteral("featured_groups")).toInt() >= 6);
+    QCOMPARE(first.value(QStringLiteral("featured_fresh")).toInt(),
+             first.value(QStringLiteral("featured_groups")).toInt());
+    QCOMPARE(first.value(QStringLiteral("featured_stale")).toInt(), 0);
 
     QString connectionName;
     QSqlDatabase db = openReadOnly(features, &connectionName);
@@ -632,6 +635,9 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QCOMPARE(status.value(QStringLiteral("statuses")).toObject().value(QStringLiteral("ok")).toInt(), 8);
     QCOMPARE(status.value(QStringLiteral("featured_groups")).toInt(),
              first.value(QStringLiteral("featured_groups")).toInt());
+    QCOMPARE(status.value(QStringLiteral("featured_fresh")).toInt(),
+             status.value(QStringLiteral("featured_groups")).toInt());
+    QCOMPARE(status.value(QStringLiteral("featured_stale")).toInt(), 0);
 }
 
 void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
@@ -1127,6 +1133,16 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
         QSqlDatabase::removeDatabase(connectionName);
     }
 
+    const QJsonObject staleStatus = runIndexer({
+        QStringLiteral("status"),
+        QStringLiteral("--features"),
+        features,
+        QStringLiteral("--json"),
+    });
+    QCOMPARE(staleStatus.value(QStringLiteral("featured_groups")).toInt(), totalGroups - 1);
+    QCOMPARE(staleStatus.value(QStringLiteral("featured_fresh")).toInt(), totalGroups - expectedStale);
+    QCOMPARE(staleStatus.value(QStringLiteral("featured_stale")).toInt(), expectedStale - 1);
+
     QByteArray progressStderr;
     const QJsonObject refresh = runIndexer({
         QStringLiteral("scan"),
@@ -1153,6 +1169,8 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
     QCOMPARE(refresh.value(QStringLiteral("features_written")).toInt(), expectedStale);
     QCOMPARE(refresh.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
     QCOMPARE(refresh.value(QStringLiteral("canceled")).toBool(), false);
+    QCOMPARE(refresh.value(QStringLiteral("featured_fresh")).toInt(), totalGroups);
+    QCOMPARE(refresh.value(QStringLiteral("featured_stale")).toInt(), 0);
 
     {
         QString connectionName;
@@ -1184,14 +1202,15 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QVERIFY(QDir().mkpath(audioDirPath));
     const QDir audioDir(audioDirPath);
 
-    // Many differently-duration click/noise reps so feature fill lasts long
-    // enough for progress emits + SIGTERM to land mid-phase (jobs=1).
-    constexpr int kFeatureCancelItems = 24;
+    // More than the 25-item progress cadence guarantees a non-final progress
+    // line even when an optimized analyzer finishes the corpus in under two
+    // seconds. Differently-duration reps keep the groups distinct.
+    constexpr int kFeatureCancelItems = 32;
     QStringList paths;
     for (int index = 0; index < kFeatureCancelItems; ++index) {
         const QString path = audioDir.filePath(QStringLiteral("feat-cancel-%1.wav").arg(index));
-        // Long enough that feature fill exceeds the 2s progress cadence so the
-        // test can observe mid-phase n/m before the last tick.
+        // Long enough to exercise real decoding/DSP without making the test's
+        // cancellation trigger depend on wall-clock speed.
         const int duration = 20 + index * 3;
         if (index % 3 == 0) {
             ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
@@ -1335,6 +1354,9 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QVERIFY(writtenOnCancel < featureCountBefore);
     QVERIFY(canceledPayload.value(QStringLiteral("feature_groups_processed")).toInt()
             >= writtenOnCancel);
+    QCOMPARE(canceledPayload.value(QStringLiteral("featured_fresh")).toInt(), writtenOnCancel);
+    QCOMPARE(canceledPayload.value(QStringLiteral("featured_stale")).toInt(),
+             featureCountBefore - writtenOnCancel);
 
     int freshAfterCancel = 0;
     int staleAfterCancel = 0;
@@ -1382,6 +1404,8 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QCOMPARE(match.captured(1).toInt(), staleAfterCancel);
     QCOMPARE(resume.value(QStringLiteral("feature_groups_processed")).toInt(), staleAfterCancel);
     QCOMPARE(resume.value(QStringLiteral("canceled")).toBool(), false);
+    QCOMPARE(resume.value(QStringLiteral("featured_fresh")).toInt(), featureCountBefore);
+    QCOMPARE(resume.value(QStringLiteral("featured_stale")).toInt(), 0);
 
     {
         QString connectionName;

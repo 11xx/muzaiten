@@ -3,6 +3,7 @@
 #include "core/Track.h"
 #include "db/Database.h"
 #include "features/FeatureStore.h"
+#include "indexer/DspVersion.h"
 #include "reco/GenreCuration.h"
 #include "ui/AudioAnalysisData.h"
 
@@ -255,6 +256,9 @@ void CurationDialogDataTest::statusSummaryIncludesEmbeddingCoverage()
     QCOMPARE(summary.status.files, qint64(2));
     QCOMPARE(summary.status.groups, qint64(2));
     QCOMPARE(summary.status.featured, qint64(1));
+    QCOMPARE(summary.status.featuredFresh, qint64(0));
+    QCOMPARE(summary.status.featuredStale, qint64(1));
+    QCOMPARE(summary.status.expectedDspVersion, QLatin1String(Dsp::kDspVersion));
     QCOMPARE(summary.status.embeddedGroups, qint64(2));
     QCOMPARE(summary.status.embeddingModel, QStringLiteral("test-clap"));
     QCOMPARE(summary.status.embeddingVersion, QStringLiteral("v1"));

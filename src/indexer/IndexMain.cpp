@@ -505,7 +505,11 @@ QString compactProcessError(QProcess &process)
     return value;
 }
 
-DecodedAudio decodeCanonical(const QString &path)
+// keepRawPcm retains the raw f32le byte stream alongside the float samples;
+// only the identity path needs it (decode_hash is defined over those bytes).
+// Callers that just analyze should drop it — for an hour-long track the byte
+// copy alone is ~320 MB per worker.
+DecodedAudio decodeCanonical(const QString &path, bool keepRawPcm = true)
 {
     QProcess process;
     process.start(QStringLiteral("ffmpeg"), {
@@ -559,7 +563,11 @@ DecodedAudio decodeCanonical(const QString &path)
     }
 
     DecodedAudio decoded;
-    decoded.pcm = std::move(pcm);
+    if (keepRawPcm) {
+        decoded.pcm = std::move(pcm);
+    } else {
+        pcm = QByteArray();
+    }
     decoded.samples = std::move(samples);
     decoded.durationMs = static_cast<qint64>(
         std::llround(static_cast<double>(sampleCount) * 1000.0 / static_cast<double>(Dsp::kSampleRateHz)));
@@ -640,6 +648,9 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
         analysis.decodeHash = QString::fromLatin1(
             QCryptographicHash::hash(decoded.pcm, QCryptographicHash::Sha256).toHex());
         analysis.timings.hashMs = elapsedMs(hashStarted);
+        // The raw byte copy exists only for the hash above; release it so the
+        // worker holds one PCM copy, not two, through DSP and Chromaprint.
+        decoded.pcm = QByteArray();
 
         const auto dspStarted = std::chrono::steady_clock::now();
         analysis.scalars = Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
@@ -1087,7 +1098,8 @@ std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
     if (it != extracted.constEnd()) {
         return it->known ? std::optional<Dsp::ScalarFeatures>(it->features) : std::nullopt;
     }
-    DecodedAudio decoded = decodeCanonical(path);
+    // Feature refresh never hashes, so skip the raw byte copy entirely.
+    const DecodedAudio decoded = decodeCanonical(path, false);
     return Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
 }
 
@@ -1361,6 +1373,18 @@ qint64 countScalar(QSqlDatabase &database, const QString &sql)
     return query.value(0).toLongLong();
 }
 
+// Feature rows written by a different analyzer version than this binary's;
+// they are recomputed on the next scan and, until then, hidden from the
+// app-side read path (FeatureStore filters by expected version).
+qint64 staleFeatureCount(QSqlDatabase &database)
+{
+    QSqlQuery query(database);
+    prepareOrFail(query, QStringLiteral("SELECT COUNT(*) FROM features WHERE version != ?"));
+    query.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+    execPrepared(query);
+    return query.next() ? query.value(0).toLongLong() : 0;
+}
+
 QJsonObject statusJson(QSqlDatabase &database)
 {
     QJsonObject statuses;
@@ -1377,6 +1401,7 @@ QJsonObject statusJson(QSqlDatabase &database)
 
     const qint64 groups = countScalar(database, QStringLiteral("SELECT COUNT(*) FROM content_groups"));
     const qint64 featured = countScalar(database, QStringLiteral("SELECT COUNT(*) FROM features"));
+    const qint64 featuredStale = staleFeatureCount(database);
     return QJsonObject{
         {QStringLiteral("schema_version"), kSchemaVersion},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
@@ -1385,6 +1410,8 @@ QJsonObject statusJson(QSqlDatabase &database)
         {QStringLiteral("groups"), static_cast<double>(groups)},
         {QStringLiteral("features"), static_cast<double>(featured)},
         {QStringLiteral("featured_groups"), static_cast<double>(featured)},
+        {QStringLiteral("featured_fresh"), static_cast<double>(featured - featuredStale)},
+        {QStringLiteral("featured_stale"), static_cast<double>(featuredStale)},
         {QStringLiteral("pending"), 0},
     };
 }
@@ -1431,9 +1458,9 @@ QJsonObject timingsJson(const TimingAccumulator &timings)
 }
 
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
-                     double elapsedSecs = 0.0, const QJsonObject &timings = {}, bool canceled = false,
-                     const QString &power = QStringLiteral("turbo"), int jobs = 1,
-                     const FeatureFillResult *featureFill = nullptr)
+                     int featuredStale, double elapsedSecs = 0.0, const QJsonObject &timings = {},
+                     bool canceled = false, const QString &power = QStringLiteral("turbo"),
+                     int jobs = 1, const FeatureFillResult *featureFill = nullptr)
 {
     QJsonObject object{
         {QStringLiteral("schema_version"), kSchemaVersion},
@@ -1446,6 +1473,8 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         {QStringLiteral("groups"), groups},
         {QStringLiteral("dsp_version"), QString::fromLatin1(Dsp::kDspVersion)},
         {QStringLiteral("featured_groups"), featured},
+        {QStringLiteral("featured_fresh"), featured - featuredStale},
+        {QStringLiteral("featured_stale"), featuredStale},
         {QStringLiteral("elapsed_secs"), elapsedSecs},
         {QStringLiteral("timings"), timings.isEmpty() ? timingsJson({}) : timings},
     };
@@ -1629,6 +1658,7 @@ int runScan(const ScanOptions &options)
         const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
         const int featured = currentFeatureCount(database);
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
+                                             static_cast<int>(staleFeatureCount(database)),
                                              std::chrono::duration<double>(
                                                  std::chrono::steady_clock::now() - scanStarted)
                                                  .count(),
@@ -1665,6 +1695,7 @@ int runScan(const ScanOptions &options)
             std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count();
         const QJsonObject payload =
             scanJson(0, skipped, 0, currentGroupCount(database), currentFeatureCount(database),
+                     static_cast<int>(staleFeatureCount(database)),
                      elapsedSecs,
                      {},
                      fill.canceled,
@@ -1732,6 +1763,7 @@ int runScan(const ScanOptions &options)
     if (stopRequested()) {
         const QJsonObject payload =
             scanJson(scanned, skipped, failed, currentGroupCount(database), currentFeatureCount(database),
+                     static_cast<int>(staleFeatureCount(database)),
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
                      timingsJson(timings),
                      true,
@@ -1761,6 +1793,7 @@ int runScan(const ScanOptions &options)
     }
     const QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
+                 static_cast<int>(staleFeatureCount(database)),
                  elapsedSecs,
                  timingsJson(timings),
                  fill.canceled,

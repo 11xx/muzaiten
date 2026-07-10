@@ -1,5 +1,7 @@
 #include "features/FeatureStore.h"
 
+#include "indexer/DspVersion.h"
+
 #include <QDebug>
 #include <QFileInfo>
 #include <QSqlError>
@@ -282,10 +284,16 @@ FeatureStore::Scalars FeatureStore::scalarsForGroup(qint64 groupId) const
         return {};
     }
 
+    // Strict freshness: only rows written by the DSP version this binary
+    // expects feed the app/radio. Stale rows (older version, or an entire
+    // store last written by an older binary) read as absent until the
+    // indexer recomputes them — radio silently consuming old-scale scalars
+    // would be worse than briefly having none.
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT %1 FROM features WHERE content_group_id = ?")
+    query.prepare(QStringLiteral("SELECT %1 FROM features WHERE content_group_id = ? AND version = ?")
                       .arg(scalarColumnList(m_schemaVersion, false)));
     query.addBindValue(groupId);
+    query.addBindValue(QLatin1String(Dsp::kDspVersion));
     if (!query.exec() || !query.next()) {
         return {};
     }
@@ -302,11 +310,13 @@ QHash<qint64, FeatureStore::Scalars> FeatureStore::scalarsForGroups(const QList<
     for (qsizetype start = 0; start < groupIds.size(); start += kMaxSqlBindings) {
         const qsizetype count = std::min(kMaxSqlBindings, groupIds.size() - start);
         QSqlQuery query(m_db);
-        query.prepare(QStringLiteral("SELECT %1 FROM features WHERE content_group_id IN (%2)")
+        query.prepare(QStringLiteral("SELECT %1 FROM features WHERE content_group_id IN (%2)"
+                                     " AND version = ?")
                           .arg(scalarColumnList(m_schemaVersion, true), placeholders(count)));
         for (qsizetype i = 0; i < count; ++i) {
             query.addBindValue(groupIds.at(start + i));
         }
+        query.addBindValue(QLatin1String(Dsp::kDspVersion));
         if (!query.exec()) {
             continue;
         }
@@ -405,7 +415,15 @@ FeatureStore::Status FeatureStore::status() const
     }
     result.groups = scalarCount(m_db, QStringLiteral("SELECT COUNT(*) FROM content_groups"));
     result.featured = scalarCount(m_db, QStringLiteral("SELECT COUNT(*) FROM features"));
+    QSqlQuery freshQuery(m_db);
+    freshQuery.prepare(QStringLiteral("SELECT COUNT(*) FROM features WHERE version = ?"));
+    freshQuery.addBindValue(QLatin1String(Dsp::kDspVersion));
+    if (freshQuery.exec() && freshQuery.next()) {
+        result.featuredFresh = freshQuery.value(0).toLongLong();
+    }
+    result.featuredStale = result.featured - result.featuredFresh;
     result.dspVersion = metaValue(m_db, QStringLiteral("dsp_version"));
+    result.expectedDspVersion = QLatin1String(Dsp::kDspVersion);
     if (hasTable(m_db, QStringLiteral("embeddings"))) {
         result.embeddedGroups = scalarCount(m_db, QStringLiteral("SELECT COUNT(DISTINCT content_group_id) FROM embeddings"));
         QSqlQuery embeddingQuery(m_db);

@@ -1,8 +1,11 @@
 #include "indexer/Dsp.h"
+#include "indexer/Fft.h"
 
 #include <QTest>
 
+#include <array>
 #include <cmath>
+#include <complex>
 #include <numbers>
 
 // Ported 1:1 from the Rust original's unit tests (archived at
@@ -71,6 +74,69 @@ std::vector<double> impulseEnvelope(double bpm, double frameRate, double secs)
 
 constexpr double kFrameRate = static_cast<double>(Dsp::kSampleRateHz) / 512.0;
 
+// Music-like deterministic mix; kept byte-identical with tests/bench_dsp.cpp
+// so the bench's --goldens output and this file's oracle describe the same
+// audio.
+std::vector<float> makeMix(double secs)
+{
+    const std::vector<float> clicks = makeClicks(123.0, secs);
+    const std::vector<float> low = makeSine(220.0, 0.3, secs);
+    const std::vector<float> high = makeSine(3520.0, 0.1, secs);
+    const std::vector<float> bed = makeNoise(clicks.size(), 42);
+    std::vector<float> out(clicks.size());
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        out[i] = 0.5F * clicks[i] + low[i] + high[i] + 0.05F * bed[i];
+    }
+    return out;
+}
+
+// Tone, hard silence gap, tone; kept byte-identical with bench_dsp.cpp. The
+// only fixture whose frame stream mixes silent and non-silent frames, so it
+// pins the kSilentFramePower skip path the other fixtures never branch on.
+std::vector<float> makeGappedTone()
+{
+    const std::vector<float> tone = makeSine(880.0, 0.6, 4.0);
+    std::vector<float> out(tone);
+    out.insert(out.end(), Dsp::kSampleRateHz * 2, 0.0F);
+    out.insert(out.end(), tone.begin(), tone.end());
+    return out;
+}
+
+// The v1 oracle uses one shared tolerance: tight enough that any semantic
+// change to the analyzer trips it, loose enough to absorb FMA/libm noise
+// across build regimes. Values near zero (cancellation residue) collapse
+// into the absolute floor by design.
+bool nearGolden(double actual, double expected)
+{
+    return std::abs(actual - expected) <= std::max(1e-9, 1e-9 * std::abs(expected));
+}
+
+bool nearGolden(const std::optional<double> &actual, const std::optional<double> &expected)
+{
+    if (actual.has_value() != expected.has_value()) {
+        return false;
+    }
+    return !expected.has_value() || nearGolden(*actual, *expected);
+}
+
+bool nearAbsolute(double actual, double expected, double tolerance)
+{
+    return std::abs(actual - expected) <= tolerance;
+}
+
+struct GoldenRow {
+    const char *fixture;
+    std::optional<double> tempoBpm;
+    std::optional<double> loudnessLufs;
+    std::optional<double> loudnessStdDb;
+    double centroidMeanHz;
+    double centroidStdHz;
+    double flatnessMean;
+    double zcr;
+    double onsetRateHz;
+    std::optional<double> energy;
+};
+
 } // namespace
 
 class DspTest : public QObject
@@ -96,6 +162,8 @@ private slots:
     void sineCentroidSitsAtItsFrequencyAndIsTonal();
     void noiseIsFlatterAndBrighterThanALowSine();
     void sineZeroCrossingRateTracksFrequency();
+    void cleanRoomRealFftMatchesV1Reference();
+    void v2ScalarsStayWithinMeasuredV1Tolerance();
 };
 
 void DspTest::tooShortInputYieldsNothing()
@@ -289,6 +357,154 @@ void DspTest::sineZeroCrossingRateTracksFrequency()
     const double expected = 2.0 * 1000.0 / Dsp::kSampleRateHz;
     QVERIFY2(std::abs(rate - expected) < 0.1 * expected,
              qPrintable(QStringLiteral("zcr %1").arg(rate)));
+}
+
+void DspTest::cleanRoomRealFftMatchesV1Reference()
+{
+    using Frame = std::array<float, Fft::RealFft2048::kSize>;
+    std::vector<std::pair<QString, Frame>> fixtures;
+
+    fixtures.emplace_back(QStringLiteral("silence"), Frame{});
+
+    Frame firstImpulse{};
+    firstImpulse.front() = 1.0F;
+    fixtures.emplace_back(QStringLiteral("first-impulse"), firstImpulse);
+
+    Frame lastImpulse{};
+    lastImpulse.back() = 1.0F;
+    fixtures.emplace_back(QStringLiteral("last-impulse"), lastImpulse);
+
+    Frame dc{};
+    dc.fill(0.25F);
+    fixtures.emplace_back(QStringLiteral("dc"), dc);
+
+    Frame nyquist{};
+    for (std::size_t i = 0; i < nyquist.size(); ++i) {
+        nyquist[i] = i % 2 == 0 ? 0.5F : -0.5F;
+    }
+    fixtures.emplace_back(QStringLiteral("nyquist"), nyquist);
+
+    Frame mixed{};
+    const std::vector<float> noise = makeNoise(mixed.size(), 73);
+    for (std::size_t i = 0; i < mixed.size(); ++i) {
+        const double phase = 2.0 * std::numbers::pi * static_cast<double>(i) /
+                             static_cast<double>(mixed.size());
+        mixed[i] = static_cast<float>(0.7 * std::sin(43.0 * phase) +
+                                      0.2 * std::cos(317.0 * phase) + 0.03 * noise[i]);
+    }
+    fixtures.emplace_back(QStringLiteral("mixed"), mixed);
+
+    Fft::RealFft2048 plan;
+    Fft::RealFft2048::Workspace workspace;
+    std::array<Fft::ComplexFloat, Fft::RealFft2048::kBins> output{};
+    std::array<double, Fft::RealFft2048::kBins> power{};
+
+    for (const auto &[name, input] : fixtures) {
+        std::vector<std::complex<double>> reference(input.size());
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            reference[i] = {static_cast<double>(input[i]), 0.0};
+        }
+        Fft::complexRadix2Reference(reference);
+        plan.forward(input, output, workspace);
+        plan.forwardPower(input, power, workspace);
+
+        for (std::size_t bin = 0; bin < output.size(); ++bin) {
+            const std::complex<double> candidate(output[bin].real, output[bin].imag);
+            const double binScale = std::max(1.0, std::abs(reference[bin]));
+            QVERIFY2(std::abs(candidate - reference[bin]) <= 5e-4 * binScale,
+                     qPrintable(QStringLiteral("%1 bin %2 candidate=(%3,%4) reference=(%5,%6)")
+                                    .arg(name)
+                                    .arg(bin)
+                                    .arg(candidate.real(), 0, 'g', 12)
+                                    .arg(candidate.imag(), 0, 'g', 12)
+                                    .arg(reference[bin].real(), 0, 'g', 12)
+                                    .arg(reference[bin].imag(), 0, 'g', 12)));
+            const double referencePower = std::norm(reference[bin]);
+            QVERIFY2(std::abs(power[bin] - referencePower) <= 1e-3 * std::max(1.0, referencePower),
+                     qPrintable(QStringLiteral("%1 power bin %2 candidate=%3 reference=%4")
+                                    .arg(name)
+                                    .arg(bin)
+                                    .arg(power[bin], 0, 'g', 12)
+                                    .arg(referencePower, 0, 'g', 12)));
+        }
+    }
+}
+
+void DspTest::v2ScalarsStayWithinMeasuredV1Tolerance()
+{
+    // muzaiten-dsp-v1 oracle, captured 2026-07-09 at master@8e46549 via
+    // `bench_dsp --goldens` (RelWithDebInfo, generic x86-64, gcc, no FMA
+    // contraction pinned yet). Regime-scoped reference: bit-exactness across
+    // refactors is proven by diffing the bench's full-precision output; this
+    // test is also the v2 comparison oracle. The fixed float real FFT leaves
+    // tempo, loudness, ZCR, onset rate, and energy exact on this corpus; only
+    // spectral reductions move. Measured maxima across these hostile fixtures
+    // plus the isolated 6.3-hour DSF/high-resolution corpus were 6.2e-6 Hz
+    // centroid mean, 4.4e-5 Hz centroid std (near-zero click residue), and
+    // 1.7e-10 flatness. The field-specific gates below bound those named
+    // effects instead of hiding them behind one global epsilon.
+    constexpr double kCentroidToleranceHz = 1e-4;
+    constexpr double kFlatnessTolerance = 1e-9;
+    std::vector<float> quietNoise = makeNoise(Dsp::kSampleRateHz * 10, 7);
+    for (float &sample : quietNoise) {
+        sample *= 0.01F;
+    }
+    const std::vector<std::pair<GoldenRow, std::vector<float>>> cases = {
+        {{"silence-10s", std::nullopt, std::nullopt, std::nullopt, 0.0, 0.0, 0.0, 0.0, 0.0,
+          std::nullopt},
+         std::vector<float>(Dsp::kSampleRateHz * 10, 0.0F)},
+        {{"tone-gap-tone-10s", 30.046329941860463, -7.8136234982408661, 4.7033343975730224,
+          879.78140147729061, 2.1343771918360384, 2.6010183789833646e-05,
+          0.063850629708071233, 0.1998441125290023, 0.55705047087044957},
+         makeGappedTone()},
+        {{"sine440-10s", 112.34714673913044, -9.6644690533454369, 0.00017316047801089145,
+          439.97390961613837, 0.34491538285773432, 6.8534369758426706e-07,
+          0.039904942879559542, 0.0, 0.50671061893309133},
+         makeSine(440.0, 0.5, 10.0)},
+        {{"quiet-noise-10s", 123.046875, -41.847875202932698, 0.038684863534371436,
+          5498.6712804053541, 134.40748654491614, 0.56008263486076393, 0.49851019732515794,
+          9.7923615139211133, 0.40000000000000002},
+         quietNoise},
+        {{"noise-10s", 123.046875, -1.8478750090323097, 0.038684864062500948,
+          5498.6712803356886, 134.4074865790883, 0.56008263477821707, 0.49851019732515794,
+          9.7923615139211133, 1.0},
+         makeNoise(Dsp::kSampleRateHz * 10, 7)},
+        {{"clicks120-30s", 117.45383522727273, -36.523361991074935, 4.2632564145606011e-14,
+          5512.5000000000118, 6.8923732343424907e-11, 1.0000000000000036, 0.0,
+          1.9666547745743035, 0.13111031830495357},
+         makeClicks(120.0, 30.0)},
+        {{"mix-30s", 123.046875, -13.067526800504618, 0.011740588257490931,
+          633.21220193502609, 10.671009353426417, 0.010179760571680022,
+          0.073301698112922323, 7.5332877805727554, 0.8386494639899077},
+         makeMix(30.0)},
+    };
+
+    for (const auto &[golden, samples] : cases) {
+        const auto features = Dsp::analyze(samples, Dsp::kSampleRateHz);
+        QVERIFY2(features.has_value(), golden.fixture);
+        const auto check = [&](const char *field, bool ok) {
+            QVERIFY2(ok, qPrintable(QStringLiteral("%1: %2 exceeds the measured v1-to-v2 gate")
+                                        .arg(QLatin1String(golden.fixture), QLatin1String(field))));
+        };
+        check("tempo_bpm", nearGolden(features->tempoBpm, golden.tempoBpm));
+        check("loudness_lufs", nearGolden(features->loudnessLufs, golden.loudnessLufs));
+        check("loudness_std_db", nearGolden(features->loudnessStdDb, golden.loudnessStdDb));
+        check("centroid_mean_hz", nearAbsolute(features->spectralCentroidMeanHz,
+                                                golden.centroidMeanHz,
+                                                kCentroidToleranceHz));
+        check("centroid_std_hz", nearAbsolute(features->spectralCentroidStdHz,
+                                               golden.centroidStdHz,
+                                               kCentroidToleranceHz));
+        check("flatness_mean", nearAbsolute(features->spectralFlatnessMean,
+                                             golden.flatnessMean,
+                                             kFlatnessTolerance));
+        check("zcr", nearGolden(features->zeroCrossingRate, golden.zcr));
+        check("onset_rate_hz", nearGolden(features->onsetRateHz, golden.onsetRateHz));
+        check("energy", nearGolden(features->energy, golden.energy));
+    }
+
+    // Short-input contract stays pinned alongside the numeric oracle.
+    QVERIFY(!Dsp::analyze(makeSine(440.0, 0.5, 1.0), Dsp::kSampleRateHz).has_value());
 }
 
 QTEST_APPLESS_MAIN(DspTest)

@@ -35,6 +35,27 @@
 
 ### Changed
 
+- Scalar analysis is now `muzaiten-dsp-v2`: a first-party, allocation-free
+  fixed-2048 real FFT replaces the complex-double STFT while keeping
+  double-precision power and reductions. A four-minute analysis fixture drops
+  from about 893 ms to 141 ms on the reference development machine. Existing
+  v1 scalar rows refresh through the normal progress/cancel/resume feature
+  phase; decoded identity, Chromaprint groups, tempo, energy, loudness, onset
+  rate, and zero-crossing semantics are unchanged, with only tightly bounded
+  spectral floating-point deltas. Post-integration streaming (gated loudness
+  through a block ring, virtual reflected padding) brings the fixture to
+  about 131 ms with bit-identical output.
+- Analysis workers hold far less memory: whole-track double arrays and the
+  duplicate raw PCM byte copy are gone, so each in-flight track costs one
+  float PCM copy instead of roughly five duration-scaled buffers. On a
+  deliberately hostile corpus (DSD, 96/192 kHz, 79-93 minute tracks) an
+  8-worker feature refresh peaks at ~2.7 GiB instead of ~4.8 GiB — and
+  instead of the ~20 GiB observed in the field on the v1 spectrogram path.
+- Scalar features are now consumed only when their per-row DSP version matches
+  the running build, so radio never treats an untouched old store or a
+  cancel/resume mixed-version store as current. The analysis status dialog,
+  `muzaitenctl features-status`, and `muzaiten-index` JSON now expose the stale
+  portion without redefining the existing total featured count.
 - Feature fill now uses the configured analysis worker count to decode and
   analyze stale group representatives concurrently while keeping
   `features.sqlite` writes serialized and resumable.

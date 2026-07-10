@@ -1,6 +1,9 @@
 #include "indexer/Dsp.h"
 
+#include "indexer/Fft.h"
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -35,37 +38,6 @@ constexpr double kAbsoluteGateLufs = -70.0;
 constexpr double kRelativeGateLu = -10.0;
 constexpr double kLufsOffset = -0.691;
 
-// In-place iterative radix-2 FFT; kNFft is a power of two by construction,
-// which is the whole reason no FFT library is needed.
-void fftRadix2(std::vector<std::complex<double>> &buffer)
-{
-    const std::size_t n = buffer.size();
-    for (std::size_t i = 1, j = 0; i < n; ++i) {
-        std::size_t bit = n >> 1;
-        for (; j & bit; bit >>= 1) {
-            j ^= bit;
-        }
-        j |= bit;
-        if (i < j) {
-            std::swap(buffer[i], buffer[j]);
-        }
-    }
-    for (std::size_t len = 2; len <= n; len <<= 1) {
-        const double angle = -2.0 * std::numbers::pi / static_cast<double>(len);
-        const std::complex<double> root(std::cos(angle), std::sin(angle));
-        for (std::size_t start = 0; start < n; start += len) {
-            std::complex<double> twiddle(1.0, 0.0);
-            for (std::size_t k = 0; k < len / 2; ++k) {
-                const std::complex<double> even = buffer[start + k];
-                const std::complex<double> odd = buffer[start + k + len / 2] * twiddle;
-                buffer[start + k] = even + odd;
-                buffer[start + k + len / 2] = even - odd;
-                twiddle *= root;
-            }
-        }
-    }
-}
-
 std::vector<double> hannWindow(std::size_t n)
 {
     std::vector<double> window(n);
@@ -76,13 +48,44 @@ std::vector<double> hannWindow(std::size_t n)
     return window;
 }
 
-std::vector<float> reflectPad(const std::vector<float> &samples, std::size_t pad)
+const std::array<float, kNFft> &analysisWindow()
 {
+    static const std::array<float, kNFft> window = [] {
+        std::array<float, kNFft> values{};
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            const double phase = 2.0 * std::numbers::pi * static_cast<double>(i) /
+                                 static_cast<double>(values.size());
+            values[i] = static_cast<float>(0.5 - 0.5 * std::cos(phase));
+        }
+        return values;
+    }();
+    return window;
+}
+
+void powerFrame2048(const float *source,
+                    std::array<float, kNFft> &windowed,
+                    double *power,
+                    Fft::RealFft2048::Workspace &workspace) noexcept
+{
+    const std::array<float, kNFft> &window = analysisWindow();
+    for (std::size_t i = 0; i < kNFft; ++i) {
+        windowed[i] = source[i] * window[i];
+    }
+    static const Fft::RealFft2048 transform;
+    transform.forwardPower(windowed,
+                           std::span<double, Fft::RealFft2048::kBins>(
+                               power, Fft::RealFft2048::kBins),
+                           workspace);
+}
+
+void reflectPadInto(const std::vector<float> &samples, std::size_t pad, std::vector<float> &out)
+{
+    out.clear();
     if (samples.size() < 2) {
-        return samples;
+        out.assign(samples.begin(), samples.end());
+        return;
     }
     const std::size_t edge = std::min(pad, samples.size() - 1);
-    std::vector<float> out;
     out.reserve(samples.size() + 2 * edge);
     for (std::size_t i = edge; i >= 1; --i) {
         out.push_back(samples[i]);
@@ -91,6 +94,12 @@ std::vector<float> reflectPad(const std::vector<float> &samples, std::size_t pad
     for (std::size_t i = 0; i < edge; ++i) {
         out.push_back(samples[samples.size() - 2 - i]);
     }
+}
+
+std::vector<float> reflectPad(const std::vector<float> &samples, std::size_t pad)
+{
+    std::vector<float> out;
+    reflectPadInto(samples, pad, out);
     return out;
 }
 
@@ -165,22 +174,25 @@ Biquad kWeightHighPass(double rate)
     };
 }
 
-void applyBiquad(std::vector<double> &samples, const Biquad &f)
-{
+// Per-sample biquad recurrence with explicit state, so the K-weighting
+// cascade can stream without materializing whole-track double arrays. The
+// arithmetic expression matches the historical whole-array pass exactly.
+struct BiquadState {
     double x1 = 0.0;
     double x2 = 0.0;
     double y1 = 0.0;
     double y2 = 0.0;
-    for (double &sample : samples) {
-        const double x0 = sample;
+
+    double step(const Biquad &f, double x0)
+    {
         const double y0 = f.b0 * x0 + f.b1 * x1 + f.b2 * x2 - f.a1 * y1 - f.a2 * y2;
         x2 = x1;
         x1 = x0;
         y2 = y1;
         y1 = y0;
-        sample = y0;
+        return y0;
     }
-}
+};
 
 std::vector<double> autocorrelate(const double *frame, std::size_t n)
 {
@@ -213,16 +225,29 @@ PowerSpectrogram powerSpectrogram(const std::vector<float> &samples, std::size_t
                                   std::size_t hop)
 {
     const std::vector<float> padded = reflectPad(samples, nFft / 2);
-    const std::vector<double> window = hannWindow(nFft);
 
     PowerSpectrogram spectrogram;
     spectrogram.nFft = nFft;
+    if (nFft == kNFft) {
+        std::array<float, kNFft> windowed{};
+        Fft::RealFft2048::Workspace workspace;
+        for (std::size_t start = 0; start + nFft <= padded.size(); start += hop) {
+            std::vector<double> frame(Fft::RealFft2048::kBins);
+            powerFrame2048(padded.data() + start, windowed, frame.data(), workspace);
+            spectrogram.frames.push_back(std::move(frame));
+        }
+        return spectrogram;
+    }
+
+    // Arbitrary-size support is retained for oracle tooling only. Production
+    // analysis and all in-tree consumers use the fixed real transform above.
+    const std::vector<double> window = hannWindow(nFft);
     std::vector<std::complex<double>> buffer(nFft);
     for (std::size_t start = 0; start + nFft <= padded.size(); start += hop) {
         for (std::size_t i = 0; i < nFft; ++i) {
             buffer[i] = {static_cast<double>(padded[start + i]) * window[i], 0.0};
         }
-        fftRadix2(buffer);
+        Fft::complexRadix2Reference(buffer);
         std::vector<double> frame(nFft / 2 + 1);
         for (std::size_t k = 0; k <= nFft / 2; ++k) {
             frame[k] = std::norm(buffer[k]);
@@ -281,6 +306,12 @@ MelBank MelBank::slaney(std::size_t nMels, std::size_t nFft, double sampleRate)
 std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
 {
     std::vector<double> out(weights.size(), 0.0);
+    applyInto(powerFrame, out.data());
+    return out;
+}
+
+void MelBank::applyInto(const std::vector<double> &powerFrame, double *out) const
+{
     if (sparseSpans.size() == weights.size()) {
         for (std::size_t m = 0; m < sparseSpans.size(); ++m) {
             const SparseSpan &span = sparseSpans[m];
@@ -291,7 +322,7 @@ std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
             }
             out[m] = sum;
         }
-        return out;
+        return;
     }
     for (std::size_t m = 0; m < weights.size(); ++m) {
         double sum = 0.0;
@@ -301,7 +332,6 @@ std::vector<double> MelBank::apply(const std::vector<double> &powerFrame) const
         }
         out[m] = sum;
     }
-    return out;
 }
 
 namespace {
@@ -440,24 +470,49 @@ std::optional<double> estimateBpm(const std::vector<double> &envelope, double fr
 
 Loudness gatedLoudness(const std::vector<float> &samples, double sampleRate)
 {
-    std::vector<double> weighted(samples.begin(), samples.end());
-    applyBiquad(weighted, kWeightHighShelf(sampleRate));
-    applyBiquad(weighted, kWeightHighPass(sampleRate));
-
     const auto blockLen = static_cast<std::size_t>(kBlockSecs * sampleRate);
     const auto step = static_cast<std::size_t>((1.0 - kBlockOverlap) * kBlockSecs * sampleRate);
-    if (blockLen == 0 || step == 0 || weighted.size() < blockLen) {
+    if (blockLen == 0 || step == 0 || samples.size() < blockLen) {
         return {};
     }
 
-    // Mean-square power z_j per 400 ms block (BS.1770 eq. 1), mono gain 1.0.
+    // Stream the K-weighting cascade through a one-block ring instead of
+    // materializing whole-track double arrays (8 bytes/sample twice over,
+    // duration-scaled — the last big per-worker allocation after the
+    // spectrogram went away). Each 400 ms block (BS.1770 eq. 1, mono gain
+    // 1.0) still sums its own window in ascending order, so every block
+    // power matches the previous whole-array formulation bit for bit; the
+    // 4x overlap re-summation is retained deliberately for that reason.
+    const Biquad shelf = kWeightHighShelf(sampleRate);
+    const Biquad highPass = kWeightHighPass(sampleRate);
+    BiquadState shelfState;
+    BiquadState highPassState;
+    std::vector<double> ring(blockLen, 0.0);
     std::vector<double> blockPower;
-    for (std::size_t start = 0; start + blockLen <= weighted.size(); start += step) {
-        double sumSq = 0.0;
-        for (std::size_t i = start; i < start + blockLen; ++i) {
-            sumSq += weighted[i] * weighted[i];
+    blockPower.reserve(samples.size() / step + 1);
+    std::size_t writePos = 0;         // == i % blockLen, carried
+    std::size_t untilBlockEnd = blockLen; // samples left before a block completes
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        const double weighted = highPassState.step(highPass, shelfState.step(shelf, samples[i]));
+        ring[writePos] = weighted;
+        if (++writePos == blockLen) {
+            writePos = 0;
         }
-        blockPower.push_back(sumSq / static_cast<double>(blockLen));
+        if (--untilBlockEnd == 0) {
+            untilBlockEnd = step;
+            // The block's oldest sample sits at writePos; summing the two
+            // contiguous runs visits the window in ascending sample order,
+            // matching the historical whole-array loop addition for
+            // addition.
+            double sumSq = 0.0;
+            for (std::size_t slot = writePos; slot < blockLen; ++slot) {
+                sumSq += ring[slot] * ring[slot];
+            }
+            for (std::size_t slot = 0; slot < writePos; ++slot) {
+                sumSq += ring[slot] * ring[slot];
+            }
+            blockPower.push_back(sumSq / static_cast<double>(blockLen));
+        }
     }
 
     std::vector<double> blockLufs;
@@ -595,13 +650,122 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
         return std::nullopt;
     }
 
-    const PowerSpectrogram spectrogram = powerSpectrogram(samples, kNFft, kHop);
-    if (spectrogram.frames.empty()) {
-        return std::nullopt;
+    // Stream STFT frames instead of materializing the full linear-bin
+    // spectrogram (~85 MB per 4 min and duration-scaled — the memory tax
+    // that multiplied across parallel workers). Each frame feeds the
+    // spectral accumulators immediately and survives only as its 128-bin
+    // mel projection; the compact mel matrix must be kept whole because the
+    // top_db floor needs the global mel max before dB conversion.
+    //
+    // The 2048-point dense helper and this streaming walk share the same
+    // fixed real-FFT frame path. Power and every downstream reduction remain
+    // double precision; test_dsp's field-specific v1->v2 gates pin the small
+    // spectral-only change introduced by float transform arithmetic.
+    //
+    // Hot buffers live in thread-local scratch reused across tracks on the
+    // same worker; analyze stays pure to callers. The mel matrix is one
+    // flat frames×kNMels block so the walk performs no per-frame heap
+    // allocation.
+    struct AnalysisScratch {
+        std::array<float, kNFft> boundaryFrame{};
+        std::array<float, kNFft> windowed{};
+        Fft::RealFft2048::Workspace fftWorkspace;
+        std::vector<double> powerFrame;
+        std::vector<double> melPowers;
+    };
+    thread_local AnalysisScratch scratch;
+
+    // Reflected padding is virtual: interior frames read the caller's samples
+    // directly, and only the handful of frames overlapping either reflected
+    // edge are assembled into a fixed staging frame. Same values as the old
+    // materialized padded copy (another 4 bytes/sample, duration-scaled)
+    // without ever allocating it.
+    const std::size_t edge = std::min(kNFft / 2, samples.size() - 1);
+    const std::size_t paddedSize = samples.size() + 2 * edge;
+    const auto reflectedSample = [&](std::size_t p) {
+        if (p < edge) {
+            return samples[edge - p];
+        }
+        if (p < edge + samples.size()) {
+            return samples[p - edge];
+        }
+        return samples[samples.size() - 2 - (p - edge - samples.size())];
+    };
+    std::vector<double> binFreqs(kNFft / 2 + 1);
+    for (std::size_t k = 0; k < binFreqs.size(); ++k) {
+        binFreqs[k] = static_cast<double>(k) * rate / static_cast<double>(kNFft);
     }
 
     const MelBank &melBank = cachedMelBank(sampleRate);
-    const std::vector<double> envelope = onsetEnvelope(spectrogram, melBank);
+    const std::size_t melFrames =
+        paddedSize >= kNFft ? (paddedSize - kNFft) / kHop + 1 : 0;
+    if (melFrames == 0) {
+        return std::nullopt;
+    }
+    scratch.powerFrame.resize(kNFft / 2 + 1);
+    scratch.melPowers.resize(melFrames * kNMels);
+    std::vector<double> &powerFrame = scratch.powerFrame;
+    std::vector<double> &melPowers = scratch.melPowers;
+    std::vector<double> centroids;
+    double flatnessSum = 0.0;
+    std::size_t flatnessFrames = 0;
+    double maxPower = kAmin;
+
+    std::size_t frame = 0;
+    for (std::size_t start = 0; start + kNFft <= paddedSize; start += kHop, ++frame) {
+        const float *source = nullptr;
+        if (start >= edge && start + kNFft <= edge + samples.size()) {
+            source = samples.data() + (start - edge);
+        } else {
+            for (std::size_t i = 0; i < kNFft; ++i) {
+                scratch.boundaryFrame[i] = reflectedSample(start + i);
+            }
+            source = scratch.boundaryFrame.data();
+        }
+        powerFrame2048(source, scratch.windowed,
+                       powerFrame.data(), scratch.fftWorkspace);
+
+        double total = 0.0;
+        for (double p : powerFrame) {
+            total += p;
+        }
+        if (!(total < kSilentFramePower)) {
+            double weightedFreq = 0.0;
+            double logSum = 0.0;
+            for (std::size_t k = 0; k < powerFrame.size(); ++k) {
+                weightedFreq += powerFrame[k] * binFreqs[k];
+                logSum += std::log(std::max(powerFrame[k], kAmin));
+            }
+            centroids.push_back(weightedFreq / total);
+
+            const double logMean = logSum / static_cast<double>(powerFrame.size());
+            const double arithMean = total / static_cast<double>(powerFrame.size());
+            flatnessSum += std::exp(logMean) / std::max(arithMean, kAmin);
+            ++flatnessFrames;
+        }
+
+        double *melFrame = melPowers.data() + frame * kNMels;
+        melBank.applyInto(powerFrame, melFrame);
+        for (std::size_t m = 0; m < kNMels; ++m) {
+            maxPower = std::max(maxPower, melFrame[m]);
+        }
+    }
+
+    const double floorDb = 10.0 * std::log10(maxPower) - kTopDb;
+    for (double &p : melPowers) {
+        p = std::max(10.0 * std::log10(std::max(p, kAmin)), floorDb);
+    }
+    std::vector<double> envelope{0.0};
+    envelope.reserve(melFrames);
+    for (std::size_t t = 1; t < melFrames; ++t) {
+        const double *current = melPowers.data() + t * kNMels;
+        const double *previous = current - kNMels;
+        double flux = 0.0;
+        for (std::size_t m = 0; m < kNMels; ++m) {
+            flux += std::max(current[m] - previous[m], 0.0);
+        }
+        envelope.push_back(flux / static_cast<double>(kNMels));
+    }
     const double frameRate = rate / static_cast<double>(kHop);
 
     ScalarFeatures features;
@@ -612,10 +776,22 @@ std::optional<ScalarFeatures> analyze(const std::vector<float> &samples, unsigne
     features.loudnessLufs = loudness.integratedLufs;
     features.loudnessStdDb = loudness.blockStdDb;
 
-    const SpectralStats spectral = spectralStats(spectrogram, rate);
-    features.spectralCentroidMeanHz = spectral.centroidMeanHz;
-    features.spectralCentroidStdHz = spectral.centroidStdHz;
-    features.spectralFlatnessMean = spectral.flatnessMean;
+    if (!centroids.empty()) {
+        double mean = 0.0;
+        for (double c : centroids) {
+            mean += c;
+        }
+        mean /= static_cast<double>(centroids.size());
+        double variance = 0.0;
+        for (double c : centroids) {
+            variance += (c - mean) * (c - mean);
+        }
+        variance /= static_cast<double>(centroids.size());
+
+        features.spectralCentroidMeanHz = mean;
+        features.spectralCentroidStdHz = std::sqrt(variance);
+        features.spectralFlatnessMean = flatnessSum / static_cast<double>(flatnessFrames);
+    }
     features.zeroCrossingRate = zeroCrossingRate(samples);
 
     if (loudness.integratedLufs) {

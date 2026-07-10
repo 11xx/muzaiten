@@ -102,6 +102,14 @@ muzaiten-index scan --library ~/.local/share/muzaiten/library.sqlite \
 `duplicate-groups` / `pin-copy` / `unpin-copy`) inspects detected duplicate
 groups and pins which copy radio should prefer.
 
+The current `muzaiten-dsp-v2` analyzer makes full-track analysis substantially
+cheaper with a first-party fixed-size real FFT. The v2 comparison kept the
+tempo and energy values used by radio exactly stable across the synthetic
+oracle and an isolated DSF/high-resolution corpus, including a deliberate
+85/170 BPM near-octave scorer gate, so radio's tempo and energy falloff
+constants are unchanged. Upgrading marks v1 scalar rows stale until the normal
+resumable feature phase refreshes them; stale rows never enter scoring.
+
 **CLAP embeddings** (audio similarity + free-text search) are computed by
 the optional Python tool in `tools/embedder` — kept out of the app because
 it downloads a ~2 GB model on first use:

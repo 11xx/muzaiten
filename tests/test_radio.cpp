@@ -5,6 +5,7 @@
 #include "features/FeatureStore.h"
 #include "features/QualityRank.h"
 #include "features/SongIdentity.h"
+#include "indexer/DspVersion.h"
 #include "reco/AffinityPool.h"
 #include "reco/ArtistRadio.h"
 #include "reco/RadioFilters.h"
@@ -925,6 +926,29 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
         {}, seed, weights);
     QVERIFY(!hasComponent(distant, QStringLiteral("tempo")));
     QVERIFY(!hasComponent(distant, QStringLiteral("energy")));
+
+    // F5b's v1->v2 comparison measured tempo and energy as exactly stable on
+    // both the synthetic oracle and the real DSF/high-resolution corpus. Keep
+    // the downstream near-octave ranking explicit: a true 85 BPM neighbor
+    // must beat its 170 BPM octave under the existing 60 BPM linear falloff.
+    seed.contextTempoBpm = 85.0;
+    const TrackScorer::Scored sameOctave = TrackScorer::score(
+        makeCandidate(QStringLiteral("/85"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 85.0, 0.75),
+        {}, seed, weights);
+    const TrackScorer::Scored nearby = TrackScorer::score(
+        makeCandidate(QStringLiteral("/95"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 95.0, 0.75),
+        {}, seed, weights);
+    const TrackScorer::Scored doubleOctave = TrackScorer::score(
+        makeCandidate(QStringLiteral("/170"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 170.0, 0.75),
+        {}, seed, weights);
+    const double sameTempo = componentValue(sameOctave, QStringLiteral("tempo"));
+    const double nearbyTempo = componentValue(nearby, QStringLiteral("tempo"));
+    QVERIFY(sameTempo > nearbyTempo);
+    QVERIFY(nearbyTempo > 0.0);
+    QVERIFY(!hasComponent(doubleOctave, QStringLiteral("tempo")));
 }
 
 void RadioTest::unknownTempoOrEnergyYieldsNoComponent()
@@ -2044,10 +2068,11 @@ QString createRadioFeatureFixture(const QTemporaryDir &dir,
                     "INSERT INTO features(content_group_id, tempo_bpm, loudness_lufs, loudness_std_db, "
                     "spectral_centroid_mean_hz, spectral_centroid_std_hz, spectral_flatness_mean, "
                     "zero_crossing_rate, onset_rate_hz, energy, extractor, version) "
-                    "VALUES(?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'fixture', 'dsp')"));
+                    "VALUES(?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, 'fixture', ?)"));
                 insert.addBindValue(it.key());
                 insert.addBindValue(it.value().tempoBpm > 0.0 ? QVariant(it.value().tempoBpm) : QVariant());
                 insert.addBindValue(it.value().energy >= 0.0 ? QVariant(it.value().energy) : QVariant());
+                insert.addBindValue(QLatin1String(Dsp::kDspVersion));
                 if (!insert.exec()) {
                     if (error != nullptr) {
                         *error = insert.lastError().text();
