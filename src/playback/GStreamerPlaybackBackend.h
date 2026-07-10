@@ -54,6 +54,15 @@ private:
     void pollPosition();
     void handleMessage(GstMessage *message);
     void loadUri(const QString &uri, State targetState, qint64 positionMs = -1);
+    // Issue a flushing seek and arm the in-flight bookkeeping (watchdog +
+    // coalescing). Callers must have ruled out the soft-pause/handoff cases.
+    void issueSeek(qint64 positionMs);
+    // Deterministic recovery: drop the pipeline to READY and reload the audible
+    // uri at |positionMs|, preserving the prepared gapless next. Used when a
+    // seek lands in the undefined about-to-finish window or never completes.
+    void reloadCurrentAtPosition(qint64 positionMs, State targetState);
+    void handleSeekWatchdogTimeout();
+    void clearSeekInFlight();
     void beginTargetTransition(State targetState);
     void finishTargetTransition();
     void handleTargetTransitionTimeout();
@@ -94,6 +103,10 @@ private:
     QTimer m_pollTimer;
     mutable QMutex m_mutex;
     QString m_currentUri;
+    // The uri actually audible right now. Lags m_currentUri between
+    // about-to-finish (which swaps m_currentUri to the queued next track) and
+    // the new stream's STREAM_START; equal to m_currentUri otherwise.
+    QString m_playingUri;
     QString m_preparedUri;
     State m_state = State::Stopped;
     qint64 m_positionMs = 0;
@@ -110,6 +123,16 @@ private:
     qint64 m_resumePositionMs = 0;
     // Pending seek to apply once the pipeline prerolls after a soft-pause resume.
     qint64 m_pendingSeekMs = -1;
+
+    // Seek coalescing: flushing seeks must not stack — a burst (slider scrub)
+    // issued into a pipeline that hasn't finished the previous flush can wedge
+    // playbin around a source switch. Only one seek is in flight at a time; the
+    // latest requested target waits in m_queuedSeekMs until ASYNC_DONE, and the
+    // watchdog reloads the source if ASYNC_DONE never arrives.
+    bool m_seekInFlight = false;
+    qint64 m_queuedSeekMs = -1;
+    qint64 m_lastSeekMs = -1;
+    QTimer m_seekWatchdog;
 
     // Read-ahead state: a private fd on the current file plus the byte size and
     // the furthest offset we've already advised (the sliding watermark).

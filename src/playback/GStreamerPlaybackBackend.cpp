@@ -159,6 +159,15 @@ GStreamerPlaybackBackend::GStreamerPlaybackBackend(QObject *parent)
             &QTimer::timeout,
             this,
             &GStreamerPlaybackBackend::handleTargetTransitionTimeout);
+    // Generous for local files, short enough that a wedged flushing seek
+    // (possible around a gapless source switch) self-heals instead of leaving
+    // the user staring at a frozen 0:00.
+    m_seekWatchdog.setSingleShot(true);
+    m_seekWatchdog.setInterval(4000);
+    connect(&m_seekWatchdog,
+            &QTimer::timeout,
+            this,
+            &GStreamerPlaybackBackend::handleSeekWatchdogTimeout);
 }
 
 GStreamerPlaybackBackend::~GStreamerPlaybackBackend()
@@ -394,9 +403,11 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
     }
 
     resetTimeline();
+    clearSeekInFlight();
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri = uriForUrl(url);
+        m_playingUri = m_currentUri;
         m_preparedUri.clear();
         m_gaplessAdvancePending = false;
     }
@@ -410,9 +421,11 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
 
 void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qint64 positionMs)
 {
+    clearSeekInFlight();
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri = uri;
+        m_playingUri = uri;
         m_preparedUri.clear();
         m_gaplessAdvancePending = false;
         g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
@@ -461,10 +474,15 @@ void GStreamerPlaybackBackend::pause()
                          || m_dsdActive;
 
     if (release) {
-        // Capture position before tearing down the pipeline.
+        // Capture position before tearing down the pipeline. The query can fail
+        // transiently (e.g. mid-flush); the polled position is then the best
+        // truth we have — don't let a failed query reset the resume point to 0.
         gint64 pos = GST_CLOCK_TIME_NONE;
-        gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos);
-        m_resumePositionMs = clockTimeToMs(pos);
+        if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos)) {
+            m_resumePositionMs = clockTimeToMs(pos);
+        } else {
+            m_resumePositionMs = std::max<qint64>(0, m_positionMs);
+        }
         m_softPaused = true;
         // READY releases the audio device but keeps the element graph intact
         // so re-preroll on resume is fast.  State messages from the
@@ -506,6 +524,7 @@ void GStreamerPlaybackBackend::stop()
 {
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    clearSeekInFlight();
     m_targetState = State::Stopped;
     finishTargetTransition();
     if (m_playbin != nullptr) {
@@ -516,6 +535,7 @@ void GStreamerPlaybackBackend::stop()
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri.clear();
+        m_playingUri.clear();
         m_preparedUri.clear();
         m_gaplessAdvancePending = false;
     }
@@ -537,10 +557,123 @@ void GStreamerPlaybackBackend::seek(qint64 positionMs)
     if (m_playbin == nullptr) {
         return;
     }
-    gst_element_seek_simple(m_playbin,
-                            GST_FORMAT_TIME,
-                            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
-                            static_cast<gint64>(std::max<qint64>(0, positionMs)) * GST_MSECOND);
+    positionMs = std::max<qint64>(0, positionMs);
+
+    // A soft-paused pipeline sits in READY, which cannot execute a seek (the
+    // request would be silently dropped and the resume would snap back to the
+    // old position). Retarget the resume point instead.
+    if (m_softPaused) {
+        m_resumePositionMs = positionMs;
+        if (m_positionMs != positionMs) {
+            m_positionMs = positionMs;
+            emit positionChanged(m_positionMs);
+        }
+        return;
+    }
+
+    // A resume/load preroll is still in flight; its ASYNC_DONE handler will
+    // apply m_pendingSeekMs, so just retarget it.
+    if (m_pendingSeekMs >= 0) {
+        m_pendingSeekMs = positionMs;
+        return;
+    }
+
+    // Between about-to-finish and the next stream's start, playbin has already
+    // consumed the queued uri; a flushing seek in that window is undefined and
+    // can wedge the pipeline. Cancel the handoff and reload the audible track
+    // at the target position (the queued next track is re-armed afterwards).
+    bool handoffPending = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        handoffPending = m_gaplessAdvancePending;
+    }
+    if (handoffPending && !m_dsdActive) {
+        reloadCurrentAtPosition(positionMs,
+                                m_state == State::Paused ? State::Paused : State::Playing);
+        return;
+    }
+
+    // Never stack flushing seeks (a slider scrub emits one per mouse move):
+    // coalesce onto the in-flight one; ASYNC_DONE issues the latest target.
+    if (m_seekInFlight) {
+        m_queuedSeekMs = positionMs;
+        return;
+    }
+    issueSeek(positionMs);
+}
+
+void GStreamerPlaybackBackend::issueSeek(qint64 positionMs)
+{
+    m_lastSeekMs = positionMs;
+    const gboolean ok = gst_element_seek_simple(
+        m_playbin,
+        GST_FORMAT_TIME,
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+        static_cast<gint64>(positionMs) * GST_MSECOND);
+    if (ok) {
+        m_seekInFlight = true;
+        m_seekWatchdog.start();
+        m_pollTimer.start();
+        // Rebase the published position to the target now: the UI tracks the
+        // seek instantly instead of snapping back until the flush completes,
+        // and a backward jump can never masquerade as the position reset the
+        // gapless handoff commit watches for.
+        if (m_positionMs != positionMs) {
+            m_positionMs = positionMs;
+            emit positionChanged(m_positionMs);
+        }
+    } else {
+        clearSeekInFlight();
+    }
+}
+
+void GStreamerPlaybackBackend::clearSeekInFlight()
+{
+    m_seekInFlight = false;
+    m_queuedSeekMs = -1;
+    m_seekWatchdog.stop();
+}
+
+void GStreamerPlaybackBackend::handleSeekWatchdogTimeout()
+{
+    if (!m_seekInFlight || m_playbin == nullptr) {
+        return;
+    }
+    // ASYNC_DONE never arrived: the flushing seek wedged the pipeline (seen
+    // around gapless source switches). The DSD graph never hits that race, so
+    // just drop the bookkeeping there; for playbin, rebuild deterministically.
+    if (m_dsdActive) {
+        clearSeekInFlight();
+        return;
+    }
+    reloadCurrentAtPosition(std::max<qint64>(0, m_lastSeekMs),
+                            m_state == State::Paused ? State::Paused : State::Playing);
+}
+
+void GStreamerPlaybackBackend::reloadCurrentAtPosition(qint64 positionMs, State targetState)
+{
+    QString uri;
+    QString nextUri;
+    {
+        QMutexLocker locker(&m_mutex);
+        uri = m_playingUri.isEmpty() ? m_currentUri : m_playingUri;
+        // Mid-handoff, the queued next track lives in m_currentUri (about-to-
+        // finish already swapped it); otherwise the prepared uri still holds it.
+        nextUri = m_gaplessAdvancePending ? m_currentUri : m_preparedUri;
+        m_gaplessAdvancePending = false;
+    }
+    if (uri.isEmpty()) {
+        return;
+    }
+    clearSeekInFlight();
+    // playbin only picks up a new uri from READY; this restarts the source
+    // cleanly, which is exactly the point of the recovery.
+    gst_element_set_state(m_playbin, GST_STATE_READY);
+    loadUri(uri, targetState, positionMs);
+    {
+        QMutexLocker locker(&m_mutex);
+        m_preparedUri = nextUri;
+    }
 }
 
 void GStreamerPlaybackBackend::setVolume(double volume0To1)
@@ -597,6 +730,7 @@ void GStreamerPlaybackBackend::aboutToFinishCallback(GstElement *playbin, void *
 
 void GStreamerPlaybackBackend::rebuildPipeline()
 {
+    clearSeekInFlight();
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
         gst_object_unref(m_playbin);
@@ -689,6 +823,25 @@ void GStreamerPlaybackBackend::pollPosition()
         return;
     }
 
+    // Between about-to-finish and the audible switch the pipeline can already
+    // answer duration queries with the queued next track's length while
+    // position still reads the outgoing track's tail — publishing that mix
+    // makes the progress bar jump through bogus ratios (100% → ~20% → 0%).
+    // Hold the outgoing duration until the handoff commits below.
+    //
+    // The commit itself is position-based on purpose: playbin3 posts its
+    // aggregated STREAM_START as soon as the queued uri is parsed (seconds
+    // before the sink renders it), so bus messages cannot mark the audible
+    // switch. A position that falls back to the start of a track while a
+    // handoff is armed is that switch. App-issued seeks can't fake it: seeking
+    // during a pending handoff never reaches here (seek() reloads the source
+    // instead), and issueSeek() rebases m_positionMs to the target up front.
+    bool handoffPending = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        handoffPending = m_gaplessAdvancePending;
+    }
+
     gint64 position = GST_CLOCK_TIME_NONE;
     gint64 duration = GST_CLOCK_TIME_NONE;
     const qint64 previousPositionMs = m_positionMs;
@@ -699,7 +852,7 @@ void GStreamerPlaybackBackend::pollPosition()
             emit positionChanged(m_positionMs);
         }
     }
-    if (gst_element_query_duration(m_playbin, GST_FORMAT_TIME, &duration)) {
+    if (!handoffPending && gst_element_query_duration(m_playbin, GST_FORMAT_TIME, &duration)) {
         const qint64 durationMs = clockTimeToMs(duration);
         if (durationMs != m_durationMs) {
             m_durationMs = durationMs;
@@ -708,16 +861,27 @@ void GStreamerPlaybackBackend::pollPosition()
     }
 
     bool emitPreparedStarted = false;
-    {
-        QMutexLocker locker(&m_mutex);
+    if (handoffPending && m_state == State::Playing) {
         const bool positionReset = m_positionMs + 1000 < previousPositionMs;
-        if (m_gaplessAdvancePending && m_state == State::Playing && (m_positionMs <= 2000 || positionReset)) {
+        if (m_positionMs <= 2000 || positionReset) {
+            QMutexLocker locker(&m_mutex);
             m_gaplessAdvancePending = false;
+            m_playingUri = m_currentUri;
             emitPreparedStarted = true;
         }
     }
     if (emitPreparedStarted) {
         emit preparedTrackStarted();
+        // The duration query was held while the handoff was pending; publish
+        // the new track's length in the same tick as the commit so the UI
+        // snaps from 100%/old straight to 0%/new with no mixed frame.
+        if (gst_element_query_duration(m_playbin, GST_FORMAT_TIME, &duration)) {
+            const qint64 durationMs = clockTimeToMs(duration);
+            if (durationMs != m_durationMs) {
+                m_durationMs = durationMs;
+                emit durationChanged(m_durationMs);
+            }
+        }
     }
 
     // Slide the read-ahead window forward to track the playhead.
@@ -791,6 +955,13 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
     case GST_MESSAGE_EOS:
         m_targetState = State::Stopped;
         finishTargetTransition();
+        clearSeekInFlight();
+        {
+            // A handoff that never produced a stream (e.g. the queued uri failed)
+            // must not leave the advance flag armed for the next load.
+            QMutexLocker locker(&m_mutex);
+            m_gaplessAdvancePending = false;
+        }
         updateState(State::Stopped);
         emit finished();
         break;
@@ -810,6 +981,18 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             }
             gst_element_set_state(m_playbin, GST_STATE_PLAYING);
         } else if (GST_MESSAGE_SRC(message) == GST_OBJECT(m_playbin)) {
+            // The in-flight flushing seek completed; release the coalescing
+            // latch and fire the newest queued target, if any arrived while
+            // the flush was running (slider scrubs produce these bursts).
+            if (m_seekInFlight) {
+                m_seekWatchdog.stop();
+                m_seekInFlight = false;
+                if (m_queuedSeekMs >= 0) {
+                    const qint64 next = m_queuedSeekMs;
+                    m_queuedSeekMs = -1;
+                    issueSeek(next);
+                }
+            }
             GstState current = GST_STATE_NULL;
             GstState pending = GST_STATE_VOID_PENDING;
             gst_element_get_state(m_playbin, &current, &pending, 0);

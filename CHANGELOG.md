@@ -101,6 +101,28 @@
 
 ### Fixed
 
+- Gapless track changes no longer leak the handoff into the progress bar:
+  between playbin's `about-to-finish` and the audible switch, the outgoing
+  track's duration is held so the bar runs to 100% and snaps straight to
+  0:00/new-length instead of jumping through bogus intermediate ratios
+  (100% → ~20% → 0%). The new track's duration is published in the same tick
+  the queue advance commits.
+- Seeking is now robust around track boundaries: flushing seeks are never
+  stacked (a slider scrub coalesces onto the in-flight seek and re-issues the
+  latest target on completion), a seek during the armed gapless handoff
+  window — where playbin's behavior is undefined and could wedge the pipeline
+  at 0:00 — cancels the handoff and deterministically reloads the audible
+  track at the target position (re-arming the prepared next track), and a
+  4-second watchdog reloads the source if a flushing seek never completes, so
+  a wedged pipeline self-heals instead of requiring a manual track switch.
+- Seeking while paused with a released output device (bit-perfect /
+  release-on-pause soft pause) now retargets the resume position instead of
+  being silently dropped by the READY pipeline, and the position shown while
+  scrubbing updates immediately instead of snapping back until the seek
+  completes. A backward seek in the last seconds of a track also no longer
+  falsely triggers the gapless queue advance.
+- Pausing in a release-on-pause profile no longer loses the resume position to
+  0:00 when the position query fails transiently (e.g. mid-flush).
 - `muzaiten-embed neighbors` now scales to real libraries: the cosine
   neighbor rebuild works in fixed-size blocks instead of materializing the
   full group-by-group similarity matrix (24 GB at 77k groups) and ranking it
