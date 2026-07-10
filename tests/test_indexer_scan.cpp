@@ -32,13 +32,16 @@ class IndexerScanTest final : public QObject {
     Q_OBJECT
 
 private slots:
-    void generatedFixtureMatrixWritesSchemaV3Features();
+    void generatedFixtureMatrixWritesSchemaV4Features();
     void groupIdsStayStableWhenLibraryGrows();
     void powerOptionsReportEffectiveJobs();
     void cancelPersistsCompletedRowsAndRerunSkipsThem();
     void incrementalRescanPreservesFeatureRows();
     void featurePhaseProgressAndStaleDenom();
     void featurePhaseCancelPreservesWrittenRows();
+    void schemaV3StoreUpgradesInPlaceKeepingFeatureRows();
+    void forcedRefreshCopiesWithoutTouchingAudio();
+    void orphanedFileFeatureRowsAreSwept();
 };
 
 namespace {
@@ -453,7 +456,7 @@ double ffmpegIntegratedLufs(const QString &path)
 
 } // namespace
 
-void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
+void IndexerScanTest::generatedFixtureMatrixWritesSchemaV4Features()
 {
     requireTool(QStringLiteral("ffmpeg"));
     requireTool(QStringLiteral("fpcalc"));
@@ -525,7 +528,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QVERIFY(first.contains(QStringLiteral("feature_groups_failed")));
     QVERIFY(first.value(QStringLiteral("features_written")).toInt() >= 6);
     QCOMPARE(first.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
-    QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 3);
+    QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 4);
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 8);
     QCOMPARE(first.value(QStringLiteral("skipped")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("failed")).toInt(), 0);
@@ -547,6 +550,33 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QString connectionName;
     QSqlDatabase db = openReadOnly(features, &connectionName);
     QVERIFY(db.open());
+
+    // PF-1 contract: every successful file analysis persists its scalar
+    // result immediately, not only whichever paths later become group
+    // representatives. Optional scalar fields remain SQL NULL and the row
+    // itself is still a fresh, final result.
+    {
+        QSqlQuery fileFeatureCount(db);
+        fileFeatureCount.prepare(QStringLiteral(
+            "SELECT COUNT(*), SUM(version = ?) FROM file_features"));
+        fileFeatureCount.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+        QVERIFY(fileFeatureCount.exec());
+        QVERIFY(fileFeatureCount.next());
+        QCOMPARE(fileFeatureCount.value(0).toInt(), 8);
+        QCOMPARE(fileFeatureCount.value(1).toInt(), 8);
+
+        QSqlQuery silentFileFeatures(db);
+        silentFileFeatures.prepare(QStringLiteral(
+            "SELECT tempo_bpm, loudness_lufs, energy, version "
+            "FROM file_features WHERE path = ?"));
+        silentFileFeatures.addBindValue(silence);
+        QVERIFY(silentFileFeatures.exec());
+        QVERIFY(silentFileFeatures.next());
+        QVERIFY(silentFileFeatures.value(0).isNull());
+        QVERIFY(silentFileFeatures.value(1).isNull());
+        QVERIFY(silentFileFeatures.value(2).isNull());
+        QCOMPARE(silentFileFeatures.value(3).toString(), QString::fromLatin1(Dsp::kDspVersion));
+    }
 
     for (const QString &file : {sineFlac, sineWav, sineMp3, padded, click120, click90, pink, silence}) {
         const QByteArray indexed = chromaprintFor(db, file);
@@ -629,7 +659,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
         features,
         QStringLiteral("--json"),
     });
-    QCOMPARE(status.value(QStringLiteral("schema_version")).toInt(), 3);
+    QCOMPARE(status.value(QStringLiteral("schema_version")).toInt(), 4);
     QCOMPARE(status.value(QStringLiteral("dsp_version")).toString(), QString::fromLatin1(Dsp::kDspVersion));
     QCOMPARE(status.value(QStringLiteral("files")).toInt(), 8);
     QCOMPARE(status.value(QStringLiteral("statuses")).toObject().value(QStringLiteral("ok")).toInt(), 8);
@@ -1347,6 +1377,11 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
     QCOMPARE(process.exitCode(), 0);
 
     const QJsonObject canceledPayload = parseJsonObject(stdoutBytes);
+    // With per-file scalar rows fresh, this refresh runs on the SQL copy
+    // path: the mid-phase progress line at the 25-item cadence gives the
+    // terminate() above a real window because every copy is an autocommit
+    // write with a stopRequested() check between rows. The assertions below
+    // therefore pin cancel/durability/resume semantics for copies too.
     QVERIFY2(canceledPayload.value(QStringLiteral("canceled")).toBool(),
              qPrintable(QString::fromUtf8(stdoutBytes) + QString::fromUtf8(stderrBytes)));
     const int writtenOnCancel = canceledPayload.value(QStringLiteral("features_written")).toInt();
@@ -1417,6 +1452,290 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
         QVERIFY(fresh.exec());
         QVERIFY(fresh.next());
         QCOMPARE(fresh.value(0).toInt(), featureCountBefore);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+}
+
+void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioDirPath));
+    const QDir audioDir(audioDirPath);
+    QStringList paths;
+    for (int i = 0; i < 2; ++i) {
+        const QString path = audioDir.filePath(QStringLiteral("up%1.wav").arg(i));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("sine=frequency=%1:duration=6:sample_rate=44100").arg(330 + i * 220),
+                path});
+        paths.push_back(path);
+    }
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, paths);
+
+    const QJsonObject first = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 2);
+    const int featuredBefore = first.value(QStringLiteral("featured_groups")).toInt();
+    QVERIFY(featuredBefore >= 1);
+
+    // Regress the store to schema v3: version stamp back, additive table
+    // gone. The upgrade must recreate the table and must NOT drop the
+    // v3-shaped features rows (the historical version-mismatch drop wiped
+    // them; upgrades are additive now).
+    {
+        QString connectionName = QStringLiteral("upgrade-mutate-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery mutate(db);
+            QVERIFY(mutate.exec(QStringLiteral("UPDATE meta SET value='3' WHERE key='schema_version'")));
+            QVERIFY(mutate.exec(QStringLiteral("DROP TABLE IF EXISTS file_features")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    const QJsonObject rescan = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+    QCOMPARE(rescan.value(QStringLiteral("scanned")).toInt(), 0);
+    QCOMPARE(rescan.value(QStringLiteral("featured_groups")).toInt(), featuredBefore);
+    QCOMPARE(rescan.value(QStringLiteral("schema_version")).toInt(), 4);
+
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QSqlQuery meta(db);
+        QVERIFY(meta.exec(QStringLiteral("SELECT value FROM meta WHERE key='schema_version'")));
+        QVERIFY(meta.next());
+        QCOMPARE(meta.value(0).toString(), QStringLiteral("4"));
+        QSqlQuery count(db);
+        QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM features")));
+        QVERIFY(count.next());
+        QCOMPARE(count.value(0).toInt(), featuredBefore);
+        QSqlQuery table(db);
+        QVERIFY(table.exec(QStringLiteral(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_features'")));
+        QVERIFY(table.next());
+        QCOMPARE(table.value(0).toInt(), 1);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+}
+
+void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioDirPath));
+    const QDir audioDir(audioDirPath);
+    QStringList paths;
+    for (int i = 0; i < 4; ++i) {
+        const QString path = audioDir.filePath(QStringLiteral("copy%1.wav").arg(i));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("anoisesrc=color=pink:duration=%1:amplitude=0.2:sample_rate=44100:seed=%2")
+                    .arg(6 + i * 3)
+                    .arg(i),
+                path});
+        paths.push_back(path);
+    }
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, paths);
+
+    const QStringList scanArgs{
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("2"), QStringLiteral("--json"),
+    };
+    const QJsonObject first = runIndexer(scanArgs);
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 4);
+    const int groups = first.value(QStringLiteral("featured_groups")).toInt();
+    QVERIFY(groups >= 2);
+
+    // Migration shape: BOTH group and per-file rows stale (an older-version
+    // store meeting a newer binary). The refresh must decode representatives
+    // and, as a side effect, backfill fresh file_features rows.
+    {
+        QString connectionName = QStringLiteral("copy-test-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery stale(db);
+            QVERIFY(stale.exec(QStringLiteral("UPDATE features SET version='old'")));
+            // Poison the stale cache too: a version-blind copy would leak
+            // these impossible values into current group rows. The fallback
+            // must decode, replace each representative's cache row, and copy
+            // none of these sentinels.
+            QVERIFY(stale.exec(QStringLiteral(
+                "UPDATE file_features SET version='old', tempo_bpm=999, energy=999")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    const QJsonObject migration = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features, QStringLiteral("--stage"),
+        QStringLiteral("features"), QStringLiteral("--jobs"), QStringLiteral("2"),
+        QStringLiteral("--json"),
+    });
+    QCOMPARE(migration.value(QStringLiteral("features_written")).toInt(), groups);
+    QCOMPARE(migration.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        {
+            QSqlQuery freshRepresentatives(db);
+            freshRepresentatives.prepare(QStringLiteral(
+                "SELECT COUNT(*) FROM ("
+                " SELECT content_group_id, MIN(path) AS path FROM files "
+                " WHERE content_group_id IS NOT NULL AND status='ok' "
+                " GROUP BY content_group_id"
+                ") reps JOIN file_features ff ON ff.path=reps.path "
+                "WHERE ff.version=?"));
+            freshRepresentatives.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+            QVERIFY(freshRepresentatives.exec());
+            QVERIFY(freshRepresentatives.next());
+            QCOMPARE(freshRepresentatives.value(0).toInt(), groups);
+
+            QSqlQuery poison(db);
+            QVERIFY(poison.exec(QStringLiteral(
+                "SELECT COUNT(*) FROM features WHERE tempo_bpm=999 OR energy=999")));
+            QVERIFY(poison.next());
+            QCOMPARE(poison.value(0).toInt(), 0);
+        }
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    // Second forced refresh with fresh per-file rows — and NO audio on disk.
+    // Success is only possible on the pure copy path; any attempted decode
+    // would surface as feature_groups_failed. The trigger additionally proves
+    // the feature-only command does not rebuild already-clean content groups;
+    // that unrelated O(files) work would erase the warm-path latency win.
+    {
+        QString connectionName = QStringLiteral("copy-test2-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery stale(db);
+            QVERIFY(stale.exec(QStringLiteral("UPDATE features SET version='old'")));
+            QVERIFY(stale.exec(QStringLiteral(
+                "CREATE TRIGGER reject_unneeded_regroup BEFORE DELETE ON content_groups "
+                "BEGIN SELECT RAISE(ABORT, 'feature-only refresh regrouped clean store'); END")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    for (const QString &path : paths) {
+        QVERIFY(QFile::remove(path));
+    }
+    const QJsonObject copies = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features, QStringLiteral("--stage"),
+        QStringLiteral("features"), QStringLiteral("--jobs"), QStringLiteral("2"),
+        QStringLiteral("--json"),
+    });
+    QCOMPARE(copies.value(QStringLiteral("features_written")).toInt(), groups);
+    QCOMPARE(copies.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+    QCOMPARE(copies.value(QStringLiteral("featured_stale")).toInt(), 0);
+    QCOMPARE(copies.value(QStringLiteral("canceled")).toBool(), false);
+}
+
+void IndexerScanTest::orphanedFileFeatureRowsAreSwept()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioDirPath));
+    const QDir audioDir(audioDirPath);
+    QStringList paths;
+    for (int i = 0; i < 2; ++i) {
+        const QString path = audioDir.filePath(QStringLiteral("sweep%1.wav").arg(i));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("anoisesrc=color=pink:duration=%1:amplitude=0.2:sample_rate=44100:seed=%2")
+                    .arg(6 + i * 3)
+                    .arg(10 + i),
+                path});
+        paths.push_back(path);
+    }
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, paths);
+    runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+
+    // Simulate a pruned files row; the per-file scalar row must follow it on
+    // the next scan that regroups (adding a third file forces that path).
+    {
+        QString connectionName = QStringLiteral("sweep-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery prune(db);
+            prune.prepare(QStringLiteral("DELETE FROM files WHERE path = ?"));
+            prune.addBindValue(paths.first());
+            QVERIFY(prune.exec());
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+    const QString extra = audioDir.filePath(QStringLiteral("sweep-extra.wav"));
+    ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+            QStringLiteral("anoisesrc=color=pink:duration=12:amplitude=0.2:sample_rate=44100:seed=99"),
+            extra});
+    // The pruned file leaves the library too, or the rescan would simply
+    // re-analyze it and rewrite the very row the sweep should remove.
+    QVERIFY(QFile::remove(library));
+    createLibrary(library, QStringList() << paths.at(1) << extra);
+    runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QSqlQuery gone(db);
+        gone.prepare(QStringLiteral("SELECT COUNT(*) FROM file_features WHERE path = ?"));
+        gone.addBindValue(paths.first());
+        QVERIFY(gone.exec());
+        QVERIFY(gone.next());
+        QCOMPARE(gone.value(0).toInt(), 0);
         db.close();
         QSqlDatabase::removeDatabase(connectionName);
     }

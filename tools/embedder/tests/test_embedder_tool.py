@@ -120,7 +120,11 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
     ]
 
 
-def test_schema_three_is_accepted_without_downgrade(tmp_path: Path) -> None:
+@pytest.mark.parametrize("schema_version", [3, 4])
+def test_current_indexer_schemas_are_accepted_without_downgrade(
+    tmp_path: Path,
+    schema_version: int,
+) -> None:
     path = tmp_path / "features.sqlite"
     with sqlite3.connect(path) as conn:
         conn.executescript(
@@ -154,11 +158,19 @@ def test_schema_three_is_accepted_without_downgrade(tmp_path: Path) -> None:
             );
             """
         )
-        conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '3')")
+        if schema_version == 4:
+            conn.execute(
+                "CREATE TABLE file_features("
+                "path TEXT PRIMARY KEY, extractor TEXT NOT NULL, version TEXT NOT NULL)"
+            )
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES('schema_version', ?)",
+            (str(schema_version),),
+        )
 
     with db.connect(path) as conn:
         db.ensure_schema(conn)
-        assert db.read_schema_version(conn) == 3
+        assert db.read_schema_version(conn) == schema_version
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'embeddings'").fetchone() is not None
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'track_neighbors'").fetchone() is not None
 

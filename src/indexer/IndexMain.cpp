@@ -50,7 +50,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 constexpr int kProcessTimeoutMs = 10 * 60 * 1000;
 constexpr double kChromaprintBerThreshold = 0.15;
 constexpr int kChromaprintOffsetFrames = 3;
@@ -291,10 +291,12 @@ QVariant scalarVariant(const std::optional<Dsp::ScalarFeatures> &features, doubl
     return features ? QVariant((*features).*member) : QVariant();
 }
 
-void bindScalarRow(QSqlQuery &query, qint64 groupId, const std::optional<Dsp::ScalarFeatures> &features)
+// Shared by the group-features and file_features upserts — both tables carry
+// the same ten scalar columns after their key.
+void bindScalarRow(QSqlQuery &query, const QVariant &key, const std::optional<Dsp::ScalarFeatures> &features)
 {
     int bindIndex = 0;
-    query.bindValue(bindIndex++, groupId);
+    query.bindValue(bindIndex++, key);
     query.bindValue(bindIndex++, features ? optionalVariant(features->tempoBpm) : QVariant());
     query.bindValue(bindIndex++, features ? optionalVariant(features->loudnessLufs) : QVariant());
     query.bindValue(bindIndex++, features ? optionalVariant(features->loudnessStdDb) : QVariant());
@@ -326,17 +328,6 @@ QSqlDatabase openFeaturesDatabase(const QString &path, SqlConnection &connection
     return database;
 }
 
-int readSchemaVersion(QSqlDatabase &database)
-{
-    QSqlQuery query(database);
-    if (!query.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")) || !query.next()) {
-        return -1;
-    }
-    bool ok = false;
-    const int version = query.value(0).toString().toInt(&ok);
-    return ok ? version : -1;
-}
-
 QStringList tableColumns(QSqlDatabase &database, const QString &table)
 {
     QSqlQuery query(database);
@@ -349,7 +340,7 @@ QStringList tableColumns(QSqlDatabase &database, const QString &table)
     return columns;
 }
 
-bool featuresTableIsV3(QSqlDatabase &database)
+bool featuresTableHasCurrentShape(QSqlDatabase &database)
 {
     const QStringList columns = tableColumns(database, QStringLiteral("features"));
     const QStringList expected{
@@ -373,7 +364,6 @@ void initSchema(QSqlDatabase &database)
 {
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)"));
-    const int version = readSchemaVersion(database);
 
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS files("
@@ -389,12 +379,37 @@ void initSchema(QSqlDatabase &database)
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT)"));
 
-    if (version != kSchemaVersion || !featuresTableIsV3(database)) {
+    // Drop on SHAPE mismatch only, never on the schema_version number: the
+    // v3 -> v4 upgrade is purely additive (file_features below), and a
+    // version-based drop here would wipe every existing store's feature
+    // rows on first open after an upgrade. Only the pre-v3 bliss-era table
+    // fails the shape check.
+    if (!featuresTableHasCurrentShape(database)) {
         execSql(database, QStringLiteral("DROP TABLE IF EXISTS features"));
     }
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS features("
                           " content_group_id INTEGER PRIMARY KEY,"
+                          " tempo_bpm REAL,"
+                          " loudness_lufs REAL,"
+                          " loudness_std_db REAL,"
+                          " spectral_centroid_mean_hz REAL,"
+                          " spectral_centroid_std_hz REAL,"
+                          " spectral_flatness_mean REAL,"
+                          " zero_crossing_rate REAL,"
+                          " onset_rate_hz REAL,"
+                          " energy REAL,"
+                          " extractor TEXT NOT NULL,"
+                          " version TEXT NOT NULL)"));
+
+    // Per-file scalar cache (schema v4): the durable form of the in-memory
+    // `extracted` map. Written whenever a file is decoded and analyzed, so
+    // the group feature phase can copy a representative's scalars instead
+    // of decoding the audio a second time. NULL scalars mean "analyzed,
+    // no features" (short input) — a known result, not missing work.
+    execSql(database, QStringLiteral(
+                          "CREATE TABLE IF NOT EXISTS file_features("
+                          " path TEXT PRIMARY KEY,"
                           " tempo_bpm REAL,"
                           " loudness_lufs REAL,"
                           " loudness_std_db REAL,"
@@ -758,6 +773,41 @@ void upsertFile(QSqlDatabase &database, const FileAnalysis &analysis)
     execPrepared(query);
 }
 
+void prepareFileFeaturesUpsert(QSqlQuery &query)
+{
+    prepareOrFail(query, QStringLiteral(
+                             "INSERT INTO file_features("
+                             " path, tempo_bpm, loudness_lufs, loudness_std_db,"
+                             " spectral_centroid_mean_hz, spectral_centroid_std_hz,"
+                             " spectral_flatness_mean, zero_crossing_rate, onset_rate_hz,"
+                             " energy, extractor, version)"
+                             " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                             " ON CONFLICT(path) DO UPDATE SET"
+                             " tempo_bpm = excluded.tempo_bpm,"
+                             " loudness_lufs = excluded.loudness_lufs,"
+                             " loudness_std_db = excluded.loudness_std_db,"
+                             " spectral_centroid_mean_hz = excluded.spectral_centroid_mean_hz,"
+                             " spectral_centroid_std_hz = excluded.spectral_centroid_std_hz,"
+                             " spectral_flatness_mean = excluded.spectral_flatness_mean,"
+                             " zero_crossing_rate = excluded.zero_crossing_rate,"
+                             " onset_rate_hz = excluded.onset_rate_hz,"
+                             " energy = excluded.energy,"
+                             " extractor = excluded.extractor,"
+                             " version = excluded.version"));
+}
+
+// Durable twin of recordScalarExtraction: persist the per-file scalars so a
+// later feature phase (this run or any future one) can copy them instead of
+// decoding the file again. The caller owns one prepared query for the whole
+// phase; preparing this upsert once per file would add avoidable SQLite work
+// to the hot completion path.
+void upsertFileFeatures(QSqlQuery &query, const QString &path,
+                        const std::optional<Dsp::ScalarFeatures> &features)
+{
+    bindScalarRow(query, path, features);
+    execPrepared(query);
+}
+
 std::vector<qint32> decodeFingerprint(const QByteArray &blob)
 {
     std::vector<qint32> values;
@@ -1013,6 +1063,10 @@ void deleteOrphanedGroupRows(QSqlDatabase &database)
                               "(SELECT id FROM content_groups) OR neighbor_group_id NOT IN "
                               "(SELECT id FROM content_groups)"));
     }
+    // Per-file scalar rows follow their files row's lifecycle exactly.
+    execSql(database, QStringLiteral(
+                          "DELETE FROM file_features WHERE path NOT IN "
+                          "(SELECT path FROM files)"));
 }
 
 qint64 countScalar(QSqlDatabase &database, const QString &sql);
@@ -1265,26 +1319,61 @@ void emitFeatureProgress(int processed, int total,
     err.flush();
 }
 
-std::vector<StaleRep> materializeStaleReps(QSqlDatabase &database)
+// A stale group whose representative already has fresh per-file scalars:
+// the group row is written by copying these values — no decode. The ten
+// variants are the nine scalar columns plus extractor, preserved exactly as
+// the file row stores them.
+struct StaleRepCopy {
+    qint64 groupId = 0;
+    QVariantList scalarRow;
+};
+
+struct MaterializedStaleReps {
+    std::vector<StaleRepCopy> copies;
+    std::vector<StaleRep> decodes;
+};
+
+MaterializedStaleReps materializeStaleReps(QSqlDatabase &database)
 {
     // Matches featureRowFresh: missing row, older version, and NULL version
     // are stale; exact current version is fresh. Representative is MIN(path)
-    // over ok file rows — same as the previous serial loop.
+    // over ok file rows — same as the previous serial loop. The outer join
+    // against file_features splits the stale set into copyable groups
+    // (representative has fresh per-file scalars) and groups that still
+    // need a decode.
     QSqlQuery reps(database);
     prepareOrFail(reps, QStringLiteral(
-                            "SELECT f.content_group_id, MIN(f.path) AS path "
-                            "FROM files f "
-                            "LEFT JOIN features feat ON feat.content_group_id = f.content_group_id "
-                            "WHERE f.content_group_id IS NOT NULL AND f.status = 'ok' "
-                            "  AND (feat.version IS NULL OR feat.version != ?) "
-                            "GROUP BY f.content_group_id "
-                            "ORDER BY f.content_group_id"));
+                            "SELECT s.content_group_id, s.path, ff.version IS NOT NULL,"
+                            " ff.tempo_bpm, ff.loudness_lufs, ff.loudness_std_db,"
+                            " ff.spectral_centroid_mean_hz, ff.spectral_centroid_std_hz,"
+                            " ff.spectral_flatness_mean, ff.zero_crossing_rate,"
+                            " ff.onset_rate_hz, ff.energy, ff.extractor "
+                            "FROM (SELECT f.content_group_id AS content_group_id,"
+                            "             MIN(f.path) AS path "
+                            "      FROM files f "
+                            "      LEFT JOIN features feat"
+                            "        ON feat.content_group_id = f.content_group_id "
+                            "      WHERE f.content_group_id IS NOT NULL AND f.status = 'ok' "
+                            "        AND (feat.version IS NULL OR feat.version != ?) "
+                            "      GROUP BY f.content_group_id) s "
+                            "LEFT JOIN file_features ff ON ff.path = s.path AND ff.version = ? "
+                            "ORDER BY s.content_group_id"));
+    reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     execPrepared(reps);
 
-    std::vector<StaleRep> stale;
+    MaterializedStaleReps stale;
     while (reps.next()) {
-        stale.push_back(StaleRep{reps.value(0).toLongLong(), reps.value(1).toString()});
+        if (reps.value(2).toBool()) {
+            QVariantList row;
+            row.reserve(10);
+            for (int column = 3; column <= 12; ++column) {
+                row.push_back(reps.value(column));
+            }
+            stale.copies.push_back(StaleRepCopy{reps.value(0).toLongLong(), std::move(row)});
+        } else {
+            stale.decodes.push_back(StaleRep{reps.value(0).toLongLong(), reps.value(1).toString()});
+        }
     }
     return stale;
 }
@@ -1295,8 +1384,8 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                                     std::chrono::steady_clock::time_point scanStarted)
 {
     FeatureFillResult result;
-    const std::vector<StaleRep> stale = materializeStaleReps(database);
-    result.total = static_cast<int>(stale.size());
+    const MaterializedStaleReps stale = materializeStaleReps(database);
+    result.total = static_cast<int>(stale.copies.size() + stale.decodes.size());
 
     const auto phaseStarted = std::chrono::steady_clock::now();
     FeatureProgressRate phaseRate;
@@ -1342,20 +1431,49 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                               " energy = excluded.energy,"
                               " extractor = excluded.extractor,"
                               " version = excluded.version"));
+    // Copy path first: stale groups whose representative already has fresh
+    // per-file scalars become pure SQL upserts — no decode, no workers. The
+    // variants pass through exactly as the file row stores them; version is
+    // the expected one by construction of the materializing join.
+    for (const StaleRepCopy &copy : stale.copies) {
+        if (stopRequested()) {
+            break;
+        }
+        int bindIndex = 0;
+        upsert.bindValue(bindIndex++, copy.groupId);
+        for (const QVariant &value : copy.scalarRow) {
+            upsert.bindValue(bindIndex++, value);
+        }
+        upsert.bindValue(bindIndex, QString::fromLatin1(Dsp::kDspVersion));
+        execPrepared(upsert);
+        ++result.processed;
+        ++result.written;
+        maybeEmit(result.processed == result.total);
+    }
+    const int copiesDone = result.processed;
+
+    // Decode fallback for representatives without a fresh per-file row —
+    // and the backfill: every decoded representative gets its file_features
+    // row written here, so the next version bump's refresh copies instead.
+    QSqlQuery fileUpsert(database);
+    prepareFileFeaturesUpsert(fileUpsert);
     const auto completion = [&](FeatureAnalysis &&analysis, int processed, int) {
-        result.processed = processed;
+        result.processed = copiesDone + processed;
         if (analysis.failed) {
             ++result.failed;
         } else {
             bindScalarRow(upsert, analysis.representative.groupId, analysis.scalars);
             execPrepared(upsert);
+            upsertFileFeatures(fileUpsert, analysis.representative.path, analysis.scalars);
             ++result.written;
         }
         maybeEmit(result.processed == result.total);
     };
-    // Workers only decode and analyze. The main thread owns this QSqlQuery so
-    // the feature database remains a single-writer SQLite connection.
-    analyzeFeatureRepresentatives(stale, extracted, jobs, completion);
+    // Workers only decode and analyze. The main thread owns these QSqlQuery
+    // objects so the feature database remains a single-writer connection.
+    if (!stopRequested()) {
+        analyzeFeatureRepresentatives(stale.decodes, extracted, jobs, completion);
+    }
     result.canceled = stopRequested();
 
     if (progress && (result.canceled || lastProgress != result.processed)) {
@@ -1651,7 +1769,15 @@ int runScan(const ScanOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("grouping"));
         }
-        const int groups = regroupContent(database);
+        // Identity scans leave every successful file grouped before they
+        // return. A feature-only refresh must not rebuild 99k-file
+        // Chromaprint groups merely to copy stale scalar rows; regroup only
+        // when an interrupted/external workflow actually left ok rows
+        // ungrouped. Keep emitting the existing phase marker so the progress
+        // wire protocol and GUI state machine do not change.
+        const int groups = hasUngroupedOkRows(database)
+            ? regroupContent(database)
+            : currentGroupCount(database);
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
@@ -1714,6 +1840,8 @@ int runScan(const ScanOptions &options)
     int scanned = 0;
     int failed = 0;
 
+    QSqlQuery fileFeaturesUpsert(database);
+    prepareFileFeaturesUpsert(fileFeaturesUpsert);
     beginTransaction(database);
     int uncommitted = 0;
     auto lastCommit = std::chrono::steady_clock::now();
@@ -1752,6 +1880,9 @@ int runScan(const ScanOptions &options)
         timings.add(analysis.timings);
         recordScalarExtraction(extracted, analysis);
         upsertFile(database, analysis);
+        if (analysis.status == QLatin1String("ok")) {
+            upsertFileFeatures(fileFeaturesUpsert, analysis.candidate.path, analysis.scalars);
+        }
         ++scanned;
         ++uncommitted;
         commitIfNeeded(false);

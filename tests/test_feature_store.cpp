@@ -20,6 +20,7 @@ private slots:
     void versionMismatchIsClosed();
     void versionTwoIsOpen();
     void versionThreeIsOpen();
+    void versionFourIsOpen();
     void groupLookupsRoundTrip();
     void batchLookupsAndScalarsRoundTrip();
     void statusCountsRows();
@@ -375,12 +376,28 @@ void FeatureStoreTest::versionMismatchIsClosed()
     QVERIFY(temp.isValid());
 
     QString error;
-    const QString path = createFixture(temp, 4, &error);
+    const QString path = createFixture(temp, 5, &error);
     QVERIFY2(!path.isEmpty(), qPrintable(error));
     FeatureStore store(path);
     QVERIFY(!store.isOpen());
     QCOMPARE(store.schemaVersion(), -1);
     QCOMPARE(store.contentGroupForPath(QStringLiteral("/music/a.flac")), -1);
+}
+
+void FeatureStoreTest::versionFourIsOpen()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    // A v4 store is a v3 store plus the indexer-private file_features table;
+    // the fixture does not need that table for the app read path to work.
+    QString error;
+    const QString path = createFixture(temp, 4, &error);
+    QVERIFY2(!path.isEmpty(), qPrintable(error));
+    FeatureStore store(path);
+    QVERIFY(store.isOpen());
+    QCOMPARE(store.schemaVersion(), 4);
+    QVERIFY(store.scalarsForGroup(10).valid);
 }
 
 void FeatureStoreTest::versionTwoIsOpen()

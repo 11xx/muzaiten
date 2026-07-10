@@ -3,7 +3,7 @@
 `features.sqlite` is written by the `muzaiten-index` C++ binary built with the
 Qt application. The app and `muzaitenctl` treat this database as read-only.
 
-Schema version: `3`
+Schema version: `4`
 
 ```sql
 meta(key TEXT PRIMARY KEY, value TEXT);
@@ -24,6 +24,21 @@ content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT);
 
 features(
     content_group_id INTEGER PRIMARY KEY,
+    tempo_bpm REAL,
+    loudness_lufs REAL,
+    loudness_std_db REAL,
+    spectral_centroid_mean_hz REAL,
+    spectral_centroid_std_hz REAL,
+    spectral_flatness_mean REAL,
+    zero_crossing_rate REAL,
+    onset_rate_hz REAL,
+    energy REAL,
+    extractor TEXT NOT NULL,
+    version TEXT NOT NULL
+);
+
+file_features(
+    path TEXT PRIMARY KEY,
     tempo_bpm REAL,
     loudness_lufs REAL,
     loudness_std_db REAL,
@@ -59,7 +74,7 @@ databases may not contain them until the embedder runs.
 
 ## Meta Keys
 
-- `schema_version`: `3`.
+- `schema_version`: `4`.
 - `indexer_version`: `cpp`.
 - `dsp_version`: the analyzer version recorded when the indexer last opened the
   store. It is diagnostic; app-side freshness is decided from each feature
@@ -73,9 +88,10 @@ databases may not contain them until the embedder runs.
 - `last_scan_mean_ms_per_track`: elapsed milliseconds per scanned track.
 - `last_scan_power`: `background`, `balanced`, or `turbo`.
 
-Schema v1/v2 files are upgraded in place by `muzaiten-index scan`; the old
-`features` table is dropped and recreated because no shipped database contains
-authoritative scalar rows from the blocked bliss plan.
+Schema v1/v2 files are upgraded in place by `muzaiten-index scan`; their old
+bliss-era `features` shape is dropped and recreated because no shipped database
+contains authoritative rows in that shape. Schema v3 upgrades add
+`file_features` without dropping existing group feature rows.
 
 ## Identity Columns
 
@@ -99,16 +115,42 @@ Grouping is recomputed after changed files are analyzed:
 
 AcoustID lookup is intentionally out of scope.
 
-## Feature Rows
+## Per-file Feature Rows
+
+`file_features` is the durable scalar result for each successfully analyzed
+path. The file phase already decodes a changed file once for its SHA-256
+identity, Chromaprint, and `Dsp::analyze`; schema v4 persists that analysis at
+the same time instead of keeping it only in a process-local cache. Rows use the
+same scalar columns, extractor, DSP version, and NULL semantics as group rows.
+A row with NULL optional scalars is therefore a known result, not a request to
+decode the file again.
+
+The cache is strictly versioned. A row is copyable only when
+`file_features.version` matches the DSP version expected by the running
+indexer. Changed paths overwrite their row after successful analysis; failed
+files are never representatives, and orphan rows are swept when their `files`
+row is removed. The path key intentionally matches the lexicographic
+representative policy and the indexer's incremental path/mtime/size identity.
+A rename is analyzed once under its new path.
+
+## Group Feature Rows
 
 `features` contains one row per content group. The representative is the
 lexicographically first successfully analyzed path in the group, matching the
-embedder representative policy. Each scan buffers the canonical PCM once for a
-changed file, feeds it to the SHA-256 identity hash, Chromaprint, and
-`Dsp::analyze`, and writes scalar rows after grouping. Rows persist across
-rescans: a group that keeps its id keeps its feature row as long as the row's
-`version` matches the current `Dsp::kDspVersion`, so incremental scans only
-compute features for new or stale groups.
+embedder representative policy. After grouping, the feature phase copies a
+fresh representative `file_features` row into `features` without touching the
+audio. If that per-file row is missing or stale, the existing parallel fallback
+decodes and analyzes the representative once, writes both rows, and thereby
+backfills the copy path for a retry or later refresh. Files analyzed in the
+same scan already have their per-file row, so they are never decoded a second
+time merely to create the group row.
+
+Group rows persist across rescans: a group that keeps its id keeps its feature
+row as long as the row's `version` matches the current `Dsp::kDspVersion`.
+Feature-only refreshes also skip Chromaprint regrouping when no successful file
+is awaiting a group id. The steady-state phase is therefore O(stale groups)
+SQLite copying; decode is reserved for genuinely missing or invalidated
+per-file results.
 
 The app and radio serve scalar rows only when `features.version` matches the
 DSP version expected by the running build. This strict row-level check also
@@ -184,8 +226,9 @@ Caveats:
 ## Embedding Rows
 
 `tools/embedder` adds CLAP embeddings and cosine neighbors. It upgrades
-schema-1 databases to schema 2, accepts schema 3 without downgrading it, and is
-not linked into the Qt application.
+schema-1 databases to schema 2, accepts schema 3 and 4 without downgrading
+them, and is not linked into the Qt application. Schema v4's `file_features`
+table is indexer-private and does not change embedding or neighbor rows.
 
 `embeddings` contains one row per content group for the active model:
 

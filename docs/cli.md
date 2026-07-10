@@ -93,9 +93,13 @@ for the following `progress` lines (and may reset UI counters); the same
 `progress n/m elapsed= rate= eta=` line shape is reused. After `phase
 features`, `n/m` counts **stale representative groups** (missing, older, or
 NULL `features.version` rows for the active DSP version), not files.
-Representative decode/DSP work uses the same resolved `--power` / `--jobs`
-worker count as file analysis; feature-row writes remain serialized on the
-indexer thread for SQLite safety.
+When a representative has a fresh persisted per-file scalar row, the indexer
+copies it into the group row without decoding audio. Missing or stale per-file
+rows use the same resolved `--power` / `--jobs` worker count as file analysis,
+then backfill the per-file cache. Feature-row writes remain serialized on the
+indexer thread for SQLite safety. A feature-only run also avoids rebuilding
+already-complete content groups; `phase grouping` remains in the progress
+protocol but is normally instantaneous on an unchanged store.
 
 Both `muzaiten-index status --json` and scan JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /
