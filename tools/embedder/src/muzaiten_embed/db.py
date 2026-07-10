@@ -24,12 +24,6 @@ class Representative:
 
 
 @dataclass(frozen=True)
-class EmbeddingRow:
-    content_group_id: int
-    vector: tuple[float, ...]
-
-
-@dataclass(frozen=True)
 class Status:
     schema_version: int
     groups: int
@@ -172,20 +166,33 @@ def upsert_embedding(
     )
 
 
-def load_embeddings(
+def _load_embedding_matrix(
     conn: sqlite3.Connection,
     model: str,
     version: str,
-) -> list[EmbeddingRow]:
+) -> tuple[np.ndarray, np.ndarray]:
     rows = conn.execute(
         "SELECT content_group_id, dim, vector FROM embeddings "
         "WHERE model = ? AND version = ? ORDER BY content_group_id",
         (model, version),
     ).fetchall()
-    return [
-        EmbeddingRow(int(row["content_group_id"]), unpack_vector(row["vector"], int(row["dim"])))
-        for row in rows
-    ]
+    if not rows:
+        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
+    dim = int(rows[0]["dim"])
+    group_ids = np.empty(len(rows), dtype=np.int64)
+    matrix = np.empty((len(rows), dim), dtype=np.float32)
+    for index, row in enumerate(rows):
+        if int(row["dim"]) != dim:
+            raise ValueError(
+                f"embedding for group {int(row['content_group_id'])} has dim "
+                f"{int(row['dim'])}, expected {dim}"
+            )
+        vector = np.frombuffer(row["vector"], dtype="<f4")
+        if vector.size != dim:
+            raise ValueError(f"embedding blob has {vector.size} floats, expected {dim}")
+        group_ids[index] = int(row["content_group_id"])
+        matrix[index] = vector
+    return group_ids, matrix
 
 
 def rebuild_neighbors(
@@ -193,30 +200,43 @@ def rebuild_neighbors(
     model: str,
     version: str,
     top_k: int = 100,
+    block_size: int = 1024,
 ) -> int:
-    rows = load_embeddings(conn, model, version)
+    group_ids, matrix = _load_embedding_matrix(conn, model, version)
     conn.execute("DELETE FROM track_neighbors")
-    if len(rows) < 2:
+    total = int(group_ids.size)
+    if total < 2:
         conn.commit()
         return 0
 
-    matrix = np.array([row.vector for row in rows], dtype=np.float32)
-    similarities = matrix @ matrix.T
+    # Blockwise so memory stays O(block_size * total) instead of the full
+    # total^2 similarity matrix (24 GB at 77k groups).
+    keep = min(top_k, total - 1)
     inserted = 0
-    for source_index, source in enumerate(rows):
-        ranked: list[tuple[int, float]] = []
-        for neighbor_index, neighbor in enumerate(rows):
-            if neighbor_index == source_index:
-                continue
-            ranked.append((neighbor_index, float(similarities[source_index, neighbor_index])))
-        ranked.sort(key=lambda item: (-item[1], rows[item[0]].content_group_id))
-        for rank, (neighbor_index, cosine) in enumerate(ranked[:top_k], start=1):
-            conn.execute(
+    for start in range(0, total, block_size):
+        stop = min(start + block_size, total)
+        similarities = matrix[start:stop] @ matrix.T
+        for local, source_index in enumerate(range(start, stop)):
+            row = similarities[local]
+            row[source_index] = -np.inf
+            # Exact (-cosine, neighbor_group_id) top-k: partition first, then
+            # widen to every candidate tied with the selection floor so
+            # boundary ties resolve by ascending group id, not partition luck.
+            partitioned = np.argpartition(row, -keep)[-keep:]
+            floor = row[partitioned].min()
+            candidates = np.flatnonzero(row >= floor)
+            order = np.lexsort((group_ids[candidates], -row[candidates]))
+            chosen = candidates[order][:keep]
+            source_id = int(group_ids[source_index])
+            conn.executemany(
                 "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine) "
                 "VALUES(?, ?, ?, ?)",
-                (source.content_group_id, rows[neighbor_index].content_group_id, rank, cosine),
+                [
+                    (source_id, int(group_ids[neighbor]), rank, float(row[neighbor]))
+                    for rank, neighbor in enumerate(chosen, start=1)
+                ],
             )
-            inserted += 1
+            inserted += int(chosen.size)
     conn.commit()
     return inserted
 

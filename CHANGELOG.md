@@ -91,6 +91,11 @@
 
 ### Fixed
 
+- `muzaiten-embed neighbors` now scales to real libraries: the cosine
+  neighbor rebuild works in fixed-size blocks instead of materializing the
+  full group-by-group similarity matrix (24 GB at 77k groups) and ranking it
+  in pure Python. Ranking semantics are unchanged (highest cosine first,
+  ties by ascending group id) and pinned by a conformance test.
 - The Analysis status dialog `Files` row no longer clips large counts such as
   `99,159 (98,561 ok, 598 failed)` at the default size; form fields grow with
   the dialog width.
