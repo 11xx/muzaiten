@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.07.10]
+
 ### Added
 
 - The CLAP embedder (`tools/embedder`) now makes its inference device explicit:
