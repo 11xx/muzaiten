@@ -336,3 +336,74 @@ def test_cli_status_reports_device_probe(
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["device"] == "cuda"
+
+
+def _naive_neighbor_reference(
+    group_ids: list[int],
+    vectors: list[tuple[float, ...]],
+    top_k: int,
+) -> list[tuple[int, int, int]]:
+    import numpy as np
+
+    matrix = np.array(vectors, dtype=np.float32)
+    similarities = matrix @ matrix.T
+    expected: list[tuple[int, int, int]] = []
+    for source_index, source_id in enumerate(group_ids):
+        ranked = [
+            (neighbor_index, float(similarities[source_index, neighbor_index]))
+            for neighbor_index in range(len(group_ids))
+            if neighbor_index != source_index
+        ]
+        ranked.sort(key=lambda item: (-item[1], group_ids[item[0]]))
+        for rank, (neighbor_index, _cosine) in enumerate(ranked[:top_k], start=1):
+            expected.append((source_id, group_ids[neighbor_index], rank))
+    return expected
+
+
+def test_blockwise_neighbors_match_naive_reference(tmp_path: Path) -> None:
+    import random
+
+    rng = random.Random(20260710)
+    dim = 8
+    count = 137
+    group_ids = sorted(rng.sample(range(1, 10_000), count))
+    vectors: list[tuple[float, ...]] = []
+    for index in range(count):
+        if index % 7 == 3:
+            # Duplicate an earlier vector so cosine ties exercise the
+            # ascending-group-id tie-break at the top-k boundary.
+            vectors.append(vectors[index - 1])
+            continue
+        raw = [rng.uniform(-1.0, 1.0) for _ in range(dim)]
+        vectors.append(db.normalize_vector(raw))
+
+    path = tmp_path / "features.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '2')")
+    with db.connect(path) as conn:
+        db.ensure_schema(conn)
+        for group_id, vector in zip(group_ids, vectors):
+            db.upsert_embedding(conn, group_id, "fake-clap", "fixture", vector)
+        conn.commit()
+
+        stored = [
+            db.unpack_vector(row["vector"], dim)
+            for row in conn.execute(
+                "SELECT vector FROM embeddings ORDER BY content_group_id"
+            ).fetchall()
+        ]
+        expected = _naive_neighbor_reference(group_ids, stored, top_k=10)
+
+        inserted = db.rebuild_neighbors(conn, "fake-clap", "fixture", top_k=10, block_size=17)
+
+        actual = [
+            (int(row["content_group_id"]), int(row["neighbor_group_id"]), int(row["rank"]))
+            for row in conn.execute(
+                "SELECT content_group_id, neighbor_group_id, rank FROM track_neighbors "
+                "ORDER BY content_group_id, rank",
+            ).fetchall()
+        ]
+
+    assert inserted == count * 10
+    assert actual == expected
