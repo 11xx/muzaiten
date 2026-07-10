@@ -39,6 +39,7 @@ private slots:
     void incrementalRescanPreservesFeatureRows();
     void featurePhaseProgressAndStaleDenom();
     void featurePhaseCancelPreservesWrittenRows();
+    void schemaV3StoreUpgradesInPlaceKeepingFeatureRows();
 };
 
 namespace {
@@ -525,7 +526,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
     QVERIFY(first.contains(QStringLiteral("feature_groups_failed")));
     QVERIFY(first.value(QStringLiteral("features_written")).toInt() >= 6);
     QCOMPARE(first.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
-    QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 3);
+    QCOMPARE(first.value(QStringLiteral("schema_version")).toInt(), 4);
     QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 8);
     QCOMPARE(first.value(QStringLiteral("skipped")).toInt(), 0);
     QCOMPARE(first.value(QStringLiteral("failed")).toInt(), 0);
@@ -629,7 +630,7 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV3Features()
         features,
         QStringLiteral("--json"),
     });
-    QCOMPARE(status.value(QStringLiteral("schema_version")).toInt(), 3);
+    QCOMPARE(status.value(QStringLiteral("schema_version")).toInt(), 4);
     QCOMPARE(status.value(QStringLiteral("dsp_version")).toString(), QString::fromLatin1(Dsp::kDspVersion));
     QCOMPARE(status.value(QStringLiteral("files")).toInt(), 8);
     QCOMPARE(status.value(QStringLiteral("statuses")).toObject().value(QStringLiteral("ok")).toInt(), 8);
@@ -1417,6 +1418,87 @@ void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
         QVERIFY(fresh.exec());
         QVERIFY(fresh.next());
         QCOMPARE(fresh.value(0).toInt(), featureCountBefore);
+        db.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+}
+
+void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
+{
+    requireTool(QStringLiteral("ffmpeg"));
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioDirPath));
+    const QDir audioDir(audioDirPath);
+    QStringList paths;
+    for (int i = 0; i < 2; ++i) {
+        const QString path = audioDir.filePath(QStringLiteral("up%1.wav").arg(i));
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("sine=frequency=%1:duration=6:sample_rate=44100").arg(330 + i * 220),
+                path});
+        paths.push_back(path);
+    }
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, paths);
+
+    const QJsonObject first = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), 2);
+    const int featuredBefore = first.value(QStringLiteral("featured_groups")).toInt();
+    QVERIFY(featuredBefore >= 1);
+
+    // Regress the store to schema v3: version stamp back, additive table
+    // gone. The upgrade must recreate the table and must NOT drop the
+    // v3-shaped features rows (the historical version-mismatch drop wiped
+    // them; upgrades are additive now).
+    {
+        QString connectionName = QStringLiteral("upgrade-mutate-%1")
+                                     .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+            db.setDatabaseName(features);
+            QVERIFY(db.open());
+            QSqlQuery mutate(db);
+            QVERIFY(mutate.exec(QStringLiteral("UPDATE meta SET value='3' WHERE key='schema_version'")));
+            QVERIFY(mutate.exec(QStringLiteral("DROP TABLE IF EXISTS file_features")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    const QJsonObject rescan = runIndexer({
+        QStringLiteral("scan"), QStringLiteral("--library"), library,
+        QStringLiteral("--features"), features,
+        QStringLiteral("--jobs"), QStringLiteral("1"), QStringLiteral("--json"),
+    });
+    QCOMPARE(rescan.value(QStringLiteral("scanned")).toInt(), 0);
+    QCOMPARE(rescan.value(QStringLiteral("featured_groups")).toInt(), featuredBefore);
+    QCOMPARE(rescan.value(QStringLiteral("schema_version")).toInt(), 4);
+
+    {
+        QString connectionName;
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QSqlQuery meta(db);
+        QVERIFY(meta.exec(QStringLiteral("SELECT value FROM meta WHERE key='schema_version'")));
+        QVERIFY(meta.next());
+        QCOMPARE(meta.value(0).toString(), QStringLiteral("4"));
+        QSqlQuery count(db);
+        QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM features")));
+        QVERIFY(count.next());
+        QCOMPARE(count.value(0).toInt(), featuredBefore);
+        QSqlQuery table(db);
+        QVERIFY(table.exec(QStringLiteral(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file_features'")));
+        QVERIFY(table.next());
+        QCOMPARE(table.value(0).toInt(), 1);
         db.close();
         QSqlDatabase::removeDatabase(connectionName);
     }

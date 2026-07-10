@@ -16,7 +16,9 @@
 namespace {
 
 constexpr int kMinSupportedSchemaVersion = 1;
-constexpr int kMaxSupportedSchemaVersion = 3;
+// v4 adds the indexer-private file_features table; the app read path is
+// unchanged from v3 (it never reads per-file rows).
+constexpr int kMaxSupportedSchemaVersion = 4;
 constexpr qsizetype kMaxSqlBindings = 500;
 
 bool isSupportedSchemaVersion(int version)

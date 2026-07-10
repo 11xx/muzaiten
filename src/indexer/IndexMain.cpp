@@ -50,7 +50,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 constexpr int kProcessTimeoutMs = 10 * 60 * 1000;
 constexpr double kChromaprintBerThreshold = 0.15;
 constexpr int kChromaprintOffsetFrames = 3;
@@ -326,17 +326,6 @@ QSqlDatabase openFeaturesDatabase(const QString &path, SqlConnection &connection
     return database;
 }
 
-int readSchemaVersion(QSqlDatabase &database)
-{
-    QSqlQuery query(database);
-    if (!query.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")) || !query.next()) {
-        return -1;
-    }
-    bool ok = false;
-    const int version = query.value(0).toString().toInt(&ok);
-    return ok ? version : -1;
-}
-
 QStringList tableColumns(QSqlDatabase &database, const QString &table)
 {
     QSqlQuery query(database);
@@ -373,7 +362,6 @@ void initSchema(QSqlDatabase &database)
 {
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)"));
-    const int version = readSchemaVersion(database);
 
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS files("
@@ -389,12 +377,37 @@ void initSchema(QSqlDatabase &database)
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT)"));
 
-    if (version != kSchemaVersion || !featuresTableIsV3(database)) {
+    // Drop on SHAPE mismatch only, never on the schema_version number: the
+    // v3 -> v4 upgrade is purely additive (file_features below), and a
+    // version-based drop here would wipe every existing store's feature
+    // rows on first open after an upgrade. Only the pre-v3 bliss-era table
+    // fails the shape check.
+    if (!featuresTableIsV3(database)) {
         execSql(database, QStringLiteral("DROP TABLE IF EXISTS features"));
     }
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS features("
                           " content_group_id INTEGER PRIMARY KEY,"
+                          " tempo_bpm REAL,"
+                          " loudness_lufs REAL,"
+                          " loudness_std_db REAL,"
+                          " spectral_centroid_mean_hz REAL,"
+                          " spectral_centroid_std_hz REAL,"
+                          " spectral_flatness_mean REAL,"
+                          " zero_crossing_rate REAL,"
+                          " onset_rate_hz REAL,"
+                          " energy REAL,"
+                          " extractor TEXT NOT NULL,"
+                          " version TEXT NOT NULL)"));
+
+    // Per-file scalar cache (schema v4): the durable form of the in-memory
+    // `extracted` map. Written whenever a file is decoded and analyzed, so
+    // the group feature phase can copy a representative's scalars instead
+    // of decoding the audio a second time. NULL scalars mean "analyzed,
+    // no features" (short input) — a known result, not missing work.
+    execSql(database, QStringLiteral(
+                          "CREATE TABLE IF NOT EXISTS file_features("
+                          " path TEXT PRIMARY KEY,"
                           " tempo_bpm REAL,"
                           " loudness_lufs REAL,"
                           " loudness_std_db REAL,"
