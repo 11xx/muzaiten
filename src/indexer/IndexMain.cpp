@@ -291,10 +291,12 @@ QVariant scalarVariant(const std::optional<Dsp::ScalarFeatures> &features, doubl
     return features ? QVariant((*features).*member) : QVariant();
 }
 
-void bindScalarRow(QSqlQuery &query, qint64 groupId, const std::optional<Dsp::ScalarFeatures> &features)
+// Shared by the group-features and file_features upserts — both tables carry
+// the same ten scalar columns after their key.
+void bindScalarRow(QSqlQuery &query, const QVariant &key, const std::optional<Dsp::ScalarFeatures> &features)
 {
     int bindIndex = 0;
-    query.bindValue(bindIndex++, groupId);
+    query.bindValue(bindIndex++, key);
     query.bindValue(bindIndex++, features ? optionalVariant(features->tempoBpm) : QVariant());
     query.bindValue(bindIndex++, features ? optionalVariant(features->loudnessLufs) : QVariant());
     query.bindValue(bindIndex++, features ? optionalVariant(features->loudnessStdDb) : QVariant());
@@ -768,6 +770,39 @@ void upsertFile(QSqlDatabase &database, const FileAnalysis &analysis)
     query.addBindValue(analysis.chromaprint.isEmpty() ? QVariant() : QVariant(analysis.chromaprint));
     query.addBindValue(QDateTime::currentSecsSinceEpoch());
     query.addBindValue(analysis.status);
+    execPrepared(query);
+}
+
+// Durable twin of recordScalarExtraction: persist the per-file scalars so a
+// later feature phase (this run or any future one) can copy them instead of
+// decoding the file again. Same rule — only ok analyses; NULL scalars mean
+// "analyzed, no features" and are a final answer, not pending work.
+void upsertFileFeatures(QSqlDatabase &database, const FileAnalysis &analysis)
+{
+    if (analysis.status != QLatin1String("ok")) {
+        return;
+    }
+    QSqlQuery query(database);
+    prepareOrFail(query, QStringLiteral(
+                             "INSERT INTO file_features("
+                             " path, tempo_bpm, loudness_lufs, loudness_std_db,"
+                             " spectral_centroid_mean_hz, spectral_centroid_std_hz,"
+                             " spectral_flatness_mean, zero_crossing_rate, onset_rate_hz,"
+                             " energy, extractor, version)"
+                             " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                             " ON CONFLICT(path) DO UPDATE SET"
+                             " tempo_bpm = excluded.tempo_bpm,"
+                             " loudness_lufs = excluded.loudness_lufs,"
+                             " loudness_std_db = excluded.loudness_std_db,"
+                             " spectral_centroid_mean_hz = excluded.spectral_centroid_mean_hz,"
+                             " spectral_centroid_std_hz = excluded.spectral_centroid_std_hz,"
+                             " spectral_flatness_mean = excluded.spectral_flatness_mean,"
+                             " zero_crossing_rate = excluded.zero_crossing_rate,"
+                             " onset_rate_hz = excluded.onset_rate_hz,"
+                             " energy = excluded.energy,"
+                             " extractor = excluded.extractor,"
+                             " version = excluded.version"));
+    bindScalarRow(query, analysis.candidate.path, analysis.scalars);
     execPrepared(query);
 }
 
@@ -1765,6 +1800,7 @@ int runScan(const ScanOptions &options)
         timings.add(analysis.timings);
         recordScalarExtraction(extracted, analysis);
         upsertFile(database, analysis);
+        upsertFileFeatures(database, analysis);
         ++scanned;
         ++uncommitted;
         commitIfNeeded(false);
