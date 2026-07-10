@@ -123,6 +123,15 @@
   falsely triggers the gapless queue advance.
 - Pausing in a release-on-pause profile no longer loses the resume position to
   0:00 when the position query fails transiently (e.g. mid-flush).
+- Seeks are now sample-accurate (`ACCURATE` instead of `KEY_UNIT`), which also
+  fixes an "Internal data stream error" that key-unit seeks near the end of
+  FLACs without a seektable (e.g. ffmpeg-muxed rips) triggered in flacparse.
+- A pipeline error no longer freezes the transport: the backend first retries
+  the current source in place (one bounded attempt per position — decode
+  errors after a seek and transient stalls recover silently), and starting any
+  track from the error state rebuilds the pipeline, so a genuinely unplayable
+  file reports its error once and the next play works instead of requiring a
+  track switch to revive playback.
 - `muzaiten-embed neighbors` now scales to real libraries: the cosine
   neighbor rebuild works in fixed-size blocks instead of materializing the
   full group-by-group similarity matrix (24 GB at 77k groups) and ranking it

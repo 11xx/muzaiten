@@ -61,6 +61,11 @@ private:
     // uri at |positionMs|, preserving the prepared gapless next. Used when a
     // seek lands in the undefined about-to-finish window or never completes.
     void reloadCurrentAtPosition(qint64 positionMs, State targetState);
+    // One bounded attempt to survive a pipeline error (bad frame near EOS,
+    // transient decode failure) by reloading the current source in place.
+    // Returns true when a recovery was started and the error should not be
+    // published; a repeat error in the same neighbourhood gives up.
+    bool tryRecoverFromStreamError();
     void handleSeekWatchdogTimeout();
     void clearSeekInFlight();
     void beginTargetTransition(State targetState);
@@ -105,7 +110,7 @@ private:
     QString m_currentUri;
     // The uri actually audible right now. Lags m_currentUri between
     // about-to-finish (which swaps m_currentUri to the queued next track) and
-    // the new stream's STREAM_START; equal to m_currentUri otherwise.
+    // the audible switch committed in pollPosition; equal otherwise.
     QString m_playingUri;
     QString m_preparedUri;
     State m_state = State::Stopped;
@@ -133,6 +138,13 @@ private:
     qint64 m_queuedSeekMs = -1;
     qint64 m_lastSeekMs = -1;
     QTimer m_seekWatchdog;
+
+    // Error-recovery budget: where the last in-place reload happened. A second
+    // pipeline error near the same spot on the same uri means the file is
+    // genuinely unplayable there — publish the error instead of looping.
+    // Cleared on every explicit play()/loadPaused()/stop().
+    QString m_lastRecoveryUri;
+    qint64 m_lastRecoveryPositionMs = -1;
 
     // Read-ahead state: a private fd on the current file plus the byte size and
     // the furthest offset we've already advised (the sliding watermark).

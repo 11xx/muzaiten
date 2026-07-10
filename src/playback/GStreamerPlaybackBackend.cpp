@@ -8,6 +8,7 @@
 #include <gst/gst.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 
 #include <fcntl.h>
@@ -139,6 +140,14 @@ qint64 clockTimeToMs(gint64 value)
     return static_cast<qint64>(value / GST_MSECOND);
 }
 
+// ACCURATE, not KEY_UNIT: sample-accurate seeks land where the user dropped
+// the needle, and — verified empirically — KEY_UNIT's frame-boundary estimate
+// makes flacparse hit an "Internal data stream error" near the end of FLACs
+// without a seektable (ffmpeg-muxed rips), where ACCURATE seeks stay clean.
+// FLAC frames are all sync points, so the accuracy costs nothing there.
+constexpr GstSeekFlags kSeekFlags
+    = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE);
+
 } // namespace
 
 GStreamerPlaybackBackend::GStreamerPlaybackBackend(QObject *parent)
@@ -237,7 +246,10 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
         return;
     }
     // Coming back from native DSD: rebuild the playbin the normal path expects.
-    if (m_dsdActive) {
+    // Same after a pipeline error — GStreamer only guarantees recovery through
+    // NULL, and a fresh playbin is the reliable way to leave the failed state
+    // behind (READY alone can keep dead elements inside uridecodebin).
+    if (m_dsdActive || m_state == State::Error) {
         rebuildPipeline();
     }
     if (m_playbin == nullptr) {
@@ -246,6 +258,8 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
 
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_lastRecoveryUri.clear();
+    m_lastRecoveryPositionMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
     resetTimeline();
     loadUri(uriForUrl(url), State::Playing);
@@ -267,7 +281,8 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
         playDsd(url, State::Paused);
         return;
     }
-    if (m_dsdActive) {
+    // As in play(): a fresh playbin after native DSD or a pipeline error.
+    if (m_dsdActive || m_state == State::Error) {
         rebuildPipeline();
     }
     if (m_playbin == nullptr) {
@@ -276,6 +291,8 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
 
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_lastRecoveryUri.clear();
+    m_lastRecoveryPositionMs = -1;
     gst_element_set_state(m_playbin, GST_STATE_READY);
     resetTimeline();
     loadUri(uriForUrl(url), State::Paused);
@@ -385,6 +402,8 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
     // build a fresh DSD passthrough graph for this file.
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_lastRecoveryUri.clear();
+    m_lastRecoveryPositionMs = -1;
     finishTargetTransition();
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
@@ -440,7 +459,7 @@ void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qi
         if (targetState == State::Paused && positionMs > 0) {
             gst_element_seek_simple(m_playbin,
                                     GST_FORMAT_TIME,
-                                    static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+                                    kSeekFlags,
                                     static_cast<gint64>(positionMs) * GST_MSECOND);
         }
     }
@@ -524,6 +543,8 @@ void GStreamerPlaybackBackend::stop()
 {
     m_softPaused = false;
     m_pendingSeekMs = -1;
+    m_lastRecoveryUri.clear();
+    m_lastRecoveryPositionMs = -1;
     clearSeekInFlight();
     m_targetState = State::Stopped;
     finishTargetTransition();
@@ -608,7 +629,7 @@ void GStreamerPlaybackBackend::issueSeek(qint64 positionMs)
     const gboolean ok = gst_element_seek_simple(
         m_playbin,
         GST_FORMAT_TIME,
-        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+        kSeekFlags,
         static_cast<gint64>(positionMs) * GST_MSECOND);
     if (ok) {
         m_seekInFlight = true;
@@ -632,6 +653,37 @@ void GStreamerPlaybackBackend::clearSeekInFlight()
     m_seekInFlight = false;
     m_queuedSeekMs = -1;
     m_seekWatchdog.stop();
+}
+
+bool GStreamerPlaybackBackend::tryRecoverFromStreamError()
+{
+    // The in-place reload path drives a playbin; the hand-built DSD graph and
+    // a missing pipeline publish the error as before.
+    if (m_playbin == nullptr || m_dsdActive) {
+        return false;
+    }
+    QString uri;
+    {
+        QMutexLocker locker(&m_mutex);
+        uri = m_playingUri.isEmpty() ? m_currentUri : m_playingUri;
+    }
+    if (uri.isEmpty()) {
+        return false;
+    }
+    // An error mid-flush belongs to the seek target, not the last polled spot.
+    const qint64 positionMs = m_seekInFlight && m_lastSeekMs >= 0
+        ? m_lastSeekMs
+        : std::max<qint64>(0, m_positionMs);
+    if (uri == m_lastRecoveryUri && std::abs(positionMs - m_lastRecoveryPositionMs) < 3000) {
+        return false;
+    }
+    m_lastRecoveryUri = uri;
+    m_lastRecoveryPositionMs = positionMs;
+    const State target = m_targetState == State::Paused || m_state == State::Paused
+        ? State::Paused
+        : State::Playing;
+    reloadCurrentAtPosition(positionMs, target);
+    return true;
 }
 
 void GStreamerPlaybackBackend::handleSeekWatchdogTimeout()
@@ -946,6 +998,13 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         if (debug != nullptr) {
             g_free(debug);
         }
+        // Decode/parse errors (a bad frame after a seek, a transient stall) are
+        // often survivable: reload the source in place before surfacing the
+        // error and freezing the transport on the user.
+        if (tryRecoverFromStreamError()) {
+            emit technicalInfoChanged(QStringLiteral("Recovered from pipeline error: %1").arg(text));
+            break;
+        }
         m_targetState = State::Error;
         finishTargetTransition();
         updateState(State::Error);
@@ -975,8 +1034,7 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             if (seekTo > 0) {
                 gst_element_seek_simple(m_playbin,
                                         GST_FORMAT_TIME,
-                                        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH
-                                                                  | GST_SEEK_FLAG_KEY_UNIT),
+                                        kSeekFlags,
                                         static_cast<gint64>(seekTo) * GST_MSECOND);
             }
             gst_element_set_state(m_playbin, GST_STATE_PLAYING);
