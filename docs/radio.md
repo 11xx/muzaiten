@@ -120,6 +120,10 @@ uv run muzaiten-embed scan --features ~/.local/share/muzaiten/features.sqlite
 uv run muzaiten-embed neighbors --features ~/.local/share/muzaiten/features.sqlite
 ```
 
+`scan` (and `query`) accept `--device auto|cuda|cpu` (default `auto`) and log
+the chosen device at startup; an explicit `--device cuda` fails rather than
+silently falling back to CPU. See `tools/embedder/README.md` for details.
+
 With embeddings present, radio pools get augmented with sonic neighbors
 (tag-poor tracks surface because they *sound* right) and free-text semantic
 search works:

@@ -20,6 +20,43 @@ MODEL_URL = (
 MODEL_SHA256 = "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd"
 MODEL_AMODEL = "HTSAT-base"
 MODEL_SAMPLE_RATE = 48_000
+DEVICE_CHOICES = ("auto", "cuda", "cpu")
+
+
+def probe_device() -> str | None:
+    """Device an ``auto`` run would pick, or None when torch is not installed."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def resolve_device(choice: str) -> str:
+    try:
+        import torch
+    except ImportError as exc:  # pragma: no cover - depends on optional extra
+        raise RuntimeError(
+            "device selection requires optional dependencies; run "
+            "`uv sync --extra model` in tools/embedder"
+        ) from exc
+
+    cuda_available = torch.cuda.is_available()
+    if choice == "auto":
+        return "cuda" if cuda_available else "cpu"
+    if choice == "cuda" and not cuda_available:
+        raise RuntimeError("--device cuda requested but torch reports no usable CUDA device")
+    if choice not in DEVICE_CHOICES:
+        raise RuntimeError(f"unknown device choice: {choice}")
+    return choice
+
+
+def device_label(device: str) -> str:
+    if device == "cuda":
+        import torch
+
+        return f"cuda ({torch.cuda.get_device_name(0)})"
+    return device
 
 
 @dataclass(frozen=True)
@@ -100,7 +137,7 @@ class RealClapEmbedder:
     model = MODEL_NAME
     version = MODEL_VERSION
 
-    def __init__(self, checkpoint: Path | None = None) -> None:
+    def __init__(self, checkpoint: Path | None = None, device: str | None = None) -> None:
         try:
             import laion_clap
         except ImportError as exc:  # pragma: no cover - depends on optional extra
@@ -109,8 +146,13 @@ class RealClapEmbedder:
                 "`uv sync --extra model` in tools/embedder"
             ) from exc
 
+        self.device = device if device is not None else resolve_device("auto")
         checkpoint_path = checkpoint if checkpoint is not None else ensure_checkpoint().path
-        self._model = laion_clap.CLAP_Module(enable_fusion=False, amodel=MODEL_AMODEL)
+        self._model = laion_clap.CLAP_Module(
+            enable_fusion=False,
+            amodel=MODEL_AMODEL,
+            device=self.device,
+        )
         self._model.load_ckpt(str(checkpoint_path), verbose=False)
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Sequence
 
 import pytest
 
 from muzaiten_embed import db
-from muzaiten_embed.cli import main
+from muzaiten_embed.cli import build_parser, main
+from muzaiten_embed.model import device_label, probe_device, resolve_device
 from muzaiten_embed.ops import neighbors, query_embedding, scan, status
 
 
@@ -265,3 +268,71 @@ def test_cli_status_json_does_not_load_real_model(features_path: Path, capsys: p
     assert payload["embeddings"] == 0
     assert payload["neighbor_rows"] == 0
     assert payload["model"] == "laion-clap-music-audioset"
+
+
+def _fake_torch(cuda_available: bool, name: str = "NVIDIA GeForce RTX 3080") -> SimpleNamespace:
+    return SimpleNamespace(
+        cuda=SimpleNamespace(
+            is_available=lambda: cuda_available,
+            get_device_name=lambda index: name,
+        ),
+    )
+
+
+def test_resolve_device_auto_prefers_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+
+    assert resolve_device("auto") == "cuda"
+
+
+def test_resolve_device_auto_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False))
+
+    assert resolve_device("auto") == "cpu"
+
+
+def test_resolve_device_explicit_cuda_errors_instead_of_silent_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False))
+
+    with pytest.raises(RuntimeError, match="no usable CUDA device"):
+        resolve_device("cuda")
+
+
+def test_resolve_device_explicit_cpu_ignores_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+
+    assert resolve_device("cpu") == "cpu"
+
+
+def test_device_label_names_the_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+
+    assert device_label("cuda") == "cuda (NVIDIA GeForce RTX 3080)"
+    assert device_label("cpu") == "cpu"
+
+
+def test_probe_device_is_none_without_torch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", None)
+
+    assert probe_device() is None
+
+
+def test_cli_rejects_unknown_device() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["scan", "--features", "x.sqlite", "--device", "tpu"])
+
+
+def test_cli_status_reports_device_probe(
+    features_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+
+    exit_code = main(["status", "--features", str(features_path), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["device"] == "cuda"

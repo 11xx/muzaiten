@@ -4,6 +4,12 @@
 
 ### Added
 
+- The CLAP embedder (`tools/embedder`) now makes its inference device explicit:
+  `muzaiten-embed scan`/`query` accept `--device auto|cuda|cpu` (default
+  `auto`), log the chosen device (with GPU name) at startup so a silent CPU
+  fallback can't burn a run, fail fast when `--device cuda` finds no usable
+  CUDA device, and report the device in JSON output; `status` shows the device
+  an `auto` run would pick.
 - Feature-fill progress is now first-class: after `phase features`,
   `muzaiten-index` reports stale group n/m progress (with phase-local rate/
   ETA), JSON counters `feature_groups_processed` / `features_written` /
