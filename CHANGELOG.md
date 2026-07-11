@@ -27,9 +27,10 @@
 - Python provider releases use a manual, environment-scoped Trusted Publishing
   workflow: unprivileged jobs build and audit the distributions, while only the
   selected TestPyPI or PyPI publication job receives a short-lived OIDC token.
-- Python provider releases share the native release's UTC date version. PyPI
-  uses the PEP 440-normalized spelling without leading zeroes (`2026.7.11` for
-  native tag `2026.07.11`).
+- When a Python provider release accompanies a native release, it shares the
+  native release's UTC date using the PEP 440-normalized spelling without
+  leading zeroes (`2026.7.11` for native tag `2026.07.11`). Native-only releases
+  keep using the latest compatible provider instead of republishing it.
 
 ## [2026.07.10]
 

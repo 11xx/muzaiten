@@ -122,22 +122,148 @@ the tested, tagged release commit, then upload both files to the Codeberg releas
 attached to that tag. The tarball name still uses `<version>`, not the shorter
 tag name.
 
-The optional Python provider is not bundled into native artifacts. Build its
-pure-Python wheel and sdist independently:
+### Publishing the optional Python provider
 
-```sh
-cd tools/features-clap
-uv build --no-sources
-```
+The optional provider is not bundled into native artifacts and does not release
+in lockstep with the application. Publish it only when the provider package,
+protocol implementation, dependency contract, or other provider-facing behavior
+changes. A native-only Muzaiten release can continue using the existing PyPI
+release; do not rebuild or republish an unchanged provider merely to match a new
+application date.
 
-The base wheel depends only on NumPy; LAION-CLAP, PyTorch, and torchvision are
-confined to `[model]`. Provider releases use the same UTC date as the matching
-native release. Python package indexes normalize out leading zeroes under PEP
-440, so native tag `2026.07.11` corresponds to provider version `2026.7.11`;
-same-day release iterations append the same final numeric component. Recheck the
-PyPI project endpoint immediately before a separately approved first
-publication. Core AUR packages list `muzaiten-features-clap` only as an optional
-dependency.
+The base wheel depends only on NumPy; LAION-CLAP, PyTorch, and torchvision stay
+confined to the `[model]` extra. Installing or inspecting the base package must
+not download a model checkpoint.
+
+When the provider does ship as part of a coordinated Muzaiten release, use the
+same UTC release date. Python package indexes normalize out leading zeroes under
+PEP 440, so native tag `2026.07.11` corresponds to provider version
+`2026.7.11`; same-day release iterations append the same final numeric
+component. Package version and `feature_revision` are deliberately independent:
+a package-only or protocol-version bump does not invalidate stored embeddings
+unless the model input, preprocessing, or vector semantics actually changed.
+
+#### One-time publication configuration
+
+Both PyPI and TestPyPI trust the GitHub repository `11xx/muzaiten`, workflow
+`publish-features-clap.yml`, and their respective `pypi` or `testpypi`
+environment. The matching GitHub environments:
+
+- allow deployments only from the `master` branch;
+- disallow administrator bypass of their protection rules; and
+- contain no passwords, API tokens, secrets, or package-index credentials.
+
+The workflow grants `id-token: write` only to its two-step publication job. The
+build and archive-audit job has read-only repository access, and passes its
+immutable artifacts to the publication job. PyPI exchanges the short-lived OIDC
+identity for a short-lived upload token; no reusable credential belongs in the
+repository or GitHub settings.
+
+#### Release runbook
+
+1. Choose a new provider version. Distribution filenames are immutable within
+   each index: never upload different contents under a version already present
+   on that index. Use the same candidate version on TestPyPI and then PyPI.
+   Update the version in
+   `tools/features-clap/pyproject.toml` and
+   `tools/features-clap/src/muzaiten_features_clap/__init__.py`, then regenerate
+   `tools/features-clap/uv.lock` with `uv lock`.
+
+2. Build and inspect the distributions locally:
+
+   ```sh
+   cd tools/features-clap
+   rm -rf dist
+   uv sync --group dev
+   uv build --no-sources
+   uvx --from twine==6.2.0 twine check dist/*
+   .venv/bin/python -m pytest -q
+   .venv/bin/python -m ruff check .
+   cd ../..
+   make build && make test
+   ```
+
+   Confirm that the wheel and sdist contain only the intended package source and
+   metadata. The GitHub workflow repeats the metadata and privacy/archive audits
+   on a clean runner.
+
+3. Commit the tested release source and push the same commit to Codeberg and
+   GitHub. Confirm that GitHub's `master` resolves to that commit before
+   dispatching publication.
+
+4. Dispatch **Publish CLAP provider** for `testpypi`, always selecting
+   `master`. This can be done in the GitHub Actions UI or with an authenticated
+   GitHub CLI:
+
+   ```sh
+   gh workflow run publish-features-clap.yml \
+     --repo 11xx/muzaiten --ref master -f index=testpypi
+   gh run watch --repo 11xx/muzaiten
+   ```
+
+5. Check the TestPyPI project JSON and install the exact version in a fresh
+   environment. Run a `status` protocol request with isolated `XDG_CACHE_HOME`
+   and `XDG_DATA_HOME`; the base install must report the expected provider
+   version, no model extra, and no downloaded model/cache files. Do not rely only
+   on the green workflow header.
+
+6. Recheck the committed diff, workflow run SHA, public package metadata, and
+   archive contents. Do not advance GitHub `master` between the TestPyPI and
+   PyPI dispatches: they are separate snapshot runs, and production must build
+   the same commit that passed TestPyPI. Only after TestPyPI succeeds, dispatch
+   the same workflow for `pypi`:
+
+   ```sh
+   gh workflow run publish-features-clap.yml \
+     --repo 11xx/muzaiten --ref master -f index=pypi
+   gh run watch --repo 11xx/muzaiten
+   ```
+
+   Production publication is irreversible and remains an explicit maintainer
+   decision even when the surrounding checks are automated.
+
+7. Verify the real PyPI JSON metadata, install the exact version from PyPI in a
+   fresh isolated environment, and verify both wheel and sdist attestations:
+
+   ```sh
+   uvx --from pypi-attestations pypi-attestations verify pypi \
+     --repository https://github.com/11xx/muzaiten <distribution-file-url>
+   ```
+
+   The distribution URLs and SHA-256 digests are available from
+   `https://pypi.org/pypi/muzaiten-features-clap/<version>/json`.
+
+Each manual dispatch is a commit snapshot. For `workflow_dispatch`, GitHub binds
+the run to the last commit on the selected branch or tag; checkout therefore
+builds that recorded SHA, and both jobs within that run use the artifact named
+for that SHA. Commits pushed after dispatch do not alter that run. Because
+TestPyPI and PyPI currently require separate dispatches, keep `master` fixed
+between those two runs and verify both `head_sha` values match. After production
+publication, PyPI retains the published files independently of all future
+repository work.
+
+It is normal for later native commits—and even later native releases—to move
+past the provider's published source snapshot. Installed users continue to get
+the latest published provider until a genuinely new provider version is
+released. This independent cadence is safe while the native orchestrator and
+provider retain compatible protocol, capability, generation-fingerprint, and
+`feature_revision` contracts. If a native change breaks that compatibility,
+publish and verify the matching provider before or together with the native
+release.
+
+GitHub supports dispatch through the web UI, `gh workflow run`, or its REST API,
+so an agent can automate version edits, local gates, pushes, TestPyPI dispatch,
+run monitoring, isolated installation, metadata checks, and attestation
+verification. A future single-run promotion workflow could build once, publish
+to TestPyPI, pause for environment approval, and send the same stored artifacts
+to PyPI; that would remove the temporary `master` freeze between two dispatches.
+Keep the production `pypi` step behind explicit approval either way. Automation
+changes how the action is invoked, not the permanence or authority of
+publication.
+
+See GitHub's [manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+and PyPI's [Trusted Publishing security model](https://docs.pypi.org/trusted-publishers/security-model/).
+Core AUR packages list `muzaiten-features-clap` only as an optional dependency.
 
 ### Dry-running the prebuilt-dist packaging (dev)
 
