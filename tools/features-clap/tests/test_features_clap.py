@@ -409,14 +409,14 @@ def test_waveform_preprocessing_matches_quantize_repeatpad_and_trim() -> None:
     assert longer == pytest.approx(exact)
 
 
-def test_artifact_manifest_verifies_identity_and_hashes(tmp_path: Path) -> None:
+def _write_artifact_fixture(path: Path) -> dict[str, object]:
     files = {
         AUDIO_MODEL_FILENAME: b"audio graph",
         TEXT_MODEL_FILENAME: b"text graph",
         TOKENIZER_FILENAME: b"tokenizer",
     }
     for filename, payload in files.items():
-        (tmp_path / filename).write_bytes(payload)
+        (path / filename).write_bytes(payload)
     manifest = {
         "format_version": ARTIFACT_FORMAT_VERSION,
         "model": MODEL_NAME,
@@ -426,11 +426,16 @@ def test_artifact_manifest_verifies_identity_and_hashes(tmp_path: Path) -> None:
         "feature_revision": FEATURE_REVISION,
         "vector_dimension": 512,
         "artifacts": {
-            filename: {"sha256": file_sha256(tmp_path / filename), "bytes": len(payload)}
+            filename: {"sha256": file_sha256(path / filename), "bytes": len(payload)}
             for filename, payload in files.items()
         },
     }
-    (tmp_path / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
+    (path / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest
+
+
+def test_artifact_manifest_verifies_identity_and_hashes(tmp_path: Path) -> None:
+    manifest = _write_artifact_fixture(tmp_path)
 
     current = artifact_status(path=tmp_path)
     assert current.present is True
@@ -440,6 +445,38 @@ def test_artifact_manifest_verifies_identity_and_hashes(tmp_path: Path) -> None:
     (tmp_path / AUDIO_MODEL_FILENAME).write_bytes(b"corrupt")
     assert artifact_status(path=tmp_path, verify=False).valid is True
     assert artifact_status(path=tmp_path).valid is False
+
+
+def test_interactive_operations_never_hash_artifacts(
+    features_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    _write_artifact_fixture(tmp_path)
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path)
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=False))
+
+    def refuse_hashing(path: Path) -> str:
+        raise AssertionError(f"interactive operation hashed artifact bytes: {path}")
+
+    monkeypatch.setattr(model, "file_sha256", refuse_hashing)
+    fake = FakeEmbedder({}, text_vectors={"piano": (1.0, 0.0)})
+
+    status_request = protocol_module.Request("s1", "status", {})
+    status_payload = protocol_module.run_request(status_request, lambda _e: None, lambda: False)
+    assert status_payload["model"]["present"] is True
+    assert status_payload["model"]["valid"] is True
+
+    query_request = protocol_module.Request("q1", "query", {"text": "piano"})
+    result = protocol_module.run_request(
+        query_request,
+        lambda _e: None,
+        lambda: False,
+        embedder_factory=lambda **_kwargs: fake,
+    )
+    assert result["dim"] == 2
 
 
 def test_protocol_status_does_not_load_real_model(

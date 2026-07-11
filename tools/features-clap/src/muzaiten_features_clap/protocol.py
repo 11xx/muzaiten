@@ -81,7 +81,7 @@ def run_request(
     if request.operation == "capabilities":
         return capabilities()
     if request.operation == "status":
-        current = artifact_status()
+        current = artifact_status(verify=False)
         payload: dict[str, object] = {
             **capabilities(),
             "model": _model_payload(current.present, current.valid, current.path),
@@ -138,7 +138,10 @@ def run_request(
         device_choice = _string(params, "device", "auto")
         limit = _optional_int(params, "limit")
         batch_size = _positive_int(params, "batch_size", 8)
-        checkpoint = artifact_status()
+        # Structural manifest check only: artifact hashes are verified when
+        # the model is installed, and hashing 790 MB per invocation would
+        # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
+        checkpoint = artifact_status(verify=False)
         if not checkpoint.present or not checkpoint.valid:
             raise FileNotFoundError(f"converted CLAP model is missing or invalid: {checkpoint.path}")
         started = time.monotonic()
@@ -186,7 +189,10 @@ def run_request(
         device_choice = _string(params, "device", "auto")
         if not text.strip():
             raise ProtocolError("text must not be empty")
-        checkpoint = artifact_status()
+        # Structural manifest check only: artifact hashes are verified when
+        # the model is installed, and hashing 790 MB per invocation would
+        # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
+        checkpoint = artifact_status(verify=False)
         if not checkpoint.present or not checkpoint.valid:
             raise FileNotFoundError(f"converted CLAP model is missing or invalid: {checkpoint.path}")
         embedder = embedder_factory(

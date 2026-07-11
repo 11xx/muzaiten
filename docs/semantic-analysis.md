@@ -75,8 +75,10 @@ uv tool install --reinstall 'muzaiten-features-clap[model]'
 The download writes a temporary file, streams byte progress, verifies the
 checksum, and atomically installs the pinned CC0 checkpoint. Conversion then
 reports `model-convert` progress, exports fp32 audio and text ONNX graphs plus
-the exact tokenizer, and verifies their hashed manifest. The checkpoint stays
-in the cache as the provenance source. Removing the `convert` extra afterward
+the exact tokenizer, and verifies their hashed manifest. Artifact hashes are
+verified at installation; later operations check the manifest identity and
+file presence, so status checks and text queries never re-hash the artifacts.
+The checkpoint stays in the cache as the provenance source. Removing the `convert` extra afterward
 drops PyTorch, torchvision, librosa, numba, and LAION-CLAP from the serving
 environment without removing cached artifacts. Expect about 2.35 GB for the
 checkpoint and 790 MB for the ONNX artifacts; the runtime tool environment is
