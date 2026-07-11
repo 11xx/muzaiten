@@ -5550,7 +5550,7 @@ void MainWindow::configureSemanticProvider()
         QProcess process;
         process.start(binary, {QStringLiteral("status"), QStringLiteral("--features"),
                                m_core->featuresPath(), QStringLiteral("--json")});
-        if (process.waitForFinished(10'000) && process.exitCode() == 0) {
+        if (process.waitForFinished(45'000) && process.exitCode() == 0) {
             status = QJsonDocument::fromJson(process.readAllStandardOutput()).object()
                          .value(QStringLiteral("semantic")).toObject();
         }
@@ -5597,7 +5597,7 @@ void MainWindow::downloadSemanticModel()
     QProcess statusProcess;
     statusProcess.start(binary, {QStringLiteral("status"), QStringLiteral("--features"),
                                  m_core->featuresPath(), QStringLiteral("--json")});
-    if (!statusProcess.waitForFinished(10'000) || statusProcess.exitCode() != 0) {
+    if (!statusProcess.waitForFinished(45'000) || statusProcess.exitCode() != 0) {
         statusBar()->showMessage(QStringLiteral("Semantic provider is not ready; open Semantic provider setup"), 8000);
         return;
     }

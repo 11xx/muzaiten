@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -41,6 +42,8 @@ private slots:
     void featurePhaseProgressAndStaleDenom();
     void featurePhaseCancelPreservesWrittenRows();
     void schemaV3StoreUpgradesInPlaceKeepingFeatureRows();
+    void interruptedSemanticMigrationResumesWithoutDuplicateRows();
+    void providerStatusAllowsSlowModelInspection();
     void forcedRefreshCopiesWithoutTouchingAudio();
     void orphanedFileFeatureRowsAreSwept();
 };
@@ -83,18 +86,20 @@ bool runProcess(const QString &program, const QStringList &arguments, QByteArray
         }
         return false;
     }
+    const QByteArray capturedStdout = process.readAllStandardOutput();
+    const QByteArray capturedStderr = process.readAllStandardError();
     if (stdoutBytes != nullptr) {
-        *stdoutBytes = process.readAllStandardOutput();
+        *stdoutBytes = capturedStdout;
     }
     if (stderrBytes != nullptr) {
-        *stderrBytes = process.readAllStandardError();
+        *stderrBytes = capturedStderr;
     }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         if (error != nullptr) {
             *error = QStringLiteral("%1 exited %2: %3")
                          .arg(program)
                          .arg(process.exitCode())
-                         .arg(QString::fromUtf8(process.readAllStandardError()).trimmed());
+                         .arg(QString::fromUtf8(capturedStderr).trimmed());
         }
         return false;
     }
@@ -118,15 +123,21 @@ void ffmpeg(const QStringList &arguments)
 
 QJsonObject runIndexer(const QStringList &arguments, QByteArray *stderrBytes = nullptr)
 {
+    QStringList effectiveArguments = arguments;
+    if (effectiveArguments.value(0) == QLatin1String("refresh")
+        && !effectiveArguments.contains(QStringLiteral("--semantic"))
+        && !effectiveArguments.contains(QStringLiteral("--no-semantic"))) {
+        effectiveArguments.append(QStringLiteral("--no-semantic"));
+    }
     QByteArray stdoutBytes;
     QByteArray capturedStderr;
     QString error;
-    if (!runProcess(muzaitenIndexPath(), arguments, &stdoutBytes, &capturedStderr, &error)) {
+    if (!runProcess(muzaitenIndexPath(), effectiveArguments, &stdoutBytes, &capturedStderr, &error)) {
         const QByteArray message = (error.isEmpty() ? QString::fromUtf8(capturedStderr) : error).toUtf8();
         QTest::qFail(message.constData(), __FILE__, __LINE__);
         return {};
     }
-    const bool jsonl = arguments.contains(QStringLiteral("--progress=jsonl"));
+    const bool jsonl = effectiveArguments.contains(QStringLiteral("--progress=jsonl"));
     if (stderrBytes != nullptr) {
         *stderrBytes = jsonl ? stdoutBytes : capturedStderr;
     }
@@ -1698,6 +1709,131 @@ void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()
         db.close();
         QSqlDatabase::removeDatabase(connectionName);
     }
+}
+
+void IndexerScanTest::interruptedSemanticMigrationResumesWithoutDuplicateRows()
+{
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {});
+    runIndexer({QStringLiteral("refresh"), QStringLiteral("--library"), library,
+                QStringLiteral("--features"), features, QStringLiteral("--no-semantic"),
+                QStringLiteral("--json")});
+
+    const QString connectionName = QStringLiteral("interrupted-semantic-%1")
+                                       .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(features);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QString error;
+        const QString setup = QStringLiteral(
+            "UPDATE meta SET value='4' WHERE key='schema_version';"
+            "CREATE TABLE embeddings_v4(content_group_id INTEGER PRIMARY KEY, model TEXT NOT NULL,"
+            " version TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL);"
+            "INSERT INTO embeddings_v4 VALUES(10, 'laion-clap-music-audioset',"
+            " 'music_audioset_epoch_15_esc_90.14.pt', 512, x'00000000');"
+            "CREATE TABLE track_neighbors_v4(content_group_id INTEGER NOT NULL,"
+            " neighbor_group_id INTEGER NOT NULL, rank INTEGER NOT NULL, cosine REAL NOT NULL,"
+            " PRIMARY KEY(content_group_id, rank));"
+            "INSERT INTO track_neighbors_v4 VALUES(10, 11, 1, 0.5);"
+            "INSERT INTO semantic_generations(capability, model, checkpoint_sha256, feature_revision,"
+            " vector_dim, provider_path, created_at, completed_at, active) VALUES("
+            " 'clap', 'laion-clap-music-audioset',"
+            " 'fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd',"
+            " 'clap-htsat-base-audio-window-v1', 512, 'legacy-v4-migration', 1, 1, 1);"
+            "INSERT INTO embeddings VALUES(10, 1, 512, x'00000000');"
+            "INSERT INTO track_neighbors VALUES(10, 11, 1, 0.5, 1, 'cosine-blockwise-v1', 1);");
+        for (const QString &statement : setup.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
+            QVERIFY2(execSql(query, statement, &error), qPrintable(error));
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    const QJsonObject result = runIndexer({
+        QStringLiteral("refresh"), QStringLiteral("--stage"), QStringLiteral("features"),
+        QStringLiteral("--features"), features, QStringLiteral("--no-semantic"),
+        QStringLiteral("--json"),
+    });
+    QCOMPARE(result.value(QStringLiteral("schema_version")).toInt(), 5);
+
+    QString readConnection;
+    QSqlDatabase db = openReadOnly(features, &readConnection);
+    QVERIFY(db.open());
+    QSqlQuery query(db);
+    QVERIFY(query.exec(QStringLiteral(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+        " AND name IN ('embeddings_v4', 'track_neighbors_v4')")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
+    QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM semantic_generations")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM embeddings")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM track_neighbors")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    db.close();
+    QSqlDatabase::removeDatabase(readConnection);
+}
+
+void IndexerScanTest::providerStatusAllowsSlowModelInspection()
+{
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {});
+    runIndexer({QStringLiteral("refresh"), QStringLiteral("--library"), library,
+                QStringLiteral("--features"), features, QStringLiteral("--no-semantic"),
+                QStringLiteral("--json")});
+
+    const QString provider = dir.filePath(QStringLiteral("slow-provider"));
+    QFile script(provider);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    script.write(R"PY(#!/usr/bin/env python3
+import json, sys, time
+request = json.load(sys.stdin)
+if request["operation"] == "status":
+    time.sleep(5.5)
+result = {
+    "capability": "clap",
+    "protocol_versions": [1],
+    "operations": ["capabilities", "status"],
+    "model": {"present": True, "valid": True},
+    "model_extra_installed": True,
+}
+print(json.dumps({"protocol_version": 1, "request_id": request["request_id"],
+                  "event": "result", "result": result}), flush=True)
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+    QByteArray stdoutBytes;
+    QByteArray stderrBytes;
+    QString error;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QVERIFY2(runProcess(muzaitenIndexPath(),
+                        {QStringLiteral("doctor"), QStringLiteral("--features"), features,
+                         QStringLiteral("--state"), dir.filePath(QStringLiteral("state.sqlite")),
+                         QStringLiteral("--provider"), provider, QStringLiteral("--json")},
+                        &stdoutBytes, &stderrBytes, &error),
+             qPrintable(error.isEmpty() ? QString::fromUtf8(stderrBytes) : error));
+    QVERIFY(elapsed.elapsed() >= 5'000);
+    QVERIFY(elapsed.elapsed() < 20'000);
+    const QJsonObject result = parseJsonObject(stdoutBytes);
+    QCOMPARE(result.value(QStringLiteral("semantic")).toObject()
+                 .value(QStringLiteral("state")).toString(),
+             QStringLiteral("provider-ready"));
 }
 
 void IndexerScanTest::forcedRefreshCopiesWithoutTouchingAudio()

@@ -149,35 +149,61 @@ def _migrate_legacy_semantics(conn: sqlite3.Connection) -> None:
     )
     if rows:
         dim = int(rows[0]["dim"])
-        cursor = conn.execute(
-            "INSERT INTO semantic_generations(capability, model, checkpoint_sha256, feature_revision, "
-            "vector_dim, provider_path, provider_version, created_at, completed_at, active) "
-            "VALUES('clap', ?, ?, ?, ?, 'legacy-v4-migration', NULL, unixepoch(), "
-            "CASE WHEN ? THEN unixepoch() END, ?)",
-            (
-                MODEL_NAME if known else "legacy-unknown",
-                MODEL_SHA256 if known else "unknown",
-                FEATURE_REVISION if known else "unknown",
-                dim,
-                known,
-                int(known),
-            ),
+        generation_key = (
+            MODEL_NAME if known else "legacy-unknown",
+            MODEL_SHA256 if known else "unknown",
+            FEATURE_REVISION if known else "unknown",
+            dim,
         )
-        generation_id = int(cursor.lastrowid)
+        existing = conn.execute(
+            "SELECT id FROM semantic_generations WHERE capability = 'clap' AND model = ? "
+            "AND checkpoint_sha256 = ? AND feature_revision = ? AND vector_dim = ?",
+            generation_key,
+        ).fetchone()
+        if existing is None:
+            cursor = conn.execute(
+                "INSERT INTO semantic_generations(capability, model, checkpoint_sha256, feature_revision, "
+                "vector_dim, provider_path, provider_version, created_at, completed_at, active) "
+                "VALUES('clap', ?, ?, ?, ?, 'legacy-v4-migration', NULL, unixepoch(), "
+                "CASE WHEN ? THEN unixepoch() END, ?)",
+                (*generation_key, known, int(known)),
+            )
+            generation_id = int(cursor.lastrowid)
+        else:
+            generation_id = int(existing["id"])
         conn.execute(
-            "INSERT INTO embeddings(content_group_id, generation_id, dim, vector) "
-            "SELECT content_group_id, ?, dim, vector FROM embeddings_v4",
-            (generation_id,),
+            "UPDATE semantic_generations SET active = CASE WHEN id = ? THEN ? ELSE 0 END",
+            (generation_id, int(known)),
         )
+        legacy_embedding_count = _count(conn, "SELECT COUNT(*) FROM embeddings_v4")
+        current_embedding_count = _count(
+            conn, "SELECT COUNT(*) FROM embeddings WHERE generation_id = ?", (generation_id,)
+        )
+        if current_embedding_count != legacy_embedding_count:
+            conn.execute("DELETE FROM track_neighbors WHERE generation_id = ?", (generation_id,))
+            conn.execute("DELETE FROM embeddings WHERE generation_id = ?", (generation_id,))
+            conn.execute(
+                "INSERT INTO embeddings(content_group_id, generation_id, dim, vector) "
+                "SELECT content_group_id, ?, dim, vector FROM embeddings_v4",
+                (generation_id,),
+            )
     if known and generation_id is not None and _table_exists(conn, "track_neighbors_v4"):
         top_k = _count(conn, "SELECT COALESCE(MAX(rank), 0) FROM track_neighbors_v4")
-        conn.execute(
-            "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine, "
-            "generation_id, algorithm_revision, top_k) "
-            "SELECT content_group_id, neighbor_group_id, rank, cosine, ?, ?, ? "
-            "FROM track_neighbors_v4",
-            (generation_id, NEIGHBOR_ALGORITHM_REVISION, top_k),
+        legacy_neighbor_count = _count(conn, "SELECT COUNT(*) FROM track_neighbors_v4")
+        current_neighbor_count = _count(
+            conn,
+            "SELECT COUNT(*) FROM track_neighbors WHERE generation_id = ?",
+            (generation_id,),
         )
+        if current_neighbor_count != legacy_neighbor_count:
+            conn.execute("DELETE FROM track_neighbors WHERE generation_id = ?", (generation_id,))
+            conn.execute(
+                "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine, "
+                "generation_id, algorithm_revision, top_k) "
+                "SELECT content_group_id, neighbor_group_id, rank, cosine, ?, ?, ? "
+                "FROM track_neighbors_v4",
+                (generation_id, NEIGHBOR_ALGORITHM_REVISION, top_k),
+            )
     conn.execute("DROP TABLE embeddings_v4")
     if _table_exists(conn, "track_neighbors_v4"):
         conn.execute("DROP TABLE track_neighbors_v4")

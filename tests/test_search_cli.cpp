@@ -496,6 +496,10 @@ private slots:
 
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert(QStringLiteral("PATH"), m_temp.path() + QStringLiteral("/empty-bin"));
+        env.insert(QStringLiteral("MUZAITEN_STATE_DIR"), m_temp.path() + QStringLiteral("/state"));
+        env.insert(QStringLiteral("XDG_DATA_HOME"), m_temp.path() + QStringLiteral("/empty-xdg"));
+        env.insert(QStringLiteral("UV_TOOL_BIN_DIR"), m_temp.path() + QStringLiteral("/empty-bin"));
+        env.remove(QStringLiteral("MUZAITEN_FEATURES_CLAP"));
 
         QProcess ctl;
         ctl.setProgram(ctlPath);

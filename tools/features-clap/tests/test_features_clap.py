@@ -12,7 +12,7 @@ from typing import Sequence
 
 import pytest
 
-from muzaiten_features_clap import db
+from muzaiten_features_clap import cli, db
 from muzaiten_features_clap.cli import main
 from muzaiten_features_clap import model
 from muzaiten_features_clap.model import (
@@ -408,6 +408,125 @@ def test_protocol_status_does_not_load_real_model(
     assert payload["store"]["neighbor_rows"] == 0
     assert payload["model"]["name"] == "laion-clap-music-audioset"
     assert payload["feature_revision"] == "clap-htsat-base-audio-window-v1"
+
+
+def test_protocol_routes_incidental_stdout_away_from_jsonl(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def noisy_request(request: object, emit: object, canceled: object) -> dict[str, bool]:
+        del request, canceled
+        print("third-party checkpoint diagnostic")
+        emit(  # type: ignore[operator]
+            {
+                "protocol_version": 1,
+                "request_id": "noisy-1",
+                "event": "progress",
+                "phase": "semantic-embeddings",
+                "completed": 0,
+                "total": 0,
+            }
+        )
+        return {"ready": True}
+
+    monkeypatch.setattr(cli, "run_request", noisy_request)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "request_id": "noisy-1",
+                    "operation": "capabilities",
+                }
+            )
+        ),
+    )
+
+    assert main() == 0
+    captured = capsys.readouterr()
+    events = [json.loads(line) for line in captured.out.splitlines()]
+    assert [item["event"] for item in events] == ["progress", "result"]
+    assert events[-1]["result"] == {"ready": True}
+    assert "third-party checkpoint diagnostic" in captured.err
+
+
+def test_provider_finishes_interrupted_known_v4_migration(tmp_path: Path) -> None:
+    path = tmp_path / "interrupted.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO meta VALUES('schema_version', '4');
+            CREATE TABLE semantic_generations(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                capability TEXT NOT NULL,
+                model TEXT NOT NULL,
+                checkpoint_sha256 TEXT NOT NULL,
+                feature_revision TEXT NOT NULL,
+                vector_dim INTEGER NOT NULL,
+                provider_path TEXT,
+                provider_version TEXT,
+                created_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                active INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(capability, model, checkpoint_sha256, feature_revision, vector_dim)
+            );
+            INSERT INTO semantic_generations VALUES(
+                1, 'clap', 'laion-clap-music-audioset',
+                'fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd',
+                'clap-htsat-base-audio-window-v1', 512,
+                'legacy-v4-migration', NULL, 1, 1, 1
+            );
+            CREATE TABLE embeddings_v4(
+                content_group_id INTEGER PRIMARY KEY,
+                model TEXT NOT NULL, version TEXT NOT NULL,
+                dim INTEGER NOT NULL, vector BLOB NOT NULL
+            );
+            INSERT INTO embeddings_v4 VALUES(
+                10, 'laion-clap-music-audioset',
+                'music_audioset_epoch_15_esc_90.14.pt', 512, x'00000000'
+            );
+            CREATE TABLE track_neighbors_v4(
+                content_group_id INTEGER NOT NULL,
+                neighbor_group_id INTEGER NOT NULL,
+                rank INTEGER NOT NULL, cosine REAL NOT NULL,
+                PRIMARY KEY(content_group_id, rank)
+            );
+            INSERT INTO track_neighbors_v4 VALUES(10, 11, 1, 0.5);
+            CREATE TABLE embeddings(
+                content_group_id INTEGER NOT NULL,
+                generation_id INTEGER NOT NULL,
+                dim INTEGER NOT NULL, vector BLOB NOT NULL,
+                PRIMARY KEY(content_group_id, generation_id)
+            );
+            INSERT INTO embeddings VALUES(10, 1, 512, x'00000000');
+            CREATE TABLE track_neighbors(
+                content_group_id INTEGER NOT NULL,
+                neighbor_group_id INTEGER NOT NULL,
+                rank INTEGER NOT NULL, cosine REAL NOT NULL,
+                generation_id INTEGER NOT NULL,
+                algorithm_revision TEXT NOT NULL,
+                top_k INTEGER NOT NULL,
+                PRIMARY KEY(content_group_id, generation_id, rank)
+            );
+            INSERT INTO track_neighbors VALUES(10, 11, 1, 0.5, 1, 'cosine-blockwise-v1', 1);
+            """
+        )
+
+    with db.connect(path) as conn:
+        db.ensure_schema(conn)
+        tables = {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        assert "embeddings_v4" not in tables
+        assert "track_neighbors_v4" not in tables
+        assert conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM track_neighbors").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM semantic_generations").fetchone()[0] == 1
+        assert db.read_schema_version(conn) == 5
 
 
 def _fake_torch(cuda_available: bool, name: str = "NVIDIA GeForce RTX 3080") -> SimpleNamespace:

@@ -20,6 +20,10 @@
   neighbors; matching legacy CLAP corpora migrate in place while mixed or
   unknown semantic rows remain inactive. Semantic search now obtains query
   vectors through `muzaiten-features` and verifies the generation fingerprint.
+- Interrupted schema-v5 migrations now resume transactionally without duplicate
+  generations or abandoned legacy tables. Provider status allows enough time
+  for checkpoint verification and device probing, and third-party model-loading
+  messages are kept off the provider's JSONL stdout channel.
 
 ## [2026.07.10]
 

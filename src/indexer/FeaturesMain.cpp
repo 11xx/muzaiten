@@ -56,6 +56,7 @@ namespace {
 
 constexpr int kSchemaVersion = 5;
 constexpr int kProcessTimeoutMs = 10 * 60 * 1000;
+constexpr int kProviderStatusTimeoutMs = 30'000;
 constexpr double kChromaprintBerThreshold = 0.15;
 constexpr int kChromaprintOffsetFrames = 3;
 constexpr qint64 kDurationBucketMs = 2'000;
@@ -357,6 +358,38 @@ void execPrepared(QSqlQuery &query)
     }
 }
 
+class SqlTransaction final {
+public:
+    explicit SqlTransaction(QSqlDatabase &database, const QString &context)
+        : m_database(database)
+        , m_context(context)
+    {
+        if (!m_database.transaction()) {
+            fail(QStringLiteral("starting %1: %2").arg(m_context, m_database.lastError().text()));
+        }
+    }
+
+    ~SqlTransaction()
+    {
+        if (!m_committed) {
+            m_database.rollback();
+        }
+    }
+
+    void commit()
+    {
+        if (!m_database.commit()) {
+            fail(QStringLiteral("committing %1: %2").arg(m_context, m_database.lastError().text()));
+        }
+        m_committed = true;
+    }
+
+private:
+    QSqlDatabase &m_database;
+    QString m_context;
+    bool m_committed = false;
+};
+
 QVariant optionalVariant(const std::optional<double> &value)
 {
     return value ? QVariant(*value) : QVariant();
@@ -438,6 +471,7 @@ bool featuresTableHasCurrentShape(QSqlDatabase &database)
 
 void initSemanticSchema(QSqlDatabase &database)
 {
+    SqlTransaction transaction(database, QStringLiteral("semantic schema migration"));
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS semantic_generations("
                           " id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -483,57 +517,111 @@ void initSemanticSchema(QSqlDatabase &database)
                           " PRIMARY KEY(content_group_id, generation_id, rank),"
                           " FOREIGN KEY(generation_id) REFERENCES semantic_generations(id))"));
 
-    if (!legacyEmbeddings) {
-        if (legacyNeighbors) {
+    const bool hasLegacyEmbeddings = database.tables().contains(QStringLiteral("embeddings_v4"));
+    const bool hasLegacyNeighbors = database.tables().contains(QStringLiteral("track_neighbors_v4"));
+    if (!hasLegacyEmbeddings) {
+        if (hasLegacyNeighbors) {
             execSql(database, QStringLiteral("DROP TABLE track_neighbors_v4"));
         }
+        transaction.commit();
         return;
     }
 
-    QSqlQuery provenance(database);
-    const bool known = provenance.exec(QStringLiteral(
-                           "SELECT COUNT(DISTINCT model || char(0) || version || char(0) || dim),"
-                           " MIN(model), MIN(version), MIN(dim), COUNT(*) FROM embeddings_v4"))
-        && provenance.next()
-        && provenance.value(0).toInt() == 1
-        && provenance.value(1).toString() == QLatin1String(kSemanticModel)
-        && provenance.value(2).toString() == QLatin1String(kSemanticCheckpoint)
-        && provenance.value(3).toInt() == 512;
-    const int rowCount = provenance.isValid() ? provenance.value(4).toInt() : 0;
+    bool known = false;
+    int dimension = 0;
+    int rowCount = 0;
+    {
+        QSqlQuery provenance(database);
+        if (!provenance.exec(QStringLiteral(
+                "SELECT COUNT(DISTINCT model || char(0) || version || char(0) || dim),"
+                " MIN(model), MIN(version), MIN(dim), COUNT(*) FROM embeddings_v4"))
+            || !provenance.next()) {
+            fail(provenance.lastError().text());
+        }
+        dimension = provenance.value(3).toInt();
+        rowCount = provenance.value(4).toInt();
+        known = provenance.value(0).toInt() == 1
+            && provenance.value(1).toString() == QLatin1String(kSemanticModel)
+            && provenance.value(2).toString() == QLatin1String(kSemanticCheckpoint)
+            && dimension == 512;
+    }
     if (rowCount > 0) {
-        QSqlQuery generation(database);
-        generation.prepare(QStringLiteral(
-            "INSERT INTO semantic_generations(capability, model, checkpoint_sha256, feature_revision,"
-            " vector_dim, provider_path, provider_version, created_at, completed_at, active)"
-            " VALUES('clap', ?, ?, ?, ?, 'legacy-v4-migration', NULL, ?, ?, ?)"));
-        generation.addBindValue(known ? QLatin1String(kSemanticModel) : QStringLiteral("legacy-unknown"));
-        generation.addBindValue(known ? QLatin1String(kSemanticCheckpointSha256) : QStringLiteral("unknown"));
-        generation.addBindValue(known ? QLatin1String(kSemanticFeatureRevision) : QStringLiteral("unknown"));
-        generation.addBindValue(provenance.value(3).toInt());
-        generation.addBindValue(QDateTime::currentSecsSinceEpoch());
-        generation.addBindValue(known ? QDateTime::currentSecsSinceEpoch() : QVariant());
-        generation.addBindValue(known ? 1 : 0);
-        execPrepared(generation);
-        const qint64 generationId = generation.lastInsertId().toLongLong();
-        execSql(database, QStringLiteral(
-                              "INSERT INTO embeddings(content_group_id, generation_id, dim, vector)"
-                              " SELECT content_group_id, %1, dim, vector FROM embeddings_v4")
-                              .arg(generationId));
-        if (known && legacyNeighbors) {
+        const QString model = known ? QLatin1String(kSemanticModel) : QStringLiteral("legacy-unknown");
+        const QString checkpoint = known ? QLatin1String(kSemanticCheckpointSha256) : QStringLiteral("unknown");
+        const QString revision = known ? QLatin1String(kSemanticFeatureRevision) : QStringLiteral("unknown");
+        qint64 generationId = -1;
+        {
+            QSqlQuery existing(database);
+            prepareOrFail(existing, QStringLiteral(
+                "SELECT id FROM semantic_generations WHERE capability = 'clap' AND model = ?"
+                " AND checkpoint_sha256 = ? AND feature_revision = ? AND vector_dim = ?"));
+            existing.addBindValue(model);
+            existing.addBindValue(checkpoint);
+            existing.addBindValue(revision);
+            existing.addBindValue(dimension);
+            execPrepared(existing);
+            if (existing.next()) {
+                generationId = existing.value(0).toLongLong();
+            }
+        }
+        if (generationId < 0) {
+            QSqlQuery generation(database);
+            prepareOrFail(generation, QStringLiteral(
+                "INSERT INTO semantic_generations(capability, model, checkpoint_sha256, feature_revision,"
+                " vector_dim, provider_path, provider_version, created_at, completed_at, active)"
+                " VALUES('clap', ?, ?, ?, ?, 'legacy-v4-migration', NULL, ?, ?, ?)"));
+            generation.addBindValue(model);
+            generation.addBindValue(checkpoint);
+            generation.addBindValue(revision);
+            generation.addBindValue(dimension);
+            generation.addBindValue(QDateTime::currentSecsSinceEpoch());
+            generation.addBindValue(known ? QDateTime::currentSecsSinceEpoch() : QVariant());
+            generation.addBindValue(known ? 1 : 0);
+            execPrepared(generation);
+            generationId = generation.lastInsertId().toLongLong();
+        }
+
+        execSql(database, QStringLiteral("UPDATE semantic_generations SET active = CASE WHEN id = %1 THEN %2 ELSE 0 END")
+                              .arg(generationId)
+                              .arg(known ? 1 : 0));
+        const auto countRows = [&](const QString &sql) {
+            QSqlQuery query(database);
+            if (!query.exec(sql) || !query.next()) {
+                fail(query.lastError().text());
+            }
+            return query.value(0).toLongLong();
+        };
+        if (countRows(QStringLiteral("SELECT COUNT(*) FROM embeddings WHERE generation_id = %1").arg(generationId))
+            != rowCount) {
+            execSql(database, QStringLiteral("DELETE FROM track_neighbors WHERE generation_id = %1").arg(generationId));
+            execSql(database, QStringLiteral("DELETE FROM embeddings WHERE generation_id = %1").arg(generationId));
             execSql(database, QStringLiteral(
-                                  "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine,"
-                                  " generation_id, algorithm_revision, top_k)"
-                                  " SELECT content_group_id, neighbor_group_id, rank, cosine, %1,"
-                                  " 'cosine-blockwise-v1',"
-                                  " (SELECT COALESCE(MAX(rank), 0) FROM track_neighbors_v4)"
-                                  " FROM track_neighbors_v4")
+                                  "INSERT INTO embeddings(content_group_id, generation_id, dim, vector)"
+                                  " SELECT content_group_id, %1, dim, vector FROM embeddings_v4")
                                   .arg(generationId));
+        }
+        if (known && hasLegacyNeighbors) {
+            const qint64 legacyNeighborCount = countRows(QStringLiteral("SELECT COUNT(*) FROM track_neighbors_v4"));
+            if (countRows(QStringLiteral("SELECT COUNT(*) FROM track_neighbors WHERE generation_id = %1")
+                              .arg(generationId)) != legacyNeighborCount) {
+                execSql(database, QStringLiteral("DELETE FROM track_neighbors WHERE generation_id = %1")
+                                      .arg(generationId));
+                execSql(database, QStringLiteral(
+                                      "INSERT INTO track_neighbors(content_group_id, neighbor_group_id, rank, cosine,"
+                                      " generation_id, algorithm_revision, top_k)"
+                                      " SELECT content_group_id, neighbor_group_id, rank, cosine, %1,"
+                                      " 'cosine-blockwise-v1',"
+                                      " (SELECT COALESCE(MAX(rank), 0) FROM track_neighbors_v4)"
+                                      " FROM track_neighbors_v4")
+                                      .arg(generationId));
+            }
         }
     }
     execSql(database, QStringLiteral("DROP TABLE embeddings_v4"));
-    if (legacyNeighbors) {
+    if (hasLegacyNeighbors) {
         execSql(database, QStringLiteral("DROP TABLE track_neighbors_v4"));
     }
+    transaction.commit();
 }
 
 void initSchema(QSqlDatabase &database)
@@ -2545,7 +2633,8 @@ int runStatus(const StatusOptions &options)
             QStringLiteral("status"),
             QJsonObject{{QStringLiteral("features"), options.featuresPath}},
             false,
-            [] { return false; });
+            [] { return false; },
+            kProviderStatusTimeoutMs);
         if (providerStatus.exitCode == 0) {
             semantic.insert(QStringLiteral("provider"), providerStatus.result);
             const QJsonObject model = providerStatus.result.value(QStringLiteral("model")).toObject();
