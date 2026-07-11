@@ -275,6 +275,17 @@ def _decode_audio_command(path: Path, duration_ms: int | None = None) -> list[st
     return command
 
 
+def _run_ffmpeg(command: list[str], timeout: float | None = None):
+    try:
+        return subprocess.run(command, check=True, capture_output=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        # Without this, a missing ffmpeg binary surfaces as a misleading
+        # model_missing protocol error instead of naming the real dependency.
+        raise RuntimeError(
+            "ffmpeg is required to decode audio; install ffmpeg and ensure it is on PATH"
+        ) from exc
+
+
 def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
     try:
         import numpy as np
@@ -283,27 +294,17 @@ def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
 
     command = _decode_audio_command(path, duration_ms)
     try:
-        completed = subprocess.run(
+        completed = _run_ffmpeg(
             command,
-            check=True,
-            capture_output=True,
             timeout=SEEK_TIMEOUT_SECONDS if "-ss" in command else None,
         )
     except subprocess.TimeoutExpired:
-        completed = subprocess.run(
-            _decode_audio_command(path),
-            check=True,
-            capture_output=True,
-        )
+        completed = _run_ffmpeg(_decode_audio_command(path))
     if not completed.stdout and "-ss" in command:
         # Indexed/container durations can overstate the decodable stream. A
         # successful seek beyond EOF produces no bytes, so keep the decode
         # bounded and fall back to the first model window.
-        completed = subprocess.run(
-            _decode_audio_command(path),
-            check=True,
-            capture_output=True,
-        )
+        completed = _run_ffmpeg(_decode_audio_command(path))
     audio = np.frombuffer(completed.stdout, dtype="<f4").astype("float32", copy=True)
     if audio.size == 0:
         raise RuntimeError(f"ffmpeg decoded no audio from {path}")

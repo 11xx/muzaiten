@@ -789,6 +789,55 @@ def test_model_download_cancellation_removes_temporary_file(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_missing_ffmpeg_names_the_real_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_missing(*_args: object, **_kwargs: object):
+        raise FileNotFoundError(2, "No such file or directory", "ffmpeg")
+
+    monkeypatch.setattr(model.subprocess, "run", raise_missing)
+    with pytest.raises(RuntimeError, match="ffmpeg is required"):
+        model.decode_audio_ffmpeg(tmp_path / "song.flac")
+
+
+def test_protocol_model_download_converts_with_its_own_progress_clock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import convert as convert_module
+    from muzaiten_features_clap import protocol as protocol_module
+
+    clock = iter([100.0, 250.0, 251.0])
+    monkeypatch.setattr(protocol_module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        protocol_module,
+        "download_checkpoint",
+        lambda progress=None, canceled=None: model.ModelDownload(
+            tmp_path / "checkpoint.pt", downloaded=False
+        ),
+    )
+
+    def fake_convert(checkpoint: Path, *, output=None, progress=None, canceled=None):
+        assert progress is not None
+        progress(1, 5)
+        return convert_module.ConversionResult(tmp_path / "clap-onnx-v1", converted=True)
+
+    monkeypatch.setattr(convert_module, "convert_checkpoint", fake_convert)
+    events: list[dict[str, object]] = []
+    request = protocol_module.Request("r1", "model-download", {})
+
+    result = protocol_module.run_request(request, events.append, lambda: False)
+
+    convert_events = [event for event in events if event.get("phase") == "model-convert"]
+    assert convert_events, "conversion must report model-convert progress"
+    # One conversion step over one second on the fake clock: the rate must be
+    # computed from the conversion's own start, not the download's.
+    assert convert_events[0]["rate"] == pytest.approx(1.0)
+    assert result["converted"] is True
+    assert result["artifacts_path"] == str(tmp_path / "clap-onnx-v1")
+
+
 def test_protocol_status_reports_device_probe(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],

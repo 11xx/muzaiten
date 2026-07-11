@@ -110,6 +110,8 @@ def run_request(
         result = download_checkpoint(progress=download_progress, canceled=canceled)
         from .convert import convert_checkpoint
 
+        # Conversion rate/ETA must not inherit the download's elapsed time.
+        convert_started = time.monotonic()
         converted = convert_checkpoint(
             result.path,
             progress=lambda completed, total: emit(
@@ -119,7 +121,7 @@ def run_request(
                     completed,
                     total,
                     "steps",
-                    started,
+                    convert_started,
                 )
             ),
             canceled=canceled,
