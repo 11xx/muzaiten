@@ -328,6 +328,47 @@ QIcon menuHamburgerIcon(const QPalette &palette)
     return QIcon(pixmap);
 }
 
+// Vectorized from the radio-receiver reference artwork: a boxy receiver with
+// a round dial, speaker slats, and an antenna broadcasting waves. Used for
+// the Radio shuffle mode so it reads as "radio", not just badged shuffle.
+void drawRadioReceiverGlyph(QPainter &painter, const QColor &color)
+{
+    QPen pen(color, 1.7);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+
+    // Body, and the antenna reaching up to the broadcast point.
+    painter.drawRoundedRect(QRectF(3.5, 11.0, 17.0, 10.0), 2.2, 2.2);
+    painter.drawLine(QPointF(7.0, 11.0), QPointF(14.6, 5.7));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(14.9, 5.4), 1.15, 1.15);
+
+    // Broadcast waves fanning out above the antenna tip.
+    painter.setBrush(Qt::NoBrush);
+    QPen wave(color, 1.5);
+    wave.setCapStyle(Qt::RoundCap);
+    painter.setPen(wave);
+    for (int i = 0; i < 2; ++i) {
+        const qreal radius = 2.6 + i * 2.1;
+        const QRectF rect(14.9 - radius, 5.4 - radius, radius * 2, radius * 2);
+        painter.drawArc(rect, 40 * 16, 100 * 16);
+    }
+
+    // Dial and speaker slats on the face.
+    QPen dial(color, 1.5);
+    painter.setPen(dial);
+    painter.drawEllipse(QPointF(8.7, 16.0), 2.3, 2.3);
+    QPen slat(color, 1.3);
+    slat.setCapStyle(Qt::RoundCap);
+    painter.setPen(slat);
+    painter.drawLine(QPointF(13.4, 13.9), QPointF(17.4, 13.9));
+    painter.drawLine(QPointF(13.4, 16.0), QPointF(17.4, 16.0));
+    painter.drawLine(QPointF(13.4, 18.1), QPointF(17.4, 18.1));
+}
+
 QIcon shuffleIcon(const QPalette &palette, ShuffleMode mode)
 {
     QPixmap pixmap(24, 24);
@@ -338,6 +379,14 @@ QIcon shuffleIcon(const QPalette &palette, ShuffleMode mode)
     const QColor color = mode == ShuffleMode::Off
         ? palette.color(QPalette::ButtonText)
         : palette.color(QPalette::Highlight);
+
+    // Radio shuffle swaps the crossing arrows for the receiver glyph — the
+    // mode is "let the radio pick", which the plain badge didn't convey.
+    if (mode == ShuffleMode::Radio) {
+        drawRadioReceiverGlyph(painter, color);
+        return QIcon(pixmap);
+    }
+
     QPen pen(color, 1.8);
     painter.setPen(pen);
 
@@ -364,10 +413,6 @@ QIcon shuffleIcon(const QPalette &palette, ShuffleMode mode)
         painter.setPen(badge);
         painter.drawLine(QPointF(21, 1.5), QPointF(21, 6.5));
         painter.drawLine(QPointF(18.5, 4), QPointF(23.5, 4));
-    } else if (mode == ShuffleMode::Radio) {
-        painter.setBrush(color);
-        painter.setPen(Qt::NoPen);
-        painter.drawEllipse(QPointF(21, 4), 2.5, 2.5);
     }
     return QIcon(pixmap);
 }
@@ -412,6 +457,10 @@ QIcon repeatIcon(const QPalette &palette, RepeatMode mode)
     return QIcon(pixmap);
 }
 
+// Vectorized from the headphones-over-vinyl reference artwork: a filled
+// record (punched label ring, groove arcs, center dot) framed by a headband
+// and two ear cups. Replaces the generic wifi-arc glyph the radio-session
+// indicator used to show.
 QIcon radioIcon(const QPalette &palette)
 {
     QPixmap pixmap(24, 24);
@@ -421,17 +470,45 @@ QIcon radioIcon(const QPalette &palette)
     // The button is only ever shown while a radio session is active, so the
     // glyph is always drawn in the accent color (no "off" variant needed).
     const QColor color = palette.color(QPalette::Highlight);
-    QPen pen(color, 1.8);
-    pen.setCapStyle(Qt::RoundCap);
-    painter.setPen(pen);
-    painter.setBrush(color);
-    painter.drawEllipse(QPointF(12, 18), 2.0, 2.0);
+
+    // Headband arcing over the disc into the two ear cups, drawn first so the
+    // disc can punch a separating gap into them (the reference art keeps
+    // clear space between the record and the headphones).
+    const QPointF discCenter(12.0, 14.0);
+    QPen band(color, 2.4);
+    band.setCapStyle(Qt::FlatCap);
+    painter.setPen(band);
     painter.setBrush(Qt::NoBrush);
-    for (int i = 0; i < 3; ++i) {
-        const qreal radius = 4.0 + i * 4.0;
-        const QRectF rect(12 - radius, 18 - radius, radius * 2, radius * 2);
-        painter.drawArc(rect, 35 * 16, 110 * 16);
-    }
+    const qreal bandRadius = 9.6;
+    const QRectF bandRect(12.0 - bandRadius, 13.5 - bandRadius, bandRadius * 2, bandRadius * 2);
+    painter.drawArc(bandRect, 20 * 16, 140 * 16);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawRoundedRect(QRectF(0.8, 10.5, 4.0, 8.6), 1.8, 1.8);
+    painter.drawRoundedRect(QRectF(19.2, 10.5, 4.0, 8.6), 1.8, 1.8);
+
+    // The vinyl disc, with the label ring and groove arcs punched out of it
+    // (Clear mode) so they read in whatever sits behind the toolbar. The
+    // slightly larger clear disc first carves the gap around the record.
+    painter.setCompositionMode(QPainter::CompositionMode_Clear);
+    painter.drawEllipse(discCenter, 8.2, 8.2);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    painter.drawEllipse(discCenter, 7.2, 7.2);
+    painter.setCompositionMode(QPainter::CompositionMode_Clear);
+    painter.drawEllipse(discCenter, 3.0, 3.0);
+    QPen groove(color, 1.0);
+    groove.setCapStyle(Qt::RoundCap);
+    painter.setPen(groove);
+    painter.setBrush(Qt::NoBrush);
+    const qreal grooveRadius = 5.2;
+    const QRectF grooveRect(discCenter.x() - grooveRadius, discCenter.y() - grooveRadius,
+                            grooveRadius * 2, grooveRadius * 2);
+    painter.drawArc(grooveRect, 115 * 16, 55 * 16);
+    painter.drawArc(grooveRect, 295 * 16, 55 * 16);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(discCenter, 1.1, 1.1);
     return QIcon(pixmap);
 }
 
