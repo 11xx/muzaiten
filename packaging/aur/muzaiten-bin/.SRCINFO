@@ -8,6 +8,7 @@ pkgbase = muzaiten-bin
 	depends = qt6-base
 	depends = qt6-multimedia
 	depends = taglib
+	depends = chromaprint
 	depends = gstreamer
 	depends = gst-plugins-base-libs
 	depends = glib2

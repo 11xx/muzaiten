@@ -71,7 +71,7 @@ pkgdesc="Native music player for local libraries (local dev build for packaging 
 arch=('${arch}')
 url="https://codeberg.org/11xx/muzaiten"
 license=('Unlicense')
-depends=('qt6-base' 'qt6-multimedia' 'taglib' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
+depends=('qt6-base' 'qt6-multimedia' 'taglib' 'chromaprint' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
 optdepends=('gst-plugins-good: extra audio decoders and sinks'
             'gst-plugin-pipewire: PipeWire audio output'
             'gst-plugins-bad: additional codecs and native DSF DSD playback'
