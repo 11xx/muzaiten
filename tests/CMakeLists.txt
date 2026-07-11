@@ -566,6 +566,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME test_playlist_converter
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_playlist_converter.py
             ${CMAKE_SOURCE_DIR}/tools/playlist-import/muzaiten-import)
+add_test(NAME test_arch_provider_gate
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_provider_gate.py
+            ${CMAKE_SOURCE_DIR}/packaging/features-clap/check-arch-gate.py)
 
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp

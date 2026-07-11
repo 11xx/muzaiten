@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Arch packages no longer advertise the not-yet-published semantic provider as
+  an optional dependency. PyPI/uv remains the supported installation path until
+  a deterministic Arch/PyPI/AUR gate reports a candidate and the full
+  clean-chroot CPU plus isolated CUDA acceptance suite passes.
+
 ## [2026.07.11]
 
 - UI copy sweep: em-dashes are gone from status messages, tooltips, dialog

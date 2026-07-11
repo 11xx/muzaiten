@@ -343,7 +343,13 @@ keeping the one irreversible decision visibly human.
 
 See GitHub's [manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 and PyPI's [Trusted Publishing security model](https://docs.pypi.org/trusted-publishers/security-model/).
-Core AUR packages list `muzaiten-features-clap` only as an optional dependency.
+The core AUR packages do not list `muzaiten-features-clap` while that package is
+unavailable from Arch/AUR. Advertising an unresolved optional dependency makes
+the package page imply an installation route that does not exist. Restore it in
+the same publication slice that creates the real provider package; until then,
+the supported provider is the PyPI tool installed with uv. The deterministic
+distro gate and eventual package order are recorded in
+`packaging/features-clap/README.md`.
 
 ### Dry-running the prebuilt-dist packaging (dev)
 

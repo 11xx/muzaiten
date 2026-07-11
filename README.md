@@ -91,7 +91,9 @@ icon. Packaging details and the Last.fm credential model:
 [docs/distribution.md](docs/distribution.md).
 
 Semantic/audio-similarity analysis is disabled by default and separately
-installed. The app never runs uv or downloads a model without consent:
+installed. There is no Arch/AUR provider package yet; Arch and other Linux
+users install the published Python tool directly. The app never runs uv or
+downloads a model without consent:
 
 ```sh
 uv tool install 'muzaiten-features-clap[model]' --torch-backend auto

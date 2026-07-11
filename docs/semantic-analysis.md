@@ -6,7 +6,10 @@ files. The saved setting `analysis.semantic.enabled` defaults to `false`.
 
 ## Install the provider
 
-The GUI never runs uv. Install the provider yourself in user space:
+The GUI never runs uv. No Arch/AUR package currently provides the optional
+provider: the distro-native dependency gate is blocked by upstream
+NumPy/Numba/LAION-CLAP constraints. Arch and other Linux users install the
+published provider themselves in user space:
 
 ```sh
 uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
@@ -34,6 +37,13 @@ uv-managed tool and records the new registry requirement. Add
 `==<provider-version>` to the requirement when an exact release is required.
 The tested uv 0.11.25 release accepts `--torch-backend` on `tool install`, not
 on `tool upgrade`.
+
+The core `muzaiten-bin` and `muzaiten-git` packages deliberately do not name a
+nonexistent provider as an optional dependency. When the distro gate passes,
+`muzaiten-features-clap` will be published as its own AUR package and restored
+to their optional-dependency metadata. This changes only package-manager
+discovery; the uv-installed executable is already found through the normal
+provider search order.
 
 Recreating the tool environment does not remove the model checkpoint under the
 Muzaiten cache directory and does not touch `features.sqlite`, so it does not
