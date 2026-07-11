@@ -5917,6 +5917,8 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
                 m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::SemanticNeighbors;
             } else if (phase == QLatin1String("model-download")) {
                 m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::ModelDownload;
+            } else if (phase == QLatin1String("model-convert")) {
+                m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::ModelConvert;
             } else {
                 m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::AnalyzingFiles;
             }

@@ -41,6 +41,7 @@ struct LiveStatus {
         SemanticEmbeddings,
         SemanticNeighbors,
         ModelDownload,
+        ModelConvert,
     };
 
     bool running = false;

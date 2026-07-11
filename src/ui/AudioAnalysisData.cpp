@@ -174,6 +174,8 @@ QString phaseLabel(LiveStatus::Phase phase)
         return QStringLiteral("Building audio-similarity neighbors");
     case LiveStatus::Phase::ModelDownload:
         return QStringLiteral("Downloading semantic model");
+    case LiveStatus::Phase::ModelConvert:
+        return QStringLiteral("Preparing model");
     case LiveStatus::Phase::Idle:
         break;
     }
@@ -183,7 +185,9 @@ QString phaseLabel(LiveStatus::Phase phase)
 QString progressLabel(const LiveStatus &status)
 {
     QString label;
-    if (status.phase == LiveStatus::Phase::WritingFeatures
+    if (status.phase == LiveStatus::Phase::ModelConvert) {
+        label = QStringLiteral("Preparing model… %1/%2 steps").arg(status.analyzed).arg(status.total);
+    } else if (status.phase == LiveStatus::Phase::WritingFeatures
         || status.phase == LiveStatus::Phase::SemanticEmbeddings
         || status.phase == LiveStatus::Phase::SemanticNeighbors) {
         label = QStringLiteral("Writing features… %1/%2 groups").arg(status.analyzed).arg(status.total);
