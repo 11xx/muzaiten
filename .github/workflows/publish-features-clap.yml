@@ -1,0 +1,134 @@
+name: Publish CLAP provider
+
+run-name: Publish muzaiten-features-clap to ${{ inputs.index }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      index:
+        description: Python package index
+        required: true
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-features-clap-${{ inputs.index }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and audit distributions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install the tested uv release
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: 0.11.25
+          enable-cache: false
+
+      - name: Build wheel and source distribution
+        working-directory: tools/features-clap
+        run: uv build --no-sources
+
+      - name: Check package metadata rendering
+        working-directory: tools/features-clap
+        run: uvx --from twine==6.2.0 twine check dist/*
+
+      - name: Reject private data and unexpected archive members
+        working-directory: tools/features-clap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import tarfile
+          import zipfile
+
+          dist = Path("dist")
+          artifacts = sorted(path for path in dist.iterdir() if path.name.endswith((".whl", ".tar.gz")))
+          if len(artifacts) != 2:
+              raise SystemExit(f"expected one wheel and one sdist, found: {artifacts}")
+
+          forbidden = (
+              b"/home/",
+              b"pypi-",
+              b"api_key",
+              b"api-key",
+              b"password",
+          )
+          email = re.compile(rb"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)
+          allowed_suffixes = (
+              ".py",
+              ".dist-info/METADATA",
+              ".dist-info/RECORD",
+              ".dist-info/WHEEL",
+              ".dist-info/entry_points.txt",
+              "/PKG-INFO",
+              "/README.md",
+              "/pyproject.toml",
+          )
+
+          for artifact in artifacts:
+              if artifact.suffix == ".whl":
+                  with zipfile.ZipFile(artifact) as archive:
+                      members = [
+                          (member.filename, archive.read(member))
+                          for member in archive.infolist()
+                          if not member.is_dir()
+                      ]
+              else:
+                  with tarfile.open(artifact) as archive:
+                      members = [
+                          (member.name, archive.extractfile(member).read())
+                          for member in archive.getmembers()
+                          if member.isfile()
+                      ]
+              unexpected = [name for name, _ in members if not name.endswith(allowed_suffixes)]
+              if unexpected:
+                  raise SystemExit(f"unexpected files in {artifact.name}: {unexpected}")
+              for name, data in members:
+                  lowered = data.lower()
+                  hits = [needle.decode() for needle in forbidden if needle.lower() in lowered]
+                  if hits:
+                      raise SystemExit(f"private-data marker in {artifact.name}:{name}: {hits}")
+                  if match := email.search(data):
+                      raise SystemExit(
+                          f"email address in {artifact.name}:{name}: {match.group().decode()}"
+                      )
+          PY
+
+      - name: Stage immutable publication artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: features-clap-dist-${{ github.sha }}
+          path: tools/features-clap/dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish to ${{ inputs.index }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.index }}
+    permissions:
+      id-token: write
+    steps:
+      - name: Retrieve audited distributions
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: features-clap-dist-${{ github.sha }}
+          path: dist
+
+      - name: Publish with short-lived OIDC credentials
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: dist
+          repository-url: ${{ inputs.index == 'testpypi' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}

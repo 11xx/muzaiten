@@ -35,16 +35,3 @@ uv sync --group dev
 uv run python -m pytest
 uv run ruff check .
 ```
-
-Release preparation (do not run without separate publication approval):
-
-```sh
-uv build --no-sources
-uv publish --publish-url https://test.pypi.org/legacy/ dist/*
-# after installing/testing from TestPyPI and rechecking name availability:
-uv publish dist/*
-```
-
-Recheck `https://pypi.org/pypi/muzaiten-features-clap/json` immediately before
-the first upload. Building, checking, and preparing these commands does not
-authorize claiming or publishing the project name.

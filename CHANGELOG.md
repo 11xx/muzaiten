@@ -24,6 +24,9 @@
   generations or abandoned legacy tables. Provider status allows enough time
   for checkpoint verification and device probing, and third-party model-loading
   messages are kept off the provider's JSONL stdout channel.
+- Python provider releases use a manual, environment-scoped Trusted Publishing
+  workflow: unprivileged jobs build and audit the distributions, while only the
+  selected TestPyPI or PyPI publication job receives a short-lived OIDC token.
 
 ## [2026.07.10]
 
