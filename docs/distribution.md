@@ -131,10 +131,13 @@ uv build --no-sources
 ```
 
 The base wheel depends only on NumPy; LAION-CLAP, PyTorch, and torchvision are
-confined to `[model]`. Recheck the PyPI project endpoint immediately before a
-separately approved first publication; this repository prepares metadata and
-commands but does not upload or claim the name. Core AUR packages list
-`muzaiten-features-clap` only as an optional dependency.
+confined to `[model]`. Provider releases use the same UTC date as the matching
+native release. Python package indexes normalize out leading zeroes under PEP
+440, so native tag `2026.07.11` corresponds to provider version `2026.7.11`;
+same-day release iterations append the same final numeric component. Recheck the
+PyPI project endpoint immediately before a separately approved first
+publication. Core AUR packages list `muzaiten-features-clap` only as an optional
+dependency.
 
 ### Dry-running the prebuilt-dist packaging (dev)
 
