@@ -771,7 +771,9 @@ class FakeDownloadResponse:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def read(self, size: int) -> bytes:
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.payload) - self.offset
         chunk = self.payload[self.offset : self.offset + size]
         self.offset += len(chunk)
         return chunk
@@ -845,6 +847,7 @@ def test_protocol_model_download_converts_with_its_own_progress_clock(
     from muzaiten_features_clap import convert as convert_module
     from muzaiten_features_clap import protocol as protocol_module
 
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path / "no-artifacts")
     clock = iter([100.0, 250.0, 251.0])
     monkeypatch.setattr(protocol_module.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(
@@ -873,6 +876,143 @@ def test_protocol_model_download_converts_with_its_own_progress_clock(
     assert convert_events[0]["rate"] == pytest.approx(1.0)
     assert result["converted"] is True
     assert result["artifacts_path"] == str(tmp_path / "clap-onnx-v1")
+
+
+def _hosted_bundle(tmp_path: Path) -> tuple[dict[str, bytes], dict[str, object]]:
+    source = tmp_path / "bundle-source"
+    source.mkdir()
+    manifest = _write_artifact_fixture(source)
+    payloads = {
+        name: (source / name).read_bytes()
+        for name in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME)
+    }
+    payloads[MANIFEST_FILENAME] = json.dumps(manifest).encode()
+    return payloads, manifest
+
+
+def _bundle_opener(payloads: dict[str, bytes], calls: list[str]):
+    def opener(url: str, timeout: float | None = None):
+        filename = url.rsplit("/", 1)[-1]
+        calls.append(filename)
+        return FakeDownloadResponse(payloads[filename])
+
+    return opener
+
+
+def test_download_artifacts_installs_verified_hosted_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, _manifest = _hosted_bundle(tmp_path)
+    calls: list[str] = []
+    progress: list[tuple[int, int | None]] = []
+
+    result = model.download_artifacts(
+        "https://example.invalid/bundle/",
+        progress=lambda completed, total: progress.append((completed, total)),
+        opener=_bundle_opener(payloads, calls),
+    )
+
+    assert result.downloaded is True
+    assert result.path == cache / model.ARTIFACT_DIRNAME
+    assert artifact_status().valid is True
+    total = sum(
+        len(payloads[name])
+        for name in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME)
+    )
+    assert progress[0] == (0, total)
+    assert progress[-1] == (total, total)
+    assert calls[0] == MANIFEST_FILENAME
+    # A second run short-circuits on the installed bundle without fetching.
+    calls.clear()
+    again = model.download_artifacts(
+        "https://example.invalid/bundle/", opener=_bundle_opener(payloads, calls)
+    )
+    assert again.downloaded is False
+    assert calls == []
+
+
+def test_download_artifacts_rejects_tampered_bytes_and_wrong_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, manifest = _hosted_bundle(tmp_path)
+
+    tampered = dict(payloads)
+    tampered[AUDIO_MODEL_FILENAME] = b"tampered graph"
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        model.download_artifacts(
+            "https://example.invalid/bundle", opener=_bundle_opener(tampered, [])
+        )
+    assert artifact_status().present is False
+    assert list(cache.iterdir()) == []
+
+    foreign = dict(manifest)
+    foreign["feature_revision"] = "some-other-revision"
+    payloads[MANIFEST_FILENAME] = json.dumps(foreign).encode()
+    calls: list[str] = []
+    with pytest.raises(RuntimeError, match="feature_revision"):
+        model.download_artifacts(
+            "https://example.invalid/bundle", opener=_bundle_opener(payloads, calls)
+        )
+    # Identity is rejected before any artifact bytes are fetched.
+    assert calls == [MANIFEST_FILENAME]
+
+
+def test_protocol_model_download_prefers_hosted_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path / "no-artifacts")
+    monkeypatch.setattr(protocol_module, "MODEL_ARTIFACTS_URL", "https://example.invalid/b")
+    monkeypatch.setattr(
+        protocol_module,
+        "download_checkpoint",
+        lambda **_kwargs: pytest.fail("hosted bundle must not download the checkpoint"),
+    )
+    installed = tmp_path / "installed"
+    monkeypatch.setattr(
+        protocol_module,
+        "download_artifacts",
+        lambda url, progress=None, canceled=None: model.ArtifactDownload(
+            installed, downloaded=True
+        ),
+    )
+
+    request = protocol_module.Request("d1", "model-download", {})
+    result = protocol_module.run_request(request, lambda _e: None, lambda: False)
+
+    assert result["downloaded"] is True
+    assert result["converted"] is False
+    assert result["artifacts_path"] == str(installed)
+
+
+def test_protocol_model_download_short_circuits_on_valid_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    _write_artifact_fixture(tmp_path)
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        protocol_module,
+        "download_checkpoint",
+        lambda **_kwargs: pytest.fail("valid artifacts must not trigger a download"),
+    )
+
+    request = protocol_module.Request("d2", "model-download", {})
+    result = protocol_module.run_request(request, lambda _e: None, lambda: False)
+
+    assert result["downloaded"] is False
+    assert result["converted"] is False
+    assert result["artifacts_path"] == str(tmp_path)
 
 
 def test_protocol_status_reports_device_probe(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import urllib.request
@@ -37,6 +38,11 @@ TEXT_MODEL_FILENAME = "text.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 MANIFEST_FILENAME = "manifest.json"
 ONNX_APPROXIMATE_BYTES = 790_186_110
+# Base URL of a hosted, pre-converted artifact bundle (manifest.json plus the
+# three artifacts it names). None until the maintainer publishes one; once
+# set, model download fetches the artifacts directly and end users need no
+# checkpoint download or conversion stack.
+MODEL_ARTIFACTS_URL: str | None = None
 INFERENCE_THREADS_ENV = "MUZAITEN_CLAP_THREADS"
 DEFAULT_MAX_INFERENCE_THREADS = 8
 
@@ -191,12 +197,71 @@ def download_checkpoint(
     return ModelDownload(path, downloaded=True)
 
 
+@dataclass(frozen=True)
+class ArtifactDownload:
+    path: Path
+    downloaded: bool
+
+
+def download_artifacts(
+    base_url: str,
+    progress: Callable[[int, int | None], None] | None = None,
+    canceled: Callable[[], bool] | None = None,
+    opener: Callable[..., object] = urllib.request.urlopen,
+) -> ArtifactDownload:
+    """Install a hosted, pre-converted artifact bundle without a checkpoint."""
+    target = artifact_dir()
+    if artifact_status(path=target).valid:
+        return ArtifactDownload(target, downloaded=False)
+
+    prefix = base_url.rstrip("/")
+    with opener(f"{prefix}/{MANIFEST_FILENAME}", timeout=60) as response:  # noqa: S310
+        manifest = validate_manifest_identity(json.load(response))
+    artifacts = manifest["artifacts"]
+    assert isinstance(artifacts, dict)
+    filenames = (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME)
+    sizes = [artifacts[filename].get("bytes") for filename in filenames]
+    total = sum(size for size in sizes if isinstance(size, int)) or None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{ARTIFACT_DIRNAME}-", dir=target.parent))
+    try:
+        completed = 0
+        if progress is not None:
+            progress(completed, total)
+        for filename in filenames:
+            digest = hashlib.sha256()
+            with opener(f"{prefix}/{filename}", timeout=60) as response:  # noqa: S310
+                with (staging / filename).open("wb") as handle:
+                    while True:
+                        if canceled is not None and canceled():
+                            raise InterruptedError("artifact download canceled")
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                        handle.write(chunk)
+                        completed += len(chunk)
+                        if progress is not None:
+                            progress(completed, total)
+            if digest.hexdigest() != artifacts[filename]["sha256"]:
+                raise RuntimeError(f"downloaded CLAP artifact failed SHA-256: {filename}")
+        with (staging / MANIFEST_FILENAME).open("w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        if not artifact_status(path=staging).valid:
+            raise RuntimeError("downloaded CLAP artifacts failed manifest verification")
+        if target.exists():
+            shutil.rmtree(target)
+        os.replace(staging, target)
+        return ArtifactDownload(target, downloaded=True)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
 def _verify_sha256(path: Path) -> None:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != MODEL_SHA256:
+    if file_sha256(path) != MODEL_SHA256:
         raise RuntimeError(f"cached CLAP checkpoint has wrong SHA-256: {path}")
 
 
@@ -208,9 +273,8 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_and_validate_manifest(path: Path, *, verify: bool) -> dict[str, object]:
-    with (path / MANIFEST_FILENAME).open(encoding="utf-8") as handle:
-        manifest = json.load(handle)
+def validate_manifest_identity(manifest: object) -> dict[str, object]:
+    """Check a manifest's model identity and artifact table, not its files."""
     if not isinstance(manifest, dict):
         raise RuntimeError("invalid ONNX artifact manifest")
     expected = {
@@ -233,6 +297,16 @@ def _read_and_validate_manifest(path: Path, *, verify: bool) -> dict[str, object
         artifact = artifacts.get(filename)
         if not isinstance(artifact, dict) or not isinstance(artifact.get("sha256"), str):
             raise RuntimeError(f"ONNX artifact manifest is missing {filename}")
+    return manifest
+
+
+def _read_and_validate_manifest(path: Path, *, verify: bool) -> dict[str, object]:
+    with (path / MANIFEST_FILENAME).open(encoding="utf-8") as handle:
+        manifest = validate_manifest_identity(json.load(handle))
+    artifacts = manifest["artifacts"]
+    assert isinstance(artifacts, dict)
+    for filename in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME):
+        artifact = artifacts[filename]
         artifact_path = path / filename
         if not artifact_path.is_file():
             raise RuntimeError(f"ONNX artifact is missing: {artifact_path}")

@@ -144,6 +144,27 @@ component. Package version and `feature_revision` are deliberately independent:
 a package-only or protocol-version bump does not invalidate stored embeddings
 unless the model input, preprocessing, or vector semantics actually changed.
 
+#### Hosting the converted artifact bundle
+
+The converted model is four files produced by `python -m
+muzaiten_features_clap.convert` in the artifact cache directory: `audio.onnx`
+(about 285 MB), `text.onnx` (about 501 MB), `tokenizer.json` (about 3.5 MB),
+and the `manifest.json` that records their SHA-256 hashes together with the
+source checkpoint hash and feature revision. The checkpoint and the LAION-CLAP
+code are CC0-1.0, so redistributing the converted bundle is permitted.
+
+To let end users skip the 2.35 GB checkpoint download and the `[convert]`
+stack entirely, host that directory at a stable HTTPS location (a Hugging Face
+model repository is the natural host), then set `MODEL_ARTIFACTS_URL` in
+`tools/features-clap/src/muzaiten_features_clap/model.py` to the directory URL
+and publish a new provider version. With the URL set, `model download` fetches
+`manifest.json`, rejects it unless its checkpoint hash, feature revision, and
+format version match the constants baked into the release, streams the three
+artifacts with byte progress while verifying each manifest hash, and installs
+the bundle atomically. The consent dialog then reports the bundle source and
+its size instead of the checkpoint's. Until the URL is set, this path is
+dormant and `model download` uses the checkpoint-plus-conversion flow.
+
 #### One-time publication configuration
 
 Both PyPI and TestPyPI trust the GitHub repository `11xx/muzaiten`, workflow

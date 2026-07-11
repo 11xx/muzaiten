@@ -11,15 +11,17 @@ from . import __version__
 from .model import (
     FEATURE_REVISION,
     MODEL_APPROXIMATE_BYTES,
+    MODEL_ARTIFACTS_URL,
     MODEL_LICENSE,
     MODEL_NAME,
-    ONNX_APPROXIMATE_BYTES,
     MODEL_SHA256,
     MODEL_URL,
     MODEL_VERSION,
+    ONNX_APPROXIMATE_BYTES,
     OnnxClapEmbedder,
     artifact_status,
     device_label,
+    download_artifacts,
     download_checkpoint,
     probe_device,
     resolve_device,
@@ -93,6 +95,17 @@ def run_request(
             payload["store"] = status(_path(params, "features"), MODEL_NAME, MODEL_VERSION).as_dict()
         return payload
     if request.operation == "model-download":
+        # Full hash verification is correct here: this is the install-time
+        # boundary, and an invalid bundle must be repaired, not trusted.
+        current = artifact_status()
+        if current.valid:
+            return {
+                "path": str(current.path),
+                "downloaded": False,
+                "sha256": MODEL_SHA256,
+                "artifacts_path": str(current.path),
+                "converted": False,
+            }
         started = time.monotonic()
 
         def download_progress(completed: int, total: int | None) -> None:
@@ -106,6 +119,20 @@ def run_request(
                     started,
                 )
             )
+
+        if MODEL_ARTIFACTS_URL is not None:
+            hosted = download_artifacts(
+                MODEL_ARTIFACTS_URL,
+                progress=download_progress,
+                canceled=canceled,
+            )
+            return {
+                "path": str(hosted.path),
+                "downloaded": hosted.downloaded,
+                "sha256": MODEL_SHA256,
+                "artifacts_path": str(hosted.path),
+                "converted": False,
+            }
 
         result = download_checkpoint(progress=download_progress, canceled=canceled)
         from .convert import convert_checkpoint
@@ -225,12 +252,15 @@ def encode_event(payload: dict[str, object]) -> str:
 
 
 def _model_payload(present: bool, valid: bool, path: Path) -> dict[str, object]:
+    # With a hosted bundle the consent-relevant download is the artifacts
+    # themselves; without one it is the checkpoint that conversion needs.
+    hosted = MODEL_ARTIFACTS_URL is not None
     return {
         "name": MODEL_NAME,
         "checkpoint": MODEL_VERSION,
-        "source": MODEL_URL,
+        "source": MODEL_ARTIFACTS_URL if hosted else MODEL_URL,
         "sha256": MODEL_SHA256,
-        "approximate_bytes": MODEL_APPROXIMATE_BYTES,
+        "approximate_bytes": ONNX_APPROXIMATE_BYTES if hosted else MODEL_APPROXIMATE_BYTES,
         "converted_approximate_bytes": ONNX_APPROXIMATE_BYTES,
         "license": MODEL_LICENSE,
         "cache_path": str(path),
