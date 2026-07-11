@@ -298,9 +298,9 @@ void CurationDialogDataTest::audioAnalysisProgressLabelsAreHumanReadable()
              QStringLiteral("Writing features… 700/70590 groups · 0.5/s · ~38h49m left · 2:00:00 elapsed"));
 
     QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0),
-             QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201 — 42m 10s (2.1s/track)"));
+             QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201 in 42m 10s (2.1s/track)"));
     QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0, 64012),
-             QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201, features written 64012 — 42m 10s (2.1s/track)"));
+             QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201, features written 64012 in 42m 10s (2.1s/track)"));
 }
 
 void CurationDialogDataTest::duplicateGroupsRankCopiesAndRespectPins()

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- UI copy sweep: em-dashes are gone from status messages, tooltips, dialog
+  text, headers, and CLI errors in favor of plain punctuation; the "—"
+  empty-value placeholder in tables and the import-format separators are
+  unchanged. The playlist view's empty-state key cheat line now matches the
+  real bindings (Ctrl+D/Delete to delete, Shift+j/k to reorder items, the new
+  z fold toggle) instead of advertising keys that never worked.
 - New radio glyphs, vectorized from reference artwork into palette-aware
   drawing code: the radio-session indicator in the player bar shows
   headphones over a spinning vinyl instead of the generic wifi arcs, and the

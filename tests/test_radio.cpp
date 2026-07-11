@@ -1570,7 +1570,7 @@ void RadioTest::reasonSentencePicksTopPhrases()
     };
 
     QCOMPARE(ReasonText::sentence(components),
-             QStringLiteral("Radio pick — matches the session's mood · you rate it highly "
+             QStringLiteral("Radio pick: matches the session's mood · you rate it highly "
 	                            "(held back: heard recently)"));
 }
 
@@ -1582,7 +1582,7 @@ void RadioTest::reasonSentenceNamesAudio()
     };
 
     QCOMPARE(ReasonText::sentence(components),
-             QStringLiteral("Radio pick — sounds similar · similar energy"));
+             QStringLiteral("Radio pick: sounds similar · similar energy"));
 }
 
 void RadioTest::reasonSentenceNamesTempoAndEnergy()
@@ -1593,7 +1593,7 @@ void RadioTest::reasonSentenceNamesTempoAndEnergy()
     };
 
     QCOMPARE(ReasonText::sentence(components),
-             QStringLiteral("Radio pick — similar energy · matches the pace"));
+             QStringLiteral("Radio pick: similar energy · matches the pace"));
 }
 
 void RadioTest::reasonSentenceHandlesPenaltyOnly()
@@ -1604,7 +1604,7 @@ void RadioTest::reasonSentenceHandlesPenaltyOnly()
     };
 
     QCOMPARE(ReasonText::sentence(components),
-             QStringLiteral("Radio pick — held back: often skipped early · heard recently"));
+             QStringLiteral("Radio pick (held back): often skipped early · heard recently"));
 }
 
 void RadioTest::reasonSentenceEmptyOnEmptyInput()

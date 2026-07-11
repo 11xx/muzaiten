@@ -84,10 +84,10 @@ QString sentence(const QList<TrackScorer::Component> &components)
         return {};
     }
     if (positiveParts.isEmpty()) {
-        return QStringLiteral("Radio pick — held back: ") + negativeParts.join(QStringLiteral(" · "));
+        return QStringLiteral("Radio pick (held back): ") + negativeParts.join(QStringLiteral(" · "));
     }
 
-    QString result = QStringLiteral("Radio pick — ") + positiveParts.join(QStringLiteral(" · "));
+    QString result = QStringLiteral("Radio pick: ") + positiveParts.join(QStringLiteral(" · "));
     if (!negativeParts.isEmpty()) {
         result += QStringLiteral(" (held back: ") + negativeParts.join(QStringLiteral(" · "))
             + QStringLiteral(")");

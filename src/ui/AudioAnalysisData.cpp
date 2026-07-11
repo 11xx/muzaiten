@@ -214,7 +214,7 @@ QString finalSummary(int scanned, int skipped, int failed, int groups, double el
     if (featuresWritten >= 0) {
         summary += QStringLiteral(", features written %1").arg(featuresWritten);
     }
-    summary += QStringLiteral(" — %1 (%2s/track)")
+    summary += QStringLiteral(" in %1 (%2s/track)")
                    .arg(spacedDuration(static_cast<qint64>(std::llround(elapsedSecs))))
                    .arg(QString::number(secsPerTrack, 'f', 1));
     return summary;

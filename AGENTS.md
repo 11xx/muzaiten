@@ -34,6 +34,16 @@
 - Menu paths, key tables, and CLI verbs quoted in README/docs must match
   the shipped UI exactly; treat a stale doc as a bug, not a nice-to-have.
 
+# UI copy style
+
+- Em-dashes are long-form-prose punctuation, and reaching for them everywhere
+  is an LLM tell. Never put them in UI copy (status messages, tooltips,
+  headers, menu labels, dialog text, CLI errors); rewrite with a colon,
+  comma, period, semicolon, or parentheses. The literal "—" survives only
+  where it is functional: the empty-value placeholder in tables and the
+  import-format separator tokens. Prose surfaces (docs/, CHANGELOG.md, code
+  comments) may keep an em-dash where it genuinely earns its place.
+
 # Boiling pond
 
 - Proactive Mentorship: When answering questions or implementing code, do not just answer literally. If you spot a fragile pattern (like hardcoded variables or string manipulation for IPs/paths), proactively suggest a more robust, idiomatic, or native tool/filter that achieves the goal safely.

@@ -52,7 +52,7 @@ PlaylistImportDialog::PlaylistImportDialog(const QString &dbPath, const QString 
     auto *layout = new QVBoxLayout(this);
 
     auto *hint = new QLabel(QStringLiteral(
-        "Paste a tracklist (one \"Artist - Title\" per line), an m3u/m3u8, or csv — "
+        "Paste a tracklist (one \"Artist - Title\" per line), an m3u/m3u8, or csv, "
         "or load a file. Nothing is written until you press Add."), this);
     hint->setWordWrap(true);
     layout->addWidget(hint);
@@ -92,7 +92,7 @@ PlaylistImportDialog::PlaylistImportDialog(const QString &dbPath, const QString 
     buttonRow->addWidget(m_matchButton);
     m_exactMatch = new QCheckBox(QStringLiteral("Exact only"), this);
     m_exactMatch->setToolTip(QStringLiteral(
-        "Match by exact text only — no fuzzy/relaxed guessing. Stricter: uncertain "
+        "Match by exact text only, no fuzzy/relaxed guessing. Stricter: uncertain "
         "rows stay pending instead of being approximated."));
     buttonRow->addWidget(m_exactMatch);
     m_status = new QLabel(this);
@@ -122,7 +122,7 @@ PlaylistImportDialog::PlaylistImportDialog(const QString &dbPath, const QString 
             m_results.clear();
             m_preview->setRowCount(0);
             m_addButton->setEnabled(false);
-            m_status->setText(QStringLiteral("Edited — match again."));
+            m_status->setText(QStringLiteral("Edited; match again."));
         }
     });
 }
@@ -180,7 +180,7 @@ void PlaylistImportDialog::loadFile()
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         m_input->setPlainText(QString::fromUtf8(file.readAll()));
     }
-    m_status->setText(QStringLiteral("%1 entries loaded — press Match.").arg(entries.size()));
+    m_status->setText(QStringLiteral("%1 entries loaded; press Match.").arg(entries.size()));
 }
 
 void PlaylistImportDialog::fetchUrl()
@@ -211,7 +211,7 @@ void PlaylistImportDialog::fetchUrl()
                                     .arg(entry.externalId);
                     }
                     m_input->setPlainText(text);
-                    m_status->setText(QStringLiteral("Fetched %1 tracks from \"%2\" — press Match.")
+                    m_status->setText(QStringLiteral("Fetched %1 tracks from \"%2\"; press Match.")
                                           .arg(entries.size()).arg(title));
                 });
         connect(m_fetcher, &YouTubePlaylistFetcher::progress, this, [this](int count) {
@@ -343,7 +343,7 @@ void PlaylistImportDialog::appendPreviewRow(int index, const PlaylistImportMatch
             for (const QString &candidate : match.outcome.candidatePaths) {
                 combo->addItem(candidate, candidate);
             }
-            combo->addItem(QStringLiteral("(no match — clear)"), noMatchMarker());
+            combo->addItem(QStringLiteral("(no match / clear)"), noMatchMarker());
             m_preview->setCellWidget(row, 3, combo);
             m_resolvers.insert(index, combo);
         } else {
@@ -367,7 +367,7 @@ void PlaylistImportDialog::updateSummary()
     const QString headerNote = m_header.present && !m_header.name.isEmpty()
         ? QStringLiteral("playlist \"%1\" · ").arg(m_header.name)
         : QString();
-    m_status->setText(QStringLiteral("%1%2 matched · %3 approx · %4 multi · %5 pending — pick a "
+    m_status->setText(QStringLiteral("%1%2 matched · %3 approx · %4 multi · %5 pending. Pick a "
                                      "candidate to resolve a row; Add inserts all.")
                           .arg(headerNote).arg(matched).arg(approx).arg(multi).arg(pending));
 }

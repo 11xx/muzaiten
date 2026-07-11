@@ -32,7 +32,7 @@ KeyBindingReferenceList PlaylistView::keyBindingReference()
 {
     // One section per pane; rows with an empty key render as headings.
     return {
-        {QString(), QStringLiteral("— Playlists pane —")},
+        {QString(), QStringLiteral("Playlists pane")},
         {QStringLiteral("j / n"), QStringLiteral("Move down")},
         {QStringLiteral("k / p"), QStringLiteral("Move up")},
         {QStringLiteral("Shift+J / Shift+K"), QStringLiteral("Extend selection down / up")},
@@ -49,7 +49,7 @@ KeyBindingReferenceList PlaylistView::keyBindingReference()
         {QStringLiteral("x"), QStringLiteral("Export playlist (m3u8/csv)")},
         {QStringLiteral("i"), QStringLiteral("Import… (paste/m3u/csv, matched against library)")},
         {QStringLiteral("T"), QStringLiteral("Toggle created-date display")},
-        {QString(), QStringLiteral("— Items pane —")},
+        {QString(), QStringLiteral("Items pane")},
         {QStringLiteral("j / n"), QStringLiteral("Move down")},
         {QStringLiteral("k / p"), QStringLiteral("Move up")},
         {QStringLiteral("h / Left"), QStringLiteral("Back to playlists pane")},

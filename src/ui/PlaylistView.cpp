@@ -1497,14 +1497,15 @@ void PlaylistView::updateHeader()
         }
         const QListWidgetItem *current = m_playlistList->currentItem();
         const QString name = current != nullptr ? current->data(PlaylistNameRole).toString() : QString();
-        m_header->setText(QStringLiteral("%1 — saved queue, %2 items").arg(name).arg(m_items.size()));
+        m_header->setText(QStringLiteral("%1 (saved queue, %2 items)").arg(name).arg(m_items.size()));
         m_header->show();
         return;
     }
     if (m_currentPlaylistId <= 0) {
         m_header->setText(QStringLiteral(
-            "Playlists — a: new   R: rename   D: delete   x: export   =/+: add song   T: toggle date   Enter: play   l: open   "
-            "(inside) =/+: add   a: add-to-playlist   e: edit   d: remove   Alt+j/k: move   s: sort   Enter: play"));
+            "Playlists   a: new   r: rename   C-d: delete   x: export   =/+: add song   i: import   T: toggle date   "
+            "z: fold group   Enter: play   l: open   "
+            "(inside) =/+: add   a: add-to-playlist   e: edit   C-d: remove   Shift+j/k: move   s: sort   u: undo   Enter: play"));
         m_header->show();
         return;
     }
@@ -1514,7 +1515,7 @@ void PlaylistView::updateHeader()
     }
     const QListWidgetItem *current = m_playlistList->currentItem();
     const QString name = current != nullptr ? current->data(PlaylistNameRole).toString() : QString();
-    m_header->setText(QStringLiteral("%1 — %2 items").arg(name).arg(m_items.size()));
+    m_header->setText(QStringLiteral("%1 (%2 items)").arg(name).arg(m_items.size()));
     m_header->show();
 }
 

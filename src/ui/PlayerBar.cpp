@@ -944,7 +944,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_radio->setAutoRaise(true);
     m_radio->setFixedSize(34, 34);
     m_radio->setCheckable(true);
-    m_radio->setToolTip(QStringLiteral("Radio session active — click to stop, right-click for options"));
+    m_radio->setToolTip(QStringLiteral("Radio session active. Click to stop, right-click for options"));
     m_radio->setVisible(false);
     m_radio->setContextMenuPolicy(Qt::CustomContextMenu);
     updateRadioIcon();

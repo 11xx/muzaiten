@@ -1057,7 +1057,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("ListenBrainz"), message);
     });
     connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::tokenValidated, this, [this](bool valid, const QString &username) {
-        statusBar()->showMessage(valid ? QStringLiteral("ListenBrainz token valid — connected as %1").arg(username)
+        statusBar()->showMessage(valid ? QStringLiteral("ListenBrainz token valid: connected as %1").arg(username)
                                        : QStringLiteral("ListenBrainz token is invalid."),
                                  8000);
     });
@@ -1237,7 +1237,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         // it streams) and restart it at the new power once it exits.
         if (value != previous && m_audioAnalysisProcess != nullptr) {
             m_audioAnalysisRestartPending = true;
-            statusBar()->showMessage(QStringLiteral("Applying %1 analysis power — restarting analysis...").arg(value), 6000);
+            statusBar()->showMessage(QStringLiteral("Applying %1 analysis power, restarting analysis...").arg(value), 6000);
             cancelAudioAnalysis();
         }
     });
@@ -1360,7 +1360,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::queueSavedLimitRequested, this, &MainWindow::configureSavedQueueLimit);
     connect(m_playerBar, &PlayerBar::stopRadioRequested, this, [this]() {
         m_core->stopRadio();
-        statusBar()->showMessage(QStringLiteral("Radio stopped — queue kept"), 4000);
+        statusBar()->showMessage(QStringLiteral("Radio stopped, queue kept"), 4000);
     });
     connect(m_playerBar, &PlayerBar::radioMenuAboutToShow, this, [this]() {
         m_playerBar->setRadioAdventurous(m_core->radioAdventurous());
@@ -2103,7 +2103,7 @@ void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, b
     if (canceled) {
         summary = QStringLiteral("Scan canceled: %1 enumerated, %2 unchanged").arg(enumerated).arg(skipped);
     } else if (pendingFill > 0) {
-        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged) — reading metadata for %4 in the background")
+        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged), reading metadata for %4 in the background")
                       .arg(enumerated).arg(indexed).arg(skipped).arg(pendingFill);
     } else {
         summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged)")
@@ -4972,7 +4972,7 @@ void MainWindow::attemptDeviceTakeover()
         return;
     }
     statusBar()->showMessage(
-        QStringLiteral("Took over %1 — retrying playback").arg(dev->description), 4000);
+        QStringLiteral("Took over %1, retrying playback").arg(dev->description), 4000);
     m_takeOverDeviceButton->setVisible(false);
 
     // Reopen only once PipeWire has removed the old Audio/Sink. A profile flip
@@ -5017,7 +5017,7 @@ void MainWindow::updateDsdTakeoverPromptText()
     }
     const auto dev = AudioDeviceControl::findByHwPath(m_pendingDsdTakeoverDevice);
     const QString name = dev ? dev->description : m_pendingDsdTakeoverDevice;
-    const QString text = QStringLiteral("DSD needs %1 — take over for bit-perfect playback? Skipping in %2s")
+    const QString text = QStringLiteral("DSD needs %1. Take over for bit-perfect playback? Skipping in %2s")
                              .arg(name)
                              .arg(m_dsdTakeoverSecondsRemaining);
     statusBar()->showMessage(text);
@@ -5830,7 +5830,7 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
     if (m_audioAnalysisCancelRequested) {
         if (!restartRequested) {
             statusBar()->showMessage(
-                QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
+                QStringLiteral("Audio analysis stopped: completed work is saved; run again to resume"), 8000);
         }
     } else if (exitStatus != QProcess::NormalExit || exitCode != 0) {
         QString detail = QString::fromUtf8(m_audioAnalysisStderr).trimmed();
@@ -5856,7 +5856,7 @@ void MainWindow::finishAudioAnalysis(int exitCode, QProcess::ExitStatus exitStat
             const QJsonObject object = terminal.value(QStringLiteral("result")).toObject();
             if (object.value(QStringLiteral("canceled")).toBool()) {
                 statusBar()->showMessage(
-                    QStringLiteral("Audio analysis stopped — completed work is saved; run again to resume"), 8000);
+                    QStringLiteral("Audio analysis stopped: completed work is saved; run again to resume"), 8000);
             } else {
                 const int featuresWritten = object.value(QStringLiteral("features_written")).toInt(-1);
                 statusBar()->showMessage(
@@ -6319,8 +6319,8 @@ void MainWindow::setScrobbleOffline(bool offline)
         QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resendNowPlaying", Qt::QueuedConnection);
         QMetaObject::invokeMethod(m_lastFmScrobbler, "resendNowPlaying", Qt::QueuedConnection);
     }
-    statusBar()->showMessage(offline ? QStringLiteral("Scrobble uploads paused — listens are buffered locally")
-                                     : QStringLiteral("Scrobble uploads resumed — sending buffered listens"),
+    statusBar()->showMessage(offline ? QStringLiteral("Scrobble uploads paused, listens are buffered locally")
+                                     : QStringLiteral("Scrobble uploads resumed, sending buffered listens"),
                              5000);
 }
 
@@ -6471,10 +6471,10 @@ void MainWindow::showLastFmSettings()
     const bool hasDefaults = hasDefaultLastFmCredentials();
     const QString keyPlaceholder = hasDefaults
         ? QStringLiteral("Using built-in default (leave blank)")
-        : QStringLiteral("Required — your Last.fm API key");
+        : QStringLiteral("Required: your Last.fm API key");
     const QString secretPlaceholder = hasDefaults
         ? QStringLiteral("Using built-in default (leave blank)")
-        : QStringLiteral("Required — your Last.fm shared secret");
+        : QStringLiteral("Required: your Last.fm shared secret");
 
     auto *drawerToggle = new QToolButton(&dialog);
     drawerToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -6599,7 +6599,7 @@ void MainWindow::showLastFmSettings()
             });
     connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationFailed, &dialog,
             [status, actionButton](const QString &message) {
-                status->setText(QStringLiteral("Not connected — %1").arg(message));
+                status->setText(QStringLiteral("Not connected: %1").arg(message));
                 status->setStyleSheet(QString());
                 actionButton->setEnabled(true);
                 actionButton->setText(QStringLiteral("Log in to Last.fm"));
@@ -7608,8 +7608,8 @@ void MainWindow::finishDropImport(bool interrupted)
         m_playlistView->reloadItems();
     }
     statusBar()->showMessage(
-        interrupted ? QStringLiteral("Import interrupted — partial playlists kept.")
-                    : QStringLiteral("Import complete — resolve multi/pending via the 'e' edit modal."),
+        interrupted ? QStringLiteral("Import interrupted, partial playlists kept.")
+                    : QStringLiteral("Import complete. Resolve multi/pending via the 'e' edit modal."),
         6000);
 }
 
@@ -7644,7 +7644,7 @@ void MainWindow::openPlaylistEditModal(qint64 playlistId, qint64 itemId, const Q
     const auto snapshotDisplay = [](const PlaylistItem &it) -> QString {
         QString name = it.artistSnapshot.isEmpty()
             ? it.titleSnapshot
-            : QStringLiteral("%1 — %2").arg(it.artistSnapshot, it.titleSnapshot);
+            : QStringLiteral("%1 - %2").arg(it.artistSnapshot, it.titleSnapshot);
         if (!name.isEmpty() && !it.albumSnapshot.isEmpty()) {
             name += QStringLiteral(" · %1").arg(it.albumSnapshot);
         }
@@ -7730,7 +7730,7 @@ void MainWindow::resolvePlaylistMultiMatches(qint64 playlistId)
     if (resolved == 0 && skipped == 0) {
         return;
     }
-    QString message = QStringLiteral("Resolved %1 multi-match%2 to best guess (Approximate — give them a glance).")
+    QString message = QStringLiteral("Resolved %1 multi-match%2 to best guess (Approximate; give them a glance).")
                           .arg(resolved)
                           .arg(resolved == 1 ? QString() : QStringLiteral("es"));
     if (skipped > 0) {

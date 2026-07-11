@@ -2224,7 +2224,7 @@ int main(int argc, char **argv)
     QLocalSocket socket;
     socket.connectToServer(IpcSocket::serverPath());
     if (!socket.waitForConnected(connectTimeoutMs)) {
-        return fail(QStringLiteral("cannot connect to %1 — is muzaiten running?").arg(IpcSocket::serverPath()));
+        return fail(QStringLiteral("cannot connect to %1 (is muzaiten running?)").arg(IpcSocket::serverPath()));
     }
 
     const QJsonObject request{{QStringLiteral("command"), command}, {QStringLiteral("args"), args}};

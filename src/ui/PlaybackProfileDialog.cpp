@@ -86,7 +86,7 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
 
     m_allowResample = new QCheckBox(QStringLiteral("Allow resampling"), m_sharedGroup);
     m_allowResample->setToolTip(
-        QStringLiteral("Allow GStreamer to convert sample rates. Normally off — PipeWire handles rate "
+        QStringLiteral("Allow GStreamer to convert sample rates. Normally off; PipeWire handles rate "
                        "negotiation. For DSD, off keeps native bit-perfect output; on decodes DSD to PCM."));
     sharedForm->addRow(QString(), m_allowResample);
 
@@ -260,13 +260,13 @@ void PlaybackProfileDialog::populateDevices()
     m_deviceCombo->clear();
     for (const auto &[label, hw] : enumerateAlsaCards()) {
         const bool busy = held.value(hw, false);
-        m_deviceCombo->addItem(busy ? QStringLiteral("%1 — busy").arg(label) : label, hw);
+        m_deviceCombo->addItem(busy ? QStringLiteral("%1 (busy)").arg(label) : label, hw);
         if (busy) {
             const int row = m_deviceCombo->count() - 1;
             m_deviceCombo->setItemData(row, QColor(Qt::red), Qt::ForegroundRole);
             m_deviceCombo->setItemData(
                 row,
-                QStringLiteral("Held by PipeWire — take over to play bit-perfect to it"),
+                QStringLiteral("Held by PipeWire; take over to play bit-perfect to it"),
                 Qt::ToolTipRole);
         }
     }
@@ -313,7 +313,7 @@ void PlaybackProfileDialog::refreshDeviceStatus()
     const bool held = dev->heldByPipeWire();
     if (held) {
         m_deviceStatus->setText(
-            QStringLiteral("⚠ Busy — PipeWire is holding this device; direct playback will fail."));
+            QStringLiteral("⚠ Busy: PipeWire is holding this device; direct playback will fail."));
         m_deviceStatus->setStyleSheet(active ? QStringLiteral("color: #c0392b;") : QString());
         m_deviceAction->setText(QStringLiteral("Take over"));
         m_deviceAction->setToolTip(
