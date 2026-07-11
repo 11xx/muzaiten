@@ -261,6 +261,86 @@ Keep the production `pypi` step behind explicit approval either way. Automation
 changes how the action is invoked, not the permanence or authority of
 publication.
 
+#### Preferred deterministic automation contract
+
+The two-dispatch release runbook above is the current runnable procedure. Keep
+using it until the `pypi` GitHub environment has a required reviewer and the
+workflow implements the state machine below. Branch restriction and disabled
+administrator bypass are valuable, but they do not create a pause by
+themselves; changing to automatic promotion before adding a reviewer would make
+publication less safe.
+
+The preferred future workflow is a single run whose complete release identity
+is the pair `(provider_version, source_sha)`. It should accept those two values
+as required inputs, plus a production-intent input that defaults to false, and
+enforce all of the following in CI rather than relying on an operator or agent
+to remember them:
+
+1. Assert `github.sha == source_sha`; require a clean full-length hexadecimal
+   SHA rather than a branch name or abbreviated revision.
+2. Assert `provider_version` matches `pyproject.toml`, runtime `__version__`, and
+   the root package entry in `uv.lock` exactly.
+3. Build once. Produce wheel, sdist, and a JSON manifest containing version,
+   source SHA, filenames, byte sizes, and SHA-256 digests. Expose the digests as
+   build-job outputs as well as storing the manifest with the distributions, so
+   a downloaded artifact cannot validate itself.
+4. Publish that artifact to TestPyPI from the minimal `testpypi` OIDC job.
+   TestPyPI retry may use skip-existing semantics, but only the following
+   verification job decides whether reuse is safe.
+5. Poll TestPyPI's version JSON to a fixed deadline. An absent version is an
+   indexing delay and may be retried. Once present, any unexpected filename,
+   size, or digest is a permanent mismatch and fails immediately. Download the
+   exact advertised wheel, verify its digest, install it with dependencies from
+   real PyPI—not TestPyPI—and run the isolated-cache provider status smoke.
+6. If production intent is false, stop successfully after TestPyPI verification.
+   If true, wait at the `pypi` environment for its required reviewer. The
+   environment approval in GitHub's UI is the irreversible-action boundary;
+   CLI dispatch confirmation is only defense in depth.
+7. After approval, download the same run artifact. Before requesting an OIDC
+   token upload, compare its files against the independent build-job digest
+   outputs. Then publish through the minimal `pypi` job.
+8. Poll real PyPI with the same absent-versus-mismatch rules, repeat the isolated
+   install/status smoke, and verify wheel and sdist attestations against
+   `https://github.com/11xx/muzaiten`.
+
+Use one global concurrency group for provider releases so candidates cannot
+interleave. Retain artifacts for seven days and require approval within six;
+after that, cancel and create a new provider version instead of approving a run
+whose artifact may expire. A transient verification failure may retry only when
+the already-published TestPyPI files match the manifest exactly. Never enable
+skip-existing behavior for production PyPI.
+
+For both a human and an agent, the preferred operator surface is deliberately
+small:
+
+```sh
+gh auth status
+gh workflow run publish-features-clap.yml \
+  --repo 11xx/muzaiten --ref master \
+  -f provider_version="$version" \
+  -f source_sha="$sha" \
+  -f publish_pypi=false
+gh run watch --repo 11xx/muzaiten --compact --exit-status <run-id>
+gh run view --repo 11xx/muzaiten <run-id> \
+  --json headSha,status,conclusion,url
+```
+
+Those inputs describe the target contract, not the current workflow CLI. Do not
+use them until the single-run workflow lands. At that point, an agent should run
+deterministic commands and consume the workflow's compact JSON summary; it
+should not scrape prose logs, reinterpret release policy, browse for package
+state that the index JSON APIs expose, or regenerate the checklist from model
+memory. Set `publish_pypi=true` only when intentionally starting a
+production-capable run. Production intent may be supplied through the CLI, but
+final approval must remain in the protected GitHub environment.
+
+Recovery is version-based, never mutation-based. If TestPyPI contains files
+whose hashes differ from the manifest, or a production upload partially
+succeeds, stop and diagnose before choosing the next same-day version
+iteration. Do not delete, overwrite, or reuse published filenames. These rules
+make the workflow deterministic enough for unattended verification while
+keeping the one irreversible decision visibly human.
+
 See GitHub's [manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 and PyPI's [Trusted Publishing security model](https://docs.pypi.org/trusted-publishers/security-model/).
 Core AUR packages list `muzaiten-features-clap` only as an optional dependency.
