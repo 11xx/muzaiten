@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-"""Report whether Arch's package indexes justify reopening CLAP packaging.
+"""Report whether the distro-native CLAP provider route can reopen.
+
+The ONNX runtime provider needs only NumPy, ONNX Runtime, and Tokenizers at
+serving time, so the old NumPy/Numba/LAION-CLAP compatibility chain no longer
+gates distro packaging. What gates it now:
+
+1. every runtime dependency must be resolvable on Arch, from the official
+   repositories (directly or through ``provides`` variants such as
+   ``python-onnxruntime-cpu``) or, acceptably for an AUR package, from the
+   AUR itself;
+2. the published PyPI provider's ``[model]`` extra must be the ONNX runtime,
+   proving the release actually shipped; and
+3. a hosted converted-artifact bundle must be configured
+   (``MODEL_ARTIFACTS_URL``), because a distro package cannot ask users to
+   install the one-time ``[convert]`` stack that is itself not packageable.
 
 Index compatibility is necessary, not sufficient. A ``candidate`` result must
-still pass the clean-chroot CPU and isolated CUDA gates documented beside this
-script before any AUR provider package is published.
+still pass the clean-chroot runtime gates documented beside this script
+before any AUR provider package is published.
 """
 
 from __future__ import annotations
@@ -16,30 +30,24 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Sequence
 
-SCHEMA_VERSION = 1
-ARCH_PACKAGES = (
-    "python-numpy",
-    "python-numba",
-    "python-pytorch",
-    "python-torchvision",
-    "python-librosa",
+SCHEMA_VERSION = 2
+# Each runtime dependency with the official package names that satisfy it.
+# The ONNX Runtime variants (-cpu/-cuda/-rocm) all `provides` the plain name.
+ARCH_RUNTIME_DEPENDENCIES = (
+    ("python-numpy", ("python-numpy",)),
+    ("python-onnxruntime", ("python-onnxruntime", "python-onnxruntime-cpu")),
+    ("python-tokenizers", ("python-tokenizers",)),
 )
-AUR_RUNTIME_DEPENDENCIES = (
-    "python-ftfy",
-    "python-braceexpand",
-    "python-webdataset",
-    "python-wget",
-    "python-wandb",
-    "python-transformers",
+PLANNED_PACKAGES = ("muzaiten-features-clap",)
+PROVIDER_PROJECT = "muzaiten-features-clap"
+PROVIDER_MODEL_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "tools/features-clap/src/muzaiten_features_clap/model.py"
 )
-PLANNED_PACKAGES = (
-    "python-torchlibrosa",
-    "python-laion-clap",
-    "muzaiten-features-clap",
-)
-USER_AGENT = "muzaiten-arch-provider-gate/1"
+USER_AGENT = "muzaiten-arch-provider-gate/2"
 
 
 class PackageIndexError(RuntimeError):
@@ -73,10 +81,11 @@ def _arch_package(name: str) -> dict[str, object]:
         and not str(item.get("repo", "")).endswith("-testing")
     ]
     if not exact:
-        raise PackageIndexError(f"official Arch package is unavailable: {name}")
+        return {"available": False, "url": url}
     exact.sort(key=lambda item: (str(item.get("repo")), str(item.get("arch"))))
     item = exact[0]
     return {
+        "available": True,
         "version": str(item.get("pkgver", "")),
         "release": str(item.get("pkgrel", "")),
         "repository": str(item.get("repo", "")),
@@ -85,9 +94,8 @@ def _arch_package(name: str) -> dict[str, object]:
     }
 
 
-def _pypi_project(name: str, version: str | None = None) -> dict[str, object]:
-    suffix = f"/{version}" if version else ""
-    url = f"https://pypi.org/pypi/{urllib.parse.quote(name)}{suffix}/json"
+def _pypi_project(name: str) -> dict[str, object]:
+    url = f"https://pypi.org/pypi/{urllib.parse.quote(name)}/json"
     payload = _fetch_json(url)
     info = payload.get("info")
     if not isinstance(info, dict):
@@ -122,93 +130,92 @@ def _aur_package(name: str) -> dict[str, object]:
     }
 
 
-def _release_tuple(version: str) -> tuple[int, ...]:
-    plain = version.split(":", 1)[-1].split("+", 1)[0]
-    match = re.match(r"^(\d+(?:\.\d+)*)", plain)
-    if match is None:
-        raise ValueError(f"unsupported version: {version!r}")
-    return tuple(int(part) for part in match.group(1).split("."))
-
-
-def _compare(left: str, right: str) -> int:
-    left_parts = list(_release_tuple(left))
-    right_parts = list(_release_tuple(right))
-    width = max(len(left_parts), len(right_parts))
-    left_parts.extend([0] * (width - len(left_parts)))
-    right_parts.extend([0] * (width - len(right_parts)))
-    return (left_parts > right_parts) - (left_parts < right_parts)
-
-
-def _numpy_requirement(requirements: Sequence[str]) -> str | None:
+def model_extra_requirements(requirements: Sequence[str]) -> list[str]:
+    """Lower-case project names required under the ``model`` extra."""
+    names: list[str] = []
     for requirement in requirements:
-        match = re.match(
-            r"^numpy(?:\[[^]]+\])?\s*(?:\(([^)]*)\)|([^;]*))",
-            requirement,
-            flags=re.IGNORECASE,
-        )
+        parts = requirement.split(";", 1)
+        marker = parts[1] if len(parts) == 2 else ""
+        if re.search(r"""extra\s*==\s*['"]model['"]""", marker) is None:
+            continue
+        match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", parts[0])
         if match is not None:
-            return (match.group(1) or match.group(2) or "").strip() or None
-    return None
+            names.append(match.group(1).lower())
+    return names
 
 
-def _satisfies(version: str, specification: str | None) -> bool:
-    if specification is None:
-        return True
-    clauses = [clause.strip() for clause in specification.split(",") if clause.strip()]
-    for clause in clauses:
-        match = re.fullmatch(r"(<=|>=|==|!=|<|>)\s*([0-9][0-9A-Za-z.+_-]*)", clause)
-        if match is None:
-            raise ValueError(f"unsupported version clause: {clause!r}")
-        operator, target = match.groups()
-        comparison = _compare(version, target)
-        accepted = {
-            "<": comparison < 0,
-            "<=": comparison <= 0,
-            ">": comparison > 0,
-            ">=": comparison >= 0,
-            "==": comparison == 0,
-            "!=": comparison != 0,
-        }[operator]
-        if not accepted:
-            return False
-    return True
+def repo_artifacts_url(path: Path = PROVIDER_MODEL_PATH) -> str | None:
+    """MODEL_ARTIFACTS_URL as configured in the repository checkout."""
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"^MODEL_ARTIFACTS_URL[^=\n]*=\s*(.+)$", text, flags=re.MULTILINE)
+    if match is None:
+        raise PackageIndexError(f"MODEL_ARTIFACTS_URL is not declared in {path}")
+    value = match.group(1).strip()
+    if value == "None":
+        return None
+    literal = re.fullmatch(r"""["']([^"']+)["']""", value)
+    if literal is None:
+        raise PackageIndexError(f"MODEL_ARTIFACTS_URL has an unsupported value: {value}")
+    return literal.group(1)
 
 
-def evaluate_gate(indexes: dict[str, dict[str, object]]) -> dict[str, object]:
+def evaluate_gate(
+    indexes: dict[str, dict[str, Any]],
+    hosted_artifacts_url: str | None,
+) -> dict[str, object]:
     arch = indexes["arch"]
     pypi = indexes["pypi"]
     aur = indexes["aur"]
-    numpy_version = str(arch["python-numpy"]["version"])
-    numba_version = str(arch["python-numba"]["version"])
-    numba_requirement = _numpy_requirement(
-        pypi["numba"]["requires_dist"]  # type: ignore[arg-type]
-    )
-    laion_requirement = _numpy_requirement(
-        pypi["laion-clap"]["requires_dist"]  # type: ignore[arg-type]
-    )
-    numba_compatible = _satisfies(numpy_version, numba_requirement)
-    laion_compatible = _satisfies(numpy_version, laion_requirement)
 
     reasons: list[str] = []
-    if not numba_compatible:
-        reasons.append(
-            f"Arch NumPy {numpy_version} does not satisfy Numba {numba_version} "
-            f"requirement {numba_requirement}"
+    runtime_state: dict[str, dict[str, object]] = {}
+    for dependency, official_names in ARCH_RUNTIME_DEPENDENCIES:
+        official = next(
+            (
+                (name, arch[name])
+                for name in official_names
+                if bool(arch.get(name, {}).get("available"))
+            ),
+            None,
         )
-    if not laion_compatible:
+        if official is not None:
+            name, item = official
+            runtime_state[dependency] = {
+                "realm": "official",
+                "package": name,
+                "version": item.get("version"),
+            }
+        elif bool(aur.get(dependency, {}).get("available")):
+            # An AUR dependency is acceptable for an AUR package.
+            runtime_state[dependency] = {
+                "realm": "aur",
+                "package": dependency,
+                "version": aur[dependency].get("version"),
+            }
+        else:
+            runtime_state[dependency] = {"realm": "missing", "package": None, "version": None}
+            reasons.append(f"runtime dependency is unavailable on Arch: {dependency}")
+
+    provider = pypi[PROVIDER_PROJECT]
+    extra_names = model_extra_requirements(provider["requires_dist"])
+    provider_is_onnx = "onnxruntime" in extra_names and "laion-clap" not in extra_names
+    if not provider_is_onnx:
         reasons.append(
-            f"Arch NumPy {numpy_version} does not satisfy LAION-CLAP "
-            f"{pypi['laion-clap']['version']} requirement {laion_requirement}"
+            f"published provider {provider['version']} [model] extra is not the "
+            "ONNX runtime"
         )
-    for package in AUR_RUNTIME_DEPENDENCIES:
-        if not bool(aur[package].get("available")):
-            reasons.append(f"required AUR dependency is unavailable: {package}")
+
+    if hosted_artifacts_url is None:
+        reasons.append(
+            "hosted artifact bundle is not configured (MODEL_ARTIFACTS_URL is unset); "
+            "a distro package cannot depend on the [convert] stack"
+        )
 
     status = "blocked" if reasons else "candidate"
     next_step = (
-        "wait for compatible upstream Arch and LAION-CLAP releases"
+        "publish the ONNX provider release and host the artifact bundle"
         if status == "blocked"
-        else "run the documented clean-chroot CPU, parity, and CUDA gates"
+        else "run the documented clean-chroot runtime gates"
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -217,55 +224,65 @@ def evaluate_gate(indexes: dict[str, dict[str, object]]) -> dict[str, object]:
         "reasons": reasons,
         "next_step": next_step,
         "compatibility": {
-            "arch_numpy": numpy_version,
-            "numba": {
-                "version": numba_version,
-                "numpy_requirement": numba_requirement,
-                "satisfied": numba_compatible,
+            "runtime_packages": runtime_state,
+            "provider": {
+                "version": provider["version"],
+                "model_extra": extra_names,
+                "onnx_runtime": provider_is_onnx,
             },
-            "laion_clap": {
-                "version": pypi["laion-clap"]["version"],
-                "numpy_requirement": laion_requirement,
-                "satisfied": laion_compatible,
+            "hosted_artifacts": {
+                "configured": hosted_artifacts_url is not None,
+                "url": hosted_artifacts_url,
             },
         },
         "indexes": indexes,
         "planned_packages": {
             package: {
                 "published": bool(aur[package].get("available")),
-                "disposition": "consume if compatible" if aur[package].get("available") else "to package",
+                "disposition": (
+                    "consume if compatible" if aur[package].get("available") else "to package"
+                ),
             }
             for package in PLANNED_PACKAGES
         },
     }
 
 
-def collect_indexes() -> dict[str, dict[str, object]]:
-    arch = {package: _arch_package(package) for package in ARCH_PACKAGES}
-    numba_version = str(arch["python-numba"]["version"])
-    pypi = {
-        "numba": _pypi_project("numba", numba_version),
-        "laion-clap": _pypi_project("laion-clap"),
-    }
-    aur_names = (*AUR_RUNTIME_DEPENDENCIES, *PLANNED_PACKAGES)
-    aur = {package: _aur_package(package) for package in aur_names}
+def collect_indexes() -> dict[str, dict[str, Any]]:
+    arch: dict[str, Any] = {}
+    aur: dict[str, Any] = {}
+    for dependency, official_names in ARCH_RUNTIME_DEPENDENCIES:
+        for name in official_names:
+            arch[name] = _arch_package(name)
+        if not any(bool(arch[name].get("available")) for name in official_names):
+            aur[dependency] = _aur_package(dependency)
+    pypi = {PROVIDER_PROJECT: _pypi_project(PROVIDER_PROJECT)}
+    for package in PLANNED_PACKAGES:
+        aur[package] = _aur_package(package)
     return {"arch": arch, "pypi": pypi, "aur": aur}
 
 
 def _human_report(report: dict[str, object]) -> str:
     compatibility = report["compatibility"]
     assert isinstance(compatibility, dict)
-    numba = compatibility["numba"]
-    laion = compatibility["laion_clap"]
-    assert isinstance(numba, dict) and isinstance(laion, dict)
-    lines = [
-        f"Arch CLAP provider gate: {str(report['status']).upper()}",
-        f"  Arch NumPy: {compatibility['arch_numpy']}",
-        f"  Numba {numba['version']}: numpy{numba['numpy_requirement']} "
-        f"({'ok' if numba['satisfied'] else 'blocked'})",
-        f"  LAION-CLAP {laion['version']}: numpy{laion['numpy_requirement']} "
-        f"({'ok' if laion['satisfied'] else 'blocked'})",
-    ]
+    runtime = compatibility["runtime_packages"]
+    provider = compatibility["provider"]
+    hosted = compatibility["hosted_artifacts"]
+    assert isinstance(runtime, dict) and isinstance(provider, dict) and isinstance(hosted, dict)
+    lines = [f"Arch CLAP provider gate: {str(report['status']).upper()}"]
+    for dependency, state in runtime.items():
+        if state["realm"] == "missing":
+            label = "missing"
+        else:
+            label = f"{state['package']} {state['version']} ({state['realm']})"
+        lines.append(f"  {dependency}: {label}")
+    lines.append(
+        f"  PyPI provider {provider['version']}: "
+        f"{'ONNX runtime' if provider['onnx_runtime'] else 'not the ONNX runtime'}"
+    )
+    lines.append(
+        f"  hosted artifacts: {hosted['url'] if hosted['configured'] else 'not configured'}"
+    )
     reasons = report["reasons"]
     assert isinstance(reasons, list)
     lines.extend(f"  - {reason}" for reason in reasons)
@@ -283,8 +300,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        report = evaluate_gate(collect_indexes())
-    except (PackageIndexError, KeyError, TypeError, ValueError) as exc:
+        report = evaluate_gate(collect_indexes(), repo_artifacts_url())
+    except (PackageIndexError, KeyError, TypeError, ValueError, OSError) as exc:
         error = {"schema_version": SCHEMA_VERSION, "status": "error", "error": str(exc)}
         if args.json:
             print(json.dumps(error, indent=2, sort_keys=True))

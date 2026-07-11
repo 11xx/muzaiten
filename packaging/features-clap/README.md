@@ -1,24 +1,36 @@
 # Distro provider packaging gate
 
 The supported provider is currently the pure-Python wheel/sdist installed from
-PyPI with uv. The Arch-native route is upstream-gated: do not publish a stub,
-embedded virtual environment, pip/uv-driven PKGBUILD, model-bearing package, or
+PyPI with uv. The Arch-native route is gated: do not publish a stub, embedded
+virtual environment, pip/uv-driven PKGBUILD, model-bearing package, or
 Muzaiten-only fork merely to make an optional-dependency link resolve.
 
-## Current blockers
+## What the gate measures
 
-Rechecked on 2026-07-11:
+The ONNX runtime provider serves with only NumPy, ONNX Runtime, and
+Tokenizers, so the retired NumPy/Numba/LAION-CLAP compatibility chain no
+longer gates distro packaging. A distro-native `muzaiten-features-clap`
+package becomes a candidate when all three hold:
 
-- Arch NumPy 2.5.1 does not satisfy Numba 0.66.0's `numpy<2.5` requirement.
-- LAION-CLAP 1.1.7 itself requires `numpy<2.0.0`, so a future Numba update alone
-  is insufficient.
-- `python-torchlibrosa` and `python-laion-clap` are absent from Arch/AUR.
-- LAION-CLAP's complete runtime chain also consumes several AUR packages,
-  including ftfy, braceexpand, webdataset, wget, wandb, and transformers.
+- every runtime dependency is resolvable on Arch: `python-numpy` (official),
+  `python-onnxruntime` (official, satisfied by the `-cpu`/`-cuda`/`-rocm`
+  variants through `provides`), and `python-tokenizers` (AUR, acceptable for
+  an AUR package);
+- the published PyPI provider's `[model]` extra is the ONNX runtime, proving
+  the ONNX release actually shipped; and
+- a hosted converted-artifact bundle is configured (`MODEL_ARTIFACTS_URL` in
+  the provider's `model.py`), because a distro package cannot ask users to
+  install the one-time `[convert]` stack, which is itself not
+  distro-packageable (LAION-CLAP pins `numpy<2`, and its librosa/numba chain
+  conflicts with current Arch NumPy).
 
-The core Muzaiten AUR packages therefore do not advertise the unresolved
-provider. Native analysis remains Python-free, and an existing uv tool remains
-fully supported and discoverable.
+The conversion stack stays confined to the PyPI `[convert]` extra and to
+maintainer machines; see "Hosting the converted artifact bundle" in
+`docs/distribution.md`.
+
+The core Muzaiten AUR packages do not advertise the unpublished provider.
+Native analysis remains Python-free, and an existing uv tool remains fully
+supported and discoverable.
 
 ## Deterministic index check
 
@@ -30,41 +42,34 @@ python packaging/features-clap/check-arch-gate.py --json
 python packaging/features-clap/check-arch-gate.py --json --strict
 ```
 
-The stable JSON schema records Arch, PyPI, and AUR versions, requirements,
-planned packages, and reasons. Ordinary reporting exits zero even while blocked;
+The stable JSON schema records the Arch runtime packages, the published
+provider's `[model]` extra, the hosted-bundle configuration, planned AUR
+packages, and reasons. Ordinary reporting exits zero even while blocked;
 `--strict` exits 1 for `blocked` and 2 for an index/protocol error. An index
-result can only be `blocked` or `candidate`: `candidate` means run the runtime
-gates below, never that publication is already safe.
+result can only be `blocked` or `candidate`: `candidate` means run the
+runtime gates below, never that publication is already safe.
 
 ## Reopening and publication
 
-Reopen only after official Arch NumPy imports with official Numba and an
-upstream LAION-CLAP release declares support for that NumPy. Do not carry a
-downstream behavioral compatibility patch. Before changing the provider pin,
-compare fixed synthetic audio/text vectors with the current 1.1.7 music-model
-baseline: cosine similarity must be at least 0.999999 and maximum absolute
-component error at most 1e-5. A mismatch requires a separate semantic-generation
-change and `feature_revision` bump, not silent packaging.
+When the gate reports `candidate`, publish in dependency order:
 
-Publish in dependency order:
+1. a date-versioned PyPI provider release whose `[model]` extra is the ONNX
+   runtime and whose `MODEL_ARTIFACTS_URL` points at the hosted bundle;
+2. `muzaiten-features-clap` on the AUR, built from that PyPI sdist, depending
+   on `python-numpy` and `python-onnxruntime` (official; the backend variants
+   satisfy it through `provides`), `python-tokenizers` (AUR), and `ffmpeg`;
+   and
+3. the restored optdepends entries in `muzaiten-bin` and `muzaiten-git`.
 
-1. `python-torchlibrosa`, from an immutable upstream sdist;
-2. `python-laion-clap`, as the complete upstream package with system deps;
-3. a newly date-versioned PyPI provider with the tested dependency pin;
-4. `muzaiten-features-clap`, built from that PyPI sdist; and
-5. the restored optdepends entries in `muzaiten-bin` and `muzaiten-git`.
+The AUR package uses `python-build --wheel --no-isolation` and
+`python-installer` and installs ordinary files under `/usr`. Neither the
+checkpoint nor the converted artifacts are packaged: the model remains an
+explicit, checksum-verified user download outside pacman ownership, fetched
+from the hosted bundle by `muzaiten-features model download`.
 
-All Python packages use `python-build --wheel --no-isolation` and
-`python-installer`, install ordinary files under `/usr`, and declare system
-NumPy, PyTorch, torchvision, ffmpeg, and the full upstream dependency chain as
-appropriate. CUDA variants satisfy the same dependency names through Arch's
-`provides`; no backend-specific provider package is needed. The model remains an
-explicit, checksum-verified user download outside pacman ownership.
-
-Build the chain in a clean devtools chroot with a temporary local repository.
-Require source verification, Namcap, archive/privacy inspection, offline base
-status, structured model-missing behavior, mocked download lifecycle, a real
-CPU query plus synthetic-audio scan, and a real CUDA query/scan on an available
-host. Copy the already verified checkpoint into an isolated test cache; never
-package it or use live library data. Only after all gates pass may the AUR
-packages and optional-dependency metadata be published.
+Validate in a clean devtools chroot with a temporary local repository:
+source verification, Namcap, archive/privacy inspection, offline base status,
+structured model-missing behavior, a mocked hosted-bundle download lifecycle,
+and a real CPU text query plus synthetic-audio scan against an isolated test
+cache. Never package the model or use live library data. Only after all
+gates pass may the AUR package and optional-dependency metadata be published.

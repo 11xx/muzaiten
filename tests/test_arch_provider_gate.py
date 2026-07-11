@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -20,6 +21,18 @@ def load_gate(path: Path):
     return module
 
 
+HOSTED_URL = "https://example.invalid/muzaiten-clap-onnx-v1"
+ONNX_MODEL_EXTRA = [
+    'numpy>=1.23.5; extra == "model"',
+    'onnxruntime>=1.23; extra == "model"',
+    'tokenizers>=0.22; extra == "model"',
+]
+TORCH_MODEL_EXTRA = [
+    'laion-clap==1.1.7; extra == "model"',
+    'torch>=2.3; extra == "model"',
+]
+
+
 class ArchProviderGateTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -27,68 +40,117 @@ class ArchProviderGateTest(unittest.TestCase):
             raise RuntimeError("checker path was not initialized")
         cls.gate = load_gate(CHECKER_PATH)
 
-    def indexes(self, numpy: str = "2.5.1", *, missing: str | None = None):
+    def indexes(
+        self,
+        *,
+        missing: str | None = None,
+        model_extra: list[str] | None = None,
+        aur_published: bool = False,
+    ):
+        # Mirrors live reality: ONNX Runtime ships as an official provides
+        # variant, and Tokenizers is resolvable only from the AUR.
         arch = {
-            name: {"version": version}
-            for name, version in {
-                "python-numpy": numpy,
-                "python-numba": "0.66.0",
-                "python-pytorch": "2.12.1",
-                "python-torchvision": "0.27.1",
-                "python-librosa": "0.11.0",
-            }.items()
+            "python-numpy": {"available": True, "version": "2.5.1"},
+            "python-onnxruntime": {"available": False},
+            "python-onnxruntime-cpu": {"available": True, "version": "1.27.1"},
+            "python-tokenizers": {"available": False},
         }
-        aur = {
-            name: {"available": name != missing, "version": "1.0-1"}
-            for name in (*self.gate.AUR_RUNTIME_DEPENDENCIES, *self.gate.PLANNED_PACKAGES)
+        aur = {"python-tokenizers": {"available": True, "version": "0.23.1-1"}}
+        if missing is not None:
+            for name in arch:
+                if name.startswith(missing):
+                    arch[name] = {"available": False}
+            aur.pop(missing, None)
+        pypi = {
+            self.gate.PROVIDER_PROJECT: {
+                "version": "2026.7.12",
+                "requires_dist": ONNX_MODEL_EXTRA if model_extra is None else model_extra,
+            }
         }
-        return {
-            "arch": arch,
-            "pypi": {
-                "numba": {"version": "0.66.0", "requires_dist": ["numpy<2.5,>=1.22"]},
-                "laion-clap": {
-                    "version": "1.1.7",
-                    "requires_dist": ["numpy<2.0.0,>=1.23.5", "torch"],
-                },
-            },
-            "aur": aur,
-        }
+        for name in self.gate.PLANNED_PACKAGES:
+            aur[name] = {"available": aur_published, "version": "2026.7.12-1"}
+        return {"arch": arch, "pypi": pypi, "aur": aur}
 
-    def test_current_indexes_report_both_numpy_blockers(self) -> None:
-        report = self.gate.evaluate_gate(self.indexes())
-        self.assertEqual(report["status"], "blocked")
-        self.assertFalse(report["compatibility"]["numba"]["satisfied"])
-        self.assertFalse(report["compatibility"]["laion_clap"]["satisfied"])
-        self.assertEqual(len(report["reasons"]), 2)
-
-    def test_compatible_indexes_are_only_a_candidate(self) -> None:
-        report = self.gate.evaluate_gate(self.indexes("1.26.4"))
+    def test_complete_indexes_and_hosted_bundle_are_a_candidate(self) -> None:
+        report = self.gate.evaluate_gate(self.indexes(), HOSTED_URL)
         self.assertEqual(report["status"], "candidate")
         self.assertIn("clean-chroot", report["next_step"])
+        self.assertTrue(report["compatibility"]["provider"]["onnx_runtime"])
+        runtime = report["compatibility"]["runtime_packages"]
+        self.assertEqual(runtime["python-onnxruntime"]["realm"], "official")
+        self.assertEqual(runtime["python-onnxruntime"]["package"], "python-onnxruntime-cpu")
+        self.assertEqual(runtime["python-tokenizers"]["realm"], "aur")
 
-    def test_missing_runtime_dependency_blocks_candidate(self) -> None:
-        report = self.gate.evaluate_gate(self.indexes("1.26.4", missing="python-webdataset"))
+    def test_unconfigured_hosted_bundle_blocks(self) -> None:
+        report = self.gate.evaluate_gate(self.indexes(), None)
+        self.assertEqual(report["status"], "blocked")
+        self.assertTrue(
+            any("MODEL_ARTIFACTS_URL" in reason for reason in report["reasons"])
+        )
+
+    def test_missing_runtime_package_blocks(self) -> None:
+        report = self.gate.evaluate_gate(
+            self.indexes(missing="python-onnxruntime"), HOSTED_URL
+        )
         self.assertEqual(report["status"], "blocked")
         self.assertIn(
-            "required AUR dependency is unavailable: python-webdataset",
+            "runtime dependency is unavailable on Arch: python-onnxruntime",
             report["reasons"],
         )
 
-    def test_planned_packages_are_outputs_not_index_blockers(self) -> None:
-        indexes = self.indexes("1.26.4")
-        for name in self.gate.PLANNED_PACKAGES:
-            indexes["aur"][name] = {"available": False}
-        report = self.gate.evaluate_gate(indexes)
-        self.assertEqual(report["status"], "candidate")
-        self.assertTrue(
-            all(item["disposition"] == "to package" for item in report["planned_packages"].values())
+    def test_aur_only_dependency_is_not_a_blocker(self) -> None:
+        report = self.gate.evaluate_gate(self.indexes(), HOSTED_URL)
+        self.assertFalse(
+            any("python-tokenizers" in reason for reason in report["reasons"])
+        )
+        report = self.gate.evaluate_gate(
+            self.indexes(missing="python-tokenizers"), HOSTED_URL
+        )
+        self.assertEqual(report["status"], "blocked")
+        self.assertIn(
+            "runtime dependency is unavailable on Arch: python-tokenizers",
+            report["reasons"],
         )
 
-    def test_requirement_parser_accepts_parenthesized_metadata(self) -> None:
-        requirement = self.gate._numpy_requirement(["numpy (<2.5,>=1.22); python_version >= '3.10'"])
-        self.assertEqual(requirement, "<2.5,>=1.22")
-        self.assertTrue(self.gate._satisfies("2.4.2", requirement))
-        self.assertFalse(self.gate._satisfies("2.5.0", requirement))
+    def test_published_torch_provider_blocks(self) -> None:
+        report = self.gate.evaluate_gate(
+            self.indexes(model_extra=TORCH_MODEL_EXTRA), HOSTED_URL
+        )
+        self.assertEqual(report["status"], "blocked")
+        self.assertFalse(report["compatibility"]["provider"]["onnx_runtime"])
+
+    def test_planned_package_is_an_output_not_a_blocker(self) -> None:
+        report = self.gate.evaluate_gate(self.indexes(aur_published=False), HOSTED_URL)
+        self.assertEqual(report["status"], "candidate")
+        planned = report["planned_packages"][self.gate.PROVIDER_PROJECT]
+        self.assertEqual(planned["disposition"], "to package")
+
+    def test_model_extra_parser_reads_markers_and_names(self) -> None:
+        names = self.gate.model_extra_requirements(
+            [
+                "numpy>=1.23.5",
+                "onnxruntime (>=1.23) ; extra == 'model'",
+                'tokenizers>=0.22; python_version >= "3.11" and extra == "model"',
+            ]
+        )
+        self.assertEqual(names, ["onnxruntime", "tokenizers"])
+
+    def test_repo_artifacts_url_reads_unset_and_configured_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.py"
+            path.write_text("MODEL_ARTIFACTS_URL: str | None = None\n", encoding="utf-8")
+            self.assertIsNone(self.gate.repo_artifacts_url(path))
+            path.write_text(
+                'MODEL_ARTIFACTS_URL: str | None = "https://example.invalid/x"\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                self.gate.repo_artifacts_url(path), "https://example.invalid/x"
+            )
+
+    def test_live_repo_configuration_parses(self) -> None:
+        # Whatever the checkout currently pins must parse without error.
+        self.gate.repo_artifacts_url()
 
 
 if __name__ == "__main__":
