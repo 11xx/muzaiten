@@ -5590,7 +5590,7 @@ void MainWindow::configureSemanticProvider()
                                     status.value(QStringLiteral("provider_path")).toString(QStringLiteral("none")),
                                     status.value(QStringLiteral("provider_source")).toString(QStringLiteral("none"))));
     box.setDetailedText(QStringLiteral(
-        "Install command:\nuv tool install 'muzaiten-features-clap[model]' --torch-backend auto\n\n"
+        "Install command:\nuv tool install 'muzaiten-features-clap[model]'\n\n"
         "The application never runs uv. This command is copyable and must be run by you."));
     QPushButton *automatic = box.addButton(QStringLiteral("Use automatic discovery"), QMessageBox::ActionRole);
     QPushButton *choose = box.addButton(QStringLiteral("Choose executable…"), QMessageBox::ActionRole);
