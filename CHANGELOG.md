@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- The Back button no longer counts as a radio "early skip": pressing Next and
+  then Back could cross the three-early-skips threshold and reroll — i.e.
+  destroy and regenerate — the not-yet-played radio picks, even though going
+  back to re-hear a track is navigation, not rejection. Only genuine forward
+  skips feed the reroll streak now.
+- Stepping back with the Back button no longer marks the song just departed
+  with a spurious "play next" badge; like an explicit jump, Back clears any
+  pending play-next batch instead of mis-spanning it over rows it stepped over.
+
 ## [2026.07.11]
 
 - Native and AUR packages now declare the required Chromaprint runtime used by

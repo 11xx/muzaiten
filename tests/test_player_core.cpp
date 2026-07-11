@@ -109,6 +109,8 @@ private slots:
     void shuffleManualPickRefreshesBucketAndPreservesPrevious();
     void shuffleAppendAndPlayRefreshesBucket();
     void shuffleBackwardJumpDoesNotBadgePlayNext();
+    void linearPreviousDoesNotBadgeDepartedRowAsPlayNext();
+    void previousEmitsAboutToNavigateBack();
     void libraryShuffleInjectsLibraryTrack();
     void radioShuffleAtPercent100InjectsRadioProviderTrack();
     void radioShuffleAtPercent0UsesQueueShuffle();
@@ -543,6 +545,42 @@ void PlayerCoreTest::shuffleBackwardJumpDoesNotBadgePlayNext()
     QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
     m_core->previous();
     QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+}
+
+void PlayerCoreTest::linearPreviousDoesNotBadgeDepartedRowAsPlayNext()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->playAt(1);  // playing /b, empty play-next region ends at row 2
+    QCOMPARE(m_core->playNextInsertIndex(), 2);
+
+    // Stepping back to /a used to keep the old boundary (2), turning the just
+    // departed /b — region [1, 2) — into a spurious "play next" badge.
+    m_core->previous();
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+
+    // Same with a real pending play-next batch: Previous is a manual move, so
+    // like an explicit jump it clears the batch instead of mis-spanning it.
+    m_core->playAt(1);
+    m_core->playTracksNext(makeTracks({"/x"}));
+    QCOMPARE(m_core->playNextInsertIndex(), 3);
+    m_core->previous();
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
+}
+
+void PlayerCoreTest::previousEmitsAboutToNavigateBack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->playAt(1);
+
+    // The signal fires before the outgoing track's play event is finalized;
+    // AppCore relies on it to exempt Back from the radio reroll skip streak.
+    QSignalSpy backNav(m_core.get(), &PlayerCore::aboutToNavigateBack);
+    m_core->previous();
+    QCOMPARE(backNav.count(), 1);
+    m_core->next();
+    QCOMPARE(backNav.count(), 1);
 }
 
 void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()

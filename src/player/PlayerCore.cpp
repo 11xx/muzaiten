@@ -209,6 +209,7 @@ void PlayerCore::previous()
     if (m_queue.isEmpty()) {
         return;
     }
+    emit aboutToNavigateBack();
     if (m_shuffleMode != ShuffleMode::Off && !m_shuffleHistory.isEmpty()) {
         int previousIndex = m_shuffleHistory.takeLast();
         previousIndex = std::clamp(previousIndex, 0, static_cast<int>(m_queue.size()) - 1);
@@ -220,6 +221,11 @@ void PlayerCore::previous()
         playShuffleJump(previousIndex);
         return;
     }
+    // Stepping back must not leave the old boundary behind: the play-next
+    // region is [queueIndex+1, insertIndex), so a stale insertIndex from the
+    // row we're leaving would spuriously badge that row as "play next".
+    // Collapse it exactly like playShuffleJump does for the retrace path.
+    m_playNextInsertIndex = -1;
     playAt(std::max(0, m_queueIndex - 1));
 }
 

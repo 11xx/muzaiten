@@ -266,6 +266,11 @@ private:
     // these carry the attribution forward to the currentTrackChanged handler.
     bool              m_nextStartUserInitiated = false;
     bool              m_nextStartInjected = false;
+    // Set by PlayerCore::aboutToNavigateBack (the Back button): the outgoing
+    // track's "skipped" play event is a re-hear navigation, not a rejection,
+    // so handleRadioPlayEvent must not count it toward the reroll streak.
+    // Consumed there; cleared on every real track start so it never lingers.
+    bool              m_nextSkipIsBackNavigation = false;
     QString           m_currentPlayingSource;
     // Paths this radio session has handed out (batch appends + JIT provider
     // picks alike), for telemetry (source "radio") and for rerollRadioQueue()

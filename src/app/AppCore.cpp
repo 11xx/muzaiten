@@ -323,6 +323,9 @@ AppCore::AppCore(QObject *parent)
         m_nextStartUserInitiated = userInitiated;
         maybeTopUpRadioQueue();
     });
+    connect(m_player, &PlayerCore::aboutToNavigateBack, this, [this]() {
+        m_nextSkipIsBackNavigation = true;
+    });
     connect(m_player, &PlayerCore::aboutToInjectLibraryTrack, this, [this](const Track &) {
         m_nextStartInjected = true;
     });
@@ -690,7 +693,12 @@ void AppCore::setupScrobbleWiring()
                 ? QStringLiteral("library_shuffle")
                 : (userInitiated ? QStringLiteral("queue_manual") : QStringLiteral("queue_auto")));
         m_currentPlayingSource = source;
+        // trackStarted synchronously finalizes the outgoing spin (its play
+        // event routes through handleRadioPlayEvent while the back-navigation
+        // flag is still set); clear the flag afterwards so a Previous that
+        // never produced a skip event can't mislabel a later, unrelated skip.
         m_playEventRecorder->trackStarted(track, userInitiated, source);
+        m_nextSkipIsBackNavigation = false;
         // Advance the radio rolling context with every real track start while a
         // session is active — the seed, radio picks, and user-queued
         // interruptions alike (they all shape mood continuity).
@@ -2032,6 +2040,10 @@ void AppCore::rerollRadioQueue()
 void AppCore::handleRadioPlayEvent(const QString &source, const QString &outcome, qint64 playedMs,
                                    qint64 durationMs)
 {
+    // Consume the back-navigation mark before any early return: it applies to
+    // exactly this one finalized spin, whatever its source/outcome.
+    const bool backNavigation = m_nextSkipIsBackNavigation;
+    m_nextSkipIsBackNavigation = false;
     if (source != QStringLiteral("radio")) {
         // Non-radio starts already reset the streak in setupScrobbleWiring's
         // currentTrackChanged handler; nothing else to do for their play events.
@@ -2041,6 +2053,14 @@ void AppCore::handleRadioPlayEvent(const QString &source, const QString &outcome
         // Any non-skip outcome (finished, stopped, session_end) means the pick
         // landed fine -- the early-skip streak is broken.
         m_radioConsecutiveEarlySkips = 0;
+        return;
+    }
+    if (backNavigation) {
+        // The Back button re-hears an earlier track; leaving the current one is
+        // navigation, not rejection. Counting it made "Next, then Back" reroll
+        // (and so destroy) the queued radio picks — the reroll streak must only
+        // ever be fed by genuine forward skips. Leave the counter untouched,
+        // like a late skip.
         return;
     }
     if (!RadioSession::isEarlySkip(playedMs, durationMs)) {

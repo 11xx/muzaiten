@@ -140,6 +140,11 @@ public:
     void prepareNext();
 
 signals:
+    // Emitted at the start of Previous, before any index/track signals: the
+    // outgoing track is being left to re-hear an earlier one, not rejected.
+    // Radio's early-skip accounting uses this to keep Back from counting
+    // toward the reroll streak (rerolls are queue-destructive).
+    void aboutToNavigateBack();
     // Emitted before tracks are added, so the owner can apply its queue
     // identity policy (append to source playlist / mark spontaneous).
     void aboutToAddTracks(const QVector<Track> &tracks);
