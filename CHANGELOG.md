@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.07.11]
+
 - UI copy sweep: em-dashes are gone from status messages, tooltips, dialog
   text, headers, and CLI errors in favor of plain punctuation; the "—"
   empty-value placeholder in tables and the import-format separators are
@@ -31,9 +33,6 @@
 - Stepping back with the Back button no longer marks the song just departed
   with a spurious "play next" badge; like an explicit jump, Back clears any
   pending play-next batch instead of mis-spanning it over rows it stepped over.
-
-## [2026.07.11]
-
 - Native and AUR packages now declare the required Chromaprint runtime used by
   `muzaiten-features`, so audio analysis does not depend on an undeclared host
   library.
