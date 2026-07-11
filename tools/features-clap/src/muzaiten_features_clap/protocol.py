@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import time
 from dataclasses import dataclass
@@ -13,11 +13,12 @@ from .model import (
     MODEL_APPROXIMATE_BYTES,
     MODEL_LICENSE,
     MODEL_NAME,
+    ONNX_APPROXIMATE_BYTES,
     MODEL_SHA256,
     MODEL_URL,
     MODEL_VERSION,
-    RealClapEmbedder,
-    checkpoint_status,
+    OnnxClapEmbedder,
+    artifact_status,
     device_label,
     download_checkpoint,
     probe_device,
@@ -58,7 +59,7 @@ def parse_request(payload: object) -> Request:
 
 
 def capabilities() -> dict[str, object]:
-    current = checkpoint_status(verify=False)
+    current = artifact_status(verify=False)
     return {
         "capability": "clap",
         "provider_version": __version__,
@@ -74,17 +75,17 @@ def run_request(
     request: Request,
     emit: Callable[[dict[str, object]], None],
     canceled: Callable[[], bool],
-    embedder_factory: Callable[..., object] = RealClapEmbedder,
+    embedder_factory: Callable[..., object] = OnnxClapEmbedder,
 ) -> dict[str, object]:
     params = request.parameters
     if request.operation == "capabilities":
         return capabilities()
     if request.operation == "status":
-        current = checkpoint_status()
+        current = artifact_status()
         payload: dict[str, object] = {
             **capabilities(),
             "model": _model_payload(current.present, current.valid, current.path),
-            "model_extra_installed": importlib.util.find_spec("laion_clap") is not None,
+            "model_extra_installed": _runtime_dependencies_installed(),
             "device": probe_device() or "unavailable",
         }
         features = params.get("features")
@@ -107,19 +108,37 @@ def run_request(
             )
 
         result = download_checkpoint(progress=download_progress, canceled=canceled)
+        from .convert import convert_checkpoint
+
+        converted = convert_checkpoint(
+            result.path,
+            progress=lambda completed, total: emit(
+                _progress_event(
+                    request,
+                    "model-convert",
+                    completed,
+                    total,
+                    "steps",
+                    started,
+                )
+            ),
+            canceled=canceled,
+        )
         return {
             "path": str(result.path),
             "downloaded": result.downloaded,
             "sha256": MODEL_SHA256,
+            "artifacts_path": str(converted.path),
+            "converted": converted.converted,
         }
     if request.operation == "scan":
         features_path = _path(params, "features")
         device_choice = _string(params, "device", "auto")
         limit = _optional_int(params, "limit")
         batch_size = _positive_int(params, "batch_size", 8)
-        checkpoint = checkpoint_status()
+        checkpoint = artifact_status()
         if not checkpoint.present or not checkpoint.valid:
-            raise FileNotFoundError(f"CLAP checkpoint is missing or invalid: {checkpoint.path}")
+            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {checkpoint.path}")
         started = time.monotonic()
         embedder = embedder_factory(
             checkpoint=checkpoint.path,
@@ -165,9 +184,9 @@ def run_request(
         device_choice = _string(params, "device", "auto")
         if not text.strip():
             raise ProtocolError("text must not be empty")
-        checkpoint = checkpoint_status()
+        checkpoint = artifact_status()
         if not checkpoint.present or not checkpoint.valid:
-            raise FileNotFoundError(f"CLAP checkpoint is missing or invalid: {checkpoint.path}")
+            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {checkpoint.path}")
         embedder = embedder_factory(
             checkpoint=checkpoint.path,
             device=resolve_device(device_choice),
@@ -204,11 +223,21 @@ def _model_payload(present: bool, valid: bool, path: Path) -> dict[str, object]:
         "source": MODEL_URL,
         "sha256": MODEL_SHA256,
         "approximate_bytes": MODEL_APPROXIMATE_BYTES,
+        "converted_approximate_bytes": ONNX_APPROXIMATE_BYTES,
         "license": MODEL_LICENSE,
         "cache_path": str(path),
         "present": present,
         "valid": valid,
     }
+
+
+def _runtime_dependencies_installed() -> bool:
+    try:
+        for name in ("onnxruntime", "tokenizers"):
+            importlib.import_module(name)
+        return True
+    except (ImportError, ValueError):
+        return False
 
 
 def _progress_event(

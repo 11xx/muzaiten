@@ -16,10 +16,22 @@ from muzaiten_features_clap import cli, db
 from muzaiten_features_clap.cli import main
 from muzaiten_features_clap import model
 from muzaiten_features_clap.model import (
+    ARTIFACT_FORMAT_VERSION,
+    AUDIO_MODEL_FILENAME,
+    FEATURE_REVISION,
+    MANIFEST_FILENAME,
+    MODEL_NAME,
+    MODEL_SHA256,
+    MODEL_VERSION,
+    TEXT_MODEL_FILENAME,
+    TOKENIZER_FILENAME,
     _decode_audio_command,
+    artifact_status,
     checkpoint_status,
     device_label,
     download_checkpoint,
+    file_sha256,
+    prepare_waveform,
     probe_device,
     resolve_device,
 )
@@ -378,6 +390,57 @@ def test_audio_decode_is_bounded_to_a_stable_ten_second_window() -> None:
     assert short_command[short_command.index("-t") + 1] == "10"
 
 
+def test_waveform_preprocessing_matches_quantize_repeatpad_and_trim() -> None:
+    import numpy as np
+
+    raw = np.array([0.5, -0.5, 1.2, -1.2, 0.25, -0.25, 0.0], dtype=np.float32)
+    expected_cycle = (np.clip(raw, -1.0, 1.0) * 32767.0).astype(np.int16)
+    expected_cycle = (expected_cycle / 32767.0).astype(np.float32)
+
+    padded = prepare_waveform(raw)
+    assert padded.shape == (480_000,)
+    assert padded.dtype == np.float32
+    assert padded[: len(raw)] == pytest.approx(expected_cycle)
+    assert padded[-3:] == pytest.approx((0.0, 0.0, 0.0))
+
+    exact = prepare_waveform(np.linspace(-1.0, 1.0, 480_000, dtype=np.float32))
+    longer = prepare_waveform(np.concatenate((exact, np.ones(17, dtype=np.float32))))
+    assert longer == pytest.approx(exact)
+
+
+def test_artifact_manifest_verifies_identity_and_hashes(tmp_path: Path) -> None:
+    files = {
+        AUDIO_MODEL_FILENAME: b"audio graph",
+        TEXT_MODEL_FILENAME: b"text graph",
+        TOKENIZER_FILENAME: b"tokenizer",
+    }
+    for filename, payload in files.items():
+        (tmp_path / filename).write_bytes(payload)
+    manifest = {
+        "format_version": ARTIFACT_FORMAT_VERSION,
+        "model": MODEL_NAME,
+        "checkpoint": MODEL_VERSION,
+        "checkpoint_sha256": MODEL_SHA256,
+        "provider_version": "fixture",
+        "feature_revision": FEATURE_REVISION,
+        "vector_dimension": 512,
+        "artifacts": {
+            filename: {"sha256": file_sha256(tmp_path / filename), "bytes": len(payload)}
+            for filename, payload in files.items()
+        },
+    }
+    (tmp_path / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
+
+    current = artifact_status(path=tmp_path)
+    assert current.present is True
+    assert current.valid is True
+    assert current.manifest == manifest
+
+    (tmp_path / AUDIO_MODEL_FILENAME).write_bytes(b"corrupt")
+    assert artifact_status(path=tmp_path, verify=False).valid is True
+    assert artifact_status(path=tmp_path).valid is False
+
+
 def test_protocol_status_does_not_load_real_model(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -450,6 +513,42 @@ def test_protocol_routes_incidental_stdout_away_from_jsonl(
     assert [item["event"] for item in events] == ["progress", "result"]
     assert events[-1]["result"] == {"ready": True}
     assert "third-party checkpoint diagnostic" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (FileNotFoundError("converted CLAP model is missing"), "model_missing"),
+        (ModuleNotFoundError("conversion dependency is missing"), "component_missing"),
+    ],
+)
+def test_protocol_preserves_missing_model_and_component_error_codes(
+    error: Exception,
+    expected_code: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_request(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise error
+
+    monkeypatch.setattr(cli, "run_request", failing_request)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "request_id": "missing-1",
+                    "operation": "status",
+                }
+            )
+        ),
+    )
+
+    assert main() == 3
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == expected_code
 
 
 def test_provider_finishes_interrupted_known_v4_migration(tmp_path: Path) -> None:
@@ -529,23 +628,21 @@ def test_provider_finishes_interrupted_known_v4_migration(tmp_path: Path) -> Non
         assert db.read_schema_version(conn) == 5
 
 
-def _fake_torch(cuda_available: bool, name: str = "NVIDIA GeForce RTX 3080") -> SimpleNamespace:
-    return SimpleNamespace(
-        cuda=SimpleNamespace(
-            is_available=lambda: cuda_available,
-            get_device_name=lambda index: name,
-        ),
-    )
+def _fake_onnxruntime(cuda_available: bool) -> SimpleNamespace:
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if cuda_available else [
+        "CPUExecutionProvider"
+    ]
+    return SimpleNamespace(get_available_providers=lambda: providers)
 
 
 def test_resolve_device_auto_prefers_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     assert resolve_device("auto") == "cuda"
 
 
 def test_resolve_device_auto_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=False))
 
     assert resolve_device("auto") == "cpu"
 
@@ -553,27 +650,25 @@ def test_resolve_device_auto_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) 
 def test_resolve_device_explicit_cuda_errors_instead_of_silent_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=False))
 
-    with pytest.raises(RuntimeError, match="no usable CUDA device"):
+    with pytest.raises(RuntimeError, match="no CUDA execution provider"):
         resolve_device("cuda")
 
 
 def test_resolve_device_explicit_cpu_ignores_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     assert resolve_device("cpu") == "cpu"
 
 
-def test_device_label_names_the_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
-
-    assert device_label("cuda") == "cuda (NVIDIA GeForce RTX 3080)"
+def test_device_label_preserves_protocol_device_names() -> None:
+    assert device_label("cuda") == "cuda"
     assert device_label("cpu") == "cpu"
 
 
-def test_probe_device_is_none_without_torch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", None)
+def test_probe_device_is_none_without_onnxruntime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
 
     assert probe_device() is None
 
@@ -684,7 +779,7 @@ def test_protocol_status_reports_device_probe(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     monkeypatch.setattr(
         sys,

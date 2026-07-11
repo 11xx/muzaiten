@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
@@ -22,48 +23,53 @@ MODEL_SHA256 = "fae3e9c087f2909c28a09dc31c8dfcdacbc42ba44c70e972b58c1bd1caf6dedd
 MODEL_AMODEL = "HTSAT-base"
 MODEL_SAMPLE_RATE = 48_000
 MODEL_WINDOW_SECONDS = 10
-MODEL_APPROXIMATE_BYTES = 630_000_000
+MODEL_APPROXIMATE_BYTES = 2_352_471_003
 MODEL_LICENSE = "CC0-1.0"
 # Changes only when model input, preprocessing, or output semantics change.
 FEATURE_REVISION = "clap-htsat-base-audio-window-v1"
 DECODE_WORKERS = 4
 SEEK_TIMEOUT_SECONDS = 30
 DEVICE_CHOICES = ("auto", "cuda", "cpu")
+ARTIFACT_FORMAT_VERSION = 1
+ARTIFACT_DIRNAME = "clap-onnx-v1"
+AUDIO_MODEL_FILENAME = "audio.onnx"
+TEXT_MODEL_FILENAME = "text.onnx"
+TOKENIZER_FILENAME = "tokenizer.json"
+MANIFEST_FILENAME = "manifest.json"
+ONNX_APPROXIMATE_BYTES = 790_127_686
 
 
 def probe_device() -> str | None:
-    """Device an ``auto`` run would pick, or None when torch is not installed."""
+    """Device an ``auto`` run would pick, or None without ONNX Runtime."""
     try:
-        import torch
+        import onnxruntime as ort
     except ImportError:
         return None
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    return "cuda" if "CUDAExecutionProvider" in ort.get_available_providers() else "cpu"
 
 
 def resolve_device(choice: str) -> str:
     try:
-        import torch
+        import onnxruntime as ort
     except ImportError as exc:  # pragma: no cover - depends on optional extra
         raise RuntimeError(
             "device selection requires optional dependencies; run "
             "`uv sync --extra model` in tools/features-clap"
         ) from exc
 
-    cuda_available = torch.cuda.is_available()
+    cuda_available = "CUDAExecutionProvider" in ort.get_available_providers()
     if choice == "auto":
         return "cuda" if cuda_available else "cpu"
     if choice == "cuda" and not cuda_available:
-        raise RuntimeError("--device cuda requested but torch reports no usable CUDA device")
+        raise RuntimeError(
+            "--device cuda requested but ONNX Runtime reports no CUDA execution provider"
+        )
     if choice not in DEVICE_CHOICES:
         raise RuntimeError(f"unknown device choice: {choice}")
     return choice
 
 
 def device_label(device: str) -> str:
-    if device == "cuda":
-        import torch
-
-        return f"cuda ({torch.cuda.get_device_name(0)})"
     return device
 
 
@@ -78,6 +84,14 @@ class CheckpointStatus:
     path: Path
     present: bool
     valid: bool
+
+
+@dataclass(frozen=True)
+class ArtifactStatus:
+    path: Path
+    present: bool
+    valid: bool
+    manifest: dict[str, object] | None = None
 
 
 def model_cache_dir() -> Path:
@@ -97,6 +111,21 @@ def checkpoint_status(*, verify: bool = True) -> CheckpointStatus:
     except RuntimeError:
         return CheckpointStatus(path, present=True, valid=False)
     return CheckpointStatus(path, present=True, valid=True)
+
+
+def artifact_dir() -> Path:
+    return model_cache_dir() / ARTIFACT_DIRNAME
+
+
+def artifact_status(*, verify: bool = True, path: Path | None = None) -> ArtifactStatus:
+    current = artifact_dir() if path is None else path
+    if not current.is_dir():
+        return ArtifactStatus(current, present=False, valid=False)
+    try:
+        manifest = _read_and_validate_manifest(current, verify=verify)
+    except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
+        return ArtifactStatus(current, present=True, valid=False)
+    return ArtifactStatus(current, present=True, valid=True, manifest=manifest)
 
 
 def download_checkpoint(
@@ -150,6 +179,47 @@ def _verify_sha256(path: Path) -> None:
             digest.update(chunk)
     if digest.hexdigest() != MODEL_SHA256:
         raise RuntimeError(f"cached CLAP checkpoint has wrong SHA-256: {path}")
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_and_validate_manifest(path: Path, *, verify: bool) -> dict[str, object]:
+    with (path / MANIFEST_FILENAME).open(encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    if not isinstance(manifest, dict):
+        raise RuntimeError("invalid ONNX artifact manifest")
+    expected = {
+        "format_version": ARTIFACT_FORMAT_VERSION,
+        "model": MODEL_NAME,
+        "checkpoint": MODEL_VERSION,
+        "checkpoint_sha256": MODEL_SHA256,
+        "feature_revision": FEATURE_REVISION,
+        "vector_dimension": 512,
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise RuntimeError(f"ONNX artifact manifest has unexpected {key}")
+    if not isinstance(manifest.get("provider_version"), str):
+        raise RuntimeError("ONNX artifact manifest is missing provider_version")
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise RuntimeError("ONNX artifact manifest is missing artifact hashes")
+    for filename in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME):
+        artifact = artifacts.get(filename)
+        if not isinstance(artifact, dict) or not isinstance(artifact.get("sha256"), str):
+            raise RuntimeError(f"ONNX artifact manifest is missing {filename}")
+        artifact_path = path / filename
+        if not artifact_path.is_file():
+            raise RuntimeError(f"ONNX artifact is missing: {artifact_path}")
+        if verify and file_sha256(artifact_path) != artifact["sha256"]:
+            raise RuntimeError(f"ONNX artifact has wrong SHA-256: {artifact_path}")
+    return manifest
 
 
 def _decode_audio_command(path: Path, duration_ms: int | None = None) -> list[str]:
@@ -221,14 +291,38 @@ def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
     return audio.reshape(1, -1)
 
 
-class RealClapEmbedder:
+def prepare_waveform(value):
+    """Replicate LAION-CLAP's non-fusion preprocessing for one waveform."""
+    try:
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - optional runtime dependency
+        raise RuntimeError("numpy is required for real audio embedding") from exc
+
+    waveform = np.asarray(value, dtype=np.float32).reshape(-1)
+    if waveform.size == 0:
+        raise ValueError("cannot embed an empty audio waveform")
+    waveform = (np.clip(waveform, -1.0, 1.0) * 32767.0).astype(np.int16)
+    waveform = (waveform / 32767.0).astype(np.float32)
+    target = MODEL_SAMPLE_RATE * MODEL_WINDOW_SECONDS
+    if waveform.size < target:
+        repeats = target // waveform.size
+        waveform = np.tile(waveform, repeats)
+        waveform = np.pad(waveform, (0, target - waveform.size))
+    elif waveform.size > target:
+        waveform = waveform[:target]
+    return np.ascontiguousarray(waveform, dtype=np.float32)
+
+
+class OnnxClapEmbedder:
     model = MODEL_NAME
     version = MODEL_VERSION
     dimension = 512
 
     def __init__(self, checkpoint: Path | None = None, device: str | None = None) -> None:
         try:
-            import laion_clap
+            import numpy as np
+            import onnxruntime as ort
+            from tokenizers import Tokenizer
         except ImportError as exc:  # pragma: no cover - depends on optional extra
             raise RuntimeError(
                 "real CLAP embedding requires optional dependencies; run "
@@ -237,21 +331,28 @@ class RealClapEmbedder:
 
         self.device = device if device is not None else resolve_device("auto")
         if checkpoint is None:
-            current = checkpoint_status()
+            current = artifact_status()
             if not current.present or not current.valid:
                 raise FileNotFoundError(
-                    f"CLAP checkpoint is missing or invalid: {current.path}; "
+                    f"converted CLAP model is missing or invalid: {current.path}; "
                     "run `muzaiten-features model download`"
                 )
-            checkpoint_path = current.path
+            artifact_path = current.path
         else:
-            checkpoint_path = checkpoint
-        self._model = laion_clap.CLAP_Module(
-            enable_fusion=False,
-            amodel=MODEL_AMODEL,
-            device=self.device,
+            artifact_path = checkpoint if checkpoint.is_dir() else checkpoint.parent / ARTIFACT_DIRNAME
+        self._np = np
+        self._ort = ort
+        self._artifact_path = artifact_path
+        self._providers = (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if self.device == "cuda"
+            else ["CPUExecutionProvider"]
         )
-        self._model.load_ckpt(str(checkpoint_path), verbose=False)
+        self._audio_session = None
+        self._text_session = None
+        self._tokenizer = Tokenizer.from_file(str(artifact_path / TOKENIZER_FILENAME))
+        self._tokenizer.enable_truncation(max_length=77)
+        self._tokenizer.enable_padding(length=77, pad_id=1, pad_token="<pad>")
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:
         return self.embed_audio_paths([path])[0]
@@ -273,19 +374,50 @@ class RealClapEmbedder:
                 audio.reshape(-1)
                 for audio in executor.map(decode_audio_ffmpeg, paths, durations)
             ]
-        embedding = self._model.get_audio_embedding_from_data(
-            x=decoded,
-            use_tensor=False,
-        )
+        embedding = self.embed_audio_data(decoded)
         if len(embedding) != len(paths):
-            raise RuntimeError(
-                f"CLAP returned {len(embedding)} embeddings for {len(paths)} audio paths"
-            )
+            raise RuntimeError(f"CLAP returned {len(embedding)} embeddings for {len(paths)} paths")
         return [normalize_vector(row) for row in embedding]
 
+    def embed_audio_data(self, waveforms: Sequence[object]) -> Sequence[Sequence[float]]:
+        if not waveforms:
+            return []
+        batch = self._np.stack([prepare_waveform(value) for value in waveforms])
+        session = self._get_audio_session()
+        return session.run(["embedding"], {"waveform": batch})[0]
+
     def embed_text(self, text: str) -> Sequence[float]:
-        embedding = self._model.get_text_embedding([text], use_tensor=False)
-        return normalize_vector(_first_row(embedding))
+        return normalize_vector(self.embed_texts([text])[0])
+
+    def embed_texts(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        if not texts:
+            return []
+        input_ids, attention_mask = self.tokenize_texts(texts)
+        session = self._get_text_session()
+        return session.run(
+            ["embedding"],
+            {"input_ids": input_ids, "attention_mask": attention_mask},
+        )[0]
+
+    def tokenize_texts(self, texts: Sequence[str]):
+        encodings = self._tokenizer.encode_batch(list(texts))
+        input_ids = self._np.asarray([item.ids for item in encodings], dtype=self._np.int64)
+        masks = self._np.asarray([item.attention_mask for item in encodings], dtype=self._np.int64)
+        return input_ids, masks
+
+    def _get_audio_session(self):
+        if self._audio_session is None:
+            self._audio_session = self._ort.InferenceSession(
+                str(self._artifact_path / AUDIO_MODEL_FILENAME), providers=self._providers
+            )
+        return self._audio_session
+
+    def _get_text_session(self):
+        if self._text_session is None:
+            self._text_session = self._ort.InferenceSession(
+                str(self._artifact_path / TEXT_MODEL_FILENAME), providers=self._providers
+            )
+        return self._text_session
 
 
 def _first_row(value) -> tuple[float, ...]:

@@ -49,9 +49,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ProtocolError as exc:
         emit(event(request_id, "error", code="invalid_request", message=str(exc)))
         return EXIT_INVALID
-    except (FileNotFoundError, ModuleNotFoundError) as exc:
-        code = "model_missing" if "checkpoint" in str(exc).lower() else "component_missing"
-        emit(event(request_id, "error", code=code, message=str(exc)))
+    except FileNotFoundError as exc:
+        emit(event(request_id, "error", code="model_missing", message=str(exc)))
+        return EXIT_COMPONENT_MISSING
+    except ModuleNotFoundError as exc:
+        emit(event(request_id, "error", code="component_missing", message=str(exc)))
         return EXIT_COMPONENT_MISSING
     except InterruptedError as exc:
         emit(event(request_id, "error", code="canceled", message=str(exc)))
