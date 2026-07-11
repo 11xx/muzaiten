@@ -53,6 +53,7 @@
 #include <QMenu>
 #include <QScrollBar>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSignalBlocker>
@@ -164,6 +165,7 @@ constexpr int PlaylistSeparatorRole = Qt::UserRole + 9;
 constexpr int PlaylistUpdatedAtRole = Qt::UserRole + 10;
 constexpr int PlaylistSpacerRole = Qt::UserRole + 11;
 constexpr int PlaylistImportingRole = Qt::UserRole + 12;  // background drop-import in progress
+constexpr int PlaylistGroupRole = Qt::UserRole + 13;      // saved-queue fold group key
 
 enum PlaylistItemRoles {
     ItemIdRole = Qt::UserRole,
@@ -320,12 +322,30 @@ int nextSelectablePlaylistRow(QListWidget *list, int row, int direction)
     row = std::clamp(row, 0, list->count() - 1);
     while (row >= 0 && row < list->count()) {
         const QListWidgetItem *item = list->item(row);
-        if (item != nullptr && item->flags().testFlag(Qt::ItemIsSelectable)) {
+        if (item != nullptr && !item->isHidden() && item->flags().testFlag(Qt::ItemIsSelectable)) {
             return row;
         }
         row += direction < 0 ? -1 : 1;
     }
     return std::clamp(row, 0, list->count() - 1);
+}
+
+// Selector fold groups, keyed for persistence in the view settings JSON.
+QString queueGroupKey(SavedQueuePlaylistEntry::Kind kind)
+{
+    switch (kind) {
+    case SavedQueuePlaylistEntry::Kind::Manual: return QStringLiteral("manual");
+    case SavedQueuePlaylistEntry::Kind::Auto:   return QStringLiteral("auto");
+    case SavedQueuePlaylistEntry::Kind::Radio:  return QStringLiteral("radio");
+    }
+    return QStringLiteral("manual");
+}
+
+QString queueGroupHeaderText(const QString &title, int count, bool folded)
+{
+    return QStringLiteral("%1 %2 (%3)")
+        .arg(folded ? QStringLiteral("▸") : QStringLiteral("▾"), title)
+        .arg(count);
 }
 
 // Splitter layout policy for the playlist list vs. item table. The default
@@ -683,6 +703,7 @@ PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
     layout->setContentsMargins(0, 0, 0, 0);
 
     m_header = new QLabel(this);
+    m_header->setObjectName(QStringLiteral("PlaylistHeader"));
     m_header->setContentsMargins(8, 4, 8, 4);
     layout->addWidget(m_header);
 
@@ -704,7 +725,9 @@ PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
     m_playlistList = new QListWidget(m_splitter);
     m_playlistList->setObjectName(QStringLiteral("PlaylistList"));
     m_playlistList->setFrameShape(QFrame::NoFrame);
-    m_playlistList->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Extended selection so several playlists/saved queues can be deleted or
+    // enqueued in one go; plain j/k navigation still collapses to one row.
+    m_playlistList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_playlistList->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_playlistList->setItemDelegate(new PlaylistListDelegate(this));
     // Drives the selector spinner while a background drop-import is filling a
@@ -721,6 +744,7 @@ PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
     m_playlistList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_playlistList->installEventFilter(this);
     m_playlistList->viewport()->installEventFilter(this);
+    OverlayScrollBar::install(m_playlistList);
 
     m_itemModel = new PlaylistItemTableModel(this);
     m_itemTable = new PlaylistItemTableView(m_splitter);
@@ -815,6 +839,8 @@ PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
                                    kPlaylistSplitterMinimumTotal)) {
             m_userSplitterSizes = live;
         }
+        // The sidebar width changed, so the selected name may (stop) overflowing.
+        updateHeader();
         emit viewSettingsChanged();
     });
     connect(m_ratingDelegate, &StarRatingDelegate::ratingEdited, this, [this](const QModelIndex &index, int rating) {
@@ -923,8 +949,16 @@ QString PlaylistView::viewSettingsJson() const
         }
     }
 
+    QJsonArray unfoldedGroups;
+    QStringList unfoldedKeys(m_unfoldedQueueGroups.cbegin(), m_unfoldedQueueGroups.cend());
+    unfoldedKeys.sort();
+    for (const QString &key : unfoldedKeys) {
+        unfoldedGroups.append(key);
+    }
+
     QJsonObject root;
     root.insert(QStringLiteral("visibleColumns"), visibleColumns);
+    root.insert(QStringLiteral("unfoldedQueueGroups"), unfoldedGroups);
     root.insert(QStringLiteral("sortKey"), sortKeyToString(m_sortKey));
     root.insert(QStringLiteral("sortDescending"), m_sortDescending);
     root.insert(QStringLiteral("selectorMetadata"), selectorMetadataToString(m_selectorMetadata));
@@ -962,6 +996,13 @@ void PlaylistView::applyViewSettingsJson(const QString &json)
         }
     }
 
+    m_unfoldedQueueGroups.clear();
+    for (const QJsonValue &value : root.value(QStringLiteral("unfoldedQueueGroups")).toArray()) {
+        const QString key = value.toString();
+        if (!key.isEmpty()) {
+            m_unfoldedQueueGroups.insert(key);
+        }
+    }
     m_sortKey = sortKeyFromString(root.value(QStringLiteral("sortKey")).toString());
     m_sortDescending = root.value(QStringLiteral("sortDescending")).toBool(false);
     if (root.contains(QStringLiteral("selectorMetadata"))) {
@@ -1015,6 +1056,7 @@ void PlaylistView::resetViewSettings()
     }
     m_sortKey = SortKey::Ordinal;
     m_sortDescending = false;
+    m_unfoldedQueueGroups.clear();  // groups fold by default
     m_selectorMetadata = SelectorMetadata::UpdatedAt;
     m_selectorDateFormat = defaultTimestampFormat();
     m_playlistRowHeight = 18;
@@ -1119,38 +1161,74 @@ void PlaylistView::reloadPlaylists()
         spacer->setData(PlaylistKindRole, QStringLiteral("spacer"));
         spacer->setData(PlaylistSpacerRole, true);
 
-        auto *separator = new QListWidgetItem(QStringLiteral("Saved queues"), m_playlistList);
-        separator->setFlags(Qt::NoItemFlags);
-        separator->setData(PlaylistIdRole, 0);
-        separator->setData(QueueSnapshotIdRole, QString());
-        separator->setData(PlaylistKindRole, QStringLiteral("separator"));
-        separator->setData(PlaylistNameRole, QStringLiteral("Saved queues"));
-        separator->setData(PlaylistItemCountRole, 0);
-        separator->setData(PlaylistCreatedAtRole, 0);
-        separator->setData(PlaylistUpdatedAtRole, 0);
-        separator->setData(PlaylistShowCreatedRole, false);
-        separator->setData(PlaylistMetaRole, QString());
-        separator->setData(PlaylistListActiveRole, listActive);
-        separator->setData(PlaylistSeparatorRole, true);
-    }
-    for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
-        auto *item = new QListWidgetItem(queue.name, m_playlistList);
-        item->setData(PlaylistIdRole, 0);
-        item->setData(QueueSnapshotIdRole, queue.snapshotKey.isEmpty() ? queue.id : queue.snapshotKey);
-        item->setData(PlaylistKindRole, QStringLiteral("queue"));
-        item->setData(PlaylistNameRole, queue.name);
-        item->setData(PlaylistItemCountRole, queue.items.size());
-        item->setData(PlaylistCreatedAtRole, queue.savedAt);
-        item->setData(PlaylistUpdatedAtRole, queue.savedAt);
-        item->setData(PlaylistShowCreatedRole, !selectorMetadataForSavedQueue(queue).isEmpty());
-        item->setData(PlaylistMetaRole, selectorMetadataForSavedQueue(queue));
-        item->setData(PlaylistListActiveRole, listActive);
-        item->setData(PlaylistSeparatorRole, false);
+        // Three foldable groups in fixed order: the user's own saves first,
+        // then the automatic backlog, then saved radio sessions.
+        struct QueueGroup {
+            SavedQueuePlaylistEntry::Kind kind;
+            QString title;
+        };
+        const QueueGroup groups[] = {
+            {SavedQueuePlaylistEntry::Kind::Manual, QStringLiteral("Saved queues")},
+            {SavedQueuePlaylistEntry::Kind::Auto, QStringLiteral("Auto-saved")},
+            {SavedQueuePlaylistEntry::Kind::Radio, QStringLiteral("Radio sessions")},
+        };
+        for (const QueueGroup &group : groups) {
+            QVector<const SavedQueuePlaylistEntry *> entries;
+            for (const SavedQueuePlaylistEntry &queue : m_savedQueueEntries) {
+                if (queue.kind == group.kind) {
+                    entries.push_back(&queue);
+                }
+            }
+            if (entries.isEmpty()) {
+                continue;
+            }
+            const QString groupKey = queueGroupKey(group.kind);
+            const bool folded = !m_unfoldedQueueGroups.contains(groupKey);
+
+            auto *separator = new QListWidgetItem(group.title, m_playlistList);
+            separator->setFlags(Qt::NoItemFlags);
+            separator->setData(PlaylistIdRole, 0);
+            separator->setData(QueueSnapshotIdRole, QString());
+            separator->setData(PlaylistKindRole, QStringLiteral("separator"));
+            separator->setData(PlaylistNameRole,
+                               queueGroupHeaderText(group.title, static_cast<int>(entries.size()), folded));
+            separator->setData(PlaylistItemCountRole, 0);
+            separator->setData(PlaylistCreatedAtRole, 0);
+            separator->setData(PlaylistUpdatedAtRole, 0);
+            separator->setData(PlaylistShowCreatedRole, false);
+            separator->setData(PlaylistMetaRole, QString());
+            separator->setData(PlaylistListActiveRole, listActive);
+            separator->setData(PlaylistSeparatorRole, true);
+            separator->setData(PlaylistGroupRole, groupKey);
+
+            for (const SavedQueuePlaylistEntry *queue : entries) {
+                auto *item = new QListWidgetItem(queue->name, m_playlistList);
+                item->setData(PlaylistIdRole, 0);
+                item->setData(QueueSnapshotIdRole, queue->snapshotKey.isEmpty() ? queue->id : queue->snapshotKey);
+                item->setData(PlaylistKindRole, QStringLiteral("queue"));
+                item->setData(PlaylistNameRole, queue->name);
+                item->setData(PlaylistItemCountRole, queue->items.size());
+                item->setData(PlaylistCreatedAtRole, queue->savedAt);
+                item->setData(PlaylistUpdatedAtRole, queue->savedAt);
+                item->setData(PlaylistShowCreatedRole, !selectorMetadataForSavedQueue(*queue).isEmpty());
+                item->setData(PlaylistMetaRole, selectorMetadataForSavedQueue(*queue));
+                item->setData(PlaylistListActiveRole, listActive);
+                item->setData(PlaylistSeparatorRole, false);
+                item->setData(PlaylistGroupRole, groupKey);
+                item->setHidden(folded);
+            }
+        }
     }
     applyPlaylistRowHeights();
     if (!keepQueueId.isEmpty()) {
         for (int row = 0; row < m_playlistList->count(); ++row) {
-            if (m_playlistList->item(row)->data(QueueSnapshotIdRole).toString() == keepQueueId) {
+            QListWidgetItem *item = m_playlistList->item(row);
+            if (item->data(QueueSnapshotIdRole).toString() == keepQueueId) {
+                // Re-selecting a queue inside a folded group unfolds the group
+                // first so the selection isn't restored onto a hidden row.
+                if (item->isHidden()) {
+                    setQueueGroupFolded(item->data(PlaylistGroupRole).toString(), false);
+                }
                 m_playlistList->setCurrentRow(row);
                 updatePaneFocus();
                 updateHeader();
@@ -1406,23 +1484,57 @@ void PlaylistView::sortByColumn(int column)
     emit viewSettingsChanged();
 }
 
+// The heading duplicates the sidebar's selected row, so it stays hidden unless
+// the selected name is elided there — then the header is the one place the
+// full name can still be read. The keybinding cheat line keeps showing when
+// nothing is selected at all (an empty, first-run selector).
 void PlaylistView::updateHeader()
 {
     if (currentSelectionIsSavedQueue()) {
+        if (!selectedNameOverflowsSidebar()) {
+            m_header->hide();
+            return;
+        }
         const QListWidgetItem *current = m_playlistList->currentItem();
         const QString name = current != nullptr ? current->data(PlaylistNameRole).toString() : QString();
         m_header->setText(QStringLiteral("%1 — saved queue, %2 items").arg(name).arg(m_items.size()));
+        m_header->show();
         return;
     }
     if (m_currentPlaylistId <= 0) {
         m_header->setText(QStringLiteral(
             "Playlists — a: new   R: rename   D: delete   x: export   =/+: add song   T: toggle date   Enter: play   l: open   "
             "(inside) =/+: add   a: add-to-playlist   e: edit   d: remove   Alt+j/k: move   s: sort   Enter: play"));
+        m_header->show();
+        return;
+    }
+    if (!selectedNameOverflowsSidebar()) {
+        m_header->hide();
         return;
     }
     const QListWidgetItem *current = m_playlistList->currentItem();
     const QString name = current != nullptr ? current->data(PlaylistNameRole).toString() : QString();
     m_header->setText(QStringLiteral("%1 — %2 items").arg(name).arg(m_items.size()));
+    m_header->show();
+}
+
+bool PlaylistView::selectedNameOverflowsSidebar() const
+{
+    const QListWidgetItem *current = m_playlistList->currentItem();
+    if (current == nullptr) {
+        return false;
+    }
+    const QFontMetrics fm(m_playlistList->font());
+    const QString name = current->data(PlaylistNameRole).toString();
+    const QString count = QString::number(current->data(PlaylistItemCountRole).toInt());
+    // Mirror PlaylistListDelegate::paint's name rect: 6px text margins each
+    // side, the right-aligned count plus its 8px gap, and the 12px spinner
+    // strip (plus 5px gap) while the playlist is importing.
+    int available = m_playlistList->viewport()->width() - 12 - (fm.horizontalAdvance(count) + 8);
+    if (current->data(PlaylistImportingRole).toBool()) {
+        available -= 17;
+    }
+    return fm.horizontalAdvance(name) > available;
 }
 
 const PlaylistItem *PlaylistView::itemForDisplayRow(int row) const
@@ -1677,9 +1789,46 @@ void PlaylistView::editCurrentItem()
 
 void PlaylistView::showPlaylistMenu(const QPoint &pos)
 {
-    const int row = m_playlistList->row(m_playlistList->itemAt(pos));
-    if (row >= 0) {
+    QListWidgetItem *clicked = m_playlistList->itemAt(pos);
+    const int row = m_playlistList->row(clicked);
+    // Right-clicking inside an existing multi-selection keeps it (so the bulk
+    // menu can act on it); clicking elsewhere collapses to the clicked row.
+    if (row >= 0 && !clicked->isSelected()) {
         m_playlistList->setCurrentRow(row);
+    }
+
+    const QList<QListWidgetItem *> selection = selectedEntryItems();
+    if (selection.size() > 1) {
+        int playlists = 0;
+        int queues = 0;
+        for (const QListWidgetItem *item : selection) {
+            (item->data(PlaylistKindRole).toString() == QStringLiteral("queue") ? queues : playlists)++;
+        }
+        QStringList parts;
+        if (playlists > 0) {
+            parts << (playlists == 1 ? QStringLiteral("1 playlist") : QStringLiteral("%1 playlists").arg(playlists));
+        }
+        if (queues > 0) {
+            parts << (queues == 1 ? QStringLiteral("1 saved queue") : QStringLiteral("%1 saved queues").arg(queues));
+        }
+
+        QMenu menu(this);
+        menu.addSection(parts.join(QStringLiteral(" + ")));
+        const QStringList paths = pathsForSelectorItems(selection);
+        QAction *play = menu.addAction(QStringLiteral("Play"));
+        play->setEnabled(!paths.isEmpty());
+        connect(play, &QAction::triggered, this, [this, paths]() { emit playPathsRequested(paths, 0); });
+        QAction *addToQueue = menu.addAction(QStringLiteral("Add to queue"));
+        addToQueue->setEnabled(!paths.isEmpty());
+        connect(addToQueue, &QAction::triggered, this, [this, paths]() { emit addPathsToQueueRequested(paths); });
+        QAction *playNext = menu.addAction(QStringLiteral("Play next"));
+        playNext->setEnabled(!paths.isEmpty());
+        connect(playNext, &QAction::triggered, this, [this, paths]() { emit playNextPathsRequested(paths); });
+        menu.addSeparator();
+        QAction *deleteAction = menu.addAction(QStringLiteral("Delete…"));
+        connect(deleteAction, &QAction::triggered, this, &PlaylistView::deleteSelectedEntries);
+        menu.exec(m_playlistList->viewport()->mapToGlobal(pos));
+        return;
     }
 
     QMenu menu(this);
@@ -2347,6 +2496,9 @@ void PlaylistView::updateSavedQueueSpacerHeight()
             spacer = item;
             continue;
         }
+        if (item->isHidden()) {
+            continue;  // folded-away saved queues take no space
+        }
         usedHeight += std::max(0, item->sizeHint().height());
     }
     if (spacer == nullptr) {
@@ -2354,6 +2506,54 @@ void PlaylistView::updateSavedQueueSpacerHeight()
     }
     const int extra = std::max(0, m_playlistList->viewport()->height() - usedHeight - 2);
     spacer->setSizeHint(QSize(0, extra));
+}
+
+void PlaylistView::setQueueGroupFolded(const QString &groupKey, bool folded)
+{
+    if (groupKey.isEmpty()) {
+        return;
+    }
+    if (folded) {
+        m_unfoldedQueueGroups.remove(groupKey);
+    } else {
+        m_unfoldedQueueGroups.insert(groupKey);
+    }
+    int entryCount = 0;
+    QListWidgetItem *separator = nullptr;
+    for (int row = 0; row < m_playlistList->count(); ++row) {
+        QListWidgetItem *item = m_playlistList->item(row);
+        if (item->data(PlaylistGroupRole).toString() != groupKey) {
+            continue;
+        }
+        if (item->data(PlaylistSeparatorRole).toBool()) {
+            separator = item;
+        } else {
+            item->setHidden(folded);
+            ++entryCount;
+        }
+    }
+    if (separator != nullptr) {
+        // Re-derive the base title from the item text (the painted name role
+        // carries the chevron + count decoration).
+        separator->setData(PlaylistNameRole, queueGroupHeaderText(separator->text(), entryCount, folded));
+    }
+    // Folding away the selected queue would leave the cursor on an invisible
+    // row; park it on the nearest visible entry above instead.
+    QListWidgetItem *current = m_playlistList->currentItem();
+    if (current != nullptr && current->isHidden()) {
+        m_playlistList->setCurrentRow(
+            nextSelectablePlaylistRow(m_playlistList, m_playlistList->row(current), -1));
+    }
+    updateSavedQueueSpacerHeight();
+    m_playlistList->viewport()->update();
+    emit viewSettingsChanged();
+}
+
+void PlaylistView::toggleQueueGroupFold(const QString &groupKey)
+{
+    if (!groupKey.isEmpty()) {
+        setQueueGroupFolded(groupKey, m_unfoldedQueueGroups.contains(groupKey));
+    }
 }
 
 QString PlaylistView::selectorMetadataForPlaylist(const Playlist &playlist) const
@@ -2479,6 +2679,112 @@ void PlaylistView::deleteCurrentPlaylist()
     }
     m_db->deletePlaylist(m_currentPlaylistId);
     m_currentPlaylistId = 0;
+    reloadPlaylists();
+}
+
+QList<QListWidgetItem *> PlaylistView::selectedEntryItems() const
+{
+    QList<QListWidgetItem *> entries = m_playlistList->selectedItems();
+    entries.removeIf([](QListWidgetItem *item) {
+        const QString kind = item->data(PlaylistKindRole).toString();
+        return kind != QStringLiteral("playlist") && kind != QStringLiteral("queue");
+    });
+    std::sort(entries.begin(), entries.end(), [this](QListWidgetItem *a, QListWidgetItem *b) {
+        return m_playlistList->row(a) < m_playlistList->row(b);
+    });
+    return entries;
+}
+
+QStringList PlaylistView::pathsForSelectorItems(const QList<QListWidgetItem *> &items) const
+{
+    QStringList paths;
+    for (const QListWidgetItem *item : items) {
+        const QString kind = item->data(PlaylistKindRole).toString();
+        if (kind == QStringLiteral("queue")) {
+            paths += pathsForSavedQueue(item->data(QueueSnapshotIdRole).toString(), nullptr);
+        } else if (kind == QStringLiteral("playlist") && m_db != nullptr) {
+            for (const PlaylistItem &playlistItem : m_db->items(item->data(PlaylistIdRole).toLongLong())) {
+                if (isPlayablePlaylistItem(playlistItem)) {
+                    paths << playlistItem.trackPath;
+                }
+            }
+        }
+    }
+    return paths;
+}
+
+void PlaylistView::deleteSelectedEntries()
+{
+    // Snapshot ids/keys/names up front: the deletions below rebuild the
+    // selector (directly and via the saved-queue refresh), which destroys the
+    // QListWidgetItems we are iterating.
+    QVector<qint64> playlistIds;
+    QStringList queueKeys;
+    QStringList names;
+    for (const QListWidgetItem *item : selectedEntryItems()) {
+        if (item->data(PlaylistKindRole).toString() == QStringLiteral("queue")) {
+            queueKeys << item->data(QueueSnapshotIdRole).toString();
+        } else {
+            playlistIds << item->data(PlaylistIdRole).toLongLong();
+        }
+        names << item->data(PlaylistNameRole).toString();
+    }
+    if (playlistIds.isEmpty() && queueKeys.isEmpty()) {
+        return;
+    }
+    if (playlistIds.isEmpty() && queueKeys.size() == 1) {
+        // Single saved queue: the owner shows its own richer confirmation.
+        emit deleteSavedQueueRequested(queueKeys.first());
+        return;
+    }
+    if (queueKeys.isEmpty() && playlistIds.size() == 1) {
+        // Single playlist: keep the established one-name confirmation flow.
+        m_currentPlaylistId = playlistIds.first();
+        deleteCurrentPlaylist();
+        return;
+    }
+
+    QStringList parts;
+    if (!playlistIds.isEmpty()) {
+        parts << (playlistIds.size() == 1
+                      ? QStringLiteral("1 playlist")
+                      : QStringLiteral("%1 playlists").arg(playlistIds.size()));
+    }
+    if (!queueKeys.isEmpty()) {
+        parts << (queueKeys.size() == 1
+                      ? QStringLiteral("1 saved queue")
+                      : QStringLiteral("%1 saved queues").arg(queueKeys.size()));
+    }
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Delete selection"));
+    box.setText(QStringLiteral("Delete %1?").arg(parts.join(QStringLiteral(" and "))));
+    box.setInformativeText(names.mid(0, 12).join(QStringLiteral("\n"))
+                           + (names.size() > 12 ? QStringLiteral("\n…") : QString()));
+    QPushButton *deleteButton = box.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != deleteButton) {
+        return;
+    }
+
+    if (m_db != nullptr) {
+        for (qint64 playlistId : playlistIds) {
+            if (m_importingPlaylists.contains(playlistId)) {
+                emit stopPlaylistImportRequested(playlistId);
+            }
+            m_db->deletePlaylist(playlistId);
+            if (playlistId == m_currentPlaylistId) {
+                m_currentPlaylistId = 0;
+            }
+        }
+    }
+    if (!queueKeys.isEmpty()) {
+        // One signal for the whole batch: the owner deletes without another
+        // prompt and refreshes the saved-queue entries (rebuilding this list).
+        emit deleteSavedQueuesConfirmedRequested(queueKeys);
+    }
     reloadPlaylists();
 }
 
@@ -2640,7 +2946,20 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
     }
     if (playlistListWatched && event->type() == QEvent::Resize) {
         updateSavedQueueSpacerHeight();
+        updateHeader();  // elision depends on the sidebar width
         return QWidget::eventFilter(watched, event);
+    }
+    // Clicking a saved-queue group header folds/unfolds the group.
+    if (playlistListWatched && event->type() == QEvent::MouseButtonPress) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        if (mouse->button() == Qt::LeftButton) {
+            const QListWidgetItem *item = m_playlistList->itemAt(mouse->position().toPoint());
+            if (item != nullptr && item->data(PlaylistSeparatorRole).toBool()
+                && !item->data(PlaylistGroupRole).toString().isEmpty()) {
+                toggleQueueGroupFold(item->data(PlaylistGroupRole).toString());
+                return true;
+            }
+        }
     }
     if (event->type() != QEvent::KeyPress) {
         return QWidget::eventFilter(watched, event);
@@ -2659,14 +2978,32 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
 
     if (watched == m_playlistList) {
         if (mods == Qt::ControlModifier && key == Qt::Key_D) {
-            deleteCurrentPlaylist();
+            deleteSelectedEntries();
             return true;
         }
         if (mods == Qt::NoModifier && key == Qt::Key_U) {
             undoLastChange();
             return true;
         }
+        // Shift+j/k extend the selection like the platform Shift+Down/Up
+        // (translated so Qt's own anchored range selection does the work).
+        if (mods == Qt::ShiftModifier
+            && (key == Qt::Key_J || key == Qt::Key_N || key == Qt::Key_K || key == Qt::Key_P)) {
+            QKeyEvent arrow(QEvent::KeyPress,
+                            key == Qt::Key_J || key == Qt::Key_N ? Qt::Key_Down : Qt::Key_Up,
+                            Qt::ShiftModifier);
+            QCoreApplication::sendEvent(m_playlistList, &arrow);
+            return true;
+        }
         switch (key) {
+        case Qt::Key_Z: {
+            // Fold/unfold the saved-queue group under the cursor.
+            const QListWidgetItem *current = m_playlistList->currentItem();
+            if (current != nullptr) {
+                toggleQueueGroupFold(current->data(PlaylistGroupRole).toString());
+            }
+            return true;
+        }
         case Qt::Key_J:
         case Qt::Key_N:
             m_playlistList->setCurrentRow(nextSelectablePlaylistRow(
@@ -2716,7 +3053,7 @@ bool PlaylistView::eventFilter(QObject *watched, QEvent *event)
             editCurrentPlaylistComment();
             return true;
         case Qt::Key_Delete:
-            deleteCurrentPlaylist();
+            deleteSelectedEntries();
             return true;
         case Qt::Key_X:
             exportCurrentPlaylist();

@@ -27,11 +27,16 @@ class QTimer;
 class PlaylistItemTableModel;
 
 struct SavedQueuePlaylistEntry {
+    // Which selector group the entry belongs to: Manual = explicitly saved by
+    // the user, Auto = automatic backlog snapshots, Radio = saved radio
+    // sessions. Displayed as separate foldable groups in that order.
+    enum class Kind { Manual, Auto, Radio };
     QString id;
     QString snapshotKey;
     QString name;
     QString meta;
     qint64 savedAt = 0;
+    Kind kind = Kind::Manual;
     QVector<PlaylistItem> items;
 };
 
@@ -149,6 +154,9 @@ signals:
     void addSavedQueueToQueueRequested(const QString &snapshotId);
     void playNextSavedQueueRequested(const QString &snapshotId);
     void deleteSavedQueueRequested(const QString &snapshotId);
+    // Bulk-delete path: the view already asked one combined confirmation for
+    // the whole selection, so the owner must remove these without re-prompting.
+    void deleteSavedQueuesConfirmedRequested(const QStringList &snapshotIds);
     void trackRatingChanged(const QString &path, int rating0To100);
     void trackFlagChanged(const QString &path, const QString &flag, bool on);
     // Emitted after a structural edit made directly in this view. MainWindow
@@ -210,6 +218,21 @@ private:
     void restoreTracklistViewState();
     QString tracklistViewStateKey() const;
 
+    // Folding for the saved-queue selector groups ("manual"/"auto"/"radio").
+    // Groups start folded; unfolded keys persist through view settings.
+    void setQueueGroupFolded(const QString &groupKey, bool folded);
+    void toggleQueueGroupFold(const QString &groupKey);
+    // Selected selector rows (playlists and saved queues, display order).
+    QList<class QListWidgetItem *> selectedEntryItems() const;
+    // Playable paths for a mixed selector selection, concatenated in order.
+    QStringList pathsForSelectorItems(const QList<class QListWidgetItem *> &items) const;
+    // Deletes the whole selector selection: one combined confirmation, then
+    // playlists via the database and saved queues via the confirmed signal.
+    void deleteSelectedEntries();
+    // True when the selected row's name is elided in the sidebar — the only
+    // case the (otherwise redundant) header above the panes is shown for.
+    bool selectedNameOverflowsSidebar() const;
+
     void moveSelectedItems(int delta);
     // Mouse drag-reorder: move the dragged display `rows` so they land at the
     // `destinationRow` insertion index (Qt drop convention). No-op for saved
@@ -258,6 +281,8 @@ private:
     SortKey m_sortKey = SortKey::Ordinal;
     bool m_sortDescending = false;
 
+    // Saved-queue groups the user has unfolded (all groups fold by default).
+    QSet<QString> m_unfoldedQueueGroups;
     SelectorMetadata m_selectorMetadata = SelectorMetadata::UpdatedAt;
     QString m_selectorDateFormat = QStringLiteral("yyyy-MM-dd'T'HH:mm:ss");
     int m_playlistRowHeight = 18;

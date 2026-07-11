@@ -4,6 +4,11 @@ Press `5` for the playlist management view: a playlist list on the left,
 the selected playlist's items on the right, keyboard-first (`h`/`l` switch
 panes, `j`/`k`/`n`/`p` move, `Enter` plays the focused playlist or item).
 
+Several playlists (and saved queues) can be selected at once —
+`Shift+j`/`Shift+k` or Shift/Ctrl+Click — to play, enqueue, or delete them
+in bulk from the right-click menu; `Ctrl+D`/`Delete` deletes the whole
+selection after one combined confirmation.
+
 Playlists live in their own database, separate from the scanned library,
 and each item carries a metadata snapshot plus the search query that
 produced it — so a playlist survives rescans and keeps remembering tracks
@@ -41,3 +46,11 @@ flow both ways, and the track context menus offer "…(don't save to
 playlist)" variants for queueing something transient without touching the
 playlist. `Queue > Detach queue from playlist` breaks the link; saved
 queues are managed from the same view as playlists.
+
+## Saved queues
+
+Saved queues sit at the bottom of the playlist list in three foldable
+groups — **Saved queues** (your explicit saves), **Auto-saved** (automatic
+backlog snapshots), and **Radio sessions** — each folded by default; click
+a group header or press `z` on a row to fold/unfold, and the unfolded
+state persists.

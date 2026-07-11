@@ -157,6 +157,9 @@ private:
     void addQueueSnapshotByIdToQueue(const QString &id);
     void playNextQueueSnapshotById(const QString &id);
     void deleteQueueSnapshotById(const QString &id);
+    // Bulk path: PlaylistView already confirmed the whole selection, so this
+    // removes without another prompt.
+    void deleteQueueSnapshotsConfirmed(const QStringList &ids);
     void configureSavedQueueLimit();
     void ensureCurrentQueueIdentity();
     bool currentQueueBacklogEligible() const;

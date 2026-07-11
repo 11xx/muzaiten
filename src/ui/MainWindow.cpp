@@ -3528,6 +3528,8 @@ PlaylistView *MainWindow::ensurePlaylistView()
     connect(m_playlistView, &PlaylistView::addSavedQueueToQueueRequested, this, &MainWindow::addQueueSnapshotByIdToQueue);
     connect(m_playlistView, &PlaylistView::playNextSavedQueueRequested, this, &MainWindow::playNextQueueSnapshotById);
     connect(m_playlistView, &PlaylistView::deleteSavedQueueRequested, this, &MainWindow::deleteQueueSnapshotById);
+    connect(m_playlistView, &PlaylistView::deleteSavedQueuesConfirmedRequested, this,
+            &MainWindow::deleteQueueSnapshotsConfirmed);
     connect(m_playlistView, &PlaylistView::trackRatingChanged, this, [this](const QString &path, int rating) {
         Track track = m_database != nullptr ? m_database->trackForPath(path) : Track();
         if (track.path.isEmpty()) {
@@ -3949,7 +3951,8 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
     QVector<SavedQueuePlaylistEntry> entries;
     const QJsonObject root = loadQueueSnapshotsRoot();
     int ordinal = 1;
-    const auto appendSnapshot = [this, &entries, &ordinal](const QJsonObject &snapshot) {
+    const auto appendSnapshot = [this, &entries, &ordinal](const QJsonObject &snapshot,
+                                                           SavedQueuePlaylistEntry::Kind kind) {
         const QString id = snapshot.value(QStringLiteral("id")).toString();
         if (id.isEmpty()) {
             return;
@@ -3964,6 +3967,7 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
         entry.savedAt = queueSnapshotSavedAt(snapshot);
         entry.name = queueSnapshotLabel(snapshot, defaultSavedQueueName(ordinal++));
         entry.meta = queueSnapshotTimestamp(entry.savedAt);
+        entry.kind = kind;
         entry.items.reserve(tracks.size());
         for (int i = 0; i < tracks.size(); ++i) {
             PlaylistItem item = playlistItemFromTrack(tracks.at(i), QString());
@@ -3974,10 +3978,12 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
     };
 
     for (const QJsonObject &snapshot : automaticQueueSnapshotsFromRoot(root)) {
-        appendSnapshot(snapshot);
+        appendSnapshot(snapshot,
+                       queueSnapshotIsRadio(snapshot) ? SavedQueuePlaylistEntry::Kind::Radio
+                                                      : SavedQueuePlaylistEntry::Kind::Auto);
     }
     for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
-        appendSnapshot(value.toObject());
+        appendSnapshot(value.toObject(), SavedQueuePlaylistEntry::Kind::Manual);
     }
     return entries;
 }
@@ -4073,6 +4079,25 @@ void MainWindow::deleteQueueSnapshotById(const QString &id)
     removeQueueSnapshotFromRoot(&root, id);
     saveQueueSnapshotsRoot(root);
     statusBar()->showMessage(QStringLiteral("Deleted \"%1\"").arg(name), 4000);
+}
+
+void MainWindow::deleteQueueSnapshotsConfirmed(const QStringList &ids)
+{
+    QJsonObject root = loadQueueSnapshotsRoot();
+    int removed = 0;
+    for (const QString &id : ids) {
+        if (!id.isEmpty() && removeQueueSnapshotFromRoot(&root, id)) {
+            ++removed;
+        }
+    }
+    if (removed == 0) {
+        return;
+    }
+    saveQueueSnapshotsRoot(root);
+    statusBar()->showMessage(QStringLiteral("Deleted %1 saved queue%2")
+                                 .arg(removed)
+                                 .arg(removed == 1 ? QString() : QStringLiteral("s")),
+                             4000);
 }
 
 int MainWindow::savedQueueLimitSetting() const

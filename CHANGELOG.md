@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- Playlist view polish: the playlist list supports multi-selection
+  (Shift/Ctrl+Click, `Shift+j`/`Shift+k`) with a bulk context menu — play,
+  enqueue, play next, or delete several playlists and saved queues at once
+  behind a single combined confirmation (`Ctrl+D`/`Delete` works on the whole
+  selection too). Saved queues are now grouped into three foldable sections —
+  manual saves, auto-saved snapshots, and radio sessions, in that order —
+  folded by default; click a header or press `z` to toggle, and unfolded
+  groups persist. The sidebar uses the same overlay scrollbar as the
+  tracklist, and the redundant heading above the panes now appears only when
+  the selected name is too long to read un-elided in the sidebar.
 - The Back button no longer counts as a radio "early skip": pressing Next and
   then Back could cross the three-early-skips threshold and reroll — i.e.
   destroy and regenerate — the not-yet-played radio picks, even though going

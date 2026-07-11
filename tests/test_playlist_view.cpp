@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QMetaObject>
@@ -165,6 +166,115 @@ private slots:
         QCOMPARE(list->item(3)->text(), QStringLiteral("Saved queues"));
         QCOMPARE(list->item(4)->text(), QStringLiteral("saved queue 1"));
         QCOMPARE(list->item(4)->data(Qt::UserRole + 8).toString(), expectedMeta);
+    }
+
+    void savedQueueGroupsAreOrderedAndFoldedByDefault()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-groups-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        QVERIFY(db.createPlaylist(QStringLiteral("Daily")) > 0);
+
+        const auto makeQueue = [](const QString &id, SavedQueuePlaylistEntry::Kind kind) {
+            SavedQueuePlaylistEntry queue;
+            queue.id = id;
+            queue.name = id;
+            queue.savedAt = 1781460895;
+            queue.kind = kind;
+            return queue;
+        };
+        // Deliberately scrambled input order: the view groups and orders them
+        // manual → auto → radio regardless.
+        PlaylistView view;
+        view.resize(320, 420);
+        view.setDatabase(&db);
+        view.setSavedQueueEntries({
+            makeQueue(QStringLiteral("radio-1"), SavedQueuePlaylistEntry::Kind::Radio),
+            makeQueue(QStringLiteral("manual-1"), SavedQueuePlaylistEntry::Kind::Manual),
+            makeQueue(QStringLiteral("auto-1"), SavedQueuePlaylistEntry::Kind::Auto),
+        });
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+        auto *list = view.findChild<QListWidget *>();
+        QVERIFY(list != nullptr);
+        // 0: playlist, 1: spacer, then three headers each followed by their entry.
+        QCOMPARE(list->item(0)->text(), QStringLiteral("Daily"));
+        QCOMPARE(list->item(2)->text(), QStringLiteral("Saved queues"));
+        QCOMPARE(list->item(3)->text(), QStringLiteral("manual-1"));
+        QCOMPARE(list->item(4)->text(), QStringLiteral("Auto-saved"));
+        QCOMPARE(list->item(5)->text(), QStringLiteral("auto-1"));
+        QCOMPARE(list->item(6)->text(), QStringLiteral("Radio sessions"));
+        QCOMPARE(list->item(7)->text(), QStringLiteral("radio-1"));
+        // Entries are folded away by default; the headers stay visible and
+        // paint a folded chevron plus the group size.
+        QVERIFY(list->item(3)->isHidden());
+        QVERIFY(list->item(5)->isHidden());
+        QVERIFY(list->item(7)->isHidden());
+        QVERIFY(!list->item(2)->isHidden());
+        QCOMPARE(list->item(2)->data(Qt::UserRole + 1).toString(), QStringLiteral("▸ Saved queues (1)"));
+    }
+
+    void unfoldedQueueGroupsPersistInViewSettings()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-unfold-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        QVERIFY(db.createPlaylist(QStringLiteral("Daily")) > 0);
+
+        SavedQueuePlaylistEntry queue;
+        queue.id = QStringLiteral("manual-1");
+        queue.name = queue.id;
+        queue.kind = SavedQueuePlaylistEntry::Kind::Manual;
+
+        PlaylistView view;
+        const QJsonObject root{{QStringLiteral("unfoldedQueueGroups"),
+                                QJsonArray{QStringLiteral("manual")}}};
+        view.applyViewSettingsJson(QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+        view.setDatabase(&db);
+        view.setSavedQueueEntries({queue});
+
+        auto *list = view.findChild<QListWidget *>();
+        QVERIFY(list != nullptr);
+        QCOMPARE(list->item(3)->text(), QStringLiteral("manual-1"));
+        QVERIFY(!list->item(3)->isHidden());
+
+        const QJsonObject saved = QJsonDocument::fromJson(view.viewSettingsJson().toUtf8()).object();
+        const QJsonArray unfolded = saved.value(QStringLiteral("unfoldedQueueGroups")).toArray();
+        QCOMPARE(unfolded.size(), 1);
+        QCOMPARE(unfolded.first().toString(), QStringLiteral("manual"));
+    }
+
+    void headerShowsOnlyWhenSelectedNameOverflowsSidebar()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-header-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 shortId = db.createPlaylist(QStringLiteral("Short"));
+        const QString longName = QStringLiteral("A very long playlist name that cannot possibly fit the sidebar width");
+        const qint64 longId = db.createPlaylist(longName);
+        QVERIFY(shortId > 0 && longId > 0);
+
+        PlaylistView view;
+        view.resize(900, 420);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+        auto *header = view.findChild<QLabel *>(QStringLiteral("PlaylistHeader"));
+        QVERIFY(header != nullptr);
+
+        view.selectPlaylist(shortId);
+        QCoreApplication::processEvents();
+        QVERIFY(header->isHidden());
+
+        view.selectPlaylist(longId);
+        QCoreApplication::processEvents();
+        QVERIFY(!header->isHidden());
+        QVERIFY(header->text().contains(longName));
     }
 
     void tracklistScrollAndSelectionSurvivePlaylistRefresh()
