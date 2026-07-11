@@ -131,6 +131,7 @@ echo ">> Configuring release build in '$BUILD_DIR'"
 cmake -S . -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,relro,-z,now" \
     -DBUILD_TESTING=OFF \
     -DMUZAITEN_LASTFM_API_KEY="$MUZAITEN_LASTFM_API_KEY" \
     -DMUZAITEN_LASTFM_SHARED_SECRET="$MUZAITEN_LASTFM_SHARED_SECRET"
@@ -148,8 +149,11 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
 DESTDIR="$stage" cmake --install "$BUILD_DIR" --prefix "$PREFIX" >/dev/null
-# Strip symbols: smaller, and removes the obfuscated-blob symbol names.
-strip --strip-unneeded "$stage/$PREFIX/bin/muzaiten"
+# Strip every native executable. Besides reducing the archive, this avoids
+# publishing build-only symbol names; muzaiten-import is a Python script.
+for executable in muzaiten muzaitenctl muzaiten-features; do
+    strip --strip-unneeded "$stage/$PREFIX/bin/$executable"
+done
 install -Dm644 UNLICENSE "$stage/$PREFIX/share/licenses/muzaiten/UNLICENSE"
 
 mkdir -p dist

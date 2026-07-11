@@ -36,6 +36,8 @@
 - Native and AUR packages now declare the required Chromaprint runtime used by
   `muzaiten-features`, so audio analysis does not depend on an undeclared host
   library.
+- Prebuilt release executables are fully RELRO-hardened and stripped of
+  build-only symbol tables before archive creation.
 - The audio-analysis executable is now `muzaiten-features`, and the optional
   CLAP provider is packaged independently as `muzaiten-features-clap` from
   `tools/features-clap`. The retired executable, distribution, and import names
