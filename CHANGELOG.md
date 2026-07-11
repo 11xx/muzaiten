@@ -11,9 +11,8 @@
 - New radio glyphs, vectorized from reference artwork into palette-aware
   drawing code: the radio-session indicator in the player bar shows
   headphones over a spinning vinyl instead of the generic wifi arcs, and the
-  Radio shuffle mode (the cycle stop after Library shuffle) now shows a small
-  radio receiver with broadcast waves instead of crossed arrows with a dot
-  badge.
+  Radio shuffle mode (the cycle stop after Library shuffle) combines that mark
+  with crossing arrows instead of reusing Library shuffle's icon.
 - Playlist view polish: the playlist list supports multi-selection
   (Shift/Ctrl+Click, `Shift+j`/`Shift+k`) with a bulk context menu — play,
   enqueue, play next, or delete several playlists and saved queues at once
