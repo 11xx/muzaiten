@@ -170,17 +170,16 @@ def _export_audio(model, output: Path) -> None:
             return torch.nn.functional.normalize(self.audio_projection(encoded), dim=-1)
 
     tower = AudioTower(model).eval()
-    example = torch.zeros((2, 480_000), dtype=torch.float32)
-    batch = torch.export.Dim("batch", min=1)
+    example = torch.zeros((1, 480_000), dtype=torch.float32)
     torch.onnx.export(
         tower,
         (example,),
         output,
         input_names=["waveform"],
         output_names=["embedding"],
-        dynamic_shapes={"waveform": {0: batch}},
+        dynamic_axes={"waveform": {0: "batch"}, "embedding": {0: "batch"}},
         opset_version=18,
-        dynamo=True,
+        dynamo=False,
     )
 
 

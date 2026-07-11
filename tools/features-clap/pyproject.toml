@@ -21,7 +21,6 @@ convert = [
     # stack currently rejects NumPy 2.5.
     "numpy<2.5",
     "onnx>=1.19",
-    "onnxscript>=0.5",
     "torch>=2.3",
     # laion-clap 1.1.7 imports torchvision without declaring it.
     "torchvision>=0.18",
