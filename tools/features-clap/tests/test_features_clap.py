@@ -31,6 +31,7 @@ from muzaiten_features_clap.model import (
     device_label,
     download_checkpoint,
     file_sha256,
+    inference_thread_count,
     prepare_waveform,
     probe_device,
     resolve_device,
@@ -665,6 +666,20 @@ def test_resolve_device_explicit_cpu_ignores_cuda(monkeypatch: pytest.MonkeyPatc
 def test_device_label_preserves_protocol_device_names() -> None:
     assert device_label("cuda") == "cuda"
     assert device_label("cpu") == "cpu"
+
+
+def test_inference_threads_are_capped_and_can_be_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MUZAITEN_CLAP_THREADS", raising=False)
+    monkeypatch.setattr(model.os, "sched_getaffinity", lambda _pid: set(range(16)))
+    assert inference_thread_count() == 8
+
+    monkeypatch.setenv("MUZAITEN_CLAP_THREADS", "3")
+    assert inference_thread_count() == 3
+    monkeypatch.setenv("MUZAITEN_CLAP_THREADS", "0")
+    with pytest.raises(RuntimeError, match="positive integer"):
+        inference_thread_count()
 
 
 def test_probe_device_is_none_without_onnxruntime(monkeypatch: pytest.MonkeyPatch) -> None:

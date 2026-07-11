@@ -37,6 +37,8 @@ TEXT_MODEL_FILENAME = "text.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 MANIFEST_FILENAME = "manifest.json"
 ONNX_APPROXIMATE_BYTES = 790_127_686
+INFERENCE_THREADS_ENV = "MUZAITEN_CLAP_THREADS"
+DEFAULT_MAX_INFERENCE_THREADS = 8
 
 
 def probe_device() -> str | None:
@@ -71,6 +73,23 @@ def resolve_device(choice: str) -> str:
 
 def device_label(device: str) -> str:
     return device
+
+
+def inference_thread_count() -> int:
+    configured = os.environ.get(INFERENCE_THREADS_ENV)
+    if configured is not None:
+        try:
+            threads = int(configured)
+        except ValueError as exc:
+            raise RuntimeError(f"{INFERENCE_THREADS_ENV} must be a positive integer") from exc
+        if threads < 1:
+            raise RuntimeError(f"{INFERENCE_THREADS_ENV} must be a positive integer")
+        return threads
+    try:
+        available = len(os.sched_getaffinity(0))
+    except AttributeError:  # pragma: no cover - non-POSIX fallback
+        available = os.cpu_count() or 1
+    return max(1, min(DEFAULT_MAX_INFERENCE_THREADS, available))
 
 
 @dataclass(frozen=True)
@@ -348,6 +367,9 @@ class OnnxClapEmbedder:
             if self.device == "cuda"
             else ["CPUExecutionProvider"]
         )
+        self._session_options = ort.SessionOptions()
+        self._session_options.intra_op_num_threads = inference_thread_count()
+        self._session_options.inter_op_num_threads = 1
         self._audio_session = None
         self._text_session = None
         self._tokenizer = Tokenizer.from_file(str(artifact_path / TOKENIZER_FILENAME))
@@ -408,14 +430,18 @@ class OnnxClapEmbedder:
     def _get_audio_session(self):
         if self._audio_session is None:
             self._audio_session = self._ort.InferenceSession(
-                str(self._artifact_path / AUDIO_MODEL_FILENAME), providers=self._providers
+                str(self._artifact_path / AUDIO_MODEL_FILENAME),
+                sess_options=self._session_options,
+                providers=self._providers,
             )
         return self._audio_session
 
     def _get_text_session(self):
         if self._text_session is None:
             self._text_session = self._ort.InferenceSession(
-                str(self._artifact_path / TEXT_MODEL_FILENAME), providers=self._providers
+                str(self._artifact_path / TEXT_MODEL_FILENAME),
+                sess_options=self._session_options,
+                providers=self._providers,
             )
         return self._text_session
 
