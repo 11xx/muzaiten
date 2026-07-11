@@ -96,7 +96,7 @@ users install the published Python tool directly. The app never runs uv or
 downloads a model without consent:
 
 ```sh
-uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
+uv tool install 'muzaiten-features-clap[model]'
 ```
 
 Setup, model provenance, CPU/CUDA choices, and refresh behavior:

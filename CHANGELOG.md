@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- The optional CLAP provider now serves the same stable embeddings through
+  fp32 ONNX Runtime audio and text graphs instead of loading PyTorch,
+  torchvision, librosa, numba, and LAION-CLAP at runtime. A one-time isolated
+  conversion keeps the pinned checkpoint identity, saves the exact tokenizer,
+  verifies a hashed artifact manifest, and preserves existing semantic stores
+  without a rescan; model preparation now has its own live progress phase.
 - Arch packages no longer advertise the not-yet-published semantic provider as
   an optional dependency. PyPI/uv remains the supported installation path until
   a deterministic Arch/PyPI/AUR gate reports a candidate and the full

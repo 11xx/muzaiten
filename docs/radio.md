@@ -115,7 +115,7 @@ analysis never needs Python. Install the provider yourself—the GUI never runs
 uv—and explicitly consent to the model download:
 
 ```sh
-uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
+uv tool install 'muzaiten-features-clap[model]'
 muzaiten-features model download
 muzaiten-features refresh --semantic
 ```

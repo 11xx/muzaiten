@@ -131,9 +131,10 @@ changes. A native-only Muzaiten release can continue using the existing PyPI
 release; do not rebuild or republish an unchanged provider merely to match a new
 application date.
 
-The base wheel depends only on NumPy; LAION-CLAP, PyTorch, and torchvision stay
-confined to the `[model]` extra. Installing or inspecting the base package must
-not download a model checkpoint.
+The base wheel depends only on NumPy. The runtime `[model]` extra adds ONNX
+Runtime and Tokenizers; the heavy LAION-CLAP, PyTorch, and torchvision stack is
+confined to the one-time `[convert]` extra. Installing or inspecting the base
+package must not download a model checkpoint or converted artifact.
 
 When the provider does ship as part of a coordinated Muzaiten release, use the
 same UTC release date. Python package indexes normalize out leading zeroes under
