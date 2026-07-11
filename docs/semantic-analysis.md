@@ -17,6 +17,30 @@ uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
 or CUDA backend selector for the target host. The base provider package remains
 small; the model stack is confined to the `model` extra.
 
+### Move a checkout installation to PyPI
+
+`uv tool upgrade` preserves the requirement source recorded when the tool was
+installed. If the original requirement was a checkout path, upgrading rebuilds
+from that checkout; it does not switch the tool to the package index. Recreate
+the tool with a registry requirement instead:
+
+```sh
+uv tool install --reinstall --no-sources \
+  'muzaiten-features-clap[model]' --torch-backend auto
+```
+
+An explicit uninstall is unnecessary: `uv tool install` replaces the existing
+uv-managed tool and records the new registry requirement. Add
+`==<provider-version>` to the requirement when an exact release is required.
+The tested uv 0.11.25 release accepts `--torch-backend` on `tool install`, not
+on `tool upgrade`.
+
+Recreating the tool environment does not remove the model checkpoint under the
+Muzaiten cache directory and does not touch `features.sqlite`, so it does not
+force model download or semantic reanalysis. The provider's stable
+`feature_revision`, rather than its package-install source, controls embedding
+compatibility.
+
 Provider discovery is ordered and handshake-gated: `--provider`,
 `MUZAITEN_FEATURES_CLAP`, the saved GUI path, a sibling executable, uv tool-bin
 locations, then `PATH`. `muzaiten-features status --json` reports the accepted

@@ -27,6 +27,8 @@
 - Python provider releases use a manual, environment-scoped Trusted Publishing
   workflow: unprivileged jobs build and audit the distributions, while only the
   selected TestPyPI or PyPI publication job receives a short-lived OIDC token.
+  The installation guide also explains how to replace a checkout-backed uv tool
+  with the published package without removing model or feature data.
 - When a Python provider release accompanies a native release, it shares the
   native release's UTC date using the PEP 440-normalized spelling without
   leading zeroes (`2026.7.11` for native tag `2026.07.11`). Native-only releases
