@@ -97,7 +97,7 @@ def main() -> int:
     reference_load_seconds = time.perf_counter() - started
 
     started = time.perf_counter()
-    candidate = OnnxClapEmbedder(checkpoint=args.artifacts, device="cpu")
+    candidate = OnnxClapEmbedder(artifacts=args.artifacts, device="cpu")
     candidate_init_seconds = time.perf_counter() - started
 
     tables: dict[str, dict[str, float | int]] = {}

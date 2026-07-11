@@ -20,7 +20,6 @@ from .model import (
     ONNX_APPROXIMATE_BYTES,
     OnnxClapEmbedder,
     artifact_status,
-    device_label,
     download_artifacts,
     download_checkpoint,
     probe_device,
@@ -168,12 +167,12 @@ def run_request(
         # Structural manifest check only: artifact hashes are verified when
         # the model is installed, and hashing 790 MB per invocation would
         # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
-        checkpoint = artifact_status(verify=False)
-        if not checkpoint.present or not checkpoint.valid:
-            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {checkpoint.path}")
+        artifacts = artifact_status(verify=False)
+        if not artifacts.present or not artifacts.valid:
+            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {artifacts.path}")
         started = time.monotonic()
         embedder = embedder_factory(
-            checkpoint=checkpoint.path,
+            artifacts=artifacts.path,
             device=resolve_device(device_choice),
         )
         result = scan(
@@ -196,7 +195,7 @@ def run_request(
             "model": MODEL_NAME,
             "checkpoint_sha256": MODEL_SHA256,
             "feature_revision": FEATURE_REVISION,
-            "device": device_label(str(getattr(embedder, "device", "unknown"))),
+            "device": str(getattr(embedder, "device", "unknown")),
         }
     if request.operation == "neighbors":
         started = time.monotonic()
@@ -219,11 +218,11 @@ def run_request(
         # Structural manifest check only: artifact hashes are verified when
         # the model is installed, and hashing 790 MB per invocation would
         # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
-        checkpoint = artifact_status(verify=False)
-        if not checkpoint.present or not checkpoint.valid:
-            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {checkpoint.path}")
+        artifacts = artifact_status(verify=False)
+        if not artifacts.present or not artifacts.valid:
+            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {artifacts.path}")
         embedder = embedder_factory(
-            checkpoint=checkpoint.path,
+            artifacts=artifacts.path,
             device=resolve_device(device_choice),
         )
         vector = query_embedding(text, embedder)  # type: ignore[arg-type]

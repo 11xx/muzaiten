@@ -5634,13 +5634,22 @@ void MainWindow::downloadSemanticModel()
         statusBar()->showMessage(QStringLiteral("Semantic provider is not ready; open Semantic provider setup"), 8000);
         return;
     }
+    const double downloadMb = model.value(QStringLiteral("approximate_bytes")).toDouble() / 1'000'000.0;
+    const double convertedMb =
+        model.value(QStringLiteral("converted_approximate_bytes")).toDouble() / 1'000'000.0;
+    QString sizeLines = QStringLiteral("Download size: about %1 MB").arg(downloadMb, 0, 'f', 0);
+    // With a hosted bundle the download already is the converted model, so a
+    // second line would double-count the same bytes.
+    if (convertedMb > 0.0 && qAbs(convertedMb - downloadMb) > 1.0) {
+        sizeLines += QStringLiteral("\nConversion adds about %1 MB of ONNX artifacts")
+                         .arg(convertedMb, 0, 'f', 0);
+    }
     const QString consent = QStringLiteral(
-        "Source: %1\nLicense: %2\nExpected size: about %3 MB\nCache: %4\nSHA-256: %5\n\nDownload and verify this model?")
+        "Source: %1\nLicense: %2\n%3\nCache: %4\nSHA-256: %5\n\nDownload and verify this model?")
                                 .arg(model.value(QStringLiteral("source")).toString(),
-                                     model.value(QStringLiteral("license")).toString())
-                                .arg(model.value(QStringLiteral("approximate_bytes")).toDouble() / 1'000'000.0,
-                                     0, 'f', 0)
-                                .arg(model.value(QStringLiteral("cache_path")).toString(),
+                                     model.value(QStringLiteral("license")).toString(),
+                                     sizeLines,
+                                     model.value(QStringLiteral("cache_path")).toString(),
                                      model.value(QStringLiteral("sha256")).toString());
     if (QMessageBox::question(this, QStringLiteral("Download semantic model"), consent)
         != QMessageBox::Yes) {

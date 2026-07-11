@@ -28,7 +28,6 @@ from muzaiten_features_clap.model import (
     _decode_audio_command,
     artifact_status,
     checkpoint_status,
-    device_label,
     download_checkpoint,
     file_sha256,
     inference_thread_count,
@@ -698,11 +697,6 @@ def test_resolve_device_explicit_cpu_ignores_cuda(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     assert resolve_device("cpu") == "cpu"
-
-
-def test_device_label_preserves_protocol_device_names() -> None:
-    assert device_label("cuda") == "cuda"
-    assert device_label("cpu") == "cpu"
 
 
 def test_inference_threads_are_capped_and_can_be_overridden(

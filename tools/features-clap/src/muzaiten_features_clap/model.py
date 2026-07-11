@@ -77,10 +77,6 @@ def resolve_device(choice: str) -> str:
     return choice
 
 
-def device_label(device: str) -> str:
-    return device
-
-
 def inference_thread_count() -> int:
     configured = os.environ.get(INFERENCE_THREADS_ENV)
     if configured is not None:
@@ -412,7 +408,7 @@ class OnnxClapEmbedder:
     version = MODEL_VERSION
     dimension = 512
 
-    def __init__(self, checkpoint: Path | None = None, device: str | None = None) -> None:
+    def __init__(self, artifacts: Path | None = None, device: str | None = None) -> None:
         try:
             import numpy as np
             import onnxruntime as ort
@@ -424,7 +420,7 @@ class OnnxClapEmbedder:
             ) from exc
 
         self.device = device if device is not None else resolve_device("auto")
-        if checkpoint is None:
+        if artifacts is None:
             current = artifact_status()
             if not current.present or not current.valid:
                 raise FileNotFoundError(
@@ -433,7 +429,7 @@ class OnnxClapEmbedder:
                 )
             artifact_path = current.path
         else:
-            artifact_path = checkpoint if checkpoint.is_dir() else checkpoint.parent / ARTIFACT_DIRNAME
+            artifact_path = artifacts
         self._np = np
         self._ort = ort
         self._artifact_path = artifact_path
@@ -520,7 +516,3 @@ class OnnxClapEmbedder:
             )
         return self._text_session
 
-
-def _first_row(value) -> tuple[float, ...]:
-    row = value[0] if hasattr(value, "__getitem__") else value
-    return tuple(float(item) for item in row)
