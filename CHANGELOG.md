@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.07.11]
+
 - The audio-analysis executable is now `muzaiten-features`, and the optional
   CLAP provider is packaged independently as `muzaiten-features-clap` from
   `tools/features-clap`. The retired executable, distribution, and import names
@@ -31,6 +33,9 @@
   with the published package without removing model or feature data. The
   distribution runbook records a deterministic, build-once promotion contract
   for future automation while keeping production approval human-gated.
+- The Trusted Publishing workflow now pins current Node.js 24 releases of the
+  GitHub checkout and artifact actions, removing the runner's Node.js 20
+  deprecation warnings without changing the package or publication boundary.
 - When a Python provider release accompanies a native release, it shares the
   native release's UTC date using the PEP 440-normalized spelling without
   leading zeroes (`2026.7.11` for native tag `2026.07.11`). Native-only releases
