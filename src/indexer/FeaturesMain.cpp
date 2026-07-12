@@ -2735,10 +2735,38 @@ int runProviderOperation(const ProviderOptions &options,
             failWithCode(5, QStringLiteral("feature store is busy"));
         }
     }
-    const FeatureProvider::Resolved provider = requireProvider(options);
-    const FeatureProvider::Invocation invocation = FeatureProvider::invoke(
-        provider.path, operation, parameters, options.progress, stopRequested,
-        operation == QLatin1String("query") ? kProcessTimeoutMs : 0);
+    // Interactive queries skip the capabilities handshake: it doubles the
+    // provider process count for an operation whose result is provenance-
+    // checked downstream anyway. When the trusted candidate fails, fall back
+    // to full discovery once in case a later candidate is the working one.
+    const bool fastResolve = operation == QLatin1String("query");
+    const int timeoutMs = fastResolve ? kProcessTimeoutMs : 0;
+    FeatureProvider::Resolved provider;
+    FeatureProvider::Invocation invocation;
+    if (fastResolve) {
+        const auto trusted = FeatureProvider::resolveTrusted(
+            options.providerPath,
+            readStateSetting(options.statePath, QStringLiteral("analysis.semantic.providerPath")));
+        if (trusted) {
+            provider = *trusted;
+            invocation = FeatureProvider::invoke(
+                provider.path, operation, parameters, options.progress, stopRequested, timeoutMs);
+        }
+        if (!trusted || invocation.exitCode != 0) {
+            const QString trustedPath = trusted ? trusted->path : QString();
+            const FeatureProvider::Resolved discovered = requireProvider(options);
+            if (QFileInfo(discovered.path).canonicalFilePath()
+                != QFileInfo(trustedPath).canonicalFilePath()) {
+                provider = discovered;
+                invocation = FeatureProvider::invoke(
+                    provider.path, operation, parameters, options.progress, stopRequested, timeoutMs);
+            }
+        }
+    } else {
+        provider = requireProvider(options);
+        invocation = FeatureProvider::invoke(
+            provider.path, operation, parameters, options.progress, stopRequested, timeoutMs);
+    }
     if (invocation.exitCode != 0) {
         failWithCode(providerFailureCode(invocation),
                      QStringLiteral("provider %1 failed (%2): %3")

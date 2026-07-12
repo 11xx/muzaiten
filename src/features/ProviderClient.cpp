@@ -207,6 +207,17 @@ Invocation invoke(const QString &path,
     return invocation;
 }
 
+std::optional<Resolved> resolveTrusted(const QString &explicitPath, const QString &savedPath)
+{
+    for (const Candidate &candidate : candidates(explicitPath, savedPath)) {
+        const QString path = executableAt(candidate.path);
+        if (!path.isEmpty()) {
+            return Resolved{path, candidate.source, {}};
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<Resolved> discover(const QString &explicitPath, const QString &savedPath)
 {
     QSet<QString> seen;

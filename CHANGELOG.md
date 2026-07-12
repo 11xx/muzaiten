@@ -2,7 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- `muzaitenctl semantic-search` now memoizes text query vectors in a
+  persistent cache (`semantic-query.sqlite` under the cache directory) keyed
+  by the active semantic generation's model identity, so repeating a query
+  skips the CLAP provider process and its cold ONNX text-session load
+  entirely. A new `--no-cache` flag forces a fresh provider embedding.
+
+### Changed
+
+- Semantic text queries no longer run a separate provider capability
+  handshake before the query itself: the query trusts the first resolvable
+  provider candidate and falls back to full discovery only on failure,
+  removing one Python provider process (and its startup latency) from every
+  uncached search.
+
 ### Fixed
+
+- Semantic search ranking now caps how many candidate groups it probes for
+  library membership. A stale `features.sqlite` paired with a pruned library
+  could previously send one search into minutes of full-store probing; a
+  healthy store fills the requested limit within the first few candidates and
+  is unaffected.
 
 - Gapless playback now commits each queue advance from the new stream's
   serialized event at the audio sink instead of waiting for a successful

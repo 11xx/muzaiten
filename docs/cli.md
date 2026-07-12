@@ -42,6 +42,7 @@ next radio session. `radio-learn` is suggestion-only: it saves a
 ```sh
 muzaitenctl search [opts] [text]        # client-side folded search / fzf picker
 muzaitenctl semantic-search "<text>"    # CLAP text-to-library search
+                                        #   [--limit N] [--no-cache]
 muzaitenctl features-status             # features.sqlite coverage report
 muzaitenctl duplicate-groups [--min-size N]
 muzaitenctl pin-copy <group-id> <path> | unpin-copy <group-id>
@@ -50,6 +51,12 @@ muzaitenctl pin-copy <group-id> <path> | unpin-copy <group-id>
 Search details and query syntax: [search.md](search.md). The analysis
 pipeline that produces `features.sqlite` (the in-app runner,
 `muzaiten-features`, and the optional CLAP embedder): [radio.md](radio.md).
+
+Repeated `semantic-search` texts answer from a persistent query-vector
+cache (`semantic-query.sqlite` under the cache directory) keyed by the
+active model identity, skipping the provider process entirely; pass
+`--no-cache` to force a fresh provider embedding. The cache is disposable:
+deleting the file only costs the next query a warm-up.
 
 ## Scrobble backfill
 

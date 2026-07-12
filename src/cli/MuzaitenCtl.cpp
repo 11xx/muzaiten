@@ -11,6 +11,7 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "features/FeatureStore.h"
+#include "features/QueryVectorCache.h"
 #include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
 #include "reco/GenreCuration.h"
@@ -78,7 +79,7 @@ void printUsage()
         "      --fuzzy               fuzzy match instead of exact substring\n"
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
-        "  semantic-search [--limit N] <text>\n"
+        "  semantic-search [--limit N] [--no-cache] <text>\n"
         "                          CLAP text-to-library search (requires muzaiten-features-clap)\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
         "  features-status         show features.sqlite coverage (works offline)\n"
@@ -646,7 +647,17 @@ QVector<SemanticSearchResult> rankSemanticMatches(const QVector<float> &queryVec
     const QHash<qint64, QString> pins = db.contentGroupPins();
     QVector<SemanticSearchResult> results;
     results.reserve(std::min(static_cast<qsizetype>(limit), scores.size()));
+    // Each candidate group costs several library queries. When the stores
+    // disagree (stale features.sqlite vs pruned library), no candidate ever
+    // matches and an unbounded walk would turn one search into minutes of
+    // full-store probing; a healthy store fills `limit` within the first
+    // few candidates, so the cap only bites in the mismatched case.
+    const qsizetype maxCandidates = std::max<qsizetype>(static_cast<qsizetype>(limit) * 20, 500);
+    qsizetype examined = 0;
     for (const SemanticScore &score : scores) {
+        if (++examined > maxCandidates) {
+            break;
+        }
         const DuplicateMember member = bestCopyForGroup(db, features, score.groupId, pins.value(score.groupId));
         if (member.track.path.isEmpty()) {
             continue;
@@ -1491,6 +1502,7 @@ int runSearch(QStringList arguments, bool json)
 int runSemanticSearch(QStringList arguments, bool json)
 {
     bool jsonOut = json;
+    bool useCache = true;
     int limit = defaultSemanticSearchLimit;
     QByteArray queryVectorJson;
     QStringList queryWords;
@@ -1499,6 +1511,8 @@ int runSemanticSearch(QStringList arguments, bool json)
         const QString word = arguments.at(i);
         if (word == QLatin1String("--json")) {
             jsonOut = true;
+        } else if (word == QLatin1String("--no-cache")) {
+            useCache = false;
         } else if (word == QLatin1String("--limit")) {
             bool ok = false;
             if (i + 1 >= arguments.size() || (limit = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
@@ -1540,16 +1554,37 @@ int runSemanticSearch(QStringList arguments, bool json)
         return fail(db.lastError());
     }
 
+    // The cache key is the active generation's model identity: a hit is by
+    // construction provenance-correct, so it skips both the provider process
+    // and the metadata comparison below.
+    QueryVectorCache::Identity cacheIdentity;
+    if (features.schemaVersion() >= 5) {
+        const auto generation = features.activeSemanticGeneration();
+        if (generation.valid()) {
+            cacheIdentity = {generation.capability, generation.model, generation.checkpointSha256,
+                             generation.featureRevision, generation.vectorDimension};
+        }
+    }
+
     QString vectorError;
     QJsonObject queryMetadata;
-    const QVector<float> queryVector = queryVectorJson.isEmpty()
-        ? queryEmbeddingViaFeatures(queryText, &queryMetadata, &vectorError)
-        : parseQueryVectorJson(queryVectorJson, &vectorError);
+    QVector<float> queryVector;
+    bool fromCache = false;
+    if (!queryVectorJson.isEmpty()) {
+        queryVector = parseQueryVectorJson(queryVectorJson, &vectorError);
+    } else if (useCache && cacheIdentity.valid()) {
+        QueryVectorCache cache(QueryVectorCache::defaultPath());
+        queryVector = cache.lookup(cacheIdentity, queryText);
+        fromCache = !queryVector.isEmpty();
+    }
+    if (queryVector.isEmpty() && queryVectorJson.isEmpty()) {
+        queryVector = queryEmbeddingViaFeatures(queryText, &queryMetadata, &vectorError);
+    }
     if (queryVector.isEmpty()) {
         return fail(vectorError.isEmpty() ? QStringLiteral("semantic-search could not build a query embedding")
                                           : vectorError);
     }
-    if (queryVectorJson.isEmpty() && features.schemaVersion() >= 5) {
+    if (queryVectorJson.isEmpty() && !fromCache && features.schemaVersion() >= 5) {
         const auto generation = features.activeSemanticGeneration();
         const bool matches = generation.valid()
             && queryMetadata.value(QStringLiteral("capability")).toString() == generation.capability
@@ -1562,6 +1597,10 @@ int runSemanticSearch(QStringList arguments, bool json)
         if (!matches) {
             return fail(QStringLiteral(
                 "semantic query generation does not match the active features.sqlite generation; refresh semantic features"));
+        }
+        if (useCache && cacheIdentity.valid()) {
+            QueryVectorCache cache(QueryVectorCache::defaultPath());
+            cache.store(cacheIdentity, queryText, queryVector);
         }
     }
 

@@ -63,6 +63,7 @@ set(MUZAITEN_SOURCES
     src/db/SettingsStore.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
+    src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
@@ -361,6 +362,7 @@ add_executable(muzaitenctl
     src/db/Database.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
+    src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
     src/core/GenreTags.cpp
     src/core/MetadataBlob.cpp
