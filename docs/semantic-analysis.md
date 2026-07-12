@@ -1,24 +1,24 @@
 # Semantic Analysis
 
 Semantic audio similarity and free-text search are optional. Native identity,
-duplicate grouping, and scalar analysis work without Python, PyTorch, or model
-files. The saved setting `analysis.semantic.enabled` defaults to `false`.
+duplicate grouping, and scalar analysis work without Python or model files.
+The saved setting `analysis.semantic.enabled` defaults to `false`.
 
 ## Install the provider
 
 The GUI never runs uv. No Arch/AUR package currently provides the optional
-provider: the distro-native dependency gate is blocked by upstream
-NumPy/Numba/LAION-CLAP constraints. Arch and other Linux users install the
-published provider themselves in user space:
+provider. Arch and other Linux users install the published provider themselves
+in user space:
 
 ```sh
-uv tool install 'muzaiten-features-clap[model]' --torch-backend auto
+uv tool install 'muzaiten-features-clap[model]'
 ```
 
-`--torch-backend` is a uv preview feature. Muzaiten's tested packaging uses uv
-0.11.x; if automatic backend selection is unsuitable, use uv's documented CPU
-or CUDA backend selector for the target host. The base provider package remains
-small; the model stack is confined to the `model` extra.
+The runtime `model` extra contains only NumPy, ONNX Runtime, and Tokenizers.
+The standard ONNX Runtime package runs on CPU. A custom environment exposing
+ONNX Runtime's CUDA execution provider can use the saved `auto` or `cuda`
+device setting; an explicit `cuda` request fails instead of silently using CPU
+when that provider is unavailable.
 
 ### Move a checkout installation to PyPI
 
@@ -29,14 +29,12 @@ the tool with a registry requirement instead:
 
 ```sh
 uv tool install --reinstall --no-sources \
-  'muzaiten-features-clap[model]' --torch-backend auto
+  'muzaiten-features-clap[model]'
 ```
 
 An explicit uninstall is unnecessary: `uv tool install` replaces the existing
 uv-managed tool and records the new registry requirement. Add
 `==<provider-version>` to the requirement when an exact release is required.
-The tested uv 0.11.25 release accepts `--torch-backend` on `tool install`, not
-on `tool upgrade`.
 
 The core `muzaiten-bin` and `muzaiten-git` packages deliberately do not name a
 nonexistent provider as an optional dependency. When the distro gate passes,
@@ -45,9 +43,8 @@ to their optional-dependency metadata. This changes only package-manager
 discovery; the uv-installed executable is already found through the normal
 provider search order.
 
-Recreating the tool environment does not remove the model checkpoint under the
-Muzaiten cache directory and does not touch `features.sqlite`, so it does not
-force model download or semantic reanalysis. The provider's stable
+Recreating the tool environment does not remove the model cache or touch
+`features.sqlite`, so it does not force semantic reanalysis. The provider's stable
 `feature_revision`, rather than its package-install source, controls embedding
 compatibility.
 
@@ -66,10 +63,30 @@ analysis > Download semantic model…** or:
 muzaiten-features model download --progress=jsonl
 ```
 
-Before consent, the GUI shows the source, CC0-1.0 license, expected size, cache
-path, and SHA-256. Download writes a temporary file, streams byte progress,
-verifies the checksum, and atomically installs it. A missing model is reported
-as `model_missing` (exit 3).
+Before the first download and conversion, temporarily install the isolated
+conversion stack:
+
+```sh
+uv tool install --reinstall 'muzaiten-features-clap[model,convert]'
+muzaiten-features model download --progress=jsonl
+uv tool install --reinstall 'muzaiten-features-clap[model]'
+```
+
+The download writes a temporary file, streams byte progress, verifies the
+checksum, and atomically installs the pinned CC0 checkpoint. Conversion then
+reports `model-convert` progress, exports fp32 audio and text ONNX graphs plus
+the exact tokenizer, and verifies their hashed manifest. Artifact hashes are
+verified at installation; later operations check the manifest identity and
+file presence, so status checks and text queries never re-hash the artifacts.
+The checkpoint stays in the cache as the provenance source. Removing the `convert` extra afterward
+drops PyTorch, torchvision, librosa, numba, and LAION-CLAP from the serving
+environment without removing cached artifacts. Expect about 2.35 GB for the
+checkpoint and 790 MB for the ONNX artifacts; the runtime tool environment is
+roughly 150 MB instead of about 5 GB.
+
+If conversion dependencies are missing, model download exits 3 with
+`component_missing` and prints the required `[model,convert]` install command.
+A missing or invalid converted model is reported as `model_missing` (exit 3).
 
 ## Refresh and search
 

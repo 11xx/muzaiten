@@ -297,6 +297,16 @@ void CurationDialogDataTest::audioAnalysisProgressLabelsAreHumanReadable()
     QCOMPARE(AudioAnalysisData::progressLabel(status),
              QStringLiteral("Writing features… 700/70590 groups · 0.5/s · ~38h49m left · 2:00:00 elapsed"));
 
+    status.phase = AudioAnalysisData::LiveStatus::Phase::ModelConvert;
+    status.analyzed = 3;
+    status.total = 5;
+    status.rate = -1.0;
+    status.etaSecs.reset();
+    status.elapsedSecs = 12;
+    QCOMPARE(AudioAnalysisData::phaseLabel(status.phase), QStringLiteral("Preparing model"));
+    QCOMPARE(AudioAnalysisData::progressLabel(status),
+             QStringLiteral("Preparing model… 3/5 steps · 00:12 elapsed"));
+
     QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0),
              QStringLiteral("Audio analysis: scanned 1234, skipped 56, failed 2, groups 1201 in 42m 10s (2.1s/track)"));
     QCOMPARE(AudioAnalysisData::finalSummary(1234, 56, 2, 1201, 2530.0, 64012),

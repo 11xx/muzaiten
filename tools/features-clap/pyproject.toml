@@ -11,11 +11,18 @@ dependencies = [
 
 [project.optional-dependencies]
 model = [
+    "numpy>=1.23.5",
+    "onnxruntime>=1.23",
+    "tokenizers>=0.22",
+]
+convert = [
     "laion-clap==1.1.7",
-    # numba 0.66 (via librosa) rejects NumPy 2.5; NumPy 2.4 is smoke-tested.
+    # The reference package is isolated to one-time conversion. Its librosa
+    # stack currently rejects NumPy 2.5.
     "numpy<2.5",
+    "onnx>=1.19",
     "torch>=2.3",
-    # laion-clap 1.1.7 imports torchvision without declaring it
+    # laion-clap 1.1.7 imports torchvision without declaring it.
     "torchvision>=0.18",
 ]
 

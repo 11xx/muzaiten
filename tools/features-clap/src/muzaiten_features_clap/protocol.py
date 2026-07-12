@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import time
 from dataclasses import dataclass
@@ -11,14 +11,16 @@ from . import __version__
 from .model import (
     FEATURE_REVISION,
     MODEL_APPROXIMATE_BYTES,
+    MODEL_ARTIFACTS_URL,
     MODEL_LICENSE,
     MODEL_NAME,
     MODEL_SHA256,
     MODEL_URL,
     MODEL_VERSION,
-    RealClapEmbedder,
-    checkpoint_status,
-    device_label,
+    ONNX_APPROXIMATE_BYTES,
+    OnnxClapEmbedder,
+    artifact_status,
+    download_artifacts,
     download_checkpoint,
     probe_device,
     resolve_device,
@@ -58,7 +60,7 @@ def parse_request(payload: object) -> Request:
 
 
 def capabilities() -> dict[str, object]:
-    current = checkpoint_status(verify=False)
+    current = artifact_status(verify=False)
     return {
         "capability": "clap",
         "provider_version": __version__,
@@ -74,17 +76,17 @@ def run_request(
     request: Request,
     emit: Callable[[dict[str, object]], None],
     canceled: Callable[[], bool],
-    embedder_factory: Callable[..., object] = RealClapEmbedder,
+    embedder_factory: Callable[..., object] = OnnxClapEmbedder,
 ) -> dict[str, object]:
     params = request.parameters
     if request.operation == "capabilities":
         return capabilities()
     if request.operation == "status":
-        current = checkpoint_status()
+        current = artifact_status(verify=False)
         payload: dict[str, object] = {
             **capabilities(),
             "model": _model_payload(current.present, current.valid, current.path),
-            "model_extra_installed": importlib.util.find_spec("laion_clap") is not None,
+            "model_extra_installed": _runtime_dependencies_installed(),
             "device": probe_device() or "unavailable",
         }
         features = params.get("features")
@@ -92,6 +94,17 @@ def run_request(
             payload["store"] = status(_path(params, "features"), MODEL_NAME, MODEL_VERSION).as_dict()
         return payload
     if request.operation == "model-download":
+        # Full hash verification is correct here: this is the install-time
+        # boundary, and an invalid bundle must be repaired, not trusted.
+        current = artifact_status()
+        if current.valid:
+            return {
+                "path": str(current.path),
+                "downloaded": False,
+                "sha256": MODEL_SHA256,
+                "artifacts_path": str(current.path),
+                "converted": False,
+            }
         started = time.monotonic()
 
         def download_progress(completed: int, total: int | None) -> None:
@@ -106,23 +119,60 @@ def run_request(
                 )
             )
 
+        if MODEL_ARTIFACTS_URL is not None:
+            hosted = download_artifacts(
+                MODEL_ARTIFACTS_URL,
+                progress=download_progress,
+                canceled=canceled,
+            )
+            return {
+                "path": str(hosted.path),
+                "downloaded": hosted.downloaded,
+                "sha256": MODEL_SHA256,
+                "artifacts_path": str(hosted.path),
+                "converted": False,
+            }
+
         result = download_checkpoint(progress=download_progress, canceled=canceled)
+        from .convert import convert_checkpoint
+
+        # Conversion rate/ETA must not inherit the download's elapsed time.
+        convert_started = time.monotonic()
+        converted = convert_checkpoint(
+            result.path,
+            progress=lambda completed, total: emit(
+                _progress_event(
+                    request,
+                    "model-convert",
+                    completed,
+                    total,
+                    "steps",
+                    convert_started,
+                )
+            ),
+            canceled=canceled,
+        )
         return {
             "path": str(result.path),
             "downloaded": result.downloaded,
             "sha256": MODEL_SHA256,
+            "artifacts_path": str(converted.path),
+            "converted": converted.converted,
         }
     if request.operation == "scan":
         features_path = _path(params, "features")
         device_choice = _string(params, "device", "auto")
         limit = _optional_int(params, "limit")
         batch_size = _positive_int(params, "batch_size", 8)
-        checkpoint = checkpoint_status()
-        if not checkpoint.present or not checkpoint.valid:
-            raise FileNotFoundError(f"CLAP checkpoint is missing or invalid: {checkpoint.path}")
+        # Structural manifest check only: artifact hashes are verified when
+        # the model is installed, and hashing 790 MB per invocation would
+        # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
+        artifacts = artifact_status(verify=False)
+        if not artifacts.present or not artifacts.valid:
+            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {artifacts.path}")
         started = time.monotonic()
         embedder = embedder_factory(
-            checkpoint=checkpoint.path,
+            artifacts=artifacts.path,
             device=resolve_device(device_choice),
         )
         result = scan(
@@ -145,7 +195,7 @@ def run_request(
             "model": MODEL_NAME,
             "checkpoint_sha256": MODEL_SHA256,
             "feature_revision": FEATURE_REVISION,
-            "device": device_label(str(getattr(embedder, "device", "unknown"))),
+            "device": str(getattr(embedder, "device", "unknown")),
         }
     if request.operation == "neighbors":
         started = time.monotonic()
@@ -165,11 +215,14 @@ def run_request(
         device_choice = _string(params, "device", "auto")
         if not text.strip():
             raise ProtocolError("text must not be empty")
-        checkpoint = checkpoint_status()
-        if not checkpoint.present or not checkpoint.valid:
-            raise FileNotFoundError(f"CLAP checkpoint is missing or invalid: {checkpoint.path}")
+        # Structural manifest check only: artifact hashes are verified when
+        # the model is installed, and hashing 790 MB per invocation would
+        # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
+        artifacts = artifact_status(verify=False)
+        if not artifacts.present or not artifacts.valid:
+            raise FileNotFoundError(f"converted CLAP model is missing or invalid: {artifacts.path}")
         embedder = embedder_factory(
-            checkpoint=checkpoint.path,
+            artifacts=artifacts.path,
             device=resolve_device(device_choice),
         )
         vector = query_embedding(text, embedder)  # type: ignore[arg-type]
@@ -198,17 +251,30 @@ def encode_event(payload: dict[str, object]) -> str:
 
 
 def _model_payload(present: bool, valid: bool, path: Path) -> dict[str, object]:
+    # With a hosted bundle the consent-relevant download is the artifacts
+    # themselves; without one it is the checkpoint that conversion needs.
+    hosted = MODEL_ARTIFACTS_URL is not None
     return {
         "name": MODEL_NAME,
         "checkpoint": MODEL_VERSION,
-        "source": MODEL_URL,
+        "source": MODEL_ARTIFACTS_URL if hosted else MODEL_URL,
         "sha256": MODEL_SHA256,
-        "approximate_bytes": MODEL_APPROXIMATE_BYTES,
+        "approximate_bytes": ONNX_APPROXIMATE_BYTES if hosted else MODEL_APPROXIMATE_BYTES,
+        "converted_approximate_bytes": ONNX_APPROXIMATE_BYTES,
         "license": MODEL_LICENSE,
         "cache_path": str(path),
         "present": present,
         "valid": valid,
     }
+
+
+def _runtime_dependencies_installed() -> bool:
+    try:
+        for name in ("onnxruntime", "tokenizers"):
+            importlib.import_module(name)
+        return True
+    except (ImportError, ValueError):
+        return False
 
 
 def _progress_event(

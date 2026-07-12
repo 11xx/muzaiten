@@ -16,10 +16,22 @@ from muzaiten_features_clap import cli, db
 from muzaiten_features_clap.cli import main
 from muzaiten_features_clap import model
 from muzaiten_features_clap.model import (
+    ARTIFACT_FORMAT_VERSION,
+    AUDIO_MODEL_FILENAME,
+    FEATURE_REVISION,
+    MANIFEST_FILENAME,
+    MODEL_NAME,
+    MODEL_SHA256,
+    MODEL_VERSION,
+    TEXT_MODEL_FILENAME,
+    TOKENIZER_FILENAME,
     _decode_audio_command,
+    artifact_status,
     checkpoint_status,
-    device_label,
     download_checkpoint,
+    file_sha256,
+    inference_thread_count,
+    prepare_waveform,
     probe_device,
     resolve_device,
 )
@@ -378,6 +390,94 @@ def test_audio_decode_is_bounded_to_a_stable_ten_second_window() -> None:
     assert short_command[short_command.index("-t") + 1] == "10"
 
 
+def test_waveform_preprocessing_matches_quantize_repeatpad_and_trim() -> None:
+    import numpy as np
+
+    raw = np.array([0.5, -0.5, 1.2, -1.2, 0.25, -0.25, 0.0], dtype=np.float32)
+    expected_cycle = (np.clip(raw, -1.0, 1.0) * 32767.0).astype(np.int16)
+    expected_cycle = (expected_cycle / 32767.0).astype(np.float32)
+
+    padded = prepare_waveform(raw)
+    assert padded.shape == (480_000,)
+    assert padded.dtype == np.float32
+    assert padded[: len(raw)] == pytest.approx(expected_cycle)
+    assert padded[-3:] == pytest.approx((0.0, 0.0, 0.0))
+
+    exact = prepare_waveform(np.linspace(-1.0, 1.0, 480_000, dtype=np.float32))
+    longer = prepare_waveform(np.concatenate((exact, np.ones(17, dtype=np.float32))))
+    assert longer == pytest.approx(exact)
+
+
+def _write_artifact_fixture(path: Path) -> dict[str, object]:
+    files = {
+        AUDIO_MODEL_FILENAME: b"audio graph",
+        TEXT_MODEL_FILENAME: b"text graph",
+        TOKENIZER_FILENAME: b"tokenizer",
+    }
+    for filename, payload in files.items():
+        (path / filename).write_bytes(payload)
+    manifest = {
+        "format_version": ARTIFACT_FORMAT_VERSION,
+        "model": MODEL_NAME,
+        "checkpoint": MODEL_VERSION,
+        "checkpoint_sha256": MODEL_SHA256,
+        "provider_version": "fixture",
+        "feature_revision": FEATURE_REVISION,
+        "vector_dimension": 512,
+        "artifacts": {
+            filename: {"sha256": file_sha256(path / filename), "bytes": len(payload)}
+            for filename, payload in files.items()
+        },
+    }
+    (path / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest
+
+
+def test_artifact_manifest_verifies_identity_and_hashes(tmp_path: Path) -> None:
+    manifest = _write_artifact_fixture(tmp_path)
+
+    current = artifact_status(path=tmp_path)
+    assert current.present is True
+    assert current.valid is True
+    assert current.manifest == manifest
+
+    (tmp_path / AUDIO_MODEL_FILENAME).write_bytes(b"corrupt")
+    assert artifact_status(path=tmp_path, verify=False).valid is True
+    assert artifact_status(path=tmp_path).valid is False
+
+
+def test_interactive_operations_never_hash_artifacts(
+    features_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    _write_artifact_fixture(tmp_path)
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path)
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=False))
+
+    def refuse_hashing(path: Path) -> str:
+        raise AssertionError(f"interactive operation hashed artifact bytes: {path}")
+
+    monkeypatch.setattr(model, "file_sha256", refuse_hashing)
+    fake = FakeEmbedder({}, text_vectors={"piano": (1.0, 0.0)})
+
+    status_request = protocol_module.Request("s1", "status", {})
+    status_payload = protocol_module.run_request(status_request, lambda _e: None, lambda: False)
+    assert status_payload["model"]["present"] is True
+    assert status_payload["model"]["valid"] is True
+
+    query_request = protocol_module.Request("q1", "query", {"text": "piano"})
+    result = protocol_module.run_request(
+        query_request,
+        lambda _e: None,
+        lambda: False,
+        embedder_factory=lambda **_kwargs: fake,
+    )
+    assert result["dim"] == 2
+
+
 def test_protocol_status_does_not_load_real_model(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -450,6 +550,42 @@ def test_protocol_routes_incidental_stdout_away_from_jsonl(
     assert [item["event"] for item in events] == ["progress", "result"]
     assert events[-1]["result"] == {"ready": True}
     assert "third-party checkpoint diagnostic" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (FileNotFoundError("converted CLAP model is missing"), "model_missing"),
+        (ModuleNotFoundError("conversion dependency is missing"), "component_missing"),
+    ],
+)
+def test_protocol_preserves_missing_model_and_component_error_codes(
+    error: Exception,
+    expected_code: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_request(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise error
+
+    monkeypatch.setattr(cli, "run_request", failing_request)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "request_id": "missing-1",
+                    "operation": "status",
+                }
+            )
+        ),
+    )
+
+    assert main() == 3
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == expected_code
 
 
 def test_provider_finishes_interrupted_known_v4_migration(tmp_path: Path) -> None:
@@ -529,23 +665,21 @@ def test_provider_finishes_interrupted_known_v4_migration(tmp_path: Path) -> Non
         assert db.read_schema_version(conn) == 5
 
 
-def _fake_torch(cuda_available: bool, name: str = "NVIDIA GeForce RTX 3080") -> SimpleNamespace:
-    return SimpleNamespace(
-        cuda=SimpleNamespace(
-            is_available=lambda: cuda_available,
-            get_device_name=lambda index: name,
-        ),
-    )
+def _fake_onnxruntime(cuda_available: bool) -> SimpleNamespace:
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if cuda_available else [
+        "CPUExecutionProvider"
+    ]
+    return SimpleNamespace(get_available_providers=lambda: providers)
 
 
 def test_resolve_device_auto_prefers_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     assert resolve_device("auto") == "cuda"
 
 
 def test_resolve_device_auto_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=False))
 
     assert resolve_device("auto") == "cpu"
 
@@ -553,27 +687,34 @@ def test_resolve_device_auto_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) 
 def test_resolve_device_explicit_cuda_errors_instead_of_silent_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=False))
 
-    with pytest.raises(RuntimeError, match="no usable CUDA device"):
+    with pytest.raises(RuntimeError, match="no CUDA execution provider"):
         resolve_device("cuda")
 
 
 def test_resolve_device_explicit_cpu_ignores_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     assert resolve_device("cpu") == "cpu"
 
 
-def test_device_label_names_the_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+def test_inference_threads_are_capped_and_can_be_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MUZAITEN_CLAP_THREADS", raising=False)
+    monkeypatch.setattr(model.os, "sched_getaffinity", lambda _pid: set(range(16)))
+    assert inference_thread_count() == 8
 
-    assert device_label("cuda") == "cuda (NVIDIA GeForce RTX 3080)"
-    assert device_label("cpu") == "cpu"
+    monkeypatch.setenv("MUZAITEN_CLAP_THREADS", "3")
+    assert inference_thread_count() == 3
+    monkeypatch.setenv("MUZAITEN_CLAP_THREADS", "0")
+    with pytest.raises(RuntimeError, match="positive integer"):
+        inference_thread_count()
 
 
-def test_probe_device_is_none_without_torch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "torch", None)
+def test_probe_device_is_none_without_onnxruntime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
 
     assert probe_device() is None
 
@@ -624,7 +765,9 @@ class FakeDownloadResponse:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def read(self, size: int) -> bytes:
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.payload) - self.offset
         chunk = self.payload[self.offset : self.offset + size]
         self.offset += len(chunk)
         return chunk
@@ -679,12 +822,199 @@ def test_model_download_cancellation_removes_temporary_file(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_missing_ffmpeg_names_the_real_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_missing(*_args: object, **_kwargs: object):
+        raise FileNotFoundError(2, "No such file or directory", "ffmpeg")
+
+    monkeypatch.setattr(model.subprocess, "run", raise_missing)
+    with pytest.raises(RuntimeError, match="ffmpeg is required"):
+        model.decode_audio_ffmpeg(tmp_path / "song.flac")
+
+
+def test_protocol_model_download_converts_with_its_own_progress_clock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import convert as convert_module
+    from muzaiten_features_clap import protocol as protocol_module
+
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path / "no-artifacts")
+    clock = iter([100.0, 250.0, 251.0])
+    monkeypatch.setattr(protocol_module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        protocol_module,
+        "download_checkpoint",
+        lambda progress=None, canceled=None: model.ModelDownload(
+            tmp_path / "checkpoint.pt", downloaded=False
+        ),
+    )
+
+    def fake_convert(checkpoint: Path, *, output=None, progress=None, canceled=None):
+        assert progress is not None
+        progress(1, 5)
+        return convert_module.ConversionResult(tmp_path / "clap-onnx-v1", converted=True)
+
+    monkeypatch.setattr(convert_module, "convert_checkpoint", fake_convert)
+    events: list[dict[str, object]] = []
+    request = protocol_module.Request("r1", "model-download", {})
+
+    result = protocol_module.run_request(request, events.append, lambda: False)
+
+    convert_events = [event for event in events if event.get("phase") == "model-convert"]
+    assert convert_events, "conversion must report model-convert progress"
+    # One conversion step over one second on the fake clock: the rate must be
+    # computed from the conversion's own start, not the download's.
+    assert convert_events[0]["rate"] == pytest.approx(1.0)
+    assert result["converted"] is True
+    assert result["artifacts_path"] == str(tmp_path / "clap-onnx-v1")
+
+
+def _hosted_bundle(tmp_path: Path) -> tuple[dict[str, bytes], dict[str, object]]:
+    source = tmp_path / "bundle-source"
+    source.mkdir()
+    manifest = _write_artifact_fixture(source)
+    payloads = {
+        name: (source / name).read_bytes()
+        for name in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME)
+    }
+    payloads[MANIFEST_FILENAME] = json.dumps(manifest).encode()
+    return payloads, manifest
+
+
+def _bundle_opener(payloads: dict[str, bytes], calls: list[str]):
+    def opener(url: str, timeout: float | None = None):
+        filename = url.rsplit("/", 1)[-1]
+        calls.append(filename)
+        return FakeDownloadResponse(payloads[filename])
+
+    return opener
+
+
+def test_download_artifacts_installs_verified_hosted_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, _manifest = _hosted_bundle(tmp_path)
+    calls: list[str] = []
+    progress: list[tuple[int, int | None]] = []
+
+    result = model.download_artifacts(
+        "https://example.invalid/bundle/",
+        progress=lambda completed, total: progress.append((completed, total)),
+        opener=_bundle_opener(payloads, calls),
+    )
+
+    assert result.downloaded is True
+    assert result.path == cache / model.ARTIFACT_DIRNAME
+    assert artifact_status().valid is True
+    total = sum(
+        len(payloads[name])
+        for name in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME)
+    )
+    assert progress[0] == (0, total)
+    assert progress[-1] == (total, total)
+    assert calls[0] == MANIFEST_FILENAME
+    # A second run short-circuits on the installed bundle without fetching.
+    calls.clear()
+    again = model.download_artifacts(
+        "https://example.invalid/bundle/", opener=_bundle_opener(payloads, calls)
+    )
+    assert again.downloaded is False
+    assert calls == []
+
+
+def test_download_artifacts_rejects_tampered_bytes_and_wrong_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, manifest = _hosted_bundle(tmp_path)
+
+    tampered = dict(payloads)
+    tampered[AUDIO_MODEL_FILENAME] = b"tampered graph"
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        model.download_artifacts(
+            "https://example.invalid/bundle", opener=_bundle_opener(tampered, [])
+        )
+    assert artifact_status().present is False
+    assert list(cache.iterdir()) == []
+
+    foreign = dict(manifest)
+    foreign["feature_revision"] = "some-other-revision"
+    payloads[MANIFEST_FILENAME] = json.dumps(foreign).encode()
+    calls: list[str] = []
+    with pytest.raises(RuntimeError, match="feature_revision"):
+        model.download_artifacts(
+            "https://example.invalid/bundle", opener=_bundle_opener(payloads, calls)
+        )
+    # Identity is rejected before any artifact bytes are fetched.
+    assert calls == [MANIFEST_FILENAME]
+
+
+def test_protocol_model_download_prefers_hosted_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path / "no-artifacts")
+    monkeypatch.setattr(protocol_module, "MODEL_ARTIFACTS_URL", "https://example.invalid/b")
+    monkeypatch.setattr(
+        protocol_module,
+        "download_checkpoint",
+        lambda **_kwargs: pytest.fail("hosted bundle must not download the checkpoint"),
+    )
+    installed = tmp_path / "installed"
+    monkeypatch.setattr(
+        protocol_module,
+        "download_artifacts",
+        lambda url, progress=None, canceled=None: model.ArtifactDownload(
+            installed, downloaded=True
+        ),
+    )
+
+    request = protocol_module.Request("d1", "model-download", {})
+    result = protocol_module.run_request(request, lambda _e: None, lambda: False)
+
+    assert result["downloaded"] is True
+    assert result["converted"] is False
+    assert result["artifacts_path"] == str(installed)
+
+
+def test_protocol_model_download_short_circuits_on_valid_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    _write_artifact_fixture(tmp_path)
+    monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        protocol_module,
+        "download_checkpoint",
+        lambda **_kwargs: pytest.fail("valid artifacts must not trigger a download"),
+    )
+
+    request = protocol_module.Request("d2", "model-download", {})
+    result = protocol_module.run_request(request, lambda _e: None, lambda: False)
+
+    assert result["downloaded"] is False
+    assert result["converted"] is False
+    assert result["artifacts_path"] == str(tmp_path)
+
+
 def test_protocol_status_reports_device_probe(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=True))
+    monkeypatch.setitem(sys.modules, "onnxruntime", _fake_onnxruntime(cuda_available=True))
 
     monkeypatch.setattr(
         sys,
