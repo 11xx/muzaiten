@@ -65,6 +65,7 @@ set(MUZAITEN_SOURCES
     src/features/QualityRank.cpp
     src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
+    src/fs/MediaProbe.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
@@ -408,6 +409,7 @@ add_executable(muzaiten-features
     src/indexer/FeaturesMain.cpp
     src/app/AppPaths.cpp
     src/features/ProviderClient.cpp
+    src/fs/MediaProbe.cpp
 )
 target_include_directories(muzaiten-features PRIVATE src)
 target_link_libraries(muzaiten-features PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)

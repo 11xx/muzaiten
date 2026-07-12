@@ -1,5 +1,7 @@
 #include "app/AppPaths.h"
 #include "features/ProviderClient.h"
+#include "fs/MediaProbe.h"
+#include "indexer/DecodeGate.h"
 #include "indexer/Dsp.h"
 
 #include <QByteArray>
@@ -963,7 +965,7 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
     return analysis;
 }
 
-void analyzePending(const std::vector<Candidate> &pending, int jobs,
+void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate &gate,
                     const std::function<void(FileAnalysis &&, int, int)> &completion)
 {
     if (pending.empty()) {
@@ -979,11 +981,29 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs,
     std::deque<FileAnalysis> completed;
     std::size_t runningWorkers = boundedWorkers;
 
+    const auto workExhausted = [&]() {
+        return nextIndex.load(std::memory_order_relaxed) >= pending.size();
+    };
+
     std::vector<std::thread> workers;
     workers.reserve(boundedWorkers);
     for (std::size_t worker = 0; worker < boundedWorkers; ++worker) {
-        workers.emplace_back([&]() {
+        workers.emplace_back([&, worker]() {
             while (!stopRequested()) {
+                if (worker >= static_cast<std::size_t>(gate.target())) {
+                    // Parked: the gate shrank below this ordinal. Wake on
+                    // growth, exhaustion, or stop; never claim work while
+                    // parked so the medium sees fewer concurrent readers.
+                    std::unique_lock lock(mutex);
+                    ready.wait(lock, [&]() {
+                        return stopRequested() || workExhausted()
+                            || worker < static_cast<std::size_t>(gate.target());
+                    });
+                    if (stopRequested() || workExhausted()) {
+                        break;
+                    }
+                    continue;
+                }
                 const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
                 if (index >= pending.size()) {
                     break;
@@ -993,13 +1013,15 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs,
                     std::lock_guard lock(mutex);
                     completed.push_back(std::move(analysis));
                 }
-                ready.notify_one();
+                // notify_all: a parked worker may consume a single notify
+                // without waking the completion drain.
+                ready.notify_all();
             }
             {
                 std::lock_guard lock(mutex);
                 --runningWorkers;
             }
-            ready.notify_one();
+            ready.notify_all();
         });
     }
 
@@ -1012,7 +1034,11 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs,
             completed.pop_front();
             lock.unlock();
             ++analyzed;
+            const double decodeMs = static_cast<double>(analysis.timings.decodeMs);
             completion(std::move(analysis), analyzed, total);
+            if (gate.recordDecodeMs(decodeMs)) {
+                ready.notify_all();
+            }
             lock.lock();
         }
         if (runningWorkers == 0) {
@@ -1716,6 +1742,7 @@ FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
 
 void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
                                    const QHash<QString, ScalarExtraction> &extracted, int jobs,
+                                   DecodeGate &gate,
                                    const std::function<void(FeatureAnalysis &&, int, int)> &completion)
 {
     if (representatives.empty()) {
@@ -1731,11 +1758,28 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
     std::deque<FeatureAnalysis> completed;
     std::size_t runningWorkers = workerCount;
 
+    const auto workExhausted = [&]() {
+        return nextIndex.load(std::memory_order_relaxed) >= representatives.size();
+    };
+
     std::vector<std::thread> workers;
     workers.reserve(workerCount);
     for (std::size_t worker = 0; worker < workerCount; ++worker) {
-        workers.emplace_back([&]() {
+        workers.emplace_back([&, worker]() {
             while (!stopRequested()) {
+                if (worker >= static_cast<std::size_t>(gate.target())) {
+                    // Parked: see analyzePending. Fewer concurrent decoders
+                    // is the whole point on seek-sensitive media.
+                    std::unique_lock lock(mutex);
+                    ready.wait(lock, [&]() {
+                        return stopRequested() || workExhausted()
+                            || worker < static_cast<std::size_t>(gate.target());
+                    });
+                    if (stopRequested() || workExhausted()) {
+                        break;
+                    }
+                    continue;
+                }
                 const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
                 if (index >= representatives.size()) {
                     break;
@@ -1750,13 +1794,13 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
                     // during shutdown, which is harmless.
                     completed.push_back(std::move(analysis));
                 }
-                ready.notify_one();
+                ready.notify_all();
             }
             {
                 std::lock_guard lock(mutex);
                 --runningWorkers;
             }
-            ready.notify_one();
+            ready.notify_all();
         });
     }
 
@@ -1770,7 +1814,11 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
             ready.notify_all();
             lock.unlock();
             ++processed;
+            const double decodeMs = static_cast<double>(analysis.timings.decodeMs);
             completion(std::move(analysis), processed, total);
+            if (gate.recordDecodeMs(decodeMs)) {
+                ready.notify_all();
+            }
             lock.lock();
         }
         if (runningWorkers == 0) {
@@ -2020,7 +2068,12 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
     // Workers only decode and analyze. The main thread owns these QSqlQuery
     // objects so the feature database remains a single-writer connection.
     if (!stopRequested()) {
-        analyzeFeatureRepresentatives(stale.decodes, extracted, jobs, completion);
+        const MediaProbe::Class mediaClass = stale.decodes.empty()
+            ? MediaProbe::Class::Fast
+            : MediaProbe::classify(stale.decodes.front().path);
+        DecodeGate gate(MediaProbe::seekSensitive(mediaClass) ? std::min(2, std::max(1, jobs)) : jobs,
+                        1, jobs);
+        analyzeFeatureRepresentatives(stale.decodes, extracted, jobs, gate, completion);
     }
     result.canceled = stopRequested();
 
@@ -2493,12 +2546,29 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         ++uncommitted;
         commitIfNeeded(false);
     };
-    analyzePending(pending, effective.jobs, completion);
+    // Seek-sensitive media (network mounts, spinning disks) start at two
+    // concurrent decoders instead of the full worker pool; the gate then
+    // follows measured decode latency in both directions. Fast local media
+    // start wide and only shrink if decodes degrade.
+    const MediaProbe::Class mediaClass = pending.empty()
+        ? MediaProbe::Class::Fast
+        : MediaProbe::classify(pending.front().path);
+    DecodeGate gate(MediaProbe::seekSensitive(mediaClass) ? std::min(2, std::max(1, effective.jobs))
+                                                          : effective.jobs,
+                    1, effective.jobs);
+    analyzePending(pending, effective.jobs, gate, completion);
+    const auto decodeAdaptationJson = [&]() {
+        return QJsonObject{
+            {QStringLiteral("media_class"), MediaProbe::name(mediaClass)},
+            {QStringLiteral("initial"), gate.initialTarget()},
+            {QStringLiteral("final"), gate.target()},
+        };
+    };
     commitIfNeeded(true);
     commitTransaction(database);
 
     if (stopRequested()) {
-        const QJsonObject payload =
+        QJsonObject payload =
             scanJson(scanned, skipped, failed, currentGroupCount(database), currentFeatureCount(database),
                      static_cast<int>(staleFeatureCount(database)),
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
@@ -2506,6 +2576,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
                      true,
                      effectivePowerName,
                      effective.jobs);
+        payload.insert(QStringLiteral("decode_adaptation"), decodeAdaptationJson());
         return payload;
     }
 
@@ -2529,7 +2600,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
     if (options.stage == Stage::All && !fill.canceled) {
         writeLastScanSummary(database, scanned, skipped, failed, elapsedSecs, effectivePowerName);
     }
-    const QJsonObject payload =
+    QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
                  static_cast<int>(staleFeatureCount(database)),
                  elapsedSecs,
@@ -2538,6 +2609,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
                  effectivePowerName,
                  effective.jobs,
                  fillPtr);
+    payload.insert(QStringLiteral("decode_adaptation"), decodeAdaptationJson());
     return payload;
 }
 

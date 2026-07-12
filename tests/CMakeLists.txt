@@ -111,6 +111,16 @@ target_compile_features(test_listen_history PRIVATE cxx_std_26)
 add_test(NAME test_listen_history COMMAND test_listen_history)
 set_tests_properties(test_listen_history PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_decode_gate
+    test_decode_gate.cpp
+    ../src/fs/MediaProbe.cpp
+)
+target_include_directories(test_decode_gate PRIVATE ../src)
+target_link_libraries(test_decode_gate PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_decode_gate PRIVATE cxx_std_26)
+add_test(NAME test_decode_gate COMMAND test_decode_gate)
+set_tests_properties(test_decode_gate PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_query_vector_cache
     test_query_vector_cache.cpp
     ../src/app/AppPaths.cpp
@@ -279,6 +289,7 @@ add_test(NAME test_path_guesser COMMAND test_path_guesser)
 
 add_executable(test_scan_pipeline
     test_scan_pipeline.cpp
+    ../src/fs/MediaProbe.cpp
     ../src/scanner/ScanPipeline.cpp
     ../src/scanner/PathMetadataGuesser.cpp
     ../src/scanner/DirectoryWalker.cpp
