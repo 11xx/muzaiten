@@ -40,14 +40,14 @@ void TestDecodeGate::shrinksOnSlowWindow()
 {
     DecodeGate gate(4, 1, 16);
     bool changed = false;
-    feedWindow(gate, 4000.0, changed);
+    feedWindow(gate, 15000.0, changed);
     QVERIFY(changed);
     QCOMPARE(gate.target(), 3);
-    feedWindow(gate, 4000.0, changed);
-    feedWindow(gate, 4000.0, changed);
-    feedWindow(gate, 4000.0, changed);
+    feedWindow(gate, 15000.0, changed);
+    feedWindow(gate, 15000.0, changed);
+    feedWindow(gate, 15000.0, changed);
     QCOMPARE(gate.target(), 1);
-    feedWindow(gate, 4000.0, changed);
+    feedWindow(gate, 15000.0, changed);
     QVERIFY(!changed);
     QCOMPARE(gate.target(), 1); // floor holds
 }
@@ -56,21 +56,24 @@ void TestDecodeGate::growsOnFastWindow()
 {
     DecodeGate gate(2, 1, 4);
     bool changed = false;
-    feedWindow(gate, 200.0, changed);
+    feedWindow(gate, 500.0, changed);
     QVERIFY(changed);
     QCOMPARE(gate.target(), 3);
-    feedWindow(gate, 200.0, changed);
+    feedWindow(gate, 500.0, changed);
     QCOMPARE(gate.target(), 4);
-    feedWindow(gate, 200.0, changed);
+    feedWindow(gate, 500.0, changed);
     QVERIFY(!changed);
     QCOMPARE(gate.target(), 4); // cap holds
 }
 
 void TestDecodeGate::holdsInsideDeadBand()
 {
+    // Contended-but-progressing latency on the reference network mount:
+    // exactly the case the brake must NOT touch, because that width still
+    // wins on aggregate throughput.
     DecodeGate gate(3, 1, 16);
     bool changed = false;
-    feedWindow(gate, 1200.0, changed);
+    feedWindow(gate, 4200.0, changed);
     QVERIFY(!changed);
     QCOMPARE(gate.target(), 3);
 }

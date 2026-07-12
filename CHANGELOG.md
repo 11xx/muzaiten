@@ -12,14 +12,17 @@
 
 ### Changed
 
-- Audio analysis adapts decode concurrency to the storage medium. Network
-  mounts and spinning disks start at two concurrent decoders (measured on a
-  reference NFS library: sixteen concurrent full-track decodes averaged
-  4.2 s each while per-track compute needs about 0.25 s) and the worker gate
-  then follows measured decode latency in both directions; fast local media
-  start at the full worker pool. The refresh JSON reports the decision under
-  `decode_adaptation`, and the library scanner now treats network mounts as
-  conservatively as spinning disks when sizing its walker and tag threads.
+- Audio analysis gained a decode-concurrency brake against pathological
+  media collapse. Measurement drove the design twice over: on a reference
+  NFS library, sixteen concurrent full-track decodes average 4.2 s each
+  (vs about 0.3 s solo) yet still deliver 2.2x the aggregate throughput of
+  two workers, so the pool starts at full width everywhere and narrows only
+  when the windowed decode median exceeds ten seconds (dying spindles,
+  saturated links, seek storms), recovering once the collapse passes. The
+  refresh JSON reports the storage class and gate movement under
+  `decode_adaptation`, and the library scanner now starts network mounts as
+  conservatively as spinning disks when sizing its walker and tag threads
+  (its own latency controller then adapts upward).
 - The CLAP semantic scan overlaps audio decoding with model inference (one
   batch of decode lookahead) instead of strictly alternating them, and both
   the provider scan and the scalar-refresh decode fallback now walk

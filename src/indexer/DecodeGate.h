@@ -4,15 +4,17 @@
 #include <atomic>
 #include <vector>
 
-// Adaptive decode-concurrency gate for the analysis worker pools. Decode
-// latency on seek-sensitive media (spinning disks, network mounts) grows
-// superlinearly with concurrent readers: measured on the reference NFS
-// library, 16 parallel full-track decodes average 4.2 s each while compute
-// (hash + DSP) needs only ~0.25 s. Workers whose ordinal is at or above
+// Decode-concurrency brake for the analysis worker pools. Measured on the
+// reference NFS library: 16 concurrent full-track decodes average 4.2 s
+// each (vs ~0.3 s solo), yet aggregate throughput at width 16 is still
+// 2.2x that of width 2, so latency alone must NOT drive the pool narrower
+// under normal contention. The gate therefore starts at the full worker
+// count on every medium and only intervenes on pathological collapse
+// (windowed median beyond several times the contended-but-progressing
+// range: dying spindles, saturated links, tiny-file seek storms), growing
+// back once the collapse passes. Workers whose ordinal is at or above
 // target() park instead of claiming work; the completion thread feeds
-// per-decode wall times back in, and the target shrinks or grows on the
-// windowed median with a wide dead band so it settles instead of
-// oscillating.
+// per-decode wall times back in.
 class DecodeGate
 {
 public:
@@ -57,12 +59,13 @@ public:
     }
 
 private:
-    // Full-track canonical decode of a typical song costs a few hundred ms
-    // in a vacuum; multi-second medians mean readers are fighting the
-    // medium. The band in between is deliberately wide: within it the gate
-    // holds its level rather than hunting.
-    static constexpr double kSlowDecodeMs = 2500.0;
-    static constexpr double kFastDecodeMs = 500.0;
+    // Contended-but-progressing decodes on the reference network mount
+    // median around 4 s at full width and that width still wins on
+    // throughput, so the brake only engages well beyond it. Below the grow
+    // threshold the medium is clearly keeping up and the pool recovers
+    // toward the cap.
+    static constexpr double kSlowDecodeMs = 10000.0;
+    static constexpr double kFastDecodeMs = 2000.0;
     static constexpr std::size_t kWindowSize = 8;
 
     int m_floor;
