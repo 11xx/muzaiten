@@ -1,5 +1,7 @@
 #include "app/AppPaths.h"
 #include "features/ProviderClient.h"
+#include "fs/MediaProbe.h"
+#include "indexer/DecodeGate.h"
 #include "indexer/Dsp.h"
 
 #include <QByteArray>
@@ -91,6 +93,7 @@ struct RefreshOptions {
     Power power = Power::Unspecified;
     int limit = -1;
     int jobs = 0;
+    std::optional<int> semanticDecodeWorkers;
     bool json = false;
     bool progress = false;
     bool verbose = false;
@@ -114,6 +117,7 @@ struct ProviderOptions {
     QString statePath;
     QString providerPath;
     QString device = QStringLiteral("auto");
+    QString components = QStringLiteral("full");
     QString text;
     bool json = false;
     bool progress = false;
@@ -963,7 +967,7 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
     return analysis;
 }
 
-void analyzePending(const std::vector<Candidate> &pending, int jobs,
+void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate &gate,
                     const std::function<void(FileAnalysis &&, int, int)> &completion)
 {
     if (pending.empty()) {
@@ -979,11 +983,29 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs,
     std::deque<FileAnalysis> completed;
     std::size_t runningWorkers = boundedWorkers;
 
+    const auto workExhausted = [&]() {
+        return nextIndex.load(std::memory_order_relaxed) >= pending.size();
+    };
+
     std::vector<std::thread> workers;
     workers.reserve(boundedWorkers);
     for (std::size_t worker = 0; worker < boundedWorkers; ++worker) {
-        workers.emplace_back([&]() {
+        workers.emplace_back([&, worker]() {
             while (!stopRequested()) {
+                if (worker >= static_cast<std::size_t>(gate.target())) {
+                    // Parked: the gate shrank below this ordinal. Wake on
+                    // growth, exhaustion, or stop; never claim work while
+                    // parked so the medium sees fewer concurrent readers.
+                    std::unique_lock lock(mutex);
+                    ready.wait(lock, [&]() {
+                        return stopRequested() || workExhausted()
+                            || worker < static_cast<std::size_t>(gate.target());
+                    });
+                    if (stopRequested() || workExhausted()) {
+                        break;
+                    }
+                    continue;
+                }
                 const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
                 if (index >= pending.size()) {
                     break;
@@ -993,13 +1015,15 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs,
                     std::lock_guard lock(mutex);
                     completed.push_back(std::move(analysis));
                 }
-                ready.notify_one();
+                // notify_all: a parked worker may consume a single notify
+                // without waking the completion drain.
+                ready.notify_all();
             }
             {
                 std::lock_guard lock(mutex);
                 --runningWorkers;
             }
-            ready.notify_one();
+            ready.notify_all();
         });
     }
 
@@ -1012,7 +1036,11 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs,
             completed.pop_front();
             lock.unlock();
             ++analyzed;
+            const double decodeMs = static_cast<double>(analysis.timings.decodeMs);
             completion(std::move(analysis), analyzed, total);
+            if (gate.recordDecodeMs(decodeMs)) {
+                ready.notify_all();
+            }
             lock.lock();
         }
         if (runningWorkers == 0) {
@@ -1661,15 +1689,21 @@ void recordScalarExtraction(QHash<QString, ScalarExtraction> &extracted, const F
 }
 
 std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
-                                                            const QHash<QString, ScalarExtraction> &extracted)
+                                                            const QHash<QString, ScalarExtraction> &extracted,
+                                                            StageTimings &timings)
 {
     const auto it = extracted.constFind(path);
     if (it != extracted.constEnd()) {
         return it->known ? std::optional<Dsp::ScalarFeatures>(it->features) : std::nullopt;
     }
     // Feature refresh never hashes, so skip the raw byte copy entirely.
+    const auto decodeStarted = std::chrono::steady_clock::now();
     const DecodedAudio decoded = decodeCanonical(path, false);
-    return Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
+    timings.decodeMs = elapsedMs(decodeStarted);
+    const auto dspStarted = std::chrono::steady_clock::now();
+    const auto scalars = Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
+    timings.dspMs = elapsedMs(dspStarted);
+    return scalars;
 }
 
 struct FeatureFillResult {
@@ -1678,6 +1712,7 @@ struct FeatureFillResult {
     int failed = 0;
     int total = 0;
     bool canceled = false;
+    TimingAccumulator timings;
 };
 
 struct StaleRep {
@@ -1689,7 +1724,10 @@ struct FeatureAnalysis {
     StaleRep representative;
     std::optional<Dsp::ScalarFeatures> scalars;
     bool failed = false;
+    StageTimings timings;
 };
+
+void emitVerboseFeatureRepresentative(const FeatureAnalysis &analysis);
 
 FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
                                              const QHash<QString, ScalarExtraction> &extracted)
@@ -1697,7 +1735,7 @@ FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
     FeatureAnalysis analysis;
     analysis.representative = representative;
     try {
-        analysis.scalars = scalarsForRepresentative(representative.path, extracted);
+        analysis.scalars = scalarsForRepresentative(representative.path, extracted, analysis.timings);
     } catch (const std::exception &) {
         analysis.failed = true;
     }
@@ -1706,6 +1744,7 @@ FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
 
 void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
                                    const QHash<QString, ScalarExtraction> &extracted, int jobs,
+                                   DecodeGate &gate,
                                    const std::function<void(FeatureAnalysis &&, int, int)> &completion)
 {
     if (representatives.empty()) {
@@ -1721,11 +1760,28 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
     std::deque<FeatureAnalysis> completed;
     std::size_t runningWorkers = workerCount;
 
+    const auto workExhausted = [&]() {
+        return nextIndex.load(std::memory_order_relaxed) >= representatives.size();
+    };
+
     std::vector<std::thread> workers;
     workers.reserve(workerCount);
     for (std::size_t worker = 0; worker < workerCount; ++worker) {
-        workers.emplace_back([&]() {
+        workers.emplace_back([&, worker]() {
             while (!stopRequested()) {
+                if (worker >= static_cast<std::size_t>(gate.target())) {
+                    // Parked: see analyzePending. Fewer concurrent decoders
+                    // is the whole point on seek-sensitive media.
+                    std::unique_lock lock(mutex);
+                    ready.wait(lock, [&]() {
+                        return stopRequested() || workExhausted()
+                            || worker < static_cast<std::size_t>(gate.target());
+                    });
+                    if (stopRequested() || workExhausted()) {
+                        break;
+                    }
+                    continue;
+                }
                 const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
                 if (index >= representatives.size()) {
                     break;
@@ -1740,13 +1796,13 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
                     // during shutdown, which is harmless.
                     completed.push_back(std::move(analysis));
                 }
-                ready.notify_one();
+                ready.notify_all();
             }
             {
                 std::lock_guard lock(mutex);
                 --runningWorkers;
             }
-            ready.notify_one();
+            ready.notify_all();
         });
     }
 
@@ -1760,7 +1816,11 @@ void analyzeFeatureRepresentatives(const std::vector<StaleRep> &representatives,
             ready.notify_all();
             lock.unlock();
             ++processed;
+            const double decodeMs = static_cast<double>(analysis.timings.decodeMs);
             completion(std::move(analysis), processed, total);
+            if (gate.recordDecodeMs(decodeMs)) {
+                ready.notify_all();
+            }
             lock.lock();
         }
         if (runningWorkers == 0) {
@@ -1891,7 +1951,8 @@ MaterializedStaleReps materializeStaleReps(QSqlDatabase &database)
                             "        AND (feat.version IS NULL OR feat.version != ?) "
                             "      GROUP BY f.content_group_id) s "
                             "LEFT JOIN file_features ff ON ff.path = s.path AND ff.version = ? "
-                            "ORDER BY s.content_group_id"));
+                            "ORDER BY ff.version IS NOT NULL DESC, "
+                            "CASE WHEN ff.version IS NULL THEN s.path END, s.content_group_id"));
     reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     execPrepared(reps);
@@ -1914,7 +1975,7 @@ MaterializedStaleReps materializeStaleReps(QSqlDatabase &database)
 
 FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                                     const QHash<QString, ScalarExtraction> &extracted,
-                                    int jobs, bool progress,
+                                    int jobs, bool progress, bool verbose,
                                     std::chrono::steady_clock::time_point scanStarted)
 {
     FeatureFillResult result;
@@ -1993,6 +2054,10 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
     prepareFileFeaturesUpsert(fileUpsert);
     const auto completion = [&](FeatureAnalysis &&analysis, int processed, int) {
         result.processed = copiesDone + processed;
+        result.timings.add(analysis.timings);
+        if (verbose) {
+            emitVerboseFeatureRepresentative(analysis);
+        }
         if (analysis.failed) {
             ++result.failed;
         } else {
@@ -2006,7 +2071,8 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
     // Workers only decode and analyze. The main thread owns these QSqlQuery
     // objects so the feature database remains a single-writer connection.
     if (!stopRequested()) {
-        analyzeFeatureRepresentatives(stale.decodes, extracted, jobs, completion);
+        DecodeGate gate(std::max(1, jobs), 1, std::max(1, jobs));
+        analyzeFeatureRepresentatives(stale.decodes, extracted, jobs, gate, completion);
     }
     result.canceled = stopRequested();
 
@@ -2109,6 +2175,14 @@ QJsonObject timingsJson(const TimingAccumulator &timings)
     };
 }
 
+QJsonObject featureFillTimingsJson(const TimingAccumulator &timings)
+{
+    return QJsonObject{
+        {QStringLiteral("decode"), timingStatsJson(timings.decode)},
+        {QStringLiteral("dsp"), timingStatsJson(timings.dsp)},
+    };
+}
+
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
                      int featuredStale, double elapsedSecs = 0.0, const QJsonObject &timings = {},
                      bool canceled = false, const QString &power = QStringLiteral("turbo"),
@@ -2134,6 +2208,7 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         object.insert(QStringLiteral("feature_groups_processed"), featureFill->processed);
         object.insert(QStringLiteral("features_written"), featureFill->written);
         object.insert(QStringLiteral("feature_groups_failed"), featureFill->failed);
+        object.insert(QStringLiteral("feature_fill_timings"), featureFillTimingsJson(featureFill->timings));
     }
     return object;
 }
@@ -2225,6 +2300,17 @@ void emitVerboseFile(const FileAnalysis &analysis)
         << " dsp=" << analysis.timings.dspMs
         << " fp=" << analysis.timings.fpMs
         << ' ' << analysis.candidate.path << '\n';
+    err.flush();
+}
+
+void emitVerboseFeatureRepresentative(const FeatureAnalysis &analysis)
+{
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
+    err << "representative " << (analysis.failed ? "decode_failed" : "ok")
+        << " decode=" << analysis.timings.decodeMs
+        << " dsp=" << analysis.timings.dspMs
+        << ' ' << analysis.representative.path << '\n';
     err.flush();
 }
 
@@ -2342,7 +2428,8 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
+        const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, options.verbose,
+                                                         scanStarted);
         const int featured = currentFeatureCount(database);
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
                                              static_cast<int>(staleFeatureCount(database)),
@@ -2378,7 +2465,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
             if (options.progress) {
                 emitPhase(QStringLiteral("features"));
             }
-            fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
+            fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, options.verbose, scanStarted);
             fillPtr = &fill;
         }
         // No last-scan summary here: a run that analyzed nothing must not
@@ -2458,12 +2545,28 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         ++uncommitted;
         commitIfNeeded(false);
     };
-    analyzePending(pending, effective.jobs, completion);
+    // Every medium starts at the full worker pool: measured on the
+    // reference NFS library, width 16 outruns width 2 by 2.2x in aggregate
+    // even though each individual decode is 3.8x slower, so the gate acts
+    // only as a brake against pathological collapse (see DecodeGate.h).
+    // media_class stays in the terminal JSON for observability.
+    const MediaProbe::Class mediaClass = pending.empty()
+        ? MediaProbe::Class::Fast
+        : MediaProbe::classify(pending.front().path);
+    DecodeGate gate(effective.jobs, 1, effective.jobs);
+    analyzePending(pending, effective.jobs, gate, completion);
+    const auto decodeAdaptationJson = [&]() {
+        return QJsonObject{
+            {QStringLiteral("media_class"), MediaProbe::name(mediaClass)},
+            {QStringLiteral("initial"), gate.initialTarget()},
+            {QStringLiteral("final"), gate.target()},
+        };
+    };
     commitIfNeeded(true);
     commitTransaction(database);
 
     if (stopRequested()) {
-        const QJsonObject payload =
+        QJsonObject payload =
             scanJson(scanned, skipped, failed, currentGroupCount(database), currentFeatureCount(database),
                      static_cast<int>(staleFeatureCount(database)),
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - scanStarted).count(),
@@ -2471,6 +2574,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
                      true,
                      effectivePowerName,
                      effective.jobs);
+        payload.insert(QStringLiteral("decode_adaptation"), decodeAdaptationJson());
         return payload;
     }
 
@@ -2486,7 +2590,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        fill = ensureFeatureRows(database, extracted, effective.jobs, options.progress, scanStarted);
+        fill = ensureFeatureRows(database, extracted, effective.jobs, options.progress, options.verbose, scanStarted);
         fillPtr = &fill;
     }
     const double elapsedSecs =
@@ -2494,7 +2598,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
     if (options.stage == Stage::All && !fill.canceled) {
         writeLastScanSummary(database, scanned, skipped, failed, elapsedSecs, effectivePowerName);
     }
-    const QJsonObject payload =
+    QJsonObject payload =
         scanJson(scanned, skipped, failed, groups, currentFeatureCount(database),
                  static_cast<int>(staleFeatureCount(database)),
                  elapsedSecs,
@@ -2503,6 +2607,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
                  effectivePowerName,
                  effective.jobs,
                  fillPtr);
+    payload.insert(QStringLiteral("decode_adaptation"), decodeAdaptationJson());
     return payload;
 }
 
@@ -2570,6 +2675,9 @@ int runRefresh(const RefreshOptions &options)
     };
     if (options.limit > 0) {
         scanParameters.insert(QStringLiteral("limit"), options.limit);
+    }
+    if (options.semanticDecodeWorkers.has_value()) {
+        scanParameters.insert(QStringLiteral("decode_workers"), *options.semanticDecodeWorkers);
     }
     const FeatureProvider::Invocation scan = FeatureProvider::invoke(
         provider->path,
@@ -2662,7 +2770,8 @@ ProviderOptions parseProviderOptions(QStringList arguments, bool queryCommand)
     for (int index = 0; index < arguments.size(); ++index) {
         const QString word = arguments.at(index);
         if (word == QLatin1String("--features") || word == QLatin1String("--state")
-            || word == QLatin1String("--provider") || word == QLatin1String("--device")) {
+            || word == QLatin1String("--provider") || word == QLatin1String("--device")
+            || word == QLatin1String("--components")) {
             if (index + 1 >= arguments.size()) {
                 failWithCode(2, QStringLiteral("%1 needs a value").arg(word));
             }
@@ -2673,6 +2782,11 @@ ProviderOptions parseProviderOptions(QStringList arguments, bool queryCommand)
                 options.statePath = value;
             } else if (word == QLatin1String("--provider")) {
                 options.providerPath = value;
+            } else if (word == QLatin1String("--components")) {
+                if (value != QLatin1String("full") && value != QLatin1String("audio")) {
+                    failWithCode(2, QStringLiteral("--components must be full or audio"));
+                }
+                options.components = value;
             } else {
                 if (value != QLatin1String("auto") && value != QLatin1String("cuda")
                     && value != QLatin1String("cpu")) {
@@ -2735,10 +2849,38 @@ int runProviderOperation(const ProviderOptions &options,
             failWithCode(5, QStringLiteral("feature store is busy"));
         }
     }
-    const FeatureProvider::Resolved provider = requireProvider(options);
-    const FeatureProvider::Invocation invocation = FeatureProvider::invoke(
-        provider.path, operation, parameters, options.progress, stopRequested,
-        operation == QLatin1String("query") ? kProcessTimeoutMs : 0);
+    // Interactive queries skip the capabilities handshake: it doubles the
+    // provider process count for an operation whose result is provenance-
+    // checked downstream anyway. When the trusted candidate fails, fall back
+    // to full discovery once in case a later candidate is the working one.
+    const bool fastResolve = operation == QLatin1String("query");
+    const int timeoutMs = fastResolve ? kProcessTimeoutMs : 0;
+    FeatureProvider::Resolved provider;
+    FeatureProvider::Invocation invocation;
+    if (fastResolve) {
+        const auto trusted = FeatureProvider::resolveTrusted(
+            options.providerPath,
+            readStateSetting(options.statePath, QStringLiteral("analysis.semantic.providerPath")));
+        if (trusted) {
+            provider = *trusted;
+            invocation = FeatureProvider::invoke(
+                provider.path, operation, parameters, options.progress, stopRequested, timeoutMs);
+        }
+        if (!trusted || invocation.exitCode != 0) {
+            const QString trustedPath = trusted ? trusted->path : QString();
+            const FeatureProvider::Resolved discovered = requireProvider(options);
+            if (QFileInfo(discovered.path).canonicalFilePath()
+                != QFileInfo(trustedPath).canonicalFilePath()) {
+                provider = discovered;
+                invocation = FeatureProvider::invoke(
+                    provider.path, operation, parameters, options.progress, stopRequested, timeoutMs);
+            }
+        }
+    } else {
+        provider = requireProvider(options);
+        invocation = FeatureProvider::invoke(
+            provider.path, operation, parameters, options.progress, stopRequested, timeoutMs);
+    }
     if (invocation.exitCode != 0) {
         failWithCode(providerFailureCode(invocation),
                      QStringLiteral("provider %1 failed (%2): %3")
@@ -2753,7 +2895,10 @@ int runProviderOperation(const ProviderOptions &options,
 
 int runModelDownload(const ProviderOptions &options)
 {
-    return runProviderOperation(options, QStringLiteral("model-download"), {}, false);
+    // "audio" skips the ~500 MB text tower: radio and the analysis scan only
+    // need the audio graph; free-text semantic queries need the full bundle.
+    return runProviderOperation(options, QStringLiteral("model-download"),
+                                QJsonObject{{QStringLiteral("components"), options.components}}, false);
 }
 
 int runQuery(const ProviderOptions &options)
@@ -2784,10 +2929,10 @@ void printUsage()
         "Usage: muzaiten-features <refresh|status|doctor|model download|query|neighbors> [options]\n"
         "\n"
         "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
-        "        [--limit N] [--jobs N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
+        "        [--limit N] [--jobs N] [--semantic-decode-workers N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
-        "model download [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
+        "model download [--components full|audio] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
         "query TEXT [--state PATH] [--provider PATH] [--device auto|cuda|cpu] [--json]\n"
         "neighbors --force [--features PATH] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n",
         stderr);
@@ -2864,6 +3009,16 @@ RefreshOptions parseRefresh(QStringList arguments)
             if (!ok || options.jobs <= 0) {
                 failWithCode(2, QStringLiteral("refresh --jobs needs a positive integer"));
             }
+        } else if (word == QLatin1String("--semantic-decode-workers")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("refresh --semantic-decode-workers needs a positive integer"));
+            }
+            bool ok = false;
+            const int workers = arguments.at(++index).toInt(&ok);
+            if (!ok || workers <= 0) {
+                failWithCode(2, QStringLiteral("refresh --semantic-decode-workers needs a positive integer"));
+            }
+            options.semanticDecodeWorkers = workers;
         } else if (word == QLatin1String("--stage")) {
             if (index + 1 >= arguments.size()) {
                 failWithCode(2, QStringLiteral("refresh --stage needs a value"));

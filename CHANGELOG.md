@@ -2,7 +2,78 @@
 
 ## [Unreleased]
 
+### Added
+
+- The semantic model can now be installed audio-only: the download consent
+  dialog offers "Audio only" (about 285 MB) alongside the full bundle
+  (about 790 MB), and `muzaiten-features model download` gained
+  `--components full|audio`. Radio, neighbors, and the analysis scan work
+  fully on the audio component; free-text semantic search asks for the full
+  bundle by name when the text graph is absent, and upgrading later fetches
+  only the missing text files.
+
+- Semantic search arrived in the app: press `Ctrl+S` in the Search view to
+  describe the music in free text ("warm piano with brushed drums") and get
+  the analyzed library ranked by CLAP audio similarity. Result rows carry
+  rank, match score, title, artist, album, year, length, format quality, and
+  star rating, with play now / play next / add to queue actions. Queries and
+  ranking run off the UI thread; the loaded embeddings matrix and the
+  query-vector cache (shared with `muzaitenctl semantic-search`) make repeat
+  queries immediate.
+- `muzaitenctl semantic-search` now memoizes text query vectors in a
+  persistent cache (`semantic-query.sqlite` under the cache directory) keyed
+  by the active semantic generation's model identity, so repeating a query
+  skips the CLAP provider process and its cold ONNX text-session load
+  entirely. A new `--no-cache` flag forces a fresh provider embedding.
+
+### Changed
+
+- Semantic audio embeddings now pool three deterministic 10-second windows
+  per track (hash-placed in the early, middle, and late thirds) instead of
+  one, so a single unrepresentative section no longer defines a track's
+  radio neighborhood. This bumps the feature revision to
+  `clap-htsat-base-audio-window-v2`: the next semantic refresh re-embeds the
+  library (roughly 3x the per-track inference, overlapped with decoding).
+  Installed model bundles stay valid because the manifest's feature revision
+  is now informational (it names provider preprocessing, not graph bytes),
+  and legacy pre-v5 stores keep migrating under the revision they were
+  actually computed with.
+- Audio analysis gained a decode-concurrency brake against pathological
+  media collapse. Measurement drove the design twice over: on a reference
+  NFS library, sixteen concurrent full-track decodes average 4.2 s each
+  (vs about 0.3 s solo) yet still deliver 2.2x the aggregate throughput of
+  two workers, so the pool starts at full width everywhere and narrows only
+  when the windowed decode median exceeds ten seconds (dying spindles,
+  saturated links, seek storms), recovering once the collapse passes. The
+  refresh JSON reports the storage class and gate movement under
+  `decode_adaptation`, and the library scanner now starts network mounts as
+  conservatively as spinning disks when sizing its walker and tag threads
+  (its own latency controller then adapts upward).
+- The CLAP semantic scan overlaps audio decoding with model inference (one
+  batch of decode lookahead) instead of strictly alternating them, and both
+  the provider scan and the scalar-refresh decode fallback now walk
+  representatives in path order for on-disk locality. A new
+  `--semantic-decode-workers N` refresh option (and provider
+  `decode_workers` scan parameter) sizes the provider's decode pool.
+- `muzaiten-features` terminal JSON now reports decode and DSP stage timings
+  for the scalar-refresh fallback (`feature_fill_timings`) and the CLAP
+  provider reports per-decode and per-batch inference timings in its scan
+  result, so decode-bound and compute-bound scans can be told apart without
+  external profiling. `--verbose` prints one timing line per re-decoded
+  representative.
+- Semantic text queries no longer run a separate provider capability
+  handshake before the query itself: the query trusts the first resolvable
+  provider candidate and falls back to full discovery only on failure,
+  removing one Python provider process (and its startup latency) from every
+  uncached search.
+
 ### Fixed
+
+- Semantic search ranking now caps how many candidate groups it probes for
+  library membership. A stale `features.sqlite` paired with a pruned library
+  could previously send one search into minutes of full-store probing; a
+  healthy store fills the requested limit within the first few candidates and
+  is unaffected.
 
 - Gapless playback now commits each queue advance from the new stream's
   serialized event at the audio sink instead of waiting for a successful

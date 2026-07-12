@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import math
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping, Sequence
 
 from . import db
 from .embedder import Embedder
@@ -13,13 +15,62 @@ class ScanResult:
     groups: int
     embedded: int
     skipped: int
+    timings: dict[str, dict[str, float | int]]
 
-    def as_dict(self) -> dict[str, int]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "groups": self.groups,
             "embedded": self.embedded,
             "skipped": self.skipped,
+            "timings": self.timings,
         }
+
+
+def _timing_stats(values: Sequence[float], count_key: str) -> dict[str, float | int]:
+    if not values:
+        return {
+            count_key: 0,
+            "total": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+        }
+    ordered = sorted(values)
+    total = sum(ordered)
+
+    def percentile(fraction: float) -> float:
+        return ordered[math.ceil(fraction * len(ordered)) - 1]
+
+    return {
+        count_key: len(ordered),
+        "total": total,
+        "mean": total / len(ordered),
+        "p50": percentile(0.50),
+        "p95": percentile(0.95),
+    }
+
+
+def _scan_timings(embedder: Embedder) -> dict[str, dict[str, float | int]]:
+    raw = getattr(embedder, "scan_timings", {})
+    if callable(raw):
+        raw = raw()
+    timings = raw if isinstance(raw, Mapping) else {}
+    decode = timings.get("decode_ms", ())
+    infer = timings.get("infer_ms", ())
+    decode_values = [float(value) for value in decode] if isinstance(decode, Sequence) else []
+    infer_values = [float(value) for value in infer] if isinstance(infer, Sequence) else []
+    return {
+        "decode_ms": _timing_stats(decode_values, "count"),
+        "infer_ms": _timing_stats(infer_values, "batches"),
+    }
+
+
+def _split_audio_api(embedder: Embedder) -> tuple[Callable[..., object], Callable[..., object]] | None:
+    decode = getattr(embedder, "decode_audio_paths", None)
+    infer = getattr(embedder, "embed_audio_data", None)
+    if not callable(decode) or not callable(infer):
+        return None
+    return decode, infer
 
 
 def scan(
@@ -38,6 +89,9 @@ def scan(
 ) -> ScanResult:
     if batch_size < 1:
         raise ValueError("batch size must be at least 1")
+    reset_timings = getattr(embedder, "reset_scan_timings", None)
+    if callable(reset_timings):
+        reset_timings()
     with db.connect(features_path) as conn:
         db.ensure_schema(conn)
         dimension = vector_dim if vector_dim is not None else int(getattr(embedder, "dimension", 512))
@@ -61,14 +115,11 @@ def scan(
         ]
         if progress is not None:
             progress(0, len(pending))
-        for start in range(0, len(pending), batch_size):
-            if canceled is not None and canceled():
-                raise InterruptedError("semantic scan canceled")
-            batch = pending[start : start + batch_size]
-            vectors = embedder.embed_audio_paths(
-                [item.path for item in batch],
-                [item.duration_ms for item in batch],
-            )
+        split_api = _split_audio_api(embedder)
+        batches = [pending[start : start + batch_size] for start in range(0, len(pending), batch_size)]
+
+        def write_batch(batch: Sequence[db.Representative], vectors: Sequence[Sequence[float]]) -> None:
+            nonlocal embedded
             if len(vectors) != len(batch):
                 raise RuntimeError(
                     f"embedder returned {len(vectors)} vectors for {len(batch)} audio paths"
@@ -86,10 +137,45 @@ def scan(
             conn.commit()
             if progress is not None:
                 progress(embedded, len(pending))
+
+        if split_api is None:
+            for batch in batches:
+                if canceled is not None and canceled():
+                    raise InterruptedError("semantic scan canceled")
+                write_batch(
+                    batch,
+                    embedder.embed_audio_paths(
+                        [item.path for item in batch],
+                        [item.duration_ms for item in batch],
+                    ),
+                )
+        elif batches:
+            decode, infer = split_api
+            if canceled is not None and canceled():
+                raise InterruptedError("semantic scan canceled")
+            with ThreadPoolExecutor(max_workers=1) as lookahead:
+                decoded = lookahead.submit(
+                    decode,
+                    [item.path for item in batches[0]],
+                    [item.duration_ms for item in batches[0]],
+                )
+                for index, batch in enumerate(batches):
+                    if canceled is not None and canceled():
+                        raise InterruptedError("semantic scan canceled")
+                    waveforms = decoded.result()
+                    if index + 1 < len(batches):
+                        next_batch = batches[index + 1]
+                        decoded = lookahead.submit(
+                            decode,
+                            [item.path for item in next_batch],
+                            [item.duration_ms for item in next_batch],
+                        )
+                    vectors = [db.normalize_vector(vector) for vector in infer(waveforms)]
+                    write_batch(batch, vectors)
         skipped = len(representatives) - len(pending)
         if limit is None and embedded + skipped == len(representatives):
             db.complete_generation(conn, generation_id)
-        return ScanResult(len(representatives), embedded, skipped)
+        return ScanResult(len(representatives), embedded, skipped, _scan_timings(embedder))
 
 
 def neighbors(

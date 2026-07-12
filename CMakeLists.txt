@@ -63,7 +63,9 @@ set(MUZAITEN_SOURCES
     src/db/SettingsStore.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
+    src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
+    src/fs/MediaProbe.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
     src/mpd/MpdClient.cpp
@@ -164,6 +166,9 @@ set(MUZAITEN_SOURCES
     src/ui/SearchResultDelegate.cpp
     src/ui/SearchResultsModel.cpp
     src/ui/SearchView.cpp
+    src/ui/SemanticSearchData.cpp
+    src/ui/SemanticSearchDialog.cpp
+    src/features/QueryEmbedding.cpp
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
@@ -361,6 +366,8 @@ add_executable(muzaitenctl
     src/db/Database.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
+    src/features/QueryEmbedding.cpp
+    src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
     src/core/GenreTags.cpp
     src/core/MetadataBlob.cpp
@@ -406,6 +413,7 @@ add_executable(muzaiten-features
     src/indexer/FeaturesMain.cpp
     src/app/AppPaths.cpp
     src/features/ProviderClient.cpp
+    src/fs/MediaProbe.cpp
 )
 target_include_directories(muzaiten-features PRIVATE src)
 target_link_libraries(muzaiten-features PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)

@@ -1,6 +1,7 @@
 #include "scanner/ScanPipeline.h"
 
 #include "core/MetadataBlob.h"
+#include "fs/MediaProbe.h"
 #include "scanner/DirectoryWalker.h"
 #include "scanner/PathMetadataGuesser.h"
 #include "scanner/TagReader.h"
@@ -19,8 +20,6 @@
 #include <thread>
 
 #include <sys/resource.h>
-#include <sys/stat.h>
-#include <sys/sysmacros.h>
 
 Q_LOGGING_CATEGORY(scanPipelineLog, "muzaiten.scan")
 
@@ -31,26 +30,6 @@ struct ThreadCounts {
     int tags;
 };
 
-bool isRotational(const QString &path)
-{
-    struct stat st {};
-    if (stat(path.toUtf8().constData(), &st) != 0) {
-        return false;
-    }
-    const QString devLink = QStringLiteral("/sys/dev/block/%1:%2")
-                                .arg(major(st.st_dev))
-                                .arg(minor(st.st_dev));
-    QString devDir = QFileInfo(devLink).canonicalFilePath();
-    for (int level = 0; level < 2 && !devDir.isEmpty(); ++level) {
-        QFile flag(devDir + QStringLiteral("/queue/rotational"));
-        if (flag.exists() && flag.open(QIODevice::ReadOnly)) {
-            return flag.readAll().trimmed() == "1";
-        }
-        devDir = QFileInfo(devDir).path(); // partition -> parent disk
-    }
-    return false;
-}
-
 ThreadCounts resolveThreads(const QString &root, const ScanPipeline::Options &options)
 {
     const int cores = std::max(2, QThread::idealThreadCount());
@@ -60,7 +39,10 @@ ThreadCounts resolveThreads(const QString &root, const ScanPipeline::Options &op
         return {walkers, tags};
     }
 
-    if (isRotational(root)) {
+    // Network mounts start as conservatively as spinning disks: neither
+    // rewards concurrent seeks, and the runtime latency controller raises
+    // the worker count again when the medium turns out to be fast.
+    if (MediaProbe::seekSensitive(MediaProbe::classify(root))) {
         if (walkers <= 0) {
             walkers = 2;
         }

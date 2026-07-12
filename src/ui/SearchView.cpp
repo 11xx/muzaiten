@@ -226,6 +226,10 @@ bool SearchView::eventFilter(QObject *watched, QEvent *event)
     // Key handling on the search box (input mode) and the list (browse mode).
     if (watched == m_searchBox && event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
+        if (ke->key() == Qt::Key_S && ke->modifiers() == Qt::ControlModifier) {
+            emit semanticSearchRequested();
+            return true;
+        }
         if (handleNavKey(ke)) {
             return true;
         }
@@ -235,10 +239,14 @@ bool SearchView::eventFilter(QObject *watched, QEvent *event)
 
     if (watched == m_resultList && event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
-        // In browse mode, '/' (or C-s) returns to the search box.
-        if ((ke->key() == Qt::Key_Slash && ke->modifiers() == Qt::NoModifier)
-            || (ke->key() == Qt::Key_S && ke->modifiers() == Qt::ControlModifier)) {
+        // In browse mode, '/' returns to the search box; Ctrl+S opens the
+        // semantic describe-the-music search instead.
+        if (ke->key() == Qt::Key_Slash && ke->modifiers() == Qt::NoModifier) {
             focusSearchBox();
+            return true;
+        }
+        if (ke->key() == Qt::Key_S && ke->modifiers() == Qt::ControlModifier) {
+            emit semanticSearchRequested();
             return true;
         }
         if (handleNavKey(ke)) {

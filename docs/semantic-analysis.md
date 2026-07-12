@@ -71,10 +71,15 @@ muzaiten-features model download --progress=jsonl
 The download fetches the hosted, pre-converted model bundle from
 [muzaiten/clap-htsat-base-onnx](https://huggingface.co/muzaiten/clap-htsat-base-onnx):
 about 790 MB of fp32 ONNX audio and text graphs plus the exact tokenizer.
-The provider rejects the bundle's manifest unless its checkpoint hash,
-feature revision, and format version match the installed release, verifies
-every file hash while streaming byte progress, and installs the bundle
-atomically. No PyTorch or conversion stack is involved, and the 2.35 GB
+Radio, neighbors, and the analysis scan need only the audio graph, so the
+consent dialog (and `model download --components audio`) also offers an
+audio-only install of about 285 MB; free-text semantic search needs the
+full bundle, and upgrading later fetches only the missing text files.
+The provider rejects the bundle's manifest unless its checkpoint hash and
+format version match the installed release (the feature revision in the
+manifest is informational: it names the provider's windowing scheme, not
+the graph bytes), verifies every file hash while streaming byte progress,
+and installs the bundle atomically. No PyTorch or conversion stack is involved, and the 2.35 GB
 source checkpoint is never downloaded. Artifact hashes are verified at
 installation; later operations check the manifest identity and file
 presence, so status checks and text queries never re-hash the artifacts.
@@ -107,6 +112,14 @@ muzaitenctl semantic-search "melancholic shoegaze" --limit 10
 keeps ranking and preferred-copy selection locally. Query provenance must match
 the active semantic generation. The hidden `--query-vector-json` option remains
 available only for deterministic tests.
+
+Each track's stored embedding pools three deterministic 10-second windows
+(hash-placed in the early, middle, and late thirds of the track), mean-pooled
+and renormalized, so one unrepresentative section cannot define the whole
+track. Tracks at or under ten seconds, or with unknown duration, embed a
+single window. This is feature revision `clap-htsat-base-audio-window-v2`;
+stores built by the earlier single-window revision re-embed on the next
+semantic refresh.
 
 ## Provenance
 

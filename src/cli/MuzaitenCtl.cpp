@@ -11,6 +11,8 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "features/FeatureStore.h"
+#include "features/QueryEmbedding.h"
+#include "features/QueryVectorCache.h"
 #include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
 #include "reco/GenreCuration.h"
@@ -78,7 +80,7 @@ void printUsage()
         "      --fuzzy               fuzzy match instead of exact substring\n"
         "      --refresh             rebuild the on-disk cache from the library\n"
         "      --clear-cache         delete the cache and exit\n"
-        "  semantic-search [--limit N] <text>\n"
+        "  semantic-search [--limit N] [--no-cache] <text>\n"
         "                          CLAP text-to-library search (requires muzaiten-features-clap)\n"
         "  genre-report [--plain]  dump folded genre vocabulary stats (works offline)\n"
         "  features-status         show features.sqlite coverage (works offline)\n"
@@ -389,166 +391,6 @@ struct SemanticSearchResult {
     DuplicateMember member;
 };
 
-QVector<float> normalizedVector(const QVector<float> &values, QString *error)
-{
-    if (values.isEmpty()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("embedding vector is empty");
-        }
-        return {};
-    }
-
-    double normSquared = 0.0;
-    for (float value : values) {
-        if (!std::isfinite(value)) {
-            if (error != nullptr) {
-                *error = QStringLiteral("embedding vector contains a non-finite value");
-            }
-            return {};
-        }
-        normSquared += static_cast<double>(value) * static_cast<double>(value);
-    }
-    if (!(normSquared > 0.0) || !std::isfinite(normSquared)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("embedding vector must have a finite non-zero norm");
-        }
-        return {};
-    }
-
-    const double scale = 1.0 / std::sqrt(normSquared);
-    QVector<float> normalized;
-    normalized.reserve(values.size());
-    for (float value : values) {
-        normalized.push_back(static_cast<float>(static_cast<double>(value) * scale));
-    }
-    return normalized;
-}
-
-QVector<float> vectorFromJsonArray(const QJsonArray &array, QString *error)
-{
-    QVector<float> raw;
-    raw.reserve(array.size());
-    for (qsizetype i = 0; i < array.size(); ++i) {
-        const QJsonValue value = array.at(i);
-        if (!value.isDouble()) {
-            if (error != nullptr) {
-                *error = QStringLiteral("embedding vector entry %1 is not numeric").arg(i);
-            }
-            return {};
-        }
-        const double number = value.toDouble();
-        if (!std::isfinite(number)) {
-            if (error != nullptr) {
-                *error = QStringLiteral("embedding vector entry %1 is not finite").arg(i);
-            }
-            return {};
-        }
-        raw.push_back(static_cast<float>(number));
-    }
-    return normalizedVector(raw, error);
-}
-
-QVector<float> parseQueryVectorJson(const QByteArray &json, QString *error)
-{
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        if (error != nullptr) {
-            *error = QStringLiteral("could not parse query embedding JSON: %1").arg(parseError.errorString());
-        }
-        return {};
-    }
-
-    if (document.isArray()) {
-        return vectorFromJsonArray(document.array(), error);
-    }
-    if (!document.isObject()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("query embedding JSON must be an array or object");
-        }
-        return {};
-    }
-
-    const QJsonObject object = document.object();
-    const QJsonValue vectorValue = object.value(QStringLiteral("vector")).isArray()
-        ? object.value(QStringLiteral("vector"))
-        : object.value(QStringLiteral("embedding"));
-    if (!vectorValue.isArray()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("query embedding JSON object must contain a vector array");
-        }
-        return {};
-    }
-    return vectorFromJsonArray(vectorValue.toArray(), error);
-}
-
-QString compactProcessError(QString value)
-{
-    value.replace(QLatin1Char('\n'), QLatin1Char(' '));
-    value.replace(QLatin1Char('\r'), QLatin1Char(' '));
-    if (value.size() > 500) {
-        value = value.left(500).trimmed() + QStringLiteral("...");
-    }
-    return value;
-}
-
-QVector<float> queryEmbeddingViaFeatures(const QString &text, QJsonObject *metadata, QString *error)
-{
-    const QString sibling = QDir(QCoreApplication::applicationDirPath())
-                                .filePath(QStringLiteral("muzaiten-features"));
-    const QString executable = QFileInfo(sibling).isExecutable()
-        ? sibling
-        : QStandardPaths::findExecutable(QStringLiteral("muzaiten-features"));
-    if (executable.isEmpty()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires muzaiten-features");
-        }
-        return {};
-    }
-
-    QProcess process;
-    process.start(executable, {QStringLiteral("query"), text, QStringLiteral("--json")});
-    if (!process.waitForStarted(5000)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("semantic search could not start muzaiten-features");
-        }
-        return {};
-    }
-    if (!process.waitForFinished(semanticQueryTimeoutMs)) {
-        process.kill();
-        process.waitForFinished(1000);
-        if (error != nullptr) {
-            *error = QStringLiteral("semantic search query through muzaiten-features timed out");
-        }
-        return {};
-    }
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        QString detail = QString::fromUtf8(process.readAllStandardError()).trimmed();
-        if (detail.isEmpty()) {
-            detail = QStringLiteral("query failed");
-        }
-        if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires a ready CLAP provider: %1").arg(compactProcessError(detail));
-        }
-        return {};
-    }
-
-    QString parseError;
-    const QByteArray output = process.readAllStandardOutput();
-    const QJsonDocument document = QJsonDocument::fromJson(output);
-    if (metadata != nullptr && document.isObject()) {
-        *metadata = document.object();
-    }
-    QVector<float> vector = parseQueryVectorJson(output, &parseError);
-    if (vector.isEmpty()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("semantic search requires a ready CLAP provider: %1").arg(parseError);
-        }
-        return {};
-    }
-    return vector;
-}
-
 double cosineSimilarity(const QVector<float> &left, const QVector<float> &right)
 {
     if (left.size() != right.size() || left.isEmpty()) {
@@ -646,7 +488,17 @@ QVector<SemanticSearchResult> rankSemanticMatches(const QVector<float> &queryVec
     const QHash<qint64, QString> pins = db.contentGroupPins();
     QVector<SemanticSearchResult> results;
     results.reserve(std::min(static_cast<qsizetype>(limit), scores.size()));
+    // Each candidate group costs several library queries. When the stores
+    // disagree (stale features.sqlite vs pruned library), no candidate ever
+    // matches and an unbounded walk would turn one search into minutes of
+    // full-store probing; a healthy store fills `limit` within the first
+    // few candidates, so the cap only bites in the mismatched case.
+    const qsizetype maxCandidates = std::max<qsizetype>(static_cast<qsizetype>(limit) * 20, 500);
+    qsizetype examined = 0;
     for (const SemanticScore &score : scores) {
+        if (++examined > maxCandidates) {
+            break;
+        }
         const DuplicateMember member = bestCopyForGroup(db, features, score.groupId, pins.value(score.groupId));
         if (member.track.path.isEmpty()) {
             continue;
@@ -1491,6 +1343,7 @@ int runSearch(QStringList arguments, bool json)
 int runSemanticSearch(QStringList arguments, bool json)
 {
     bool jsonOut = json;
+    bool useCache = true;
     int limit = defaultSemanticSearchLimit;
     QByteArray queryVectorJson;
     QStringList queryWords;
@@ -1499,6 +1352,8 @@ int runSemanticSearch(QStringList arguments, bool json)
         const QString word = arguments.at(i);
         if (word == QLatin1String("--json")) {
             jsonOut = true;
+        } else if (word == QLatin1String("--no-cache")) {
+            useCache = false;
         } else if (word == QLatin1String("--limit")) {
             bool ok = false;
             if (i + 1 >= arguments.size() || (limit = arguments.at(++i).toInt(&ok)) <= 0 || !ok) {
@@ -1540,16 +1395,40 @@ int runSemanticSearch(QStringList arguments, bool json)
         return fail(db.lastError());
     }
 
+    // The cache key is the active generation's model identity: a hit is by
+    // construction provenance-correct, so it skips both the provider process
+    // and the metadata comparison below.
+    QueryVectorCache::Identity cacheIdentity;
+    if (features.schemaVersion() >= 5) {
+        const auto generation = features.activeSemanticGeneration();
+        if (generation.valid()) {
+            cacheIdentity = {generation.capability, generation.model, generation.checkpointSha256,
+                             generation.featureRevision, generation.vectorDimension};
+        }
+    }
+
     QString vectorError;
     QJsonObject queryMetadata;
-    const QVector<float> queryVector = queryVectorJson.isEmpty()
-        ? queryEmbeddingViaFeatures(queryText, &queryMetadata, &vectorError)
-        : parseQueryVectorJson(queryVectorJson, &vectorError);
+    QVector<float> queryVector;
+    bool fromCache = false;
+    if (!queryVectorJson.isEmpty()) {
+        queryVector = QueryEmbedding::parseVectorJson(queryVectorJson, &vectorError);
+    } else if (useCache && cacheIdentity.valid()) {
+        QueryVectorCache cache(QueryVectorCache::defaultPath());
+        queryVector = cache.lookup(cacheIdentity, queryText);
+        fromCache = !queryVector.isEmpty();
+    }
+    if (queryVector.isEmpty() && queryVectorJson.isEmpty()) {
+        QueryEmbedding::Result embedded = QueryEmbedding::viaFeatures(queryText, semanticQueryTimeoutMs);
+        queryVector = embedded.vector;
+        queryMetadata = embedded.metadata;
+        vectorError = embedded.error;
+    }
     if (queryVector.isEmpty()) {
         return fail(vectorError.isEmpty() ? QStringLiteral("semantic-search could not build a query embedding")
                                           : vectorError);
     }
-    if (queryVectorJson.isEmpty() && features.schemaVersion() >= 5) {
+    if (queryVectorJson.isEmpty() && !fromCache && features.schemaVersion() >= 5) {
         const auto generation = features.activeSemanticGeneration();
         const bool matches = generation.valid()
             && queryMetadata.value(QStringLiteral("capability")).toString() == generation.capability
@@ -1562,6 +1441,10 @@ int runSemanticSearch(QStringList arguments, bool json)
         if (!matches) {
             return fail(QStringLiteral(
                 "semantic query generation does not match the active features.sqlite generation; refresh semantic features"));
+        }
+        if (useCache && cacheIdentity.valid()) {
+            QueryVectorCache cache(QueryVectorCache::defaultPath());
+            cache.store(cacheIdentity, queryText, queryVector);
         }
     }
 

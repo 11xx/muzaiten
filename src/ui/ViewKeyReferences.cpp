@@ -22,7 +22,8 @@ KeyBindingReferenceList SearchView::keyBindingReference()
         {QStringLiteral("a"), QStringLiteral("Add selection to playlist… (browse mode)")},
         {QStringLiteral("Ctrl+F"), QStringLiteral("Toggle fuzzy mode")},
         {QStringLiteral("F5"), QStringLiteral("Refresh search index")},
-        {QStringLiteral("/ or Ctrl+S"), QStringLiteral("Return to search box (browse mode)")},
+        {QStringLiteral("/"), QStringLiteral("Return to search box (browse mode)")},
+        {QStringLiteral("Ctrl+S"), QStringLiteral("Semantic search (describe the music)")},
         {QStringLiteral("Esc / Ctrl+G"), QStringLiteral("Clear search, then leave input")},
         {QStringLiteral("Ctrl+Wheel"), QStringLiteral("Adjust result row height")},
     };

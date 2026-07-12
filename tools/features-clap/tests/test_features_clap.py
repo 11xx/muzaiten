@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import threading
 import sqlite3
 import sys
 from dataclasses import dataclass, field
@@ -23,12 +24,14 @@ from muzaiten_features_clap.model import (
     MODEL_NAME,
     MODEL_SHA256,
     MODEL_VERSION,
+    OnnxClapEmbedder,
     TEXT_MODEL_FILENAME,
     TOKENIZER_FILENAME,
     _decode_audio_command,
     artifact_status,
     checkpoint_status,
     download_checkpoint,
+    window_offsets_ms,
     file_sha256,
     inference_thread_count,
     prepare_waveform,
@@ -79,6 +82,60 @@ class FailingSecondBatchEmbedder(FakeEmbedder):
         if self.batches:
             raise RuntimeError("fixture batch failure")
         return super().embed_audio_paths(paths, durations_ms)
+
+
+class NormalizingFakeEmbedder(FakeEmbedder):
+    def embed_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[Sequence[float]]:
+        return [db.normalize_vector(vector) for vector in super().embed_audio_paths(paths, durations_ms)]
+
+
+@dataclass
+class SplitFakeEmbedder(FakeEmbedder):
+    decode_batches: list[list[Path]] = field(default_factory=list)
+    inference_batches: list[list[Path]] = field(default_factory=list)
+    second_decode_started: threading.Event = field(default_factory=threading.Event)
+    release_second_decode: threading.Event = field(default_factory=threading.Event)
+
+    def decode_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[object]:
+        batch = list(paths)
+        self.decode_batches.append(batch)
+        if len(self.decode_batches) == 2:
+            self.second_decode_started.set()
+            assert self.release_second_decode.wait(timeout=1)
+        return batch
+
+    def embed_audio_data(self, waveforms: Sequence[object]) -> Sequence[Sequence[float]]:
+        batch = [Path(waveform) for waveform in waveforms]
+        self.inference_batches.append(batch)
+        if len(self.inference_batches) == 1:
+            assert self.second_decode_started.wait(timeout=1)
+            self.release_second_decode.set()
+        return [self.vectors[path] for path in batch]
+
+    @property
+    def scan_timings(self) -> dict[str, list[float]]:
+        return {
+            "decode_ms": [10.0] * sum(len(batch) for batch in self.decode_batches),
+            "infer_ms": [20.0] * len(self.inference_batches),
+        }
+
+
+@dataclass
+class TimedFakeEmbedder(FakeEmbedder):
+    @property
+    def scan_timings(self) -> dict[str, list[float]]:
+        return {
+            "decode_ms": [10.0] * len(self.calls),
+            "infer_ms": [20.0] * len(self.batches),
+        }
 
 
 @pytest.fixture
@@ -143,7 +200,27 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
     )
 
     first = scan(features_path, fake, limit=3, batch_size=2)
-    assert first.as_dict() == {"groups": 3, "embedded": 3, "skipped": 0}
+    assert first.as_dict() == {
+        "groups": 3,
+        "embedded": 3,
+        "skipped": 0,
+        "timings": {
+            "decode_ms": {
+                "count": 0,
+                "total": 0.0,
+                "mean": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+            },
+            "infer_ms": {
+                "batches": 0,
+                "total": 0.0,
+                "mean": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+            },
+        },
+    }
     assert fake.calls == [
         Path("/music/a-copy.flac"),
         Path("/music/b.flac"),
@@ -168,12 +245,43 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
         assert db.unpack_vector(rows[1]["vector"], 2) == pytest.approx((0.0, 1.0))
 
     second = scan(features_path, fake, limit=3, batch_size=2)
-    assert second.as_dict() == {"groups": 3, "embedded": 0, "skipped": 3}
+    assert second.as_dict()["groups"] == 3
+    assert second.as_dict()["embedded"] == 0
+    assert second.as_dict()["skipped"] == 3
     assert fake.calls == [
         Path("/music/a-copy.flac"),
         Path("/music/b.flac"),
         Path("/music/c.flac"),
     ]
+
+
+def test_scan_reports_optional_embedder_timings(features_path: Path) -> None:
+    fake = TimedFakeEmbedder(
+        {
+            Path("/music/a-copy.flac"): (3.0, 0.0),
+            Path("/music/b.flac"): (0.0, 4.0),
+            Path("/music/c.flac"): (1.0, 1.0),
+        },
+    )
+
+    result = scan(features_path, fake, limit=3, batch_size=2).as_dict()
+
+    assert result["timings"] == {
+        "decode_ms": {
+            "count": 3,
+            "total": 30.0,
+            "mean": 10.0,
+            "p50": 10.0,
+            "p95": 10.0,
+        },
+        "infer_ms": {
+            "batches": 2,
+            "total": 40.0,
+            "mean": 20.0,
+            "p50": 20.0,
+            "p95": 20.0,
+        },
+    }
 
 
 def test_scan_rejects_non_positive_batch_size(features_path: Path) -> None:
@@ -201,6 +309,63 @@ def test_scan_commits_each_completed_batch(features_path: Path) -> None:
             "SELECT content_group_id FROM embeddings ORDER BY content_group_id"
         ).fetchall()
     assert [int(row["content_group_id"]) for row in group_ids] == [10, 11]
+
+
+def test_split_api_lookahead_matches_sequential_vectors_and_resume(
+    features_path: Path,
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.sqlite"
+    baseline_path.write_bytes(features_path.read_bytes())
+    vectors = {
+        Path("/music/a-copy.flac"): (3.0, 4.0),
+        Path("/music/b.flac"): (5.0, 12.0),
+        Path("/music/c.flac"): (8.0, 15.0),
+        Path("/music/d.flac"): (-7.0, 24.0),
+    }
+    sequential = NormalizingFakeEmbedder(vectors)
+    split = SplitFakeEmbedder(vectors)
+
+    scan(baseline_path, sequential, batch_size=2)
+    result = scan(features_path, split, batch_size=2)
+
+    assert split.decode_batches == split.inference_batches == [
+        [Path("/music/a-copy.flac"), Path("/music/b.flac")],
+        [Path("/music/c.flac"), Path("/music/d.flac")],
+    ]
+    assert result.as_dict()["timings"] == {
+        "decode_ms": {"count": 4, "total": 40.0, "mean": 10.0, "p50": 10.0, "p95": 10.0},
+        "infer_ms": {"batches": 2, "total": 40.0, "mean": 20.0, "p50": 20.0, "p95": 20.0},
+    }
+    with db.connect(baseline_path) as baseline, db.connect(features_path) as lookahead:
+        baseline_rows = baseline.execute(
+            "SELECT content_group_id, vector FROM embeddings ORDER BY content_group_id"
+        ).fetchall()
+        lookahead_rows = lookahead.execute(
+            "SELECT content_group_id, vector FROM embeddings ORDER BY content_group_id"
+        ).fetchall()
+    assert [(row["content_group_id"], row["vector"]) for row in lookahead_rows] == [
+        (row["content_group_id"], row["vector"]) for row in baseline_rows
+    ]
+
+    resumed = scan(features_path, split, batch_size=2)
+    assert resumed.embedded == 0
+    assert resumed.skipped == 4
+
+
+def test_representative_groups_are_ordered_by_path(features_path: Path) -> None:
+    with db.connect(features_path) as conn:
+        conn.execute("INSERT INTO content_groups(id) VALUES(20)")
+        conn.execute(
+            "INSERT INTO files(path, mtime, size, duration_ms, decode_hash, content_group_id, "
+            "analyzed_at, status) VALUES('/music/0.flac', 1, 2, 3000, 'hash-0', 20, 1000, 'ok')"
+        )
+        representatives = db.representative_groups(conn, limit=2)
+
+    assert [(item.content_group_id, item.path) for item in representatives] == [
+        (20, Path("/music/0.flac")),
+        (10, Path("/music/a-copy.flac")),
+    ]
 
 
 def test_generation_change_activates_partial_new_corpus_and_hides_old_neighbors(
@@ -378,11 +543,21 @@ def test_query_embedding_normalizes_fake_text_vector() -> None:
 
 def test_audio_decode_is_bounded_to_a_stable_ten_second_window() -> None:
     long_path = Path("/music/long.flac")
-    long_command = _decode_audio_command(long_path, duration_ms=240_000)
-    repeated_command = _decode_audio_command(long_path, duration_ms=240_000)
-    short_command = _decode_audio_command(Path("/music/short.flac"), duration_ms=3_000)
+    offsets = window_offsets_ms(long_path, 240_000)
+    repeated = window_offsets_ms(long_path, 240_000)
 
-    assert long_command == repeated_command
+    assert offsets == repeated
+    assert len(offsets) == 3
+    span = 230_000
+    for index, offset in enumerate(offsets):
+        assert offset is not None
+        assert span * index // 3 <= offset <= span * (index + 1) // 3
+
+    assert window_offsets_ms(Path("/music/short.flac"), 3_000) == [None]
+    assert window_offsets_ms(Path("/music/unknown.flac"), None) == [None]
+
+    long_command = _decode_audio_command(long_path, offsets[2])
+    short_command = _decode_audio_command(Path("/music/short.flac"), None)
     offset = float(long_command[long_command.index("-ss") + 1])
     assert 0.0 <= offset <= 230.0
     assert "-ss" not in short_command
@@ -478,6 +653,42 @@ def test_interactive_operations_never_hash_artifacts(
     assert result["dim"] == 2
 
 
+def test_protocol_scan_passes_decode_workers_to_embedder(
+    features_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    monkeypatch.setattr(
+        protocol_module,
+        "artifact_status",
+        lambda *, verify=True, required=("audio",): SimpleNamespace(
+            present=True, valid=True, path=tmp_path, components=("audio", "text")),
+    )
+    monkeypatch.setattr(protocol_module, "resolve_device", lambda _choice: "cpu")
+    received: dict[str, object] = {}
+    fake = FakeEmbedder({Path("/music/a-copy.flac"): (1.0, 0.0)})
+
+    def factory(**kwargs: object) -> FakeEmbedder:
+        received.update(kwargs)
+        return fake
+
+    result = protocol_module.run_request(
+        protocol_module.Request(
+            "scan-workers",
+            "scan",
+            {"features": str(features_path), "limit": 1, "decode_workers": 2},
+        ),
+        lambda _event: None,
+        lambda: False,
+        embedder_factory=factory,
+    )
+
+    assert received["decode_workers"] == 2
+    assert result["embedded"] == 1
+
+
 def test_protocol_status_does_not_load_real_model(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -507,7 +718,7 @@ def test_protocol_status_does_not_load_real_model(
     assert payload["store"]["embeddings"] == 0
     assert payload["store"]["neighbor_rows"] == 0
     assert payload["model"]["name"] == "laion-clap-music-audioset"
-    assert payload["feature_revision"] == "clap-htsat-base-audio-window-v1"
+    assert payload["feature_revision"] == "clap-htsat-base-audio-window-v2"
 
 
 def test_protocol_routes_incidental_stdout_away_from_jsonl(
@@ -724,6 +935,7 @@ def test_probe_device_is_none_without_onnxruntime(monkeypatch: pytest.MonkeyPatc
     [
         ({"features": "x.sqlite", "device": 7}, "device must be a string"),
         ({"features": "x.sqlite", "batch_size": 0}, "batch_size must be a positive integer"),
+        ({"features": "x.sqlite", "decode_workers": 0}, "decode_workers must be a positive integer"),
     ],
 )
 def test_protocol_rejects_invalid_scan_parameters(
@@ -929,6 +1141,141 @@ def test_download_artifacts_installs_verified_hosted_bundle(
     assert calls == []
 
 
+def test_download_artifacts_audio_only_then_upgrade_to_full(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, _manifest = _hosted_bundle(tmp_path)
+
+    calls: list[str] = []
+    result = model.download_artifacts(
+        "https://example.invalid/bundle",
+        opener=_bundle_opener(payloads, calls),
+        components=("audio",),
+    )
+    assert result.downloaded is True
+    assert TEXT_MODEL_FILENAME not in calls
+    audio_only = artifact_status(required=("audio",))
+    assert audio_only.valid is True
+    assert audio_only.components == ("audio",)
+    assert artifact_status().valid is False  # full still missing text
+
+    # Upgrading reuses the installed audio graph instead of re-downloading.
+    upgrade_calls: list[str] = []
+    upgraded = model.download_artifacts(
+        "https://example.invalid/bundle",
+        opener=_bundle_opener(payloads, upgrade_calls),
+        components=("audio", "text"),
+    )
+    assert upgraded.downloaded is True
+    assert AUDIO_MODEL_FILENAME not in upgrade_calls
+    assert TEXT_MODEL_FILENAME in upgrade_calls
+    full = artifact_status()
+    assert full.valid is True
+    assert set(full.components) == {"audio", "text"}
+
+    with pytest.raises(RuntimeError, match="audio component"):
+        model.download_artifacts(
+            "https://example.invalid/bundle",
+            opener=_bundle_opener(payloads, []),
+            components=("text",),
+        )
+
+
+def test_protocol_query_names_missing_text_component(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, _manifest = _hosted_bundle(tmp_path)
+    model.download_artifacts(
+        "https://example.invalid/bundle",
+        opener=_bundle_opener(payloads, []),
+        components=("audio",),
+    )
+
+    with pytest.raises(FileNotFoundError, match="text model component"):
+        protocol_module.run_request(
+            protocol_module.Request("q1", "query", {"text": "warm piano"}),
+            lambda _e: None,
+            lambda: False,
+            embedder_factory=lambda **_kwargs: pytest.fail("query must not build an embedder"),
+        )
+
+
+def test_embed_audio_data_mean_pools_window_groups() -> None:
+    import numpy as np
+
+    class PoolingProbe:
+        _np = np
+
+        def __init__(self) -> None:
+            self.batches: list[int] = []
+            self._infer_timings_ms: list[float] = []
+
+        def _get_audio_session(self):
+            probe = self
+
+            class Session:
+                def run(self, _outputs, feeds):
+                    batch = feeds["waveform"]
+                    probe.batches.append(batch.shape[0])
+                    # Distinct unit rows per window: index k -> e_k basis.
+                    rows = np.zeros((batch.shape[0], 4), dtype=np.float32)
+                    for index in range(batch.shape[0]):
+                        rows[index, index % 4] = 1.0
+                    return [rows]
+
+            return Session()
+
+    wave = np.zeros(480_000, dtype=np.float32)
+    wave[0] = 0.5
+    pooled = OnnxClapEmbedder.embed_audio_data(
+        PoolingProbe(), [(wave, wave, wave), wave]
+    )
+
+    assert len(pooled) == 2
+    # First item pooled over windows 0,1,2 -> mean of e0,e1,e2.
+    assert pooled[0] == pytest.approx((1 / 3, 1 / 3, 1 / 3, 0.0))
+    # Second item is a bare waveform: passes through as one row (e3).
+    assert pooled[1] == pytest.approx((0.0, 0.0, 0.0, 1.0))
+
+
+def test_decode_paths_group_windows_per_track(monkeypatch: pytest.MonkeyPatch) -> None:
+    import numpy as np
+
+    decoded: list[tuple[Path, int | None, int | None]] = []
+
+    def fake_decode(path: Path, duration_ms: int | None = None, offset_ms: int | None = None):
+        decoded.append((path, duration_ms, offset_ms))
+        return np.zeros((1, 8), dtype=np.float32)
+
+    monkeypatch.setattr(model, "decode_audio_ffmpeg", fake_decode)
+
+    class DecodeProbe:
+        decode_workers = 2
+        _decode_timings_ms: list[float] = []
+        _decode_audio_window = OnnxClapEmbedder._decode_audio_window
+
+    long_track = Path("/music/long.flac")
+    short_track = Path("/music/short.flac")
+    grouped = OnnxClapEmbedder.decode_audio_paths(
+        DecodeProbe(), [long_track, short_track], [240_000, 3_000]
+    )
+
+    assert len(grouped) == 2
+    assert len(grouped[0]) == 3  # three windows for the long track
+    assert len(grouped[1]) == 1  # short track collapses to one read
+    long_offsets = [spec[2] for spec in decoded if spec[0] == long_track]
+    assert long_offsets == window_offsets_ms(long_track, 240_000)
+    assert [spec[2] for spec in decoded if spec[0] == short_track] == [None]
+
+
 def test_download_artifacts_rejects_tampered_bytes_and_wrong_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -947,15 +1294,25 @@ def test_download_artifacts_rejects_tampered_bytes_and_wrong_identity(
     assert list(cache.iterdir()) == []
 
     foreign = dict(manifest)
-    foreign["feature_revision"] = "some-other-revision"
+    foreign["checkpoint_sha256"] = "0" * 64
     payloads[MANIFEST_FILENAME] = json.dumps(foreign).encode()
     calls: list[str] = []
-    with pytest.raises(RuntimeError, match="feature_revision"):
+    with pytest.raises(RuntimeError, match="checkpoint_sha256"):
         model.download_artifacts(
             "https://example.invalid/bundle", opener=_bundle_opener(payloads, calls)
         )
     # Identity is rejected before any artifact bytes are fetched.
     assert calls == [MANIFEST_FILENAME]
+
+    # A manifest exported under another windowing revision stays installable:
+    # the revision names provider preprocessing, not the graph bytes.
+    other_revision = dict(manifest)
+    other_revision["feature_revision"] = "some-other-revision"
+    assert model.validate_manifest_identity(other_revision)
+    stripped = dict(manifest)
+    stripped["feature_revision"] = ""
+    with pytest.raises(RuntimeError, match="feature_revision"):
+        model.validate_manifest_identity(stripped)
 
 
 def test_protocol_model_download_prefers_hosted_bundle(
@@ -975,9 +1332,8 @@ def test_protocol_model_download_prefers_hosted_bundle(
     monkeypatch.setattr(
         protocol_module,
         "download_artifacts",
-        lambda url, progress=None, canceled=None: model.ArtifactDownload(
-            installed, downloaded=True
-        ),
+        lambda url, progress=None, canceled=None, components=("audio", "text"):
+            model.ArtifactDownload(installed, downloaded=True),
     )
 
     request = protocol_module.Request("d1", "model-download", {})

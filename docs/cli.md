@@ -42,6 +42,7 @@ next radio session. `radio-learn` is suggestion-only: it saves a
 ```sh
 muzaitenctl search [opts] [text]        # client-side folded search / fzf picker
 muzaitenctl semantic-search "<text>"    # CLAP text-to-library search
+                                        #   [--limit N] [--no-cache]
 muzaitenctl features-status             # features.sqlite coverage report
 muzaitenctl duplicate-groups [--min-size N]
 muzaitenctl pin-copy <group-id> <path> | unpin-copy <group-id>
@@ -50,6 +51,12 @@ muzaitenctl pin-copy <group-id> <path> | unpin-copy <group-id>
 Search details and query syntax: [search.md](search.md). The analysis
 pipeline that produces `features.sqlite` (the in-app runner,
 `muzaiten-features`, and the optional CLAP embedder): [radio.md](radio.md).
+
+Repeated `semantic-search` texts answer from a persistent query-vector
+cache (`semantic-query.sqlite` under the cache directory) keyed by the
+active model identity, skipping the provider process entirely; pass
+`--no-cache` to force a fresh provider embedding. The cache is disposable:
+deleting the file only costs the next query a warm-up.
 
 ## Scrobble backfill
 
@@ -78,6 +85,7 @@ muzaiten-features refresh --no-semantic --power background
 muzaiten-features status --json
 muzaiten-features doctor
 muzaiten-features model download --progress=jsonl
+muzaiten-features model download --components audio   # 285 MB, radio/analysis only
 muzaiten-features query "warm piano with brushed drums" --json
 muzaiten-features neighbors --force
 ```
@@ -91,6 +99,8 @@ start Python. `--provider PATH` overrides provider discovery.
 priority; `--jobs N` overrides only the worker count. `--verbose` writes
 per-file diagnostics to stderr. `--progress=jsonl` writes versioned phase,
 progress, and one terminal result event to stdout; stderr remains diagnostic.
+`--semantic-decode-workers N` sets the optional CLAP provider's concurrent
+audio decodes for that refresh; omit it to use the provider default.
 After the scalar-feature phase, counters describe stale representative groups,
 not files. Provider embedding and neighbor events use the same JSONL stream.
 When a representative has a fresh persisted per-file scalar row, the indexer

@@ -111,6 +111,38 @@ target_compile_features(test_listen_history PRIVATE cxx_std_26)
 add_test(NAME test_listen_history COMMAND test_listen_history)
 set_tests_properties(test_listen_history PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_semantic_search_data
+    test_semantic_search_data.cpp
+    ../src/core/Rating.cpp
+    ../src/ui/SemanticSearchData.cpp
+)
+target_include_directories(test_semantic_search_data PRIVATE ../src)
+target_link_libraries(test_semantic_search_data PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_compile_features(test_semantic_search_data PRIVATE cxx_std_26)
+add_test(NAME test_semantic_search_data COMMAND test_semantic_search_data)
+set_tests_properties(test_semantic_search_data PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_decode_gate
+    test_decode_gate.cpp
+    ../src/fs/MediaProbe.cpp
+)
+target_include_directories(test_decode_gate PRIVATE ../src)
+target_link_libraries(test_decode_gate PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_decode_gate PRIVATE cxx_std_26)
+add_test(NAME test_decode_gate COMMAND test_decode_gate)
+set_tests_properties(test_decode_gate PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_query_vector_cache
+    test_query_vector_cache.cpp
+    ../src/app/AppPaths.cpp
+    ../src/features/QueryVectorCache.cpp
+)
+target_include_directories(test_query_vector_cache PRIVATE ../src)
+target_link_libraries(test_query_vector_cache PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_query_vector_cache PRIVATE cxx_std_26)
+add_test(NAME test_query_vector_cache COMMAND test_query_vector_cache)
+set_tests_properties(test_query_vector_cache PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_feature_store
     test_feature_store.cpp
     ../src/features/FeatureStore.cpp
@@ -268,6 +300,7 @@ add_test(NAME test_path_guesser COMMAND test_path_guesser)
 
 add_executable(test_scan_pipeline
     test_scan_pipeline.cpp
+    ../src/fs/MediaProbe.cpp
     ../src/scanner/ScanPipeline.cpp
     ../src/scanner/PathMetadataGuesser.cpp
     ../src/scanner/DirectoryWalker.cpp
