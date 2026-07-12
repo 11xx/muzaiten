@@ -146,17 +146,26 @@ def model_extra_requirements(requirements: Sequence[str]) -> list[str]:
 
 def repo_artifacts_url(path: Path = PROVIDER_MODEL_PATH) -> str | None:
     """MODEL_ARTIFACTS_URL as configured in the repository checkout."""
-    text = path.read_text(encoding="utf-8")
-    match = re.search(r"^MODEL_ARTIFACTS_URL[^=\n]*=\s*(.+)$", text, flags=re.MULTILINE)
-    if match is None:
-        raise PackageIndexError(f"MODEL_ARTIFACTS_URL is not declared in {path}")
-    value = match.group(1).strip()
-    if value == "None":
-        return None
-    literal = re.fullmatch(r"""["']([^"']+)["']""", value)
-    if literal is None:
-        raise PackageIndexError(f"MODEL_ARTIFACTS_URL has an unsupported value: {value}")
-    return literal.group(1)
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        elif isinstance(node, ast.Assign):
+            targets = node.targets
+        if any(getattr(target, "id", None) == "MODEL_ARTIFACTS_URL" for target in targets):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError as exc:
+                raise PackageIndexError(
+                    f"MODEL_ARTIFACTS_URL is not a literal in {path}"
+                ) from exc
+            if value is None or isinstance(value, str):
+                return value
+            raise PackageIndexError(f"MODEL_ARTIFACTS_URL has an unsupported value: {value!r}")
+    raise PackageIndexError(f"MODEL_ARTIFACTS_URL is not declared in {path}")
 
 
 def evaluate_gate(

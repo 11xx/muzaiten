@@ -147,6 +147,15 @@ class ArchProviderGateTest(unittest.TestCase):
             self.assertEqual(
                 self.gate.repo_artifacts_url(path), "https://example.invalid/x"
             )
+            path.write_text(
+                'MODEL_ARTIFACTS_URL: str | None = (\n'
+                '    "https://example.invalid/wrapped"\n'
+                ')\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                self.gate.repo_artifacts_url(path), "https://example.invalid/wrapped"
+            )
 
     def test_live_repo_configuration_parses(self) -> None:
         # Whatever the checkout currently pins must parse without error.

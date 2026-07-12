@@ -38,11 +38,13 @@ TEXT_MODEL_FILENAME = "text.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 MANIFEST_FILENAME = "manifest.json"
 ONNX_APPROXIMATE_BYTES = 790_186_110
-# Base URL of a hosted, pre-converted artifact bundle (manifest.json plus the
-# three artifacts it names). None until the maintainer publishes one; once
-# set, model download fetches the artifacts directly and end users need no
-# checkpoint download or conversion stack.
-MODEL_ARTIFACTS_URL: str | None = None
+# Base URL of the hosted, pre-converted artifact bundle (manifest.json plus
+# the three artifacts it names). With this set, model download fetches the
+# artifacts directly and end users need no checkpoint download or conversion
+# stack; the [convert] extra remains for building from the checkpoint.
+MODEL_ARTIFACTS_URL: str | None = (
+    "https://huggingface.co/muzaiten/clap-htsat-base-onnx/resolve/main"
+)
 INFERENCE_THREADS_ENV = "MUZAITEN_CLAP_THREADS"
 DEFAULT_MAX_INFERENCE_THREADS = 8
 

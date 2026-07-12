@@ -63,30 +63,27 @@ analysis > Download semantic model…** or:
 muzaiten-features model download --progress=jsonl
 ```
 
-Before the first download and conversion, temporarily install the isolated
-conversion stack:
+The download fetches the hosted, pre-converted model bundle from
+[muzaiten/clap-htsat-base-onnx](https://huggingface.co/muzaiten/clap-htsat-base-onnx):
+about 790 MB of fp32 ONNX audio and text graphs plus the exact tokenizer.
+The provider rejects the bundle's manifest unless its checkpoint hash,
+feature revision, and format version match the installed release, verifies
+every file hash while streaming byte progress, and installs the bundle
+atomically. No PyTorch or conversion stack is involved, and the 2.35 GB
+source checkpoint is never downloaded. Artifact hashes are verified at
+installation; later operations check the manifest identity and file
+presence, so status checks and text queries never re-hash the artifacts.
+Expect roughly 150 MB for the runtime tool environment and 790 MB for the
+cached artifacts, instead of the previous 5 GB PyTorch environment.
 
-```sh
-uv tool install --reinstall 'muzaiten-features-clap[model,convert]'
-muzaiten-features model download --progress=jsonl
-uv tool install --reinstall 'muzaiten-features-clap[model]'
-```
+Building the bundle from the pinned CC0 checkpoint yourself remains
+supported: install `'muzaiten-features-clap[model,convert]'`, download the
+checkpoint, and run `python -m muzaiten_features_clap.convert`. Conversion
+reports `model-convert` progress and writes the same hash-verified manifest;
+the checkpoint then stays in the cache as the provenance source.
 
-The download writes a temporary file, streams byte progress, verifies the
-checksum, and atomically installs the pinned CC0 checkpoint. Conversion then
-reports `model-convert` progress, exports fp32 audio and text ONNX graphs plus
-the exact tokenizer, and verifies their hashed manifest. Artifact hashes are
-verified at installation; later operations check the manifest identity and
-file presence, so status checks and text queries never re-hash the artifacts.
-The checkpoint stays in the cache as the provenance source. Removing the `convert` extra afterward
-drops PyTorch, torchvision, librosa, numba, and LAION-CLAP from the serving
-environment without removing cached artifacts. Expect about 2.35 GB for the
-checkpoint and 790 MB for the ONNX artifacts; the runtime tool environment is
-roughly 150 MB instead of about 5 GB.
-
-If conversion dependencies are missing, model download exits 3 with
-`component_missing` and prints the required `[model,convert]` install command.
-A missing or invalid converted model is reported as `model_missing` (exit 3).
+A missing or invalid converted model is reported as `model_missing`
+(exit 3).
 
 ## Refresh and search
 

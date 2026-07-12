@@ -1,6 +1,6 @@
 [project]
 name = "muzaiten-features-clap"
-version = "2026.7.11"
+version = "2026.7.12"
 description = "Optional CLAP capability provider for muzaiten features"
 readme = "README.md"
 license = "Unlicense"

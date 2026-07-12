@@ -9,10 +9,12 @@
   verifies a hashed artifact manifest, and preserves existing semantic stores
   without a rescan; model preparation now has its own live progress phase.
   Status checks and text queries validate the artifact manifest structurally
-  instead of re-hashing hundreds of megabytes per invocation, and the
-  provider can install a maintainer-hosted, hash-verified artifact bundle
-  once one is published, letting end users skip the checkpoint download and
-  conversion stack entirely.
+  instead of re-hashing hundreds of megabytes per invocation. Model download
+  now fetches the hosted, hash-verified bundle from
+  `muzaiten/clap-htsat-base-onnx` on Hugging Face (about 790 MB of converted
+  artifacts), so end users need neither the 2.35 GB checkpoint nor the
+  conversion stack; converting locally from the pinned checkpoint remains
+  supported through the `[convert]` extra.
 - Arch packages no longer advertise the not-yet-published semantic provider as
   an optional dependency. PyPI/uv remains the supported installation path until
   a deterministic Arch/PyPI/AUR gate reports a candidate and the full

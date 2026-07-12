@@ -842,6 +842,7 @@ def test_protocol_model_download_converts_with_its_own_progress_clock(
     from muzaiten_features_clap import protocol as protocol_module
 
     monkeypatch.setattr(model, "artifact_dir", lambda: tmp_path / "no-artifacts")
+    monkeypatch.setattr(protocol_module, "MODEL_ARTIFACTS_URL", None)
     clock = iter([100.0, 250.0, 251.0])
     monkeypatch.setattr(protocol_module.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(
