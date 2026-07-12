@@ -66,6 +66,8 @@ signals:
     void addToQueueTemporaryRequested(QVector<Track> tracks);
     void playNextTemporaryRequested(QVector<Track> tracks);
     void playNowRequested(QVector<Track> tracks);
+    // Ctrl+S anywhere in the view: open the semantic (CLAP) search dialog.
+    void semanticSearchRequested();
     void findInLibraryRequested(Track track);
     void findFileRequested(Track track);
     void propertiesRequested(Track track);

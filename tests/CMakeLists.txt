@@ -111,6 +111,17 @@ target_compile_features(test_listen_history PRIVATE cxx_std_26)
 add_test(NAME test_listen_history COMMAND test_listen_history)
 set_tests_properties(test_listen_history PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_semantic_search_data
+    test_semantic_search_data.cpp
+    ../src/core/Rating.cpp
+    ../src/ui/SemanticSearchData.cpp
+)
+target_include_directories(test_semantic_search_data PRIVATE ../src)
+target_link_libraries(test_semantic_search_data PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_compile_features(test_semantic_search_data PRIVATE cxx_std_26)
+add_test(NAME test_semantic_search_data COMMAND test_semantic_search_data)
+set_tests_properties(test_semantic_search_data PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_decode_gate
     test_decode_gate.cpp
     ../src/fs/MediaProbe.cpp

@@ -4,6 +4,14 @@
 
 ### Added
 
+- Semantic search arrived in the app: press `Ctrl+S` in the Search view to
+  describe the music in free text ("warm piano with brushed drums") and get
+  the analyzed library ranked by CLAP audio similarity. Result rows carry
+  rank, match score, title, artist, album, year, length, format quality, and
+  star rating, with play now / play next / add to queue actions. Queries and
+  ranking run off the UI thread; the loaded embeddings matrix and the
+  query-vector cache (shared with `muzaitenctl semantic-search`) make repeat
+  queries immediate.
 - `muzaitenctl semantic-search` now memoizes text query vectors in a
   persistent cache (`semantic-query.sqlite` under the cache directory) keyed
   by the active semantic generation's model identity, so repeating a query

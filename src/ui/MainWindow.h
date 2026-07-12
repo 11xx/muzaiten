@@ -59,6 +59,7 @@ class MusicExplorerView;
 class ScanPipeline;
 class ArtworkCache;
 class SearchView;
+class SemanticSearchDialog;
 
 enum class LibrarySource { Local, Mpd };
 enum class MainView { LibraryPanels, LibraryMusicExplorer, LibraryFileExplorer, FreeRoamFileExplorer, Search, Queue, Playlist };
@@ -421,6 +422,9 @@ private:
     void openPlaylistEditModal(qint64 playlistId, qint64 itemId, const QString &query);
     void resolvePlaylistMultiMatches(qint64 playlistId);
     void openAddToPlaylistDialog(const QVector<Track> &tracks);
+    // Ctrl+S: describe-the-music search over CLAP embeddings. Lazily built,
+    // kept alive across opens so its loaded embeddings matrix survives.
+    void openSemanticSearchDialog();
     QString resolvedReadPathForTrack(const Track &track) const;
     void rememberTrackTableViewState();
     void restoreTrackTableViewState();
@@ -445,6 +449,7 @@ private:
     FileExplorerView *m_libraryFileExplorer = nullptr;
     FileExplorerView *m_freeRoamFileExplorer = nullptr;
     SearchView       *m_searchView = nullptr;
+    SemanticSearchDialog *m_semanticSearchDialog = nullptr;
     PlaylistView     *m_playlistView = nullptr;
     PanelSearchController *m_panelSearch = nullptr;
     QProgressBar *m_scanProgress = nullptr;

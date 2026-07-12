@@ -52,6 +52,7 @@
 #include "ui/PlaylistView.h"
 #include "ui/ScoringWeightsDialog.h"
 #include "ui/SearchView.h"
+#include "ui/SemanticSearchDialog.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
 #include "ui/MainPanelKeybindings.h"
@@ -3048,6 +3049,7 @@ SearchView *MainWindow::ensureSearchView()
         addTracksToQueue(tracks);
         playQueueIndex(static_cast<int>(m_player->queue().size()) - static_cast<int>(tracks.size()));
     });
+    connect(m_searchView, &SearchView::semanticSearchRequested, this, &MainWindow::openSemanticSearchDialog);
     connect(m_searchView, &SearchView::findInLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_searchView, &SearchView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
@@ -7748,6 +7750,35 @@ void MainWindow::resolvePlaylistMultiMatches(qint64 playlistId)
         message += QStringLiteral(" %1 skipped (no candidate in the library).").arg(skipped);
     }
     statusBar()->showMessage(message, 6000);
+}
+
+void MainWindow::openSemanticSearchDialog()
+{
+    if (m_semanticSearchDialog == nullptr) {
+        m_semanticSearchDialog = new SemanticSearchDialog(m_core->databasePath(), m_core->featuresPath(), this);
+        connect(m_semanticSearchDialog, &SemanticSearchDialog::addToQueueRequested, this,
+                [this](const QVector<Track> &tracks) {
+                    enqueueTracksFromMenu(tracks, QueueAddMode::Append, false);
+                });
+        connect(m_semanticSearchDialog, &SemanticSearchDialog::playNextRequested, this,
+                [this](const QVector<Track> &tracks) {
+                    enqueueTracksFromMenu(tracks, QueueAddMode::PlayNext, false);
+                });
+        connect(m_semanticSearchDialog, &SemanticSearchDialog::playNowRequested, this,
+                [this](const QVector<Track> &tracks) {
+                    if (tracks.isEmpty()) return;
+                    addTracksToQueue(tracks);
+                    playQueueIndex(static_cast<int>(m_player->queue().size()) - static_cast<int>(tracks.size()));
+                });
+        connect(m_semanticSearchDialog, &SemanticSearchDialog::statusMessageRequested, this,
+                [this](const QString &message, int timeoutMs) {
+                    statusBar()->showMessage(message, timeoutMs);
+                });
+    }
+    m_semanticSearchDialog->show();
+    m_semanticSearchDialog->raise();
+    m_semanticSearchDialog->activateWindow();
+    m_semanticSearchDialog->focusQuery();
 }
 
 void MainWindow::openAddToPlaylistDialog(const QVector<Track> &tracks)

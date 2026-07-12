@@ -166,6 +166,9 @@ set(MUZAITEN_SOURCES
     src/ui/SearchResultDelegate.cpp
     src/ui/SearchResultsModel.cpp
     src/ui/SearchView.cpp
+    src/ui/SemanticSearchData.cpp
+    src/ui/SemanticSearchDialog.cpp
+    src/features/QueryEmbedding.cpp
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
@@ -363,6 +366,7 @@ add_executable(muzaitenctl
     src/db/Database.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
+    src/features/QueryEmbedding.cpp
     src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
     src/core/GenreTags.cpp

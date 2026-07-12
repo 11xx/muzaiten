@@ -35,6 +35,7 @@ file is harmless — it rebuilds on next open.
 | `Ctrl+F` | Toggle fuzzy mode (default: exact orderless substring) |
 | `Esc` / `Ctrl+G` | Clear the query; press again to leave text-input mode |
 | `/` | Return focus to the search box (from browse mode) |
+| `Ctrl+S` | Open semantic search (describe the music) |
 | `F5` (or re-press `4`) | Rebuild the search index |
 | `Ctrl+scroll` | Adjust result row height |
 | Double-click | Play now |
@@ -108,6 +109,10 @@ picker** over the whole library — multi-line rows, romaji matches kanji,
 a bare `search` dumps the whole library as TSV. First run builds the cache
 (a few seconds); later runs are instant.
 
-For free-text *meaning* search ("melancholic shoegaze") see
-`semantic-search` in [radio.md](radio.md) — it ranks by CLAP audio
-embeddings rather than tags.
+For free-text *meaning* search ("melancholic shoegaze") press `Ctrl+S`
+inside the Search view: a semantic search dialog embeds the description
+with the CLAP provider and ranks the analyzed library by audio similarity,
+with play/queue actions on the rich result rows. Repeat queries answer
+instantly from the shared query-vector cache. The same engine drives
+`muzaitenctl semantic-search`; see [radio.md](radio.md) for the analysis
+pipeline behind it.
