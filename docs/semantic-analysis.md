@@ -6,9 +6,16 @@ The saved setting `analysis.semantic.enabled` defaults to `false`.
 
 ## Install the provider
 
-The GUI never runs uv. No Arch/AUR package currently provides the optional
-provider. Arch and other Linux users install the published provider themselves
-in user space:
+The GUI never runs uv or a package manager. Arch users can install the
+provider from the AUR, where it is an optional dependency of `muzaiten-bin`
+and `muzaiten-git`:
+
+```sh
+paru -S muzaiten-features-clap
+```
+
+Users of other distributions, or anyone preferring a user-space install,
+use the published PyPI package instead:
 
 ```sh
 uv tool install 'muzaiten-features-clap[model]'
@@ -36,12 +43,10 @@ An explicit uninstall is unnecessary: `uv tool install` replaces the existing
 uv-managed tool and records the new registry requirement. Add
 `==<provider-version>` to the requirement when an exact release is required.
 
-The core `muzaiten-bin` and `muzaiten-git` packages deliberately do not name a
-nonexistent provider as an optional dependency. When the distro gate passes,
-`muzaiten-features-clap` will be published as its own AUR package and restored
-to their optional-dependency metadata. This changes only package-manager
-discovery; the uv-installed executable is already found through the normal
-provider search order.
+The AUR and uv routes install the same pure-Python package; either
+executable is found through the normal provider search order, and the AUR
+package resolves `python-onnxruntime` through the official `-cpu`/`-cuda`
+variants while `python-tokenizers` comes from the AUR.
 
 Recreating the tool environment does not remove the model cache or touch
 `features.sqlite`, so it does not force semantic reanalysis. The provider's stable

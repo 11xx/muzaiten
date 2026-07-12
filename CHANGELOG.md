@@ -15,15 +15,15 @@
   artifacts), so end users need neither the 2.35 GB checkpoint nor the
   conversion stack; converting locally from the pinned checkpoint remains
   supported through the `[convert]` extra.
-- Arch packages no longer advertise the not-yet-published semantic provider as
-  an optional dependency. PyPI/uv remains the supported installation path until
-  a deterministic Arch/PyPI/AUR gate reports a candidate and the full
-  clean-chroot CPU plus isolated CUDA acceptance suite passes. The gate now
-  measures the ONNX reality (runtime dependencies resolvable from official
-  repositories, provides variants, or the AUR; an ONNX `[model]` extra on the
-  published provider; a configured hosted bundle) instead of the retired
-  NumPy/Numba/LAION-CLAP chain, and every runtime dependency already
-  resolves on Arch today.
+- The semantic provider is a real Arch package: with provider 2026.7.12 on
+  PyPI (ONNX runtime) and the hosted bundle live, the rewritten distro gate
+  reports candidate, `muzaiten-features-clap` is published on the AUR from
+  the PyPI sdist (clean-chroot built, namcap-reviewed, model never
+  packaged), and `muzaiten-bin`/`muzaiten-git` advertise it again as an
+  optional dependency. The gate now measures the ONNX reality (runtime
+  dependencies resolvable from official repositories, provides variants, or
+  the AUR; an ONNX `[model]` extra on the published provider; a configured
+  hosted bundle) instead of the retired NumPy/Numba/LAION-CLAP chain.
 
 ## [2026.07.11]
 

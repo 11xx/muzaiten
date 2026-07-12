@@ -28,9 +28,10 @@ The conversion stack stays confined to the PyPI `[convert]` extra and to
 maintainer machines; see "Hosting the converted artifact bundle" in
 `docs/distribution.md`.
 
-The core Muzaiten AUR packages do not advertise the unpublished provider.
-Native analysis remains Python-free, and an existing uv tool remains fully
-supported and discoverable.
+`muzaiten-features-clap` is published on the AUR and restored as an optional
+dependency of the core Muzaiten packages. Native analysis remains
+Python-free, and an existing uv tool remains fully supported and
+discoverable.
 
 ## Deterministic index check
 
