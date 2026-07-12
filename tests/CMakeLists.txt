@@ -679,6 +679,18 @@ target_compile_features(test_player_core PRIVATE cxx_std_26)
 add_test(NAME test_player_core COMMAND test_player_core)
 set_tests_properties(test_player_core PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_gstreamer_playback
+    test_gstreamer_playback.cpp
+    ../src/playback/AudioDeviceControl.cpp
+    ../src/playback/GStreamerPlaybackBackend.cpp
+    ../src/playback/PlaybackBackend.h
+)
+target_include_directories(test_gstreamer_playback PRIVATE ../src)
+target_link_libraries(test_gstreamer_playback PRIVATE Qt6::Core Qt6::Test PkgConfig::GSTREAMER)
+target_compile_features(test_gstreamer_playback PRIVATE cxx_std_26)
+add_test(NAME test_gstreamer_playback COMMAND test_gstreamer_playback)
+set_tests_properties(test_gstreamer_playback PROPERTIES ENVIRONMENT "MUZAITEN_DEMO_SILENT_AUDIO=1")
+
 add_executable(test_ipc_server
     test_ipc_server.cpp
     ../src/ipc/IpcServer.cpp

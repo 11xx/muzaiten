@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Gapless playback now commits each queue advance from the new stream's
+  serialized event at the audio sink instead of waiting for a successful
+  position query. A slow or temporarily unqueryable source can no longer leave
+  the UI on the outgoing row, skip a queue row at the following boundary, or
+  make the successor appear to start many seconds into its timeline. Very
+  short or fully cached tracks also preserve the first pending handoff when
+  playbin asks for another URI before that successor becomes audible, and a
+  sink-confirmed start is committed before any immediately following EOS or
+  recovery event.
+
 ## [2026.07.12]
 
 - The optional CLAP provider now serves the same stable embeddings through

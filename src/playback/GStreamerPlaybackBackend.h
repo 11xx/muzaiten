@@ -53,6 +53,14 @@ private:
     void pollBus();
     void pollPosition();
     void handleMessage(GstMessage *message);
+    // Queue/commit the prepared-track transition when the serialized
+    // STREAM_START event reaches the actual audio sink. Unlike playbin's
+    // upstream discovery messages, this event sits directly in front of the
+    // first audible buffer.
+    void queueGaplessAdvanceFromSink();
+    void commitGaplessAdvance(quint64 generation);
+    void invalidateGaplessAdvanceLocked();
+    void removeAudioSinkProbe();
     void loadUri(const QString &uri, State targetState, qint64 positionMs = -1);
     // Issue a flushing seek and arm the in-flight bookkeeping (watchdog +
     // coalescing). Callers must have ruled out the soft-pause/handoff cases.
@@ -119,6 +127,10 @@ private:
     State m_targetState = State::Stopped;
     bool m_waitingForTargetState = false;
     bool m_gaplessAdvancePending = false;
+    bool m_gaplessStartQueued = false;
+    quint64 m_gaplessGeneration = 0;
+    GstPad *m_audioSinkPad = nullptr;
+    unsigned long m_audioSinkProbeId = 0;
     double m_volume = 1.0;
     QTimer m_transitionTimer;
 
