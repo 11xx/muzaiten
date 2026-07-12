@@ -12,6 +12,12 @@
 
 ### Changed
 
+- `muzaiten-features` terminal JSON now reports decode and DSP stage timings
+  for the scalar-refresh fallback (`feature_fill_timings`) and the CLAP
+  provider reports per-decode and per-batch inference timings in its scan
+  result, so decode-bound and compute-bound scans can be told apart without
+  external profiling. `--verbose` prints one timing line per re-decoded
+  representative.
 - Semantic text queries no longer run a separate provider capability
   handshake before the query itself: the query trusts the first resolvable
   provider candidate and falls back to full discovery only on failure,
