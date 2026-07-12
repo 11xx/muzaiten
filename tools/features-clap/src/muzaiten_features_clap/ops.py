@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping, Sequence
 
 from . import db
 from .embedder import Embedder
@@ -13,13 +14,54 @@ class ScanResult:
     groups: int
     embedded: int
     skipped: int
+    timings: dict[str, dict[str, float | int]]
 
-    def as_dict(self) -> dict[str, int]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "groups": self.groups,
             "embedded": self.embedded,
             "skipped": self.skipped,
+            "timings": self.timings,
         }
+
+
+def _timing_stats(values: Sequence[float], count_key: str) -> dict[str, float | int]:
+    if not values:
+        return {
+            count_key: 0,
+            "total": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+        }
+    ordered = sorted(values)
+    total = sum(ordered)
+
+    def percentile(fraction: float) -> float:
+        return ordered[math.ceil(fraction * len(ordered)) - 1]
+
+    return {
+        count_key: len(ordered),
+        "total": total,
+        "mean": total / len(ordered),
+        "p50": percentile(0.50),
+        "p95": percentile(0.95),
+    }
+
+
+def _scan_timings(embedder: Embedder) -> dict[str, dict[str, float | int]]:
+    raw = getattr(embedder, "scan_timings", {})
+    if callable(raw):
+        raw = raw()
+    timings = raw if isinstance(raw, Mapping) else {}
+    decode = timings.get("decode_ms", ())
+    infer = timings.get("infer_ms", ())
+    decode_values = [float(value) for value in decode] if isinstance(decode, Sequence) else []
+    infer_values = [float(value) for value in infer] if isinstance(infer, Sequence) else []
+    return {
+        "decode_ms": _timing_stats(decode_values, "count"),
+        "infer_ms": _timing_stats(infer_values, "batches"),
+    }
 
 
 def scan(
@@ -38,6 +80,9 @@ def scan(
 ) -> ScanResult:
     if batch_size < 1:
         raise ValueError("batch size must be at least 1")
+    reset_timings = getattr(embedder, "reset_scan_timings", None)
+    if callable(reset_timings):
+        reset_timings()
     with db.connect(features_path) as conn:
         db.ensure_schema(conn)
         dimension = vector_dim if vector_dim is not None else int(getattr(embedder, "dimension", 512))
@@ -89,7 +134,7 @@ def scan(
         skipped = len(representatives) - len(pending)
         if limit is None and embedded + skipped == len(representatives):
             db.complete_generation(conn, generation_id)
-        return ScanResult(len(representatives), embedded, skipped)
+        return ScanResult(len(representatives), embedded, skipped, _scan_timings(embedder))
 
 
 def neighbors(

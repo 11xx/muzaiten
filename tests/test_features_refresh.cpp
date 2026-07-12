@@ -572,6 +572,14 @@ void IndexerScanTest::generatedFixtureMatrixWritesSchemaV5Features()
         QVERIFY2(stats.contains(QStringLiteral("p50_ms")), qPrintable(stage));
         QVERIFY2(stats.contains(QStringLiteral("p95_ms")), qPrintable(stage));
     }
+    const QJsonObject featureFillTimings = first.value(QStringLiteral("feature_fill_timings")).toObject();
+    for (const QString &stage : {QStringLiteral("decode"), QStringLiteral("dsp")}) {
+        const QJsonObject stats = featureFillTimings.value(stage).toObject();
+        QVERIFY2(stats.contains(QStringLiteral("total_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("mean_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("p50_ms")), qPrintable(stage));
+        QVERIFY2(stats.contains(QStringLiteral("p95_ms")), qPrintable(stage));
+    }
     QVERIFY(first.value(QStringLiteral("featured_groups")).toInt() >= 6);
     QCOMPARE(first.value(QStringLiteral("featured_fresh")).toInt(),
              first.value(QStringLiteral("featured_groups")).toInt());
