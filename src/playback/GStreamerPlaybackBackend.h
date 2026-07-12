@@ -29,6 +29,7 @@ public:
     bool hasSource() const override;
     qint64 position() const override;
     qint64 duration() const override;
+    void stabilizeGaplessHandoff() override;
     void onGaplessTrackAdvanced() override;
     void setOutputMode(OutputMode mode, const QString &dsdDevice = QString()) override;
     DsdSupport dsdSupport() const override;
@@ -69,7 +70,8 @@ private:
     // Deterministic recovery: drop the pipeline to READY and reload the audible
     // uri at |positionMs|, preserving the prepared gapless next. Used when a
     // seek lands in the undefined about-to-finish window or never completes.
-    void reloadCurrentAtPosition(qint64 positionMs, State targetState);
+    void reloadCurrentAtPosition(qint64 positionMs, State targetState,
+                                 bool preservePreparedNext = true);
     // One bounded attempt to survive a pipeline error (bad frame near EOS,
     // transient decode failure) by reloading the current source in place.
     // Returns true when a recovery was started and the error should not be

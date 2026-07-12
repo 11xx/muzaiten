@@ -737,7 +737,8 @@ void GStreamerPlaybackBackend::handleSeekWatchdogTimeout()
                             m_state == State::Paused ? State::Paused : State::Playing);
 }
 
-void GStreamerPlaybackBackend::reloadCurrentAtPosition(qint64 positionMs, State targetState)
+void GStreamerPlaybackBackend::reloadCurrentAtPosition(qint64 positionMs, State targetState,
+                                                       bool preservePreparedNext)
 {
     QString uri;
     QString nextUri;
@@ -746,7 +747,9 @@ void GStreamerPlaybackBackend::reloadCurrentAtPosition(qint64 positionMs, State 
         uri = m_playingUri.isEmpty() ? m_currentUri : m_playingUri;
         // Mid-handoff, the queued next track lives in m_currentUri (about-to-
         // finish already swapped it); otherwise the prepared uri still holds it.
-        nextUri = m_gaplessAdvancePending ? m_currentUri : m_preparedUri;
+        if (preservePreparedNext) {
+            nextUri = m_gaplessAdvancePending ? m_currentUri : m_preparedUri;
+        }
         invalidateGaplessAdvanceLocked();
     }
     if (uri.isEmpty()) {
@@ -793,6 +796,30 @@ qint64 GStreamerPlaybackBackend::position() const
 qint64 GStreamerPlaybackBackend::duration() const
 {
     return m_durationMs;
+}
+
+void GStreamerPlaybackBackend::stabilizeGaplessHandoff()
+{
+    // Once the sink has accepted the successor it is the audible truth, so
+    // commit it before the owner mutates queue indices. An armed-only handoff
+    // can still be canceled safely by reloading the outgoing source at its
+    // current position; the owner will prepare the post-mutation successor.
+    commitSinkStartedGaplessAdvanceIfNeeded();
+    bool pending = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        pending = m_gaplessAdvancePending;
+    }
+    if (!pending || m_dsdActive || m_playbin == nullptr) {
+        return;
+    }
+    gint64 position = GST_CLOCK_TIME_NONE;
+    const qint64 positionMs = gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position)
+        ? clockTimeToMs(position)
+        : std::max<qint64>(0, m_positionMs);
+    reloadCurrentAtPosition(positionMs,
+                            m_state == State::Paused ? State::Paused : State::Playing,
+                            /*preservePreparedNext=*/false);
 }
 
 void GStreamerPlaybackBackend::aboutToFinishCallback(GstElement *playbin, void *userData)

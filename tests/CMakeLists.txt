@@ -684,6 +684,7 @@ add_executable(test_gstreamer_playback
     ../src/playback/AudioDeviceControl.cpp
     ../src/playback/GStreamerPlaybackBackend.cpp
     ../src/playback/PlaybackBackend.h
+    ../src/player/PlayerCore.cpp
 )
 target_include_directories(test_gstreamer_playback PRIVATE ../src)
 target_link_libraries(test_gstreamer_playback PRIVATE Qt6::Core Qt6::Test PkgConfig::GSTREAMER)

@@ -44,6 +44,14 @@ public:
     qint64 position() const override { return positionMs; }
     qint64 duration() const override { return durationMs; }
     void fail() { m_state = State::Error; }
+    void stabilizeGaplessHandoff() override
+    {
+        ++stabilizeCalls;
+        if (commitOnStabilize) {
+            commitOnStabilize = false;
+            emit preparedTrackStarted();
+        }
+    }
 
     QVector<QUrl> playedUrls;
     QVector<QUrl> loadedPausedUrls;
@@ -55,6 +63,8 @@ public:
     qint64 positionMs = 0;
     qint64 durationMs = 0;
     int stopCalls = 0;
+    int stabilizeCalls = 0;
+    bool commitOnStabilize = false;
 
 private:
     QUrl m_source;
@@ -90,9 +100,11 @@ private slots:
     void playAtStartsTrackAndPreparesNext();
     void appendAndPlayJumpsToExistingEntry();
     void playTracksNextInsertsAfterCurrent();
+    void queueMutationStabilizesAudibleSuccessorBeforeReordering();
     void removingCurrentAdvancesPlayback();
     void removingCurrentWhilePausedStaysPausedOnNext();
     void removingLastTrackClearsPlayback();
+    void removalFiltersInvalidRowsAndMarksSuccessorAutomatic();
     void removingOtherRowDoesNotRepresentCurrentTrack();
     void clearKeepingCurrentDoesNotRepresentCurrentTrack();
     void unresolvableTrackSkipsWithoutLeavingOldAudio();
@@ -196,6 +208,20 @@ void PlayerCoreTest::playTracksNextInsertsAfterCurrent()
     QCOMPARE(m_backend->preparedUrls.last(), QUrl::fromLocalFile("/x"));
 }
 
+void PlayerCoreTest::queueMutationStabilizesAudibleSuccessorBeforeReordering()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->playAt(0);
+    m_backend->commitOnStabilize = true;
+
+    m_core->playTracksNext(makeTracks({"/x"}));
+
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+    QCOMPARE(m_core->queueIndex(), 1);
+    QCOMPARE(m_core->queue().at(2).path, QStringLiteral("/x"));
+    QVERIFY(m_backend->stabilizeCalls > 0);
+}
+
 void PlayerCoreTest::removingCurrentAdvancesPlayback()
 {
     m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
@@ -242,6 +268,21 @@ void PlayerCoreTest::removingLastTrackClearsPlayback()
     QVERIFY(m_core->currentTrack().path.isEmpty());
     QCOMPARE(cleared.count(), 1);
     QVERIFY(m_backend->stopCalls > 0);
+}
+
+void PlayerCoreTest::removalFiltersInvalidRowsAndMarksSuccessorAutomatic()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->playAt(1);
+    QSignalSpy indexChanged(m_core.get(), &PlayerCore::currentIndexChanged);
+
+    m_core->removeRows({-1, 1, 99});
+
+    QCOMPARE(m_core->queue().size(), 2);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/c"));
+    QCOMPARE(indexChanged.count(), 1);
+    QCOMPARE(indexChanged.first().at(0).toInt(), 1);
+    QCOMPARE(indexChanged.first().at(1).toBool(), false);
 }
 
 void PlayerCoreTest::removingOtherRowDoesNotRepresentCurrentTrack()

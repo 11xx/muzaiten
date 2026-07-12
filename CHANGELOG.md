@@ -26,7 +26,9 @@
   longer restarts that same track.
 - Removing a different queue row or clearing the queue while keeping the
   current track no longer re-presents unchanged playback and resets the
-  progress bar and MPRIS position to zero.
+  progress bar and MPRIS position to zero. Row removal also ignores invalid
+  indices without blocking valid ones, and deleting the playing row reports
+  its successor as an automatic transition before playback starts.
 - Play and Play/Pause now restart the current row through a fresh pipeline
   after an unrecoverable backend error instead of trying to resume the failed
   GStreamer graph indefinitely.
@@ -34,6 +36,11 @@
   now report themselves as automatic instead of user-initiated. Queue views no
   longer reveal those rows as if clicked, and playback telemetry no longer
   mislabels them as manual starts.
+- Queue reordering, removal, Play Next insertion, clearing, and repeat/shuffle
+  policy changes now stabilize an in-progress gapless boundary first. An
+  already-audible successor is committed before indices move; an armed-only
+  successor is canceled back to the outgoing source, so GStreamer can never
+  start a file that PlayerCore now assigns to a different row.
 
 ## [2026.07.12]
 

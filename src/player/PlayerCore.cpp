@@ -316,6 +316,7 @@ void PlayerCore::playTracksNext(const QVector<Track> &tracks)
     if (tracks.isEmpty()) {
         return;
     }
+    m_backend->stabilizeGaplessHandoff();
     emit aboutToAddTracks(tracks);
 
     if (m_queueIndex < 0 || m_queue.isEmpty()) {
@@ -359,6 +360,7 @@ void PlayerCore::playTracksNext(const QVector<Track> &tracks)
 
 void PlayerCore::appendTracks(const QVector<Track> &tracks)
 {
+    m_backend->stabilizeGaplessHandoff();
     emit aboutToAddTracks(tracks);
     for (const Track &track : tracks) {
         if (!track.path.isEmpty()) {
@@ -372,6 +374,7 @@ void PlayerCore::appendTracks(const QVector<Track> &tracks)
 
 void PlayerCore::injectTracks(const QVector<Track> &tracks)
 {
+    m_backend->stabilizeGaplessHandoff();
     bool appended = false;
     for (const Track &track : tracks) {
         if (track.path.isEmpty()) {
@@ -394,6 +397,7 @@ void PlayerCore::moveRows(const QVector<int> &rows, int destinationRow)
     if (rows.isEmpty() || m_queue.isEmpty()) {
         return;
     }
+    m_backend->stabilizeGaplessHandoff();
 
     QVector<int> sortedRows = rows;
     std::sort(sortedRows.begin(), sortedRows.end());
@@ -405,7 +409,6 @@ void PlayerCore::moveRows(const QVector<int> &rows, int destinationRow)
     if (sortedRows.isEmpty()) {
         return;
     }
-
     // Allow dropping anywhere, including above the current track: newQueueIndex
     // below tracks where the playing track lands, so playback stays correct.
     destinationRow = std::clamp(destinationRow, 0, static_cast<int>(m_queue.size()));
@@ -465,6 +468,7 @@ void PlayerCore::removeRows(const QVector<int> &rows)
     if (rows.isEmpty() || m_queue.isEmpty()) {
         return;
     }
+    m_backend->stabilizeGaplessHandoff();
 
     // Capture playback state before mutating: if the current track is among the
     // removed rows we advance the backend onto its successor instead of leaving
@@ -475,6 +479,13 @@ void PlayerCore::removeRows(const QVector<int> &rows)
     QVector<int> sortedRows = rows;
     std::sort(sortedRows.begin(), sortedRows.end());
     sortedRows.erase(std::unique(sortedRows.begin(), sortedRows.end()), sortedRows.end());
+    sortedRows.erase(std::remove_if(sortedRows.begin(), sortedRows.end(), [this](int row) {
+                         return row < 0 || row >= m_queue.size();
+                     }),
+                     sortedRows.end());
+    if (sortedRows.isEmpty()) {
+        return;
+    }
 
     // The play-next region is [m_queueIndex+1, m_playNextInsertIndex). Removing
     // rows shifts its end left by the number of removed rows that sat before it,
@@ -527,6 +538,7 @@ void PlayerCore::removeRows(const QVector<int> &rows)
             // shuffle, since this is a direct advance, not an auto-next decision).
             // Match the prior transport state: keep playing, or stay paused on the
             // new track so the backend's source doesn't lag behind the queue.
+            emit currentIndexChanged(m_queueIndex, /*userInitiated=*/false);
             if (wasPlaying) {
                 playCurrent(/*notifyScrobbler=*/true, /*startPaused=*/false);
             } else if (hadSource) {
@@ -549,6 +561,7 @@ void PlayerCore::removeRows(const QVector<int> &rows)
 
 void PlayerCore::clearKeepingCurrent()
 {
+    m_backend->stabilizeGaplessHandoff();
     const bool keepCurrent = m_queueIndex >= 0 && m_queueIndex < m_queue.size();
     if (!keepCurrent) {
         clearAll();
@@ -569,6 +582,7 @@ void PlayerCore::clearKeepingCurrent()
 
 void PlayerCore::clearAll()
 {
+    m_backend->stabilizeGaplessHandoff();
     m_queue.clear();
     m_queueIndex = -1;
     m_playNextInsertIndex = -1;
@@ -702,6 +716,7 @@ bool PlayerCore::applyRatingSync(const QString &path, int effectiveRating0To100)
 
 void PlayerCore::resetQueue(const QVector<Track> &tracks, int index, int playNextInsertIndex)
 {
+    m_backend->stabilizeGaplessHandoff();
     m_queue.clear();
     m_queue.reserve(tracks.size());
     for (const Track &track : tracks) {
@@ -769,6 +784,7 @@ void PlayerCore::setRepeatMode(RepeatMode mode)
     if (m_repeatMode == mode) {
         return;
     }
+    m_backend->stabilizeGaplessHandoff();
     m_repeatMode = mode;
     emit repeatModeChanged(m_repeatMode);
     // Re-derive the gapless preload: e.g. enabling repeat-all on the last track
@@ -781,6 +797,7 @@ void PlayerCore::setShuffleMode(ShuffleMode mode)
     if (m_shuffleMode == mode) {
         return;
     }
+    m_backend->stabilizeGaplessHandoff();
     m_shuffleMode = mode;
     if (m_shuffleMode != ShuffleMode::Off) {
         resetShuffleState();

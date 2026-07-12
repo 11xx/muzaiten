@@ -1,4 +1,5 @@
 #include "playback/GStreamerPlaybackBackend.h"
+#include "player/PlayerCore.h"
 
 #include <QDataStream>
 #include <QElapsedTimer>
@@ -188,6 +189,88 @@ private slots:
         backend.resume();
         QTRY_COMPARE_WITH_TIMEOUT(advanced.count(), 1, 5000);
         QCOMPARE(positionAtAdvance, 0);
+    }
+
+    void playerCorePresentsEveryTrackOnceInAudibleOrder()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        QVector<Track> tracks;
+        for (const auto [name, frequency] : {
+                 std::pair{QStringLiteral("queue-one.wav"), 440.0},
+                 std::pair{QStringLiteral("queue-two.wav"), 660.0},
+                 std::pair{QStringLiteral("queue-three.wav"), 880.0},
+             }) {
+            Track track;
+            track.path = dir.filePath(name);
+            track.title = name;
+            QVERIFY(writeToneWav(track.path, frequency, 2500));
+            tracks.push_back(track);
+        }
+
+        auto *backend = new GStreamerPlaybackBackend;
+        PlayerCore player(backend);
+        player.resetQueue(tracks);
+        QStringList presented;
+        QVector<qint64> positionsAtPresentation;
+        QStringList finished;
+        connect(&player, &PlayerCore::currentTrackChanged, this,
+                [&](const Track &track, bool) {
+                    presented.push_back(track.path);
+                    positionsAtPresentation.push_back(backend->position());
+                });
+        connect(&player, &PlayerCore::trackFinished, this,
+                [&](const Track &track) { finished.push_back(track.path); });
+
+        player.playAt(0);
+
+        QTRY_COMPARE_WITH_TIMEOUT(player.queueIndex(), 2, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend->state(), PlaybackBackend::State::Stopped, 5000);
+        QCOMPARE(presented, QStringList({tracks.at(0).path, tracks.at(1).path, tracks.at(2).path}));
+        QCOMPARE(positionsAtPresentation, QVector<qint64>({0, 0, 0}));
+        QCOMPARE(finished, QStringList({tracks.at(0).path, tracks.at(1).path, tracks.at(2).path}));
+    }
+
+    void playNextDuringArmedHandoffChangesTheAudibleSuccessor()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const auto makeTrack = [&](const QString &name, double frequency) {
+            Track track;
+            track.path = dir.filePath(name);
+            track.title = name;
+            if (!writeToneWav(track.path, frequency, 2500)) {
+                track.path.clear();
+            }
+            return track;
+        };
+        const Track first = makeTrack(QStringLiteral("mutate-one.wav"), 440.0);
+        const Track originalNext = makeTrack(QStringLiteral("mutate-two.wav"), 660.0);
+        const Track last = makeTrack(QStringLiteral("mutate-three.wav"), 880.0);
+        const Track playNext = makeTrack(QStringLiteral("mutate-inserted.wav"), 550.0);
+        QVERIFY(!first.path.isEmpty());
+        QVERIFY(!originalNext.path.isEmpty());
+        QVERIFY(!last.path.isEmpty());
+        QVERIFY(!playNext.path.isEmpty());
+
+        auto *backend = new GStreamerPlaybackBackend;
+        PlayerCore player(backend);
+        player.resetQueue({first, originalNext, last});
+        QSignalSpy needNext(backend, &PlaybackBackend::aboutToNeedNext);
+        QStringList presented;
+        connect(&player, &PlayerCore::currentTrackChanged, this,
+                [&](const Track &track, bool) { presented.push_back(track.path); });
+        player.playAt(0);
+        QTRY_VERIFY_WITH_TIMEOUT(needNext.count() >= 1, 3000);
+
+        player.playTracksNext({playNext});
+
+        QTRY_COMPARE_WITH_TIMEOUT(presented.size(), 4, 14000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend->state(), PlaybackBackend::State::Stopped, 5000);
+        QCOMPARE(presented,
+                 QStringList({first.path, playNext.path, originalNext.path, last.path}));
     }
 };
 

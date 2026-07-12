@@ -57,6 +57,10 @@ public:
     virtual bool hasSource() const = 0;
     virtual qint64 position() const = 0;
     virtual qint64 duration() const = 0;
+    // Resolve the boundary before a queue/policy mutation changes the identity
+    // of the prepared row. Backends without gapless preloading have nothing to
+    // stabilize.
+    virtual void stabilizeGaplessHandoff() {}
     // Called after a gapless track advance so the backend can re-point any
     // per-track resources (e.g. read-ahead) at the newly-current track.
     virtual void onGaplessTrackAdvanced() {}
