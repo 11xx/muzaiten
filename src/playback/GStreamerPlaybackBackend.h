@@ -59,6 +59,7 @@ private:
     // first audible buffer.
     void queueGaplessAdvanceFromSink();
     void commitGaplessAdvance(quint64 generation);
+    void commitSinkStartedGaplessAdvanceIfNeeded();
     void invalidateGaplessAdvanceLocked();
     void removeAudioSinkProbe();
     void loadUri(const QString &uri, State targetState, qint64 positionMs = -1);

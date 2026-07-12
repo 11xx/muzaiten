@@ -133,6 +133,62 @@ private slots:
         QCOMPARE(positionsAtAdvance, QVector<qint64>({0, 0}));
         QCOMPARE(backend.state(), PlaybackBackend::State::Stopped);
     }
+
+    void pipelineRebuildInvalidatesArmedHandoff()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString firstPath = dir.filePath(QStringLiteral("rebuild-one.wav"));
+        const QString secondPath = dir.filePath(QStringLiteral("rebuild-two.wav"));
+        QVERIFY(writeToneWav(firstPath, 440.0, 2500));
+        QVERIFY(writeToneWav(secondPath, 660.0, 2500));
+
+        GStreamerPlaybackBackend backend;
+        QSignalSpy needNext(&backend, &PlaybackBackend::aboutToNeedNext);
+        QSignalSpy advanced(&backend, &PlaybackBackend::preparedTrackStarted);
+        backend.play(QUrl::fromLocalFile(firstPath));
+        backend.prepareNext(QUrl::fromLocalFile(secondPath));
+        QTRY_VERIFY_WITH_TIMEOUT(needNext.count() >= 1, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > 0, 1000);
+
+        PlaybackProfile changed;
+        changed.softwareVolume = false;
+        backend.setProfile(changed);
+        QVERIFY(!backend.hasSource());
+        QCOMPARE(backend.position(), 0);
+        QTest::qWait(2800);
+        QCOMPARE(advanced.count(), 0);
+    }
+
+    void pauseDuringArmedHandoffResumesTheAudibleTrack()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString firstPath = dir.filePath(QStringLiteral("pause-one.wav"));
+        const QString secondPath = dir.filePath(QStringLiteral("pause-two.wav"));
+        QVERIFY(writeToneWav(firstPath, 440.0, 2500));
+        QVERIFY(writeToneWav(secondPath, 660.0, 2500));
+
+        GStreamerPlaybackBackend backend;
+        QSignalSpy needNext(&backend, &PlaybackBackend::aboutToNeedNext);
+        QSignalSpy advanced(&backend, &PlaybackBackend::preparedTrackStarted);
+        qint64 positionAtAdvance = -1;
+        connect(&backend, &PlaybackBackend::preparedTrackStarted, this, [&]() {
+            positionAtAdvance = backend.position();
+        });
+        backend.play(QUrl::fromLocalFile(firstPath));
+        backend.prepareNext(QUrl::fromLocalFile(secondPath));
+        QTRY_VERIFY_WITH_TIMEOUT(needNext.count() >= 1, 3000);
+
+        backend.pause();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Paused, 3000);
+        QTest::qWait(2800);
+        QCOMPARE(advanced.count(), 0);
+
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(advanced.count(), 1, 5000);
+        QCOMPARE(positionAtAdvance, 0);
+    }
 };
 
 QTEST_GUILESS_MAIN(GStreamerPlaybackTest)

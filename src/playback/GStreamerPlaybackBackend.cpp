@@ -406,6 +406,15 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
     m_lastRecoveryUri.clear();
     m_lastRecoveryPositionMs = -1;
     finishTargetTransition();
+    clearSeekInFlight();
+    stopReadAhead();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri.clear();
+        m_playingUri.clear();
+        m_preparedUri.clear();
+        invalidateGaplessAdvanceLocked();
+    }
     removeAudioSinkProbe();
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
@@ -413,6 +422,7 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
         m_playbin = nullptr;
     }
     m_dsdActive = false;
+    resetTimeline();
 
     QString error;
     if (!buildDsdPipeline(filePath, &error)) {
@@ -423,8 +433,6 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
         return;
     }
 
-    resetTimeline();
-    clearSeekInFlight();
     {
         QMutexLocker locker(&m_mutex);
         m_currentUri = uriForUrl(url);
@@ -488,6 +496,28 @@ void GStreamerPlaybackBackend::pause()
         return;
     }
 
+    // If the sink already accepted the successor, make it current before this
+    // user action observes or mutates transport state. Otherwise a pause that
+    // wins the Qt event race could reload the outgoing URI at the successor's
+    // position.
+    commitSinkStartedGaplessAdvanceIfNeeded();
+
+    qint64 handoffPositionMs = -1;
+    bool handoffPending = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        handoffPending = m_gaplessAdvancePending;
+    }
+    if (handoffPending && !m_dsdActive) {
+        gint64 pos = GST_CLOCK_TIME_NONE;
+        handoffPositionMs = gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos)
+            ? clockTimeToMs(pos)
+            : std::max<qint64>(0, m_positionMs);
+        // about-to-finish has already handed playbin the successor URI. Restore
+        // the still-audible source before pausing and keep that successor armed.
+        reloadCurrentAtPosition(handoffPositionMs, State::Paused);
+    }
+
     // Native DSD holds the ALSA device exclusively, so pausing must release it
     // (READY) just like bit-perfect — otherwise the card stays locked while idle.
     const bool release = (m_profile.mode == QStringLiteral("bit-perfect"))
@@ -499,7 +529,9 @@ void GStreamerPlaybackBackend::pause()
         // transiently (e.g. mid-flush); the polled position is then the best
         // truth we have — don't let a failed query reset the resume point to 0.
         gint64 pos = GST_CLOCK_TIME_NONE;
-        if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos)) {
+        if (handoffPositionMs >= 0) {
+            m_resumePositionMs = handoffPositionMs;
+        } else if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos)) {
             m_resumePositionMs = clockTimeToMs(pos);
         } else {
             m_resumePositionMs = std::max<qint64>(0, m_positionMs);
@@ -512,7 +544,7 @@ void GStreamerPlaybackBackend::pause()
         gst_element_set_state(m_playbin, GST_STATE_READY);
         finishTargetTransition();
         updateState(State::Paused);
-    } else {
+    } else if (handoffPositionMs < 0) {
         beginTargetTransition(State::Paused);
         gst_element_set_state(m_playbin, GST_STATE_PAUSED);
     }
@@ -581,6 +613,7 @@ void GStreamerPlaybackBackend::seek(qint64 positionMs)
         return;
     }
     positionMs = std::max<qint64>(0, positionMs);
+    commitSinkStartedGaplessAdvanceIfNeeded();
 
     // A soft-paused pipeline sits in READY, which cannot execute a seek (the
     // request would be silently dropped and the resume would snap back to the
@@ -795,6 +828,15 @@ void GStreamerPlaybackBackend::aboutToFinishCallback(GstElement *playbin, void *
 void GStreamerPlaybackBackend::rebuildPipeline()
 {
     clearSeekInFlight();
+    stopReadAhead();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri.clear();
+        m_playingUri.clear();
+        m_preparedUri.clear();
+        invalidateGaplessAdvanceLocked();
+    }
+    resetTimeline();
     removeAudioSinkProbe();
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
@@ -947,6 +989,20 @@ void GStreamerPlaybackBackend::commitGaplessAdvance(quint64 generation)
     }
 }
 
+void GStreamerPlaybackBackend::commitSinkStartedGaplessAdvanceIfNeeded()
+{
+    quint64 generation = 0;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_gaplessAdvancePending && m_gaplessStartQueued) {
+            generation = m_gaplessGeneration;
+        }
+    }
+    if (generation != 0) {
+        commitGaplessAdvance(generation);
+    }
+}
+
 void GStreamerPlaybackBackend::invalidateGaplessAdvanceLocked()
 {
     ++m_gaplessGeneration;
@@ -1080,19 +1136,10 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
 {
     switch (GST_MESSAGE_TYPE(message)) {
     case GST_MESSAGE_ERROR: {
-        quint64 startedGeneration = 0;
-        {
-            QMutexLocker locker(&m_mutex);
-            if (m_gaplessAdvancePending && m_gaplessStartQueued) {
-                startedGeneration = m_gaplessGeneration;
-            }
-        }
-        if (startedGeneration != 0) {
-            // The sink saw the successor start, but the queued Qt callback can
-            // still be waiting behind this bus poll. Commit first so recovery
-            // reloads the stream that actually failed, not the outgoing URI.
-            commitGaplessAdvance(startedGeneration);
-        }
+        // The sink may have seen the successor start while its queued Qt
+        // callback waits behind this bus poll. Commit first so recovery reloads
+        // the stream that actually failed, not the outgoing URI.
+        commitSinkStartedGaplessAdvanceIfNeeded();
         GError *error = nullptr;
         gchar *debug = nullptr;
         gst_message_parse_error(message, &error, &debug);
@@ -1117,19 +1164,10 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         break;
     }
     case GST_MESSAGE_EOS: {
-        quint64 startedGeneration = 0;
-        {
-            QMutexLocker locker(&m_mutex);
-            if (m_gaplessAdvancePending && m_gaplessStartQueued) {
-                startedGeneration = m_gaplessGeneration;
-            }
-        }
-        if (startedGeneration != 0) {
-            // A short successor may reach EOS while its sink-start callback is
-            // still queued on a busy UI thread. Advance the queue before
-            // publishing finished(), so PlayerCore finishes the audible row.
-            commitGaplessAdvance(startedGeneration);
-        }
+        // A short successor may reach EOS while its sink-start callback waits
+        // on a busy UI thread. Advance before publishing finished(), so
+        // PlayerCore finishes the row that was actually audible.
+        commitSinkStartedGaplessAdvanceIfNeeded();
         m_targetState = State::Stopped;
         finishTargetTransition();
         clearSeekInFlight();

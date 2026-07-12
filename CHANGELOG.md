@@ -12,7 +12,13 @@
   short or fully cached tracks also preserve the first pending handoff when
   playbin asks for another URI before that successor becomes audible, and a
   sink-confirmed start is committed before any immediately following EOS or
-  recovery event.
+  recovery event. Output-pipeline rebuilds and native-DSD switches now
+  invalidate old handoff callbacks, seek watchdogs, source identities, and
+  read-ahead state before tearing the retired pipeline down. Pause, seek,
+  error, and EOS handling first commit any successor already confirmed at the
+  sink; pausing during the earlier armed-only window restores the outgoing
+  source and preserves the prepared successor instead of resuming the wrong
+  URI at an inherited position.
 
 ## [2026.07.12]
 
