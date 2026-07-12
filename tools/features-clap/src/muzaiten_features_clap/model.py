@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -445,12 +446,32 @@ class OnnxClapEmbedder:
         self._session_options.inter_op_num_threads = 1
         self._audio_session = None
         self._text_session = None
+        self._decode_timings_ms: list[float] = []
+        self._infer_timings_ms: list[float] = []
         self._tokenizer = Tokenizer.from_file(str(artifact_path / TOKENIZER_FILENAME))
         self._tokenizer.enable_truncation(max_length=77)
         self._tokenizer.enable_padding(length=77, pad_id=1, pad_token="<pad>")
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:
         return self.embed_audio_paths([path])[0]
+
+    def reset_scan_timings(self) -> None:
+        self._decode_timings_ms.clear()
+        self._infer_timings_ms.clear()
+
+    @property
+    def scan_timings(self) -> dict[str, list[float]]:
+        return {
+            "decode_ms": self._decode_timings_ms.copy(),
+            "infer_ms": self._infer_timings_ms.copy(),
+        }
+
+    def _decode_audio_path(self, path: Path, duration_ms: int | None):
+        started = time.perf_counter()
+        try:
+            return decode_audio_ffmpeg(path, duration_ms)
+        finally:
+            self._decode_timings_ms.append((time.perf_counter() - started) * 1000)
 
     def embed_audio_paths(
         self,
@@ -467,7 +488,7 @@ class OnnxClapEmbedder:
         with ThreadPoolExecutor(max_workers=min(DECODE_WORKERS, len(paths))) as executor:
             decoded = [
                 audio.reshape(-1)
-                for audio in executor.map(decode_audio_ffmpeg, paths, durations)
+                for audio in executor.map(self._decode_audio_path, paths, durations)
             ]
         embedding = self.embed_audio_data(decoded)
         if len(embedding) != len(paths):
@@ -479,7 +500,11 @@ class OnnxClapEmbedder:
             return []
         batch = self._np.stack([prepare_waveform(value) for value in waveforms])
         session = self._get_audio_session()
-        return session.run(["embedding"], {"waveform": batch})[0]
+        started = time.perf_counter()
+        try:
+            return session.run(["embedding"], {"waveform": batch})[0]
+        finally:
+            self._infer_timings_ms.append((time.perf_counter() - started) * 1000)
 
     def embed_text(self, text: str) -> Sequence[float]:
         return normalize_vector(self.embed_texts([text])[0])
@@ -517,4 +542,3 @@ class OnnxClapEmbedder:
                 providers=self._providers,
             )
         return self._text_session
-

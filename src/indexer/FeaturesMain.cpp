@@ -1661,15 +1661,21 @@ void recordScalarExtraction(QHash<QString, ScalarExtraction> &extracted, const F
 }
 
 std::optional<Dsp::ScalarFeatures> scalarsForRepresentative(const QString &path,
-                                                            const QHash<QString, ScalarExtraction> &extracted)
+                                                            const QHash<QString, ScalarExtraction> &extracted,
+                                                            StageTimings &timings)
 {
     const auto it = extracted.constFind(path);
     if (it != extracted.constEnd()) {
         return it->known ? std::optional<Dsp::ScalarFeatures>(it->features) : std::nullopt;
     }
     // Feature refresh never hashes, so skip the raw byte copy entirely.
+    const auto decodeStarted = std::chrono::steady_clock::now();
     const DecodedAudio decoded = decodeCanonical(path, false);
-    return Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
+    timings.decodeMs = elapsedMs(decodeStarted);
+    const auto dspStarted = std::chrono::steady_clock::now();
+    const auto scalars = Dsp::analyze(decoded.samples, Dsp::kSampleRateHz);
+    timings.dspMs = elapsedMs(dspStarted);
+    return scalars;
 }
 
 struct FeatureFillResult {
@@ -1678,6 +1684,7 @@ struct FeatureFillResult {
     int failed = 0;
     int total = 0;
     bool canceled = false;
+    TimingAccumulator timings;
 };
 
 struct StaleRep {
@@ -1689,7 +1696,10 @@ struct FeatureAnalysis {
     StaleRep representative;
     std::optional<Dsp::ScalarFeatures> scalars;
     bool failed = false;
+    StageTimings timings;
 };
+
+void emitVerboseFeatureRepresentative(const FeatureAnalysis &analysis);
 
 FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
                                              const QHash<QString, ScalarExtraction> &extracted)
@@ -1697,7 +1707,7 @@ FeatureAnalysis analyzeFeatureRepresentative(const StaleRep &representative,
     FeatureAnalysis analysis;
     analysis.representative = representative;
     try {
-        analysis.scalars = scalarsForRepresentative(representative.path, extracted);
+        analysis.scalars = scalarsForRepresentative(representative.path, extracted, analysis.timings);
     } catch (const std::exception &) {
         analysis.failed = true;
     }
@@ -1914,7 +1924,7 @@ MaterializedStaleReps materializeStaleReps(QSqlDatabase &database)
 
 FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
                                     const QHash<QString, ScalarExtraction> &extracted,
-                                    int jobs, bool progress,
+                                    int jobs, bool progress, bool verbose,
                                     std::chrono::steady_clock::time_point scanStarted)
 {
     FeatureFillResult result;
@@ -1993,6 +2003,10 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
     prepareFileFeaturesUpsert(fileUpsert);
     const auto completion = [&](FeatureAnalysis &&analysis, int processed, int) {
         result.processed = copiesDone + processed;
+        result.timings.add(analysis.timings);
+        if (verbose) {
+            emitVerboseFeatureRepresentative(analysis);
+        }
         if (analysis.failed) {
             ++result.failed;
         } else {
@@ -2109,6 +2123,14 @@ QJsonObject timingsJson(const TimingAccumulator &timings)
     };
 }
 
+QJsonObject featureFillTimingsJson(const TimingAccumulator &timings)
+{
+    return QJsonObject{
+        {QStringLiteral("decode"), timingStatsJson(timings.decode)},
+        {QStringLiteral("dsp"), timingStatsJson(timings.dsp)},
+    };
+}
+
 QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featured,
                      int featuredStale, double elapsedSecs = 0.0, const QJsonObject &timings = {},
                      bool canceled = false, const QString &power = QStringLiteral("turbo"),
@@ -2134,6 +2156,7 @@ QJsonObject scanJson(int scanned, int skipped, int failed, int groups, int featu
         object.insert(QStringLiteral("feature_groups_processed"), featureFill->processed);
         object.insert(QStringLiteral("features_written"), featureFill->written);
         object.insert(QStringLiteral("feature_groups_failed"), featureFill->failed);
+        object.insert(QStringLiteral("feature_fill_timings"), featureFillTimingsJson(featureFill->timings));
     }
     return object;
 }
@@ -2225,6 +2248,17 @@ void emitVerboseFile(const FileAnalysis &analysis)
         << " dsp=" << analysis.timings.dspMs
         << " fp=" << analysis.timings.fpMs
         << ' ' << analysis.candidate.path << '\n';
+    err.flush();
+}
+
+void emitVerboseFeatureRepresentative(const FeatureAnalysis &analysis)
+{
+    QTextStream err(stderr);
+    err.setEncoding(QStringConverter::Utf8);
+    err << "representative " << (analysis.failed ? "decode_failed" : "ok")
+        << " decode=" << analysis.timings.decodeMs
+        << " dsp=" << analysis.timings.dspMs
+        << ' ' << analysis.representative.path << '\n';
     err.flush();
 }
 
@@ -2342,7 +2376,8 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
+        const FeatureFillResult fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, options.verbose,
+                                                         scanStarted);
         const int featured = currentFeatureCount(database);
         const QJsonObject payload = scanJson(0, 0, 0, groups, featured,
                                              static_cast<int>(staleFeatureCount(database)),
@@ -2378,7 +2413,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
             if (options.progress) {
                 emitPhase(QStringLiteral("features"));
             }
-            fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, scanStarted);
+            fill = ensureFeatureRows(database, {}, effective.jobs, options.progress, options.verbose, scanStarted);
             fillPtr = &fill;
         }
         // No last-scan summary here: a run that analyzed nothing must not
@@ -2486,7 +2521,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         if (options.progress) {
             emitPhase(QStringLiteral("features"));
         }
-        fill = ensureFeatureRows(database, extracted, effective.jobs, options.progress, scanStarted);
+        fill = ensureFeatureRows(database, extracted, effective.jobs, options.progress, options.verbose, scanStarted);
         fillPtr = &fill;
     }
     const double elapsedSecs =

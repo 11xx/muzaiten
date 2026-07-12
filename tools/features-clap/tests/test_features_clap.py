@@ -81,6 +81,16 @@ class FailingSecondBatchEmbedder(FakeEmbedder):
         return super().embed_audio_paths(paths, durations_ms)
 
 
+@dataclass
+class TimedFakeEmbedder(FakeEmbedder):
+    @property
+    def scan_timings(self) -> dict[str, list[float]]:
+        return {
+            "decode_ms": [10.0] * len(self.calls),
+            "infer_ms": [20.0] * len(self.batches),
+        }
+
+
 @pytest.fixture
 def features_path(tmp_path: Path) -> Path:
     path = tmp_path / "features.sqlite"
@@ -143,7 +153,27 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
     )
 
     first = scan(features_path, fake, limit=3, batch_size=2)
-    assert first.as_dict() == {"groups": 3, "embedded": 3, "skipped": 0}
+    assert first.as_dict() == {
+        "groups": 3,
+        "embedded": 3,
+        "skipped": 0,
+        "timings": {
+            "decode_ms": {
+                "count": 0,
+                "total": 0.0,
+                "mean": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+            },
+            "infer_ms": {
+                "batches": 0,
+                "total": 0.0,
+                "mean": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+            },
+        },
+    }
     assert fake.calls == [
         Path("/music/a-copy.flac"),
         Path("/music/b.flac"),
@@ -168,12 +198,43 @@ def test_scan_upgrades_schema_and_skips_existing_embeddings(features_path: Path)
         assert db.unpack_vector(rows[1]["vector"], 2) == pytest.approx((0.0, 1.0))
 
     second = scan(features_path, fake, limit=3, batch_size=2)
-    assert second.as_dict() == {"groups": 3, "embedded": 0, "skipped": 3}
+    assert second.as_dict()["groups"] == 3
+    assert second.as_dict()["embedded"] == 0
+    assert second.as_dict()["skipped"] == 3
     assert fake.calls == [
         Path("/music/a-copy.flac"),
         Path("/music/b.flac"),
         Path("/music/c.flac"),
     ]
+
+
+def test_scan_reports_optional_embedder_timings(features_path: Path) -> None:
+    fake = TimedFakeEmbedder(
+        {
+            Path("/music/a-copy.flac"): (3.0, 0.0),
+            Path("/music/b.flac"): (0.0, 4.0),
+            Path("/music/c.flac"): (1.0, 1.0),
+        },
+    )
+
+    result = scan(features_path, fake, limit=3, batch_size=2).as_dict()
+
+    assert result["timings"] == {
+        "decode_ms": {
+            "count": 3,
+            "total": 30.0,
+            "mean": 10.0,
+            "p50": 10.0,
+            "p95": 10.0,
+        },
+        "infer_ms": {
+            "batches": 2,
+            "total": 40.0,
+            "mean": 20.0,
+            "p50": 20.0,
+            "p95": 20.0,
+        },
+    }
 
 
 def test_scan_rejects_non_positive_batch_size(features_path: Path) -> None:
