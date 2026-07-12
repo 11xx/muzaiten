@@ -12,6 +12,20 @@
 
 ### Changed
 
+- Audio analysis adapts decode concurrency to the storage medium. Network
+  mounts and spinning disks start at two concurrent decoders (measured on a
+  reference NFS library: sixteen concurrent full-track decodes averaged
+  4.2 s each while per-track compute needs about 0.25 s) and the worker gate
+  then follows measured decode latency in both directions; fast local media
+  start at the full worker pool. The refresh JSON reports the decision under
+  `decode_adaptation`, and the library scanner now treats network mounts as
+  conservatively as spinning disks when sizing its walker and tag threads.
+- The CLAP semantic scan overlaps audio decoding with model inference (one
+  batch of decode lookahead) instead of strictly alternating them, and both
+  the provider scan and the scalar-refresh decode fallback now walk
+  representatives in path order for on-disk locality. A new
+  `--semantic-decode-workers N` refresh option (and provider
+  `decode_workers` scan parameter) sizes the provider's decode pool.
 - `muzaiten-features` terminal JSON now reports decode and DSP stage timings
   for the scalar-refresh fallback (`feature_fill_timings`) and the CLAP
   provider reports per-decode and per-batch inference timings in its scan
