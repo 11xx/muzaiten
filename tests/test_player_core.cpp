@@ -43,6 +43,7 @@ public:
     bool hasSource() const override { return !m_source.isEmpty(); }
     qint64 position() const override { return positionMs; }
     qint64 duration() const override { return durationMs; }
+    void fail() { m_state = State::Error; }
 
     QVector<QUrl> playedUrls;
     QVector<QUrl> loadedPausedUrls;
@@ -92,10 +93,17 @@ private slots:
     void removingCurrentAdvancesPlayback();
     void removingCurrentWhilePausedStaysPausedOnNext();
     void removingLastTrackClearsPlayback();
+    void removingOtherRowDoesNotRepresentCurrentTrack();
+    void clearKeepingCurrentDoesNotRepresentCurrentTrack();
+    void unresolvableTrackSkipsWithoutLeavingOldAudio();
+    void allUnresolvableRepeatQueueStops();
+    void nextAtEndDoesNotRestartCurrent();
+    void playControlsRestartCurrentAfterBackendError();
     void gaplessAdvanceMovesIndexWithoutReveal();
     void finishedAtEndOfQueueStops();
     void trackFinishedEmittedOnBackendFinish();
     void trackFinishedEmittedOnGaplessAdvance();
+    void backendFinishMarksNonGaplessAdvanceAutomatic();
     void explicitJumpCollapsesPlayNext();
     void clearKeepingCurrentKeepsOnlyCurrent();
     void metadataPatchUpdatesRowsWithoutQueueReset();
@@ -236,6 +244,93 @@ void PlayerCoreTest::removingLastTrackClearsPlayback()
     QVERIFY(m_backend->stopCalls > 0);
 }
 
+void PlayerCoreTest::removingOtherRowDoesNotRepresentCurrentTrack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->playAt(1);
+    QSignalSpy represented(m_core.get(), &PlayerCore::currentTrackChanged);
+
+    m_core->removeRows({0});
+
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+    QCOMPARE(represented.count(), 0);
+}
+
+void PlayerCoreTest::clearKeepingCurrentDoesNotRepresentCurrentTrack()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b", "/c"}));
+    m_core->playAt(1);
+    QSignalSpy represented(m_core.get(), &PlayerCore::currentTrackChanged);
+
+    m_core->clearKeepingCurrent();
+
+    QCOMPARE(m_core->queue().size(), 1);
+    QCOMPARE(m_core->queue().first().path, QStringLiteral("/b"));
+    QCOMPARE(m_core->queueIndex(), 0);
+    QCOMPARE(represented.count(), 0);
+}
+
+void PlayerCoreTest::unresolvableTrackSkipsWithoutLeavingOldAudio()
+{
+    m_core->resetQueue(makeTracks({"/a", "/missing", "/c"}));
+    m_core->setPathResolver([](const Track &track) {
+        return track.path == QLatin1String("/missing") ? QString() : track.path;
+    });
+    m_core->playAt(0);
+
+    QSignalSpy unresolvable(m_core.get(), &PlayerCore::trackUnresolvable);
+    m_core->playAt(1);
+
+    QCOMPARE(unresolvable.count(), 1);
+    QCOMPARE(unresolvable.first().at(0).value<Track>().path, QStringLiteral("/missing"));
+    QCOMPARE(m_core->queueIndex(), 2);
+    QCOMPARE(m_core->currentTrack().path, QStringLiteral("/c"));
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/c"));
+}
+
+void PlayerCoreTest::allUnresolvableRepeatQueueStops()
+{
+    m_core->resetQueue(makeTracks({"/missing-a", "/missing-b"}));
+    m_core->setPathResolver([](const Track &) { return QString(); });
+    m_core->setRepeatMode(RepeatMode::All);
+
+    m_core->playAt(0);
+
+    QVERIFY(m_backend->playedUrls.isEmpty());
+    QCOMPARE(m_backend->state(), PlaybackBackend::State::Stopped);
+    QCOMPARE(m_backend->stopCalls, 1);
+}
+
+void PlayerCoreTest::nextAtEndDoesNotRestartCurrent()
+{
+    m_core->resetQueue(makeTracks({"/only"}));
+    m_core->playAt(0);
+    const qsizetype playsBefore = m_backend->playedUrls.size();
+
+    m_core->next();
+
+    QCOMPARE(m_backend->playedUrls.size(), playsBefore);
+    QCOMPARE(m_core->queueIndex(), 0);
+}
+
+void PlayerCoreTest::playControlsRestartCurrentAfterBackendError()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->playAt(0);
+    QCOMPARE(m_backend->playedUrls.size(), 1);
+
+    m_backend->fail();
+    m_core->play();
+    QCOMPARE(m_backend->playedUrls.size(), 2);
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/a"));
+
+    m_backend->fail();
+    m_core->togglePlayPause();
+    QCOMPARE(m_backend->playedUrls.size(), 3);
+    QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/a"));
+}
+
 void PlayerCoreTest::gaplessAdvanceMovesIndexWithoutReveal()
 {
     m_core->resetQueue(makeTracks({"/a", "/b"}));
@@ -302,6 +397,30 @@ void PlayerCoreTest::trackFinishedEmittedOnGaplessAdvance()
     QCOMPARE(finished.count(), 1);
     QCOMPARE(finished.last().at(0).value<Track>().path, QStringLiteral("/a"));
     QCOMPARE(m_core->currentTrack().path, QStringLiteral("/b"));
+}
+
+void PlayerCoreTest::backendFinishMarksNonGaplessAdvanceAutomatic()
+{
+    m_core->resetQueue(makeTracks({"/a", "/b"}));
+    m_core->playAt(0);
+    QSignalSpy indexChanged(m_core.get(), &PlayerCore::currentIndexChanged);
+
+    emit m_backend->finished();
+
+    QCOMPARE(indexChanged.count(), 1);
+    QCOMPARE(indexChanged.first().at(0).toInt(), 1);
+    QCOMPARE(indexChanged.first().at(1).toBool(), false);
+
+    indexChanged.clear();
+    m_core->next();
+    QCOMPARE(indexChanged.count(), 0); // final-row Next is a no-op
+
+    m_core->playAt(0);
+    indexChanged.clear();
+    m_core->next();
+    QCOMPARE(indexChanged.count(), 1);
+    QCOMPARE(indexChanged.first().at(0).toInt(), 1);
+    QCOMPARE(indexChanged.first().at(1).toBool(), true);
 }
 
 void PlayerCoreTest::explicitJumpCollapsesPlayNext()

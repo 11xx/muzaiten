@@ -19,6 +19,21 @@
   sink; pausing during the earlier armed-only window restores the outgoing
   source and preserves the prepared successor instead of resuming the wrong
   URI at an inherited position.
+- An unresolvable queue row now advances through the existing bounded skip
+  path instead of leaving the prior file audible under the new row's
+  selection. Consecutive missing rows are skipped without recursion, an
+  all-unresolvable repeat queue stops, and pressing Next on the final row no
+  longer restarts that same track.
+- Removing a different queue row or clearing the queue while keeping the
+  current track no longer re-presents unchanged playback and resets the
+  progress bar and MPRIS position to zero.
+- Play and Play/Pause now restart the current row through a fresh pipeline
+  after an unrecoverable backend error instead of trying to resume the failed
+  GStreamer graph indefinitely.
+- Non-gapless natural advances, repeat-one restarts, and unplayable-row skips
+  now report themselves as automatic instead of user-initiated. Queue views no
+  longer reveal those rows as if clicked, and playback telemetry no longer
+  mislabels them as manual starts.
 
 ## [2026.07.12]
 

@@ -30,7 +30,8 @@ QString PlayerCore::resolvePath(const Track &track) const
     return m_resolvePath ? m_resolvePath(track) : track.path;
 }
 
-void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused, bool explicitJump)
+void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused,
+                        bool explicitJump, bool userInitiated)
 {
     if (index < 0 || index >= m_queue.size()) {
         return;
@@ -56,7 +57,7 @@ void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused, bool 
     } else {
         collapsePlayNextIfStale();
     }
-    emit currentIndexChanged(m_queueIndex, /*userInitiated=*/true);
+    emit currentIndexChanged(m_queueIndex, userInitiated);
     emit playNextRangeChanged();
     playCurrent(notifyScrobbler, startPaused);
 }
@@ -70,6 +71,7 @@ void PlayerCore::playCurrent(bool notifyScrobbler, bool startPaused)
     const QString playbackPath = resolvePath(track);
     if (playbackPath.isEmpty()) {
         emit trackUnresolvable(track);
+        skipCurrentTrack();
         return;
     }
 
@@ -165,9 +167,10 @@ void PlayerCore::skipCurrentTrack()
             emit aboutToInjectLibraryTrack(target.injected);
             m_queue.push_back(target.injected);
             emit queueChanged();
-            playAt(static_cast<int>(m_queue.size()) - 1);
+            playAt(static_cast<int>(m_queue.size()) - 1, true, false, false,
+                   /*userInitiated=*/false);
         } else if (target.index >= 0 && target.index < m_queue.size()) {
-            playAt(target.index);
+            playAt(target.index, true, false, false, /*userInitiated=*/false);
         } else {
             m_backend->stop();
             break;
@@ -195,13 +198,15 @@ void PlayerCore::next()
     if (m_shuffleMode != ShuffleMode::Off || m_repeatMode == RepeatMode::All || m_radioActive) {
         const AutoNext target = decideAutoNext();
         if (target.index >= 0 || !target.injected.path.isEmpty()) {
-            applyAutoNext(target);
+            applyAutoNext(target, /*userInitiated=*/true);
             return;
         }
         // Shuffle cycle exhausted with no repeat: nothing left to advance to.
         return;
     }
-    playAt(std::min(static_cast<int>(m_queue.size() - 1), m_queueIndex + 1));
+    if (m_queueIndex + 1 < m_queue.size()) {
+        playAt(m_queueIndex + 1);
+    }
 }
 
 void PlayerCore::previous()
@@ -231,6 +236,12 @@ void PlayerCore::previous()
 
 void PlayerCore::togglePlayPause()
 {
+    if (m_backend->state() == PlaybackBackend::State::Error) {
+        if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
+            playAt(m_queueIndex);
+        }
+        return;
+    }
     if (!m_backend->hasSource()) {
         if (!m_queue.isEmpty()) {
             playAt(m_queueIndex >= 0 ? m_queueIndex : 0);
@@ -247,6 +258,12 @@ void PlayerCore::togglePlayPause()
 
 void PlayerCore::play()
 {
+    if (m_backend->state() == PlaybackBackend::State::Error) {
+        if (m_queueIndex >= 0 && m_queueIndex < m_queue.size()) {
+            playAt(m_queueIndex);
+        }
+        return;
+    }
     if (m_backend->hasSource()) {
         m_backend->resume();
         return;
@@ -517,7 +534,10 @@ void PlayerCore::removeRows(const QVector<int> &rows)
             } else {
                 presentTrack(m_queue.at(m_queueIndex));
             }
-        } else {
+        } else if (m_currentTrack.path != m_queue.at(m_queueIndex).path) {
+            // Queue-only mutations already refresh every row/index through
+            // queueChanged. Re-present only when no matching track was active;
+            // currentTrackChanged resets the visible and MPRIS timelines to 0.
             presentTrack(m_queue.at(m_queueIndex));
         }
     } else {
@@ -542,7 +562,9 @@ void PlayerCore::clearKeepingCurrent()
     resetShuffleState();
     prepareNext();
     emit queueChanged();
-    presentTrack(current);
+    if (m_currentTrack.path != current.path) {
+        presentTrack(current);
+    }
 }
 
 void PlayerCore::clearAll()
@@ -904,7 +926,7 @@ int PlayerCore::pickShuffleIndex()
     return candidates.at(QRandomGenerator::global()->bounded(static_cast<int>(candidates.size())));
 }
 
-void PlayerCore::applyAutoNext(const AutoNext &next)
+void PlayerCore::applyAutoNext(const AutoNext &next, bool userInitiated)
 {
     if (!next.injected.path.isEmpty()) {
         // Library-wide injection: append the fresh track, then play it. playAt
@@ -915,7 +937,7 @@ void PlayerCore::applyAutoNext(const AutoNext &next)
         pushHistory(m_queueIndex);
         m_shuffleForward.clear();
         emit queueChanged();
-        playAt(static_cast<int>(m_queue.size()) - 1);
+        playAt(static_cast<int>(m_queue.size()) - 1, true, false, false, userInitiated);
         return;
     }
     if (next.index >= 0 && next.index < m_queue.size()) {
@@ -928,7 +950,7 @@ void PlayerCore::applyAutoNext(const AutoNext &next)
         if (!linearConsume) {
             m_playNextInsertIndex = -1;
         }
-        playAt(next.index);
+        playAt(next.index, true, false, false, userInitiated);
     }
 }
 
@@ -1046,14 +1068,14 @@ void PlayerCore::onFinished()
     }
     if (m_repeatMode == RepeatMode::One) {
         // Re-play the current track from the top.
-        playAt(m_queueIndex);
+        playAt(m_queueIndex, true, false, false, /*userInitiated=*/false);
         return;
     }
     // Decide fresh at finish time: the queue (or shuffle bag) may have changed
     // since prepareNext, and this path runs only when nothing was preloaded.
     const AutoNext target = decideAutoNext();
     if (target.index >= 0 || !target.injected.path.isEmpty()) {
-        applyAutoNext(target);
+        applyAutoNext(target, /*userInitiated=*/false);
         return;
     }
     // End of queue: tear the pipeline down so hasSource() is false and

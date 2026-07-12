@@ -94,7 +94,8 @@ public:
     void setRadioActive(bool active);
 
     // -- transport ---------------------------------------------------------
-    void playAt(int index, bool notifyScrobbler = true, bool startPaused = false, bool explicitJump = false);
+    void playAt(int index, bool notifyScrobbler = true, bool startPaused = false,
+                bool explicitJump = false, bool userInitiated = true);
     void next();
     void previous();
     void togglePlayPause();
@@ -194,7 +195,7 @@ private:
     };
     AutoNext decideAutoNext();
     int pickShuffleIndex();
-    void applyAutoNext(const AutoNext &next);
+    void applyAutoNext(const AutoNext &next, bool userInitiated);
     void markVisited(int index);
     void pushHistory(int index);
     // Records a forward auto-advance from `fromIndex` to `toIndex`: pushes the
