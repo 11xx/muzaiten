@@ -187,9 +187,19 @@ QString progressLabel(const LiveStatus &status)
     QString label;
     if (status.phase == LiveStatus::Phase::ModelConvert) {
         label = QStringLiteral("Preparing model… %1/%2 steps").arg(status.analyzed).arg(status.total);
-    } else if (status.phase == LiveStatus::Phase::WritingFeatures
-        || status.phase == LiveStatus::Phase::SemanticEmbeddings
-        || status.phase == LiveStatus::Phase::SemanticNeighbors) {
+    } else if (status.phase == LiveStatus::Phase::ModelDownload) {
+        // Byte counts read poorly at menu width; a percentage carries the
+        // same information.
+        const double percent = status.total > 0 ? status.analyzed * 100.0 / status.total : 0.0;
+        label = QStringLiteral("Downloading semantic model… %1%").arg(QString::number(percent, 'f', 1));
+    } else if (status.phase == LiveStatus::Phase::SemanticEmbeddings) {
+        // Each semantic phase names itself: "Writing features" for an
+        // hours-long embedding pass reads as a scalar bookkeeping step and
+        // hides what the machine is actually doing.
+        label = QStringLiteral("Generating semantic embeddings… %1/%2 groups").arg(status.analyzed).arg(status.total);
+    } else if (status.phase == LiveStatus::Phase::SemanticNeighbors) {
+        label = QStringLiteral("Building similarity neighbors… %1/%2 groups").arg(status.analyzed).arg(status.total);
+    } else if (status.phase == LiveStatus::Phase::WritingFeatures) {
         label = QStringLiteral("Writing features… %1/%2 groups").arg(status.analyzed).arg(status.total);
     } else {
         // File-phase label is byte-stable for existing tests and menu UX.

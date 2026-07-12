@@ -10,9 +10,13 @@
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLocale>
 #include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTableWidget>
@@ -74,6 +78,7 @@ QTableWidgetItem *numericItem(qint64 value)
 AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
     const QString &featuresPath,
     std::function<AudioAnalysisData::LiveStatus()> liveStatus,
+    const QString &featuresBinary,
     QWidget *parent)
     : QDialog(parent)
     , m_liveStatus(std::move(liveStatus))
@@ -118,6 +123,11 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
                                       status.embeddingVersion.isEmpty() ? QStringLiteral("unknown-version") : status.embeddingVersion);
         }
         form->addRow(QStringLiteral("Embedded groups"), valueLabel(embeddingText, this));
+        if (!featuresBinary.isEmpty()) {
+            m_providerValue = valueLabel(QStringLiteral("checking..."), this);
+            form->addRow(QStringLiteral("Provider"), m_providerValue);
+            fetchProviderStatus(featuresBinary, featuresPath, status.embeddingVersion);
+        }
         form->addRow(QStringLiteral("Neighbor rows"), valueLabel(countText(status.neighborRows), this));
         if (summary.lastRun.present) {
             auto *lastGroup = new QGroupBox(QStringLiteral("Last analysis"), this);
@@ -175,6 +185,57 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
     root->addWidget(buttons);
+}
+
+void AudioAnalysisStatusDialog::fetchProviderStatus(const QString &featuresBinary,
+                                                    const QString &featuresPath,
+                                                    const QString &storeRevision)
+{
+    auto *process = new QProcess(this);
+    process->setProgram(featuresBinary);
+    process->setArguments({QStringLiteral("status"), QStringLiteral("--features"), featuresPath,
+                           QStringLiteral("--json")});
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, process, storeRevision](int exitCode, QProcess::ExitStatus exitStatus) {
+        process->deleteLater();
+        if (m_providerValue == nullptr) {
+            return;
+        }
+        if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+            m_providerValue->setText(QStringLiteral("not available (install muzaiten-features-clap)"));
+            return;
+        }
+        const QJsonObject provider = QJsonDocument::fromJson(process->readAllStandardOutput())
+                                         .object()
+                                         .value(QStringLiteral("semantic")).toObject()
+                                         .value(QStringLiteral("provider")).toObject();
+        const QString revision = provider.value(QStringLiteral("feature_revision")).toString();
+        const QString version = provider.value(QStringLiteral("provider_version")).toString();
+        if (revision.isEmpty()) {
+            m_providerValue->setText(QStringLiteral("not available (install muzaiten-features-clap)"));
+            return;
+        }
+        QString text = QStringLiteral("muzaiten-features-clap %1 (%2)")
+                           .arg(version.isEmpty() ? QStringLiteral("unknown-version") : version, revision);
+        const QJsonArray components = provider.value(QStringLiteral("model")).toObject()
+                                          .value(QStringLiteral("components")).toArray();
+        if (!components.isEmpty()) {
+            QStringList names;
+            for (const QJsonValue &component : components) {
+                names << component.toString();
+            }
+            text += QStringLiteral(", installed: %1").arg(names.join(QStringLiteral("+")));
+        }
+        // The line users need when embeddings lag behind the provider: the
+        // fix is one button, so say exactly that.
+        if (!storeRevision.isEmpty() && revision != storeRevision) {
+            text += QStringLiteral("\nEmbeddings use %1: the next audio analysis re-embeds "
+                                   "every group with the new windowing.")
+                        .arg(storeRevision);
+        }
+        m_providerValue->setText(text);
+    });
+    process->start();
 }
 
 void AudioAnalysisStatusDialog::refreshLiveStatus()

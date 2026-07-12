@@ -20,12 +20,19 @@ public:
     explicit AudioAnalysisStatusDialog(
         const QString &featuresPath,
         std::function<AudioAnalysisData::LiveStatus()> liveStatus = {},
+        const QString &featuresBinary = {},
         QWidget *parent = nullptr);
 
 private:
     void refreshLiveStatus();
+    // Async `muzaiten-features status --json`: shows the provider's own
+    // feature revision next to the store's so an outdated provider (or a
+    // pending re-embed after a provider upgrade) is visible at a glance.
+    void fetchProviderStatus(const QString &featuresBinary, const QString &featuresPath,
+                             const QString &storeRevision);
 
     std::function<AudioAnalysisData::LiveStatus()> m_liveStatus;
+    QLabel *m_providerValue = nullptr;
     QLabel *m_liveRunning = nullptr;
     QLabel *m_livePhase = nullptr;
     QLabel *m_liveProgress = nullptr;

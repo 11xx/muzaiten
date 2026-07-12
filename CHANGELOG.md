@@ -69,6 +69,20 @@
 
 ### Fixed
 
+- The analysis status in the menu no longer reports "~0s left" for whole
+  provider phases (fractional ETA values were truncated to zero on parse)
+  and now shows real wall-clock elapsed time instead of a frozen 00:00 (the
+  progress protocol never carried elapsed; the app now keeps its own run
+  clock). Phase transitions also reset counters, rate, and ETA instead of
+  showing the new phase with the previous phase's numbers, and the semantic
+  embedding, neighbor, and model-download phases name themselves instead of
+  all reading "Writing features".
+- The analysis status dialog now shows the provider's own version and
+  feature revision next to the store's, including installed model
+  components, and states plainly when the next analysis will re-embed the
+  library because the provider's windowing revision changed. An outdated
+  provider (or a pending window-v2 re-embed) is now visible at a glance
+  instead of requiring detective work after a suspiciously fast scan.
 - Semantic search ranking now caps how many candidate groups it probes for
   library membership. A stale `features.sqlite` paired with a pruned library
   could previously send one search into minutes of full-store probing; a

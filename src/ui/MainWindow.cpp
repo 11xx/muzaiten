@@ -5565,6 +5565,7 @@ void MainWindow::showAnalysisStatus()
 {
     AudioAnalysisStatusDialog dialog(m_core->featuresPath(),
                                      [this]() { return audioAnalysisLiveStatus(); },
+                                     resolveMuzaitenIndexBinary(),
                                      this);
     dialog.exec();
 }
@@ -5781,6 +5782,7 @@ void MainWindow::startAudioAnalysis()
     m_audioAnalysisRunState.running = true;
     m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::AnalyzingFiles;
     m_audioAnalysisRunState.power = QString::fromLatin1(analysisPowerLabels[boundedAnalysisPower]);
+    m_audioAnalysisRunClock.start();
 
     m_playerBar->setAudioAnalysisRunStatus(true, QStringLiteral("Analyzing…"));
     statusBar()->showMessage(QStringLiteral("Starting audio analysis..."));
@@ -5944,9 +5946,19 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
                 ? event.value(QStringLiteral("rate")).toDouble()
                 : -1.0;
             if (event.contains(QStringLiteral("eta_seconds"))) {
-                m_audioAnalysisRunState.etaSecs = event.value(QStringLiteral("eta_seconds")).toInteger();
+                // Provider events send fractional seconds; toInteger() would
+                // return 0 for any non-integral double and freeze the menu at
+                // "~0s left" for whole phases.
+                m_audioAnalysisRunState.etaSecs = static_cast<qint64>(
+                    std::llround(event.value(QStringLiteral("eta_seconds")).toDouble()));
             } else {
                 m_audioAnalysisRunState.etaSecs.reset();
+            }
+            // The JSONL protocol carries no elapsed field; the run clock is
+            // the only truthful source across native and provider phases.
+            if (m_audioAnalysisRunClock.isValid()) {
+                m_audioAnalysisRunState.elapsedSecs =
+                    static_cast<double>(m_audioAnalysisRunClock.elapsed()) / 1000.0;
             }
             if (phase == QLatin1String("scalar-features")) {
                 m_audioAnalysisRunState.phase = AudioAnalysisData::LiveStatus::Phase::WritingFeatures;
@@ -5970,6 +5982,13 @@ void MainWindow::handleAudioAnalysisProgressLine(const QString &line)
             m_audioAnalysisRunState.phase = phase == QLatin1String("grouping")
                 ? AudioAnalysisData::LiveStatus::Phase::Grouping
                 : AudioAnalysisData::LiveStatus::Phase::WritingFeatures;
+            // Counters, rate, and ETA belong to the phase that produced
+            // them; carrying them across a phase boundary shows the new
+            // phase with the old phase's numbers.
+            m_audioAnalysisRunState.analyzed = 0;
+            m_audioAnalysisRunState.total = 0;
+            m_audioAnalysisRunState.rate = -1.0;
+            m_audioAnalysisRunState.etaSecs.reset();
             m_playerBar->setAudioAnalysisRunStatus(
                 true, AudioAnalysisData::phaseLabel(m_audioAnalysisRunState.phase) + QStringLiteral("…"));
             return;

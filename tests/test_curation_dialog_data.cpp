@@ -297,6 +297,24 @@ void CurationDialogDataTest::audioAnalysisProgressLabelsAreHumanReadable()
     QCOMPARE(AudioAnalysisData::progressLabel(status),
              QStringLiteral("Writing features… 700/70590 groups · 0.5/s · ~38h49m left · 2:00:00 elapsed"));
 
+    status.phase = AudioAnalysisData::LiveStatus::Phase::SemanticEmbeddings;
+    QCOMPARE(AudioAnalysisData::progressLabel(status),
+             QStringLiteral(
+                 "Generating semantic embeddings… 700/70590 groups · 0.5/s · ~38h49m left · 2:00:00 elapsed"));
+    status.phase = AudioAnalysisData::LiveStatus::Phase::SemanticNeighbors;
+    QCOMPARE(AudioAnalysisData::progressLabel(status),
+             QStringLiteral(
+                 "Building similarity neighbors… 700/70590 groups · 0.5/s · ~38h49m left · 2:00:00 elapsed"));
+
+    status.phase = AudioAnalysisData::LiveStatus::Phase::ModelDownload;
+    status.analyzed = 197500000;
+    status.total = 790000000;
+    status.rate = -1.0;
+    status.etaSecs.reset();
+    status.elapsedSecs = 60;
+    QCOMPARE(AudioAnalysisData::progressLabel(status),
+             QStringLiteral("Downloading semantic model… 25.0% · 01:00 elapsed"));
+
     status.phase = AudioAnalysisData::LiveStatus::Phase::ModelConvert;
     status.analyzed = 3;
     status.total = 5;

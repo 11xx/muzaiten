@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QProcess>
 #include <QSet>
@@ -533,6 +534,9 @@ private:
     bool m_audioAnalysisCancelRequested = false;
     bool m_audioAnalysisRestartPending = false;  // power changed mid-run: stop, then relaunch
     AudioAnalysisData::LiveStatus m_audioAnalysisRunState;
+    // Wall clock for the running analysis: the JSONL progress protocol has
+    // no elapsed field, so the GUI keeps its own.
+    QElapsedTimer m_audioAnalysisRunClock;
     QProcess *m_semanticModelProcess = nullptr;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
