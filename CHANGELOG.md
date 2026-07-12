@@ -28,6 +28,13 @@
 
 ### Changed
 
+- Start Radio now switches an already-playing seed into a radio queue without
+  restarting it or losing its position, while a different seed begins playing
+  before its recommendations are ready. Initial and refill batches score off
+  the UI thread, show a compact loading indicator, and discard stale work when
+  playback context changes. The new Radio refill padding setting controls how
+  many queued tracks remain when the next batch begins loading.
+
 - Semantic audio embeddings now pool three deterministic 10-second windows
   per track (hash-placed in the early, middle, and late thirds) instead of
   one, so a single unrepresentative section no longer defines a track's

@@ -371,6 +371,29 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
     return result;
 }
 
+void RadioSession::aliasResolvedPath(const QString &candidatePath, const QString &resolvedPath)
+{
+    if (candidatePath.isEmpty() || resolvedPath.isEmpty() || candidatePath == resolvedPath) {
+        return;
+    }
+    const auto candidate = m_byPath.constFind(candidatePath);
+    if (candidate != m_byPath.constEnd() && !m_byPath.contains(resolvedPath)) {
+        TrackScorer::Candidate alias = *candidate;
+        alias.path = resolvedPath;
+        m_byPath.insert(resolvedPath, alias);
+    }
+    m_usedPaths.insert(resolvedPath);
+    const auto reason = m_pickReasons.constFind(candidatePath);
+    if (reason != m_pickReasons.constEnd()) {
+        m_pickReasons.insert(resolvedPath, *reason);
+    }
+    for (QString &path : m_pickReasonOrder) {
+        if (path == candidatePath) {
+            path = resolvedPath;
+        }
+    }
+}
+
 void RadioSession::setExploration(int exploration0To100)
 {
     m_exploration = std::clamp(exploration0To100, 0, 100);

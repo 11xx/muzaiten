@@ -21,6 +21,10 @@ history. There is no cloud, no account, and nothing leaves your machine.
 Starting radio snapshots the current queue first, so "Restore saved queue…"
 can undo it. While a session runs, a radio indicator appears in the player
 bar — click to stop (the queue is kept), right-click for session options.
+Starting from the track that is already playing keeps its playback position
+and replaces only the queue around it. Starting from another track plays that
+seed immediately. In both cases recommendations load in the background and an
+indeterminate status-bar indicator remains visible until the new tail arrives.
 
 ## How picks are scored
 
@@ -53,6 +57,9 @@ below).
   the engine's taste signals (guilty-pleasure mode).
 - **Batch size** (`Radio > Radio batch size…`) sets how many picks queue
   ahead at a time.
+- **Refill padding** (`Radio > Radio refill padding…`) sets how many queued
+  tracks may remain before the next batch starts loading. The default is 5;
+  use 0 to wait until playback reaches the final queued track.
 
 ## Tuning the scoring
 

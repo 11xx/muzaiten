@@ -234,6 +234,7 @@ private slots:
     void reasonForNonEmptyOnPick();
     void reasonComponentsRoundTripFromPick();
     void resolvedPickStoresReasonUnderResolvedPath();
+    void deferredResolutionAliasesWorkerPick();
     void pickReasonsEnumeratesStoredComponents();
     void reasonSentencePicksTopPhrases();
     void reasonSentenceNamesAudio();
@@ -1531,6 +1532,28 @@ void RadioTest::resolvedPickStoresReasonUnderResolvedPath()
 
     const QVector<Track> later = session.nextTracks(2, {}, resolvePathToTrack);
     QVERIFY(later.isEmpty());
+}
+
+void RadioTest::deferredResolutionAliasesWorkerPick()
+{
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/candidate.flac"), QStringLiteral("artist"),
+                      {QStringLiteral("rock")}, 2000, 90, true),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(1u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> workerPicks = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(workerPicks.size(), 1);
+    session.aliasResolvedPath(workerPicks.first().path, QStringLiteral("/preferred.flac"));
+
+    QVERIFY(!session.reasonComponentsFor(QStringLiteral("/preferred.flac")).isEmpty());
+    QCOMPARE(session.pickReasons().first().path, QStringLiteral("/preferred.flac"));
+    const QJsonArray usedPaths = session.constraintState().value(QStringLiteral("usedPaths")).toArray();
+    QVERIFY(usedPaths.contains(QJsonValue(QStringLiteral("/candidate.flac"))));
+    QVERIFY(usedPaths.contains(QJsonValue(QStringLiteral("/preferred.flac"))));
 }
 
 void RadioTest::pickReasonsEnumeratesStoredComponents()

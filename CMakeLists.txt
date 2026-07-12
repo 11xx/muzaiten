@@ -27,7 +27,7 @@ set(MUZAITEN_LASTFM_SHARED_SECRET "" CACHE STRING "Embedded default Last.fm shar
 include(CheckPIESupported)
 check_pie_supported()
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core DBus Gui Multimedia Network Widgets Sql Test)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Concurrent Core DBus Gui Multimedia Network Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
@@ -333,6 +333,7 @@ target_compile_definitions(muzaiten_app_objects PUBLIC
 )
 
 target_link_libraries(muzaiten_app_objects PUBLIC
+    Qt6::Concurrent
     Qt6::Core
     Qt6::DBus
     Qt6::Network

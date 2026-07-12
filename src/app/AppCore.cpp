@@ -37,6 +37,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -45,6 +46,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
@@ -186,9 +188,7 @@ constexpr int kDefaultRadioExploration = 30;
 constexpr int kDefaultRadioBatchSize = 15;
 constexpr int kAdventurousExploration = 85;
 constexpr int kRadioNeighborAugmentLimit = 200;
-// Keep at least this many un-played rows queued ahead of the current index
-// while radio is batching, so the recommendation stream never visibly empties.
-constexpr int kRadioTopUpThreshold = 5;
+constexpr int kDefaultRadioRefillThreshold = 5;
 // A run of this many consecutive early radio skips means generation-time
 // context (mood) has likely drifted; see AppCore::rerollRadioQueue.
 constexpr int kRerollAfterConsecutiveSkips = 3;
@@ -261,6 +261,10 @@ AppCore::AppCore(QObject *parent)
     m_radioBatchSize = std::clamp(
         m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
         1, 100);
+    m_radioRefillThreshold = std::clamp(
+        m_database->setting(QStringLiteral("radio.refillThreshold"),
+                            QString::number(kDefaultRadioRefillThreshold)).toInt(),
+        0, 100);
 
     m_playlistDb = std::make_unique<PlaylistDatabase>(QStringLiteral("playlists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_playlistDb->open(playlistDatabasePath())) {
@@ -321,7 +325,10 @@ AppCore::AppCore(QObject *parent)
     });
     connect(m_player, &PlayerCore::currentIndexChanged, this, [this](int, bool userInitiated) {
         m_nextStartUserInitiated = userInitiated;
-        maybeTopUpRadioQueue();
+        // currentTrackChanged follows this signal synchronously and advances
+        // the radio session's rolling context. Queue the refill check so its
+        // worker snapshot includes the track that just became current.
+        QTimer::singleShot(0, this, [this]() { maybeTopUpRadioQueue(); });
     });
     connect(m_player, &PlayerCore::aboutToNavigateBack, this, [this]() {
         m_nextSkipIsBackNavigation = true;
@@ -704,6 +711,7 @@ void AppCore::setupScrobbleWiring()
         // interruptions alike (they all shape mood continuity).
         if (m_radioSession && (m_player->radioActive() || m_radioShuffleSessionActive)) {
             m_radioSession->notePlayed(track);
+            ++m_radioSessionRevision;
         }
         // A non-radio track breaks the consecutive-early-skip streak the moment
         // it starts (a user-queued interruption, not a skip outcome, is still a
@@ -1602,6 +1610,60 @@ bool AppCore::startRadio(const QString &seedPath)
         return false;
     }
 
+    const quint64 requestId = ++m_radioRequestId;
+    m_radioSession.reset();
+    m_radioPickPaths.clear();
+    m_radioConsecutiveEarlySkips = 0;
+    m_radioShuffleSessionActive = false;
+    m_radioSessionKind = QStringLiteral("seeded");
+    m_radioSessionSeedPath = seed.path;
+    m_radioSessionArtistName.clear();
+    m_radioBatchSize = std::clamp(
+        m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
+        1, 100);
+    m_radioRefillThreshold = std::clamp(
+        m_database->setting(QStringLiteral("radio.refillThreshold"),
+                            QString::number(kDefaultRadioRefillThreshold)).toInt(),
+        0, 100);
+
+    m_player->setRadioProvider({});
+    m_player->setRadioActive(true);
+    m_radioTopUpInProgress = false;
+    const bool seedAlreadyPlaying = m_player->currentTrack().path == seed.path
+        && m_playback != nullptr && m_playback->hasSource()
+        && m_playback->state() != PlaybackBackend::State::Stopped;
+    if (seedAlreadyPlaying) {
+        // Starting radio from the audible track is a queue-mode migration, not
+        // a new play. Keep the backend and timeline untouched while replacing
+        // the old queue tail with the radio tail that is about to arrive.
+        m_player->clearKeepingCurrent();
+    } else {
+        m_player->clearAll();
+        m_player->appendAndPlay(seed);
+    }
+
+    setRadioLoading(true);
+    // Yield back to the event loop after playback/queue migration. Candidate
+    // preparation can touch several SQLite-backed stores, while the expensive
+    // repeated scoring for the batch itself runs on a worker below.
+    QTimer::singleShot(0, this, [this, seedPath = seed.path, requestId]() {
+        finishSeededRadioStart(seedPath, requestId);
+    });
+    return true;
+}
+
+void AppCore::finishSeededRadioStart(const QString &seedPath, quint64 requestId)
+{
+    if (requestId != m_radioRequestId || m_database == nullptr || m_player == nullptr
+        || !m_player->radioActive()) {
+        return;
+    }
+    const Track seed = m_database->trackForPath(seedPath);
+    if (seed.path.isEmpty()) {
+        stopRadio();
+        return;
+    }
+
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
     const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
@@ -1631,15 +1693,6 @@ bool AppCore::startRadio(const QString &seedPath)
     const int exploration = m_radioAdventurous ? kAdventurousExploration : persistedExploration;
     m_radioAdventurous = false;
 
-    m_radioBatchSize = std::clamp(
-        m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
-        1, 100);
-    m_radioPickPaths.clear();
-    m_radioConsecutiveEarlySkips = 0;
-    m_radioShuffleSessionActive = false;
-    m_radioSessionKind = QStringLiteral("seeded");
-    m_radioSessionSeedPath = seed.path;
-    m_radioSessionArtistName.clear();
     m_radioSessionExploration = exploration;
 
     m_radioSessionWeights = radioScoringWeights();
@@ -1650,27 +1703,21 @@ bool AppCore::startRadio(const QString &seedPath)
     // path. Stays installed regardless of batch size: it is the safety net for
     // when the queue runs dry (e.g. the user deleted rows ahead of playback).
     installRadioProvider(/*markPicksAsRadio=*/true);
-    m_player->setRadioActive(true);
-    // Guard the setup sequence against maybeTopUpRadioQueue: appendAndPlay(seed)
-    // below fires currentIndexChanged synchronously with a 1-row queue (well
-    // under the top-up threshold), which would otherwise race ahead of the
-    // deliberate initial batch a few lines down and double-append.
-    m_radioTopUpInProgress = true;
-    // Clear the queue and start the seed; the currentTrackChanged handler feeds
-    // the seed into the session's rolling context, and auto-advance past the seed
-    // pulls the first recommendation through the radio provider.
-    m_player->clearAll();
-    m_player->appendAndPlay(seed);
+    const Track current = m_player->currentTrack();
+    if (!current.path.isEmpty()) {
+        m_radioSession->notePlayed(current);
+        ++m_radioSessionRevision;
+    }
     // batchSize == 1 reproduces the original just-in-time behaviour exactly: no
     // batch append here, and maybeTopUpRadioQueue()/rerollRadioQueue() both
     // no-op in that mode too -- the JIT provider above is the only source of
     // picks, generated exactly when decideAutoNext() needs one.
     if (m_radioBatchSize > 1) {
         appendRadioBatch(m_radioBatchSize - 1);
+    } else {
+        setRadioLoading(false);
     }
-    m_radioTopUpInProgress = false;
     saveRadioSessionState();
-    return true;
 }
 
 bool AppCore::startArtistRadio(const QString &artistName)
@@ -1683,6 +1730,8 @@ bool AppCore::startArtistRadio(const QString &artistName)
     if (trimmedArtist.isEmpty() || artistTracks.isEmpty()) {
         return false;
     }
+    ++m_radioRequestId;
+    setRadioLoading(false);
 
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
@@ -1735,10 +1784,10 @@ bool AppCore::startArtistRadio(const QString &artistName)
     m_radioTopUpInProgress = true;
     m_player->clearAll();
     m_player->appendAndPlay(representative);
+    m_radioTopUpInProgress = false;
     if (m_radioBatchSize > 1) {
         appendRadioBatch(m_radioBatchSize - 1);
     }
-    m_radioTopUpInProgress = false;
     saveRadioSessionState();
     return true;
 }
@@ -1749,6 +1798,8 @@ bool AppCore::startMix(const QString &mode)
     if (!mixMode || m_database == nullptr || m_player == nullptr) {
         return false;
     }
+    ++m_radioRequestId;
+    setRadioLoading(false);
 
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
@@ -1816,6 +1867,9 @@ bool AppCore::startMix(const QString &mode)
 
 void AppCore::stopRadio()
 {
+    ++m_radioRequestId;
+    m_radioTopUpInProgress = false;
+    setRadioLoading(false);
     if (m_player != nullptr) {
         m_player->setRadioActive(false);
         m_player->setRadioProvider({});
@@ -1830,6 +1884,15 @@ void AppCore::stopRadio()
     m_radioAdventurous = false;
     clearRadioSessionState();
     syncRadioShuffleSession();
+}
+
+void AppCore::setRadioLoading(bool loading)
+{
+    if (m_radioLoading == loading) {
+        return;
+    }
+    m_radioLoading = loading;
+    emit radioLoadingChanged(loading);
 }
 
 QString AppCore::radioPickReason(const QString &path) const
@@ -1914,6 +1977,7 @@ void AppCore::setRadioExploration(int value0To100, bool persist)
     if (m_radioSession) {
         m_radioSession->setExploration(clamped);
         m_radioSessionExploration = clamped;
+        ++m_radioSessionRevision;
         saveRadioSessionState();
     }
     if (persist && m_database != nullptr) {
@@ -1934,6 +1998,21 @@ void AppCore::setRadioBatchSize(int value1To100)
     }
 }
 
+int AppCore::radioRefillThreshold() const
+{
+    return m_radioRefillThreshold;
+}
+
+void AppCore::setRadioRefillThreshold(int value0To100)
+{
+    m_radioRefillThreshold = std::clamp(value0To100, 0, 100);
+    if (m_database != nullptr) {
+        m_database->setSetting(QStringLiteral("radio.refillThreshold"),
+                               QString::number(m_radioRefillThreshold));
+    }
+    maybeTopUpRadioQueue();
+}
+
 bool AppCore::radioAdventurous() const
 {
     return m_radioAdventurous;
@@ -1947,6 +2026,7 @@ void AppCore::setRadioAdventurous(bool on)
         // back to the persisted setting, not whatever the session started at.
         m_radioSessionExploration = on ? kAdventurousExploration : radioExploration();
         m_radioSession->setExploration(m_radioSessionExploration);
+        ++m_radioSessionRevision;
         saveRadioSessionState();
     }
     // No session yet: just arms the next startRadio (consumed + reset there).
@@ -1954,7 +2034,7 @@ void AppCore::setRadioAdventurous(bool on)
 
 void AppCore::appendRadioBatch(int count)
 {
-    if (!m_radioSession || m_player == nullptr || count <= 0) {
+    if (!m_radioSession || m_player == nullptr || count <= 0 || m_radioTopUpInProgress) {
         return;
     }
     QSet<QString> exclude;
@@ -1963,34 +2043,74 @@ void AppCore::appendRadioBatch(int count)
     for (const Track &track : queue) {
         exclude.insert(track.path);
     }
-    const QSet<QString> neverRadioPaths = m_database != nullptr
-        ? m_database->flaggedPaths(Database::TrackFlag::NeverRadio)
-        : QSet<QString>{};
-    QSet<QString> blockedPaths = neverRadioPaths;
-    blockedPaths.unite(exclude);
-    const QVector<Track> picks = m_radioSession->nextTracks(count, exclude, [this, blockedPaths](const QString &path) {
-        return resolveRadioPick(path, blockedPaths);
-    });
-    if (picks.isEmpty()) {
-        return;
-    }
-    recordRadioPicks(picks);
-    for (const Track &track : picks) {
-        if (!track.path.isEmpty()) {
+    const quint64 requestId = m_radioRequestId;
+    const quint64 revision = m_radioSessionRevision;
+    auto session = std::make_shared<RadioSession>(*m_radioSession);
+    auto candidatePicks = std::make_shared<QVector<Track>>();
+    auto *watcher = new QFutureWatcher<void>(this);
+    m_radioTopUpInProgress = true;
+    setRadioLoading(true);
+    connect(watcher, &QFutureWatcher<void>::finished, this,
+            [this, watcher, session, candidatePicks, exclude, requestId, revision]() {
+        watcher->deleteLater();
+        // A newer radio start owns both the loading indicator and the shared
+        // in-progress flag. Its batch may already be running, so an older
+        // watcher's completion must not clear either one.
+        if (requestId != m_radioRequestId) {
+            return;
+        }
+        m_radioTopUpInProgress = false;
+        if (revision != m_radioSessionRevision || m_player == nullptr
+            || !m_player->radioActive() || !m_radioSession) {
+            if (m_player != nullptr && m_player->radioActive() && m_radioSession) {
+                maybeTopUpRadioQueue();
+                if (!m_radioTopUpInProgress) {
+                    setRadioLoading(false);
+                }
+            } else {
+                setRadioLoading(false);
+            }
+            return;
+        }
+
+        const QSet<QString> neverRadioPaths = m_database != nullptr
+            ? m_database->flaggedPaths(Database::TrackFlag::NeverRadio)
+            : QSet<QString>{};
+        QSet<QString> blockedPaths = neverRadioPaths;
+        blockedPaths.unite(exclude);
+        QVector<Track> picks;
+        picks.reserve(candidatePicks->size());
+        for (const Track &candidate : *candidatePicks) {
+            const Track resolved = resolveRadioPick(candidate.path, blockedPaths);
+            if (resolved.path.isEmpty()) {
+                continue;
+            }
+            session->aliasResolvedPath(candidate.path, resolved.path);
+            blockedPaths.insert(resolved.path);
+            picks.push_back(resolved);
+        }
+
+        m_radioSession = std::make_unique<RadioSession>(*session);
+        ++m_radioSessionRevision;
+        recordRadioPicks(picks);
+        for (const Track &track : picks) {
             m_radioPickPaths.insert(track.path);
         }
-    }
-    // Radio picks are queue-only: PlayerCore::injectTracks reuses the single-JIT
-    // aboutToInjectLibraryTrack semantics per track. Plain appendTracks (which
-    // emits aboutToAddTracks) is NOT safe here -- MainWindow's
-    // prepareQueueForTrackAddition mirrors aboutToAddTracks tracks into the
-    // active playlist whenever the queue is still playlist-sourced, and
-    // AppCore::startRadio's clearAll()+appendAndPlay(seed) does not itself
-    // reset that source-kind (that bookkeeping lives in MainWindow, not
-    // PlayerCore) -- a radio session started while a playlist-backed queue was
-    // playing would otherwise silently mirror every batch pick into it.
-    m_player->injectTracks(picks);
-    saveRadioSessionState();
+        if (!picks.isEmpty()) {
+            // Radio picks are queue-only: PlayerCore::injectTracks reuses the
+            // single-JIT injection signal without mirroring into a playlist.
+            m_player->injectTracks(picks);
+        }
+        saveRadioSessionState();
+        setRadioLoading(false);
+    });
+    watcher->setFuture(QtConcurrent::run([session, candidatePicks, count, exclude]() {
+        *candidatePicks = session->nextTracks(count, exclude, [](const QString &path) {
+            Track placeholder;
+            placeholder.path = path;
+            return placeholder;
+        });
+    }));
 }
 
 void AppCore::maybeTopUpRadioQueue()
@@ -2002,13 +2122,10 @@ void AppCore::maybeTopUpRadioQueue()
         return; // pure JIT mode: no queued-ahead rows to keep topped up
     }
     const int remaining = static_cast<int>(m_player->queue().size()) - 1 - m_player->queueIndex();
-    if (remaining >= kRadioTopUpThreshold) {
+    if (remaining > m_radioRefillThreshold) {
         return;
     }
-    m_radioTopUpInProgress = true;
     appendRadioBatch(m_radioBatchSize);
-    m_radioTopUpInProgress = false;
-    saveRadioSessionState();
 }
 
 void AppCore::rerollRadioQueue()
@@ -2034,7 +2151,6 @@ void AppCore::rerollRadioQueue()
     }
     m_player->removeRows(staleRows);
     appendRadioBatch(m_radioBatchSize);
-    saveRadioSessionState();
 }
 
 void AppCore::handleRadioPlayEvent(const QString &source, const QString &outcome, qint64 playedMs,

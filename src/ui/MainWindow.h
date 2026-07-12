@@ -454,6 +454,7 @@ private:
     PlaylistView     *m_playlistView = nullptr;
     PanelSearchController *m_panelSearch = nullptr;
     QProgressBar *m_scanProgress = nullptr;
+    QProgressBar *m_radioProgress = nullptr;
     QPushButton *m_stopScanButton = nullptr;
     // Offered in the status bar only when bit-perfect playback fails because
     // PipeWire is holding the target device; click frees it and retries.

@@ -72,10 +72,10 @@ public:
     QThread               *listenBrainzThread() const;
     QThread               *lastFmThread() const;
 
-    // Start a rule-based radio session seeded from a library track: clears the
-    // queue, plays the seed, and installs a scored provider that extends the
-    // queue with recommendations. Returns false (no state change) when the seed
-    // path is not a known library track.
+    // Start a rule-based radio session seeded from a library track. An already
+    // playing seed is kept in place without restarting; another seed starts
+    // immediately. Recommendation preparation and queue extension follow
+    // asynchronously. Returns false when the path is not in the library.
     bool startRadio(const QString &seedPath);
     // Start a radio session seeded from an album-artist name. Uses a synthetic
     // seed built from the artist's genre/era aggregate and opens with a
@@ -100,16 +100,16 @@ public:
                            const QString &sourceSurface);
     void recordUserQueueRemovals(const QVector<int> &rows);
 
-    // Radio exploration/batch-size knobs (plans/music-recommendation-plan.md,
-    // "Batch radio queue"). Backed by the library-DB settings
-    // "radio.exploration"/"radio.batchSize" so a fresh session reads them as
-    // today; PlayerBar's radio right-click menu drives these through
-    // MainWindow. radioExploration() reports the PERSISTED value -- a live
-    // session's actual exploration can be higher while "adventurous" is armed.
+    // Radio exploration/batch/refill knobs (plans/music-recommendation-plan.md,
+    // "Batch radio queue"). Backed by library-DB settings and exposed through
+    // PlayerBar's radio menus. radioExploration() reports the persisted value;
+    // a live session can temporarily be higher while "adventurous" is armed.
     int radioExploration() const;
     void setRadioExploration(int value0To100, bool persist);
     int radioBatchSize() const;
     void setRadioBatchSize(int value1To100);
+    int radioRefillThreshold() const;
+    void setRadioRefillThreshold(int value0To100);
     // The "Adventurous (this session)" boost: while a session is active, toggles
     // the LIVE session exploration between 85 and the persisted value; with no
     // session active it arms the next startRadio to begin at 85 (one-shot --
@@ -148,6 +148,7 @@ signals:
     // Emitted on every backfill progress/finished/failed update, so the
     // Scrobblers menu (which stays open while browsing) can refresh live.
     void backfillStatusChanged();
+    void radioLoadingChanged(bool loading);
 
 public slots:
     void showWindow();
@@ -212,15 +213,15 @@ private:
     // PlayerCore::radioActive() is true and takes precedence.
     void syncRadioShuffleSession();
 
-    // Generates up to `count` fresh radio picks from the current rolling
-    // context and queues them via PlayerCore::injectTracks (queue-only; see its
-    // doc comment for why appendTracks is unsafe here). Tracks every resolved
-    // path in m_radioPickPaths for telemetry (AppCore::setupScrobbleWiring) and
-    // for rerollRadioQueue() to identify which queued rows are radio picks.
+    // Generates up to `count` fresh picks from a snapshot of the rolling
+    // context on a worker, resolves the chosen paths on the GUI thread, then
+    // queues them via PlayerCore::injectTracks. Stale snapshots are discarded.
     void appendRadioBatch(int count);
+    void finishSeededRadioStart(const QString &seedPath, quint64 requestId);
+    void setRadioLoading(bool loading);
     // Hooked off PlayerCore::currentIndexChanged: while radio is active and
-    // batching (batchSize > 1), keeps at least 5 rows queued ahead of the
-    // current index so the recommendation stream never visibly runs dry.
+    // batching (batchSize > 1), keeps the configured number of rows queued
+    // ahead of the current index so the recommendation stream stays padded.
     void maybeTopUpRadioQueue();
     // Stage 1 follow-up "re-roll on drift": discards the not-yet-played radio
     // rows after the current index and appends a fresh batch scored against the
@@ -286,12 +287,16 @@ private:
     // behaviour exactly); reloaded at each startRadio, otherwise updated live by
     // setRadioBatchSize.
     int               m_radioBatchSize = 15;
+    int               m_radioRefillThreshold = 5;
     // Re-entrancy / setup guard for the batch-append paths. Also held across
     // startRadio's own initial clearAll()+appendAndPlay(seed)+appendRadioBatch
     // sequence: appendAndPlay(seed) fires currentIndexChanged synchronously
     // with a 1-row queue, which would otherwise trip maybeTopUpRadioQueue and
     // double-append ahead of the deliberate initial batch.
     bool              m_radioTopUpInProgress = false;
+    bool              m_radioLoading = false;
+    quint64           m_radioRequestId = 0;
+    quint64           m_radioSessionRevision = 0;
     // Consecutive early-skip streak for the current radio session (see
     // handleRadioPlayEvent / rerollRadioQueue).
     int               m_radioConsecutiveEarlySkips = 0;

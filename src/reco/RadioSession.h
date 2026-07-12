@@ -66,6 +66,13 @@ public:
     QVector<Track> nextTracks(int count, const QSet<QString> &excludePaths,
                               const std::function<Track(const QString &path)> &resolveTrack);
 
+    // Batch generation can score on a worker using path-only placeholder
+    // Tracks, then resolve the selected paths to the preferred playable copies
+    // on the GUI thread. Teach the completed session about that substitution so
+    // explanations, repeat prevention, and later notePlayed() calls follow the
+    // path that actually entered the queue.
+    void aliasResolvedPath(const QString &candidatePath, const QString &resolvedPath);
+
     // Feed every track that actually becomes current while radio is active
     // (the seed, radio picks, and user-queued interruptions). Advances the
     // rolling context: last-3 artists, the last-3-played genre window, and the

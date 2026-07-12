@@ -669,6 +669,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(radioExplorationBar, &QAction::triggered, this, &PlayerBar::radioExplorationSettingsRequested);
     QAction *radioBatchSizeBar = radioMenu->addAction(QStringLiteral("Radio batch size…"));
     connect(radioBatchSizeBar, &QAction::triggered, this, &PlayerBar::radioBatchSizeSettingsRequested);
+    QAction *radioRefillThresholdBar = radioMenu->addAction(QStringLiteral("Radio refill padding…"));
+    connect(radioRefillThresholdBar, &QAction::triggered, this,
+            &PlayerBar::radioRefillThresholdSettingsRequested);
     QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent…"));
     QAction *scoringWeights = radioMenu->addAction(QStringLiteral("Scoring weights…"));
     radioMenu->addSeparator();
@@ -959,6 +962,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(radioExploration, &QAction::triggered, this, &PlayerBar::radioExplorationSettingsRequested);
     QAction *radioBatchSize = m_radioMenu->addAction(QStringLiteral("Radio batch size…"));
     connect(radioBatchSize, &QAction::triggered, this, &PlayerBar::radioBatchSizeSettingsRequested);
+    QAction *radioRefillThreshold = m_radioMenu->addAction(QStringLiteral("Radio refill padding…"));
+    connect(radioRefillThreshold, &QAction::triggered, this,
+            &PlayerBar::radioRefillThresholdSettingsRequested);
     connect(m_radioMenu, &QMenu::aboutToShow, this, &PlayerBar::radioMenuAboutToShow);
     root->addLayout(controls);
 

@@ -867,6 +867,14 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_scanProgress->setRange(0, 0);
     m_scanProgress->setVisible(false);
     statusBar()->addPermanentWidget(m_scanProgress);
+    m_radioProgress = new QProgressBar(this);
+    m_radioProgress->setRange(0, 0);
+    m_radioProgress->setMaximumWidth(110);
+    m_radioProgress->setFormat(QStringLiteral("Loading radio"));
+    m_radioProgress->setTextVisible(true);
+    m_radioProgress->setVisible(false);
+    statusBar()->addPermanentWidget(m_radioProgress);
+    connect(m_core, &AppCore::radioLoadingChanged, m_radioProgress, &QWidget::setVisible);
     m_stopScanButton = new QPushButton(QStringLiteral("Stop scan"), this);
     m_stopScanButton->setVisible(false);
     m_stopScanButton->setToolTip(QStringLiteral("Cancel the current library scan"));
@@ -1387,6 +1395,16 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_core->radioBatchSize(), 1, 100, 1, &ok);
         if (ok) {
             m_core->setRadioBatchSize(size);
+        }
+    });
+    connect(m_playerBar, &PlayerBar::radioRefillThresholdSettingsRequested, this, [this]() {
+        bool ok = false;
+        const int padding = QInputDialog::getInt(
+            this, QStringLiteral("Radio refill padding"),
+            QStringLiteral("Start loading a new batch when this many queued tracks remain:"),
+            m_core->radioRefillThreshold(), 0, 100, 1, &ok);
+        if (ok) {
+            m_core->setRadioRefillThreshold(padding);
         }
     });
     connect(m_playerBar, &PlayerBar::startRadioFromCurrentRequested, this, [this]() {
