@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2026.07.12]
 
 - The optional CLAP provider now serves the same stable embeddings through
   fp32 ONNX Runtime audio and text graphs instead of loading PyTorch,
