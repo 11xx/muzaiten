@@ -24,12 +24,14 @@ from muzaiten_features_clap.model import (
     MODEL_NAME,
     MODEL_SHA256,
     MODEL_VERSION,
+    OnnxClapEmbedder,
     TEXT_MODEL_FILENAME,
     TOKENIZER_FILENAME,
     _decode_audio_command,
     artifact_status,
     checkpoint_status,
     download_checkpoint,
+    window_offsets_ms,
     file_sha256,
     inference_thread_count,
     prepare_waveform,
@@ -541,11 +543,21 @@ def test_query_embedding_normalizes_fake_text_vector() -> None:
 
 def test_audio_decode_is_bounded_to_a_stable_ten_second_window() -> None:
     long_path = Path("/music/long.flac")
-    long_command = _decode_audio_command(long_path, duration_ms=240_000)
-    repeated_command = _decode_audio_command(long_path, duration_ms=240_000)
-    short_command = _decode_audio_command(Path("/music/short.flac"), duration_ms=3_000)
+    offsets = window_offsets_ms(long_path, 240_000)
+    repeated = window_offsets_ms(long_path, 240_000)
 
-    assert long_command == repeated_command
+    assert offsets == repeated
+    assert len(offsets) == 3
+    span = 230_000
+    for index, offset in enumerate(offsets):
+        assert offset is not None
+        assert span * index // 3 <= offset <= span * (index + 1) // 3
+
+    assert window_offsets_ms(Path("/music/short.flac"), 3_000) == [None]
+    assert window_offsets_ms(Path("/music/unknown.flac"), None) == [None]
+
+    long_command = _decode_audio_command(long_path, offsets[2])
+    short_command = _decode_audio_command(Path("/music/short.flac"), None)
     offset = float(long_command[long_command.index("-ss") + 1])
     assert 0.0 <= offset <= 230.0
     assert "-ss" not in short_command
@@ -651,7 +663,8 @@ def test_protocol_scan_passes_decode_workers_to_embedder(
     monkeypatch.setattr(
         protocol_module,
         "artifact_status",
-        lambda verify: SimpleNamespace(present=True, valid=True, path=tmp_path),
+        lambda *, verify=True, required=("audio",): SimpleNamespace(
+            present=True, valid=True, path=tmp_path, components=("audio", "text")),
     )
     monkeypatch.setattr(protocol_module, "resolve_device", lambda _choice: "cpu")
     received: dict[str, object] = {}
@@ -705,7 +718,7 @@ def test_protocol_status_does_not_load_real_model(
     assert payload["store"]["embeddings"] == 0
     assert payload["store"]["neighbor_rows"] == 0
     assert payload["model"]["name"] == "laion-clap-music-audioset"
-    assert payload["feature_revision"] == "clap-htsat-base-audio-window-v1"
+    assert payload["feature_revision"] == "clap-htsat-base-audio-window-v2"
 
 
 def test_protocol_routes_incidental_stdout_away_from_jsonl(
@@ -1128,6 +1141,141 @@ def test_download_artifacts_installs_verified_hosted_bundle(
     assert calls == []
 
 
+def test_download_artifacts_audio_only_then_upgrade_to_full(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, _manifest = _hosted_bundle(tmp_path)
+
+    calls: list[str] = []
+    result = model.download_artifacts(
+        "https://example.invalid/bundle",
+        opener=_bundle_opener(payloads, calls),
+        components=("audio",),
+    )
+    assert result.downloaded is True
+    assert TEXT_MODEL_FILENAME not in calls
+    audio_only = artifact_status(required=("audio",))
+    assert audio_only.valid is True
+    assert audio_only.components == ("audio",)
+    assert artifact_status().valid is False  # full still missing text
+
+    # Upgrading reuses the installed audio graph instead of re-downloading.
+    upgrade_calls: list[str] = []
+    upgraded = model.download_artifacts(
+        "https://example.invalid/bundle",
+        opener=_bundle_opener(payloads, upgrade_calls),
+        components=("audio", "text"),
+    )
+    assert upgraded.downloaded is True
+    assert AUDIO_MODEL_FILENAME not in upgrade_calls
+    assert TEXT_MODEL_FILENAME in upgrade_calls
+    full = artifact_status()
+    assert full.valid is True
+    assert set(full.components) == {"audio", "text"}
+
+    with pytest.raises(RuntimeError, match="audio component"):
+        model.download_artifacts(
+            "https://example.invalid/bundle",
+            opener=_bundle_opener(payloads, []),
+            components=("text",),
+        )
+
+
+def test_protocol_query_names_missing_text_component(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(model, "model_cache_dir", lambda: cache)
+    payloads, _manifest = _hosted_bundle(tmp_path)
+    model.download_artifacts(
+        "https://example.invalid/bundle",
+        opener=_bundle_opener(payloads, []),
+        components=("audio",),
+    )
+
+    with pytest.raises(FileNotFoundError, match="text model component"):
+        protocol_module.run_request(
+            protocol_module.Request("q1", "query", {"text": "warm piano"}),
+            lambda _e: None,
+            lambda: False,
+            embedder_factory=lambda **_kwargs: pytest.fail("query must not build an embedder"),
+        )
+
+
+def test_embed_audio_data_mean_pools_window_groups() -> None:
+    import numpy as np
+
+    class PoolingProbe:
+        _np = np
+
+        def __init__(self) -> None:
+            self.batches: list[int] = []
+            self._infer_timings_ms: list[float] = []
+
+        def _get_audio_session(self):
+            probe = self
+
+            class Session:
+                def run(self, _outputs, feeds):
+                    batch = feeds["waveform"]
+                    probe.batches.append(batch.shape[0])
+                    # Distinct unit rows per window: index k -> e_k basis.
+                    rows = np.zeros((batch.shape[0], 4), dtype=np.float32)
+                    for index in range(batch.shape[0]):
+                        rows[index, index % 4] = 1.0
+                    return [rows]
+
+            return Session()
+
+    wave = np.zeros(480_000, dtype=np.float32)
+    wave[0] = 0.5
+    pooled = OnnxClapEmbedder.embed_audio_data(
+        PoolingProbe(), [(wave, wave, wave), wave]
+    )
+
+    assert len(pooled) == 2
+    # First item pooled over windows 0,1,2 -> mean of e0,e1,e2.
+    assert pooled[0] == pytest.approx((1 / 3, 1 / 3, 1 / 3, 0.0))
+    # Second item is a bare waveform: passes through as one row (e3).
+    assert pooled[1] == pytest.approx((0.0, 0.0, 0.0, 1.0))
+
+
+def test_decode_paths_group_windows_per_track(monkeypatch: pytest.MonkeyPatch) -> None:
+    import numpy as np
+
+    decoded: list[tuple[Path, int | None, int | None]] = []
+
+    def fake_decode(path: Path, duration_ms: int | None = None, offset_ms: int | None = None):
+        decoded.append((path, duration_ms, offset_ms))
+        return np.zeros((1, 8), dtype=np.float32)
+
+    monkeypatch.setattr(model, "decode_audio_ffmpeg", fake_decode)
+
+    class DecodeProbe:
+        decode_workers = 2
+        _decode_timings_ms: list[float] = []
+        _decode_audio_window = OnnxClapEmbedder._decode_audio_window
+
+    long_track = Path("/music/long.flac")
+    short_track = Path("/music/short.flac")
+    grouped = OnnxClapEmbedder.decode_audio_paths(
+        DecodeProbe(), [long_track, short_track], [240_000, 3_000]
+    )
+
+    assert len(grouped) == 2
+    assert len(grouped[0]) == 3  # three windows for the long track
+    assert len(grouped[1]) == 1  # short track collapses to one read
+    long_offsets = [spec[2] for spec in decoded if spec[0] == long_track]
+    assert long_offsets == window_offsets_ms(long_track, 240_000)
+    assert [spec[2] for spec in decoded if spec[0] == short_track] == [None]
+
+
 def test_download_artifacts_rejects_tampered_bytes_and_wrong_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1146,15 +1294,25 @@ def test_download_artifacts_rejects_tampered_bytes_and_wrong_identity(
     assert list(cache.iterdir()) == []
 
     foreign = dict(manifest)
-    foreign["feature_revision"] = "some-other-revision"
+    foreign["checkpoint_sha256"] = "0" * 64
     payloads[MANIFEST_FILENAME] = json.dumps(foreign).encode()
     calls: list[str] = []
-    with pytest.raises(RuntimeError, match="feature_revision"):
+    with pytest.raises(RuntimeError, match="checkpoint_sha256"):
         model.download_artifacts(
             "https://example.invalid/bundle", opener=_bundle_opener(payloads, calls)
         )
     # Identity is rejected before any artifact bytes are fetched.
     assert calls == [MANIFEST_FILENAME]
+
+    # A manifest exported under another windowing revision stays installable:
+    # the revision names provider preprocessing, not the graph bytes.
+    other_revision = dict(manifest)
+    other_revision["feature_revision"] = "some-other-revision"
+    assert model.validate_manifest_identity(other_revision)
+    stripped = dict(manifest)
+    stripped["feature_revision"] = ""
+    with pytest.raises(RuntimeError, match="feature_revision"):
+        model.validate_manifest_identity(stripped)
 
 
 def test_protocol_model_download_prefers_hosted_bundle(
@@ -1174,9 +1332,8 @@ def test_protocol_model_download_prefers_hosted_bundle(
     monkeypatch.setattr(
         protocol_module,
         "download_artifacts",
-        lambda url, progress=None, canceled=None: model.ArtifactDownload(
-            installed, downloaded=True
-        ),
+        lambda url, progress=None, canceled=None, components=("audio", "text"):
+            model.ArtifactDownload(installed, downloaded=True),
     )
 
     request = protocol_module.Request("d1", "model-download", {})

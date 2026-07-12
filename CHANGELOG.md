@@ -4,6 +4,14 @@
 
 ### Added
 
+- The semantic model can now be installed audio-only: the download consent
+  dialog offers "Audio only" (about 285 MB) alongside the full bundle
+  (about 790 MB), and `muzaiten-features model download` gained
+  `--components full|audio`. Radio, neighbors, and the analysis scan work
+  fully on the audio component; free-text semantic search asks for the full
+  bundle by name when the text graph is absent, and upgrading later fetches
+  only the missing text files.
+
 - Semantic search arrived in the app: press `Ctrl+S` in the Search view to
   describe the music in free text ("warm piano with brushed drums") and get
   the analyzed library ranked by CLAP audio similarity. Result rows carry
@@ -20,6 +28,16 @@
 
 ### Changed
 
+- Semantic audio embeddings now pool three deterministic 10-second windows
+  per track (hash-placed in the early, middle, and late thirds) instead of
+  one, so a single unrepresentative section no longer defines a track's
+  radio neighborhood. This bumps the feature revision to
+  `clap-htsat-base-audio-window-v2`: the next semantic refresh re-embeds the
+  library (roughly 3x the per-track inference, overlapped with decoding).
+  Installed model bundles stay valid because the manifest's feature revision
+  is now informational (it names provider preprocessing, not graph bytes),
+  and legacy pre-v5 stores keep migrating under the revision they were
+  actually computed with.
 - Audio analysis gained a decode-concurrency brake against pathological
   media collapse. Measurement drove the design twice over: on a reference
   NFS library, sixteen concurrent full-track decodes average 4.2 s each

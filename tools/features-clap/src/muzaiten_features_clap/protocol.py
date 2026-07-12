@@ -9,6 +9,8 @@ from typing import Callable
 
 from . import __version__
 from .model import (
+    ALL_COMPONENTS,
+    AUDIO_COMPONENT_APPROXIMATE_BYTES,
     DECODE_WORKERS,
     FEATURE_REVISION,
     MODEL_APPROXIMATE_BYTES,
@@ -61,7 +63,7 @@ def parse_request(payload: object) -> Request:
 
 
 def capabilities() -> dict[str, object]:
-    current = artifact_status(verify=False)
+    current = artifact_status(verify=False, required=("audio",))
     return {
         "capability": "clap",
         "provider_version": __version__,
@@ -69,7 +71,7 @@ def capabilities() -> dict[str, object]:
         "operations": list(OPERATIONS),
         "feature_revision": FEATURE_REVISION,
         "vector_dimension": 512,
-        "model": _model_payload(current.present, current.valid, current.path),
+        "model": _model_payload(current.present, current.valid, current.path, current.components),
     }
 
 
@@ -83,10 +85,10 @@ def run_request(
     if request.operation == "capabilities":
         return capabilities()
     if request.operation == "status":
-        current = artifact_status(verify=False)
+        current = artifact_status(verify=False, required=("audio",))
         payload: dict[str, object] = {
             **capabilities(),
-            "model": _model_payload(current.present, current.valid, current.path),
+            "model": _model_payload(current.present, current.valid, current.path, current.components),
             "model_extra_installed": _runtime_dependencies_installed(),
             "device": probe_device() or "unavailable",
         }
@@ -95,9 +97,10 @@ def run_request(
             payload["store"] = status(_path(params, "features"), MODEL_NAME, MODEL_VERSION).as_dict()
         return payload
     if request.operation == "model-download":
+        components = _components(params)
         # Full hash verification is correct here: this is the install-time
         # boundary, and an invalid bundle must be repaired, not trusted.
-        current = artifact_status()
+        current = artifact_status(required=components)
         if current.valid:
             return {
                 "path": str(current.path),
@@ -105,6 +108,7 @@ def run_request(
                 "sha256": MODEL_SHA256,
                 "artifacts_path": str(current.path),
                 "converted": False,
+                "components": list(current.components),
             }
         started = time.monotonic()
 
@@ -125,13 +129,16 @@ def run_request(
                 MODEL_ARTIFACTS_URL,
                 progress=download_progress,
                 canceled=canceled,
+                components=components,
             )
+            installed = artifact_status(verify=False, required=components)
             return {
                 "path": str(hosted.path),
                 "downloaded": hosted.downloaded,
                 "sha256": MODEL_SHA256,
                 "artifacts_path": str(hosted.path),
                 "converted": False,
+                "components": list(installed.components),
             }
 
         result = download_checkpoint(progress=download_progress, canceled=canceled)
@@ -169,7 +176,7 @@ def run_request(
         # Structural manifest check only: artifact hashes are verified when
         # the model is installed, and hashing 790 MB per invocation would
         # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
-        artifacts = artifact_status(verify=False)
+        artifacts = artifact_status(verify=False, required=("audio",))
         if not artifacts.present or not artifacts.valid:
             raise FileNotFoundError(f"converted CLAP model is missing or invalid: {artifacts.path}")
         started = time.monotonic()
@@ -221,8 +228,12 @@ def run_request(
         # Structural manifest check only: artifact hashes are verified when
         # the model is installed, and hashing 790 MB per invocation would
         # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
-        artifacts = artifact_status(verify=False)
+        artifacts = artifact_status(verify=False, required=("text",))
         if not artifacts.present or not artifacts.valid:
+            if artifacts.present and "audio" in artifacts.components:
+                raise FileNotFoundError(
+                    "the text model component is not installed (audio-only download); "
+                    "text queries need the full model download")
             raise FileNotFoundError(f"converted CLAP model is missing or invalid: {artifacts.path}")
         embedder = embedder_factory(
             artifacts=artifacts.path,
@@ -253,7 +264,17 @@ def encode_event(payload: dict[str, object]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _model_payload(present: bool, valid: bool, path: Path) -> dict[str, object]:
+def _components(params: dict[str, object]) -> tuple[str, ...]:
+    value = params.get("components", "full")
+    if value == "full":
+        return ALL_COMPONENTS
+    if value == "audio":
+        return ("audio",)
+    raise ProtocolError('components must be "full" or "audio"')
+
+
+def _model_payload(present: bool, valid: bool, path: Path,
+                   components: tuple[str, ...] = ()) -> dict[str, object]:
     # With a hosted bundle the consent-relevant download is the artifacts
     # themselves; without one it is the checkpoint that conversion needs.
     hosted = MODEL_ARTIFACTS_URL is not None
@@ -264,6 +285,8 @@ def _model_payload(present: bool, valid: bool, path: Path) -> dict[str, object]:
         "sha256": MODEL_SHA256,
         "approximate_bytes": ONNX_APPROXIMATE_BYTES if hosted else MODEL_APPROXIMATE_BYTES,
         "converted_approximate_bytes": ONNX_APPROXIMATE_BYTES,
+        "audio_component_approximate_bytes": AUDIO_COMPONENT_APPROXIMATE_BYTES,
+        "components": list(components),
         "license": MODEL_LICENSE,
         "cache_path": str(path),
         "present": present,

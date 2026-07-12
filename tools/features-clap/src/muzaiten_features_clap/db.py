@@ -135,7 +135,7 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def _migrate_legacy_semantics(conn: sqlite3.Connection) -> None:
-    from .model import FEATURE_REVISION, MODEL_NAME, MODEL_SHA256, MODEL_VERSION
+    from .model import LEGACY_FEATURE_REVISION, MODEL_NAME, MODEL_SHA256, MODEL_VERSION
 
     rows = conn.execute(
         "SELECT DISTINCT model, version, dim FROM embeddings_v4 ORDER BY model, version, dim"
@@ -152,7 +152,7 @@ def _migrate_legacy_semantics(conn: sqlite3.Connection) -> None:
         generation_key = (
             MODEL_NAME if known else "legacy-unknown",
             MODEL_SHA256 if known else "unknown",
-            FEATURE_REVISION if known else "unknown",
+            LEGACY_FEATURE_REVISION if known else "unknown",
             dim,
         )
         existing = conn.execute(

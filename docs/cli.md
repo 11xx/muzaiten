@@ -85,6 +85,7 @@ muzaiten-features refresh --no-semantic --power background
 muzaiten-features status --json
 muzaiten-features doctor
 muzaiten-features model download --progress=jsonl
+muzaiten-features model download --components audio   # 285 MB, radio/analysis only
 muzaiten-features query "warm piano with brushed drums" --json
 muzaiten-features neighbors --force
 ```

@@ -117,6 +117,7 @@ struct ProviderOptions {
     QString statePath;
     QString providerPath;
     QString device = QStringLiteral("auto");
+    QString components = QStringLiteral("full");
     QString text;
     bool json = false;
     bool progress = false;
@@ -2769,7 +2770,8 @@ ProviderOptions parseProviderOptions(QStringList arguments, bool queryCommand)
     for (int index = 0; index < arguments.size(); ++index) {
         const QString word = arguments.at(index);
         if (word == QLatin1String("--features") || word == QLatin1String("--state")
-            || word == QLatin1String("--provider") || word == QLatin1String("--device")) {
+            || word == QLatin1String("--provider") || word == QLatin1String("--device")
+            || word == QLatin1String("--components")) {
             if (index + 1 >= arguments.size()) {
                 failWithCode(2, QStringLiteral("%1 needs a value").arg(word));
             }
@@ -2780,6 +2782,11 @@ ProviderOptions parseProviderOptions(QStringList arguments, bool queryCommand)
                 options.statePath = value;
             } else if (word == QLatin1String("--provider")) {
                 options.providerPath = value;
+            } else if (word == QLatin1String("--components")) {
+                if (value != QLatin1String("full") && value != QLatin1String("audio")) {
+                    failWithCode(2, QStringLiteral("--components must be full or audio"));
+                }
+                options.components = value;
             } else {
                 if (value != QLatin1String("auto") && value != QLatin1String("cuda")
                     && value != QLatin1String("cpu")) {
@@ -2888,7 +2895,10 @@ int runProviderOperation(const ProviderOptions &options,
 
 int runModelDownload(const ProviderOptions &options)
 {
-    return runProviderOperation(options, QStringLiteral("model-download"), {}, false);
+    // "audio" skips the ~500 MB text tower: radio and the analysis scan only
+    // need the audio graph; free-text semantic queries need the full bundle.
+    return runProviderOperation(options, QStringLiteral("model-download"),
+                                QJsonObject{{QStringLiteral("components"), options.components}}, false);
 }
 
 int runQuery(const ProviderOptions &options)
@@ -2922,7 +2932,7 @@ void printUsage()
         "        [--limit N] [--jobs N] [--semantic-decode-workers N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
-        "model download [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
+        "model download [--components full|audio] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
         "query TEXT [--state PATH] [--provider PATH] [--device auto|cuda|cpu] [--json]\n"
         "neighbors --force [--features PATH] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n",
         stderr);

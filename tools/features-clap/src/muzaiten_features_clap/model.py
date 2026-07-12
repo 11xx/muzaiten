@@ -28,7 +28,17 @@ MODEL_WINDOW_SECONDS = 10
 MODEL_APPROXIMATE_BYTES = 2_352_471_003
 MODEL_LICENSE = "CC0-1.0"
 # Changes only when model input, preprocessing, or output semantics change.
-FEATURE_REVISION = "clap-htsat-base-audio-window-v1"
+# v2: three deterministic 10 s windows per track, mean-pooled and
+# renormalized, instead of one hash-placed window. Whole-track retrieval
+# suffers when a single window lands on an unrepresentative section.
+FEATURE_REVISION = "clap-htsat-base-audio-window-v2"
+# What pre-v5 stores actually contained: one hash-placed window. Legacy
+# migration must label those rows with the revision they were computed
+# under, never the current one, or a revision bump would forge provenance.
+LEGACY_FEATURE_REVISION = "clap-htsat-base-audio-window-v1"
+# Windows per track for stored audio embeddings. Each window is a full
+# HTSAT forward pass, so scan cost scales linearly with this.
+MODEL_WINDOW_COUNT = 3
 DECODE_WORKERS = 4
 SEEK_TIMEOUT_SECONDS = 30
 DEVICE_CHOICES = ("auto", "cuda", "cpu")
@@ -39,6 +49,17 @@ TEXT_MODEL_FILENAME = "text.onnx"
 TOKENIZER_FILENAME = "tokenizer.json"
 MANIFEST_FILENAME = "manifest.json"
 ONNX_APPROXIMATE_BYTES = 790_186_110
+AUDIO_COMPONENT_APPROXIMATE_BYTES = 285_177_239
+# Installable slices of the bundle. Radio, neighbors, and the analysis scan
+# need only the audio tower; the text tower (plus its tokenizer) exists
+# solely for free-text semantic queries, so audio-only installs save the
+# ~500 MB text graph. The manifest always describes the full bundle; which
+# files are on disk decides what is installed.
+COMPONENT_FILES: dict[str, tuple[str, ...]] = {
+    "audio": (AUDIO_MODEL_FILENAME,),
+    "text": (TEXT_MODEL_FILENAME, TOKENIZER_FILENAME),
+}
+ALL_COMPONENTS = ("audio", "text")
 # Base URL of the hosted, pre-converted artifact bundle (manifest.json plus
 # the three artifacts it names). With this set, model download fetches the
 # artifacts directly and end users need no checkpoint download or conversion
@@ -114,8 +135,9 @@ class CheckpointStatus:
 class ArtifactStatus:
     path: Path
     present: bool
-    valid: bool
+    valid: bool  # every `required` component is installed and consistent
     manifest: dict[str, object] | None = None
+    components: tuple[str, ...] = ()  # complete components on disk
 
 
 def model_cache_dir() -> Path:
@@ -141,15 +163,18 @@ def artifact_dir() -> Path:
     return model_cache_dir() / ARTIFACT_DIRNAME
 
 
-def artifact_status(*, verify: bool = True, path: Path | None = None) -> ArtifactStatus:
+def artifact_status(*, verify: bool = True, path: Path | None = None,
+                    required: tuple[str, ...] = ALL_COMPONENTS) -> ArtifactStatus:
     current = artifact_dir() if path is None else path
     if not current.is_dir():
         return ArtifactStatus(current, present=False, valid=False)
     try:
-        manifest = _read_and_validate_manifest(current, verify=verify)
+        manifest, components = _read_and_validate_manifest(current, verify=verify)
     except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
         return ArtifactStatus(current, present=True, valid=False)
-    return ArtifactStatus(current, present=True, valid=True, manifest=manifest)
+    valid = all(component in components for component in required)
+    return ArtifactStatus(current, present=True, valid=valid, manifest=manifest,
+                          components=components)
 
 
 def download_checkpoint(
@@ -207,10 +232,21 @@ def download_artifacts(
     progress: Callable[[int, int | None], None] | None = None,
     canceled: Callable[[], bool] | None = None,
     opener: Callable[..., object] = urllib.request.urlopen,
+    components: tuple[str, ...] = ALL_COMPONENTS,
 ) -> ArtifactDownload:
-    """Install a hosted, pre-converted artifact bundle without a checkpoint."""
+    """Install a hosted, pre-converted artifact bundle without a checkpoint.
+
+    `components` selects which slices land on disk; files belonging to an
+    already-installed component are reused (hash-checked) rather than
+    re-downloaded, so upgrading audio-only to full fetches only text files.
+    """
+    for component in components:
+        if component not in COMPONENT_FILES:
+            raise RuntimeError(f"unknown model component: {component}")
+    if "audio" not in components:
+        raise RuntimeError("model download always includes the audio component")
     target = artifact_dir()
-    if artifact_status(path=target).valid:
+    if artifact_status(path=target, required=components).valid:
         return ArtifactDownload(target, downloaded=False)
 
     prefix = base_url.rstrip("/")
@@ -218,17 +254,28 @@ def download_artifacts(
         manifest = validate_manifest_identity(json.load(response))
     artifacts = manifest["artifacts"]
     assert isinstance(artifacts, dict)
-    filenames = (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME)
-    sizes = [artifacts[filename].get("bytes") for filename in filenames]
+    filenames = tuple(dict.fromkeys(
+        filename for component in components for filename in COMPONENT_FILES[component]))
+    reusable = []
+    to_download = []
+    for filename in filenames:
+        existing = target / filename
+        if existing.is_file() and file_sha256(existing) == artifacts[filename]["sha256"]:
+            reusable.append(filename)
+        else:
+            to_download.append(filename)
+    sizes = [artifacts[filename].get("bytes") for filename in to_download]
     total = sum(size for size in sizes if isinstance(size, int)) or None
 
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{ARTIFACT_DIRNAME}-", dir=target.parent))
     try:
+        for filename in reusable:
+            shutil.copy2(target / filename, staging / filename)
         completed = 0
         if progress is not None:
             progress(completed, total)
-        for filename in filenames:
+        for filename in to_download:
             digest = hashlib.sha256()
             with opener(f"{prefix}/{filename}", timeout=60) as response:  # noqa: S310
                 with (staging / filename).open("wb") as handle:
@@ -248,7 +295,7 @@ def download_artifacts(
         with (staging / MANIFEST_FILENAME).open("w", encoding="utf-8") as handle:
             json.dump(manifest, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        if not artifact_status(path=staging).valid:
+        if not artifact_status(path=staging, required=components).valid:
             raise RuntimeError("downloaded CLAP artifacts failed manifest verification")
         if target.exists():
             shutil.rmtree(target)
@@ -281,12 +328,18 @@ def validate_manifest_identity(manifest: object) -> dict[str, object]:
         "model": MODEL_NAME,
         "checkpoint": MODEL_VERSION,
         "checkpoint_sha256": MODEL_SHA256,
-        "feature_revision": FEATURE_REVISION,
         "vector_dimension": 512,
     }
     for key, value in expected.items():
         if manifest.get(key) != value:
             raise RuntimeError(f"ONNX artifact manifest has unexpected {key}")
+    # feature_revision is deliberately NOT identity-matched: it names the
+    # provider's preprocessing (window selection, pooling), not the graph
+    # bytes. Exact-matching it would brick every installed bundle on a
+    # windowing revision bump even though the artifacts are byte-identical;
+    # the manifest keeps the value it was exported with, informationally.
+    if not isinstance(manifest.get("feature_revision"), str) or not manifest.get("feature_revision"):
+        raise RuntimeError("ONNX artifact manifest is missing feature_revision")
     if not isinstance(manifest.get("provider_version"), str):
         raise RuntimeError("ONNX artifact manifest is missing provider_version")
     artifacts = manifest.get("artifacts")
@@ -299,36 +352,70 @@ def validate_manifest_identity(manifest: object) -> dict[str, object]:
     return manifest
 
 
-def _read_and_validate_manifest(path: Path, *, verify: bool) -> dict[str, object]:
+def _read_and_validate_manifest(path: Path, *, verify: bool) -> tuple[dict[str, object], tuple[str, ...]]:
+    """Manifest identity plus which components are completely installed.
+
+    The manifest always describes the full bundle; files may be absent for
+    components the user chose not to download. An absent file only excludes
+    its component, but a present file with a wrong hash poisons the whole
+    directory: partial corruption must repair, not silently degrade.
+    """
     with (path / MANIFEST_FILENAME).open(encoding="utf-8") as handle:
         manifest = validate_manifest_identity(json.load(handle))
     artifacts = manifest["artifacts"]
     assert isinstance(artifacts, dict)
-    for filename in (AUDIO_MODEL_FILENAME, TEXT_MODEL_FILENAME, TOKENIZER_FILENAME):
-        artifact = artifacts[filename]
-        artifact_path = path / filename
-        if not artifact_path.is_file():
-            raise RuntimeError(f"ONNX artifact is missing: {artifact_path}")
-        if verify and file_sha256(artifact_path) != artifact["sha256"]:
-            raise RuntimeError(f"ONNX artifact has wrong SHA-256: {artifact_path}")
-    return manifest
+    components: list[str] = []
+    for component, filenames in COMPONENT_FILES.items():
+        complete = True
+        for filename in filenames:
+            artifact = artifacts[filename]
+            artifact_path = path / filename
+            if not artifact_path.is_file():
+                complete = False
+                continue
+            if verify and file_sha256(artifact_path) != artifact["sha256"]:
+                raise RuntimeError(f"ONNX artifact has wrong SHA-256: {artifact_path}")
+        if complete:
+            components.append(component)
+    if not components:
+        raise RuntimeError(f"ONNX artifact directory has no complete component: {path}")
+    return manifest, tuple(components)
 
 
-def _decode_audio_command(path: Path, duration_ms: int | None = None) -> list[str]:
+def window_offsets_ms(path: Path, duration_ms: int | None, count: int = MODEL_WINDOW_COUNT) -> list[int | None]:
+    """Deterministic window start offsets for one track.
+
+    Extends the original single-window scheme: non-fusion CLAP trained on
+    one uniformly random 10 s window, and a stable path hash preserved that
+    corpus distribution. With `count` windows the legal start span splits
+    into equal bands and each window is hash-placed uniformly inside its
+    band, so windows spread across the track (early/middle/late for the
+    default three) while the corpus-level distribution stays uniform.
+    Unknown or window-or-shorter durations collapse to one whole read.
+    """
+    window_ms = MODEL_WINDOW_SECONDS * 1000
+    if duration_ms is None or duration_ms <= window_ms:
+        return [None]
+    span_ms = duration_ms - window_ms
+    bounded = max(1, count)
+    offsets: list[int | None] = []
+    for index in range(bounded):
+        digest = hashlib.sha256(os.fsencode(path) + b"?window=%d" % index).digest()
+        sample = int.from_bytes(digest[:8], "big")
+        band_start = span_ms * index // bounded
+        band_end = span_ms * (index + 1) // bounded
+        offsets.append(band_start + sample * (band_end - band_start) // ((1 << 64) - 1))
+    return offsets
+
+
+def _decode_audio_command(path: Path, offset_ms: int | None = None) -> list[str]:
     command = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
         "error",
     ]
-    window_ms = MODEL_WINDOW_SECONDS * 1000
-    if duration_ms is not None and duration_ms > window_ms:
-        # Non-fusion CLAP selects one uniformly random 10-second training
-        # window after loading the whole track. A stable path hash preserves
-        # that uniform corpus distribution without decoding discarded audio.
-        span_ms = duration_ms - window_ms
-        sample = int.from_bytes(hashlib.sha256(os.fsencode(path)).digest()[:8], "big")
-        offset_ms = sample * span_ms // ((1 << 64) - 1)
+    if offset_ms is not None:
         command.extend(["-ss", f"{offset_ms / 1000:.3f}"])
     command.extend(
         [
@@ -359,13 +446,17 @@ def _run_ffmpeg(command: list[str], timeout: float | None = None):
         ) from exc
 
 
-def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None):
+def decode_audio_ffmpeg(path: Path, duration_ms: int | None = None, offset_ms: int | None = None):
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - exercised only without dependencies
         raise RuntimeError("numpy is required for real audio embedding") from exc
 
-    command = _decode_audio_command(path, duration_ms)
+    if offset_ms is None and duration_ms is not None:
+        # Single-window compatibility entry: place the one window with the
+        # same banded scheme the multi-window path uses.
+        offset_ms = window_offsets_ms(path, duration_ms, 1)[0]
+    command = _decode_audio_command(path, offset_ms)
     try:
         completed = _run_ffmpeg(
             command,
@@ -432,7 +523,9 @@ class OnnxClapEmbedder:
         self.device = device if device is not None else resolve_device("auto")
         self.decode_workers = decode_workers
         if artifacts is None:
-            current = artifact_status()
+            # Audio is the floor of every install; text-only operations get
+            # a friendlier error at session-creation time.
+            current = artifact_status(required=("audio",))
             if not current.present or not current.valid:
                 raise FileNotFoundError(
                     f"converted CLAP model is missing or invalid: {current.path}; "
@@ -456,9 +549,10 @@ class OnnxClapEmbedder:
         self._text_session = None
         self._decode_timings_ms: list[float] = []
         self._infer_timings_ms: list[float] = []
-        self._tokenizer = Tokenizer.from_file(str(artifact_path / TOKENIZER_FILENAME))
-        self._tokenizer.enable_truncation(max_length=77)
-        self._tokenizer.enable_padding(length=77, pad_id=1, pad_token="<pad>")
+        # Lazy: the tokenizer belongs to the text component, which an
+        # audio-only install does not ship.
+        self._tokenizer_factory = Tokenizer
+        self._tokenizer = None
 
     def embed_audio_path(self, path: Path) -> Sequence[float]:
         return self.embed_audio_paths([path])[0]
@@ -474,10 +568,10 @@ class OnnxClapEmbedder:
             "infer_ms": self._infer_timings_ms.copy(),
         }
 
-    def _decode_audio_path(self, path: Path, duration_ms: int | None):
+    def _decode_audio_window(self, path: Path, duration_ms: int | None, offset_ms: int | None):
         started = time.perf_counter()
         try:
-            return decode_audio_ffmpeg(path, duration_ms)
+            return decode_audio_ffmpeg(path, duration_ms, offset_ms)
         finally:
             self._decode_timings_ms.append((time.perf_counter() - started) * 1000)
 
@@ -504,22 +598,57 @@ class OnnxClapEmbedder:
             )
         if not paths:
             return []
-        with ThreadPoolExecutor(max_workers=min(self.decode_workers, len(paths))) as executor:
-            return [
+        # One flat decode job per (track, window): windows of different
+        # tracks share the pool, so a short track cannot serialize behind a
+        # long one's remaining windows.
+        specs: list[tuple[Path, int | None, int | None]] = []
+        counts: list[int] = []
+        for path, duration in zip(paths, durations, strict=True):
+            offsets = window_offsets_ms(path, duration)
+            counts.append(len(offsets))
+            specs.extend((path, duration, offset) for offset in offsets)
+        with ThreadPoolExecutor(max_workers=min(self.decode_workers, len(specs))) as executor:
+            flat = [
                 audio.reshape(-1)
-                for audio in executor.map(self._decode_audio_path, paths, durations)
+                for audio in executor.map(lambda spec: self._decode_audio_window(*spec), specs)
             ]
+        grouped: list[object] = []
+        start = 0
+        for count in counts:
+            grouped.append(tuple(flat[start : start + count]))
+            start += count
+        return grouped
 
     def embed_audio_data(self, waveforms: Sequence[object]) -> Sequence[Sequence[float]]:
+        """One embedding per item; an item may be one waveform or a window group.
+
+        A tuple/list item is treated as that track's windows: every window
+        runs through the model (the graph L2-normalizes each row) and the
+        rows are mean-pooled. Callers normalize the returned rows, which
+        renormalizes the pooled mean; plain waveform items pass through
+        exactly as before.
+        """
         if not waveforms:
             return []
-        batch = self._np.stack([prepare_waveform(value) for value in waveforms])
+        groups = [
+            list(value) if isinstance(value, (list, tuple)) else [value]
+            for value in waveforms
+        ]
+        flat = [prepare_waveform(window) for group in groups for window in group]
+        batch = self._np.stack(flat)
         session = self._get_audio_session()
         started = time.perf_counter()
         try:
-            return session.run(["embedding"], {"waveform": batch})[0]
+            rows = session.run(["embedding"], {"waveform": batch})[0]
         finally:
             self._infer_timings_ms.append((time.perf_counter() - started) * 1000)
+        pooled = []
+        start = 0
+        for group in groups:
+            segment = rows[start : start + len(group)]
+            start += len(group)
+            pooled.append(segment[0] if len(group) == 1 else segment.mean(axis=0))
+        return pooled
 
     def embed_text(self, text: str) -> Sequence[float]:
         return normalize_vector(self.embed_texts([text])[0])
@@ -535,15 +664,33 @@ class OnnxClapEmbedder:
         )[0]
 
     def tokenize_texts(self, texts: Sequence[str]):
-        encodings = self._tokenizer.encode_batch(list(texts))
+        encodings = self._get_tokenizer().encode_batch(list(texts))
         input_ids = self._np.asarray([item.ids for item in encodings], dtype=self._np.int64)
         masks = self._np.asarray([item.attention_mask for item in encodings], dtype=self._np.int64)
         return input_ids, masks
 
+    def _require_component_file(self, filename: str, component: str) -> Path:
+        path = self._artifact_path / filename
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"the {component} model component is not installed ({path} is missing); "
+                "run `muzaiten-features model download` with the full bundle"
+            )
+        return path
+
+    def _get_tokenizer(self):
+        if self._tokenizer is None:
+            tokenizer = self._tokenizer_factory.from_file(
+                str(self._require_component_file(TOKENIZER_FILENAME, "text")))
+            tokenizer.enable_truncation(max_length=77)
+            tokenizer.enable_padding(length=77, pad_id=1, pad_token="<pad>")
+            self._tokenizer = tokenizer
+        return self._tokenizer
+
     def _get_audio_session(self):
         if self._audio_session is None:
             self._audio_session = self._ort.InferenceSession(
-                str(self._artifact_path / AUDIO_MODEL_FILENAME),
+                str(self._require_component_file(AUDIO_MODEL_FILENAME, "audio")),
                 sess_options=self._session_options,
                 providers=self._providers,
             )
@@ -552,7 +699,7 @@ class OnnxClapEmbedder:
     def _get_text_session(self):
         if self._text_session is None:
             self._text_session = self._ort.InferenceSession(
-                str(self._artifact_path / TEXT_MODEL_FILENAME),
+                str(self._require_component_file(TEXT_MODEL_FILENAME, "text")),
                 sess_options=self._session_options,
                 providers=self._providers,
             )

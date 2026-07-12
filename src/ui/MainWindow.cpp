@@ -5639,12 +5639,22 @@ void MainWindow::downloadSemanticModel()
     const double downloadMb = model.value(QStringLiteral("approximate_bytes")).toDouble() / 1'000'000.0;
     const double convertedMb =
         model.value(QStringLiteral("converted_approximate_bytes")).toDouble() / 1'000'000.0;
+    const double audioOnlyMb =
+        model.value(QStringLiteral("audio_component_approximate_bytes")).toDouble() / 1'000'000.0;
     QString sizeLines = QStringLiteral("Download size: about %1 MB").arg(downloadMb, 0, 'f', 0);
     // With a hosted bundle the download already is the converted model, so a
     // second line would double-count the same bytes.
     if (convertedMb > 0.0 && qAbs(convertedMb - downloadMb) > 1.0) {
         sizeLines += QStringLiteral("\nConversion adds about %1 MB of ONNX artifacts")
                          .arg(convertedMb, 0, 'f', 0);
+    }
+    // Older providers do not report the audio-only size; without it there is
+    // no partial download to offer, so the dialog stays a plain yes/no.
+    const bool offerAudioOnly = audioOnlyMb > 0.0;
+    if (offerAudioOnly) {
+        sizeLines += QStringLiteral(
+            "\nAudio only: about %1 MB (radio and analysis; no free-text search)")
+                         .arg(audioOnlyMb, 0, 'f', 0);
     }
     const QString consent = QStringLiteral(
         "Source: %1\nLicense: %2\n%3\nCache: %4\nSHA-256: %5\n\nDownload and verify this model?")
@@ -5653,14 +5663,32 @@ void MainWindow::downloadSemanticModel()
                                      sizeLines,
                                      model.value(QStringLiteral("cache_path")).toString(),
                                      model.value(QStringLiteral("sha256")).toString());
-    if (QMessageBox::question(this, QStringLiteral("Download semantic model"), consent)
-        != QMessageBox::Yes) {
+    QString components = QStringLiteral("full");
+    if (offerAudioOnly) {
+        QMessageBox box(QMessageBox::Question, QStringLiteral("Download semantic model"), consent,
+                        QMessageBox::NoButton, this);
+        QPushButton *fullButton =
+            box.addButton(QStringLiteral("Full model"), QMessageBox::AcceptRole);
+        QPushButton *audioButton =
+            box.addButton(QStringLiteral("Audio only"), QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(fullButton);
+        box.exec();
+        if (box.clickedButton() != fullButton && box.clickedButton() != audioButton) {
+            return;
+        }
+        if (box.clickedButton() == audioButton) {
+            components = QStringLiteral("audio");
+        }
+    } else if (QMessageBox::question(this, QStringLiteral("Download semantic model"), consent)
+               != QMessageBox::Yes) {
         return;
     }
     auto *process = new QProcess(this);
     m_semanticModelProcess = process;
     process->setProgram(binary);
     process->setArguments({QStringLiteral("model"), QStringLiteral("download"),
+                           QStringLiteral("--components"), components,
                            QStringLiteral("--progress=jsonl")});
     connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
         const QList<QByteArray> lines = process->readAllStandardOutput().split('\n');
