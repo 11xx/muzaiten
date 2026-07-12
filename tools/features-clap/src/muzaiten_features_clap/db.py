@@ -273,7 +273,7 @@ def representative_groups(conn: sqlite3.Connection, limit: int | None = None) ->
         "GROUP BY content_group_id) "
         "SELECT r.content_group_id, r.path, f.duration_ms "
         "FROM representatives r JOIN files f ON f.path = r.path "
-        "ORDER BY r.content_group_id"
+        "ORDER BY r.path"
     )
     params: tuple[int, ...] = ()
     if limit is not None:

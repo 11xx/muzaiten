@@ -9,6 +9,7 @@ from typing import Callable
 
 from . import __version__
 from .model import (
+    DECODE_WORKERS,
     FEATURE_REVISION,
     MODEL_APPROXIMATE_BYTES,
     MODEL_ARTIFACTS_URL,
@@ -164,6 +165,7 @@ def run_request(
         device_choice = _string(params, "device", "auto")
         limit = _optional_int(params, "limit")
         batch_size = _positive_int(params, "batch_size", 8)
+        decode_workers = _positive_int(params, "decode_workers", DECODE_WORKERS)
         # Structural manifest check only: artifact hashes are verified when
         # the model is installed, and hashing 790 MB per invocation would
         # dominate interactive latency. ONNX Runtime rejects corrupt graphs.
@@ -174,6 +176,7 @@ def run_request(
         embedder = embedder_factory(
             artifacts=artifacts.path,
             device=resolve_device(device_choice),
+            decode_workers=decode_workers,
         )
         result = scan(
             features_path,

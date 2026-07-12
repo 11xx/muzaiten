@@ -98,6 +98,8 @@ start Python. `--provider PATH` overrides provider discovery.
 priority; `--jobs N` overrides only the worker count. `--verbose` writes
 per-file diagnostics to stderr. `--progress=jsonl` writes versioned phase,
 progress, and one terminal result event to stdout; stderr remains diagnostic.
+`--semantic-decode-workers N` sets the optional CLAP provider's concurrent
+audio decodes for that refresh; omit it to use the provider default.
 After the scalar-feature phase, counters describe stale representative groups,
 not files. Provider embedding and neighbor events use the same JSONL stream.
 When a representative has a fresh persisted per-file scalar row, the indexer

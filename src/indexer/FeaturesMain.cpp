@@ -93,6 +93,7 @@ struct RefreshOptions {
     Power power = Power::Unspecified;
     int limit = -1;
     int jobs = 0;
+    std::optional<int> semanticDecodeWorkers;
     bool json = false;
     bool progress = false;
     bool verbose = false;
@@ -1949,7 +1950,8 @@ MaterializedStaleReps materializeStaleReps(QSqlDatabase &database)
                             "        AND (feat.version IS NULL OR feat.version != ?) "
                             "      GROUP BY f.content_group_id) s "
                             "LEFT JOIN file_features ff ON ff.path = s.path AND ff.version = ? "
-                            "ORDER BY s.content_group_id"));
+                            "ORDER BY ff.version IS NOT NULL DESC, "
+                            "CASE WHEN ff.version IS NULL THEN s.path END, s.content_group_id"));
     reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     reps.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     execPrepared(reps);
@@ -2678,6 +2680,9 @@ int runRefresh(const RefreshOptions &options)
     if (options.limit > 0) {
         scanParameters.insert(QStringLiteral("limit"), options.limit);
     }
+    if (options.semanticDecodeWorkers.has_value()) {
+        scanParameters.insert(QStringLiteral("decode_workers"), *options.semanticDecodeWorkers);
+    }
     const FeatureProvider::Invocation scan = FeatureProvider::invoke(
         provider->path,
         QStringLiteral("scan"),
@@ -2919,7 +2924,7 @@ void printUsage()
         "Usage: muzaiten-features <refresh|status|doctor|model download|query|neighbors> [options]\n"
         "\n"
         "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
-        "        [--limit N] [--jobs N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
+        "        [--limit N] [--jobs N] [--semantic-decode-workers N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "model download [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
@@ -2999,6 +3004,16 @@ RefreshOptions parseRefresh(QStringList arguments)
             if (!ok || options.jobs <= 0) {
                 failWithCode(2, QStringLiteral("refresh --jobs needs a positive integer"));
             }
+        } else if (word == QLatin1String("--semantic-decode-workers")) {
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, QStringLiteral("refresh --semantic-decode-workers needs a positive integer"));
+            }
+            bool ok = false;
+            const int workers = arguments.at(++index).toInt(&ok);
+            if (!ok || workers <= 0) {
+                failWithCode(2, QStringLiteral("refresh --semantic-decode-workers needs a positive integer"));
+            }
+            options.semanticDecodeWorkers = workers;
         } else if (word == QLatin1String("--stage")) {
             if (index + 1 >= arguments.size()) {
                 failWithCode(2, QStringLiteral("refresh --stage needs a value"));

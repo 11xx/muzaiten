@@ -411,7 +411,12 @@ class OnnxClapEmbedder:
     version = MODEL_VERSION
     dimension = 512
 
-    def __init__(self, artifacts: Path | None = None, device: str | None = None) -> None:
+    def __init__(
+        self,
+        artifacts: Path | None = None,
+        device: str | None = None,
+        decode_workers: int = DECODE_WORKERS,
+    ) -> None:
         try:
             import numpy as np
             import onnxruntime as ort
@@ -422,7 +427,10 @@ class OnnxClapEmbedder:
                 "`uv sync --extra model` in tools/features-clap"
             ) from exc
 
+        if decode_workers < 1:
+            raise ValueError("decode workers must be at least 1")
         self.device = device if device is not None else resolve_device("auto")
+        self.decode_workers = decode_workers
         if artifacts is None:
             current = artifact_status()
             if not current.present or not current.valid:
@@ -478,6 +486,17 @@ class OnnxClapEmbedder:
         paths: Sequence[Path],
         durations_ms: Sequence[int | None] | None = None,
     ) -> Sequence[Sequence[float]]:
+        decoded = self.decode_audio_paths(paths, durations_ms)
+        embedding = self.embed_audio_data(decoded)
+        if len(embedding) != len(paths):
+            raise RuntimeError(f"CLAP returned {len(embedding)} embeddings for {len(paths)} paths")
+        return [normalize_vector(row) for row in embedding]
+
+    def decode_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[object]:
         durations = [None] * len(paths) if durations_ms is None else durations_ms
         if len(durations) != len(paths):
             raise ValueError(
@@ -485,15 +504,11 @@ class OnnxClapEmbedder:
             )
         if not paths:
             return []
-        with ThreadPoolExecutor(max_workers=min(DECODE_WORKERS, len(paths))) as executor:
-            decoded = [
+        with ThreadPoolExecutor(max_workers=min(self.decode_workers, len(paths))) as executor:
+            return [
                 audio.reshape(-1)
                 for audio in executor.map(self._decode_audio_path, paths, durations)
             ]
-        embedding = self.embed_audio_data(decoded)
-        if len(embedding) != len(paths):
-            raise RuntimeError(f"CLAP returned {len(embedding)} embeddings for {len(paths)} paths")
-        return [normalize_vector(row) for row in embedding]
 
     def embed_audio_data(self, waveforms: Sequence[object]) -> Sequence[Sequence[float]]:
         if not waveforms:
