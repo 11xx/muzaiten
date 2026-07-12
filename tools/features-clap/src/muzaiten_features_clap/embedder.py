@@ -20,3 +20,17 @@ class Embedder(Protocol):
 
     def embed_text(self, text: str) -> Sequence[float]:
         """Return one embedding for a text query."""
+
+
+class SplitAudioEmbedder(Protocol):
+    """Optional scan API that permits decode/inference lookahead."""
+
+    def decode_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[object]:
+        """Decode audio files while preserving input order."""
+
+    def embed_audio_data(self, waveforms: Sequence[object]) -> Sequence[Sequence[float]]:
+        """Return one embedding per decoded waveform, preserving input order."""

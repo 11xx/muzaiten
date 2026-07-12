@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import threading
 import sqlite3
 import sys
 from dataclasses import dataclass, field
@@ -79,6 +80,50 @@ class FailingSecondBatchEmbedder(FakeEmbedder):
         if self.batches:
             raise RuntimeError("fixture batch failure")
         return super().embed_audio_paths(paths, durations_ms)
+
+
+class NormalizingFakeEmbedder(FakeEmbedder):
+    def embed_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[Sequence[float]]:
+        return [db.normalize_vector(vector) for vector in super().embed_audio_paths(paths, durations_ms)]
+
+
+@dataclass
+class SplitFakeEmbedder(FakeEmbedder):
+    decode_batches: list[list[Path]] = field(default_factory=list)
+    inference_batches: list[list[Path]] = field(default_factory=list)
+    second_decode_started: threading.Event = field(default_factory=threading.Event)
+    release_second_decode: threading.Event = field(default_factory=threading.Event)
+
+    def decode_audio_paths(
+        self,
+        paths: Sequence[Path],
+        durations_ms: Sequence[int | None] | None = None,
+    ) -> Sequence[object]:
+        batch = list(paths)
+        self.decode_batches.append(batch)
+        if len(self.decode_batches) == 2:
+            self.second_decode_started.set()
+            assert self.release_second_decode.wait(timeout=1)
+        return batch
+
+    def embed_audio_data(self, waveforms: Sequence[object]) -> Sequence[Sequence[float]]:
+        batch = [Path(waveform) for waveform in waveforms]
+        self.inference_batches.append(batch)
+        if len(self.inference_batches) == 1:
+            assert self.second_decode_started.wait(timeout=1)
+            self.release_second_decode.set()
+        return [self.vectors[path] for path in batch]
+
+    @property
+    def scan_timings(self) -> dict[str, list[float]]:
+        return {
+            "decode_ms": [10.0] * sum(len(batch) for batch in self.decode_batches),
+            "infer_ms": [20.0] * len(self.inference_batches),
+        }
 
 
 @dataclass
@@ -262,6 +307,63 @@ def test_scan_commits_each_completed_batch(features_path: Path) -> None:
             "SELECT content_group_id FROM embeddings ORDER BY content_group_id"
         ).fetchall()
     assert [int(row["content_group_id"]) for row in group_ids] == [10, 11]
+
+
+def test_split_api_lookahead_matches_sequential_vectors_and_resume(
+    features_path: Path,
+    tmp_path: Path,
+) -> None:
+    baseline_path = tmp_path / "baseline.sqlite"
+    baseline_path.write_bytes(features_path.read_bytes())
+    vectors = {
+        Path("/music/a-copy.flac"): (3.0, 4.0),
+        Path("/music/b.flac"): (5.0, 12.0),
+        Path("/music/c.flac"): (8.0, 15.0),
+        Path("/music/d.flac"): (-7.0, 24.0),
+    }
+    sequential = NormalizingFakeEmbedder(vectors)
+    split = SplitFakeEmbedder(vectors)
+
+    scan(baseline_path, sequential, batch_size=2)
+    result = scan(features_path, split, batch_size=2)
+
+    assert split.decode_batches == split.inference_batches == [
+        [Path("/music/a-copy.flac"), Path("/music/b.flac")],
+        [Path("/music/c.flac"), Path("/music/d.flac")],
+    ]
+    assert result.as_dict()["timings"] == {
+        "decode_ms": {"count": 4, "total": 40.0, "mean": 10.0, "p50": 10.0, "p95": 10.0},
+        "infer_ms": {"batches": 2, "total": 40.0, "mean": 20.0, "p50": 20.0, "p95": 20.0},
+    }
+    with db.connect(baseline_path) as baseline, db.connect(features_path) as lookahead:
+        baseline_rows = baseline.execute(
+            "SELECT content_group_id, vector FROM embeddings ORDER BY content_group_id"
+        ).fetchall()
+        lookahead_rows = lookahead.execute(
+            "SELECT content_group_id, vector FROM embeddings ORDER BY content_group_id"
+        ).fetchall()
+    assert [(row["content_group_id"], row["vector"]) for row in lookahead_rows] == [
+        (row["content_group_id"], row["vector"]) for row in baseline_rows
+    ]
+
+    resumed = scan(features_path, split, batch_size=2)
+    assert resumed.embedded == 0
+    assert resumed.skipped == 4
+
+
+def test_representative_groups_are_ordered_by_path(features_path: Path) -> None:
+    with db.connect(features_path) as conn:
+        conn.execute("INSERT INTO content_groups(id) VALUES(20)")
+        conn.execute(
+            "INSERT INTO files(path, mtime, size, duration_ms, decode_hash, content_group_id, "
+            "analyzed_at, status) VALUES('/music/0.flac', 1, 2, 3000, 'hash-0', 20, 1000, 'ok')"
+        )
+        representatives = db.representative_groups(conn, limit=2)
+
+    assert [(item.content_group_id, item.path) for item in representatives] == [
+        (20, Path("/music/0.flac")),
+        (10, Path("/music/a-copy.flac")),
+    ]
 
 
 def test_generation_change_activates_partial_new_corpus_and_hides_old_neighbors(
@@ -539,6 +641,41 @@ def test_interactive_operations_never_hash_artifacts(
     assert result["dim"] == 2
 
 
+def test_protocol_scan_passes_decode_workers_to_embedder(
+    features_path: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from muzaiten_features_clap import protocol as protocol_module
+
+    monkeypatch.setattr(
+        protocol_module,
+        "artifact_status",
+        lambda verify: SimpleNamespace(present=True, valid=True, path=tmp_path),
+    )
+    monkeypatch.setattr(protocol_module, "resolve_device", lambda _choice: "cpu")
+    received: dict[str, object] = {}
+    fake = FakeEmbedder({Path("/music/a-copy.flac"): (1.0, 0.0)})
+
+    def factory(**kwargs: object) -> FakeEmbedder:
+        received.update(kwargs)
+        return fake
+
+    result = protocol_module.run_request(
+        protocol_module.Request(
+            "scan-workers",
+            "scan",
+            {"features": str(features_path), "limit": 1, "decode_workers": 2},
+        ),
+        lambda _event: None,
+        lambda: False,
+        embedder_factory=factory,
+    )
+
+    assert received["decode_workers"] == 2
+    assert result["embedded"] == 1
+
+
 def test_protocol_status_does_not_load_real_model(
     features_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -785,6 +922,7 @@ def test_probe_device_is_none_without_onnxruntime(monkeypatch: pytest.MonkeyPatc
     [
         ({"features": "x.sqlite", "device": 7}, "device must be a string"),
         ({"features": "x.sqlite", "batch_size": 0}, "batch_size must be a positive integer"),
+        ({"features": "x.sqlite", "decode_workers": 0}, "decode_workers must be a positive integer"),
     ],
 )
 def test_protocol_rejects_invalid_scan_parameters(

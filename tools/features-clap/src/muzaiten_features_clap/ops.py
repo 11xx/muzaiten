@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import math
 from pathlib import Path
@@ -64,6 +65,14 @@ def _scan_timings(embedder: Embedder) -> dict[str, dict[str, float | int]]:
     }
 
 
+def _split_audio_api(embedder: Embedder) -> tuple[Callable[..., object], Callable[..., object]] | None:
+    decode = getattr(embedder, "decode_audio_paths", None)
+    infer = getattr(embedder, "embed_audio_data", None)
+    if not callable(decode) or not callable(infer):
+        return None
+    return decode, infer
+
+
 def scan(
     features_path: Path,
     embedder: Embedder,
@@ -106,14 +115,11 @@ def scan(
         ]
         if progress is not None:
             progress(0, len(pending))
-        for start in range(0, len(pending), batch_size):
-            if canceled is not None and canceled():
-                raise InterruptedError("semantic scan canceled")
-            batch = pending[start : start + batch_size]
-            vectors = embedder.embed_audio_paths(
-                [item.path for item in batch],
-                [item.duration_ms for item in batch],
-            )
+        split_api = _split_audio_api(embedder)
+        batches = [pending[start : start + batch_size] for start in range(0, len(pending), batch_size)]
+
+        def write_batch(batch: Sequence[db.Representative], vectors: Sequence[Sequence[float]]) -> None:
+            nonlocal embedded
             if len(vectors) != len(batch):
                 raise RuntimeError(
                     f"embedder returned {len(vectors)} vectors for {len(batch)} audio paths"
@@ -131,6 +137,41 @@ def scan(
             conn.commit()
             if progress is not None:
                 progress(embedded, len(pending))
+
+        if split_api is None:
+            for batch in batches:
+                if canceled is not None and canceled():
+                    raise InterruptedError("semantic scan canceled")
+                write_batch(
+                    batch,
+                    embedder.embed_audio_paths(
+                        [item.path for item in batch],
+                        [item.duration_ms for item in batch],
+                    ),
+                )
+        elif batches:
+            decode, infer = split_api
+            if canceled is not None and canceled():
+                raise InterruptedError("semantic scan canceled")
+            with ThreadPoolExecutor(max_workers=1) as lookahead:
+                decoded = lookahead.submit(
+                    decode,
+                    [item.path for item in batches[0]],
+                    [item.duration_ms for item in batches[0]],
+                )
+                for index, batch in enumerate(batches):
+                    if canceled is not None and canceled():
+                        raise InterruptedError("semantic scan canceled")
+                    waveforms = decoded.result()
+                    if index + 1 < len(batches):
+                        next_batch = batches[index + 1]
+                        decoded = lookahead.submit(
+                            decode,
+                            [item.path for item in next_batch],
+                            [item.duration_ms for item in next_batch],
+                        )
+                    vectors = [db.normalize_vector(vector) for vector in infer(waveforms)]
+                    write_batch(batch, vectors)
         skipped = len(representatives) - len(pending)
         if limit is None and embedded + skipped == len(representatives):
             db.complete_generation(conn, generation_id)
