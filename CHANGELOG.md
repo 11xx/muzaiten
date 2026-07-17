@@ -96,6 +96,9 @@
 
 ### Fixed
 
+- Library rescans no longer accumulate duplicate artist and album rows. Existing
+  duplicates are cleaned up automatically on the next launch.
+
 - Radio now treats half- and double-tempo estimates as equivalent, so tracks
   whose detected BPM differs by an octave still receive the tempo-match score.
 - Radio no longer destroys its upcoming queue after three early skips. Queue
