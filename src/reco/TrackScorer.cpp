@@ -14,6 +14,63 @@ namespace {
 constexpr double kTempoFalloffOctaves = 1.0;
 constexpr double kEnergyFalloff = 1.0;
 
+struct WeightEntry {
+    const char *key;
+    double TrackScorer::Weights::*member;
+    double minimum;
+    double maximum;
+    const char *label;
+    const char *description;
+};
+
+constexpr double kMaximumWeight = std::numeric_limits<double>::max();
+
+constexpr std::array<WeightEntry, 18> kWeightEntries{{
+    {"genreWeight", &TrackScorer::Weights::genreWeight, 0.0, kMaximumWeight,
+     "Genre match", "Reward for matching the seed and rolling-context genres."},
+    {"genreIdfSaturation", &TrackScorer::Weights::genreIdfSaturation, 0.001, kMaximumWeight,
+     "Genre rarity saturation", "Shared genre rarity value that reaches the full genre reward."},
+    {"genreCrowdingSoftLimit", &TrackScorer::Weights::genreCrowdingSoftLimit, 1.0, kMaximumWeight,
+     "Genre crowding soft limit", "Genre counts above this are damped so tag soup does not dominate."},
+    {"eraWeight", &TrackScorer::Weights::eraWeight, 0.0, kMaximumWeight,
+     "Era proximity", "Reward for release years close to the current context."},
+    {"eraSpanYears", &TrackScorer::Weights::eraSpanYears, 0.001, kMaximumWeight,
+     "Era span", "Year distance where the era reward falls to zero."},
+    {"tempoWeight", &TrackScorer::Weights::tempoWeight, 0.0, kMaximumWeight,
+     "Tempo proximity", "Reward for tempo close to the current sonic context."},
+    {"energyWeight", &TrackScorer::Weights::energyWeight, 0.0, kMaximumWeight,
+     "Energy proximity", "Reward for DSP energy close to the current sonic context."},
+    {"audioWeight", &TrackScorer::Weights::audioWeight, 0.0, kMaximumWeight,
+     "Audio similarity", "Reward for CLAP embedding similarity to the session centroid."},
+    {"ratingWeight", &TrackScorer::Weights::ratingWeight, 0.0, kMaximumWeight,
+     "Rating", "Reward from effective library rating."},
+    {"userRatingBoost", &TrackScorer::Weights::userRatingBoost, 0.0, kMaximumWeight,
+     "User rating boost", "Multiplier for ratings explicitly set by the user."},
+    {"historyWeight", &TrackScorer::Weights::historyWeight, 0.0, kMaximumWeight,
+     "Listening history", "Reward from accumulated local and imported listens."},
+    {"historySaturation", &TrackScorer::Weights::historySaturation, 0.001, kMaximumWeight,
+     "History saturation", "Listen count where the history reward nears its full value."},
+    {"noveltyWeight", &TrackScorer::Weights::noveltyWeight, 0.0, kMaximumWeight,
+     "Novelty", "Reward for tracks with little or no listening history."},
+    {"noveltyZeroAt", &TrackScorer::Weights::noveltyZeroAt, 0.001, kMaximumWeight,
+     "Novelty zero point", "Listen count where the novelty reward falls to zero."},
+    {"recencyPenalty", &TrackScorer::Weights::recencyPenalty, -100.0, 0.0,
+     "Recency penalty", "Penalty for tracks played recently."},
+    {"recencyHalfLifeDays", &TrackScorer::Weights::recencyHalfLifeDays, 0.001, kMaximumWeight,
+     "Recency half-life", "Days for the recent-play penalty to halve."},
+    {"skipPenalty", &TrackScorer::Weights::skipPenalty, -100.0, 0.0,
+     "Skip penalty", "Penalty for tracks with a high skip rate."},
+    {"sameArtistPenalty", &TrackScorer::Weights::sameArtistPenalty, -100.0, 0.0,
+     "Same artist penalty", "Soft penalty for repeating recently heard artists."},
+}};
+
+auto findWeightEntry(const QString &key)
+{
+    return std::find_if(kWeightEntries.cbegin(), kWeightEntries.cend(), [&key](const WeightEntry &entry) {
+        return key == QLatin1String(entry.key);
+    });
+}
+
 void pushIfNonZero(TrackScorer::Scored &scored, const QString &name, double value)
 {
     if (value != 0.0) {
@@ -221,160 +278,44 @@ Weights getWeights(const Weights &weights, bool dspAvailable)
 QVector<WeightSpec> weightSpecs()
 {
     const Weights defaults = defaultWeights();
-    const double max = std::numeric_limits<double>::max();
-    return {
-        {QStringLiteral("genreWeight"), QStringLiteral("Genre match"),
-         QStringLiteral("Reward for matching the seed and rolling-context genres."), 0.0, max, defaults.genreWeight},
-        {QStringLiteral("genreIdfSaturation"), QStringLiteral("Genre rarity saturation"),
-         QStringLiteral("Shared genre rarity value that reaches the full genre reward."), 0.001, max, defaults.genreIdfSaturation},
-        {QStringLiteral("genreCrowdingSoftLimit"), QStringLiteral("Genre crowding soft limit"),
-         QStringLiteral("Genre counts above this are damped so tag soup does not dominate."), 1.0, max, defaults.genreCrowdingSoftLimit},
-        {QStringLiteral("eraWeight"), QStringLiteral("Era proximity"),
-         QStringLiteral("Reward for release years close to the current context."), 0.0, max, defaults.eraWeight},
-        {QStringLiteral("eraSpanYears"), QStringLiteral("Era span"),
-         QStringLiteral("Year distance where the era reward falls to zero."), 0.001, max, defaults.eraSpanYears},
-        {QStringLiteral("tempoWeight"), QStringLiteral("Tempo proximity"),
-         QStringLiteral("Reward for tempo close to the current sonic context."), 0.0, max, defaults.tempoWeight},
-        {QStringLiteral("energyWeight"), QStringLiteral("Energy proximity"),
-         QStringLiteral("Reward for DSP energy close to the current sonic context."), 0.0, max, defaults.energyWeight},
-        {QStringLiteral("audioWeight"), QStringLiteral("Audio similarity"),
-         QStringLiteral("Reward for CLAP embedding similarity to the session centroid."), 0.0, max, defaults.audioWeight},
-        {QStringLiteral("ratingWeight"), QStringLiteral("Rating"),
-         QStringLiteral("Reward from effective library rating."), 0.0, max, defaults.ratingWeight},
-        {QStringLiteral("userRatingBoost"), QStringLiteral("User rating boost"),
-         QStringLiteral("Multiplier for ratings explicitly set by the user."), 0.0, max, defaults.userRatingBoost},
-        {QStringLiteral("historyWeight"), QStringLiteral("Listening history"),
-         QStringLiteral("Reward from accumulated local and imported listens."), 0.0, max, defaults.historyWeight},
-        {QStringLiteral("historySaturation"), QStringLiteral("History saturation"),
-         QStringLiteral("Listen count where the history reward nears its full value."), 0.001, max, defaults.historySaturation},
-        {QStringLiteral("noveltyWeight"), QStringLiteral("Novelty"),
-         QStringLiteral("Reward for tracks with little or no listening history."), 0.0, max, defaults.noveltyWeight},
-        {QStringLiteral("noveltyZeroAt"), QStringLiteral("Novelty zero point"),
-         QStringLiteral("Listen count where the novelty reward falls to zero."), 0.001, max, defaults.noveltyZeroAt},
-        {QStringLiteral("recencyPenalty"), QStringLiteral("Recency penalty"),
-         QStringLiteral("Penalty for tracks played recently."), -100.0, 0.0, defaults.recencyPenalty},
-        {QStringLiteral("recencyHalfLifeDays"), QStringLiteral("Recency half-life"),
-         QStringLiteral("Days for the recent-play penalty to halve."), 0.001, max, defaults.recencyHalfLifeDays},
-        {QStringLiteral("skipPenalty"), QStringLiteral("Skip penalty"),
-         QStringLiteral("Penalty for tracks with a high skip rate."), -100.0, 0.0, defaults.skipPenalty},
-        {QStringLiteral("sameArtistPenalty"), QStringLiteral("Same artist penalty"),
-         QStringLiteral("Soft penalty for repeating recently heard artists."), -100.0, 0.0, defaults.sameArtistPenalty},
-    };
+    QVector<WeightSpec> specs;
+    specs.reserve(static_cast<qsizetype>(kWeightEntries.size()));
+    for (const WeightEntry &entry : kWeightEntries) {
+        specs.push_back({QString::fromLatin1(entry.key), QString::fromLatin1(entry.label),
+                         QString::fromLatin1(entry.description), entry.minimum, entry.maximum,
+                         defaults.*(entry.member)});
+    }
+    return specs;
 }
 
 bool weightValue(const Weights &weights, const QString &key, double *value)
 {
-    double v = 0.0;
-    if (key == QLatin1String("genreWeight")) {
-        v = weights.genreWeight;
-    } else if (key == QLatin1String("genreIdfSaturation")) {
-        v = weights.genreIdfSaturation;
-    } else if (key == QLatin1String("genreCrowdingSoftLimit")) {
-        v = weights.genreCrowdingSoftLimit;
-    } else if (key == QLatin1String("eraWeight")) {
-        v = weights.eraWeight;
-    } else if (key == QLatin1String("eraSpanYears")) {
-        v = weights.eraSpanYears;
-    } else if (key == QLatin1String("tempoWeight")) {
-        v = weights.tempoWeight;
-    } else if (key == QLatin1String("energyWeight")) {
-        v = weights.energyWeight;
-    } else if (key == QLatin1String("audioWeight")) {
-        v = weights.audioWeight;
-    } else if (key == QLatin1String("ratingWeight")) {
-        v = weights.ratingWeight;
-    } else if (key == QLatin1String("userRatingBoost")) {
-        v = weights.userRatingBoost;
-    } else if (key == QLatin1String("historyWeight")) {
-        v = weights.historyWeight;
-    } else if (key == QLatin1String("historySaturation")) {
-        v = weights.historySaturation;
-    } else if (key == QLatin1String("noveltyWeight")) {
-        v = weights.noveltyWeight;
-    } else if (key == QLatin1String("noveltyZeroAt")) {
-        v = weights.noveltyZeroAt;
-    } else if (key == QLatin1String("recencyPenalty")) {
-        v = weights.recencyPenalty;
-    } else if (key == QLatin1String("recencyHalfLifeDays")) {
-        v = weights.recencyHalfLifeDays;
-    } else if (key == QLatin1String("skipPenalty")) {
-        v = weights.skipPenalty;
-    } else if (key == QLatin1String("sameArtistPenalty")) {
-        v = weights.sameArtistPenalty;
-    } else {
+    const auto entry = findWeightEntry(key);
+    if (entry == kWeightEntries.cend()) {
         return false;
     }
     if (value != nullptr) {
-        *value = v;
+        *value = weights.*(entry->member);
     }
     return true;
 }
 
 bool setWeightValue(Weights &weights, const QString &key, double value)
 {
-    if (key == QLatin1String("genreWeight")) {
-        weights.genreWeight = value;
-    } else if (key == QLatin1String("genreIdfSaturation")) {
-        weights.genreIdfSaturation = value;
-    } else if (key == QLatin1String("genreCrowdingSoftLimit")) {
-        weights.genreCrowdingSoftLimit = value;
-    } else if (key == QLatin1String("eraWeight")) {
-        weights.eraWeight = value;
-    } else if (key == QLatin1String("eraSpanYears")) {
-        weights.eraSpanYears = value;
-    } else if (key == QLatin1String("tempoWeight")) {
-        weights.tempoWeight = value;
-    } else if (key == QLatin1String("energyWeight")) {
-        weights.energyWeight = value;
-    } else if (key == QLatin1String("audioWeight")) {
-        weights.audioWeight = value;
-    } else if (key == QLatin1String("ratingWeight")) {
-        weights.ratingWeight = value;
-    } else if (key == QLatin1String("userRatingBoost")) {
-        weights.userRatingBoost = value;
-    } else if (key == QLatin1String("historyWeight")) {
-        weights.historyWeight = value;
-    } else if (key == QLatin1String("historySaturation")) {
-        weights.historySaturation = value;
-    } else if (key == QLatin1String("noveltyWeight")) {
-        weights.noveltyWeight = value;
-    } else if (key == QLatin1String("noveltyZeroAt")) {
-        weights.noveltyZeroAt = value;
-    } else if (key == QLatin1String("recencyPenalty")) {
-        weights.recencyPenalty = value;
-    } else if (key == QLatin1String("recencyHalfLifeDays")) {
-        weights.recencyHalfLifeDays = value;
-    } else if (key == QLatin1String("skipPenalty")) {
-        weights.skipPenalty = value;
-    } else if (key == QLatin1String("sameArtistPenalty")) {
-        weights.sameArtistPenalty = value;
-    } else {
+    const auto entry = findWeightEntry(key);
+    if (entry == kWeightEntries.cend()) {
         return false;
     }
+    weights.*(entry->member) = value;
     return true;
 }
 
 QByteArray weightsToJson(const Weights &weights)
 {
     QJsonObject object;
-    object.insert(QStringLiteral("genreWeight"), weights.genreWeight);
-    object.insert(QStringLiteral("genreIdfSaturation"), weights.genreIdfSaturation);
-    object.insert(QStringLiteral("genreCrowdingSoftLimit"), weights.genreCrowdingSoftLimit);
-    object.insert(QStringLiteral("eraWeight"), weights.eraWeight);
-    object.insert(QStringLiteral("eraSpanYears"), weights.eraSpanYears);
-    object.insert(QStringLiteral("tempoWeight"), weights.tempoWeight);
-    object.insert(QStringLiteral("energyWeight"), weights.energyWeight);
-    object.insert(QStringLiteral("audioWeight"), weights.audioWeight);
-    object.insert(QStringLiteral("ratingWeight"), weights.ratingWeight);
-    object.insert(QStringLiteral("userRatingBoost"), weights.userRatingBoost);
-    object.insert(QStringLiteral("historyWeight"), weights.historyWeight);
-    object.insert(QStringLiteral("historySaturation"), weights.historySaturation);
-    object.insert(QStringLiteral("noveltyWeight"), weights.noveltyWeight);
-    object.insert(QStringLiteral("noveltyZeroAt"), weights.noveltyZeroAt);
-    object.insert(QStringLiteral("recencyPenalty"), weights.recencyPenalty);
-    object.insert(QStringLiteral("recencyHalfLifeDays"), weights.recencyHalfLifeDays);
-    object.insert(QStringLiteral("skipPenalty"), weights.skipPenalty);
-    object.insert(QStringLiteral("sameArtistPenalty"), weights.sameArtistPenalty);
+    for (const WeightEntry &entry : kWeightEntries) {
+        object.insert(QString::fromLatin1(entry.key), weights.*(entry.member));
+    }
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
 
@@ -400,14 +341,8 @@ Weights weightsFromJson(const QByteArray &json, QString *error)
     }
 
     const QJsonObject object = document.object();
-    const QVector<WeightSpec> specs = weightSpecs();
-    QStringList keys;
-    keys.reserve(specs.size());
-    for (const WeightSpec &spec : specs) {
-        keys.push_back(spec.key);
-    }
     for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
-        if (!keys.contains(it.key())) {
+        if (findWeightEntry(it.key()) == kWeightEntries.cend()) {
             if (error != nullptr) {
                 *error = QStringLiteral("unknown radio scoring weight: %1").arg(it.key());
             }
@@ -415,14 +350,13 @@ Weights weightsFromJson(const QByteArray &json, QString *error)
         }
     }
 
-    for (const WeightSpec &spec : specs) {
-        double value = spec.defaultValue;
-        if (!assignNumber(object, spec.key, value, spec.minimum, spec.maximum, error)) {
+    for (const WeightEntry &entry : kWeightEntries) {
+        if (!assignNumber(object, QString::fromLatin1(entry.key), weights.*(entry.member),
+                          entry.minimum, entry.maximum, error)) {
             // Invalid input rejects the whole object: keys assigned before the
             // failing one must not leak through, callers treat error as all-or-nothing.
             return defaultWeights();
         }
-        setWeightValue(weights, spec.key, value);
     }
     return weights;
 }

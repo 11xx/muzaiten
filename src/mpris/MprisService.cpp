@@ -54,6 +54,9 @@ double round2(double value)
     return std::round(value * 100.0) / 100.0;
 }
 
+// These spellings are persisted in status JSON. See sourceName() in
+// db/Database.cpp for the separately persisted DB-column spellings; they must
+// not be unified.
 QString ratingSourceName(Rating::Source source)
 {
     switch (source) {

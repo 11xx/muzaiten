@@ -789,7 +789,6 @@ void RadioTest::scoringWeightsJsonRoundTripsAllFields()
 void RadioTest::scoringWeightSpecsRoundTripThroughJson()
 {
     const QVector<TrackScorer::WeightSpec> specs = TrackScorer::weightSpecs();
-    QCOMPARE(specs.size(), 18);
     TrackScorer::Weights weights = TrackScorer::defaultWeights();
     for (const TrackScorer::WeightSpec &spec : specs) {
         QVERIFY(!spec.key.isEmpty());
@@ -804,6 +803,8 @@ void RadioTest::scoringWeightSpecsRoundTripThroughJson()
         QVERIFY(TrackScorer::setWeightValue(weights, spec.key, adjusted));
     }
 
+    const QJsonObject json = QJsonDocument::fromJson(TrackScorer::weightsToJson(weights)).object();
+    QCOMPARE(json.size(), specs.size());
     QString error;
     const TrackScorer::Weights roundTrip = TrackScorer::weightsFromJson(TrackScorer::weightsToJson(weights), &error);
     QVERIFY(error.isEmpty());
@@ -812,6 +813,8 @@ void RadioTest::scoringWeightSpecsRoundTripThroughJson()
         double actual = 0.0;
         QVERIFY(TrackScorer::weightValue(weights, spec.key, &expected));
         QVERIFY(TrackScorer::weightValue(roundTrip, spec.key, &actual));
+        QVERIFY(json.contains(spec.key));
+        QVERIFY(qFuzzyCompare(json.value(spec.key).toDouble(), expected));
         QVERIFY(qFuzzyCompare(expected, actual));
     }
 }
