@@ -74,21 +74,32 @@ below).
 
 ## Tuning the scoring
 
-`Radio > Scoring weights…` edits every scorer weight with validated
-ranges, manages named profiles, and can **suggest a profile learned from
-your own listening**: after enough radio history (~200 picks with some
-early skips), a small local model fits your skip behavior and proposes
-per-component adjustments. Suggestions are never auto-applied — they save
-as a `learned-YYYYMMDD` profile you can inspect and apply explicitly.
+`Radio > Customization…` edits every scorer weight and the session-decay
+controls with validated ranges. Profiles are named and persisted in the
+application configuration directory, with the active profile restored at
+startup. New, Duplicate, Rename, Delete, and Reset to Default manage the
+profile list; the Default profile cannot be deleted. Each profile retains its
+own most recent 50 changes for Undo and Redo.
 
-The same operations exist client-side:
+Edits preview immediately in a running radio or Radio Shuffle session: newly
+generated picks use the changed settings, while tracks already queued keep
+their existing order. A 500 ms pause saves one history step. Apply sets the
+Revert baseline; Revert restores that baseline and applies it live.
+
+The same profile operations exist client-side:
 
 ```sh
-muzaitenctl radio-weights get | set '<json>' | save <name> | apply <name> | list
-muzaitenctl radio-learn --dry-run
+muzaitenctl radio-weights get | set '<json>' | save <name> | apply <name> | list | remove <name>
+muzaitenctl radio-learn [--dry-run] [--min-samples N]
 ```
 
-Weight changes take effect on the next session.
+These commands edit the same `radio-profiles.json` store as the dialog: `set`
+changes the active profile's weights, `save` copies it to a named profile, and
+`apply` chooses the profile used on the next application launch. `remove`
+cannot delete Default. `radio-learn` creates or updates a suggestion-only
+`learned-YYYYMMDD` profile; learned profiles are CLI-first and are not shown as
+suggestions in the dialog. GUI profile changes take effect for the next
+generated pick.
 
 ## Genre curation
 

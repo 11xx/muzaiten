@@ -164,7 +164,7 @@ signals:
     void radioExplorationSettingsRequested();
     void radioBatchSizeSettingsRequested();
     void radioRefillThresholdSettingsRequested();
-    void scoringWeightsRequested();
+    void radioCustomizationRequested();
     void genreCurationRequested();
     void analysisStatusRequested();
     void semanticAnalysisEnabledChanged(bool enabled);

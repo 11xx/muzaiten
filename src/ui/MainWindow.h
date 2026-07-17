@@ -242,7 +242,7 @@ private:
     int deepReleaseMs() const;
     void jumpToTrackInfoArtist(const QString &artistName);
     void jumpToTrackInfoAlbum(const QString &artistName, const QString &albumTitle);
-    void showScoringWeights();
+    void showRadioCustomization();
     void showGenreCuration();
     void showAnalysisStatus();
     void configureSemanticProvider();

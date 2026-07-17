@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Track.h"
+#include "reco/RadioProfile.h"
 #include "reco/TrackScorer.h"
 #include "scrobble/ScrobbleBackfill.h"
 
@@ -148,6 +149,21 @@ public:
     QString resetBackfill(const QString &service);
     BackfillStatus backfillStatus() const { return m_backfillStatus; }
 
+    const QVector<RadioProfile> &radioProfiles() const;
+    const RadioProfile &activeRadioProfile() const;
+    bool selectRadioProfile(const QString &name);
+    bool previewActiveRadioProfile(const RadioProfile &profile);
+    bool commitActiveRadioProfilePreview();
+    bool restoreActiveRadioProfile(const RadioProfile &profile);
+    bool undoRadioProfile();
+    bool redoRadioProfile();
+    bool canUndoRadioProfile() const;
+    bool canRedoRadioProfile() const;
+    bool createRadioProfile(const QString &name, bool duplicateActive);
+    bool renameActiveRadioProfile(const QString &name);
+    bool deleteActiveRadioProfile();
+    bool resetActiveRadioProfile();
+
 signals:
     // Emitted on every backfill progress/finished/failed update, so the
     // Scrobblers menu (which stays open while browsing) can refresh live.
@@ -204,6 +220,8 @@ private:
     QHash<QString, double> buildRadioGenreIdf(const QHash<QString, QString> &genreAliases,
                                               const QSet<QString> &ignoredRadioGenres) const;
     TrackScorer::Weights radioScoringWeights() const;
+    TrackScorer::RadioSessionDecay radioSessionDecay() const;
+    void applyActiveRadioProfile();
     QHash<QString, TrackScorer::Affinity> buildRadioAffinities(const QHash<QString, QString> &resolvedSongKeys) const;
     Track bestRadioCopyForPick(const Track &track, const QSet<QString> &blockedPaths) const;
     Track resolveRadioPick(const QString &path, const QSet<QString> &blockedPaths) const;
@@ -233,6 +251,7 @@ private:
     std::unique_ptr<ArtworkCache>      m_artworkCache;
     std::unique_ptr<FeatureStore>      m_features;
     std::unique_ptr<ListenHistoryStore> m_listenHistory;
+    RadioProfileStore                  m_radioProfileStore;
     std::unique_ptr<RadioSession>      m_radioSession;
     PlayerCore       *m_player = nullptr;
     PlaybackBackend  *m_playback = nullptr;
@@ -302,4 +321,5 @@ private:
     QString           m_radioSessionArtistName;
     int               m_radioSessionExploration = 30;
     TrackScorer::Weights m_radioSessionWeights;
+    TrackScorer::RadioSessionDecay m_radioSessionDecay = TrackScorer::defaultSessionDecay();
 };

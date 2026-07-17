@@ -75,6 +75,7 @@ add_executable(test_search_cli
     ../src/core/MusicSort.cpp
     ../src/scrobble/ListenHistoryStore.cpp
     ../src/reco/TrackScorer.cpp
+    ../src/reco/RadioProfile.cpp
     ../src/reco/WeightLearner.cpp
     ../src/reco/WeightLearnerData.cpp
     ../src/search/Exclusion.cpp
@@ -276,6 +277,17 @@ target_link_libraries(test_radio PRIVATE Qt6::Core Qt6::Sql Qt6::Test PkgConfig:
 target_compile_features(test_radio PRIVATE cxx_std_26)
 add_test(NAME test_radio COMMAND test_radio)
 set_tests_properties(test_radio PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_radio_profile
+    test_radio_profile.cpp
+    ../src/app/AppPaths.cpp
+    ../src/reco/RadioProfile.cpp
+    ../src/reco/TrackScorer.cpp
+)
+target_include_directories(test_radio_profile PRIVATE ../src)
+target_link_libraries(test_radio_profile PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_radio_profile PRIVATE cxx_std_26)
+add_test(NAME test_radio_profile COMMAND test_radio_profile)
 
 add_executable(test_scrobble_backfill
     test_scrobble_backfill.cpp

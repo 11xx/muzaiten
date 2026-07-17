@@ -673,7 +673,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(radioRefillThresholdBar, &QAction::triggered, this,
             &PlayerBar::radioRefillThresholdSettingsRequested);
     QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent…"));
-    QAction *scoringWeights = radioMenu->addAction(QStringLiteral("Scoring weights…"));
+    QAction *scoringWeights = radioMenu->addAction(QStringLiteral("Customization…"));
     radioMenu->addSeparator();
     QAction *genreCuration = radioMenu->addAction(QStringLiteral("Genre curation…"));
     connect(radioMenu, &QMenu::aboutToShow, this, [this]() {
@@ -1014,7 +1014,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(playbackResume, &QAction::triggered, this, &PlayerBar::playbackResumeRequested);
     connect(libraryShuffleSettings, &QAction::triggered, this, &PlayerBar::libraryShuffleSettingsRequested);
     connect(radioShuffleSettings, &QAction::triggered, this, &PlayerBar::radioShuffleSettingsRequested);
-    connect(scoringWeights, &QAction::triggered, this, &PlayerBar::scoringWeightsRequested);
+    connect(scoringWeights, &QAction::triggered, this, &PlayerBar::radioCustomizationRequested);
     connect(genreCuration, &QAction::triggered, this, &PlayerBar::genreCurationRequested);
     connect(rediscoveryMix, &QAction::triggered, this, &PlayerBar::rediscoveryMixRequested);
     connect(deepCutsMix, &QAction::triggered, this, &PlayerBar::deepCutsMixRequested);

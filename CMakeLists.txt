@@ -78,6 +78,7 @@ set(MUZAITEN_SOURCES
     src/reco/ArtistRadio.cpp
     src/reco/RadioFilters.cpp
     src/reco/RadioMix.cpp
+    src/reco/RadioProfile.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
     src/reco/GenreCuration.cpp
@@ -150,7 +151,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelSearchBar.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
-    src/ui/ScoringWeightsDialog.cpp
+    src/ui/RadioCustomizationDialog.cpp
     src/ui/PlaylistAddDialog.cpp
     src/ui/PlaylistImportDialog.cpp
     src/ui/PlaylistView.cpp
@@ -288,7 +289,8 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
-    src/ui/ScoringWeightsDialog.h
+    src/ui/RadioCustomizationDialog.h
+    src/reco/RadioProfile.h
     src/ui/PlaylistAddDialog.h
     src/ui/HeaderLabelStyle.h
     src/ui/PanelBorderStyle.h
@@ -375,6 +377,7 @@ add_executable(muzaitenctl
     src/core/Rating.cpp
     src/fs/PathResolver.cpp
     src/reco/GenreCuration.cpp
+    src/reco/RadioProfile.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp

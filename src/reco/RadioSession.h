@@ -47,7 +47,8 @@ public:
                  qint64 nowSecs,
                  QRandomGenerator *rng = nullptr,
                  TrackScorer::Weights weights = TrackScorer::defaultWeights(),
-                 QHash<qint64, QVector<float>> embeddingsByGroup = {});
+                 QHash<qint64, QVector<float>> embeddingsByGroup = {},
+                 TrackScorer::RadioSessionDecay sessionDecay = TrackScorer::defaultSessionDecay());
 
     // Anchorless ambient-radio mode: no fixed seed, so rollingGenres() starts
     // empty and becomes the last few notePlayed() tracks.
@@ -58,7 +59,8 @@ public:
                  qint64 nowSecs,
                  QRandomGenerator *rng = nullptr,
                  TrackScorer::Weights weights = TrackScorer::defaultWeights(),
-                 QHash<qint64, QVector<float>> embeddingsByGroup = {});
+                 QHash<qint64, QVector<float>> embeddingsByGroup = {},
+                 TrackScorer::RadioSessionDecay sessionDecay = TrackScorer::defaultSessionDecay());
 
     // Up to `count` picks scored against the CURRENT rolling context, resolved to
     // full Tracks via `resolveTrack`. `excludePaths` (typically the live queue)
@@ -85,6 +87,8 @@ public:
     // effect starting with the NEXT pick — never retroactively rescoring picks
     // already handed out.
     void setExploration(int exploration0To100);
+    void setWeights(TrackScorer::Weights weights);
+    void setSessionDecay(TrackScorer::RadioSessionDecay decay);
 
     // Terse, data-driven explanation for a pick made this session (component
     // names + rounded contributions). Empty when the path was never picked here.

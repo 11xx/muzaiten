@@ -23,7 +23,7 @@ muzaitenctl raise             # show and focus the window
 
 ```sh
 muzaitenctl start-radio <path> | stop-radio
-muzaitenctl radio-weights get | set '<json>'      # active scoring weights
+muzaitenctl radio-weights get | set '<json>'      # active profile weights
 muzaitenctl radio-weights save <n> | apply <n> | list | remove <n>
 muzaitenctl radio-learn [--dry-run] [--min-samples N]
 muzaitenctl radio-genre ignore <genre> | unignore <genre> | list
@@ -31,10 +31,12 @@ muzaitenctl genre-alias set <alias> <canonical> | remove <alias> | list
 muzaitenctl genre-report      # folded genre vocabulary stats
 ```
 
-All of these run client-side against the library database — no running app
-needed. Weight changes are validated before writing and take effect on the
-next radio session. `radio-learn` is suggestion-only: it saves a
-`learned-YYYYMMDD` profile and never touches the active weights. See
+All of these run client-side, with no running app needed. `radio-weights`
+edits the named profiles in `radio-profiles.json`: `set` changes the active
+profile, `save` snapshots it under a name, `apply` selects a profile, and
+`list` and `remove` manage saved profiles. Changes take effect when muzaiten
+next starts. `radio-learn` is suggestion-only: it saves a
+`learned-YYYYMMDD` profile and never changes the active profile. See
 [radio.md](radio.md) for the full engine guide.
 
 ## Search and audio analysis
