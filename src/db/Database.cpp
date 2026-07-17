@@ -755,7 +755,75 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 16;
+    // v17: collapse artist/album rows accumulated by the old insert-first
+    // upserts. References move to each practical-key group's oldest row before
+    // duplicate rows are removed. Artwork follows albums as well so its foreign
+    // key cannot block cleanup and cached art remains associated with the kept
+    // album.
+    {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 17"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            if (!m_db.transaction()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+            const QStringList v17Statements = {
+                QStringLiteral(
+                    "UPDATE albums SET album_artist_id = ("
+                    "SELECT MIN(kept.id) FROM artists duplicate "
+                    "JOIN artists kept ON kept.name = duplicate.name "
+                    "WHERE duplicate.id = albums.album_artist_id) "
+                    "WHERE EXISTS (SELECT 1 FROM artists duplicate "
+                    "JOIN artists kept ON kept.name = duplicate.name AND kept.id < duplicate.id "
+                    "WHERE duplicate.id = albums.album_artist_id)"),
+                QStringLiteral(
+                    "UPDATE tracks SET album_id = ("
+                    "SELECT MIN(kept.id) FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id "
+                    "WHERE duplicate.id = tracks.album_id) "
+                    "WHERE EXISTS (SELECT 1 FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id AND kept.id < duplicate.id "
+                    "WHERE duplicate.id = tracks.album_id)"),
+                QStringLiteral(
+                    "UPDATE artwork SET album_id = ("
+                    "SELECT MIN(kept.id) FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id "
+                    "WHERE duplicate.id = artwork.album_id) "
+                    "WHERE EXISTS (SELECT 1 FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id AND kept.id < duplicate.id "
+                    "WHERE duplicate.id = artwork.album_id)"),
+                QStringLiteral(
+                    "DELETE FROM albums WHERE EXISTS (SELECT 1 FROM albums kept "
+                    "WHERE kept.title = albums.title "
+                    "AND kept.album_artist_id IS albums.album_artist_id AND kept.id < albums.id)"),
+                QStringLiteral(
+                    "DELETE FROM artists WHERE EXISTS (SELECT 1 FROM artists kept "
+                    "WHERE kept.name = artists.name AND kept.id < artists.id)"),
+                QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(17, datetime('now'))"),
+            };
+            for (const QString &statement : v17Statements) {
+                if (!execSql(query, statement, &m_lastError)) {
+                    m_db.rollback();
+                    return false;
+                }
+            }
+            if (!m_db.commit()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+        }
+    }
+
+    return Schema::currentVersion == 17;
 }
 
 QString Database::lastError() const
@@ -804,23 +872,27 @@ qint64 Database::upsertArtist(const QString &name, const QString &sortName)
             return cached.value();
         }
     }
-    QSqlQuery insert(m_db);
-    insert.prepare(QStringLiteral("INSERT OR IGNORE INTO artists(name, sort_name, musicbrainz_artist_id) VALUES(?, ?, NULL)"));
-    insert.addBindValue(safeName);
-    insert.addBindValue(sortName);
-    if (!insert.exec()) {
-        m_lastError = insert.lastError().text();
-        return 0;
-    }
-
     QSqlQuery select(m_db);
-    select.prepare(QStringLiteral("SELECT id FROM artists WHERE name = ?"));
+    select.prepare(QStringLiteral("SELECT id FROM artists WHERE name = ? ORDER BY id LIMIT 1"));
     select.addBindValue(safeName);
-    if (!select.exec() || !select.next()) {
+    if (!select.exec()) {
         m_lastError = select.lastError().text();
         return 0;
     }
-    const qint64 id = select.value(0).toLongLong();
+    qint64 id = 0;
+    if (select.next()) {
+        id = select.value(0).toLongLong();
+    } else {
+        QSqlQuery insert(m_db);
+        insert.prepare(QStringLiteral("INSERT INTO artists(name, sort_name, musicbrainz_artist_id) VALUES(?, ?, NULL)"));
+        insert.addBindValue(safeName);
+        insert.addBindValue(sortName);
+        if (!insert.exec()) {
+            m_lastError = insert.lastError().text();
+            return 0;
+        }
+        id = insert.lastInsertId().toLongLong();
+    }
     if (m_scanSession) {
         m_artistIdCache.insert(safeName, id);
     }
@@ -838,28 +910,32 @@ qint64 Database::upsertAlbum(const Track &track, qint64 albumArtistId)
             return cached.value();
         }
     }
-    QSqlQuery insert(m_db);
-    insert.prepare(QStringLiteral("INSERT OR IGNORE INTO albums(title, album_artist_id, sort_title, date, original_date, musicbrainz_release_id, musicbrainz_release_group_id, artwork_cache_key) VALUES(?, ?, NULL, ?, ?, ?, ?, NULL)"));
-    insert.addBindValue(title);
-    insert.addBindValue(albumArtistId);
-    insert.addBindValue(track.date);
-    insert.addBindValue(track.originalDate);
-    insert.addBindValue(track.musicBrainz.releaseId);
-    insert.addBindValue(track.musicBrainz.releaseGroupId);
-    if (!insert.exec()) {
-        m_lastError = insert.lastError().text();
-        return 0;
-    }
-
     QSqlQuery select(m_db);
-    select.prepare(QStringLiteral("SELECT id FROM albums WHERE title = ? AND album_artist_id = ?"));
+    select.prepare(QStringLiteral("SELECT id FROM albums WHERE title = ? AND album_artist_id = ? ORDER BY id LIMIT 1"));
     select.addBindValue(title);
     select.addBindValue(albumArtistId);
-    if (!select.exec() || !select.next()) {
+    if (!select.exec()) {
         m_lastError = select.lastError().text();
         return 0;
     }
-    const qint64 id = select.value(0).toLongLong();
+    qint64 id = 0;
+    if (select.next()) {
+        id = select.value(0).toLongLong();
+    } else {
+        QSqlQuery insert(m_db);
+        insert.prepare(QStringLiteral("INSERT INTO albums(title, album_artist_id, sort_title, date, original_date, musicbrainz_release_id, musicbrainz_release_group_id, artwork_cache_key) VALUES(?, ?, NULL, ?, ?, ?, ?, NULL)"));
+        insert.addBindValue(title);
+        insert.addBindValue(albumArtistId);
+        insert.addBindValue(track.date);
+        insert.addBindValue(track.originalDate);
+        insert.addBindValue(track.musicBrainz.releaseId);
+        insert.addBindValue(track.musicBrainz.releaseGroupId);
+        if (!insert.exec()) {
+            m_lastError = insert.lastError().text();
+            return 0;
+        }
+        id = insert.lastInsertId().toLongLong();
+    }
     if (m_scanSession) {
         m_albumIdCache.insert(cacheKey, id);
     }

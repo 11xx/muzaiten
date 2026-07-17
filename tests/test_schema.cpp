@@ -6,6 +6,7 @@
 #include "search/SearchRecord.h"
 
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QDir>
 #include <QTemporaryDir>
@@ -20,6 +21,8 @@ private slots:
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
     void guessedPlaceholdersFollowVisibilitySetting();
     void upsertsTrackAndQueriesArtist();
+    void repeatedScanSessionsReuseArtistsAndAlbums();
+    void dedupMigrationRepointsAndRemovesOnlyTwins();
     void sortTagsFoldIntoSearchIndex();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
@@ -132,6 +135,141 @@ void SchemaTest::upsertsTrackAndQueriesArtist()
     QCOMPARE(tracks.size(), 1);
     QCOMPARE(tracks.first().rating0To100, 80);
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::repeatedScanSessionsReuseArtistsAndAlbums()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    const QString connectionName = QStringLiteral("schema-rescan-idempotence-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const QVector<Track> tracks = {
+        makeTrack(temp, QStringLiteral("01.flac"), 80),
+        makeTrack(temp, QStringLiteral("02.flac"), 60),
+    };
+    database.beginScanSession();
+    for (const Track &track : tracks) {
+        QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    }
+    database.endScanSession();
+
+    QSqlQuery countQuery(QSqlDatabase::database(connectionName));
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM artists")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    const int artistCount = countQuery.value(0).toInt();
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM albums")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    const int albumCount = countQuery.value(0).toInt();
+
+    database.beginScanSession();
+    for (const Track &track : tracks) {
+        QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    }
+    database.endScanSession();
+
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM artists")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    QCOMPARE(countQuery.value(0).toInt(), artistCount);
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM albums")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    QCOMPARE(countQuery.value(0).toInt(), albumCount);
+    QCOMPARE(artistCount, 1);
+    QCOMPARE(albumCount, 1);
+}
+
+void SchemaTest::dedupMigrationRepointsAndRemovesOnlyTwins()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString dbPath = temp.filePath(QStringLiteral("library.sqlite"));
+    const QString connectionName = QStringLiteral("schema-dedup-migration-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QVERIFY2(database.upsertTrack(makeTrack(temp, QStringLiteral("01.flac"), 80)), qPrintable(database.lastError()));
+    }
+
+    qint64 keptArtistId = 0;
+    qint64 keptAlbumId = 0;
+    const QString rawConnection = QStringLiteral("schema-dedup-migration-raw-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), rawConnection);
+        raw.setDatabaseName(dbPath);
+        QVERIFY(raw.open());
+        QSqlQuery query(raw);
+        QVERIFY(query.exec(QStringLiteral("PRAGMA foreign_keys=ON")));
+        QVERIFY(query.exec(QStringLiteral("SELECT id FROM artists WHERE name = 'Album Artist' ORDER BY id LIMIT 1")));
+        QVERIFY(query.next());
+        keptArtistId = query.value(0).toLongLong();
+        QVERIFY(query.exec(QStringLiteral("SELECT id FROM albums WHERE title = 'Album' ORDER BY id LIMIT 1")));
+        QVERIFY(query.next());
+        keptAlbumId = query.value(0).toLongLong();
+
+        query.prepare(QStringLiteral("INSERT INTO artists(name, sort_name, musicbrainz_artist_id) VALUES('Album Artist', NULL, NULL)"));
+        QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
+        const qint64 duplicateArtistId = query.lastInsertId().toLongLong();
+        query.prepare(QStringLiteral("INSERT INTO albums(title, album_artist_id) VALUES('Album', ?)"));
+        query.addBindValue(duplicateArtistId);
+        QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
+        const qint64 duplicateAlbumId = query.lastInsertId().toLongLong();
+
+        query.prepare(QStringLiteral("UPDATE tracks SET album_id = ?"));
+        query.addBindValue(duplicateAlbumId);
+        QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
+        query.prepare(QStringLiteral(
+            "INSERT INTO artwork(album_id, source_type, updated_at) VALUES(?, 'embedded', datetime('now'))"));
+        query.addBindValue(duplicateAlbumId);
+        QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
+        query.prepare(QStringLiteral("INSERT INTO albums(title, album_artist_id) VALUES('Legitimately Trackless', ?)"));
+        query.addBindValue(keptArtistId);
+        QVERIFY2(query.exec(), qPrintable(query.lastError().text()));
+        QVERIFY(query.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version = 17")));
+        raw.close();
+    }
+    QSqlDatabase::removeDatabase(rawConnection);
+
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QSqlQuery query(QSqlDatabase::database(connectionName));
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*), MIN(id) FROM artists WHERE name = 'Album Artist'")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+        QCOMPARE(query.value(1).toLongLong(), keptArtistId);
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*), MIN(id) FROM albums WHERE title = 'Album'")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+        QCOMPARE(query.value(1).toLongLong(), keptAlbumId);
+        QVERIFY(query.exec(QStringLiteral("SELECT album_id FROM tracks LIMIT 1")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toLongLong(), keptAlbumId);
+        QVERIFY(query.exec(QStringLiteral("SELECT album_id FROM artwork LIMIT 1")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toLongLong(), keptAlbumId);
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM albums WHERE title = 'Legitimately Trackless'")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM schema_migrations WHERE version = 17")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+    }
+
+    // Reopening with the marker present must leave the already-clean rows alone.
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QSqlQuery query(QSqlDatabase::database(connectionName));
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM artists")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM albums")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 2);
+    }
 }
 
 void SchemaTest::sortTagsFoldIntoSearchIndex()
