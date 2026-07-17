@@ -43,6 +43,8 @@
 
 ### Changed
 
+- MainWindow scan, rating-sync, view-state, and queue-snapshot clusters now live in dedicated controllers.
+
 - Flagging or forgetting a song now resolves only its matching copies instead
   of scanning the whole library first.
 

@@ -52,6 +52,10 @@
 #include "ui/PlaylistView.h"
 #include "ui/RadioCustomizationDialog.h"
 #include "ui/SearchView.h"
+#include "ui/ScanController.h"
+#include "ui/RatingSyncController.h"
+#include "ui/ViewStatePersistence.h"
+#include "ui/QueueSnapshotStore.h"
 #include "ui/SemanticSearchDialog.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
@@ -588,49 +592,6 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
-QString mainViewName(MainView view)
-{
-    switch (view) {
-    case MainView::LibraryPanels:
-        return QStringLiteral("libraryPanels");
-    case MainView::LibraryMusicExplorer:
-        return QStringLiteral("libraryMusicExplorer");
-    case MainView::LibraryFileExplorer:
-        return QStringLiteral("libraryFileExplorer");
-    case MainView::FreeRoamFileExplorer:
-        return QStringLiteral("freeRoamFileExplorer");
-    case MainView::Search:
-        return QStringLiteral("search");
-    case MainView::Queue:
-        return QStringLiteral("queue");
-    case MainView::Playlist:
-        return QStringLiteral("playlist");
-    }
-    return QStringLiteral("libraryPanels");
-}
-
-MainView mainViewFromName(const QString &name)
-{
-    if (name == QStringLiteral("libraryMusicExplorer")) {
-        return MainView::LibraryMusicExplorer;
-    }
-    if (name == QStringLiteral("libraryFileExplorer")) {
-        return MainView::LibraryFileExplorer;
-    }
-    if (name == QStringLiteral("freeRoamFileExplorer")) {
-        return MainView::FreeRoamFileExplorer;
-    }
-    if (name == QStringLiteral("search")) {
-        return MainView::Search;
-    }
-    if (name == QStringLiteral("queue")) {
-        return MainView::Queue;
-    }
-    if (name == QStringLiteral("playlist")) {
-        return MainView::Playlist;
-    }
-    return MainView::LibraryPanels;
-}
 
 QString playbackStateName(PlaybackBackend::State state)
 {
@@ -649,36 +610,6 @@ QString playbackStateName(PlaybackBackend::State state)
     return QStringLiteral("stopped");
 }
 
-QJsonObject trackToJson(const Track &track)
-{
-    QJsonObject root;
-    root.insert(QStringLiteral("path"), track.path);
-    root.insert(QStringLiteral("parentDir"), track.parentDir);
-    root.insert(QStringLiteral("filename"), track.filename);
-    root.insert(QStringLiteral("title"), track.title);
-    root.insert(QStringLiteral("artistName"), track.artistName);
-    root.insert(QStringLiteral("albumArtistName"), track.albumArtistName);
-    root.insert(QStringLiteral("albumTitle"), track.albumTitle);
-    root.insert(QStringLiteral("date"), track.date);
-    root.insert(QStringLiteral("originalDate"), track.originalDate);
-    root.insert(QStringLiteral("trackNumber"), track.trackNumber);
-    root.insert(QStringLiteral("discNumber"), track.discNumber);
-    root.insert(QStringLiteral("durationMs"), QString::number(track.durationMs));
-    root.insert(QStringLiteral("rating0To100"), track.rating0To100);
-    root.insert(QStringLiteral("effectiveRating0To100"), track.effectiveRating0To100);
-    root.insert(QStringLiteral("hasUserRating"), track.hasUserRating);
-    root.insert(QStringLiteral("fileSize"), QString::number(track.fileSize));
-    root.insert(QStringLiteral("missing"), track.missing);
-    // Technical fields the playback path needs — codec especially, since the DSD
-    // output strategy (native vs PCM) keys off it. Without these a restored queue
-    // would lose its codec and silently fall back to PCM for DSD.
-    root.insert(QStringLiteral("codec"), track.codec);
-    root.insert(QStringLiteral("sampleRateHz"), track.sampleRateHz);
-    root.insert(QStringLiteral("bitrateKbps"), track.bitrateKbps);
-    root.insert(QStringLiteral("channels"), track.channels);
-    root.insert(QStringLiteral("bitDepth"), track.bitDepth);
-    return root;
-}
 
 Track trackFromJson(const QJsonObject &root)
 {
@@ -723,37 +654,7 @@ QString cleanDirectoryPath(const QString &path)
     return cleaned;
 }
 
-bool isDirectoryCoveredBy(const QString &child, const QString &parent)
-{
-    return child != parent && child.startsWith(parent + QLatin1Char('/'));
-}
 
-QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
-{
-    for (ScanRoot &root : roots) {
-        root.path = cleanDirectoryPath(root.path);
-    }
-    std::sort(roots.begin(), roots.end(), [](const ScanRoot &left, const ScanRoot &right) {
-        if (left.path.size() == right.path.size()) {
-            return left.path < right.path;
-        }
-        return left.path.size() < right.path.size();
-    });
-
-    QVector<ScanRoot> deduped;
-    for (const ScanRoot &root : roots) {
-        if (!root.scanEnabled || root.path.isEmpty()) {
-            continue;
-        }
-        const bool covered = std::any_of(deduped.cbegin(), deduped.cend(), [&root](const ScanRoot &existing) {
-            return root.path == existing.path || isDirectoryCoveredBy(root.path, existing.path);
-        });
-        if (!covered) {
-            deduped.push_back(root);
-        }
-    }
-    return deduped;
-}
 
 } // namespace
 
@@ -775,6 +676,10 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_ipc       = m_core->ipc();
     m_listenBrainzScrobbler = m_core->listenBrainzScrobbler();
     m_lastFmScrobbler       = m_core->lastFmScrobbler();
+    m_scanController = new ScanController(*this);
+    m_ratingSyncController = new RatingSyncController(*this);
+    m_viewStatePersistence = new ViewStatePersistence(*this);
+    m_queueSnapshotStore = new QueueSnapshotStore(*this);
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -1762,410 +1667,29 @@ void MainWindow::restylePanelBorders()
     setStyleSheetIfChanged(m_albumGrid, mainAlbumGridStyleSheet(m_albumGrid));
 }
 
-void MainWindow::startScan(const QString &rootPath)
-{
-    startScan(rootPath, 0);
-}
-
-void MainWindow::startScan(const QString &rootPath, int scanRootId)
-{
-    if (m_scanThread != nullptr) {
-        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
-        return;
-    }
-
-    qCInfo(uiLog) << "starting scan" << rootPath;
-    m_activeScanRootId = scanRootId;
-    m_activeScanRootPath = cleanDirectoryPath(rootPath);
-    statusBar()->showMessage(QStringLiteral("Scanning %1").arg(m_activeScanRootPath));
-    m_scanProgress->setVisible(true);
-    m_stopScanButton->setEnabled(true);
-    m_stopScanButton->setVisible(true);
-    ensureIngestSession();
-    // A foreground scan supersedes the background fill; pause it (it resumes once
-    // the scan finishes and re-pumps the placeholder backlog).
-    if (m_fillPipeline != nullptr) {
-        m_fillPipeline->cancel();
-    }
-
-    ScanPipeline::Options options;
-    options.forceFullRescan = m_forceFullRescan;
-    options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
-    options.guessPlaceholders = guessedPlaceholdersEnabled();
-
-    m_scanThread = new QThread(this);
-    m_scanPipeline = new ScanPipeline(m_activeScanRootPath, scanRootId,
-                                      m_database->trackFingerprints(m_activeScanRootPath), options);
-    m_scanPipeline->moveToThread(m_scanThread);
-
-    connect(m_scanThread, &QThread::started, m_scanPipeline, &ScanPipeline::run);
-    connect(m_scanPipeline, &ScanPipeline::enumeratedReady, this, &MainWindow::ingestEnumeratedPlaceholders);
-    connect(m_scanPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
-    connect(m_scanPipeline, &ScanPipeline::progress, this,
-            [this](qint64 enumerated, qint64 toProcess, qint64 processed, const QString &phase) {
-                // The foreground pass only enumerates and re-reads *changed* files;
-                // new files are deferred to the background metadata fill.
-                if (phase == QStringLiteral("enumerating")) {
-                    statusBar()->showMessage(QStringLiteral("Scanning: enumerating files..."));
-                } else if (toProcess > 0) {
-                    statusBar()->showMessage(QStringLiteral("Scanning: re-read %1 of %2 changed (%3 found)")
-                                                 .arg(processed).arg(toProcess).arg(enumerated));
-                } else {
-                    statusBar()->showMessage(QStringLiteral("Scanning: %1 files found").arg(enumerated));
-                }
-            });
-    connect(m_scanPipeline, &ScanPipeline::missingReady, this, &MainWindow::markScannedTracksMissing);
-    connect(m_scanPipeline, &ScanPipeline::finished, this, &MainWindow::finishScan);
-    connect(m_scanPipeline, &ScanPipeline::finished, m_scanThread, &QThread::quit);
-    connect(m_scanThread, &QThread::finished, m_scanPipeline, &QObject::deleteLater);
-    connect(m_scanThread, &QThread::finished, m_scanThread, &QObject::deleteLater);
-    connect(m_scanThread, &QThread::finished, this, [this]() {
-        m_scanThread = nullptr;
-        m_scanPipeline = nullptr;
-        if (!m_pendingScanRoots.isEmpty()) {
-            startNextQueuedSourceScan();
-        } else {
-            m_forceFullRescan = false;
-            pumpMetadataFill();  // lazily tag-read the placeholders this scan created
-        }
-    });
-
-    m_scanThread->start();
-}
-
-void MainWindow::scanEnabledSourceDirectories()
-{
-    scanSourceRoots(m_database->enabledScanRoots());
-}
-
-void MainWindow::forceRescanEnabledSourceDirectories()
-{
-    if (m_scanThread != nullptr) {
-        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
-        return;
-    }
-    m_forceFullRescan = true;
-    scanSourceRoots(m_database->enabledScanRoots());
-}
-
-void MainWindow::scanSourceRoots(const QVector<ScanRoot> &roots)
-{
-    if (m_scanThread != nullptr) {
-        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
-        return;
-    }
-
-    m_pendingScanRoots = deduplicatedScanRoots(roots);
-    if (m_pendingScanRoots.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No scan-enabled source directories"), 5000);
-        return;
-    }
-    startNextQueuedSourceScan();
-}
-
-void MainWindow::startNextQueuedSourceScan()
-{
-    if (m_scanThread != nullptr || m_pendingScanRoots.isEmpty()) {
-        return;
-    }
-
-    const ScanRoot root = m_pendingScanRoots.takeFirst();
-    startScan(root.path, root.id);
-}
-
-void MainWindow::cancelScan()
-{
-    if (m_scanPipeline == nullptr) {
-        return;
-    }
-
-    m_scanPipeline->cancel();
-    m_pendingScanRoots.clear();
-    m_forceFullRescan = false;
-    m_stopScanButton->setEnabled(false);
-    statusBar()->showMessage(QStringLiteral("Canceling scan..."), 5000);
-}
-
-void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
-{
-    if (tracks.isEmpty()) {
-        return;
-    }
-
-    if (!m_database->beginTransaction()) {
-        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-        return;
-    }
-    for (const Track &track : tracks) {
-        if (!m_database->upsertTrack(track)) {
-            QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-            break;
-        }
-    }
-    if (!m_database->commitTransaction()) {
-        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-        return;
-    }
-
-    patchQueueTracksFromMetadata(tracks);
-    scheduleIncrementalRefresh();
-}
-
-void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
-{
-    if (tracks.isEmpty()) {
-        return;
-    }
-    if (!m_database->insertEnumeratedPlaceholders(tracks)) {
-        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-        return;
-    }
-    // Placeholders only surface in the directory/file view; coalesce the refresh
-    // with the rest of the ingest so a flood of new paths doesn't rebuild per chunk.
-    scheduleIncrementalRefresh();
-}
-
-void MainWindow::scheduleIncrementalRefresh()
-{
-    // Throttle (not debounce): during a continuous scan/fill, batches arrive faster
-    // than the interval, so we refresh at most once per window while dirty rather
-    // than never until the stream pauses. Keeps the browse/explorer filling in
-    // light chunks without rebuilding on every batch.
-    if (m_incrementalRefreshTimer == nullptr) {
-        m_incrementalRefreshTimer = new QTimer(this);
-        m_incrementalRefreshTimer->setSingleShot(true);
-        connect(m_incrementalRefreshTimer, &QTimer::timeout, this, [this]() {
-            if (m_incrementalRefreshDirty) {
-                m_incrementalRefreshDirty = false;
-                refreshArtists();
-                refreshLibraryFileExplorer();
-            }
-        });
-    }
-    m_incrementalRefreshDirty = true;
-    if (!m_incrementalRefreshTimer->isActive()) {
-        m_incrementalRefreshTimer->start(1500);
-    }
-}
-
-void MainWindow::flushIncrementalRefresh()
-{
-    if (m_incrementalRefreshTimer != nullptr) {
-        m_incrementalRefreshTimer->stop();
-    }
-    m_incrementalRefreshDirty = false;
-    refreshArtists();
-    refreshLibraryFileExplorer();
-}
-
-int MainWindow::scanProfileSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("scan.profile"), QStringLiteral("balanced"));
-    if (value == QStringLiteral("background")) {
-        return 0;
-    }
-    if (value == QStringLiteral("turbo")) {
-        return 2;
-    }
-    return 1;
-}
-
-int MainWindow::analysisPowerSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("analysis.power"), QStringLiteral("background"));
-    if (value == QStringLiteral("balanced")) {
-        return 1;
-    }
-    if (value == QStringLiteral("turbo")) {
-        return 2;
-    }
-    return 0;
-}
-
-bool MainWindow::guessedPlaceholdersEnabled() const
-{
-    return m_state->setting(QStringLiteral("scan.guessedPlaceholders"), QStringLiteral("1")) != QStringLiteral("0");
-}
-
-void MainWindow::ensureIngestSession()
-{
-    if (!m_ingestSessionActive) {
-        m_database->beginScanSession();
-        m_ingestSessionActive = true;
-    }
-}
-
-void MainWindow::endIngestSessionIfIdle()
-{
-    if (m_ingestSessionActive && m_scanThread == nullptr && m_fillThread == nullptr) {
-        m_database->endScanSession();
-        m_ingestSessionActive = false;
-    }
-}
-
-QStringList MainWindow::nextFillChunk()
-{
-    // Prefer the directory the user is looking at (on-access prioritization),
-    // then drain the rest of the backlog in bounded chunks.
-    if (!m_priorityFillDir.isEmpty()) {
-        const QStringList dirPaths = m_database->enumeratedOnlyPaths(m_priorityFillDir, 256);
-        if (!dirPaths.isEmpty()) {
-            return dirPaths;
-        }
-        m_priorityFillDir.clear();
-    }
-    return m_database->enumeratedOnlyPaths({}, 512);
-}
-
-void MainWindow::pumpMetadataFill()
-{
-    // One ingest worker at a time: never run a fill alongside a foreground scan or
-    // another fill — that would double-read files and thrash a slow/HDD mount.
-    if (m_scanThread != nullptr || m_fillThread != nullptr || m_librarySource != LibrarySource::Local) {
-        return;
-    }
-    const QStringList chunk = nextFillChunk();
-    if (chunk.isEmpty()) {
-        endIngestSessionIfIdle();
-        return;
-    }
-    startMetadataFill(chunk);
-}
-
-void MainWindow::startMetadataFill(const QStringList &paths)
-{
-    if (paths.isEmpty() || m_fillThread != nullptr || m_scanThread != nullptr) {
-        return;
-    }
-    ensureIngestSession();
-
-    ScanPipeline::Options options;
-    options.lowPriority = true;
-    options.batchSize = 64;  // small batches keep the UI fill smooth
-    options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
-
-    const QString hint = QFileInfo(paths.first()).absolutePath();
-    m_fillThread = new QThread(this);
-    m_fillPipeline = new ScanPipeline(hint, paths, options);
-    m_fillPipeline->moveToThread(m_fillThread);
-    connect(m_fillThread, &QThread::started, m_fillPipeline, &ScanPipeline::run);
-    connect(m_fillPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
-    connect(m_fillPipeline, &ScanPipeline::progress, this,
-            [this](qint64, qint64 toProcess, qint64 processed, const QString &phase) {
-                Q_UNUSED(processed);
-                if (phase == QStringLiteral("filling") && toProcess > 0) {
-                    // Show the live backlog (this chunk + everything still queued),
-                    // not just the chunk size — one cheap indexed COUNT per batch.
-                    statusBar()->showMessage(
-                        QStringLiteral("Filling metadata: %1 tracks remaining").arg(m_database->enumeratedOnlyCount()),
-                        2000);
-                }
-            });
-    connect(m_fillPipeline, &ScanPipeline::finished, this, &MainWindow::finishMetadataFill);
-    connect(m_fillPipeline, &ScanPipeline::finished, m_fillThread, &QThread::quit);
-    connect(m_fillThread, &QThread::finished, m_fillPipeline, &QObject::deleteLater);
-    connect(m_fillThread, &QThread::finished, m_fillThread, &QObject::deleteLater);
-    connect(m_fillThread, &QThread::finished, this, [this]() {
-        m_fillThread = nullptr;
-        m_fillPipeline = nullptr;
-        pumpMetadataFill();  // next chunk, or end the ingest session when drained
-    });
-    m_fillThread->start();
-}
-
-void MainWindow::finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
-{
-    Q_UNUSED(enumerated);
-    Q_UNUSED(indexed);
-    Q_UNUSED(skipped);
-    Q_UNUSED(canceled);
-    // ingestScanBatch already refreshed the views incrementally during the chunk;
-    // when the whole backlog is drained, do a final browse + search-index refresh.
-    if (m_database->enumeratedOnlyPaths({}, 1).isEmpty()) {
-        qCInfo(uiLog) << "background metadata fill complete";
-        flushIncrementalRefresh();
-        if (m_searchView != nullptr) {
-            m_searchView->invalidateIndex(databasePath());
-        }
-        statusBar()->showMessage(QStringLiteral("Library metadata complete"), 4000);
-    }
-}
-
-void MainWindow::ensureDirectoryScanned(const QString &directory)
-{
-    if (directory.isEmpty() || m_librarySource != LibrarySource::Local) {
-        return;
-    }
-    if (m_database->enumeratedOnlyPaths(directory, 1).isEmpty()) {
-        return;  // nothing pending in this directory
-    }
-    // Jump this directory to the front of the fill so opening it reads its tags now.
-    m_priorityFillDir = directory;
-    pumpMetadataFill();
-}
-
-void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
-{
-    // This is the foreground pass finishing (enumerate + re-read changed files), not
-    // the whole library: new files were turned into placeholders and their metadata
-    // is read lazily by the background fill. Report both phases honestly.
-    const int pendingFill = m_database->enumeratedOnlyCount();
-    qCInfo(uiLog).nospace() << "scan pass finished: enumerated " << enumerated
-                            << ", re-read " << indexed << " changed, " << skipped << " unchanged, "
-                            << pendingFill << " queued for background metadata fill"
-                            << (canceled ? " (canceled)" : "");
-    const bool sourceScan = m_activeScanRootId > 0;
-    const QString finishedRootPath = m_activeScanRootPath;
-    if (sourceScan) {
-        m_database->setScanRootLastScanned(m_activeScanRootId, canceled ? QStringLiteral("Canceled") : QString());
-    }
-    m_activeScanRootId = 0;
-    m_activeScanRootPath.clear();
-    m_scanProgress->setVisible(false);
-    m_stopScanButton->setVisible(false);
-    m_stopScanButton->setEnabled(false);
-    QString summary;
-    if (canceled) {
-        summary = QStringLiteral("Scan canceled: %1 enumerated, %2 unchanged").arg(enumerated).arg(skipped);
-    } else if (pendingFill > 0) {
-        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged), reading metadata for %4 in the background")
-                      .arg(enumerated).arg(indexed).arg(skipped).arg(pendingFill);
-    } else {
-        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged)")
-                      .arg(enumerated).arg(indexed).arg(skipped);
-    }
-    statusBar()->showMessage(summary, 10000);
-    flushIncrementalRefresh();
-    // Rebuild the search index with fresh library data
-    if (!canceled && m_searchView != nullptr) {
-        m_searchView->invalidateIndex(databasePath());
-    }
-    if (!canceled && !m_pendingScanRoots.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
-    } else if (sourceScan && !canceled) {
-        statusBar()->showMessage(QStringLiteral("Source scans complete"), 10000);
-    }
-}
-
-void MainWindow::markScannedTracksMissing(const QStringList &paths)
-{
-    if (paths.isEmpty()) {
-        return;
-    }
-    if (!m_database->beginTransaction()) {
-        return;
-    }
-    const int marked = m_database->markTracksMissing(paths);
-    m_database->commitTransaction();
-    if (marked > 0) {
-        m_player->markTracksMissing(paths);
-        if (m_playlistDb != nullptr && m_playlistDb->markItemsMissing(paths) > 0 && m_playlistView != nullptr) {
-            m_playlistView->reloadItems();
-            m_playlistView->reloadPlaylists();
-        }
-        qCInfo(uiLog) << "marked" << marked << "tracks missing";
-    }
-}
+void MainWindow::startScan(const QString &rootPath) { m_scanController->startScan(rootPath); }
+void MainWindow::startScan(const QString &rootPath, int scanRootId) { m_scanController->startScan(rootPath, scanRootId); }
+void MainWindow::scanEnabledSourceDirectories() { m_scanController->scanEnabledSourceDirectories(); }
+void MainWindow::forceRescanEnabledSourceDirectories() { m_scanController->forceRescanEnabledSourceDirectories(); }
+void MainWindow::scanSourceRoots(const QVector<ScanRoot> &roots) { m_scanController->scanSourceRoots(roots); }
+void MainWindow::startNextQueuedSourceScan() { m_scanController->startNextQueuedSourceScan(); }
+void MainWindow::cancelScan() { m_scanController->cancelScan(); }
+void MainWindow::ingestScanBatch(const QVector<Track> &tracks) { m_scanController->ingestScanBatch(tracks); }
+void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks) { m_scanController->ingestEnumeratedPlaceholders(tracks); }
+void MainWindow::scheduleIncrementalRefresh() { m_scanController->scheduleIncrementalRefresh(); }
+void MainWindow::flushIncrementalRefresh() { m_scanController->flushIncrementalRefresh(); }
+int MainWindow::scanProfileSetting() const { return m_scanController->scanProfileSetting(); }
+int MainWindow::analysisPowerSetting() const { return m_scanController->analysisPowerSetting(); }
+bool MainWindow::guessedPlaceholdersEnabled() const { return m_scanController->guessedPlaceholdersEnabled(); }
+void MainWindow::ensureIngestSession() { m_scanController->ensureIngestSession(); }
+void MainWindow::endIngestSessionIfIdle() { m_scanController->endIngestSessionIfIdle(); }
+QStringList MainWindow::nextFillChunk() { return m_scanController->nextFillChunk(); }
+void MainWindow::pumpMetadataFill() { m_scanController->pumpMetadataFill(); }
+void MainWindow::startMetadataFill(const QStringList &paths) { m_scanController->startMetadataFill(paths); }
+void MainWindow::finishMetadataFill(qint64 a, qint64 b, qint64 c, bool d) { m_scanController->finishMetadataFill(a, b, c, d); }
+void MainWindow::ensureDirectoryScanned(const QString &directory) { m_scanController->ensureDirectoryScanned(directory); }
+void MainWindow::finishScan(qint64 a, qint64 b, qint64 c, bool d) { m_scanController->finishScan(a, b, c, d); }
+void MainWindow::markScannedTracksMissing(const QStringList &paths) { m_scanController->markScannedTracksMissing(paths); }
 
 void MainWindow::removeMissingTracks()
 {
@@ -2486,381 +2010,25 @@ void MainWindow::refreshTrackTable()
     }
 }
 
-void MainWindow::applyTrackRating(const Track &track, int rating0To100, const QString &sourceSurface)
-{
-    const auto oldRating = m_database->trackRatingSnapshot(track.path);
-    const bool ok = rating0To100 < 0 ? m_database->clearUserTrackRating(track.path) : m_database->setUserTrackRating(track.path, rating0To100);
-    if (!ok) {
-        QMessageBox::warning(this, QStringLiteral("Rating"), m_database->lastError());
-        return;
-    }
-    if (rating0To100 >= 0) {
-        m_database->setPendingTrackRatingWrite(track.path, rating0To100, QStringLiteral("pending"));
-    } else {
-        m_database->clearPendingTrackRatingWrite(track.path);
-    }
-    Track eventTrack = track;
-    if (eventTrack.musicBrainz.recordingId.isEmpty()) {
-        eventTrack.musicBrainz.recordingId = oldRating.mbRecordingId;
-    }
-    m_core->recordRatingEvent(eventTrack,
-                              oldRating.hasUserRating,
-                              oldRating.userRating0To100,
-                              oldRating.effectiveRating0To100,
-                              rating0To100,
-                              sourceSurface);
-    // Patch the rated row in place instead of rebuilding the whole track table
-    // (a full reload also dropped scroll/selection, hence the old remember/restore
-    // dance). The album grid still refreshes because its star reflects the album's
-    // average track rating, which this edit can shift. track.rating0To100 already
-    // carries the scanned file rating (or unset), so it is the right fallback when
-    // a user rating is cleared.
-    const bool nowHasUserRating = rating0To100 >= 0;
-    m_trackTable->updateTrackRating(track.path, nowHasUserRating ? rating0To100 : track.rating0To100, nowHasUserRating);
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->refreshExpandedTracks();
-    }
-    refreshAlbumGrid();
-    m_player->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
-    if (m_player->currentTrack().path == track.path) {
-        presentNowPlaying(m_player->currentTrack());
-        m_mpris->setTrack(m_player->currentTrack());
-    }
-    m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
-    if (m_playlistView != nullptr) {
-        m_playlistView->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100);
-    }
-    scheduleQueueStateSave();
+void MainWindow::applyTrackRating(const Track &t, int r, const QString &s) { m_ratingSyncController->applyTrackRating(t, r, s); }
+void MainWindow::startRatingTagSync(const QVector<Track> &t, int s) { m_ratingSyncController->startRatingTagSync(t, s); }
+void MainWindow::schedulePendingRatingTagSync() { m_ratingSyncController->schedulePendingRatingTagSync(); }
+void MainWindow::syncCurrentTrackRatingTags() { m_ratingSyncController->syncCurrentTrackRatingTags(); }
+void MainWindow::syncCurrentArtistRatingTags() { m_ratingSyncController->syncCurrentArtistRatingTags(); }
+void MainWindow::syncAllSavedRatingTags() { m_ratingSyncController->syncAllSavedRatingTags(); }
+void MainWindow::retryPendingRatingTags() { m_ratingSyncController->retryPendingRatingTags(); }
+void MainWindow::applyAlbumRating(const QString &a, const QString &t, int r) { m_ratingSyncController->applyAlbumRating(a, t, r); }
 
-    if (rating0To100 >= 0 && m_librarySource == LibrarySource::Local) {
-        schedulePendingRatingTagSync();
-    }
-}
-
-void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
-{
-    if (tracks.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No rating tags to sync"), 5000);
-        return;
-    }
-    if (m_ratingTagSyncRunning) {
-        m_ratingTagSyncPending = true;
-        statusBar()->showMessage(QStringLiteral("Rating tag sync already running; queued latest pending writes"), 5000);
-        return;
-    }
-
-    RatingTagSyncRequest request;
-    request.scope = static_cast<RatingTagSyncRequest::Scope>(scope);
-    request.tracks = tracks;
-    request.linkRoots = m_database->linkRoots();
-
-    auto *thread = new QThread(this);
-    auto *worker = new RatingTagSyncWorker(databasePath(), request);
-    m_ratingTagSyncRunning = true;
-    worker->moveToThread(thread);
-    connect(thread, &QThread::started, worker, &RatingTagSyncWorker::run);
-    connect(worker, &RatingTagSyncWorker::progress, this, [this](int checked, int total, const QString &) {
-        statusBar()->showMessage(QStringLiteral("Rating tag sync: %1 / %2 checked").arg(checked).arg(total));
-    });
-    connect(worker, &RatingTagSyncWorker::finished, this, [this, thread, worker](const RatingTagSyncSummary &summary, const QString &error) {
-        if (!error.isEmpty()) {
-            QMessageBox::warning(this, QStringLiteral("Rating tag sync"), error);
-        } else {
-            statusBar()->showMessage(QStringLiteral("Rating tag sync complete: %1 written, %2 no writable path, %3 failed")
-                                         .arg(summary.written)
-                                         .arg(summary.noWritablePath)
-                                         .arg(summary.failed),
-                                     10000);
-        }
-        // Patch only the rows the worker actually wrote, in place — no full table
-        // reload and no per-queued-track DB requery (the old N+1 main-thread freeze
-        // the user felt "when the tag is written"). The DB is already reconciled by
-        // the worker; the effective rating equals the just-written value.
-        bool currentTrackChanged = false;
-        for (const RatingTagSyncUpdate &update : summary.updates) {
-            const int effective = update.effectiveRating0To100;
-            const bool hasUserRating = effective >= 0;
-            m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
-            if (m_playlistView != nullptr) {
-                m_playlistView->updateTrackRating(update.path, effective);
-            }
-            currentTrackChanged = m_player->applyRatingSync(update.path, effective) || currentTrackChanged;
-        }
-        if (!summary.updates.isEmpty() && m_musicExplorerView != nullptr) {
-            m_musicExplorerView->refreshExpandedTracks();
-        }
-        if (currentTrackChanged) {
-            presentNowPlaying(m_player->currentTrack());
-            m_mpris->setTrack(m_player->currentTrack());
-        }
-        if (!summary.updates.isEmpty()) {
-            m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
-                                      m_player->queueIndex() + 1, m_player->playNextInsertIndex());
-            refreshPlayNextRange();
-            scheduleQueueStateSave();
-        }
-        m_ratingTagSyncRunning = false;
-        const bool runPendingAgain = m_ratingTagSyncPending;
-        m_ratingTagSyncPending = false;
-        worker->deleteLater();
-        thread->quit();
-        if (runPendingAgain) {
-            QTimer::singleShot(0, this, [this]() {
-                startRatingTagSync(m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));
-            });
-        }
-    });
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-    thread->start();
-}
-
-void MainWindow::schedulePendingRatingTagSync()
-{
-    m_ratingTagSyncPending = true;
-    statusBar()->showMessage(QStringLiteral("Queued rating tag write"), 3000);
-    QTimer::singleShot(0, this, [this]() {
-        if (m_ratingTagSyncRunning || !m_ratingTagSyncPending) {
-            return;
-        }
-        m_ratingTagSyncPending = false;
-        startRatingTagSync(m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));
-    });
-}
-
-void MainWindow::syncCurrentTrackRatingTags()
-{
-    const Track current = m_player->currentTrack();
-    if (m_librarySource != LibrarySource::Local || current.path.isEmpty() || current.effectiveRating0To100 < 0) {
-        statusBar()->showMessage(QStringLiteral("No current local rated track to sync"), 5000);
-        return;
-    }
-    startRatingTagSync({current}, static_cast<int>(RatingTagSyncRequest::Scope::Track));
-}
-
-void MainWindow::syncCurrentArtistRatingTags()
-{
-    if (m_librarySource != LibrarySource::Local || m_currentArtist.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No current local artist to sync"), 5000);
-        return;
-    }
-    QVector<Track> tracks;
-    const QVector<Track> userRated = m_database->tracksWithUserRatings();
-    const QVector<Track> pending = m_database->tracksWithPendingRatingWrites();
-    for (const Track &track : userRated + pending) {
-        const bool alreadyQueued = std::any_of(tracks.cbegin(), tracks.cend(), [&track](const Track &queued) {
-            return queued.path == track.path;
-        });
-        if (track.albumArtistName == m_currentArtist && !alreadyQueued) {
-            tracks.push_back(track);
-        }
-    }
-    startRatingTagSync(tracks, static_cast<int>(RatingTagSyncRequest::Scope::CurrentArtist));
-}
-
-void MainWindow::syncAllSavedRatingTags()
-{
-    startRatingTagSync(m_database->tracksWithUserRatings(), static_cast<int>(RatingTagSyncRequest::Scope::SavedRatedTracks));
-}
-
-void MainWindow::retryPendingRatingTags()
-{
-    startRatingTagSync(m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));
-}
-
-void MainWindow::applyAlbumRating(const QString &albumArtistName, const QString &albumTitle, int rating0To100)
-{
-    const bool ok = rating0To100 < 0 ? m_database->clearUserAlbumRating(albumArtistName, albumTitle) : m_database->setUserAlbumRating(albumArtistName, albumTitle, rating0To100);
-    if (!ok) {
-        QMessageBox::warning(this, QStringLiteral("Rating"), m_database->lastError());
-        return;
-    }
-    refreshAlbumGrid();
-}
-
-void MainWindow::loadViewSettings()
-{
-    m_loadingViewSettings = true;
-    m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->applyAlbumGridViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
-        m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
-    }
-    const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
-    m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
-    m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
-    const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
-    m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
-    m_playerBar->setAlwaysShowTray(m_state->setting(QStringLiteral("tray.alwaysVisible"), QStringLiteral("false")) == QStringLiteral("true"));
-
-    const int volume = std::clamp(m_state->setting(QStringLiteral("volume"), QStringLiteral("100")).toInt(), 0, 100);
-    m_player->setVolume(static_cast<double>(volume) / 100.0);
-    m_playerBar->setVolume(volume);
-    m_albumGrid->applyViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
-    m_artistSidebar->applyViewSettingsJson(m_state->setting(QStringLiteral("artistSidebar.view")));
-    const QJsonObject mainWindow = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
-    const QByteArray geometry = QByteArray::fromBase64(mainWindow.value(QStringLiteral("geometry")).toString().toLatin1());
-    if (!geometry.isEmpty()) {
-        restoreGeometry(geometry);
-    }
-    SplitterPersistence::restoreSplitterIfStable(m_rootSplitter,
-                            mainWindow.value(QStringLiteral("rootSplitter")).toArray(),
-                            {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
-                            kRootSplitterMinimumTotal);
-    SplitterPersistence::restoreSplitterIfStable(m_centerSplitter,
-                            mainWindow.value(QStringLiteral("centerSplitter")).toArray(),
-                            {kPanelMinimumHeight, kPanelMinimumHeight},
-                            kCenterSplitterMinimumTotal);
-    m_mainView = mainViewFromName(mainWindow.value(QStringLiteral("mainView")).toString());
-    m_libraryExplorerDirectory = mainWindow.value(QStringLiteral("libraryExplorerDirectory")).toString();
-    m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
-
-    const bool showUnsupported = m_state->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
-    m_playerBar->setListUnsupportedFiles(showUnsupported);
-
-    if (m_panelSearch != nullptr) {
-        m_panelSearch->setKeyBindingProfileName(m_state->setting(QStringLiteral("mainPanel.keyBindingProfile"),
-                                                                 defaultMainPanelKeyBindingProfileName()));
-        const QJsonArray focusOrder = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainPanel.focusOrder")).toUtf8()).array();
-        m_panelSearch->setFocusOrder(mainPanelFocusOrderFromJson(focusOrder));
-        m_panelSearch->setActivePanelFromString(m_state->setting(QStringLiteral("mainPanel.activePanel")));
-    }
-    const int mainPanelScrollPadding = std::clamp(m_state->setting(QStringLiteral("mainPanel.scrollPadding"),
-                                                                   QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
-                                                  0, 20);
-    m_rightSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
-    m_artistSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
-    m_trackTable->setNavigationScrollPadding(mainPanelScrollPadding);
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->setNavigationScrollPadding(mainPanelScrollPadding);
-    }
-
-    switchMainView(m_mainView);
-    applySharedTableSettings();
-    m_loadingViewSettings = false;
-}
-
-void MainWindow::saveTrackTableViewSettings()
-{
-    if (m_loadingViewSettings || m_applyingTrackTableViewSettings) {
-        return;
-    }
-
-    QObject *source = sender();
-    const QString settings = source == m_musicExplorerView && m_musicExplorerView != nullptr
-        ? m_musicExplorerView->trackTableViewSettingsJson()
-        : m_trackTable->viewSettingsJson();
-    m_state->setSetting(QStringLiteral("trackTable.view"), settings);
-
-    QScopedValueRollback<bool> applying(m_applyingTrackTableViewSettings, true);
-    if (source == m_musicExplorerView) {
-        m_trackTable->applyViewSettingsJson(settings);
-    } else if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->applyTrackTableViewSettingsJson(settings);
-    }
-    applySharedTableSettings();
-}
-
-void MainWindow::saveAlbumGridViewSettings()
-{
-    const QString settings = m_albumGrid->viewSettingsJson();
-    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->applyAlbumGridViewSettingsJson(settings);
-    }
-}
-
-void MainWindow::saveMusicExplorerAlbumGridViewSettings()
-{
-    if (m_musicExplorerView == nullptr) {
-        return;
-    }
-    const QString settings = m_musicExplorerView->albumGridViewSettingsJson();
-    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
-    m_albumGrid->applyViewSettingsJson(settings);
-}
-
-void MainWindow::saveArtistSidebarViewSettings()
-{
-    m_state->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
-}
-
-void MainWindow::saveRightSidebarViewSettings()
-{
-    if (m_loadingViewSettings) {
-        return;
-    }
-    m_state->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
-    applySharedTableSettings();
-}
-
-void MainWindow::saveQueueScreenViewSettings()
-{
-    if (m_queueScreen == nullptr) {
-        return;
-    }
-    m_state->setSetting(QStringLiteral("queueScreen.view"), m_queueScreen->viewSettingsJson());
-}
-
-void MainWindow::savePlaylistViewSettings()
-{
-    if (m_playlistView == nullptr) {
-        return;
-    }
-    m_state->setSetting(QStringLiteral("playlistView.view"), m_playlistView->viewSettingsJson());
-    applySharedTableSettings();
-}
-
-void MainWindow::saveMainWindowViewSettings(bool captureSplitterSizes)
-{
-    if (m_loadingViewSettings) {
-        return;
-    }
-
-    QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
-    root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
-    if (captureSplitterSizes) {
-        const QList<int> rootSizes = m_rootSplitter->sizes();
-        if (SplitterPersistence::splitterSizesAreStable(rootSizes,
-                                   {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
-                                   kRootSplitterMinimumTotal)) {
-            root.insert(QStringLiteral("rootSplitter"), SplitterPersistence::splitterSizesToJson(rootSizes));
-        }
-        const QList<int> centerSizes = m_centerSplitter->sizes();
-        if (SplitterPersistence::splitterSizesAreStable(centerSizes,
-                                   {kPanelMinimumHeight, kPanelMinimumHeight},
-                                   kCenterSplitterMinimumTotal)) {
-            root.insert(QStringLiteral("centerSplitter"), SplitterPersistence::splitterSizesToJson(centerSizes));
-        }
-    }
-    root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
-    root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);
-    root.insert(QStringLiteral("freeRoamDirectory"), m_freeRoamDirectory);
-    if (m_panelSearch != nullptr) {
-        root.insert(QStringLiteral("activePanel"), mainPanelIdToString(m_panelSearch->activePanel()));
-    }
-    m_state->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-    if (m_panelSearch != nullptr) {
-        m_state->setSetting(QStringLiteral("mainPanel.keyBindingProfile"), m_panelSearch->keyBindingProfileName());
-        m_state->setSetting(QStringLiteral("mainPanel.focusOrder"),
-                            QString::fromUtf8(QJsonDocument(mainPanelFocusOrderToJson(m_panelSearch->focusOrder())).toJson(QJsonDocument::Compact)));
-        m_state->setSetting(QStringLiteral("mainPanel.activePanel"), mainPanelIdToString(m_panelSearch->activePanel()));
-    }
-}
-
-void MainWindow::saveAllViewSettings()
-{
-    saveTrackTableViewSettings();
-    saveAlbumGridViewSettings();
-    saveArtistSidebarViewSettings();
-    saveRightSidebarViewSettings();
-    if (m_queueScreen != nullptr) {
-        saveQueueScreenViewSettings();
-    }
-    if (m_playlistView != nullptr) {
-        savePlaylistViewSettings();
-    }
-    saveMainWindowViewSettings();
-}
+void MainWindow::loadViewSettings() { m_viewStatePersistence->loadViewSettings(); }
+void MainWindow::saveTrackTableViewSettings() { m_viewStatePersistence->saveTrackTableViewSettings(); }
+void MainWindow::saveAlbumGridViewSettings() { m_viewStatePersistence->saveAlbumGridViewSettings(); }
+void MainWindow::saveMusicExplorerAlbumGridViewSettings() { m_viewStatePersistence->saveMusicExplorerAlbumGridViewSettings(); }
+void MainWindow::saveArtistSidebarViewSettings() { m_viewStatePersistence->saveArtistSidebarViewSettings(); }
+void MainWindow::saveRightSidebarViewSettings() { m_viewStatePersistence->saveRightSidebarViewSettings(); }
+void MainWindow::saveQueueScreenViewSettings() { m_viewStatePersistence->saveQueueScreenViewSettings(); }
+void MainWindow::savePlaylistViewSettings() { m_viewStatePersistence->savePlaylistViewSettings(); }
+void MainWindow::saveMainWindowViewSettings(bool capture) { m_viewStatePersistence->saveMainWindowViewSettings(capture); }
+void MainWindow::saveAllViewSettings() { m_viewStatePersistence->saveAllViewSettings(); }
 
 void MainWindow::resetViewPreferences()
 {
@@ -3826,110 +2994,13 @@ void MainWindow::refreshLibraryFileExplorer()
     m_libraryFileExplorer->setLibraryEntries(directories, tracks);
 }
 
-void MainWindow::loadQueueState()
-{
-    const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
-    const QJsonArray trackValues = root.value(QStringLiteral("tracks")).toArray();
-    QVector<Track> tracks;
-    tracks.reserve(trackValues.size());
-    for (const QJsonValue &value : trackValues) {
-        Track track = trackFromJson(value.toObject());
-        if (!track.path.isEmpty()) {
-            const Track refreshed = m_database->trackForPath(track.path);
-            if (!refreshed.path.isEmpty()) {
-                track = refreshed;
-            }
-            tracks.push_back(track);
-        }
-    }
+void MainWindow::loadQueueState() { m_queueSnapshotStore->loadQueueState(); }
 
-    const int savedIndex = root.value(QStringLiteral("index")).toInt(-1);
-    m_player->resetQueue(tracks, savedIndex,
-                         root.value(QStringLiteral("playNextInsertIndex")).toInt(savedIndex + 1));
-    m_queueId = root.value(QStringLiteral("queueId")).toString();
-    m_queueSourceKind = normalizedQueueSourceKind(root.value(QStringLiteral("queueSourceKind")).toString(QStringLiteral("queue")));
-    m_queueSourcePlaylistId = root.value(QStringLiteral("queueSourcePlaylistId")).toString().toLongLong();
-    if (m_queueSourcePlaylistId <= 0) {
-        m_queueSourcePlaylistId = static_cast<qint64>(root.value(QStringLiteral("queueSourcePlaylistId")).toDouble(0));
-    }
-    m_queueSourceName = root.value(QStringLiteral("queueSourceName")).toString();
-    if (m_player->queue().isEmpty()) {
-        m_queueId.clear();
-        m_queueSourceKind = QStringLiteral("queue");
-        m_queueSourcePlaylistId = 0;
-        m_queueSourceName.clear();
-    } else {
-        ensureCurrentQueueIdentity();
-    }
-    // resetQueue() does not emit queueChanged, so push the source-dependent UI
-    // (playlist-mirror items, merge gating) directly for the restored queue.
-    refreshQueueSourceDependentUi();
-    m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
-                              m_player->queueIndex() + 1, m_player->playNextInsertIndex());
-    m_rightSidebar->setCurrentIndex(m_player->queueIndex(), /*reveal=*/true);
-    refreshPlayNextRange();
-    if (m_player->queueIndex() >= 0) {
-        m_player->presentTrack(m_player->queue().at(m_player->queueIndex()));
-    }
-}
+void MainWindow::saveQueueState() { m_queueSnapshotStore->saveQueueState(); }
 
-void MainWindow::saveQueueState()
-{
-    if (m_queueStateSaveTimer != nullptr) {
-        m_queueStateSaveTimer->stop();
-    }
-    if (!m_player->queue().isEmpty()) {
-        ensureCurrentQueueIdentity();
-    }
-    QJsonArray tracks;
-    for (const Track &track : m_player->queue()) {
-        tracks.append(trackToJson(track));
-    }
+void MainWindow::scheduleQueueStateSave(bool immediate) { m_queueSnapshotStore->scheduleQueueStateSave(immediate); }
 
-    QJsonObject root;
-    root.insert(QStringLiteral("tracks"), tracks);
-    root.insert(QStringLiteral("index"), m_player->queueIndex());
-    root.insert(QStringLiteral("playNextInsertIndex"), m_player->playNextInsertIndex());
-    root.insert(QStringLiteral("queueId"), m_queueId);
-    root.insert(QStringLiteral("queueSourceKind"), m_queueSourceKind);
-    root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
-    root.insert(QStringLiteral("queueSourceName"), m_queueSourceName);
-    m_state->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-}
-
-void MainWindow::scheduleQueueStateSave(bool immediate)
-{
-    if (immediate) {
-        saveQueueState();
-        return;
-    }
-    if (m_queueStateSaveTimer != nullptr) {
-        m_queueStateSaveTimer->start();
-    }
-}
-
-QJsonObject MainWindow::queueSnapshotObject(const QString &name, const QString &source) const
-{
-    QJsonArray tracks;
-    for (const Track &track : m_player->queue()) {
-        tracks.append(trackToJson(track));
-    }
-    QJsonObject snapshot;
-    snapshot.insert(QStringLiteral("id"), m_queueId);
-    snapshot.insert(QStringLiteral("name"), name);
-    snapshot.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
-    snapshot.insert(QStringLiteral("index"), m_player->queueIndex());
-    snapshot.insert(QStringLiteral("playNextInsertIndex"), m_player->playNextInsertIndex());
-    snapshot.insert(QStringLiteral("sourceKind"), m_queueSourceKind);
-    snapshot.insert(QStringLiteral("sourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
-    snapshot.insert(QStringLiteral("sourceName"), m_queueSourceName);
-    const QString trimmedSource = source.trimmed();
-    if (!trimmedSource.isEmpty()) {
-        snapshot.insert(QStringLiteral("source"), trimmedSource);
-    }
-    snapshot.insert(QStringLiteral("tracks"), tracks);
-    return snapshot;
-}
+QJsonObject MainWindow::queueSnapshotObject(const QString &name, const QString &source) const { return m_queueSnapshotStore->queueSnapshotObject(name, source); }
 
 QVector<Track> MainWindow::tracksFromSnapshotObject(const QJsonObject &snapshot) const
 {
@@ -3949,17 +3020,9 @@ QVector<Track> MainWindow::tracksFromSnapshotObject(const QJsonObject &snapshot)
     return tracks;
 }
 
-QJsonObject MainWindow::loadQueueSnapshotsRoot() const
-{
-    return QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.snapshots")).toUtf8()).object();
-}
+QJsonObject MainWindow::loadQueueSnapshotsRoot() const { return m_queueSnapshotStore->loadQueueSnapshotsRoot(); }
 
-void MainWindow::saveQueueSnapshotsRoot(const QJsonObject &root)
-{
-    m_state->setSetting(QStringLiteral("queue.snapshots"),
-                        QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-    refreshSavedQueuePlaylistEntries();
-}
+void MainWindow::saveQueueSnapshotsRoot(const QJsonObject &root) { m_queueSnapshotStore->saveQueueSnapshotsRoot(root); }
 
 QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
 {
@@ -4003,25 +3066,7 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
     return entries;
 }
 
-QJsonObject MainWindow::queueSnapshotByKey(const QString &keyOrId) const
-{
-    if (keyOrId.isEmpty()) {
-        return {};
-    }
-    const QJsonObject root = loadQueueSnapshotsRoot();
-    for (const QJsonObject &snapshot : automaticQueueSnapshotsFromRoot(root)) {
-        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
-            return snapshot;
-        }
-    }
-    for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
-        const QJsonObject snapshot = value.toObject();
-        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
-            return snapshot;
-        }
-    }
-    return {};
-}
+QJsonObject MainWindow::queueSnapshotByKey(const QString &key) const { return m_queueSnapshotStore->queueSnapshotByKey(key); }
 
 void MainWindow::refreshSavedQueuePlaylistEntries()
 {
@@ -4115,27 +3160,13 @@ void MainWindow::deleteQueueSnapshotsConfirmed(const QStringList &ids)
                              4000);
 }
 
-int MainWindow::savedQueueLimitSetting() const
-{
-    return savedQueueUnlimitedSetting() ? 0 : kAutomaticSavedQueueLimit;
-}
+int MainWindow::savedQueueLimitSetting() const { return m_queueSnapshotStore->savedQueueLimitSetting(); }
 
-int MainWindow::radioSavedQueueLimitSetting() const
-{
-    return radioSavedQueueUnlimitedSetting() ? 0 : kAutomaticSavedQueueLimit;
-}
+int MainWindow::radioSavedQueueLimitSetting() const { return m_queueSnapshotStore->radioSavedQueueLimitSetting(); }
 
-bool MainWindow::savedQueueUnlimitedSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("queue.savedQueueUnlimited")).trimmed();
-    return value == QStringLiteral("1") || value == QStringLiteral("true");
-}
+bool MainWindow::savedQueueUnlimitedSetting() const { return m_queueSnapshotStore->savedQueueUnlimitedSetting(); }
 
-bool MainWindow::radioSavedQueueUnlimitedSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("queue.radioSavedQueueUnlimited")).trimmed();
-    return value == QStringLiteral("1") || value == QStringLiteral("true");
-}
+bool MainWindow::radioSavedQueueUnlimitedSetting() const { return m_queueSnapshotStore->radioSavedQueueUnlimitedSetting(); }
 
 void MainWindow::configureSavedQueueLimit()
 {
@@ -4173,67 +3204,15 @@ void MainWindow::configureSavedQueueLimit()
     statusBar()->showMessage(QStringLiteral("Saved queue limits updated"), 4000);
 }
 
-void MainWindow::ensureCurrentQueueIdentity()
-{
-    if (m_queueId.isEmpty()) {
-        m_queueId = newQueueIdentity();
-    }
-    m_queueSourceKind = normalizedQueueSourceKind(m_queueSourceKind);
-    if (m_queueSourceKind != QStringLiteral("playlist")) {
-        m_queueSourcePlaylistId = 0;
-    }
-}
+void MainWindow::ensureCurrentQueueIdentity() { m_queueSnapshotStore->ensureCurrentQueueIdentity(); }
 
-bool MainWindow::currentQueueBacklogEligible() const
-{
-    return !m_player->queue().isEmpty() && m_queueSourceKind == QStringLiteral("queue");
-}
+bool MainWindow::currentQueueBacklogEligible() const { return m_queueSnapshotStore->currentQueueBacklogEligible(); }
 
-void MainWindow::pushCurrentQueueToBacklog(const QString &name, const QString &source)
-{
-    if (!currentQueueBacklogEligible()) {
-        return;
-    }
-    ensureCurrentQueueIdentity();
-    QJsonObject root = loadQueueSnapshotsRoot();
-    const QString snapshotId = m_queueId;
-    QJsonObject snapshot = queueSnapshotObject(name, source);
-    QJsonArray backlog = queueBacklogFromRoot(root);
-    QJsonArray radioBacklog = radioQueueBacklogFromRoot(root);
-    const bool radioSnapshot = queueSnapshotIsRadio(snapshot);
-    const int limit = radioSnapshot ? radioSavedQueueLimitSetting() : savedQueueLimitSetting();
-    QJsonArray &targetBacklog = radioSnapshot ? radioBacklog : backlog;
-    QJsonArray updatedBacklog;
-    updatedBacklog.append(snapshot);
-    for (const QJsonValue &value : targetBacklog) {
-        const QJsonObject candidate = value.toObject();
-        if (candidate.isEmpty() || candidate.value(QStringLiteral("id")).toString() == snapshotId) {
-            continue;
-        }
-        updatedBacklog.append(candidate);
-        if (limit > 0 && updatedBacklog.size() >= limit) {
-            break;
-        }
-    }
-    targetBacklog = updatedBacklog;
-    root.remove(QStringLiteral("previous"));
-    root.insert(QStringLiteral("backlog"), backlog);
-    root.insert(QStringLiteral("radioBacklog"), radioBacklog);
-    saveQueueSnapshotsRoot(root);
-}
+void MainWindow::pushCurrentQueueToBacklog(const QString &name, const QString &source) { m_queueSnapshotStore->pushCurrentQueueToBacklog(name, source); }
 
-void MainWindow::snapshotCurrentQueueAsPrevious(const QString &source)
-{
-    pushCurrentQueueToBacklog(QString(), source);
-}
+void MainWindow::snapshotCurrentQueueAsPrevious(const QString &source) { m_queueSnapshotStore->snapshotCurrentQueueAsPrevious(source); }
 
-void MainWindow::markQueueAsSpontaneous(const QString &id)
-{
-    m_queueId = id.isEmpty() ? newQueueIdentity() : id;
-    m_queueSourceKind = QStringLiteral("queue");
-    m_queueSourcePlaylistId = 0;
-    m_queueSourceName.clear();
-}
+void MainWindow::markQueueAsSpontaneous(const QString &id) { m_queueSnapshotStore->markQueueAsSpontaneous(id); }
 
 void MainWindow::appendTracksToCurrentPlaylist(const QVector<Track> &tracks)
 {

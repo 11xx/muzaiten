@@ -137,6 +137,10 @@ set(MUZAITEN_SOURCES
     src/ui/LinkRootsDialog.cpp
     src/ui/ListeningHistoryDialog.cpp
     src/ui/MainWindow.cpp
+    src/ui/ScanController.cpp
+    src/ui/RatingSyncController.cpp
+    src/ui/ViewStatePersistence.cpp
+    src/ui/QueueSnapshotStore.cpp
     src/ui/MusicExplorerView.cpp
     src/playlist/PlaylistImport.cpp
     src/playlist/PlaylistImportWorker.cpp
