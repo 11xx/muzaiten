@@ -1941,36 +1941,13 @@ QVector<Track> Database::tracksWithUserRatings() const
 {
     QVector<Track> tracks;
     QSqlQuery query(m_db);
-    query.exec(QStringLiteral(
-        "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
-        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, utr.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime, p.status "
+    query.exec(QStringLiteral("SELECT %1 "
         "FROM user_track_ratings utr JOIN tracks t ON t.path = utr.track_path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "ORDER BY lower(t.album_artist_name), lower(t.album_title), t.disc_number, t.track_number, lower(t.title)"));
+        "ORDER BY lower(t.album_artist_name), lower(t.album_title), t.disc_number, t.track_number, lower(t.title)")
+                   .arg(QString::fromLatin1(kTrackSelectColumns)));
     while (query.next()) {
-        Track track;
-        track.path = query.value(0).toString();
-        track.parentDir = query.value(1).toString();
-        track.filename = query.value(2).toString();
-        track.title = query.value(3).toString();
-        track.artistName = query.value(4).toString();
-        track.albumArtistName = query.value(5).toString();
-        track.albumTitle = query.value(6).toString();
-        track.trackNumber = query.value(7).toInt();
-        track.discNumber = query.value(8).toInt();
-        track.durationMs = query.value(9).toLongLong();
-        track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
-        track.hasUserRating = true;
-        const QString pendingStatus = query.value(16).toString();
-        const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
-            || pendingStatus == QStringLiteral("failed")
-            || pendingStatus == QStringLiteral("blocked_no_writable_path");
-        track.effectiveRating0To100 = pendingDbRating ? query.value(11).toInt() : (track.rating0To100 >= 0 ? track.rating0To100 : query.value(11).toInt());
-        track.date = query.value(12).toString();
-        track.originalDate = query.value(13).toString();
-        track.fileSize = query.value(14).toLongLong();
-        track.fileMtime = query.value(15).toLongLong();
-        tracks.push_back(track);
+        tracks.push_back(readTrackRow(query));
     }
     return tracks;
 }
@@ -1979,32 +1956,17 @@ QVector<Track> Database::tracksWithPendingRatingWrites() const
 {
     QVector<Track> tracks;
     QSqlQuery query(m_db);
-    query.exec(QStringLiteral(
-        "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
-        "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, p.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime "
+    query.exec(QStringLiteral("SELECT %1, p.rating_0_100 "
         "FROM pending_track_rating_writes p JOIN tracks t ON t.path = p.track_path "
-        "WHERE p.status IN (%1) "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "WHERE p.status IN (%2) "
         "ORDER BY p.updated_at ASC")
-                   .arg(QString::fromLatin1(kRatingOverlayStatusesSql)));
+                   .arg(QString::fromLatin1(kTrackSelectColumns),
+                        QString::fromLatin1(kRatingOverlayStatusesSql)));
     while (query.next()) {
-        Track track;
-        track.path = query.value(0).toString();
-        track.parentDir = query.value(1).toString();
-        track.filename = query.value(2).toString();
-        track.title = query.value(3).toString();
-        track.artistName = query.value(4).toString();
-        track.albumArtistName = query.value(5).toString();
-        track.albumTitle = query.value(6).toString();
-        track.trackNumber = query.value(7).toInt();
-        track.discNumber = query.value(8).toInt();
-        track.durationMs = query.value(9).toLongLong();
-        track.rating0To100 = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
+        Track track = readTrackRow(query);
         track.hasUserRating = true;
-        track.effectiveRating0To100 = query.value(11).toInt();
-        track.date = query.value(12).toString();
-        track.originalDate = query.value(13).toString();
-        track.fileSize = query.value(14).toLongLong();
-        track.fileMtime = query.value(15).toLongLong();
+        track.effectiveRating0To100 = query.value(18).toInt();
         tracks.push_back(track);
     }
     return tracks;
