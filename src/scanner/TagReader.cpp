@@ -134,11 +134,15 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
         return track;
     }
 
+    const TagLib::PropertyMap properties = file.file()->properties();
     if (const TagLib::Tag *tag = file.tag()) {
         track.title = toQString(tag->title());
         track.artistName = toQString(tag->artist());
         track.albumTitle = toQString(tag->album());
-        track.date = QString::number(tag->year());
+        track.date = firstProperty(properties, {QStringLiteral("DATE")});
+        if (track.date.isEmpty() && tag->year() > 0) {
+            track.date = QString::number(tag->year());
+        }
         track.trackNumber = static_cast<int>(tag->track());
     }
 
@@ -157,7 +161,6 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
         }
     }
 
-    const TagLib::PropertyMap properties = file.file()->properties();
     track.codec = info.suffix().toLower();
     if (fullMetadata != nullptr) {
         for (auto it = properties.begin(); it != properties.end(); ++it) {

@@ -23,6 +23,7 @@ private slots:
     void upsertsTrackAndQueriesArtist();
     void repeatedScanSessionsReuseArtistsAndAlbums();
     void dedupMigrationRepointsAndRemovesOnlyTwins();
+    void dateZeroMigrationClearsLegacyDates();
     void sortTagsFoldIntoSearchIndex();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
@@ -269,6 +270,55 @@ void SchemaTest::dedupMigrationRepointsAndRemovesOnlyTwins()
         QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM albums")));
         QVERIFY(query.next());
         QCOMPARE(query.value(0).toInt(), 2);
+    }
+}
+
+void SchemaTest::dateZeroMigrationClearsLegacyDates()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    const QString dbPath = temp.filePath(QStringLiteral("library.sqlite"));
+    const QString connectionName = QStringLiteral("schema-date-zero-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+
+        Track dated = makeTrack(temp, QStringLiteral("01.flac"), 80);
+        dated.date = QStringLiteral("2001");
+        QVERIFY2(database.upsertTrack(dated), qPrintable(database.lastError()));
+
+        Track legacyZero = makeTrack(temp, QStringLiteral("02.flac"), 80);
+        legacyZero.date = QStringLiteral("0");
+        QVERIFY2(database.upsertTrack(legacyZero), qPrintable(database.lastError()));
+    }
+
+    const QString rawConnection = QStringLiteral("schema-date-zero-raw-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), rawConnection);
+        raw.setDatabaseName(dbPath);
+        QVERIFY(raw.open());
+        QSqlQuery query(raw);
+        QVERIFY(query.exec(QStringLiteral("DELETE FROM schema_migrations WHERE version = 18")));
+        raw.close();
+    }
+    QSqlDatabase::removeDatabase(rawConnection);
+
+    {
+        Database database(connectionName);
+        QVERIFY2(database.open(dbPath), qPrintable(database.lastError()));
+        QSqlQuery query(QSqlDatabase::database(connectionName));
+        QVERIFY(query.exec(QStringLiteral("SELECT date FROM tracks WHERE filename = '02.flac'")));
+        QVERIFY(query.next());
+        QVERIFY(query.value(0).isNull());
+
+        const QVector<Album> albums = database.albumsForArtist(QStringLiteral("Album Artist"));
+        QCOMPARE(albums.size(), 1);
+        QCOMPARE(albums.constFirst().date, QStringLiteral("2001"));
+
+        Track unknownDate = makeTrack(temp, QStringLiteral("03.flac"), 80);
+        QVERIFY2(database.upsertTrack(unknownDate), qPrintable(database.lastError()));
+        QCOMPARE(database.albumsForArtist(QStringLiteral("Album Artist")).constFirst().date, QStringLiteral("2001"));
     }
 }
 
