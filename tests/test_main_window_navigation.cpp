@@ -1,5 +1,7 @@
 #include "app/AppCore.h"
 #include "core/Artist.h"
+#include "core/MetadataBlob.h"
+#include "db/Database.h"
 #include "db/SettingsStore.h"
 #include "player/PlayerCore.h"
 #include "ui/AlbumGrid.h"
@@ -15,7 +17,9 @@
 #undef private
 
 #include <QDateTime>
+#include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QToolButton>
@@ -85,6 +89,66 @@ private slots:
         bar.setVolumeControlEnabled(true);
         QVERIFY(bar.m_volumeButton->isEnabled());
         QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
+    }
+
+    void restoredRadioShuffleUsesCurrentTrackContext()
+    {
+        QTemporaryDir startupRoot;
+        QVERIFY(startupRoot.isValid());
+        qputenv("MUZAITEN_STATE_ROOT", startupRoot.path().toUtf8());
+
+        auto makeLibraryTrack = [&startupRoot](const QString &filename, const QString &title) {
+            Track track;
+            track.path = startupRoot.filePath(filename);
+            track.parentDir = startupRoot.path();
+            track.filename = filename;
+            track.title = title;
+            track.artistName = title + QStringLiteral(" Artist");
+            track.albumArtistName = track.artistName;
+            track.albumTitle = QStringLiteral("Test Album");
+            track.durationMs = 180'000;
+            track.fileSize = 44;
+            track.fileMtime = 1;
+            track.codec = QStringLiteral("wav");
+
+            MetadataBlob::FullMetadata metadata;
+            metadata.tags.insert(QStringLiteral("GENRE"), {QStringLiteral("Rock")});
+            const MetadataBlob::Encoded encoded = MetadataBlob::encode(metadata);
+            track.fullMetadataBlob = encoded.data;
+            track.fullMetadataRawSize = encoded.rawSize;
+
+            QFile file(track.path);
+            if (file.open(QIODevice::WriteOnly)) {
+                file.write(QByteArray::fromHex(
+                    "524946462400000057415645666d7420100000000100010044ac000088580100020010006461746100000000"));
+            }
+            return track;
+        };
+
+        AppCore core;
+        const Track current = makeLibraryTrack(QStringLiteral("current.wav"), QStringLiteral("Current"));
+        const Track target = makeLibraryTrack(QStringLiteral("target.wav"), QStringLiteral("Target"));
+        QVERIFY2(core.database()->upsertTrack(current), qPrintable(core.database()->lastError()));
+        QVERIFY2(core.database()->upsertTrack(target), qPrintable(core.database()->lastError()));
+
+        core.settings()->setSetting(QStringLiteral("playback.shuffleMode"), QStringLiteral("radio"));
+        core.settings()->setSetting(QStringLiteral("playback.radioShufflePercent"), QStringLiteral("100"));
+        QJsonObject queueState;
+        queueState.insert(QStringLiteral("tracks"), QJsonArray{QJsonObject{{QStringLiteral("path"), current.path}}});
+        queueState.insert(QStringLiteral("index"), 0);
+        queueState.insert(QStringLiteral("playNextInsertIndex"), 1);
+        core.settings()->setSetting(
+            QStringLiteral("queue.state"),
+            QString::fromUtf8(QJsonDocument(queueState).toJson(QJsonDocument::Compact)));
+
+        MainWindow window(&core);
+        QCOMPARE(core.player()->currentTrack().path, current.path);
+
+        core.player()->next();
+
+        QCOMPARE(core.player()->currentTrack().path, target.path);
+        QVERIFY2(core.radioPickReason(target.path).contains(QStringLiteral("genre")),
+                 qPrintable(core.radioPickReason(target.path)));
     }
 
     void savedQueueLimitsDefaultToFifteenUnlessUnlimited()

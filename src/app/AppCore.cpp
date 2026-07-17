@@ -681,6 +681,14 @@ void AppCore::setupScrobbleWiring()
         const bool navigation = m_nextTransitionIsNavigation;
         m_nextStartInjected = false;
         m_nextTransitionIsNavigation = false;
+        bool radioShuffleResynced = false;
+        if (m_radioShuffleAwaitingInitialTrack
+            && m_player->shuffleMode() == ShuffleMode::Radio
+            && !m_player->radioActive()
+            && !track.path.isEmpty()) {
+            syncRadioShuffleSession();
+            radioShuffleResynced = !m_radioShuffleAwaitingInitialTrack;
+        }
         // A silent present/restore (notifyScrobbler == false) must not open a
         // play event; only real track starts do. Consume transition attribution
         // anyway so it cannot leak into a later start.
@@ -707,7 +715,8 @@ void AppCore::setupScrobbleWiring()
         // Advance the radio rolling context with every real track start while a
         // session is active — the seed, radio picks, and user-queued
         // interruptions alike (they all shape mood continuity).
-        if (m_radioSession && (m_player->radioActive() || m_radioShuffleSessionActive)) {
+        if (!radioShuffleResynced && m_radioSession
+            && (m_player->radioActive() || m_radioShuffleSessionActive)) {
             m_radioSession->notePlayed(track);
             ++m_radioSessionRevision;
         }
@@ -1545,6 +1554,7 @@ void AppCore::syncRadioShuffleSession()
         return;
     }
     if (m_player->shuffleMode() != ShuffleMode::Radio || m_player->radioActive()) {
+        m_radioShuffleAwaitingInitialTrack = false;
         if (m_radioShuffleSessionActive) {
             m_radioShuffleSessionActive = false;
             m_radioSession.reset();
@@ -1561,6 +1571,7 @@ void AppCore::syncRadioShuffleSession()
     const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
     const Track current = m_player->currentTrack();
     const Track seed = current.path.isEmpty() ? Track{} : m_database->trackForPath(current.path);
+    m_radioShuffleAwaitingInitialTrack = seed.path.isEmpty();
     const QStringList seedGenresFolded = seed.path.isEmpty()
         ? QStringList{}
         : radioFoldedGenresForTrack(seed.path, genreAliases, ignoredRadioGenres);
