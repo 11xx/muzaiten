@@ -723,10 +723,23 @@ bool parseWeightsForCli(const QByteArray &json, TrackScorer::Weights *weights, Q
     return true;
 }
 
-bool loadRadioProfiles(Database &db, RadioProfileStore *profiles)
+bool loadRadioProfiles(RadioProfileStore *profiles)
 {
-    return profiles != nullptr
-        && profiles->load(db.setting(QString::fromLatin1(kRadioScoringWeightsKey)).toUtf8());
+    if (profiles == nullptr) {
+        return false;
+    }
+
+    QByteArray legacyWeights;
+    const QString libraryPath = SearchCli::libraryDbPath();
+    if (QFile::exists(libraryPath)) {
+        Database db(QStringLiteral("muzaitenctl-radio-profiles-%1")
+                        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        if (!db.open(libraryPath)) {
+            return false;
+        }
+        legacyWeights = db.setting(QString::fromLatin1(kRadioScoringWeightsKey)).toUtf8();
+    }
+    return profiles->load(legacyWeights);
 }
 
 QByteArray activeWeightsJson(const RadioProfileStore &profiles)
@@ -865,20 +878,12 @@ int runRadioLearn(QStringList arguments, bool json)
         }
     }
 
-    if (!QFileInfo::exists(SearchCli::libraryDbPath())) {
-        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
-    }
     if (!QFileInfo::exists(historyDbPath())) {
         return fail(QStringLiteral("history database not found at %1").arg(historyDbPath()));
     }
 
-    Database db(QStringLiteral("muzaitenctl-radio-learn-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!db.open(SearchCli::libraryDbPath())) {
-        return fail(db.lastError());
-    }
-
     RadioProfileStore profiles;
-    if (!loadRadioProfiles(db, &profiles)) {
+    if (!loadRadioProfiles(&profiles)) {
         return fail(QStringLiteral("could not load radio profiles"));
     }
     const QByteArray activeJson = activeWeightsJson(profiles);
@@ -964,17 +969,8 @@ int runRadioWeights(QStringList arguments, bool json)
     if (verb == QLatin1String("set") && arguments.size() != 1) {
         return fail(QStringLiteral("radio-weights set needs exactly one JSON object"));
     }
-    if (!QFile::exists(SearchCli::libraryDbPath())) {
-        return fail(QStringLiteral("library database not found at %1").arg(SearchCli::libraryDbPath()));
-    }
-
-    Database db(QStringLiteral("muzaitenctl-radio-weights-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-    if (!db.open(SearchCli::libraryDbPath())) {
-        return fail(db.lastError());
-    }
-
     RadioProfileStore profiles;
-    if (!loadRadioProfiles(db, &profiles)) {
+    if (!loadRadioProfiles(&profiles)) {
         return fail(QStringLiteral("could not load radio profiles"));
     }
 
