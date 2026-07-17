@@ -801,23 +801,27 @@ qint64 Database::upsertArtist(const QString &name, const QString &sortName)
             return cached.value();
         }
     }
-    QSqlQuery insert(m_db);
-    insert.prepare(QStringLiteral("INSERT OR IGNORE INTO artists(name, sort_name, musicbrainz_artist_id) VALUES(?, ?, NULL)"));
-    insert.addBindValue(safeName);
-    insert.addBindValue(sortName);
-    if (!insert.exec()) {
-        m_lastError = insert.lastError().text();
-        return 0;
-    }
-
     QSqlQuery select(m_db);
-    select.prepare(QStringLiteral("SELECT id FROM artists WHERE name = ?"));
+    select.prepare(QStringLiteral("SELECT id FROM artists WHERE name = ? ORDER BY id LIMIT 1"));
     select.addBindValue(safeName);
-    if (!select.exec() || !select.next()) {
+    if (!select.exec()) {
         m_lastError = select.lastError().text();
         return 0;
     }
-    const qint64 id = select.value(0).toLongLong();
+    qint64 id = 0;
+    if (select.next()) {
+        id = select.value(0).toLongLong();
+    } else {
+        QSqlQuery insert(m_db);
+        insert.prepare(QStringLiteral("INSERT INTO artists(name, sort_name, musicbrainz_artist_id) VALUES(?, ?, NULL)"));
+        insert.addBindValue(safeName);
+        insert.addBindValue(sortName);
+        if (!insert.exec()) {
+            m_lastError = insert.lastError().text();
+            return 0;
+        }
+        id = insert.lastInsertId().toLongLong();
+    }
     if (m_scanSession) {
         m_artistIdCache.insert(safeName, id);
     }
@@ -835,28 +839,32 @@ qint64 Database::upsertAlbum(const Track &track, qint64 albumArtistId)
             return cached.value();
         }
     }
-    QSqlQuery insert(m_db);
-    insert.prepare(QStringLiteral("INSERT OR IGNORE INTO albums(title, album_artist_id, sort_title, date, original_date, musicbrainz_release_id, musicbrainz_release_group_id, artwork_cache_key) VALUES(?, ?, NULL, ?, ?, ?, ?, NULL)"));
-    insert.addBindValue(title);
-    insert.addBindValue(albumArtistId);
-    insert.addBindValue(track.date);
-    insert.addBindValue(track.originalDate);
-    insert.addBindValue(track.musicBrainz.releaseId);
-    insert.addBindValue(track.musicBrainz.releaseGroupId);
-    if (!insert.exec()) {
-        m_lastError = insert.lastError().text();
-        return 0;
-    }
-
     QSqlQuery select(m_db);
-    select.prepare(QStringLiteral("SELECT id FROM albums WHERE title = ? AND album_artist_id = ?"));
+    select.prepare(QStringLiteral("SELECT id FROM albums WHERE title = ? AND album_artist_id = ? ORDER BY id LIMIT 1"));
     select.addBindValue(title);
     select.addBindValue(albumArtistId);
-    if (!select.exec() || !select.next()) {
+    if (!select.exec()) {
         m_lastError = select.lastError().text();
         return 0;
     }
-    const qint64 id = select.value(0).toLongLong();
+    qint64 id = 0;
+    if (select.next()) {
+        id = select.value(0).toLongLong();
+    } else {
+        QSqlQuery insert(m_db);
+        insert.prepare(QStringLiteral("INSERT INTO albums(title, album_artist_id, sort_title, date, original_date, musicbrainz_release_id, musicbrainz_release_group_id, artwork_cache_key) VALUES(?, ?, NULL, ?, ?, ?, ?, NULL)"));
+        insert.addBindValue(title);
+        insert.addBindValue(albumArtistId);
+        insert.addBindValue(track.date);
+        insert.addBindValue(track.originalDate);
+        insert.addBindValue(track.musicBrainz.releaseId);
+        insert.addBindValue(track.musicBrainz.releaseGroupId);
+        if (!insert.exec()) {
+            m_lastError = insert.lastError().text();
+            return 0;
+        }
+        id = insert.lastInsertId().toLongLong();
+    }
     if (m_scanSession) {
         m_albumIdCache.insert(cacheKey, id);
     }

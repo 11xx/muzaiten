@@ -6,6 +6,7 @@
 #include "search/SearchRecord.h"
 
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QDir>
 #include <QTemporaryDir>
@@ -20,6 +21,7 @@ private slots:
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
     void guessedPlaceholdersFollowVisibilitySetting();
     void upsertsTrackAndQueriesArtist();
+    void repeatedScanSessionsReuseArtistsAndAlbums();
     void sortTagsFoldIntoSearchIndex();
     void scannedRatingOverridesUserRating();
     void pendingUserRatingOverridesScannedRating();
@@ -132,6 +134,49 @@ void SchemaTest::upsertsTrackAndQueriesArtist()
     QCOMPARE(tracks.size(), 1);
     QCOMPARE(tracks.first().rating0To100, 80);
     QCOMPARE(tracks.first().effectiveRating0To100, 80);
+}
+
+void SchemaTest::repeatedScanSessionsReuseArtistsAndAlbums()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    const QString connectionName = QStringLiteral("schema-rescan-idempotence-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const QVector<Track> tracks = {
+        makeTrack(temp, QStringLiteral("01.flac"), 80),
+        makeTrack(temp, QStringLiteral("02.flac"), 60),
+    };
+    database.beginScanSession();
+    for (const Track &track : tracks) {
+        QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    }
+    database.endScanSession();
+
+    QSqlQuery countQuery(QSqlDatabase::database(connectionName));
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM artists")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    const int artistCount = countQuery.value(0).toInt();
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM albums")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    const int albumCount = countQuery.value(0).toInt();
+
+    database.beginScanSession();
+    for (const Track &track : tracks) {
+        QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+    }
+    database.endScanSession();
+
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM artists")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    QCOMPARE(countQuery.value(0).toInt(), artistCount);
+    QVERIFY2(countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM albums")), qPrintable(countQuery.lastError().text()));
+    QVERIFY(countQuery.next());
+    QCOMPARE(countQuery.value(0).toInt(), albumCount);
+    QCOMPARE(artistCount, 1);
+    QCOMPARE(albumCount, 1);
 }
 
 void SchemaTest::sortTagsFoldIntoSearchIndex()
