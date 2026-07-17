@@ -216,6 +216,18 @@ int resolveEffectiveRating(int scanned, bool hasUser, int user, const QString &s
     return scanned >= 0 ? scanned : (hasUser ? user : Rating::unset);
 }
 
+QString effectiveRatingSql(const QString &scannedColumn,
+                           const QString &userColumn,
+                           const QString &statusColumn)
+{
+    return QStringLiteral(
+               "CASE WHEN %1 IN (%2) AND %3 IS NOT NULL THEN %3 ELSE COALESCE(%4, %3) END")
+        .arg(statusColumn,
+             QString::fromLatin1(kRatingOverlayStatusesSql),
+             userColumn,
+             scannedColumn);
+}
+
 // "SELECT <cols> <from/joins> " prefix; callers append their WHERE/ORDER/LIMIT.
 QString trackSelectPrefix()
 {
@@ -1623,10 +1635,9 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
 {
     QVector<Album> albums;
     QSqlQuery query(m_db);
-    const QString effectiveTrackRating = QStringLiteral(
-        "COALESCE(CASE WHEN p.status IN (%1) THEN utr.rating_0_100 ELSE t.rating_0_100 END, "
-        "utr.rating_0_100)")
-                                             .arg(QString::fromLatin1(kRatingOverlayStatusesSql));
+    const QString effectiveTrackRating = effectiveRatingSql(QStringLiteral("t.rating_0_100"),
+                                                            QStringLiteral("utr.rating_0_100"),
+                                                            QStringLiteral("p.status"));
     query.prepare(QStringLiteral(
         "SELECT t.album_title, MIN(t.date), COUNT(*), "
         "AVG(%1), "
@@ -2768,15 +2779,19 @@ namespace {
 // SELECT column order is shared by the bulk readers and the streaming cursor;
 // the row->record mappers below index into it positionally, so keep them in
 // lockstep.
-constexpr char kLocalSearchSelect[] =
+const QString kLocalSearchSelect = QStringLiteral(
     "SELECT t.path, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
     "t.date, t.duration_ms, t.sample_rate_hz, t.bitrate_kbps, t.channels, t.codec, "
-    "COALESCE(utr.rating_0_100, t.rating_0_100), "
+    "%1, "
     "t.track_number, t.disc_number, t.file_mtime, t.file_size, t.bit_depth, "
     "t.title_sort, t.artist_sort, t.album_artist_sort, t.album_sort "
     "FROM tracks t "
     "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
-    "WHERE t.missing = 0 AND t.metadata_scanned = 1";
+    "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+    "WHERE t.missing = 0 AND t.metadata_scanned = 1")
+                                       .arg(effectiveRatingSql(QStringLiteral("t.rating_0_100"),
+                                                               QStringLiteral("utr.rating_0_100"),
+                                                               QStringLiteral("p.status")));
 
 constexpr char kMpdSearchSelect[] =
     "SELECT uri, title, artist_name, album_artist_name, album_title, date, duration_ms, "
@@ -2840,7 +2855,7 @@ QVector<Search::SearchRecord> Database::allTracksForSearch() const
 {
     QVector<Search::SearchRecord> records;
     QSqlQuery query(m_db);
-    QString sql = QString::fromLatin1(kLocalSearchSelect);
+    QString sql = kLocalSearchSelect;
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -2903,7 +2918,7 @@ Database::SearchRowSummary Database::searchRowSummary() const
 
 std::unique_ptr<TrackSearchCursor> Database::beginTrackSearchStream() const
 {
-    QString localSql = QString::fromLatin1(kLocalSearchSelect);
+    QString localSql = kLocalSearchSelect;
     if (hasScanRoots(m_db)) {
         localSql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
