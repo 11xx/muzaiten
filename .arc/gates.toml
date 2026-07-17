@@ -1,0 +1,8 @@
+# Declared verification gates for arc-managed changes (see `arc verify --gate`).
+# Both must be green at the exact reviewed head before `arc integrate`.
+
+[gates.build]
+command = "make build"
+
+[gates.test]
+command = "make test"
