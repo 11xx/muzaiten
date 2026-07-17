@@ -77,13 +77,95 @@ double dotProduct(const QVector<float> &left, const QVector<float> &right)
     return std::isfinite(sum) ? sum : 0.0;
 }
 
+bool hasUsableVector(const QVector<float> &vector)
+{
+    return !vector.isEmpty() && std::all_of(vector.cbegin(), vector.cend(), [](float value) {
+        return std::isfinite(value);
+    });
+}
+
+bool hasInformativeGenre(const QString &genre)
+{
+    const QString normalized = genre.trimmed();
+    return !normalized.isEmpty()
+        && normalized.compare(QLatin1String("unknown"), Qt::CaseInsensitive) != 0
+        && normalized.compare(QLatin1String("untagged"), Qt::CaseInsensitive) != 0;
+}
+
+bool hasCompleteDspClapPair(const TrackScorer::Candidate &candidate,
+                            const TrackScorer::SeedContext &seed)
+{
+    if (!candidate.hasValidDspClap() || !seed.hasValidDspClap()) {
+        return false;
+    }
+
+    const bool completeScalars = candidate.tempoBpm > 0.0 && std::isfinite(candidate.tempoBpm)
+        && candidate.energy >= 0.0 && std::isfinite(candidate.energy)
+        && seed.contextTempoBpm > 0.0 && std::isfinite(seed.contextTempoBpm)
+        && seed.contextEnergy >= 0.0 && std::isfinite(seed.contextEnergy);
+    if (completeScalars) {
+        return true;
+    }
+
+    if (candidate.contentGroupId < 0 || seed.embeddingsByGroup == nullptr
+        || !hasUsableVector(seed.audioCentroid)) {
+        return false;
+    }
+    const auto it = seed.embeddingsByGroup->constFind(candidate.contentGroupId);
+    return it != seed.embeddingsByGroup->constEnd()
+        && hasUsableVector(it.value())
+        && it.value().size() == seed.audioCentroid.size();
+}
+
 } // namespace
 
 namespace TrackScorer {
 
+bool Candidate::hasValidDspClap() const
+{
+    const bool completeScalars = tempoBpm > 0.0 && std::isfinite(tempoBpm)
+        && energy >= 0.0 && std::isfinite(energy);
+    return completeScalars || contentGroupId >= 0;
+}
+
+bool Candidate::hasValidGenre() const
+{
+    return std::any_of(genresFolded.cbegin(), genresFolded.cend(), hasInformativeGenre);
+}
+
+bool SeedContext::hasValidDspClap() const
+{
+    const bool completeScalars = contextTempoBpm > 0.0 && std::isfinite(contextTempoBpm)
+        && contextEnergy >= 0.0 && std::isfinite(contextEnergy);
+    return completeScalars || (embeddingsByGroup != nullptr && hasUsableVector(audioCentroid));
+}
+
+bool SeedContext::hasValidGenre() const
+{
+    return std::any_of(genresFolded.cbegin(), genresFolded.cend(), hasInformativeGenre);
+}
+
 Weights defaultWeights()
 {
     return {};
+}
+
+Weights getWeights(bool dspAvailable)
+{
+    return getWeights(defaultWeights(), dspAvailable);
+}
+
+Weights getWeights(const Weights &weights, bool dspAvailable)
+{
+    Weights effective = weights;
+    if (dspAvailable) {
+        effective.genreWeight = 0.0;
+    } else {
+        effective.tempoWeight = 0.0;
+        effective.energyWeight = 0.0;
+        effective.audioWeight = 0.0;
+    }
+    return effective;
 }
 
 QVector<WeightSpec> weightSpecs()
@@ -307,12 +389,12 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     scored.path = candidate.path;
 
     const double exploration = std::clamp(seed.exploration0To100, 0, 100);
+    const bool dspClapAvailable = hasCompleteDspClapPair(candidate, seed);
+    const Weights effectiveWeights = getWeights(weights, dspClapAvailable);
 
-    // genre: sum of IDF weights shared with the rolling context, damped when
-    // either side carries a crowded tag-soup genre list. This keeps clean
-    // one/two-genre matches strong while broad classifier-derived lists stop
-    // saturating similarity merely by offering many possible overlaps.
-    if (!seed.genresFolded.isEmpty() && !candidate.genresFolded.isEmpty()) {
+    // Genre is a metadata fallback only. A complete DSP/CLAP pair is richer
+    // and more reliable than tags, so it suppresses this component entirely.
+    if (effectiveWeights.genreWeight != 0.0 && seed.hasValidGenre() && candidate.hasValidGenre()) {
         const QSet<QString> seedGenres(seed.genresFolded.cbegin(), seed.genresFolded.cend());
         double idfSum = 0.0;
         for (const QString &genre : candidate.genresFolded) {
@@ -321,16 +403,19 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
             }
         }
         idfSum *= crowdingScale(seed.genresFolded.size(), candidate.genresFolded.size(),
-                                weights.genreCrowdingSoftLimit);
-        const double genreScore = std::min(1.0, idfSum / weights.genreIdfSaturation);
+                                effectiveWeights.genreCrowdingSoftLimit);
+        const double genreScore = std::min(1.0, idfSum / effectiveWeights.genreIdfSaturation);
         const double explorationScale = 1.25 - exploration / 200.0;
-        pushIfNonZero(scored, QStringLiteral("genre"), weights.genreWeight * genreScore * explorationScale);
+        pushIfNonZero(scored, QStringLiteral("genre"),
+                      effectiveWeights.genreWeight * genreScore * explorationScale);
     }
 
     // era: linear proximity in years, both years known.
     if (candidate.year > 0 && seed.year > 0) {
-        const double delta = std::min(static_cast<double>(std::abs(candidate.year - seed.year)), weights.eraSpanYears);
-        pushIfNonZero(scored, QStringLiteral("era"), weights.eraWeight * (1.0 - delta / weights.eraSpanYears));
+        const double delta = std::min(static_cast<double>(std::abs(candidate.year - seed.year)),
+                                      effectiveWeights.eraSpanYears);
+        pushIfNonZero(scored, QStringLiteral("era"),
+                      effectiveWeights.eraWeight * (1.0 - delta / effectiveWeights.eraSpanYears));
     }
 
     // tempo/energy: acoustic proximity to the current sonic context. Unknown
@@ -338,15 +423,15 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     // previous score exactly.
     if (candidate.tempoBpm > 0.0 && seed.contextTempoBpm > 0.0) {
         pushIfNonZero(scored, QStringLiteral("tempo"),
-                      weights.tempoWeight * linearProximity(candidate.tempoBpm,
-                                                            seed.contextTempoBpm,
-                                                            kTempoFalloffBpm));
+                      effectiveWeights.tempoWeight * linearProximity(candidate.tempoBpm,
+                                                                     seed.contextTempoBpm,
+                                                                     kTempoFalloffBpm));
     }
     if (candidate.energy >= 0.0 && seed.contextEnergy >= 0.0) {
         pushIfNonZero(scored, QStringLiteral("energy"),
-                      weights.energyWeight * linearProximity(candidate.energy,
-                                                             seed.contextEnergy,
-                                                             kEnergyFalloff));
+                      effectiveWeights.energyWeight * linearProximity(candidate.energy,
+                                                                      seed.contextEnergy,
+                                                                      kEnergyFalloff));
     }
 
     // audio: cosine proximity to the rolling CLAP embedding centroid. Vectors
@@ -356,30 +441,33 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
         const auto it = seed.embeddingsByGroup->constFind(candidate.contentGroupId);
         if (it != seed.embeddingsByGroup->constEnd()) {
             pushIfNonZero(scored, QStringLiteral("audio"),
-                          weights.audioWeight * std::max(0.0, dotProduct(it.value(), seed.audioCentroid)));
+                          effectiveWeights.audioWeight * std::max(0.0, dotProduct(it.value(), seed.audioCentroid)));
         }
     }
 
+    // Behavioral signals stay active regardless of metadata or DSP availability.
     // rating: effective rating, with a boost when it is the user's own rating.
     if (candidate.effectiveRating0To100 >= 0) {
-        const double base = weights.ratingWeight * (candidate.effectiveRating0To100 / 100.0);
-        pushIfNonZero(scored, QStringLiteral("rating"), candidate.hasUserRating ? base * weights.userRatingBoost : base);
+        const double base = effectiveWeights.ratingWeight * (candidate.effectiveRating0To100 / 100.0);
+        pushIfNonZero(scored, QStringLiteral("rating"),
+                      candidate.hasUserRating ? base * effectiveWeights.userRatingBoost : base);
     }
 
     // history: how much this track has been heard, saturating.
     const int heard = affinity.listenCount + affinity.baselineMax + affinity.finished;
     if (heard > 0) {
-        const double ratio = std::min(1.0, std::log1p(heard) / std::log1p(weights.historySaturation));
-        pushIfNonZero(scored, QStringLiteral("history"), weights.historyWeight * ratio);
+        const double ratio = std::min(1.0, std::log1p(heard) / std::log1p(effectiveWeights.historySaturation));
+        pushIfNonZero(scored, QStringLiteral("history"), effectiveWeights.historyWeight * ratio);
     }
 
     // novelty: reward the unheard, decaying to nothing by kNoveltyZeroAt total
     // plays, and scaled up with exploration.
     const int totalPlays = affinity.playEvents + affinity.listenCount + affinity.baselineMax;
-    const double noveltyRatio = std::max(0.0, 1.0 - totalPlays / weights.noveltyZeroAt);
+    const double noveltyRatio = std::max(0.0, 1.0 - totalPlays / effectiveWeights.noveltyZeroAt);
     if (noveltyRatio > 0.0) {
         const double explorationScale = 0.5 + exploration / 100.0;
-        pushIfNonZero(scored, QStringLiteral("novelty"), weights.noveltyWeight * noveltyRatio * explorationScale);
+        pushIfNonZero(scored, QStringLiteral("novelty"),
+                      effectiveWeights.noveltyWeight * noveltyRatio * explorationScale);
     }
 
     // recency: penalize a track played recently, exponentially fading with time.
@@ -387,7 +475,8 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
         const double days = static_cast<double>(seed.nowSecs - affinity.lastPlayedAtSecs) / 86400.0;
         if (days >= 0.0) {
             pushIfNonZero(scored, QStringLiteral("recency"),
-                          weights.recencyPenalty * std::exp(-days / weights.recencyHalfLifeDays));
+                          effectiveWeights.recencyPenalty
+                              * std::exp(-days / effectiveWeights.recencyHalfLifeDays));
         }
     }
 
@@ -399,13 +488,13 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     if (affinity.playEvents > 0 && affinity.skipped > 0) {
         const double skipRate = static_cast<double>(affinity.skipped)
             / (static_cast<double>(affinity.playEvents) + 2.0);
-        pushIfNonZero(scored, QStringLiteral("skips"), weights.skipPenalty * skipRate);
+        pushIfNonZero(scored, QStringLiteral("skips"), effectiveWeights.skipPenalty * skipRate);
     }
 
     // same-artist: a soft nudge away from an artist heard in the rolling window.
     // The hard "no same artist within k picks" throttle lives in RadioSession.
     if (!candidate.artistFolded.isEmpty() && seed.recentArtistsFolded.contains(candidate.artistFolded)) {
-        pushIfNonZero(scored, QStringLiteral("same-artist"), weights.sameArtistPenalty);
+        pushIfNonZero(scored, QStringLiteral("same-artist"), effectiveWeights.sameArtistPenalty);
     }
 
     return scored;
