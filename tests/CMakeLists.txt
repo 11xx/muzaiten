@@ -75,6 +75,7 @@ add_executable(test_search_cli
     ../src/core/MusicSort.cpp
     ../src/scrobble/ListenHistoryStore.cpp
     ../src/reco/TrackScorer.cpp
+    ../src/reco/RadioProfile.cpp
     ../src/reco/WeightLearner.cpp
     ../src/reco/WeightLearnerData.cpp
     ../src/search/Exclusion.cpp

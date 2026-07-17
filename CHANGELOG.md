@@ -10,6 +10,10 @@
   history for each profile. Profiles can be created, duplicated, renamed,
   reset, or deleted, and the active profile is restored on the next launch.
 
+- `muzaitenctl radio-weights` and `radio-learn` now manage those same persisted
+  radio profiles, so scripted tuning and learned suggestions apply after the
+  next application launch.
+
 - Radio sessions now ease from discovery toward a coherent rolling sound:
   after five queued radio picks, novelty and rating rewards taper by 10% per
   pick to small floors while the sonic and metadata matching signals stay

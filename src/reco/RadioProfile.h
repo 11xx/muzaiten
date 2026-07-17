@@ -2,6 +2,7 @@
 
 #include "reco/TrackScorer.h"
 
+#include <QByteArray>
 #include <QString>
 #include <QHash>
 #include <QVector>
@@ -27,7 +28,10 @@ public:
     };
     RadioProfileStore();
 
-    bool load();
+    // When no profile file exists yet, a valid legacy scoring-weight JSON value
+    // seeds Default before the store is persisted. Callers obtain that value
+    // from the library database; subsequent loads ignore it.
+    bool load(const QByteArray &legacyWeightsJson = {});
     bool save() const;
 
     const QVector<RadioProfile> &profiles() const;
@@ -35,6 +39,8 @@ public:
     const RadioProfile &activeProfile() const;
     bool setProfiles(QVector<RadioProfile> profiles, const QString &activeProfileName);
     bool setActiveProfileName(const QString &name);
+    bool saveProfile(const QString &name, const RadioProfile &profile);
+    bool deleteProfile(const QString &name);
 
     // Preview changes replace the live profile without creating a persistence
     // boundary. commitActivePreview() adds one immutable undo snapshot once a

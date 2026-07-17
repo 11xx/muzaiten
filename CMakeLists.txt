@@ -152,7 +152,6 @@ set(MUZAITEN_SOURCES
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
     src/ui/RadioCustomizationDialog.cpp
-    src/ui/ScoringWeightsDialog.cpp
     src/ui/PlaylistAddDialog.cpp
     src/ui/PlaylistImportDialog.cpp
     src/ui/PlaylistView.cpp
@@ -292,7 +291,6 @@ set(MUZAITEN_HEADERS
     src/ui/PlayerBar.h
     src/ui/RadioCustomizationDialog.h
     src/reco/RadioProfile.h
-    src/ui/ScoringWeightsDialog.h
     src/ui/PlaylistAddDialog.h
     src/ui/HeaderLabelStyle.h
     src/ui/PanelBorderStyle.h
@@ -379,6 +377,7 @@ add_executable(muzaitenctl
     src/core/Rating.cpp
     src/fs/PathResolver.cpp
     src/reco/GenreCuration.cpp
+    src/reco/RadioProfile.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp

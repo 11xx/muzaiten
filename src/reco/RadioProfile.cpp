@@ -136,12 +136,23 @@ RadioProfileStore::RadioProfileStore()
     restoreFactoryDefaults();
 }
 
-bool RadioProfileStore::load()
+bool RadioProfileStore::load(const QByteArray &legacyWeightsJson)
 {
     const QString path = storagePath();
     QFile file(path);
     if (!QFileInfo::exists(path)) {
         restoreFactoryDefaults();
+        if (!legacyWeightsJson.isEmpty()) {
+            QString error;
+            const TrackScorer::Weights legacyWeights = TrackScorer::weightsFromJson(legacyWeightsJson, &error);
+            if (error.isEmpty()) {
+                RadioProfile profile = activeProfile();
+                profile.weights = legacyWeights;
+                previewActiveProfile(profile);
+                commitActivePreview();
+                save();
+            }
+        }
         return true;
     }
     if (!file.open(QIODevice::ReadOnly)) {
@@ -468,6 +479,52 @@ bool RadioProfileStore::setActiveProfileName(const QString &name)
         }
     }
     return false;
+}
+
+bool RadioProfileStore::saveProfile(const QString &name, const RadioProfile &profile)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) {
+        return false;
+    }
+
+    RadioProfile saved = profile;
+    saved.name = trimmed;
+    saved.modifiedAtUtc = nowUtc();
+    for (RadioProfile &existing : m_profiles) {
+        if (existing.name != trimmed) {
+            continue;
+        }
+        saved.createdAtUtc = existing.createdAtUtc;
+        existing = saved;
+        m_histories.insert(trimmed, History{{saved}, 0});
+        return true;
+    }
+
+    saved.createdAtUtc = saved.modifiedAtUtc;
+    m_profiles.push_back(saved);
+    ensureHistory(trimmed, saved);
+    return true;
+}
+
+bool RadioProfileStore::deleteProfile(const QString &name)
+{
+    if (name == QLatin1String("Default") || m_profiles.size() <= 1) {
+        return false;
+    }
+    const auto it = std::find_if(m_profiles.cbegin(), m_profiles.cend(), [&name](const RadioProfile &profile) {
+        return profile.name == name;
+    });
+    if (it == m_profiles.cend()) {
+        return false;
+    }
+    const bool deletingActive = name == m_activeProfileName;
+    m_profiles.erase(m_profiles.begin() + (it - m_profiles.cbegin()));
+    m_histories.remove(name);
+    if (deletingActive) {
+        m_activeProfileName = m_profiles.front().name;
+    }
+    return true;
 }
 
 RadioProfile RadioProfileStore::defaultProfile()

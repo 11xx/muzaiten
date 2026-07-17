@@ -86,15 +86,20 @@ generated picks use the changed settings, while tracks already queued keep
 their existing order. A 500 ms pause saves one history step. Apply sets the
 Revert baseline; Revert restores that baseline and applies it live.
 
-The same operations exist client-side:
+The same profile operations exist client-side:
 
 ```sh
-muzaitenctl radio-weights get | set '<json>' | save <name> | apply <name> | list
-muzaitenctl radio-learn --dry-run
+muzaitenctl radio-weights get | set '<json>' | save <name> | apply <name> | list | remove <name>
+muzaitenctl radio-learn [--dry-run] [--min-samples N]
 ```
 
-The existing command-line weight commands remain available for scripted
-workflows. GUI profile changes take effect for the next generated pick.
+These commands edit the same `radio-profiles.json` store as the dialog: `set`
+changes the active profile's weights, `save` copies it to a named profile, and
+`apply` chooses the profile used on the next application launch. `remove`
+cannot delete Default. `radio-learn` creates or updates a suggestion-only
+`learned-YYYYMMDD` profile; learned profiles are CLI-first and are not shown as
+suggestions in the dialog. GUI profile changes take effect for the next
+generated pick.
 
 ## Genre curation
 

@@ -11,6 +11,7 @@ private slots:
     void init();
     void jsonRoundTrip();
     void missingStorageFallsBack();
+    void legacyWeightsSeedDefaultOnce();
     void corruptStorageFallsBack();
     void writeReadRoundTrip();
     void historyCapsAtFiftySnapshots();
@@ -50,6 +51,24 @@ void RadioProfileTest::missingStorageFallsBack()
     QVERIFY(store.load());
     QCOMPARE(store.profiles().size(), 1);
     QCOMPARE(store.activeProfileName(), QStringLiteral("Default"));
+}
+
+void RadioProfileTest::legacyWeightsSeedDefaultOnce()
+{
+    TrackScorer::Weights legacyWeights = TrackScorer::defaultWeights();
+    legacyWeights.audioWeight = 4.25;
+
+    RadioProfileStore store;
+    QVERIFY(store.load(TrackScorer::weightsToJson(legacyWeights)));
+    QCOMPARE(store.activeProfileName(), QStringLiteral("Default"));
+    QCOMPARE(store.activeProfile().weights.audioWeight, legacyWeights.audioWeight);
+    QVERIFY(QFile::exists(RadioProfileStore::storagePath()));
+
+    TrackScorer::Weights laterLegacyWeights = TrackScorer::defaultWeights();
+    laterLegacyWeights.audioWeight = 9.75;
+    RadioProfileStore restored;
+    QVERIFY(restored.load(TrackScorer::weightsToJson(laterLegacyWeights)));
+    QCOMPARE(restored.activeProfile().weights.audioWeight, legacyWeights.audioWeight);
 }
 
 void RadioProfileTest::corruptStorageFallsBack()

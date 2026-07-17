@@ -271,7 +271,7 @@ AppCore::AppCore(QObject *parent)
 
     m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
     AppPaths::writeDefaultConfigIfMissing();
-    m_radioProfileStore.load();
+    m_radioProfileStore.load(m_database->setting(QStringLiteral("radio.scoringWeights")).toUtf8());
 
     const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
     m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);

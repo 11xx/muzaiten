@@ -16,6 +16,7 @@
 #include "features/QualityRank.h"
 #include "ipc/IpcSocket.h"
 #include "reco/GenreCuration.h"
+#include "reco/RadioProfile.h"
 #include "reco/TrackScorer.h"
 #include "reco/WeightLearner.h"
 #include "reco/WeightLearnerData.h"
@@ -722,24 +723,15 @@ bool parseWeightsForCli(const QByteArray &json, TrackScorer::Weights *weights, Q
     return true;
 }
 
-QByteArray compactJsonObject(const QByteArray &json)
+bool loadRadioProfiles(Database &db, RadioProfileStore *profiles)
 {
-    return QJsonDocument(QJsonDocument::fromJson(json).object()).toJson(QJsonDocument::Compact);
+    return profiles != nullptr
+        && profiles->load(db.setting(QString::fromLatin1(kRadioScoringWeightsKey)).toUtf8());
 }
 
-QByteArray activeWeightsJson(Database &db)
+QByteArray activeWeightsJson(const RadioProfileStore &profiles)
 {
-    return db.setting(QString::fromLatin1(kRadioScoringWeightsKey)).toUtf8();
-}
-
-QByteArray effectiveWeightsJson(const QByteArray &activeJson)
-{
-    QString error;
-    const TrackScorer::Weights weights = TrackScorer::weightsFromJson(activeJson, &error);
-    if (!error.isEmpty()) {
-        return TrackScorer::weightsToJson(TrackScorer::defaultWeights());
-    }
-    return TrackScorer::weightsToJson(weights);
+    return TrackScorer::weightsToJson(profiles.activeProfile().weights);
 }
 
 QJsonObject weightsDiffJson(const QByteArray &activeJson, const QByteArray &suggestedJson)
@@ -885,7 +877,11 @@ int runRadioLearn(QStringList arguments, bool json)
         return fail(db.lastError());
     }
 
-    const QByteArray activeJson = effectiveWeightsJson(activeWeightsJson(db));
+    RadioProfileStore profiles;
+    if (!loadRadioProfiles(db, &profiles)) {
+        return fail(QStringLiteral("could not load radio profiles"));
+    }
+    const QByteArray activeJson = activeWeightsJson(profiles);
     QString activeError;
     const TrackScorer::Weights activeWeights = TrackScorer::weightsFromJson(activeJson, &activeError);
     if (!activeError.isEmpty()) {
@@ -908,8 +904,10 @@ int runRadioLearn(QStringList arguments, bool json)
     QString profileName;
     if (!dryRun) {
         profileName = QStringLiteral("learned-%1").arg(QDate::currentDate().toString(QStringLiteral("yyyyMMdd")));
-        if (!db.saveRadioWeightProfile(profileName, QString::fromUtf8(learned.suggestedWeightsJson))) {
-            return fail(db.lastError());
+        RadioProfile learnedProfile = profiles.activeProfile();
+        learnedProfile.weights = learned.suggestedWeights;
+        if (!profiles.saveProfile(profileName, learnedProfile) || !profiles.save()) {
+            return fail(QStringLiteral("could not save radio profile"));
         }
     }
 
@@ -975,44 +973,45 @@ int runRadioWeights(QStringList arguments, bool json)
         return fail(db.lastError());
     }
 
+    RadioProfileStore profiles;
+    if (!loadRadioProfiles(db, &profiles)) {
+        return fail(QStringLiteral("could not load radio profiles"));
+    }
+
     QTextStream out(stdout);
     out.setEncoding(QStringConverter::Utf8);
 
     if (verb == QLatin1String("get")) {
-        const QByteArray active = activeWeightsJson(db);
-        const QByteArray effective = active.isEmpty()
-            ? TrackScorer::weightsToJson(TrackScorer::defaultWeights())
-            : effectiveWeightsJson(active);
+        const QByteArray active = activeWeightsJson(profiles);
         if (json) {
             out << QString::fromUtf8(QJsonDocument(QJsonObject{
-                {QStringLiteral("active"), active.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                                            : QJsonValue(jsonObjectFromBytes(active))},
-                {QStringLiteral("defaults"), active.isEmpty()},
-                {QStringLiteral("effective"), jsonObjectFromBytes(effective)},
+                {QStringLiteral("profile"), profiles.activeProfileName()},
+                {QStringLiteral("active"), jsonObjectFromBytes(active)},
+                {QStringLiteral("effective"), jsonObjectFromBytes(active)},
             }).toJson(QJsonDocument::Compact)) << '\n';
         } else {
-            out << "active:\n";
-            out << (active.isEmpty() ? QStringLiteral("(defaults)") : prettyJson(active)) << '\n';
-            out << "effective:\n" << prettyJson(effective) << '\n';
+            out << "active profile: " << profiles.activeProfileName() << '\n';
+            out << "weights:\n" << prettyJson(active) << '\n';
         }
         return 0;
     }
 
     if (verb == QLatin1String("list")) {
-        const QVector<Database::RadioWeightProfile> profiles = db.radioWeightProfiles();
         if (json) {
             QJsonArray array;
-            for (const Database::RadioWeightProfile &profile : profiles) {
+            for (const RadioProfile &profile : profiles.profiles()) {
                 array.append(QJsonObject{
                     {QStringLiteral("name"), profile.name},
-                    {QStringLiteral("weights"), jsonObjectFromBytes(profile.weightsJson.toUtf8())},
-                    {QStringLiteral("updated_at"), profile.updatedAt},
+                    {QStringLiteral("weights"), jsonObjectFromBytes(TrackScorer::weightsToJson(profile.weights))},
+                    {QStringLiteral("updated_at"), profile.modifiedAtUtc},
+                    {QStringLiteral("active"), profile.name == profiles.activeProfileName()},
                 });
             }
             out << QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact)) << '\n';
         } else {
-            for (const Database::RadioWeightProfile &profile : profiles) {
-                out << profile.name << '\t' << profile.updatedAt << '\n';
+            for (const RadioProfile &profile : profiles.profiles()) {
+                out << (profile.name == profiles.activeProfileName() ? "* " : "  ")
+                    << profile.name << '\t' << profile.modifiedAtUtc << '\n';
             }
         }
         return 0;
@@ -1025,20 +1024,24 @@ int runRadioWeights(QStringList arguments, bool json)
         if (!parseWeightsForCli(raw, &weights, &error)) {
             return fail(error);
         }
-        const QByteArray compact = compactJsonObject(raw);
-        if (!db.setSetting(QString::fromLatin1(kRadioScoringWeightsKey), QString::fromUtf8(compact))) {
-            return fail(db.lastError());
+        RadioProfile activeProfile = profiles.activeProfile();
+        activeProfile.weights = weights;
+        if (!profiles.previewActiveProfile(activeProfile)
+            || !profiles.commitActivePreview()
+            || !profiles.save()) {
+            return fail(QStringLiteral("could not save radio profile"));
         }
+        const QByteArray compact = TrackScorer::weightsToJson(weights);
         if (json) {
             out << QString::fromUtf8(QJsonDocument(QJsonObject{
                 {QStringLiteral("ok"), true},
                 {QStringLiteral("action"), QStringLiteral("set")},
                 {QStringLiteral("active"), jsonObjectFromBytes(compact)},
                 {QStringLiteral("effective"), jsonObjectFromBytes(TrackScorer::weightsToJson(weights))},
-                {QStringLiteral("takes_effect"), QStringLiteral("next radio session")},
+                {QStringLiteral("takes_effect"), QStringLiteral("next application launch")},
             }).toJson(QJsonDocument::Compact)) << '\n';
         } else {
-            out << "radio-weights: set active weights; takes effect on next radio session\n";
+            out << "radio-weights: set active profile weights; takes effect on next application launch\n";
         }
         return 0;
     }
@@ -1049,12 +1052,9 @@ int runRadioWeights(QStringList arguments, bool json)
     }
 
     if (verb == QLatin1String("save")) {
-        const QByteArray active = activeWeightsJson(db);
-        const QByteArray snapshot = active.isEmpty()
-            ? TrackScorer::weightsToJson(TrackScorer::defaultWeights())
-            : effectiveWeightsJson(active);
-        if (!db.saveRadioWeightProfile(profileName, QString::fromUtf8(snapshot))) {
-            return fail(db.lastError());
+        const QByteArray snapshot = activeWeightsJson(profiles);
+        if (!profiles.saveProfile(profileName, profiles.activeProfile()) || !profiles.save()) {
+            return fail(QStringLiteral("could not save radio profile"));
         }
         if (json) {
             out << QString::fromUtf8(QJsonDocument(QJsonObject{
@@ -1070,30 +1070,35 @@ int runRadioWeights(QStringList arguments, bool json)
     }
 
     if (verb == QLatin1String("apply")) {
-        const QString profileJson = db.radioWeightProfile(profileName);
-        if (profileJson.isEmpty()) {
+        if (!profiles.setActiveProfileName(profileName)) {
             return fail(QStringLiteral("radio-weights profile not found: %1").arg(profileName));
         }
-        if (!db.setSetting(QString::fromLatin1(kRadioScoringWeightsKey), profileJson)) {
-            return fail(db.lastError());
+        if (!profiles.save()) {
+            return fail(QStringLiteral("could not save radio profile"));
         }
         if (json) {
             out << QString::fromUtf8(QJsonDocument(QJsonObject{
                 {QStringLiteral("ok"), true},
                 {QStringLiteral("action"), QStringLiteral("apply")},
                 {QStringLiteral("name"), profileName},
-                {QStringLiteral("active"), jsonObjectFromBytes(profileJson.toUtf8())},
-                {QStringLiteral("takes_effect"), QStringLiteral("next radio session")},
+                {QStringLiteral("active"), jsonObjectFromBytes(activeWeightsJson(profiles))},
+                {QStringLiteral("takes_effect"), QStringLiteral("next application launch")},
             }).toJson(QJsonDocument::Compact)) << '\n';
         } else {
-            out << "radio-weights: applied profile " << profileName
-                << "; takes effect on next radio session\n";
+            out << "radio-weights: selected profile " << profileName
+                << "; takes effect on next application launch\n";
         }
         return 0;
     }
 
-    if (!db.removeRadioWeightProfile(profileName)) {
-        return fail(db.lastError());
+    if (profileName == QLatin1String("Default")) {
+        return fail(QStringLiteral("radio-weights cannot remove the Default profile"));
+    }
+    if (!profiles.deleteProfile(profileName)) {
+        return fail(QStringLiteral("radio-weights profile not found: %1").arg(profileName));
+    }
+    if (!profiles.save()) {
+        return fail(QStringLiteral("could not save radio profile"));
     }
     if (json) {
         out << QString::fromUtf8(QJsonDocument(QJsonObject{

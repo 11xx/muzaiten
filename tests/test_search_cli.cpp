@@ -3,6 +3,7 @@
 #include "core/Track.h"
 #include "db/Database.h"
 #include "reco/WeightLearnerData.h"
+#include "reco/RadioProfile.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
@@ -27,6 +28,8 @@
 #include <QUuid>
 #include <QVariant>
 #include <QVector>
+
+#include <algorithm>
 
 namespace {
 
@@ -210,6 +213,28 @@ QString muzaitenCtlPath()
     return buildDir.filePath(QStringLiteral("muzaitenctl"));
 }
 
+QJsonDocument runJsonCommand(const QString &program, const QStringList &arguments, QString *error)
+{
+    QProcess process;
+    process.setProgram(program);
+    process.setArguments(arguments);
+    process.start();
+    if (!process.waitForFinished(10000)) {
+        *error = process.errorString();
+        return {};
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        *error = QString::fromUtf8(process.readAllStandardError());
+        return {};
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(process.readAllStandardOutput(), &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        *error = parseError.errorString();
+    }
+    return document;
+}
+
 Track radioLearnTrack(const QString &path)
 {
     Track track;
@@ -319,6 +344,7 @@ private slots:
         // Isolate AppPaths to the temp dir so we never touch real data/cache.
         qputenv("MUZAITEN_DATA_DIR", (m_temp.path() + QStringLiteral("/data")).toUtf8());
         qputenv("MUZAITEN_CACHE_DIR", (m_temp.path() + QStringLiteral("/cache")).toUtf8());
+        qputenv("MUZAITEN_CONFIG_DIR", (m_temp.path() + QStringLiteral("/config")).toUtf8());
     }
 
     void buildsReusesAndRefreshes()
@@ -521,6 +547,7 @@ private slots:
     void radioLearnDryRunAndSaveUseJoinedTelemetry()
     {
         const QString dataDir = qEnvironmentVariable("MUZAITEN_DATA_DIR");
+        QFile::remove(RadioProfileStore::storagePath());
         createRadioLearnFixture(dataDir);
         const WeightLearnerData::LoadResult load =
             WeightLearnerData::loadSamplesFromPath(QDir(dataDir).filePath(QStringLiteral("history.sqlite")));
@@ -562,12 +589,7 @@ private slots:
         QCOMPARE(dry.value(QStringLiteral("join_window_seconds")).toInt(), 12 * 60 * 60);
         QVERIFY(dry.value(QStringLiteral("components")).toArray().size() > 0);
 
-        {
-            Database db(QStringLiteral("radio-learn-dry-check-%1")
-                            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-            QVERIFY2(db.open(QDir(dataDir).filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
-            QVERIFY(db.radioWeightProfiles().isEmpty());
-        }
+        QVERIFY(!QFile::exists(RadioProfileStore::storagePath()));
 
         QProcess save;
         save.setProgram(ctlPath);
@@ -590,13 +612,77 @@ private slots:
         QCOMPARE(saved.value(QStringLiteral("sample_count")).toInt(), 3);
         QCOMPARE(saved.value(QStringLiteral("positive_labels")).toInt(), 1);
 
-        Database db(QStringLiteral("radio-learn-save-check-%1")
+        RadioProfileStore profiles;
+        QVERIFY(profiles.load());
+        QCOMPARE(profiles.profiles().size(), 2);
+        QCOMPARE(profiles.activeProfileName(), QStringLiteral("Default"));
+        const auto learned = std::find_if(profiles.profiles().cbegin(), profiles.profiles().cend(),
+                                          [&saved](const RadioProfile &profile) {
+            return profile.name == saved.value(QStringLiteral("profile")).toString();
+        });
+        QVERIFY(learned != profiles.profiles().cend());
+        QCOMPARE(learned->weights.genreWeight,
+                 saved.value(QStringLiteral("suggested")).toObject()
+                     .value(QStringLiteral("genreWeight")).toDouble());
+    }
+
+    void radioWeightCommandsUseProfilesAndMigrateLegacyWeights()
+    {
+        const QString dataDir = qEnvironmentVariable("MUZAITEN_DATA_DIR");
+        QFile::remove(RadioProfileStore::storagePath());
+
+        TrackScorer::Weights legacyWeights = TrackScorer::defaultWeights();
+        legacyWeights.audioWeight = 3.5;
+        Database db(QStringLiteral("radio-weights-legacy-%1")
                         .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
         QVERIFY2(db.open(QDir(dataDir).filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
-        const QVector<Database::RadioWeightProfile> profiles = db.radioWeightProfiles();
-        QCOMPARE(profiles.size(), 1);
-        QCOMPARE(profiles.first().name, saved.value(QStringLiteral("profile")).toString());
-        QVERIFY(!profiles.first().weightsJson.isEmpty());
+        QVERIFY(db.setSetting(QStringLiteral("radio.scoringWeights"),
+                              QString::fromUtf8(TrackScorer::weightsToJson(legacyWeights))));
+
+        const QString ctlPath = muzaitenCtlPath();
+        QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
+        const auto run = [&ctlPath](const QStringList &arguments, QJsonDocument *document) {
+            QString error;
+            *document = runJsonCommand(ctlPath, arguments, &error);
+            QVERIFY2(error.isEmpty(), qPrintable(error));
+        };
+
+        QJsonDocument document;
+        run({QStringLiteral("--json"), QStringLiteral("radio-weights"), QStringLiteral("get")}, &document);
+        const QJsonObject migrated = document.object();
+        QCOMPARE(migrated.value(QStringLiteral("profile")).toString(), QStringLiteral("Default"));
+        QCOMPARE(migrated.value(QStringLiteral("active")).toObject()
+                     .value(QStringLiteral("audioWeight")).toDouble(), legacyWeights.audioWeight);
+
+        TrackScorer::Weights editedWeights = legacyWeights;
+        editedWeights.energyWeight = 6.25;
+        run({QStringLiteral("--json"), QStringLiteral("radio-weights"), QStringLiteral("set"),
+             QString::fromUtf8(TrackScorer::weightsToJson(editedWeights))}, &document);
+        run({QStringLiteral("--json"), QStringLiteral("radio-weights"), QStringLiteral("save"),
+             QStringLiteral("Night")}, &document);
+        run({QStringLiteral("--json"), QStringLiteral("radio-weights"), QStringLiteral("apply"),
+             QStringLiteral("Night")}, &document);
+        const QJsonObject applied = document.object();
+        QCOMPARE(applied.value(QStringLiteral("name")).toString(), QStringLiteral("Night"));
+
+        run({QStringLiteral("--json"), QStringLiteral("radio-weights"), QStringLiteral("list")}, &document);
+        const QJsonArray listed = document.array();
+        QCOMPARE(listed.size(), 2);
+        QVERIFY(std::any_of(listed.cbegin(), listed.cend(), [](const QJsonValue &value) {
+            const QJsonObject profile = value.toObject();
+            return profile.value(QStringLiteral("name")).toString() == QLatin1String("Night")
+                && profile.value(QStringLiteral("active")).toBool();
+        }));
+        run({QStringLiteral("--json"), QStringLiteral("radio-weights"), QStringLiteral("remove"),
+             QStringLiteral("Night")}, &document);
+
+        RadioProfileStore profiles;
+        QVERIFY(profiles.load());
+        QCOMPARE(profiles.profiles().size(), 1);
+        QCOMPARE(profiles.activeProfileName(), QStringLiteral("Default"));
+        QCOMPARE(profiles.activeProfile().weights.energyWeight, editedWeights.energyWeight);
+        QCOMPARE(db.setting(QStringLiteral("radio.scoringWeights")),
+                 QString::fromUtf8(TrackScorer::weightsToJson(legacyWeights)));
     }
 };
 
