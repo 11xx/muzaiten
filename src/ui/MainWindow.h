@@ -280,6 +280,7 @@ private:
     QString lastFmSharedSecret() const;
     bool hasDefaultLastFmCredentials() const;
     void onLibrarySourceChanged(int index);
+    void presentNowPlaying(const Track &track);
     void presentTrack(const Track &track, bool notifyScrobbler = true);
     void presentCurrentTrackUpdate(const Track &track);
     void clearPresentedTrack();

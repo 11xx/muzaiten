@@ -2523,15 +2523,8 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100, const QS
     refreshAlbumGrid();
     m_player->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
     if (m_player->currentTrack().path == track.path) {
-        const Track &current = m_player->currentTrack();
-        const QString title = current.title.isEmpty() ? current.filename : current.title;
-        QString subtitle = QStringLiteral("%1 - %2").arg(current.artistName, current.albumTitle);
-        if (!current.date.isEmpty()) {
-            subtitle += QStringLiteral(" (%1)").arg(current.date.left(4));
-        }
-        m_playerBar->setTrackInfo(title, subtitle, current.effectiveRating0To100);
-        m_rightSidebar->setTrackInfo(current);
-        m_mpris->setTrack(current);
+        presentNowPlaying(m_player->currentTrack());
+        m_mpris->setTrack(m_player->currentTrack());
     }
     m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
     if (m_playlistView != nullptr) {
@@ -2588,24 +2581,17 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
             const int effective = update.effectiveRating0To100;
             const bool hasUserRating = effective >= 0;
             m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
-            if (m_musicExplorerView != nullptr) {
-                m_musicExplorerView->refreshExpandedTracks();
-            }
             if (m_playlistView != nullptr) {
                 m_playlistView->updateTrackRating(update.path, effective);
             }
             currentTrackChanged = m_player->applyRatingSync(update.path, effective) || currentTrackChanged;
         }
+        if (!summary.updates.isEmpty() && m_musicExplorerView != nullptr) {
+            m_musicExplorerView->refreshExpandedTracks();
+        }
         if (currentTrackChanged) {
-            const Track &current = m_player->currentTrack();
-            const QString title = current.title.isEmpty() ? current.filename : current.title;
-            QString subtitle = QStringLiteral("%1 - %2").arg(current.artistName, current.albumTitle);
-            if (!current.date.isEmpty()) {
-                subtitle += QStringLiteral(" (%1)").arg(current.date.left(4));
-            }
-            m_playerBar->setTrackInfo(title, subtitle, current.effectiveRating0To100);
-            m_rightSidebar->setTrackInfo(current);
-            m_mpris->setTrack(current);
+            presentNowPlaying(m_player->currentTrack());
+            m_mpris->setTrack(m_player->currentTrack());
         }
         if (!summary.updates.isEmpty()) {
             m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
@@ -6697,20 +6683,31 @@ void MainWindow::showLastFmSettings()
     QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
 }
 
-void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
+void MainWindow::presentNowPlaying(const Track &track)
 {
-    updateCurrentAlbumArt();
     const QString title = track.title.isEmpty() ? track.filename : track.title;
     QString subtitle = QStringLiteral("%1 - %2").arg(track.artistName, track.albumTitle);
-    if (!track.date.isEmpty()) {
-        subtitle += QStringLiteral(" (%1)").arg(track.date.left(4));
+    const QString year = track.date.left(4);
+    bool isNumericYear = false;
+    const int yearValue = year.toInt(&isNumericYear);
+    if (isNumericYear && yearValue > 0) {
+        subtitle += QStringLiteral(" (%1)").arg(year);
     }
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
+    // MPRIS is NOT mirrored here: AppCore's currentTrackChanged wiring owns
+    // that (MprisService::setTrack re-queries the DB per call). Rating updates
+    // outside a track change must push it explicitly at the call site.
+}
+
+void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
+{
+    updateCurrentAlbumArt();
+    presentNowPlaying(track);
     m_playerBar->setPosition(0, track.durationMs);
     refreshPlaylistNowPlaying();
-    // AppCore handles MPRIS mirroring and scrobble notification.
     if (notifyScrobbler) {
+        const QString title = track.title.isEmpty() ? track.filename : track.title;
         statusBar()->showMessage(QStringLiteral("Playing %1").arg(title), 3000);
     }
 }
@@ -6720,14 +6717,7 @@ void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
 void MainWindow::presentCurrentTrackUpdate(const Track &track)
 {
     updateCurrentAlbumArt();
-    const QString title = track.title.isEmpty() ? track.filename : track.title;
-    QString subtitle = QStringLiteral("%1 - %2").arg(track.artistName, track.albumTitle);
-    if (!track.date.isEmpty()) {
-        subtitle += QStringLiteral(" (%1)").arg(track.date.left(4));
-    }
-    m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
-    m_rightSidebar->setTrackInfo(track);
-    // AppCore handles MPRIS mirroring.
+    presentNowPlaying(track);
 }
 
 void MainWindow::clearPresentedTrack()

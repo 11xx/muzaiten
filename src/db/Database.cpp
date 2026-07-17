@@ -892,6 +892,37 @@ bool Database::migrate()
         return false;
     }
 
+    // v18: TagLib reports an absent legacy year field as 0. Keep unknown track
+    // dates NULL so album MIN(date) ignores them instead of selecting year 0.
+    {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 18"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            if (!m_db.transaction()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+            const QStringList v18Statements = {
+                QStringLiteral("UPDATE tracks SET date = NULL WHERE date = '0'"),
+                QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(18, datetime('now'))"),
+            };
+            for (const QString &statement : v18Statements) {
+                if (!execSql(query, statement, &m_lastError)) {
+                    m_db.rollback();
+                    return false;
+                }
+            }
+            if (!m_db.commit()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+        }
+    }
+
     const QStringList songIdentityIndexStatements = {
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_recording_mbid ON tracks(musicbrainz_recording_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS idx_track_song_identity_fallback ON track_song_identity_keys(fallback_key)"),
@@ -902,7 +933,7 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 17;
+    return Schema::currentVersion == 18;
 }
 
 QString Database::lastError() const

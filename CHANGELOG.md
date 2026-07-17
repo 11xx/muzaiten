@@ -99,6 +99,8 @@
 
 ### Fixed
 
+- Albums no longer show year 0 when a track lacks a year tag.
+
 - Library rescans no longer accumulate duplicate artist and album rows. Existing
   duplicates are cleaned up automatically on the next launch.
 
