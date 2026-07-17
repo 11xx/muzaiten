@@ -76,6 +76,8 @@
 
 ### Fixed
 
+- Radio now treats half- and double-tempo estimates as equivalent, so tracks
+  whose detected BPM differs by an octave still receive the tempo-match score.
 - Radio no longer destroys its upcoming queue after three early skips. Queue
   replacement is now explicit through **Refresh picks below** on a radio queue
   row and preserves manual entries. Previous and direct row selections are
