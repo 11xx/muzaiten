@@ -43,6 +43,9 @@
 
 ### Changed
 
+- Flagging or forgetting a song now resolves only its matching copies instead
+  of scanning the whole library first.
+
 - Radio now treats a complete tempo-and-energy pair or matching CLAP embeddings
   as its primary sonic signal. Genre matching is used only when either track
   lacks a matching audio signal, so incorrect or sparse genre tags cannot

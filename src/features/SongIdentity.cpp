@@ -2,6 +2,7 @@
 
 #include "core/FoldKey.h"
 
+#include <QSet>
 #include <QVector>
 
 #include <algorithm>
@@ -139,6 +140,85 @@ QHash<QString, QString> resolvedSongKeys(const QList<TrackIdentity> &tracks)
         }
     }
     return result;
+}
+
+QStringList pathsConnectedToTrack(const QList<TrackIdentity> &tracks, const QString &targetPath)
+{
+    if (tracks.isEmpty() || targetPath.isEmpty()) {
+        return {};
+    }
+
+    QHash<QString, int> indexByPath;
+    QHash<qint64, QList<int>> indicesByGroup;
+    QHash<QString, QList<int>> indicesByMbid;
+    QHash<QString, QList<int>> indicesByFallback;
+    indexByPath.reserve(tracks.size());
+    for (qsizetype i = 0; i < tracks.size(); ++i) {
+        const TrackIdentity &track = tracks.at(i);
+        const int index = static_cast<int>(i);
+        if (!track.path.isEmpty()) {
+            indexByPath.insert(track.path, index);
+        }
+        if (track.contentGroupId >= 0) {
+            indicesByGroup[track.contentGroupId].push_back(index);
+        }
+        if (!track.mbRecordingId.isEmpty()) {
+            indicesByMbid[track.mbRecordingId].push_back(index);
+        } else {
+            indicesByFallback[FoldKey::songKey({}, track.artist, track.title)].push_back(index);
+        }
+    }
+
+    const auto target = indexByPath.constFind(targetPath);
+    if (target == indexByPath.constEnd()) {
+        return {};
+    }
+
+    QVector<int> pending{*target};
+    QSet<int> visited{*target};
+    QSet<qint64> expandedGroups;
+    QSet<QString> expandedMbids;
+    QSet<QString> expandedFallbacks;
+    const auto enqueue = [&pending, &visited](const QList<int> &indices) {
+        for (const int index : indices) {
+            if (!visited.contains(index)) {
+                visited.insert(index);
+                pending.push_back(index);
+            }
+        }
+    };
+
+    for (qsizetype cursor = 0; cursor < pending.size(); ++cursor) {
+        const TrackIdentity &track = tracks.at(pending.at(cursor));
+        if (track.contentGroupId >= 0 && !expandedGroups.contains(track.contentGroupId)) {
+            expandedGroups.insert(track.contentGroupId);
+            enqueue(indicesByGroup.value(track.contentGroupId));
+        }
+        if (!track.mbRecordingId.isEmpty()) {
+            if (!expandedMbids.contains(track.mbRecordingId)) {
+                expandedMbids.insert(track.mbRecordingId);
+                enqueue(indicesByMbid.value(track.mbRecordingId));
+            }
+        } else {
+            const QString fallback = FoldKey::songKey({}, track.artist, track.title);
+            if (!expandedFallbacks.contains(fallback)) {
+                expandedFallbacks.insert(fallback);
+                enqueue(indicesByFallback.value(fallback));
+            }
+        }
+    }
+
+    QStringList paths;
+    paths.reserve(visited.size());
+    for (const int index : visited) {
+        const QString &path = tracks.at(index).path;
+        if (!path.isEmpty()) {
+            paths.push_back(path);
+        }
+    }
+    paths.removeDuplicates();
+    paths.sort(Qt::CaseInsensitive);
+    return paths;
 }
 
 } // namespace SongIdentity

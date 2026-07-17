@@ -80,6 +80,8 @@ private:
 
 class Database final {
 public:
+    using TrackMatchRow = std::tuple<QString, QString, QString, QString>;
+
     enum class TrackFlag {
         NeverRadio,
         NoLearn,
@@ -201,7 +203,13 @@ public:
     // Lightweight (path, artist_name, title, musicbrainz_recording_id) rows for
     // every non-missing library track, for building the scrobbler-backfill match
     // index without loading full Track objects.
-    QList<std::tuple<QString, QString, QString, QString>> trackMatchRows() const;
+    QList<TrackMatchRow> trackMatchRows() const;
+    // Indexed frontier lookup for one song-identity component. Paths come from
+    // content-group expansion; MBIDs and fallback keys come from rows already
+    // reached. Results are de-duplicated and exclude missing tracks.
+    QList<TrackMatchRow> trackMatchRowsForIdentityKeys(const QStringList &paths,
+                                                       const QStringList &recordingMbids,
+                                                       const QStringList &fallbackKeys) const;
     // Fill the rich scanned columns (audio props, totals, sort names, rating
     // source, track-level MusicBrainz ids) that the lighter loaders omit.
     void enrichTrackForStatus(Track &track) const;
@@ -265,6 +273,7 @@ public:
 private:
     qint64 upsertArtist(const QString &name, const QString &sortName = {});
     qint64 upsertAlbum(const Track &track, qint64 albumArtistId);
+    bool updateTrackSongIdentityKey(qint64 trackId, const QString &artist, const QString &title);
 
     QString m_connectionName;
     QSqlDatabase m_db;

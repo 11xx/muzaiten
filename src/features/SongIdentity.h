@@ -20,4 +20,9 @@ struct TrackIdentity {
 // closed FeatureStore preserves the FoldKey::songKey-only behavior.
 QHash<QString, QString> resolvedSongKeys(const QList<TrackIdentity> &tracks);
 
+// Returns the transitive identity component containing targetPath. This is the
+// narrow counterpart to resolvedSongKeys: callers may supply only rows reached
+// by walking group, MBID, and fallback-key indexes instead of the whole library.
+QStringList pathsConnectedToTrack(const QList<TrackIdentity> &tracks, const QString &targetPath);
+
 } // namespace SongIdentity
