@@ -389,6 +389,63 @@ void Database::restoreCacheMemory()
     pragma.exec(QStringLiteral("PRAGMA cache_size=-%1").arg(kInteractiveCacheKiB));
 }
 
+bool Database::rebuildTrackGenres(bool clearFirst, QString *error)
+{
+    if (!m_db.transaction()) {
+        if (error != nullptr) {
+            *error = m_db.lastError().text();
+        }
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    if (clearFirst && !execSql(query, QStringLiteral("DELETE FROM track_genres"), error)) {
+        m_db.rollback();
+        return false;
+    }
+
+    QSqlQuery bfQuery(m_db);
+    bfQuery.prepare(QStringLiteral(
+        "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
+    if (!bfQuery.exec()) {
+        if (error != nullptr) {
+            *error = bfQuery.lastError().text();
+        }
+        m_db.rollback();
+        return false;
+    }
+
+    QSqlQuery ins(m_db);
+    ins.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
+    while (bfQuery.next()) {
+        const qint64 trackId = bfQuery.value(0).toLongLong();
+        const qint64 rawSize = bfQuery.value(1).toLongLong();
+        const QByteArray blob = bfQuery.value(2).toByteArray();
+        const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
+        for (const QString &genre : GenreTags::fromMetadata(meta)) {
+            ins.addBindValue(trackId);
+            ins.addBindValue(genre);
+            ins.addBindValue(GenreTags::folded(genre));
+            if (!ins.exec()) {
+                if (error != nullptr) {
+                    *error = ins.lastError().text();
+                }
+                m_db.rollback();
+                return false;
+            }
+        }
+    }
+
+    if (!m_db.commit()) {
+        if (error != nullptr) {
+            *error = m_db.lastError().text();
+        }
+        return false;
+    }
+    return true;
+}
+
 bool Database::migrate()
 {
     QSqlQuery query(m_db);
@@ -607,39 +664,7 @@ bool Database::migrate()
             return false;
         }
         if (!versionCheck.next()) {
-            if (!m_db.transaction()) {
-                m_lastError = m_db.lastError().text();
-                return false;
-            }
-            QSqlQuery bfQuery(m_db);
-            bfQuery.prepare(QStringLiteral(
-                "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
-            if (!bfQuery.exec()) {
-                m_lastError = bfQuery.lastError().text();
-                m_db.rollback();
-                return false;
-            }
-            QSqlQuery ins(m_db);
-            ins.prepare(QStringLiteral(
-                "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
-            while (bfQuery.next()) {
-                const qint64 trackId = bfQuery.value(0).toLongLong();
-                const qint64 rawSize = bfQuery.value(1).toLongLong();
-                const QByteArray blob = bfQuery.value(2).toByteArray();
-                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
-                for (const QString &genre : GenreTags::fromMetadata(meta)) {
-                    ins.addBindValue(trackId);
-                    ins.addBindValue(genre);
-                    ins.addBindValue(GenreTags::folded(genre));
-                    if (!ins.exec()) {
-                        m_lastError = ins.lastError().text();
-                        m_db.rollback();
-                        return false;
-                    }
-                }
-            }
-            if (!m_db.commit()) {
-                m_lastError = m_db.lastError().text();
+            if (!rebuildTrackGenres(false, &m_lastError)) {
                 return false;
             }
         }
@@ -686,43 +711,7 @@ bool Database::migrate()
             return false;
         }
         if (!versionCheck.next()) {
-            if (!m_db.transaction()) {
-                m_lastError = m_db.lastError().text();
-                return false;
-            }
-            if (!execSql(query, QStringLiteral("DELETE FROM track_genres"), &m_lastError)) {
-                m_db.rollback();
-                return false;
-            }
-            QSqlQuery bfQuery(m_db);
-            bfQuery.prepare(QStringLiteral(
-                "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
-            if (!bfQuery.exec()) {
-                m_lastError = bfQuery.lastError().text();
-                m_db.rollback();
-                return false;
-            }
-            QSqlQuery ins(m_db);
-            ins.prepare(QStringLiteral(
-                "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
-            while (bfQuery.next()) {
-                const qint64 trackId = bfQuery.value(0).toLongLong();
-                const qint64 rawSize = bfQuery.value(1).toLongLong();
-                const QByteArray blob = bfQuery.value(2).toByteArray();
-                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
-                for (const QString &genre : GenreTags::fromMetadata(meta)) {
-                    ins.addBindValue(trackId);
-                    ins.addBindValue(genre);
-                    ins.addBindValue(GenreTags::folded(genre));
-                    if (!ins.exec()) {
-                        m_lastError = ins.lastError().text();
-                        m_db.rollback();
-                        return false;
-                    }
-                }
-            }
-            if (!m_db.commit()) {
-                m_lastError = m_db.lastError().text();
+            if (!rebuildTrackGenres(true, &m_lastError)) {
                 return false;
             }
         }

@@ -271,6 +271,7 @@ public:
     SearchRowSummary searchRowSummary() const;
 
 private:
+    bool rebuildTrackGenres(bool clearFirst, QString *error);
     qint64 upsertArtist(const QString &name, const QString &sortName = {});
     qint64 upsertAlbum(const Track &track, qint64 albumArtistId);
     bool updateTrackSongIdentityKey(qint64 trackId, const QString &artist, const QString &title);
