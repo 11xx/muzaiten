@@ -81,6 +81,11 @@
   row and preserves manual entries. Previous and direct row selections are
   recorded as navigation rather than rejection, preventing manually browsing
   the radio queue from contaminating skip-learning data.
+- Radio Shuffle now initializes its hidden recommendation session from the
+  current library track's full genre, DSP, sonic-neighbor, and CLAP context.
+  Its first library pull no longer loses tempo, energy, and audio-similarity
+  scoring when the current track was absent from the random candidate slice.
+
 - The analysis status in the menu no longer reports "~0s left" for whole
   provider phases (fractional ETA values were truncated to zero on parse)
   and now shows real wall-clock elapsed time instead of a frozen 00:00 (the

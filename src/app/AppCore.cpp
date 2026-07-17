@@ -1560,9 +1560,24 @@ void AppCore::syncRadioShuffleSession()
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
     const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
     const Track current = m_player->currentTrack();
+    const Track seed = current.path.isEmpty() ? Track{} : m_database->trackForPath(current.path);
+    const QStringList seedGenresFolded = seed.path.isEmpty()
+        ? QStringList{}
+        : radioFoldedGenresForTrack(seed.path, genreAliases, ignoredRadioGenres);
     QVector<TrackScorer::Candidate> pool =
-        buildRadioCandidatePool({}, genreAliases, ignoredRadioGenres, resolvedSongKeys,
-                                current.path.isEmpty() ? QStringList{} : QStringList{current.path});
+        buildRadioCandidatePool(GenreTags::informative(seedGenresFolded), genreAliases, ignoredRadioGenres,
+                                resolvedSongKeys, seed.path.isEmpty() ? QStringList{} : QStringList{seed.path});
+    if (!seed.path.isEmpty()) {
+        TrackScorer::Candidate currentCandidate = buildRadioSeedCandidate(seed, seedGenresFolded, resolvedSongKeys);
+        const auto existing = std::find_if(pool.begin(), pool.end(), [&seed](const TrackScorer::Candidate &candidate) {
+            return candidate.path == seed.path;
+        });
+        if (existing == pool.end()) {
+            pool.push_back(std::move(currentCandidate));
+        } else {
+            *existing = std::move(currentCandidate);
+        }
+    }
     if (pool.isEmpty()) {
         m_radioShuffleSessionActive = false;
         m_radioSession.reset();
@@ -1575,17 +1590,17 @@ void AppCore::syncRadioShuffleSession()
 
     m_radioSessionWeights = radioScoringWeights();
     QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
-    m_radioSession = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(resolvedSongKeys),
-                                                    buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
-                                                    radioExploration(), QDateTime::currentSecsSinceEpoch(),
-                                                    nullptr, m_radioSessionWeights, std::move(embeddings));
+    m_radioSession = std::make_unique<RadioSession>(
+        std::move(pool), buildRadioAffinities(resolvedSongKeys),
+        buildRadioGenreIdf(genreAliases, ignoredRadioGenres), radioExploration(),
+        QDateTime::currentSecsSinceEpoch(), nullptr, m_radioSessionWeights, std::move(embeddings));
     m_radioSessionKind = QStringLiteral("anchorless");
     m_radioSessionSeedPath.clear();
     m_radioSessionArtistName.clear();
     m_radioSessionExploration = radioExploration();
     m_radioShuffleSessionActive = true;
     installRadioProvider(/*markPicksAsRadio=*/false);
-    if (!current.path.isEmpty()) {
+    if (!seed.path.isEmpty()) {
         m_radioSession->notePlayed(current);
     }
 }
