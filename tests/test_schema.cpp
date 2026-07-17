@@ -29,6 +29,7 @@ private slots:
     void pendingUserRatingOverridesScannedRating();
     void trackFlagsRoundTrip();
     void searchTracksLikeUsesPendingRatingOverlay();
+    void searchIndexRatingMatchesTrackRatingMatrix();
     void pendingRatingWritesRoundTrip();
     void tracksWithUserRatingsRoundTrip();
     void missingTrackCleanupReturnsPaths();
@@ -466,6 +467,47 @@ void SchemaTest::pendingRatingWritesRoundTrip()
     QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
     tracks = database.tracksWithPendingRatingWrites();
     QCOMPARE(tracks.size(), 0);
+}
+
+void SchemaTest::searchIndexRatingMatchesTrackRatingMatrix()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-search-rating-matrix-%1")
+                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    const QStringList statuses = {
+        QString(),
+        QStringLiteral("pending"),
+        QStringLiteral("failed"),
+        QStringLiteral("blocked_no_writable_path"),
+        QStringLiteral("synced"),
+    };
+    int trackNumber = 0;
+    for (const QString &status : statuses) {
+        for (int ratingShape = 0; ratingShape < 3; ++ratingShape) {
+            const bool hasScanned = ratingShape != 1;
+            const bool hasUser = ratingShape != 0;
+            Track track = makeTrack(temp,
+                                    QStringLiteral("%1.flac").arg(++trackNumber, 2, 10, QLatin1Char('0')),
+                                    hasScanned ? 80 : Rating::unset);
+            QVERIFY2(database.upsertTrack(track), qPrintable(database.lastError()));
+            if (hasUser) {
+                QVERIFY2(database.setUserTrackRating(track.path, 30), qPrintable(database.lastError()));
+            }
+            if (!status.isEmpty()) {
+                QVERIFY2(database.setPendingTrackRatingWrite(track.path, 30, status), qPrintable(database.lastError()));
+            }
+        }
+    }
+
+    const QVector<Search::SearchRecord> records = database.allTracksForSearch();
+    QCOMPARE(records.size(), statuses.size() * 3);
+    for (const Search::SearchRecord &record : records) {
+        QCOMPARE(record.rating0To100, database.trackForPath(record.path).effectiveRating0To100);
+    }
 }
 
 void SchemaTest::tracksWithUserRatingsRoundTrip()
