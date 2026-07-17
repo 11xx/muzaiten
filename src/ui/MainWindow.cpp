@@ -52,6 +52,7 @@
 #include "ui/PlaylistView.h"
 #include "ui/RadioCustomizationDialog.h"
 #include "ui/SearchView.h"
+#include "ui/ScanController.h"
 #include "ui/SemanticSearchDialog.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
@@ -728,32 +729,6 @@ bool isDirectoryCoveredBy(const QString &child, const QString &parent)
     return child != parent && child.startsWith(parent + QLatin1Char('/'));
 }
 
-QVector<ScanRoot> deduplicatedScanRoots(QVector<ScanRoot> roots)
-{
-    for (ScanRoot &root : roots) {
-        root.path = cleanDirectoryPath(root.path);
-    }
-    std::sort(roots.begin(), roots.end(), [](const ScanRoot &left, const ScanRoot &right) {
-        if (left.path.size() == right.path.size()) {
-            return left.path < right.path;
-        }
-        return left.path.size() < right.path.size();
-    });
-
-    QVector<ScanRoot> deduped;
-    for (const ScanRoot &root : roots) {
-        if (!root.scanEnabled || root.path.isEmpty()) {
-            continue;
-        }
-        const bool covered = std::any_of(deduped.cbegin(), deduped.cend(), [&root](const ScanRoot &existing) {
-            return root.path == existing.path || isDirectoryCoveredBy(root.path, existing.path);
-        });
-        if (!covered) {
-            deduped.push_back(root);
-        }
-    }
-    return deduped;
-}
 
 } // namespace
 
@@ -775,6 +750,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_ipc       = m_core->ipc();
     m_listenBrainzScrobbler = m_core->listenBrainzScrobbler();
     m_lastFmScrobbler       = m_core->lastFmScrobbler();
+    m_scanController = new ScanController(*this);
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -1762,410 +1738,29 @@ void MainWindow::restylePanelBorders()
     setStyleSheetIfChanged(m_albumGrid, mainAlbumGridStyleSheet(m_albumGrid));
 }
 
-void MainWindow::startScan(const QString &rootPath)
-{
-    startScan(rootPath, 0);
-}
-
-void MainWindow::startScan(const QString &rootPath, int scanRootId)
-{
-    if (m_scanThread != nullptr) {
-        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
-        return;
-    }
-
-    qCInfo(uiLog) << "starting scan" << rootPath;
-    m_activeScanRootId = scanRootId;
-    m_activeScanRootPath = cleanDirectoryPath(rootPath);
-    statusBar()->showMessage(QStringLiteral("Scanning %1").arg(m_activeScanRootPath));
-    m_scanProgress->setVisible(true);
-    m_stopScanButton->setEnabled(true);
-    m_stopScanButton->setVisible(true);
-    ensureIngestSession();
-    // A foreground scan supersedes the background fill; pause it (it resumes once
-    // the scan finishes and re-pumps the placeholder backlog).
-    if (m_fillPipeline != nullptr) {
-        m_fillPipeline->cancel();
-    }
-
-    ScanPipeline::Options options;
-    options.forceFullRescan = m_forceFullRescan;
-    options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
-    options.guessPlaceholders = guessedPlaceholdersEnabled();
-
-    m_scanThread = new QThread(this);
-    m_scanPipeline = new ScanPipeline(m_activeScanRootPath, scanRootId,
-                                      m_database->trackFingerprints(m_activeScanRootPath), options);
-    m_scanPipeline->moveToThread(m_scanThread);
-
-    connect(m_scanThread, &QThread::started, m_scanPipeline, &ScanPipeline::run);
-    connect(m_scanPipeline, &ScanPipeline::enumeratedReady, this, &MainWindow::ingestEnumeratedPlaceholders);
-    connect(m_scanPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
-    connect(m_scanPipeline, &ScanPipeline::progress, this,
-            [this](qint64 enumerated, qint64 toProcess, qint64 processed, const QString &phase) {
-                // The foreground pass only enumerates and re-reads *changed* files;
-                // new files are deferred to the background metadata fill.
-                if (phase == QStringLiteral("enumerating")) {
-                    statusBar()->showMessage(QStringLiteral("Scanning: enumerating files..."));
-                } else if (toProcess > 0) {
-                    statusBar()->showMessage(QStringLiteral("Scanning: re-read %1 of %2 changed (%3 found)")
-                                                 .arg(processed).arg(toProcess).arg(enumerated));
-                } else {
-                    statusBar()->showMessage(QStringLiteral("Scanning: %1 files found").arg(enumerated));
-                }
-            });
-    connect(m_scanPipeline, &ScanPipeline::missingReady, this, &MainWindow::markScannedTracksMissing);
-    connect(m_scanPipeline, &ScanPipeline::finished, this, &MainWindow::finishScan);
-    connect(m_scanPipeline, &ScanPipeline::finished, m_scanThread, &QThread::quit);
-    connect(m_scanThread, &QThread::finished, m_scanPipeline, &QObject::deleteLater);
-    connect(m_scanThread, &QThread::finished, m_scanThread, &QObject::deleteLater);
-    connect(m_scanThread, &QThread::finished, this, [this]() {
-        m_scanThread = nullptr;
-        m_scanPipeline = nullptr;
-        if (!m_pendingScanRoots.isEmpty()) {
-            startNextQueuedSourceScan();
-        } else {
-            m_forceFullRescan = false;
-            pumpMetadataFill();  // lazily tag-read the placeholders this scan created
-        }
-    });
-
-    m_scanThread->start();
-}
-
-void MainWindow::scanEnabledSourceDirectories()
-{
-    scanSourceRoots(m_database->enabledScanRoots());
-}
-
-void MainWindow::forceRescanEnabledSourceDirectories()
-{
-    if (m_scanThread != nullptr) {
-        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
-        return;
-    }
-    m_forceFullRescan = true;
-    scanSourceRoots(m_database->enabledScanRoots());
-}
-
-void MainWindow::scanSourceRoots(const QVector<ScanRoot> &roots)
-{
-    if (m_scanThread != nullptr) {
-        statusBar()->showMessage(QStringLiteral("A scan is already running"), 5000);
-        return;
-    }
-
-    m_pendingScanRoots = deduplicatedScanRoots(roots);
-    if (m_pendingScanRoots.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No scan-enabled source directories"), 5000);
-        return;
-    }
-    startNextQueuedSourceScan();
-}
-
-void MainWindow::startNextQueuedSourceScan()
-{
-    if (m_scanThread != nullptr || m_pendingScanRoots.isEmpty()) {
-        return;
-    }
-
-    const ScanRoot root = m_pendingScanRoots.takeFirst();
-    startScan(root.path, root.id);
-}
-
-void MainWindow::cancelScan()
-{
-    if (m_scanPipeline == nullptr) {
-        return;
-    }
-
-    m_scanPipeline->cancel();
-    m_pendingScanRoots.clear();
-    m_forceFullRescan = false;
-    m_stopScanButton->setEnabled(false);
-    statusBar()->showMessage(QStringLiteral("Canceling scan..."), 5000);
-}
-
-void MainWindow::ingestScanBatch(const QVector<Track> &tracks)
-{
-    if (tracks.isEmpty()) {
-        return;
-    }
-
-    if (!m_database->beginTransaction()) {
-        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-        return;
-    }
-    for (const Track &track : tracks) {
-        if (!m_database->upsertTrack(track)) {
-            QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-            break;
-        }
-    }
-    if (!m_database->commitTransaction()) {
-        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-        return;
-    }
-
-    patchQueueTracksFromMetadata(tracks);
-    scheduleIncrementalRefresh();
-}
-
-void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks)
-{
-    if (tracks.isEmpty()) {
-        return;
-    }
-    if (!m_database->insertEnumeratedPlaceholders(tracks)) {
-        QMessageBox::warning(this, QStringLiteral("Scanner"), m_database->lastError());
-        return;
-    }
-    // Placeholders only surface in the directory/file view; coalesce the refresh
-    // with the rest of the ingest so a flood of new paths doesn't rebuild per chunk.
-    scheduleIncrementalRefresh();
-}
-
-void MainWindow::scheduleIncrementalRefresh()
-{
-    // Throttle (not debounce): during a continuous scan/fill, batches arrive faster
-    // than the interval, so we refresh at most once per window while dirty rather
-    // than never until the stream pauses. Keeps the browse/explorer filling in
-    // light chunks without rebuilding on every batch.
-    if (m_incrementalRefreshTimer == nullptr) {
-        m_incrementalRefreshTimer = new QTimer(this);
-        m_incrementalRefreshTimer->setSingleShot(true);
-        connect(m_incrementalRefreshTimer, &QTimer::timeout, this, [this]() {
-            if (m_incrementalRefreshDirty) {
-                m_incrementalRefreshDirty = false;
-                refreshArtists();
-                refreshLibraryFileExplorer();
-            }
-        });
-    }
-    m_incrementalRefreshDirty = true;
-    if (!m_incrementalRefreshTimer->isActive()) {
-        m_incrementalRefreshTimer->start(1500);
-    }
-}
-
-void MainWindow::flushIncrementalRefresh()
-{
-    if (m_incrementalRefreshTimer != nullptr) {
-        m_incrementalRefreshTimer->stop();
-    }
-    m_incrementalRefreshDirty = false;
-    refreshArtists();
-    refreshLibraryFileExplorer();
-}
-
-int MainWindow::scanProfileSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("scan.profile"), QStringLiteral("balanced"));
-    if (value == QStringLiteral("background")) {
-        return 0;
-    }
-    if (value == QStringLiteral("turbo")) {
-        return 2;
-    }
-    return 1;
-}
-
-int MainWindow::analysisPowerSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("analysis.power"), QStringLiteral("background"));
-    if (value == QStringLiteral("balanced")) {
-        return 1;
-    }
-    if (value == QStringLiteral("turbo")) {
-        return 2;
-    }
-    return 0;
-}
-
-bool MainWindow::guessedPlaceholdersEnabled() const
-{
-    return m_state->setting(QStringLiteral("scan.guessedPlaceholders"), QStringLiteral("1")) != QStringLiteral("0");
-}
-
-void MainWindow::ensureIngestSession()
-{
-    if (!m_ingestSessionActive) {
-        m_database->beginScanSession();
-        m_ingestSessionActive = true;
-    }
-}
-
-void MainWindow::endIngestSessionIfIdle()
-{
-    if (m_ingestSessionActive && m_scanThread == nullptr && m_fillThread == nullptr) {
-        m_database->endScanSession();
-        m_ingestSessionActive = false;
-    }
-}
-
-QStringList MainWindow::nextFillChunk()
-{
-    // Prefer the directory the user is looking at (on-access prioritization),
-    // then drain the rest of the backlog in bounded chunks.
-    if (!m_priorityFillDir.isEmpty()) {
-        const QStringList dirPaths = m_database->enumeratedOnlyPaths(m_priorityFillDir, 256);
-        if (!dirPaths.isEmpty()) {
-            return dirPaths;
-        }
-        m_priorityFillDir.clear();
-    }
-    return m_database->enumeratedOnlyPaths({}, 512);
-}
-
-void MainWindow::pumpMetadataFill()
-{
-    // One ingest worker at a time: never run a fill alongside a foreground scan or
-    // another fill — that would double-read files and thrash a slow/HDD mount.
-    if (m_scanThread != nullptr || m_fillThread != nullptr || m_librarySource != LibrarySource::Local) {
-        return;
-    }
-    const QStringList chunk = nextFillChunk();
-    if (chunk.isEmpty()) {
-        endIngestSessionIfIdle();
-        return;
-    }
-    startMetadataFill(chunk);
-}
-
-void MainWindow::startMetadataFill(const QStringList &paths)
-{
-    if (paths.isEmpty() || m_fillThread != nullptr || m_scanThread != nullptr) {
-        return;
-    }
-    ensureIngestSession();
-
-    ScanPipeline::Options options;
-    options.lowPriority = true;
-    options.batchSize = 64;  // small batches keep the UI fill smooth
-    options.profile = static_cast<ScanPipeline::Profile>(scanProfileSetting());
-
-    const QString hint = QFileInfo(paths.first()).absolutePath();
-    m_fillThread = new QThread(this);
-    m_fillPipeline = new ScanPipeline(hint, paths, options);
-    m_fillPipeline->moveToThread(m_fillThread);
-    connect(m_fillThread, &QThread::started, m_fillPipeline, &ScanPipeline::run);
-    connect(m_fillPipeline, &ScanPipeline::batchReady, this, &MainWindow::ingestScanBatch);
-    connect(m_fillPipeline, &ScanPipeline::progress, this,
-            [this](qint64, qint64 toProcess, qint64 processed, const QString &phase) {
-                Q_UNUSED(processed);
-                if (phase == QStringLiteral("filling") && toProcess > 0) {
-                    // Show the live backlog (this chunk + everything still queued),
-                    // not just the chunk size — one cheap indexed COUNT per batch.
-                    statusBar()->showMessage(
-                        QStringLiteral("Filling metadata: %1 tracks remaining").arg(m_database->enumeratedOnlyCount()),
-                        2000);
-                }
-            });
-    connect(m_fillPipeline, &ScanPipeline::finished, this, &MainWindow::finishMetadataFill);
-    connect(m_fillPipeline, &ScanPipeline::finished, m_fillThread, &QThread::quit);
-    connect(m_fillThread, &QThread::finished, m_fillPipeline, &QObject::deleteLater);
-    connect(m_fillThread, &QThread::finished, m_fillThread, &QObject::deleteLater);
-    connect(m_fillThread, &QThread::finished, this, [this]() {
-        m_fillThread = nullptr;
-        m_fillPipeline = nullptr;
-        pumpMetadataFill();  // next chunk, or end the ingest session when drained
-    });
-    m_fillThread->start();
-}
-
-void MainWindow::finishMetadataFill(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
-{
-    Q_UNUSED(enumerated);
-    Q_UNUSED(indexed);
-    Q_UNUSED(skipped);
-    Q_UNUSED(canceled);
-    // ingestScanBatch already refreshed the views incrementally during the chunk;
-    // when the whole backlog is drained, do a final browse + search-index refresh.
-    if (m_database->enumeratedOnlyPaths({}, 1).isEmpty()) {
-        qCInfo(uiLog) << "background metadata fill complete";
-        flushIncrementalRefresh();
-        if (m_searchView != nullptr) {
-            m_searchView->invalidateIndex(databasePath());
-        }
-        statusBar()->showMessage(QStringLiteral("Library metadata complete"), 4000);
-    }
-}
-
-void MainWindow::ensureDirectoryScanned(const QString &directory)
-{
-    if (directory.isEmpty() || m_librarySource != LibrarySource::Local) {
-        return;
-    }
-    if (m_database->enumeratedOnlyPaths(directory, 1).isEmpty()) {
-        return;  // nothing pending in this directory
-    }
-    // Jump this directory to the front of the fill so opening it reads its tags now.
-    m_priorityFillDir = directory;
-    pumpMetadataFill();
-}
-
-void MainWindow::finishScan(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled)
-{
-    // This is the foreground pass finishing (enumerate + re-read changed files), not
-    // the whole library: new files were turned into placeholders and their metadata
-    // is read lazily by the background fill. Report both phases honestly.
-    const int pendingFill = m_database->enumeratedOnlyCount();
-    qCInfo(uiLog).nospace() << "scan pass finished: enumerated " << enumerated
-                            << ", re-read " << indexed << " changed, " << skipped << " unchanged, "
-                            << pendingFill << " queued for background metadata fill"
-                            << (canceled ? " (canceled)" : "");
-    const bool sourceScan = m_activeScanRootId > 0;
-    const QString finishedRootPath = m_activeScanRootPath;
-    if (sourceScan) {
-        m_database->setScanRootLastScanned(m_activeScanRootId, canceled ? QStringLiteral("Canceled") : QString());
-    }
-    m_activeScanRootId = 0;
-    m_activeScanRootPath.clear();
-    m_scanProgress->setVisible(false);
-    m_stopScanButton->setVisible(false);
-    m_stopScanButton->setEnabled(false);
-    QString summary;
-    if (canceled) {
-        summary = QStringLiteral("Scan canceled: %1 enumerated, %2 unchanged").arg(enumerated).arg(skipped);
-    } else if (pendingFill > 0) {
-        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged), reading metadata for %4 in the background")
-                      .arg(enumerated).arg(indexed).arg(skipped).arg(pendingFill);
-    } else {
-        summary = QStringLiteral("Scan complete: %1 files (%2 changed, %3 unchanged)")
-                      .arg(enumerated).arg(indexed).arg(skipped);
-    }
-    statusBar()->showMessage(summary, 10000);
-    flushIncrementalRefresh();
-    // Rebuild the search index with fresh library data
-    if (!canceled && m_searchView != nullptr) {
-        m_searchView->invalidateIndex(databasePath());
-    }
-    if (!canceled && !m_pendingScanRoots.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
-    } else if (sourceScan && !canceled) {
-        statusBar()->showMessage(QStringLiteral("Source scans complete"), 10000);
-    }
-}
-
-void MainWindow::markScannedTracksMissing(const QStringList &paths)
-{
-    if (paths.isEmpty()) {
-        return;
-    }
-    if (!m_database->beginTransaction()) {
-        return;
-    }
-    const int marked = m_database->markTracksMissing(paths);
-    m_database->commitTransaction();
-    if (marked > 0) {
-        m_player->markTracksMissing(paths);
-        if (m_playlistDb != nullptr && m_playlistDb->markItemsMissing(paths) > 0 && m_playlistView != nullptr) {
-            m_playlistView->reloadItems();
-            m_playlistView->reloadPlaylists();
-        }
-        qCInfo(uiLog) << "marked" << marked << "tracks missing";
-    }
-}
+void MainWindow::startScan(const QString &rootPath) { m_scanController->startScan(rootPath); }
+void MainWindow::startScan(const QString &rootPath, int scanRootId) { m_scanController->startScan(rootPath, scanRootId); }
+void MainWindow::scanEnabledSourceDirectories() { m_scanController->scanEnabledSourceDirectories(); }
+void MainWindow::forceRescanEnabledSourceDirectories() { m_scanController->forceRescanEnabledSourceDirectories(); }
+void MainWindow::scanSourceRoots(const QVector<ScanRoot> &roots) { m_scanController->scanSourceRoots(roots); }
+void MainWindow::startNextQueuedSourceScan() { m_scanController->startNextQueuedSourceScan(); }
+void MainWindow::cancelScan() { m_scanController->cancelScan(); }
+void MainWindow::ingestScanBatch(const QVector<Track> &tracks) { m_scanController->ingestScanBatch(tracks); }
+void MainWindow::ingestEnumeratedPlaceholders(const QVector<Track> &tracks) { m_scanController->ingestEnumeratedPlaceholders(tracks); }
+void MainWindow::scheduleIncrementalRefresh() { m_scanController->scheduleIncrementalRefresh(); }
+void MainWindow::flushIncrementalRefresh() { m_scanController->flushIncrementalRefresh(); }
+int MainWindow::scanProfileSetting() const { return m_scanController->scanProfileSetting(); }
+int MainWindow::analysisPowerSetting() const { return m_scanController->analysisPowerSetting(); }
+bool MainWindow::guessedPlaceholdersEnabled() const { return m_scanController->guessedPlaceholdersEnabled(); }
+void MainWindow::ensureIngestSession() { m_scanController->ensureIngestSession(); }
+void MainWindow::endIngestSessionIfIdle() { m_scanController->endIngestSessionIfIdle(); }
+QStringList MainWindow::nextFillChunk() { return m_scanController->nextFillChunk(); }
+void MainWindow::pumpMetadataFill() { m_scanController->pumpMetadataFill(); }
+void MainWindow::startMetadataFill(const QStringList &paths) { m_scanController->startMetadataFill(paths); }
+void MainWindow::finishMetadataFill(qint64 a, qint64 b, qint64 c, bool d) { m_scanController->finishMetadataFill(a, b, c, d); }
+void MainWindow::ensureDirectoryScanned(const QString &directory) { m_scanController->ensureDirectoryScanned(directory); }
+void MainWindow::finishScan(qint64 a, qint64 b, qint64 c, bool d) { m_scanController->finishScan(a, b, c, d); }
+void MainWindow::markScannedTracksMissing(const QStringList &paths) { m_scanController->markScannedTracksMissing(paths); }
 
 void MainWindow::removeMissingTracks()
 {

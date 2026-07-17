@@ -58,6 +58,7 @@ class RightSidebar;
 class TrackTable;
 class MusicExplorerView;
 class ScanPipeline;
+class ScanController;
 class ArtworkCache;
 class SearchView;
 class SemanticSearchDialog;
@@ -92,6 +93,7 @@ protected:
     void changeEvent(QEvent *event) override;
 
 private:
+    friend class ScanController;
     void openLibraryFolder();
     void loadExistingLibrary();
     void refreshArtists();
@@ -509,6 +511,7 @@ private:
     QString m_libraryExplorerDirectory;
     QString m_freeRoamDirectory;
     QThread *m_scanThread = nullptr;
+    ScanController *m_scanController = nullptr;
     ScanPipeline *m_scanPipeline = nullptr;
     bool m_forceFullRescan = false;
     // Background metadata fill (lazy tag read of enumerated-only placeholders).
