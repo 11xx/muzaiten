@@ -604,4 +604,5 @@ void RadioSession::restoreConstraintState(const QJsonObject &state)
         }
     }
     m_pickReasons.clear();
+    m_pickReasonOrder.clear();
 }
