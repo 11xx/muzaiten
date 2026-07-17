@@ -13,6 +13,9 @@ private slots:
     void missingStorageFallsBack();
     void corruptStorageFallsBack();
     void writeReadRoundTrip();
+    void historyCapsAtFiftySnapshots();
+    void undoRedoDiscardsRedoTail();
+    void profileManagementKeepsIndependentHistory();
 
 private:
     QTemporaryDir m_temp;
@@ -22,6 +25,7 @@ void RadioProfileTest::init()
 {
     QVERIFY(m_temp.isValid());
     qputenv("MUZAITEN_CONFIG_DIR", m_temp.path().toUtf8());
+    QFile::remove(RadioProfileStore::storagePath());
 }
 
 void RadioProfileTest::jsonRoundTrip()
@@ -77,6 +81,66 @@ void RadioProfileTest::writeReadRoundTrip()
     QCOMPARE(restored.profiles().size(), 2);
     QCOMPARE(restored.activeProfileName(), second.name);
     QCOMPARE(restored.activeProfile(), second);
+}
+
+void RadioProfileTest::historyCapsAtFiftySnapshots()
+{
+    RadioProfileStore store;
+    for (int value = 0; value < 60; ++value) {
+        RadioProfile profile = store.activeProfile();
+        profile.weights.audioWeight = static_cast<double>(value);
+        QVERIFY(store.previewActiveProfile(profile));
+        QVERIFY(store.commitActivePreview());
+    }
+    QCOMPARE(store.activeProfile().weights.audioWeight, 59.0);
+    int undoCount = 0;
+    while (store.undo()) {
+        ++undoCount;
+    }
+    QCOMPARE(undoCount, RadioProfileStore::HistoryLimit - 1);
+    QCOMPARE(store.activeProfile().weights.audioWeight, 10.0);
+}
+
+void RadioProfileTest::undoRedoDiscardsRedoTail()
+{
+    RadioProfileStore store;
+    for (double value : {1.0, 2.0}) {
+        RadioProfile profile = store.activeProfile();
+        profile.weights.energyWeight = value;
+        QVERIFY(store.previewActiveProfile(profile));
+        QVERIFY(store.commitActivePreview());
+    }
+    QVERIFY(store.undo());
+    QCOMPARE(store.activeProfile().weights.energyWeight, 1.0);
+    RadioProfile profile = store.activeProfile();
+    profile.weights.energyWeight = 3.0;
+    QVERIFY(store.previewActiveProfile(profile));
+    QVERIFY(store.commitActivePreview());
+    QVERIFY(!store.canRedo());
+    QCOMPARE(store.activeProfile().weights.energyWeight, 3.0);
+}
+
+void RadioProfileTest::profileManagementKeepsIndependentHistory()
+{
+    RadioProfileStore store;
+    RadioProfile defaultProfile = store.activeProfile();
+    defaultProfile.weights.tempoWeight = 2.0;
+    QVERIFY(store.previewActiveProfile(defaultProfile));
+    QVERIFY(store.commitActivePreview());
+    QVERIFY(store.createProfile(QStringLiteral("Driving"), true));
+    QCOMPARE(store.activeProfileName(), QStringLiteral("Driving"));
+    RadioProfile driving = store.activeProfile();
+    driving.weights.energyWeight = 4.0;
+    QVERIFY(store.previewActiveProfile(driving));
+    QVERIFY(store.commitActivePreview());
+    QVERIFY(store.setActiveProfileName(QStringLiteral("Default")));
+    QCOMPARE(store.activeProfile().weights.tempoWeight, 2.0);
+    QVERIFY(store.undo());
+    QCOMPARE(store.activeProfile().weights.tempoWeight, TrackScorer::defaultWeights().tempoWeight);
+    QVERIFY(store.setActiveProfileName(QStringLiteral("Driving")));
+    QCOMPARE(store.activeProfile().weights.energyWeight, 4.0);
+    QVERIFY(store.undo());
+    QCOMPARE(store.activeProfile().weights.energyWeight, TrackScorer::defaultWeights().energyWeight);
 }
 
 QTEST_MAIN(RadioProfileTest)

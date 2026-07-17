@@ -11,6 +11,8 @@
 #include <QJsonObject>
 #include <QSet>
 
+#include <algorithm>
+
 namespace {
 
 QString nowUtc()
@@ -56,6 +58,15 @@ QJsonObject profileToJson(const RadioProfile &profile)
         {QStringLiteral("weights"), weights.object()},
         {QStringLiteral("sessionDecay"), decayToJson(profile.sessionDecay)},
     };
+}
+
+QJsonObject historyToJson(const RadioProfileStore::History &history)
+{
+    QJsonArray snapshots;
+    for (const RadioProfile &snapshot : history.snapshots) {
+        snapshots.append(profileToJson(snapshot));
+    }
+    return {{QStringLiteral("current"), history.current}, {QStringLiteral("snapshots"), snapshots}};
 }
 
 bool profileFromJson(const QJsonValue &value, RadioProfile *profile, QString *error)
@@ -166,8 +177,39 @@ bool RadioProfileStore::load()
         restoreFactoryDefaults();
         return false;
     }
+    QHash<QString, History> histories;
+    const QJsonObject historiesObject = document.object().value(QStringLiteral("histories")).toObject();
+    for (const RadioProfile &profile : loaded) {
+        History history;
+        const QJsonObject historyObject = historiesObject.value(profile.name).toObject();
+        const QJsonArray snapshots = historyObject.value(QStringLiteral("snapshots")).toArray();
+        for (const QJsonValue &snapshotValue : snapshots) {
+            RadioProfile snapshot;
+            QString error;
+            if (!profileFromJson(snapshotValue, &snapshot, &error)) {
+                qWarning().noquote() << "Ignoring malformed radio profile history:" << path << error;
+                restoreFactoryDefaults();
+                return false;
+            }
+            history.snapshots.push_back(std::move(snapshot));
+        }
+        if (history.snapshots.isEmpty()) {
+            history.snapshots.push_back(profile);
+        }
+        while (history.snapshots.size() > HistoryLimit) {
+            history.snapshots.removeFirst();
+        }
+        const int lastSnapshot = static_cast<int>(history.snapshots.size()) - 1;
+        history.current = std::clamp(historyObject.value(QStringLiteral("current")).toInt(lastSnapshot),
+                                     0, lastSnapshot);
+        // The persisted profile is authoritative for compatibility with files
+        // written before histories existed; align its current snapshot with it.
+        history.snapshots[history.current] = profile;
+        histories.insert(profile.name, std::move(history));
+    }
     m_profiles = std::move(loaded);
     m_activeProfileName = active;
+    m_histories = std::move(histories);
     return true;
 }
 
@@ -177,10 +219,15 @@ bool RadioProfileStore::save() const
     for (const RadioProfile &profile : m_profiles) {
         profiles.append(profileToJson(profile));
     }
+    QJsonObject histories;
+    for (auto it = m_histories.cbegin(); it != m_histories.cend(); ++it) {
+        histories.insert(it.key(), historyToJson(it.value()));
+    }
     const QJsonObject root{
         {QStringLiteral("version"), 1},
         {QStringLiteral("activeProfile"), m_activeProfileName},
         {QStringLiteral("profiles"), profiles},
+        {QStringLiteral("histories"), histories},
     };
     QFile file(storagePath());
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -227,6 +274,188 @@ bool RadioProfileStore::setProfiles(QVector<RadioProfile> profiles, const QStrin
     }
     m_profiles = std::move(profiles);
     m_activeProfileName = activeProfileName;
+    m_histories.clear();
+    for (const RadioProfile &profile : m_profiles) {
+        ensureHistory(profile.name, profile);
+    }
+    return true;
+}
+
+RadioProfile *RadioProfileStore::activeProfileMutable()
+{
+    for (RadioProfile &profile : m_profiles) {
+        if (profile.name == m_activeProfileName) {
+            return &profile;
+        }
+    }
+    return nullptr;
+}
+
+const RadioProfileStore::History *RadioProfileStore::activeHistory() const
+{
+    const auto it = m_histories.constFind(m_activeProfileName);
+    return it == m_histories.cend() ? nullptr : &it.value();
+}
+
+RadioProfileStore::History *RadioProfileStore::activeHistoryMutable()
+{
+    const auto it = m_histories.find(m_activeProfileName);
+    return it == m_histories.end() ? nullptr : &it.value();
+}
+
+void RadioProfileStore::ensureHistory(const QString &name, const RadioProfile &profile)
+{
+    if (!m_histories.contains(name)) {
+        m_histories.insert(name, History{{profile}, 0});
+    }
+}
+
+void RadioProfileStore::pushActiveSnapshot()
+{
+    RadioProfile *profile = activeProfileMutable();
+    History *history = activeHistoryMutable();
+    if (profile == nullptr || history == nullptr) {
+        return;
+    }
+    while (history->snapshots.size() > history->current + 1) {
+        history->snapshots.removeLast();
+    }
+    if (history->snapshots.value(history->current) == *profile) {
+        return;
+    }
+    history->snapshots.push_back(*profile);
+    while (history->snapshots.size() > HistoryLimit) {
+        history->snapshots.removeFirst();
+    }
+    history->current = static_cast<int>(history->snapshots.size()) - 1;
+}
+
+bool RadioProfileStore::previewActiveProfile(const RadioProfile &profile)
+{
+    RadioProfile *current = activeProfileMutable();
+    if (current == nullptr || profile.name != m_activeProfileName || profile.name.trimmed().isEmpty()) {
+        return false;
+    }
+    *current = profile;
+    current->modifiedAtUtc = nowUtc();
+    return true;
+}
+
+bool RadioProfileStore::commitActivePreview()
+{
+    if (activeProfileMutable() == nullptr) {
+        return false;
+    }
+    pushActiveSnapshot();
+    return true;
+}
+
+bool RadioProfileStore::restoreActiveProfile(const RadioProfile &profile)
+{
+    RadioProfile *current = activeProfileMutable();
+    if (current == nullptr || profile.name != m_activeProfileName) {
+        return false;
+    }
+    *current = profile;
+    return true;
+}
+
+bool RadioProfileStore::canUndo() const
+{
+    const History *history = activeHistory();
+    return history != nullptr && history->current > 0;
+}
+
+bool RadioProfileStore::canRedo() const
+{
+    const History *history = activeHistory();
+    return history != nullptr && history->current + 1 < history->snapshots.size();
+}
+
+bool RadioProfileStore::undo()
+{
+    History *history = activeHistoryMutable();
+    RadioProfile *profile = activeProfileMutable();
+    if (history == nullptr || profile == nullptr || history->current <= 0) {
+        return false;
+    }
+    --history->current;
+    *profile = history->snapshots.at(history->current);
+    return true;
+}
+
+bool RadioProfileStore::redo()
+{
+    History *history = activeHistoryMutable();
+    RadioProfile *profile = activeProfileMutable();
+    if (history == nullptr || profile == nullptr || history->current + 1 >= history->snapshots.size()) {
+        return false;
+    }
+    ++history->current;
+    *profile = history->snapshots.at(history->current);
+    return true;
+}
+
+bool RadioProfileStore::createProfile(const QString &name, bool duplicateActive)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty() || m_histories.contains(trimmed)) {
+        return false;
+    }
+    RadioProfile profile = duplicateActive ? activeProfile() : defaultProfile();
+    profile.name = trimmed;
+    profile.createdAtUtc = nowUtc();
+    profile.modifiedAtUtc = profile.createdAtUtc;
+    m_profiles.push_back(profile);
+    m_activeProfileName = trimmed;
+    ensureHistory(trimmed, profile);
+    return true;
+}
+
+bool RadioProfileStore::renameActiveProfile(const QString &name)
+{
+    const QString trimmed = name.trimmed();
+    RadioProfile *profile = activeProfileMutable();
+    if (profile == nullptr || trimmed.isEmpty() || (trimmed != profile->name && m_histories.contains(trimmed))) {
+        return false;
+    }
+    const QString oldName = profile->name;
+    profile->name = trimmed;
+    profile->modifiedAtUtc = nowUtc();
+    History history = m_histories.take(oldName);
+    for (RadioProfile &snapshot : history.snapshots) {
+        snapshot.name = trimmed;
+    }
+    m_histories.insert(trimmed, std::move(history));
+    m_activeProfileName = trimmed;
+    commitActivePreview();
+    return true;
+}
+
+bool RadioProfileStore::deleteActiveProfile()
+{
+    if (m_activeProfileName == QLatin1String("Default") || m_profiles.size() <= 1) {
+        return false;
+    }
+    const QString deleted = m_activeProfileName;
+    m_profiles.erase(std::remove_if(m_profiles.begin(), m_profiles.end(), [&deleted](const RadioProfile &profile) {
+        return profile.name == deleted;
+    }), m_profiles.end());
+    m_histories.remove(deleted);
+    m_activeProfileName = m_profiles.front().name;
+    return true;
+}
+
+bool RadioProfileStore::resetActiveProfile()
+{
+    RadioProfile *profile = activeProfileMutable();
+    if (profile == nullptr) {
+        return false;
+    }
+    profile->weights = TrackScorer::defaultWeights();
+    profile->sessionDecay = TrackScorer::defaultSessionDecay();
+    profile->modifiedAtUtc = nowUtc();
+    pushActiveSnapshot();
     return true;
 }
 
@@ -257,4 +486,6 @@ void RadioProfileStore::restoreFactoryDefaults()
 {
     m_profiles = {defaultProfile()};
     m_activeProfileName = m_profiles.front().name;
+    m_histories.clear();
+    ensureHistory(m_activeProfileName, m_profiles.front());
 }

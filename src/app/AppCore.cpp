@@ -20,6 +20,7 @@
 #include "reco/ArtistRadio.h"
 #include "reco/RadioFilters.h"
 #include "reco/RadioMix.h"
+#include "reco/RadioProfile.h"
 #include "reco/RadioSession.h"
 #include "reco/ReasonText.h"
 #include "reco/TrackScorer.h"
@@ -270,6 +271,7 @@ AppCore::AppCore(QObject *parent)
 
     m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
     AppPaths::writeDefaultConfigIfMissing();
+    m_radioProfileStore.load();
 
     const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
     m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
@@ -1236,17 +1238,125 @@ QHash<QString, double> AppCore::buildRadioGenreIdf(const QHash<QString, QString>
 
 TrackScorer::Weights AppCore::radioScoringWeights() const
 {
-    if (m_database == nullptr) {
-        return TrackScorer::defaultWeights();
-    }
+    return m_radioProfileStore.activeProfile().weights;
+}
 
-    QString error;
-    const TrackScorer::Weights weights =
-        TrackScorer::weightsFromJson(m_database->setting(QStringLiteral("radio.scoringWeights")).toUtf8(), &error);
-    if (!error.isEmpty()) {
-        qWarning("radio-scoring: ignoring invalid radio.scoringWeights: %s", qPrintable(error));
+TrackScorer::RadioSessionDecay AppCore::radioSessionDecay() const
+{
+    return m_radioProfileStore.activeProfile().sessionDecay;
+}
+
+const QVector<RadioProfile> &AppCore::radioProfiles() const
+{
+    return m_radioProfileStore.profiles();
+}
+
+const RadioProfile &AppCore::activeRadioProfile() const
+{
+    return m_radioProfileStore.activeProfile();
+}
+
+void AppCore::applyActiveRadioProfile()
+{
+    m_radioSessionWeights = radioScoringWeights();
+    m_radioSessionDecay = radioSessionDecay();
+    if (m_radioSession != nullptr) {
+        m_radioSession->setWeights(m_radioSessionWeights);
+        m_radioSession->setSessionDecay(m_radioSessionDecay);
+        ++m_radioSessionRevision;
     }
-    return weights;
+}
+
+bool AppCore::selectRadioProfile(const QString &name)
+{
+    if (!m_radioProfileStore.setActiveProfileName(name)) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::previewActiveRadioProfile(const RadioProfile &profile)
+{
+    if (!m_radioProfileStore.previewActiveProfile(profile)) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return true;
+}
+
+bool AppCore::commitActiveRadioProfilePreview()
+{
+    if (!m_radioProfileStore.commitActivePreview()) {
+        return false;
+    }
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::restoreActiveRadioProfile(const RadioProfile &profile)
+{
+    if (!m_radioProfileStore.restoreActiveProfile(profile)) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::undoRadioProfile()
+{
+    if (!m_radioProfileStore.undo()) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::redoRadioProfile()
+{
+    if (!m_radioProfileStore.redo()) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::canUndoRadioProfile() const { return m_radioProfileStore.canUndo(); }
+bool AppCore::canRedoRadioProfile() const { return m_radioProfileStore.canRedo(); }
+
+bool AppCore::createRadioProfile(const QString &name, bool duplicateActive)
+{
+    if (!m_radioProfileStore.createProfile(name, duplicateActive)) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::renameActiveRadioProfile(const QString &name)
+{
+    if (!m_radioProfileStore.renameActiveProfile(name)) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::deleteActiveRadioProfile()
+{
+    if (!m_radioProfileStore.deleteActiveProfile()) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
+}
+
+bool AppCore::resetActiveRadioProfile()
+{
+    if (!m_radioProfileStore.resetActiveProfile()) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return m_radioProfileStore.save();
 }
 
 void AppCore::recordRadioPicks(const QVector<Track> &picks)
@@ -1417,6 +1527,7 @@ void AppCore::maybeRestoreRadioSession()
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
     const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
     const TrackScorer::Weights scoringWeights = radioScoringWeights();
+    const TrackScorer::RadioSessionDecay sessionDecay = radioSessionDecay();
     std::unique_ptr<RadioSession> restored;
     QString seedPath;
     QString artistName;
@@ -1438,7 +1549,7 @@ void AppCore::maybeRestoreRadioSession()
         restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(resolvedSongKeys),
                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
                                                   seedCandidate, exploration, nowSecs, nullptr, scoringWeights,
-                                                  std::move(embeddings));
+                                                  std::move(embeddings), sessionDecay);
     } else if (kind == QLatin1String("artist")) {
         artistName = root.value(QStringLiteral("artistName")).toString().trimmed();
         const QVector<Track> artistTracks = m_database->tracksForArtist(artistName);
@@ -1463,7 +1574,7 @@ void AppCore::maybeRestoreRadioSession()
         QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool, seedCandidate);
         restored = std::make_unique<RadioSession>(
             std::move(pool), std::move(affinities), buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
-            seedCandidate, exploration, nowSecs, nullptr, scoringWeights, std::move(embeddings));
+            seedCandidate, exploration, nowSecs, nullptr, scoringWeights, std::move(embeddings), sessionDecay);
     } else if (kind == QLatin1String("anchorless")) {
         const Track current = m_player->currentTrack();
         QVector<TrackScorer::Candidate> pool =
@@ -1477,7 +1588,7 @@ void AppCore::maybeRestoreRadioSession()
         QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
         restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(resolvedSongKeys),
                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres), exploration, nowSecs,
-                                                  nullptr, scoringWeights, std::move(embeddings));
+                                                  nullptr, scoringWeights, std::move(embeddings), sessionDecay);
     } else if (const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(kind)) {
         QVector<TrackScorer::Candidate> pool =
             buildRadioFallbackPool(5000, genreAliases, ignoredRadioGenres, resolvedSongKeys);
@@ -1491,7 +1602,7 @@ void AppCore::maybeRestoreRadioSession()
         QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
         restored = std::make_unique<RadioSession>(std::move(pool), std::move(affinities),
                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres), exploration, nowSecs,
-                                                  nullptr, scoringWeights, std::move(embeddings));
+                                                  nullptr, scoringWeights, std::move(embeddings), sessionDecay);
     } else {
         qInfo("radio-restore: clearing malformed session state with unknown kind");
         clearRadioSessionState();
@@ -1501,6 +1612,7 @@ void AppCore::maybeRestoreRadioSession()
     restored->restoreConstraintState(root);
     m_radioSession = std::move(restored);
     m_radioSessionWeights = scoringWeights;
+    m_radioSessionDecay = sessionDecay;
     m_radioSessionKind = kind;
     m_radioSessionSeedPath = seedPath;
     m_radioSessionArtistName = artistName;
@@ -1600,11 +1712,12 @@ void AppCore::syncRadioShuffleSession()
     }
 
     m_radioSessionWeights = radioScoringWeights();
+    m_radioSessionDecay = radioSessionDecay();
     QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
     m_radioSession = std::make_unique<RadioSession>(
         std::move(pool), buildRadioAffinities(resolvedSongKeys),
         buildRadioGenreIdf(genreAliases, ignoredRadioGenres), radioExploration(),
-        QDateTime::currentSecsSinceEpoch(), nullptr, m_radioSessionWeights, std::move(embeddings));
+        QDateTime::currentSecsSinceEpoch(), nullptr, m_radioSessionWeights, std::move(embeddings), m_radioSessionDecay);
     m_radioSessionKind = QStringLiteral("anchorless");
     m_radioSessionSeedPath.clear();
     m_radioSessionArtistName.clear();
@@ -1711,9 +1824,10 @@ void AppCore::finishSeededRadioStart(const QString &seedPath, quint64 requestId)
     m_radioSessionExploration = exploration;
 
     m_radioSessionWeights = radioScoringWeights();
+    m_radioSessionDecay = radioSessionDecay();
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
                                                     seedCandidate, exploration, QDateTime::currentSecsSinceEpoch(),
-                                                    nullptr, m_radioSessionWeights, std::move(embeddings));
+                                                    nullptr, m_radioSessionWeights, std::move(embeddings), m_radioSessionDecay);
     // Install the scored provider; it resolves each pick to a full Track by
     // path. Stays installed regardless of batch size: it is the safety net for
     // when the queue runs dry (e.g. the user deleted rows ahead of playback).
@@ -1790,9 +1904,10 @@ bool AppCore::startArtistRadio(const QString &artistName)
     m_radioSessionExploration = exploration;
 
     m_radioSessionWeights = radioScoringWeights();
+    m_radioSessionDecay = radioSessionDecay();
     m_radioSession = std::make_unique<RadioSession>(std::move(pool), std::move(affinities), std::move(genreIdf),
                                                     seedCandidate, exploration, QDateTime::currentSecsSinceEpoch(),
-                                                    nullptr, m_radioSessionWeights, std::move(embeddings));
+                                                    nullptr, m_radioSessionWeights, std::move(embeddings), m_radioSessionDecay);
     installRadioProvider(/*markPicksAsRadio=*/true);
     m_player->setRadioActive(true);
     m_radioTopUpInProgress = true;
@@ -1837,11 +1952,12 @@ bool AppCore::startMix(const QString &mode)
         1, 100);
 
     m_radioSessionWeights = radioScoringWeights();
+    m_radioSessionDecay = radioSessionDecay();
     QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
     auto session = std::make_unique<RadioSession>(std::move(pool), affinities,
                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
                                                   exploration, nowSecs, nullptr, m_radioSessionWeights,
-                                                  std::move(embeddings));
+                                                  std::move(embeddings), m_radioSessionDecay);
     const QSet<QString> neverRadioPaths = m_database != nullptr
         ? m_database->flaggedPaths(Database::TrackFlag::NeverRadio)
         : QSet<QString>{};

@@ -152,13 +152,15 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            qint64 nowSecs,
                            QRandomGenerator *rng,
                            TrackScorer::Weights weights,
-                           QHash<qint64, QVector<float>> embeddingsByGroup)
+                           QHash<qint64, QVector<float>> embeddingsByGroup,
+                           TrackScorer::RadioSessionDecay sessionDecay)
     : m_pool(std::move(pool))
     , m_affinities(std::move(affinities))
     , m_genreIdf(std::move(genreIdf))
     , m_embeddingsByGroup(std::move(embeddingsByGroup))
     , m_seed(std::move(seed))
     , m_weights(std::move(weights))
+    , m_sessionDecay(std::move(sessionDecay))
     , m_exploration(std::clamp(exploration0To100, 0, 100))
     , m_nowSecs(nowSecs)
     , m_rng(rng != nullptr ? rng : QRandomGenerator::global())
@@ -188,10 +190,11 @@ RadioSession::RadioSession(QVector<TrackScorer::Candidate> pool,
                            qint64 nowSecs,
                            QRandomGenerator *rng,
                            TrackScorer::Weights weights,
-                           QHash<qint64, QVector<float>> embeddingsByGroup)
+                           QHash<qint64, QVector<float>> embeddingsByGroup,
+                           TrackScorer::RadioSessionDecay sessionDecay)
     : RadioSession(std::move(pool), std::move(affinities), std::move(genreIdf),
                    TrackScorer::Candidate{}, exploration0To100, nowSecs, rng, std::move(weights),
-                   std::move(embeddingsByGroup))
+                   std::move(embeddingsByGroup), std::move(sessionDecay))
 {
 }
 
@@ -400,6 +403,16 @@ void RadioSession::aliasResolvedPath(const QString &candidatePath, const QString
 void RadioSession::setExploration(int exploration0To100)
 {
     m_exploration = std::clamp(exploration0To100, 0, 100);
+}
+
+void RadioSession::setWeights(TrackScorer::Weights weights)
+{
+    m_weights = std::move(weights);
+}
+
+void RadioSession::setSessionDecay(TrackScorer::RadioSessionDecay decay)
+{
+    m_sessionDecay = std::move(decay);
 }
 
 bool RadioSession::isEarlySkip(qint64 playedMs, qint64 durationMs)

@@ -151,6 +151,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelSearchBar.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
+    src/ui/RadioCustomizationDialog.cpp
     src/ui/ScoringWeightsDialog.cpp
     src/ui/PlaylistAddDialog.cpp
     src/ui/PlaylistImportDialog.cpp
@@ -289,6 +290,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
     src/ui/PlayerBar.h
+    src/ui/RadioCustomizationDialog.h
     src/reco/RadioProfile.h
     src/ui/ScoringWeightsDialog.h
     src/ui/PlaylistAddDialog.h

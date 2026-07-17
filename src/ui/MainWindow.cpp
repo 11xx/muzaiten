@@ -51,6 +51,7 @@
 #include "ui/PlaylistImportDialog.h"
 #include "ui/PlaylistView.h"
 #include "ui/ScoringWeightsDialog.h"
+#include "ui/RadioCustomizationDialog.h"
 #include "ui/SearchView.h"
 #include "ui/SemanticSearchDialog.h"
 #include "ui/SourceDirectoriesDialog.h"
@@ -1294,7 +1295,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         m_playerBar->setReleaseDeviceVisible(canReleaseOutputDevice());
     });
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
-    connect(m_playerBar, &PlayerBar::scoringWeightsRequested, this, &MainWindow::showScoringWeights);
+    connect(m_playerBar, &PlayerBar::radioCustomizationRequested, this, &MainWindow::showRadioCustomization);
     connect(m_playerBar, &PlayerBar::genreCurationRequested, this, &MainWindow::showGenreCuration);
     connect(m_playerBar, &PlayerBar::audioAnalysisStartRequested, this, &MainWindow::startAudioAnalysis);
     connect(m_playerBar, &PlayerBar::audioAnalysisCancelRequested, this, &MainWindow::cancelAudioAnalysis);
@@ -5585,6 +5586,12 @@ void MainWindow::showGenreCuration()
 void MainWindow::showScoringWeights()
 {
     ScoringWeightsDialog dialog(m_database, listenHistoryPath(), this);
+    dialog.exec();
+}
+
+void MainWindow::showRadioCustomization()
+{
+    RadioCustomizationDialog dialog(m_core, this);
     dialog.exec();
 }
 
