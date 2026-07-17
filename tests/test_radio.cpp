@@ -198,6 +198,9 @@ private slots:
     void genreCrowdingDampensTagSoupMatches();
     void genreAbsentWithNoSharedGenres();
     void genreAbsentWithEmptyIdfMap();
+    void dspClapAvailabilitySuppressesGenre();
+    void genreFallbackActivatesWhenDspClapIsIncomplete();
+    void mixedDspClapAvailabilityFallsBackToGenre();
     void scoringWeightsJsonOverridesDefaults();
     void scoringWeightsJsonRoundTripsAllFields();
     void scoringWeightSpecsRoundTripThroughJson();
@@ -618,6 +621,94 @@ void RadioTest::genreAbsentWithEmptyIdfMap()
     QVERIFY(!hasComponent(scored, QStringLiteral("genre")));
 }
 
+void RadioTest::dspClapAvailabilitySuppressesGenre()
+{
+    const QHash<qint64, QVector<float>> embeddings{{10, {1.0F, 0.0F}}};
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("rock")};
+    seed.genreIdf = {{QStringLiteral("rock"), 6.0}};
+    seed.contextTempoBpm = 120.0;
+    seed.contextEnergy = 0.5;
+    seed.audioCentroid = {1.0F, 0.0F};
+    seed.embeddingsByGroup = &embeddings;
+
+    const TrackScorer::Candidate candidate = makeCandidate(
+        QStringLiteral("/complete"), QStringLiteral("a"), {QStringLiteral("rock")}, 0, -1, false,
+        {}, {}, 120.0, 0.5, 10);
+    QVERIFY(candidate.hasValidDspClap());
+    QVERIFY(seed.hasValidDspClap());
+    QVERIFY(candidate.hasValidGenre());
+    QVERIFY(seed.hasValidGenre());
+
+    const TrackScorer::Weights effective = TrackScorer::getWeights(true);
+    QCOMPARE(effective.genreWeight, 0.0);
+    QVERIFY(effective.tempoWeight > 0.0);
+    QVERIFY(effective.energyWeight > 0.0);
+    QVERIFY(effective.audioWeight > 0.0);
+
+    const TrackScorer::Scored scored = TrackScorer::score(candidate, {}, seed);
+    QVERIFY(!hasComponent(scored, QStringLiteral("genre")));
+    QVERIFY(hasComponent(scored, QStringLiteral("tempo")));
+    QVERIFY(hasComponent(scored, QStringLiteral("energy")));
+    QVERIFY(hasComponent(scored, QStringLiteral("audio")));
+}
+
+void RadioTest::genreFallbackActivatesWhenDspClapIsIncomplete()
+{
+    // The candidate has neither a complete scalar pair nor a CLAP vector in
+    // the session map. Tags are the fallback and partial DSP must not leak
+    // into the score.
+    const QHash<qint64, QVector<float>> embeddings{{10, {1.0F, 0.0F}}};
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("rock")};
+    seed.genreIdf = {{QStringLiteral("rock"), 6.0}};
+    seed.contextTempoBpm = 120.0;
+    seed.contextEnergy = 0.5;
+    seed.audioCentroid = {1.0F, 0.0F};
+    seed.embeddingsByGroup = &embeddings;
+
+    const TrackScorer::Candidate candidate = makeCandidate(
+        QStringLiteral("/missing-vector"), QStringLiteral("a"), {QStringLiteral("rock")}, 0, -1, false,
+        {}, {}, 120.0, -1.0, 11);
+    QVERIFY(candidate.hasValidDspClap());
+    QVERIFY(seed.hasValidDspClap());
+
+    const TrackScorer::Weights effective = TrackScorer::getWeights(false);
+    QVERIFY(effective.genreWeight > 0.0);
+    QCOMPARE(effective.tempoWeight, 0.0);
+    QCOMPARE(effective.energyWeight, 0.0);
+    QCOMPARE(effective.audioWeight, 0.0);
+
+    const TrackScorer::Scored scored = TrackScorer::score(candidate, {}, seed);
+    QVERIFY(hasComponent(scored, QStringLiteral("genre")));
+    QVERIFY(!hasComponent(scored, QStringLiteral("tempo")));
+    QVERIFY(!hasComponent(scored, QStringLiteral("energy")));
+    QVERIFY(!hasComponent(scored, QStringLiteral("audio")));
+}
+
+void RadioTest::mixedDspClapAvailabilityFallsBackToGenre()
+{
+    TrackScorer::SeedContext seed;
+    seed.genresFolded = {QStringLiteral("rock")};
+    seed.genreIdf = {{QStringLiteral("rock"), 6.0}};
+
+    const TrackScorer::Candidate incomplete = makeCandidate(
+        QStringLiteral("/missing-context"), QStringLiteral("a"), {QStringLiteral("rock")}, 0, -1, false,
+        {}, {}, 120.0, 0.5, 10);
+    QVERIFY(incomplete.hasValidDspClap());
+    QVERIFY(!seed.hasValidDspClap());
+    QVERIFY(incomplete.hasValidGenre());
+
+    const TrackScorer::Scored scored = TrackScorer::score(incomplete, {}, seed);
+    QVERIFY(hasComponent(scored, QStringLiteral("genre")));
+    QVERIFY(!hasComponent(scored, QStringLiteral("tempo")));
+    QVERIFY(!hasComponent(scored, QStringLiteral("audio")));
+
+    TrackScorer::Candidate placeholders = incomplete;
+    placeholders.genresFolded = {QStringLiteral("Unknown"), QStringLiteral("untagged")};
+    QVERIFY(!placeholders.hasValidGenre());
+}
+
 void RadioTest::scoringWeightsJsonOverridesDefaults()
 {
     QString error;
@@ -900,9 +991,12 @@ void RadioTest::eraDecaysWithYearGap()
 
 void RadioTest::tempoAndEnergyUseSonicProximity()
 {
+    const QHash<qint64, QVector<float>> embeddings{{1, {1.0F, 0.0F}}};
     TrackScorer::SeedContext seed;
     seed.contextTempoBpm = 120.0;
     seed.contextEnergy = 0.75;
+    seed.audioCentroid = {1.0F, 0.0F};
+    seed.embeddingsByGroup = &embeddings;
 
     TrackScorer::Weights weights = TrackScorer::defaultWeights();
     weights.tempoWeight = 0.4;
@@ -910,7 +1004,7 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
 
     const TrackScorer::Scored adjacent = TrackScorer::score(
         makeCandidate(QStringLiteral("/near"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 150.0, 0.25),
+                      QStringLiteral("album"), QStringLiteral("song"), 150.0, 0.25, 1),
         {}, seed, weights);
     QVERIFY(qFuzzyCompare(componentValue(adjacent, QStringLiteral("tempo")),
                            0.4 * (1.0 - std::log2(1.25))));
@@ -918,14 +1012,14 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
 
     const TrackScorer::Scored exact = TrackScorer::score(
         makeCandidate(QStringLiteral("/exact"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 120.0, 0.75),
+                      QStringLiteral("album"), QStringLiteral("song"), 120.0, 0.75, 1),
         {}, seed, weights);
     QVERIFY(qFuzzyCompare(componentValue(exact, QStringLiteral("tempo")), 0.4));
     QVERIFY(qFuzzyCompare(componentValue(exact, QStringLiteral("energy")), 0.6));
 
     const TrackScorer::Scored distant = TrackScorer::score(
         makeCandidate(QStringLiteral("/far"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 480.0, 1.9),
+                      QStringLiteral("album"), QStringLiteral("song"), 480.0, 1.9, 1),
         {}, seed, weights);
     QVERIFY(!hasComponent(distant, QStringLiteral("tempo")));
     QVERIFY(!hasComponent(distant, QStringLiteral("energy")));
@@ -935,15 +1029,15 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
     seed.contextTempoBpm = 85.0;
     const TrackScorer::Scored sameOctave = TrackScorer::score(
         makeCandidate(QStringLiteral("/85"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 85.0, 0.75),
+                      QStringLiteral("album"), QStringLiteral("song"), 85.0, 0.75, 1),
         {}, seed, weights);
     const TrackScorer::Scored nearby = TrackScorer::score(
         makeCandidate(QStringLiteral("/95"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 95.0, 0.75),
+                      QStringLiteral("album"), QStringLiteral("song"), 95.0, 0.75, 1),
         {}, seed, weights);
     const TrackScorer::Scored doubleOctave = TrackScorer::score(
         makeCandidate(QStringLiteral("/170"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 170.0, 0.75),
+                      QStringLiteral("album"), QStringLiteral("song"), 170.0, 0.75, 1),
         {}, seed, weights);
     const double sameTempo = componentValue(sameOctave, QStringLiteral("tempo"));
     const double nearbyTempo = componentValue(nearby, QStringLiteral("tempo"));
@@ -988,18 +1082,20 @@ void RadioTest::audioComponentUsesEmbeddingCosine()
         {12, QVector<float>{-1.0F, 0.0F}},
     };
     TrackScorer::SeedContext seed;
+    seed.contextTempoBpm = 120.0;
+    seed.contextEnergy = 0.5;
     seed.audioCentroid = {1.0F, 0.0F};
     seed.embeddingsByGroup = &embeddings;
 
     TrackScorer::Weights weights = TrackScorer::defaultWeights();
     weights.audioWeight = 2.0;
 
-    TrackScorer::Candidate same = makeCandidate(QStringLiteral("/same"), QStringLiteral("a"), {});
-    same.contentGroupId = 10;
-    TrackScorer::Candidate near = makeCandidate(QStringLiteral("/near"), QStringLiteral("b"), {});
-    near.contentGroupId = 11;
-    TrackScorer::Candidate inverse = makeCandidate(QStringLiteral("/inverse"), QStringLiteral("c"), {});
-    inverse.contentGroupId = 12;
+    TrackScorer::Candidate same = makeCandidate(QStringLiteral("/same"), QStringLiteral("a"), {}, 0, -1, false,
+                                                  {}, {}, 120.0, 0.5, 10);
+    TrackScorer::Candidate near = makeCandidate(QStringLiteral("/near"), QStringLiteral("b"), {}, 0, -1, false,
+                                                  {}, {}, 120.0, 0.5, 11);
+    TrackScorer::Candidate inverse = makeCandidate(QStringLiteral("/inverse"), QStringLiteral("c"), {}, 0, -1, false,
+                                                     {}, {}, 120.0, 0.5, 12);
 
     const TrackScorer::Scored sameScored = TrackScorer::score(same, {}, seed, weights);
     QVERIFY(qFuzzyCompare(componentValue(sameScored, QStringLiteral("audio")), 2.0));

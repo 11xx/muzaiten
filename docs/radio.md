@@ -31,15 +31,17 @@ indeterminate status-bar indicator remains visible until the new tail arrives.
 
 ## How picks are scored
 
-Every pick blends: shared **genres** (alias-canonicalized, weighted by
-rarity so `shoegaze` counts more than `rock`), **era** proximity,
-**ratings**, **listening history** (local plays + imported scrobbles,
-pooled across duplicate copies), a **novelty** bonus for the unheard, and
-penalties for recent plays, high skip rates, and repeating artists. With
-audio analysis built (below), three content-aware components join in:
-**tempo** and **energy** proximity to the session's rolling sonic context,
-and **audio** similarity by CLAP embedding against the last few played
-tracks.
+Every pick blends **era** proximity, **ratings**, **listening history**
+(local plays + imported scrobbles, pooled across duplicate copies), a
+**novelty** bonus for the unheard, and penalties for recent plays, high skip
+rates, and repeating artists. When the rolling context and a candidate share a
+complete tempo-and-energy pair or matching CLAP embeddings, **tempo** and
+**energy** proximity plus **audio** similarity by CLAP embedding are the
+primary match signal. In that case genre tags are intentionally ignored. If
+neither audio signal is available, radio falls back to shared **genres**
+(alias-canonicalized and rarity-weighted, so `shoegaze` counts more than
+`rock`) rather than combining incomplete audio with potentially incorrect
+tags.
 
 Hover a radio pick in the queue to see exactly why it was chosen — a
 human-readable summary plus the numeric component breakdown.

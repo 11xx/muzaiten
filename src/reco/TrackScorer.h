@@ -27,6 +27,11 @@ struct Candidate {
     double energy = -1.0;           // -1 = unknown, expected unit-ish extractor scale
     int effectiveRating0To100 = -1; // -1 = unrated
     bool hasUserRating = false;
+
+    // A candidate-side DSP or CLAP input. Its matching context data is
+    // checked when scoring.
+    bool hasValidDspClap() const;
+    bool hasValidGenre() const;
 };
 
 // Aggregated listening history for one track (see ListenHistoryStore).
@@ -57,6 +62,11 @@ struct SeedContext {
     const QHash<qint64, QVector<float>> *embeddingsByGroup = nullptr;
     qint64 nowSecs = 0;
     int exploration0To100 = 30;        // conservative .. exploratory
+
+    // A rolling DSP or CLAP context. The candidate's embedding is checked
+    // against embeddingsByGroup when scoring.
+    bool hasValidDspClap() const;
+    bool hasValidGenre() const;
 };
 
 struct Component {
@@ -103,6 +113,10 @@ struct WeightSpec {
 };
 
 Weights defaultWeights();
+// Effective per-pair weights. Complete DSP/CLAP pairs suppress genre; incomplete
+// pairs suppress DSP/CLAP and use genre as the metadata fallback.
+Weights getWeights(bool dspAvailable);
+Weights getWeights(const Weights &weights, bool dspAvailable);
 QVector<WeightSpec> weightSpecs();
 bool weightValue(const Weights &weights, const QString &key, double *value);
 bool setWeightValue(Weights &weights, const QString &key, double value);

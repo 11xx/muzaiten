@@ -28,6 +28,11 @@
 
 ### Changed
 
+- Radio now treats a complete tempo-and-energy pair or matching CLAP embeddings
+  as its primary sonic signal. Genre matching is used only when either track
+  lacks a matching audio signal, so incorrect or sparse genre tags cannot
+  outweigh analyzed sound.
+
 - Start Radio now switches an already-playing seed into a radio queue without
   restarting it or losing its position, while a different seed begins playing
   before its recommendations are ready. Initial and refill batches score off
