@@ -2524,6 +2524,7 @@ void MainWindow::applyTrackRating(const Track &track, int rating0To100, const QS
     m_player->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
     if (m_player->currentTrack().path == track.path) {
         presentNowPlaying(m_player->currentTrack());
+        m_mpris->setTrack(m_player->currentTrack());
     }
     m_queueStore->updateTrackRating(track.path, rating0To100 >= 0 ? rating0To100 : track.rating0To100, rating0To100 >= 0);
     if (m_playlistView != nullptr) {
@@ -2590,6 +2591,7 @@ void MainWindow::startRatingTagSync(const QVector<Track> &tracks, int scope)
         }
         if (currentTrackChanged) {
             presentNowPlaying(m_player->currentTrack());
+            m_mpris->setTrack(m_player->currentTrack());
         }
         if (!summary.updates.isEmpty()) {
             m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
@@ -6693,7 +6695,9 @@ void MainWindow::presentNowPlaying(const Track &track)
     }
     m_playerBar->setTrackInfo(title, subtitle, track.effectiveRating0To100);
     m_rightSidebar->setTrackInfo(track);
-    m_mpris->setTrack(track);
+    // MPRIS is NOT mirrored here: AppCore's currentTrackChanged wiring owns
+    // that (MprisService::setTrack re-queries the DB per call). Rating updates
+    // outside a track change must push it explicitly at the call site.
 }
 
 void MainWindow::presentTrack(const Track &track, bool notifyScrobbler)
