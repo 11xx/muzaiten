@@ -55,6 +55,7 @@
 #include "ui/ScanController.h"
 #include "ui/RatingSyncController.h"
 #include "ui/ViewStatePersistence.h"
+#include "ui/QueueSnapshotStore.h"
 #include "ui/SemanticSearchDialog.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
@@ -609,36 +610,6 @@ QString playbackStateName(PlaybackBackend::State state)
     return QStringLiteral("stopped");
 }
 
-QJsonObject trackToJson(const Track &track)
-{
-    QJsonObject root;
-    root.insert(QStringLiteral("path"), track.path);
-    root.insert(QStringLiteral("parentDir"), track.parentDir);
-    root.insert(QStringLiteral("filename"), track.filename);
-    root.insert(QStringLiteral("title"), track.title);
-    root.insert(QStringLiteral("artistName"), track.artistName);
-    root.insert(QStringLiteral("albumArtistName"), track.albumArtistName);
-    root.insert(QStringLiteral("albumTitle"), track.albumTitle);
-    root.insert(QStringLiteral("date"), track.date);
-    root.insert(QStringLiteral("originalDate"), track.originalDate);
-    root.insert(QStringLiteral("trackNumber"), track.trackNumber);
-    root.insert(QStringLiteral("discNumber"), track.discNumber);
-    root.insert(QStringLiteral("durationMs"), QString::number(track.durationMs));
-    root.insert(QStringLiteral("rating0To100"), track.rating0To100);
-    root.insert(QStringLiteral("effectiveRating0To100"), track.effectiveRating0To100);
-    root.insert(QStringLiteral("hasUserRating"), track.hasUserRating);
-    root.insert(QStringLiteral("fileSize"), QString::number(track.fileSize));
-    root.insert(QStringLiteral("missing"), track.missing);
-    // Technical fields the playback path needs — codec especially, since the DSD
-    // output strategy (native vs PCM) keys off it. Without these a restored queue
-    // would lose its codec and silently fall back to PCM for DSD.
-    root.insert(QStringLiteral("codec"), track.codec);
-    root.insert(QStringLiteral("sampleRateHz"), track.sampleRateHz);
-    root.insert(QStringLiteral("bitrateKbps"), track.bitrateKbps);
-    root.insert(QStringLiteral("channels"), track.channels);
-    root.insert(QStringLiteral("bitDepth"), track.bitDepth);
-    return root;
-}
 
 Track trackFromJson(const QJsonObject &root)
 {
@@ -708,6 +679,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_scanController = new ScanController(*this);
     m_ratingSyncController = new RatingSyncController(*this);
     m_viewStatePersistence = new ViewStatePersistence(*this);
+    m_queueSnapshotStore = new QueueSnapshotStore(*this);
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -3022,110 +2994,13 @@ void MainWindow::refreshLibraryFileExplorer()
     m_libraryFileExplorer->setLibraryEntries(directories, tracks);
 }
 
-void MainWindow::loadQueueState()
-{
-    const QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
-    const QJsonArray trackValues = root.value(QStringLiteral("tracks")).toArray();
-    QVector<Track> tracks;
-    tracks.reserve(trackValues.size());
-    for (const QJsonValue &value : trackValues) {
-        Track track = trackFromJson(value.toObject());
-        if (!track.path.isEmpty()) {
-            const Track refreshed = m_database->trackForPath(track.path);
-            if (!refreshed.path.isEmpty()) {
-                track = refreshed;
-            }
-            tracks.push_back(track);
-        }
-    }
+void MainWindow::loadQueueState() { m_queueSnapshotStore->loadQueueState(); }
 
-    const int savedIndex = root.value(QStringLiteral("index")).toInt(-1);
-    m_player->resetQueue(tracks, savedIndex,
-                         root.value(QStringLiteral("playNextInsertIndex")).toInt(savedIndex + 1));
-    m_queueId = root.value(QStringLiteral("queueId")).toString();
-    m_queueSourceKind = normalizedQueueSourceKind(root.value(QStringLiteral("queueSourceKind")).toString(QStringLiteral("queue")));
-    m_queueSourcePlaylistId = root.value(QStringLiteral("queueSourcePlaylistId")).toString().toLongLong();
-    if (m_queueSourcePlaylistId <= 0) {
-        m_queueSourcePlaylistId = static_cast<qint64>(root.value(QStringLiteral("queueSourcePlaylistId")).toDouble(0));
-    }
-    m_queueSourceName = root.value(QStringLiteral("queueSourceName")).toString();
-    if (m_player->queue().isEmpty()) {
-        m_queueId.clear();
-        m_queueSourceKind = QStringLiteral("queue");
-        m_queueSourcePlaylistId = 0;
-        m_queueSourceName.clear();
-    } else {
-        ensureCurrentQueueIdentity();
-    }
-    // resetQueue() does not emit queueChanged, so push the source-dependent UI
-    // (playlist-mirror items, merge gating) directly for the restored queue.
-    refreshQueueSourceDependentUi();
-    m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
-                              m_player->queueIndex() + 1, m_player->playNextInsertIndex());
-    m_rightSidebar->setCurrentIndex(m_player->queueIndex(), /*reveal=*/true);
-    refreshPlayNextRange();
-    if (m_player->queueIndex() >= 0) {
-        m_player->presentTrack(m_player->queue().at(m_player->queueIndex()));
-    }
-}
+void MainWindow::saveQueueState() { m_queueSnapshotStore->saveQueueState(); }
 
-void MainWindow::saveQueueState()
-{
-    if (m_queueStateSaveTimer != nullptr) {
-        m_queueStateSaveTimer->stop();
-    }
-    if (!m_player->queue().isEmpty()) {
-        ensureCurrentQueueIdentity();
-    }
-    QJsonArray tracks;
-    for (const Track &track : m_player->queue()) {
-        tracks.append(trackToJson(track));
-    }
+void MainWindow::scheduleQueueStateSave(bool immediate) { m_queueSnapshotStore->scheduleQueueStateSave(immediate); }
 
-    QJsonObject root;
-    root.insert(QStringLiteral("tracks"), tracks);
-    root.insert(QStringLiteral("index"), m_player->queueIndex());
-    root.insert(QStringLiteral("playNextInsertIndex"), m_player->playNextInsertIndex());
-    root.insert(QStringLiteral("queueId"), m_queueId);
-    root.insert(QStringLiteral("queueSourceKind"), m_queueSourceKind);
-    root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
-    root.insert(QStringLiteral("queueSourceName"), m_queueSourceName);
-    m_state->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-}
-
-void MainWindow::scheduleQueueStateSave(bool immediate)
-{
-    if (immediate) {
-        saveQueueState();
-        return;
-    }
-    if (m_queueStateSaveTimer != nullptr) {
-        m_queueStateSaveTimer->start();
-    }
-}
-
-QJsonObject MainWindow::queueSnapshotObject(const QString &name, const QString &source) const
-{
-    QJsonArray tracks;
-    for (const Track &track : m_player->queue()) {
-        tracks.append(trackToJson(track));
-    }
-    QJsonObject snapshot;
-    snapshot.insert(QStringLiteral("id"), m_queueId);
-    snapshot.insert(QStringLiteral("name"), name);
-    snapshot.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
-    snapshot.insert(QStringLiteral("index"), m_player->queueIndex());
-    snapshot.insert(QStringLiteral("playNextInsertIndex"), m_player->playNextInsertIndex());
-    snapshot.insert(QStringLiteral("sourceKind"), m_queueSourceKind);
-    snapshot.insert(QStringLiteral("sourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
-    snapshot.insert(QStringLiteral("sourceName"), m_queueSourceName);
-    const QString trimmedSource = source.trimmed();
-    if (!trimmedSource.isEmpty()) {
-        snapshot.insert(QStringLiteral("source"), trimmedSource);
-    }
-    snapshot.insert(QStringLiteral("tracks"), tracks);
-    return snapshot;
-}
+QJsonObject MainWindow::queueSnapshotObject(const QString &name, const QString &source) const { return m_queueSnapshotStore->queueSnapshotObject(name, source); }
 
 QVector<Track> MainWindow::tracksFromSnapshotObject(const QJsonObject &snapshot) const
 {
@@ -3145,17 +3020,9 @@ QVector<Track> MainWindow::tracksFromSnapshotObject(const QJsonObject &snapshot)
     return tracks;
 }
 
-QJsonObject MainWindow::loadQueueSnapshotsRoot() const
-{
-    return QJsonDocument::fromJson(m_state->setting(QStringLiteral("queue.snapshots")).toUtf8()).object();
-}
+QJsonObject MainWindow::loadQueueSnapshotsRoot() const { return m_queueSnapshotStore->loadQueueSnapshotsRoot(); }
 
-void MainWindow::saveQueueSnapshotsRoot(const QJsonObject &root)
-{
-    m_state->setSetting(QStringLiteral("queue.snapshots"),
-                        QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-    refreshSavedQueuePlaylistEntries();
-}
+void MainWindow::saveQueueSnapshotsRoot(const QJsonObject &root) { m_queueSnapshotStore->saveQueueSnapshotsRoot(root); }
 
 QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
 {
@@ -3199,25 +3066,7 @@ QVector<SavedQueuePlaylistEntry> MainWindow::savedQueuePlaylistEntries() const
     return entries;
 }
 
-QJsonObject MainWindow::queueSnapshotByKey(const QString &keyOrId) const
-{
-    if (keyOrId.isEmpty()) {
-        return {};
-    }
-    const QJsonObject root = loadQueueSnapshotsRoot();
-    for (const QJsonObject &snapshot : automaticQueueSnapshotsFromRoot(root)) {
-        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
-            return snapshot;
-        }
-    }
-    for (const QJsonValue &value : root.value(QStringLiteral("saved")).toArray()) {
-        const QJsonObject snapshot = value.toObject();
-        if (queueSnapshotKey(snapshot) == keyOrId || snapshot.value(QStringLiteral("id")).toString() == keyOrId) {
-            return snapshot;
-        }
-    }
-    return {};
-}
+QJsonObject MainWindow::queueSnapshotByKey(const QString &key) const { return m_queueSnapshotStore->queueSnapshotByKey(key); }
 
 void MainWindow::refreshSavedQueuePlaylistEntries()
 {
@@ -3311,27 +3160,13 @@ void MainWindow::deleteQueueSnapshotsConfirmed(const QStringList &ids)
                              4000);
 }
 
-int MainWindow::savedQueueLimitSetting() const
-{
-    return savedQueueUnlimitedSetting() ? 0 : kAutomaticSavedQueueLimit;
-}
+int MainWindow::savedQueueLimitSetting() const { return m_queueSnapshotStore->savedQueueLimitSetting(); }
 
-int MainWindow::radioSavedQueueLimitSetting() const
-{
-    return radioSavedQueueUnlimitedSetting() ? 0 : kAutomaticSavedQueueLimit;
-}
+int MainWindow::radioSavedQueueLimitSetting() const { return m_queueSnapshotStore->radioSavedQueueLimitSetting(); }
 
-bool MainWindow::savedQueueUnlimitedSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("queue.savedQueueUnlimited")).trimmed();
-    return value == QStringLiteral("1") || value == QStringLiteral("true");
-}
+bool MainWindow::savedQueueUnlimitedSetting() const { return m_queueSnapshotStore->savedQueueUnlimitedSetting(); }
 
-bool MainWindow::radioSavedQueueUnlimitedSetting() const
-{
-    const QString value = m_state->setting(QStringLiteral("queue.radioSavedQueueUnlimited")).trimmed();
-    return value == QStringLiteral("1") || value == QStringLiteral("true");
-}
+bool MainWindow::radioSavedQueueUnlimitedSetting() const { return m_queueSnapshotStore->radioSavedQueueUnlimitedSetting(); }
 
 void MainWindow::configureSavedQueueLimit()
 {
@@ -3369,67 +3204,15 @@ void MainWindow::configureSavedQueueLimit()
     statusBar()->showMessage(QStringLiteral("Saved queue limits updated"), 4000);
 }
 
-void MainWindow::ensureCurrentQueueIdentity()
-{
-    if (m_queueId.isEmpty()) {
-        m_queueId = newQueueIdentity();
-    }
-    m_queueSourceKind = normalizedQueueSourceKind(m_queueSourceKind);
-    if (m_queueSourceKind != QStringLiteral("playlist")) {
-        m_queueSourcePlaylistId = 0;
-    }
-}
+void MainWindow::ensureCurrentQueueIdentity() { m_queueSnapshotStore->ensureCurrentQueueIdentity(); }
 
-bool MainWindow::currentQueueBacklogEligible() const
-{
-    return !m_player->queue().isEmpty() && m_queueSourceKind == QStringLiteral("queue");
-}
+bool MainWindow::currentQueueBacklogEligible() const { return m_queueSnapshotStore->currentQueueBacklogEligible(); }
 
-void MainWindow::pushCurrentQueueToBacklog(const QString &name, const QString &source)
-{
-    if (!currentQueueBacklogEligible()) {
-        return;
-    }
-    ensureCurrentQueueIdentity();
-    QJsonObject root = loadQueueSnapshotsRoot();
-    const QString snapshotId = m_queueId;
-    QJsonObject snapshot = queueSnapshotObject(name, source);
-    QJsonArray backlog = queueBacklogFromRoot(root);
-    QJsonArray radioBacklog = radioQueueBacklogFromRoot(root);
-    const bool radioSnapshot = queueSnapshotIsRadio(snapshot);
-    const int limit = radioSnapshot ? radioSavedQueueLimitSetting() : savedQueueLimitSetting();
-    QJsonArray &targetBacklog = radioSnapshot ? radioBacklog : backlog;
-    QJsonArray updatedBacklog;
-    updatedBacklog.append(snapshot);
-    for (const QJsonValue &value : targetBacklog) {
-        const QJsonObject candidate = value.toObject();
-        if (candidate.isEmpty() || candidate.value(QStringLiteral("id")).toString() == snapshotId) {
-            continue;
-        }
-        updatedBacklog.append(candidate);
-        if (limit > 0 && updatedBacklog.size() >= limit) {
-            break;
-        }
-    }
-    targetBacklog = updatedBacklog;
-    root.remove(QStringLiteral("previous"));
-    root.insert(QStringLiteral("backlog"), backlog);
-    root.insert(QStringLiteral("radioBacklog"), radioBacklog);
-    saveQueueSnapshotsRoot(root);
-}
+void MainWindow::pushCurrentQueueToBacklog(const QString &name, const QString &source) { m_queueSnapshotStore->pushCurrentQueueToBacklog(name, source); }
 
-void MainWindow::snapshotCurrentQueueAsPrevious(const QString &source)
-{
-    pushCurrentQueueToBacklog(QString(), source);
-}
+void MainWindow::snapshotCurrentQueueAsPrevious(const QString &source) { m_queueSnapshotStore->snapshotCurrentQueueAsPrevious(source); }
 
-void MainWindow::markQueueAsSpontaneous(const QString &id)
-{
-    m_queueId = id.isEmpty() ? newQueueIdentity() : id;
-    m_queueSourceKind = QStringLiteral("queue");
-    m_queueSourcePlaylistId = 0;
-    m_queueSourceName.clear();
-}
+void MainWindow::markQueueAsSpontaneous(const QString &id) { m_queueSnapshotStore->markQueueAsSpontaneous(id); }
 
 void MainWindow::appendTracksToCurrentPlaylist(const QVector<Track> &tracks)
 {

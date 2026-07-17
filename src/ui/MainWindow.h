@@ -61,6 +61,7 @@ class ScanPipeline;
 class ScanController;
 class RatingSyncController;
 class ViewStatePersistence;
+class QueueSnapshotStore;
 class ArtworkCache;
 class SearchView;
 class SemanticSearchDialog;
@@ -98,6 +99,7 @@ private:
     friend class ScanController;
     friend class RatingSyncController;
     friend class ViewStatePersistence;
+    friend class QueueSnapshotStore;
     void openLibraryFolder();
     void loadExistingLibrary();
     void refreshArtists();
@@ -518,6 +520,7 @@ private:
     ScanController *m_scanController = nullptr;
     RatingSyncController *m_ratingSyncController = nullptr;
     ViewStatePersistence *m_viewStatePersistence = nullptr;
+    QueueSnapshotStore *m_queueSnapshotStore = nullptr;
     ScanPipeline *m_scanPipeline = nullptr;
     bool m_forceFullRescan = false;
     // Background metadata fill (lazy tag read of enumerated-only placeholders).
