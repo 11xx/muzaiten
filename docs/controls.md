@@ -44,7 +44,7 @@ search options in search, sort/alignment in the album views.
   off; with **Allow resampling** DSD decodes to PCM for shared output.
 - `Playback > Resume behavior…` — whether position and playback state are
   restored across launches.
-- `Radio > Scoring weights…` / `Radio > Genre curation…` — engine tuning
+- `Radio > Customization…` / `Radio > Genre curation…` — engine tuning
   ([radio.md](radio.md)).
 - `Settings > Track information panel…` — fields shown in the right-side
   info pane. `Settings > Album art resolution…` — cached artwork size.

@@ -3,6 +3,7 @@
 #include "app/AppCore.h"
 
 #include <QComboBox>
+#include <QCloseEvent>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -183,6 +184,18 @@ RadioCustomizationDialog::RadioCustomizationDialog(AppCore *core, QWidget *paren
 
     m_revertBaseline = m_core->activeRadioProfile();
     reloadProfile();
+}
+
+void RadioCustomizationDialog::reject()
+{
+    flushPreview();
+    QDialog::reject();
+}
+
+void RadioCustomizationDialog::closeEvent(QCloseEvent *event)
+{
+    flushPreview();
+    QDialog::closeEvent(event);
 }
 
 void RadioCustomizationDialog::reloadProfile()

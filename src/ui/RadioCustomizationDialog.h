@@ -7,6 +7,7 @@
 
 class AppCore;
 class QComboBox;
+class QCloseEvent;
 class QDoubleSpinBox;
 class QRadioButton;
 class QPushButton;
@@ -18,6 +19,10 @@ class RadioCustomizationDialog final : public QDialog {
 
 public:
     explicit RadioCustomizationDialog(AppCore *core, QWidget *parent = nullptr);
+
+protected:
+    void reject() override;
+    void closeEvent(QCloseEvent *event) override;
 
 private:
     void reloadProfile();
