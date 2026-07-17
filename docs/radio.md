@@ -34,7 +34,10 @@ indeterminate status-bar indicator remains visible until the new tail arrives.
 Every pick blends **era** proximity, **ratings**, **listening history**
 (local plays + imported scrobbles, pooled across duplicate copies), a
 **novelty** bonus for the unheard, and penalties for recent plays, high skip
-rates, and repeating artists. When the rolling context and a candidate share a
+rates, and repeating artists. The first five radio picks use the full novelty
+and rating weights; subsequent picks linearly taper those two signals by 10%
+per pick to small floors, so the session naturally settles into its rolling
+sound without losing discovery or taste history entirely. When the rolling context and a candidate share a
 complete tempo-and-energy pair or matching CLAP embeddings, **tempo** and
 **energy** proximity plus **audio** similarity by CLAP embedding are the
 primary match signal. In that case genre tags are intentionally ignored. If

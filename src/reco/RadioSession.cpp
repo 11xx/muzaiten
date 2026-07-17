@@ -274,6 +274,7 @@ void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const Tra
         }
     }
     m_pickReasonOrder.push_back(reasonPath);
+    ++m_generatedPickCount;
 }
 
 QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludePaths,
@@ -299,6 +300,8 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
         context.embeddingsByGroup = &m_embeddingsByGroup;
         context.nowSecs = m_nowSecs;
         context.exploration0To100 = m_exploration;
+        context.sessionTrackNumber = m_generatedPickCount + 1;
+        context.sessionDecay = m_sessionDecay;
 
         const QSet<QString> throttled = context.recentArtistsFolded;
         QSet<QString> excludedSongKeys;
