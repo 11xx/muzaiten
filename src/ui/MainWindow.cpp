@@ -54,6 +54,7 @@
 #include "ui/SearchView.h"
 #include "ui/ScanController.h"
 #include "ui/RatingSyncController.h"
+#include "ui/ViewStatePersistence.h"
 #include "ui/SemanticSearchDialog.h"
 #include "ui/SourceDirectoriesDialog.h"
 #include "ui/SplitterPersistence.h"
@@ -590,49 +591,6 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
 
-QString mainViewName(MainView view)
-{
-    switch (view) {
-    case MainView::LibraryPanels:
-        return QStringLiteral("libraryPanels");
-    case MainView::LibraryMusicExplorer:
-        return QStringLiteral("libraryMusicExplorer");
-    case MainView::LibraryFileExplorer:
-        return QStringLiteral("libraryFileExplorer");
-    case MainView::FreeRoamFileExplorer:
-        return QStringLiteral("freeRoamFileExplorer");
-    case MainView::Search:
-        return QStringLiteral("search");
-    case MainView::Queue:
-        return QStringLiteral("queue");
-    case MainView::Playlist:
-        return QStringLiteral("playlist");
-    }
-    return QStringLiteral("libraryPanels");
-}
-
-MainView mainViewFromName(const QString &name)
-{
-    if (name == QStringLiteral("libraryMusicExplorer")) {
-        return MainView::LibraryMusicExplorer;
-    }
-    if (name == QStringLiteral("libraryFileExplorer")) {
-        return MainView::LibraryFileExplorer;
-    }
-    if (name == QStringLiteral("freeRoamFileExplorer")) {
-        return MainView::FreeRoamFileExplorer;
-    }
-    if (name == QStringLiteral("search")) {
-        return MainView::Search;
-    }
-    if (name == QStringLiteral("queue")) {
-        return MainView::Queue;
-    }
-    if (name == QStringLiteral("playlist")) {
-        return MainView::Playlist;
-    }
-    return MainView::LibraryPanels;
-}
 
 QString playbackStateName(PlaybackBackend::State state)
 {
@@ -749,6 +707,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_lastFmScrobbler       = m_core->lastFmScrobbler();
     m_scanController = new ScanController(*this);
     m_ratingSyncController = new RatingSyncController(*this);
+    m_viewStatePersistence = new ViewStatePersistence(*this);
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -2088,190 +2047,16 @@ void MainWindow::syncAllSavedRatingTags() { m_ratingSyncController->syncAllSaved
 void MainWindow::retryPendingRatingTags() { m_ratingSyncController->retryPendingRatingTags(); }
 void MainWindow::applyAlbumRating(const QString &a, const QString &t, int r) { m_ratingSyncController->applyAlbumRating(a, t, r); }
 
-void MainWindow::loadViewSettings()
-{
-    m_loadingViewSettings = true;
-    m_trackTable->applyViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->applyAlbumGridViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
-        m_musicExplorerView->applyTrackTableViewSettingsJson(m_state->setting(QStringLiteral("trackTable.view")));
-    }
-    const QString rightSidebarSettings = m_state->setting(QStringLiteral("rightSidebar.view"));
-    m_rightSidebar->applyViewSettingsJson(rightSidebarSettings);
-    m_playerBar->setTrackInfoPaneVisible(QJsonDocument::fromJson(rightSidebarSettings.toUtf8()).object().value(QStringLiteral("showTrackInfo")).toBool(true));
-    const QJsonObject playerBar = QJsonDocument::fromJson(m_state->setting(QStringLiteral("playerBar.view")).toUtf8()).object();
-    m_playerBar->setCompactMenu(playerBar.value(QStringLiteral("compactMenu")).toBool(false));
-    m_playerBar->setAlwaysShowTray(m_state->setting(QStringLiteral("tray.alwaysVisible"), QStringLiteral("false")) == QStringLiteral("true"));
-
-    const int volume = std::clamp(m_state->setting(QStringLiteral("volume"), QStringLiteral("100")).toInt(), 0, 100);
-    m_player->setVolume(static_cast<double>(volume) / 100.0);
-    m_playerBar->setVolume(volume);
-    m_albumGrid->applyViewSettingsJson(m_state->setting(QStringLiteral("albumGrid.view")));
-    m_artistSidebar->applyViewSettingsJson(m_state->setting(QStringLiteral("artistSidebar.view")));
-    const QJsonObject mainWindow = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
-    const QByteArray geometry = QByteArray::fromBase64(mainWindow.value(QStringLiteral("geometry")).toString().toLatin1());
-    if (!geometry.isEmpty()) {
-        restoreGeometry(geometry);
-    }
-    SplitterPersistence::restoreSplitterIfStable(m_rootSplitter,
-                            mainWindow.value(QStringLiteral("rootSplitter")).toArray(),
-                            {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
-                            kRootSplitterMinimumTotal);
-    SplitterPersistence::restoreSplitterIfStable(m_centerSplitter,
-                            mainWindow.value(QStringLiteral("centerSplitter")).toArray(),
-                            {kPanelMinimumHeight, kPanelMinimumHeight},
-                            kCenterSplitterMinimumTotal);
-    m_mainView = mainViewFromName(mainWindow.value(QStringLiteral("mainView")).toString());
-    m_libraryExplorerDirectory = mainWindow.value(QStringLiteral("libraryExplorerDirectory")).toString();
-    m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
-
-    const bool showUnsupported = m_state->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
-    m_playerBar->setListUnsupportedFiles(showUnsupported);
-
-    if (m_panelSearch != nullptr) {
-        m_panelSearch->setKeyBindingProfileName(m_state->setting(QStringLiteral("mainPanel.keyBindingProfile"),
-                                                                 defaultMainPanelKeyBindingProfileName()));
-        const QJsonArray focusOrder = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainPanel.focusOrder")).toUtf8()).array();
-        m_panelSearch->setFocusOrder(mainPanelFocusOrderFromJson(focusOrder));
-        m_panelSearch->setActivePanelFromString(m_state->setting(QStringLiteral("mainPanel.activePanel")));
-    }
-    const int mainPanelScrollPadding = std::clamp(m_state->setting(QStringLiteral("mainPanel.scrollPadding"),
-                                                                   QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
-                                                  0, 20);
-    m_rightSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
-    m_artistSidebar->setNavigationScrollPadding(mainPanelScrollPadding);
-    m_trackTable->setNavigationScrollPadding(mainPanelScrollPadding);
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->setNavigationScrollPadding(mainPanelScrollPadding);
-    }
-
-    switchMainView(m_mainView);
-    applySharedTableSettings();
-    m_loadingViewSettings = false;
-}
-
-void MainWindow::saveTrackTableViewSettings()
-{
-    if (m_loadingViewSettings || m_applyingTrackTableViewSettings) {
-        return;
-    }
-
-    QObject *source = sender();
-    const QString settings = source == m_musicExplorerView && m_musicExplorerView != nullptr
-        ? m_musicExplorerView->trackTableViewSettingsJson()
-        : m_trackTable->viewSettingsJson();
-    m_state->setSetting(QStringLiteral("trackTable.view"), settings);
-
-    QScopedValueRollback<bool> applying(m_applyingTrackTableViewSettings, true);
-    if (source == m_musicExplorerView) {
-        m_trackTable->applyViewSettingsJson(settings);
-    } else if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->applyTrackTableViewSettingsJson(settings);
-    }
-    applySharedTableSettings();
-}
-
-void MainWindow::saveAlbumGridViewSettings()
-{
-    const QString settings = m_albumGrid->viewSettingsJson();
-    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
-    if (m_musicExplorerView != nullptr) {
-        m_musicExplorerView->applyAlbumGridViewSettingsJson(settings);
-    }
-}
-
-void MainWindow::saveMusicExplorerAlbumGridViewSettings()
-{
-    if (m_musicExplorerView == nullptr) {
-        return;
-    }
-    const QString settings = m_musicExplorerView->albumGridViewSettingsJson();
-    m_state->setSetting(QStringLiteral("albumGrid.view"), settings);
-    m_albumGrid->applyViewSettingsJson(settings);
-}
-
-void MainWindow::saveArtistSidebarViewSettings()
-{
-    m_state->setSetting(QStringLiteral("artistSidebar.view"), m_artistSidebar->viewSettingsJson());
-}
-
-void MainWindow::saveRightSidebarViewSettings()
-{
-    if (m_loadingViewSettings) {
-        return;
-    }
-    m_state->setSetting(QStringLiteral("rightSidebar.view"), m_rightSidebar->viewSettingsJson());
-    applySharedTableSettings();
-}
-
-void MainWindow::saveQueueScreenViewSettings()
-{
-    if (m_queueScreen == nullptr) {
-        return;
-    }
-    m_state->setSetting(QStringLiteral("queueScreen.view"), m_queueScreen->viewSettingsJson());
-}
-
-void MainWindow::savePlaylistViewSettings()
-{
-    if (m_playlistView == nullptr) {
-        return;
-    }
-    m_state->setSetting(QStringLiteral("playlistView.view"), m_playlistView->viewSettingsJson());
-    applySharedTableSettings();
-}
-
-void MainWindow::saveMainWindowViewSettings(bool captureSplitterSizes)
-{
-    if (m_loadingViewSettings) {
-        return;
-    }
-
-    QJsonObject root = QJsonDocument::fromJson(m_state->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
-    root.insert(QStringLiteral("geometry"), QString::fromLatin1(saveGeometry().toBase64()));
-    if (captureSplitterSizes) {
-        const QList<int> rootSizes = m_rootSplitter->sizes();
-        if (SplitterPersistence::splitterSizesAreStable(rootSizes,
-                                   {kArtistSidebarMinimumWidth, kCenterPaneMinimumWidth, kRightSidebarMinimumWidth},
-                                   kRootSplitterMinimumTotal)) {
-            root.insert(QStringLiteral("rootSplitter"), SplitterPersistence::splitterSizesToJson(rootSizes));
-        }
-        const QList<int> centerSizes = m_centerSplitter->sizes();
-        if (SplitterPersistence::splitterSizesAreStable(centerSizes,
-                                   {kPanelMinimumHeight, kPanelMinimumHeight},
-                                   kCenterSplitterMinimumTotal)) {
-            root.insert(QStringLiteral("centerSplitter"), SplitterPersistence::splitterSizesToJson(centerSizes));
-        }
-    }
-    root.insert(QStringLiteral("mainView"), mainViewName(m_mainView));
-    root.insert(QStringLiteral("libraryExplorerDirectory"), m_libraryExplorerDirectory);
-    root.insert(QStringLiteral("freeRoamDirectory"), m_freeRoamDirectory);
-    if (m_panelSearch != nullptr) {
-        root.insert(QStringLiteral("activePanel"), mainPanelIdToString(m_panelSearch->activePanel()));
-    }
-    m_state->setSetting(QStringLiteral("mainWindow.view"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-    if (m_panelSearch != nullptr) {
-        m_state->setSetting(QStringLiteral("mainPanel.keyBindingProfile"), m_panelSearch->keyBindingProfileName());
-        m_state->setSetting(QStringLiteral("mainPanel.focusOrder"),
-                            QString::fromUtf8(QJsonDocument(mainPanelFocusOrderToJson(m_panelSearch->focusOrder())).toJson(QJsonDocument::Compact)));
-        m_state->setSetting(QStringLiteral("mainPanel.activePanel"), mainPanelIdToString(m_panelSearch->activePanel()));
-    }
-}
-
-void MainWindow::saveAllViewSettings()
-{
-    saveTrackTableViewSettings();
-    saveAlbumGridViewSettings();
-    saveArtistSidebarViewSettings();
-    saveRightSidebarViewSettings();
-    if (m_queueScreen != nullptr) {
-        saveQueueScreenViewSettings();
-    }
-    if (m_playlistView != nullptr) {
-        savePlaylistViewSettings();
-    }
-    saveMainWindowViewSettings();
-}
+void MainWindow::loadViewSettings() { m_viewStatePersistence->loadViewSettings(); }
+void MainWindow::saveTrackTableViewSettings() { m_viewStatePersistence->saveTrackTableViewSettings(); }
+void MainWindow::saveAlbumGridViewSettings() { m_viewStatePersistence->saveAlbumGridViewSettings(); }
+void MainWindow::saveMusicExplorerAlbumGridViewSettings() { m_viewStatePersistence->saveMusicExplorerAlbumGridViewSettings(); }
+void MainWindow::saveArtistSidebarViewSettings() { m_viewStatePersistence->saveArtistSidebarViewSettings(); }
+void MainWindow::saveRightSidebarViewSettings() { m_viewStatePersistence->saveRightSidebarViewSettings(); }
+void MainWindow::saveQueueScreenViewSettings() { m_viewStatePersistence->saveQueueScreenViewSettings(); }
+void MainWindow::savePlaylistViewSettings() { m_viewStatePersistence->savePlaylistViewSettings(); }
+void MainWindow::saveMainWindowViewSettings(bool capture) { m_viewStatePersistence->saveMainWindowViewSettings(capture); }
+void MainWindow::saveAllViewSettings() { m_viewStatePersistence->saveAllViewSettings(); }
 
 void MainWindow::resetViewPreferences()
 {

@@ -60,6 +60,7 @@ class MusicExplorerView;
 class ScanPipeline;
 class ScanController;
 class RatingSyncController;
+class ViewStatePersistence;
 class ArtworkCache;
 class SearchView;
 class SemanticSearchDialog;
@@ -96,6 +97,7 @@ protected:
 private:
     friend class ScanController;
     friend class RatingSyncController;
+    friend class ViewStatePersistence;
     void openLibraryFolder();
     void loadExistingLibrary();
     void refreshArtists();
@@ -515,6 +517,7 @@ private:
     QThread *m_scanThread = nullptr;
     ScanController *m_scanController = nullptr;
     RatingSyncController *m_ratingSyncController = nullptr;
+    ViewStatePersistence *m_viewStatePersistence = nullptr;
     ScanPipeline *m_scanPipeline = nullptr;
     bool m_forceFullRescan = false;
     // Background metadata fill (lazy tag read of enumerated-only placeholders).
