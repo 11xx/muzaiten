@@ -85,6 +85,7 @@ private slots:
     void readsListAllInfo();
     void reportsAckErrorWithoutLeadingNewline();
     void decodesUtf8SplitAcrossReads();
+    void keepsTagsEndingInOkAcrossReads();
 };
 
 void MpdClientTest::allowsOnlyReadOnlyCommands()
@@ -245,6 +246,41 @@ void MpdClientTest::decodesUtf8SplitAcrossReads()
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(tracks.size(), 1);
     QCOMPARE(tracks.first().title, QString::fromUtf8("Caf\xC3\xA9 Test"));
+}
+
+void MpdClientTest::keepsTagsEndingInOkAcrossReads()
+{
+    quint16 port = 0;
+    const int serverFd = makeLoopbackServer(&port);
+    if (loopbackBlockedBySandbox(serverFd)) {
+        QSKIP("loopback TCP sockets are blocked by this sandbox");
+    }
+    QVERIFY(serverFd >= 0);
+
+    const QByteArray first = "file: Artist/Album/01.flac\n"
+                             "Title: Title OK\n";
+    const QByteArray rest = "Artist: Artist\n"
+                            "Album: Album OK\n"
+                            "OK\n";
+    std::thread serverThread([serverFd, first, rest]() {
+        serveChunks(serverFd, {first, rest}, 100);
+    });
+
+    MpdClient client;
+    QString error;
+    const bool connected = client.connectToServer(QStringLiteral("127.0.0.1"), port, 3000, &error);
+    QVector<MpdTrack> tracks;
+    if (connected) {
+        tracks = client.listAllInfo(&error);
+    }
+    serverThread.join();
+    ::close(serverFd);
+
+    QVERIFY2(connected, qPrintable(error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(tracks.size(), 1);
+    QCOMPARE(tracks.first().title, QStringLiteral("Title OK"));
+    QCOMPARE(tracks.first().albumTitle, QStringLiteral("Album OK"));
 }
 
 QTEST_MAIN(MpdClientTest)

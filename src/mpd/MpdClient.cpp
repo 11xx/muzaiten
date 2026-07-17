@@ -236,7 +236,8 @@ QString MpdClient::readResponse(QString *error)
         // "ACK [code@idx] {cmd} message\n" line. When that ACK is the first
         // line it has no preceding newline, so match the start too — otherwise
         // the loop blocks until the 5s timeout and reports a bogus socket error.
-        if (buffer.endsWith("OK\n") || buffer.startsWith("ACK ") || buffer.contains("\nACK ")) {
+        if (buffer == "OK\n" || buffer.endsWith("\nOK\n") || buffer.startsWith("ACK ")
+            || buffer.contains("\nACK ")) {
             break;
         }
     }
@@ -246,7 +247,7 @@ QString MpdClient::readResponse(QString *error)
         && error != nullptr) {
         *error = response.trimmed();
     }
-    if (response.endsWith(QStringLiteral("OK\n"))) {
+    if (response == QStringLiteral("OK\n") || response.endsWith(QStringLiteral("\nOK\n"))) {
         response.chop(3);
     }
     return response.trimmed();
