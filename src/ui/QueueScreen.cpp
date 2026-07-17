@@ -26,6 +26,8 @@ QueueScreen::QueueScreen(QWidget *parent)
     connect(m_table, &QueueTable::clearPlayNextPriorityRequested, this, &QueueScreen::clearPlayNextPriorityRequested);
     connect(m_table, &QueueTable::saveQueueAsRequested, this, &QueueScreen::saveQueueAsRequested);
     connect(m_table, &QueueTable::restorePreviousQueueRequested, this, &QueueScreen::restorePreviousQueueRequested);
+    connect(m_table, &QueueTable::refreshRadioPicksBelowRequested,
+            this, &QueueScreen::refreshRadioPicksBelowRequested);
     connect(m_table, &QueueTable::unlinkFromPlaylistRequested, this, &QueueScreen::unlinkQueueFromPlaylistRequested);
     connect(m_table, &QueueTable::findFileRequested, this, &QueueScreen::findFileRequested);
     connect(m_table, &QueueTable::addToPlaylistRequested, this, &QueueScreen::addToPlaylistRequested);
@@ -94,4 +96,9 @@ void QueueScreen::revealCurrentPlaying()
 void QueueScreen::setQueueIsPlaylistSourced(bool sourced)
 {
     m_table->setQueueIsPlaylistSourced(sourced);
+}
+
+void QueueScreen::setRadioActive(bool active)
+{
+    m_table->setRadioActive(active);
 }

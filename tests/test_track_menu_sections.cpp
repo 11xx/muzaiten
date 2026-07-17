@@ -19,6 +19,7 @@ private slots:
         callbacks.addToQueueTemporary = []() {};
         callbacks.addToPlaylist = []() {};
         callbacks.startRadio = []() {};
+        callbacks.refreshRadioPicksBelow = []() {};
         callbacks.setNeverRadio = [](bool) {};
         callbacks.setNoLearn = [](bool) {};
         callbacks.findInLibrary = []() {};
@@ -44,6 +45,7 @@ private slots:
                              QStringLiteral("Add to playlist… (3)"),
                              QStringLiteral("|"),
                              QStringLiteral("Start Radio"),
+                             QStringLiteral("Refresh picks below"),
                              QStringLiteral("Never play on radio"),
                              QStringLiteral("Don't learn from this"),
                              QStringLiteral("|"),
@@ -52,10 +54,10 @@ private slots:
                              QStringLiteral("Copy path"),
                              QStringLiteral("Properties"),
                          }));
-        QVERIFY(menu.actions().at(9)->isCheckable());
-        QVERIFY(menu.actions().at(9)->isChecked());
         QVERIFY(menu.actions().at(10)->isCheckable());
-        QVERIFY(!menu.actions().at(10)->isChecked());
+        QVERIFY(menu.actions().at(10)->isChecked());
+        QVERIFY(menu.actions().at(11)->isCheckable());
+        QVERIFY(!menu.actions().at(11)->isChecked());
     }
 
     void omitsAbsentCallbacksAndUsesSingleTrackPlayLabel()

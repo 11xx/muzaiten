@@ -76,6 +76,11 @@
 
 ### Fixed
 
+- Radio no longer destroys its upcoming queue after three early skips. Queue
+  replacement is now explicit through **Refresh picks below** on a radio queue
+  row and preserves manual entries. Previous and direct row selections are
+  recorded as navigation rather than rejection, preventing manually browsing
+  the radio queue from contaminating skip-learning data.
 - The analysis status in the menu no longer reports "~0s left" for whole
   provider phases (fractional ETA values were truncated to zero on parse)
   and now shows real wall-clock elapsed time instead of a frozen 00:00 (the

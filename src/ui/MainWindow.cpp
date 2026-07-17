@@ -942,6 +942,10 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_player, &PlayerCore::radioActiveChanged, this, [this](bool active) {
         m_playerBar->setRadioActive(active);
+        m_rightSidebar->setRadioActive(active);
+        if (m_queueScreen != nullptr) {
+            m_queueScreen->setRadioActive(active);
+        }
         // Radio replaces the queue with its own session. Sever any playlist
         // backing BEFORE the seed lands: radioActiveChanged fires ahead of the
         // clearAll/appendAndPlay sequence in AppCore::startRadio, and with a
@@ -1222,6 +1226,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::removeAllMissingTracksRequested, this, &MainWindow::removeMissingTracks);
     connect(m_rightSidebar, &RightSidebar::queueClearRequested, this, &MainWindow::clearQueue);
     connect(m_rightSidebar, &RightSidebar::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
+    connect(m_rightSidebar, &RightSidebar::refreshRadioPicksBelowRequested,
+            this, [this](int row) { m_core->refreshRadioPicksBelow(row); });
     // MPRIS transport, IPC, and tray are handled by AppCore.
     connect(m_playerBar, &PlayerBar::openLibraryRequested, this, &MainWindow::openLibraryFolder);
     connect(m_playerBar, &PlayerBar::sourceDirectoriesRequested, this, &MainWindow::configureSourceDirectories);
@@ -3008,6 +3014,7 @@ QueueScreen *MainWindow::ensureQueueScreen()
                                                   0, 20);
     m_queueScreen->setNavigationScrollPadding(mainPanelScrollPadding);
     m_queueScreen->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
+    m_queueScreen->setRadioActive(m_player->radioActive());
 
     connect(m_queueScreen, &QueueScreen::queueTrackActivated, this, [this](int index) {
         playQueueIndex(index, /*notifyScrobbler=*/true, /*startPaused=*/false, /*explicitJump=*/true);
@@ -3029,6 +3036,8 @@ QueueScreen *MainWindow::ensureQueueScreen()
     connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_queueScreen, &QueueScreen::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
     connect(m_queueScreen, &QueueScreen::restorePreviousQueueRequested, this, &MainWindow::restorePreviousQueue);
+    connect(m_queueScreen, &QueueScreen::refreshRadioPicksBelowRequested,
+            this, [this](int row) { m_core->refreshRadioPicksBelow(row); });
     connect(m_queueScreen, &QueueScreen::unlinkQueueFromPlaylistRequested, this, &MainWindow::unlinkQueueFromPlaylist);
     connect(m_queueScreen, &QueueScreen::trackLibraryRequested, this, &MainWindow::revealTrackInLibrary);
     connect(m_queueScreen, &QueueScreen::viewSettingsChanged, this, &MainWindow::saveQueueScreenViewSettings);

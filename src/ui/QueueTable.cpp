@@ -1122,6 +1122,11 @@ void QueueTable::showQueueMenu(const QPoint &pos)
         }
     };
     callbacks.startRadio = [this, track]() { emit startRadioRequested(track); };
+    if (m_radioActive) {
+        callbacks.refreshRadioPicksBelow = [this, row]() {
+            emit refreshRadioPicksBelowRequested(row);
+        };
+    }
     callbacks.setNeverRadio = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("never_radio"), on); };
     callbacks.setNoLearn = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("no_learn"), on); };
     callbacks.findInLibrary = [this, track]() { emit trackLibraryRequested(track); };
@@ -1132,6 +1137,7 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     state.trackCount = 1;
     state.neverRadioChecked = allFlagged(QStringLiteral("never_radio"));
     state.noLearnChecked = allFlagged(QStringLiteral("no_learn"));
+    state.refreshRadioPicksBelowEnabled = row >= m_store->currentIndex();
     TrackMenuSections::appendTrackSections(menu, callbacks, state);
 
     if (track.missing) {

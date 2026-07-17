@@ -28,7 +28,8 @@ void PlayEventRecorder::setClock(std::function<qint64()> clock)
     }
 }
 
-void PlayEventRecorder::trackStarted(const Track &track, bool userInitiated, const QString &source)
+void PlayEventRecorder::trackStarted(const Track &track, bool userInitiated, const QString &source,
+                                     const QString &outgoingOutcome)
 {
     const qint64 now = m_msecsNow();
     // Decide the session roll from the activity seen *before* this start:
@@ -41,7 +42,7 @@ void PlayEventRecorder::trackStarted(const Track &track, bool userInitiated, con
     const bool rollSession = m_sessionId.isEmpty()
         || (!continuousPlayback && (now - m_lastActivityMs) > kSessionIdleGapMs);
 
-    finalizeOpenEvent(QStringLiteral("skipped"));
+    finalizeOpenEvent(outgoingOutcome);
 
     if (rollSession) {
         m_sessionId = newSessionId();

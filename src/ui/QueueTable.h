@@ -53,6 +53,7 @@ public:
     // Gates the "Unlink queue from playlist" context-menu entry, shown only while
     // the live queue is mirroring a playlist.
     void setQueueIsPlaylistSourced(bool sourced);
+    void setRadioActive(bool active) { m_radioActive = active; }
 
 signals:
     void trackActivated(int index);
@@ -66,6 +67,7 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
+    void refreshRadioPicksBelowRequested(int row);
     void unlinkFromPlaylistRequested();
     void findFileRequested(const Track &track);
     void trackLibraryRequested(const Track &track);
@@ -111,6 +113,7 @@ private:
     bool m_restoreScrollPending = false;
     bool m_restoreScrollScheduled = false;
     bool m_queueIsPlaylistSourced = false;
+    bool m_radioActive = false;
 
     // Incremental "/" find (FullScreen preset only); null for the sidebar preset.
     PanelSearchBar *m_search = nullptr;

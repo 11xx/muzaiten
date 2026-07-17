@@ -20,12 +20,14 @@ QString suffixForCount(int trackCount)
     return trackCount > 1 ? QStringLiteral(" (%1)").arg(trackCount) : QString();
 }
 
-void addAction(QMenu &menu, const QString &label, const std::function<void()> &callback)
+void addAction(QMenu &menu, const QString &label, const std::function<void()> &callback,
+               bool enabled = true)
 {
     if (!callback) {
         return;
     }
     QAction *action = menu.addAction(label);
+    action->setEnabled(enabled);
     QObject::connect(action, &QAction::triggered, &menu, [callback]() {
         callback();
     });
@@ -75,10 +77,13 @@ void appendTrackSections(QMenu &menu, const Callbacks &callbacks, const State &s
         addAction(menu, QStringLiteral("Add to playlist…%1").arg(suffix), callbacks.addToPlaylist);
     }
 
-    const bool hasRadioGroup = callbacks.startRadio || callbacks.setNeverRadio || callbacks.setNoLearn;
+    const bool hasRadioGroup = callbacks.startRadio || callbacks.refreshRadioPicksBelow
+        || callbacks.setNeverRadio || callbacks.setNoLearn;
     if (hasRadioGroup) {
         addSeparatorIfNeeded(menu);
         addAction(menu, QStringLiteral("Start Radio"), callbacks.startRadio);
+        addAction(menu, QStringLiteral("Refresh picks below"), callbacks.refreshRadioPicksBelow,
+                  state.refreshRadioPicksBelowEnabled);
         addCheckableAction(menu, QStringLiteral("Never play on radio"), state.neverRadioChecked,
                            callbacks.setNeverRadio);
         addCheckableAction(menu, QStringLiteral("Don't learn from this"), state.noLearnChecked,

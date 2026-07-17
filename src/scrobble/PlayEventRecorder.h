@@ -9,7 +9,7 @@
 #include <functional>
 
 // Watches playback and finalizes exactly one PlayEvent per track "spin",
-// capturing how each playback ended (finished / skipped / stopped /
+// capturing how each playback ended (finished / skipped / navigated / stopped /
 // session_end), how much was actually heard, where the track came from, and
 // which listening session it belonged to. Runs always, independent of any
 // scrobbling service — skips and stops are as much signal as completed listens.
@@ -29,11 +29,12 @@ public:
     void setClock(std::function<qint64()> clock);
 
 public slots:
-    // A track began playing. Finalizes any open event as "skipped", rolls the
-    // listening session if the app was idle past the gap, then opens a fresh
-    // event. userInitiated marks an explicit user pick; source describes how the
-    // track was chosen (queue_manual | queue_auto | library_shuffle | resume).
-    void trackStarted(const Track &track, bool userInitiated, const QString &source);
+    // A track began playing. Finalizes any open event with outgoingOutcome,
+    // rolls the listening session if the app was idle past the gap, then opens
+    // a fresh event. "navigated" distinguishes direct row picks and Previous
+    // from a rejecting Next/automatic interruption.
+    void trackStarted(const Track &track, bool userInitiated, const QString &source,
+                      const QString &outgoingOutcome = QStringLiteral("skipped"));
     // Session-restore continuation: seeds the accumulated playback time with
     // elapsedMs and anchors the start to when the track originally began, honors
     // the restored play/pause state, and is never treated as user-initiated.

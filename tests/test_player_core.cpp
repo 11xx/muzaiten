@@ -130,7 +130,7 @@ private slots:
     void shuffleAppendAndPlayRefreshesBucket();
     void shuffleBackwardJumpDoesNotBadgePlayNext();
     void linearPreviousDoesNotBadgeDepartedRowAsPlayNext();
-    void previousEmitsAboutToNavigateBack();
+    void previousAndDirectJumpEmitNavigationSignal();
     void libraryShuffleInjectsLibraryTrack();
     void radioShuffleAtPercent100InjectsRadioProviderTrack();
     void radioShuffleAtPercent0UsesQueueShuffle();
@@ -729,18 +729,20 @@ void PlayerCoreTest::linearPreviousDoesNotBadgeDepartedRowAsPlayNext()
     QCOMPARE(m_core->playNextInsertIndex(), m_core->queueIndex() + 1);
 }
 
-void PlayerCoreTest::previousEmitsAboutToNavigateBack()
+void PlayerCoreTest::previousAndDirectJumpEmitNavigationSignal()
 {
     m_core->resetQueue(makeTracks({"/a", "/b"}));
     m_core->playAt(1);
 
-    // The signal fires before the outgoing track's play event is finalized;
-    // AppCore relies on it to exempt Back from the radio reroll skip streak.
-    QSignalSpy backNav(m_core.get(), &PlayerCore::aboutToNavigateBack);
+    // The signal fires before the outgoing track's play event is finalized so
+    // telemetry can classify Back as navigation rather than rejection.
+    QSignalSpy navigation(m_core.get(), &PlayerCore::aboutToNavigateWithoutRejecting);
     m_core->previous();
-    QCOMPARE(backNav.count(), 1);
+    QCOMPARE(navigation.count(), 1);
     m_core->next();
-    QCOMPARE(backNav.count(), 1);
+    QCOMPARE(navigation.count(), 1);
+    m_core->playAt(1, true, false, /*explicitJump=*/true);
+    QCOMPARE(navigation.count(), 2);
 }
 
 void PlayerCoreTest::libraryShuffleInjectsLibraryTrack()

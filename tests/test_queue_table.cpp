@@ -11,6 +11,7 @@
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QMenu>
+#include <QSignalSpy>
 #include <QTableView>
 #include <QTest>
 #include <QTimer>
@@ -189,6 +190,50 @@ private slots:
                               QStringLiteral("Restore saved queue…"),
                               QStringLiteral("Detach queue from playlist"),
                           }));
+    }
+
+    void radioRowMenuOffersExplicitRefresh()
+    {
+        QueueStore store;
+        Track first;
+        first.path = QStringLiteral("/a.flac");
+        Track second;
+        second.path = QStringLiteral("/b.flac");
+        store.setSnapshot({first, second}, 0, -1, -1);
+
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        table.setRadioActive(true);
+        table.resize(640, 260);
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+
+        QSignalSpy refreshSpy(&table, &QueueTable::refreshRadioPicksBelowRequested);
+        bool sawAction = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Refresh picks below")) {
+                    sawAction = true;
+                    action->trigger();
+                    break;
+                }
+            }
+            menu->close();
+        });
+
+        const QRect rowRect = view->visualRect(view->model()->index(0, 0));
+        QVERIFY(QMetaObject::invokeMethod(view, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, rowRect.center())));
+        QVERIFY(sawAction);
+        QCOMPARE(refreshSpy.count(), 1);
+        QCOMPARE(refreshSpy.first().first().toInt(), 0);
     }
 
     void currentPlayingDoesNotStealSelection()

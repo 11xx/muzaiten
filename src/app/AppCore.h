@@ -88,6 +88,10 @@ public:
     // End the session: deactivates radio and tears down the provider/session.
     // Queue contents stay as they are.
     void stopRadio();
+    // Replace only unplayed radio picks below queueRow. Manual queue entries and
+    // every row at or above the anchor are preserved. Returns true when a refresh
+    // was started.
+    bool refreshRadioPicksBelow(int queueRow);
     QString radioPickReason(const QString &path) const;
     bool trackFlag(const QString &trackPath, const QString &flag) const;
     bool setTrackFlagForSong(const QString &trackPath, const QString &flag, bool on);
@@ -223,16 +227,6 @@ private:
     // batching (batchSize > 1), keeps the configured number of rows queued
     // ahead of the current index so the recommendation stream stays padded.
     void maybeTopUpRadioQueue();
-    // Stage 1 follow-up "re-roll on drift": discards the not-yet-played radio
-    // rows after the current index and appends a fresh batch scored against the
-    // now-updated rolling context. No-op in pure-JIT mode (batchSize == 1, see
-    // appendRadioBatch) or when there is nothing stale to discard.
-    void rerollRadioQueue();
-    // Consecutive-early-skip bookkeeping for rerollRadioQueue(), fed by every
-    // finalized play event (PlayEventRecorder::playEventReady).
-    void handleRadioPlayEvent(const QString &source, const QString &outcome, qint64 playedMs,
-                              qint64 durationMs);
-
     std::unique_ptr<Database>          m_database;
     std::unique_ptr<PlaylistDatabase>  m_playlistDb;
     std::unique_ptr<SettingsStore>     m_state;
@@ -267,15 +261,13 @@ private:
     // these carry the attribution forward to the currentTrackChanged handler.
     bool              m_nextStartUserInitiated = false;
     bool              m_nextStartInjected = false;
-    // Set by PlayerCore::aboutToNavigateBack (the Back button): the outgoing
-    // track's "skipped" play event is a re-hear navigation, not a rejection,
-    // so handleRadioPlayEvent must not count it toward the reroll streak.
-    // Consumed there; cleared on every real track start so it never lingers.
-    bool              m_nextSkipIsBackNavigation = false;
+    // Set before Previous or a direct queue-row jump. The next track start
+    // finalizes the outgoing spin as navigation rather than rejection.
+    bool              m_nextTransitionIsNavigation = false;
     QString           m_currentPlayingSource;
     // Paths this radio session has handed out (batch appends + JIT provider
-    // picks alike), for telemetry (source "radio") and for rerollRadioQueue()
-    // to find not-yet-played radio rows. User queue removals prune paths from
+    // picks alike), for telemetry (source "radio") and for the explicit queue
+    // refresh action to find unplayed radio rows. User queue removals prune paths from
     // this set too so later playback attribution stays aligned with the queue.
     // Cleared on startRadio/stopRadio.
     QSet<QString>     m_radioPickPaths;
@@ -297,9 +289,6 @@ private:
     bool              m_radioLoading = false;
     quint64           m_radioRequestId = 0;
     quint64           m_radioSessionRevision = 0;
-    // Consecutive early-skip streak for the current radio session (see
-    // handleRadioPlayEvent / rerollRadioQueue).
-    int               m_radioConsecutiveEarlySkips = 0;
     // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
     bool              m_radioAdventurous = false;
     bool              m_radioShuffleSessionActive = false;

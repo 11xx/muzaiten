@@ -60,6 +60,9 @@ below).
 - **Refill padding** (`Radio > Radio refill padding…`) sets how many queued
   tracks may remain before the next batch starts loading. The default is 5;
   use 0 to wait until playback reaches the final queued track.
+- **Refresh picks below** appears when you right-click a queue row during a
+  radio session. It replaces only the unplayed radio picks below that row;
+  earlier rows and manually queued tracks are kept.
 
 ## Tuning the scoring
 
@@ -150,4 +153,6 @@ with units and caveats — is documented in
 
 The engine records its own picks and your play/skip outcomes into the local
 history database purely as training data for the weight suggestions above.
-Live scoring never reads that telemetry; nothing is transmitted anywhere.
+Previous and direct queue-row selections are recorded as navigation, not as
+rejections; Next remains a skip. Live scoring never reads that telemetry;
+nothing is transmitted anywhere.

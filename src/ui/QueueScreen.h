@@ -27,6 +27,7 @@ public:
     void focusQueue();
     void revealCurrentPlaying();
     void setQueueIsPlaylistSourced(bool sourced);
+    void setRadioActive(bool active);
 
 signals:
     void queueTrackActivated(int index);
@@ -38,6 +39,7 @@ signals:
     void clearPlayNextPriorityRequested();
     void saveQueueAsRequested();
     void restorePreviousQueueRequested();
+    void refreshRadioPicksBelowRequested(int row);
     void unlinkQueueFromPlaylistRequested();
     void findFileRequested(const Track &track);
     void addToPlaylistRequested(const QVector<Track> &tracks);

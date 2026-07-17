@@ -14,6 +14,7 @@ struct Callbacks {
     std::function<void()> addToQueueTemporary;
     std::function<void()> addToPlaylist;
     std::function<void()> startRadio;
+    std::function<void()> refreshRadioPicksBelow;
     std::function<void(bool)> setNeverRadio;
     std::function<void(bool)> setNoLearn;
     std::function<void()> findInLibrary;
@@ -26,6 +27,7 @@ struct State {
     int trackCount = 1;
     bool neverRadioChecked = false;
     bool noLearnChecked = false;
+    bool refreshRadioPicksBelowEnabled = true;
 };
 
 void appendTrackSections(QMenu &menu, const Callbacks &callbacks, const State &state);

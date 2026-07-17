@@ -229,7 +229,7 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " played_ms INTEGER NOT NULL,"         // accumulated wall-clock playback time
         " duration_ms INTEGER,"
         " completion REAL,"                    // played_ms/duration_ms capped at 1.0; NULL when duration unknown
-        " outcome TEXT NOT NULL,"              // finished | skipped | stopped | session_end
+        " outcome TEXT NOT NULL,"              // finished | skipped | navigated | stopped | session_end
         " user_initiated INTEGER NOT NULL DEFAULT 0,"  // track start was an explicit user pick
         " source TEXT NOT NULL,"               // queue_manual | queue_auto | library_shuffle | resume
         " shuffle_mode TEXT,"

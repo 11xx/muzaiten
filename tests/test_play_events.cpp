@@ -41,6 +41,7 @@ private slots:
     void storeForgetBehaviorRemovesPlayEventsAndOptionalImports();
     void recorderNaturalFinish();
     void recorderEarlySkipChainsPrevious();
+    void recorderNavigationIsNotARejection();
     void recorderPauseExcludedFromPlayed();
     void recorderStoppedAndSessionEnd();
     void recorderSessionRollover();
@@ -243,6 +244,23 @@ void TestPlayEvents::recorderEarlySkipChainsPrevious()
     QCOMPARE(sink.events.at(1).previousTrackPath, QStringLiteral("/a"));
     // A had no predecessor.
     QVERIFY(sink.events.at(0).previousTrackPath.isEmpty());
+}
+
+void TestPlayEvents::recorderNavigationIsNotARejection()
+{
+    qint64 clock = 5'000'000;
+    PlayEventRecorder rec;
+    rec.setClock([&clock] { return clock; });
+    EventSink sink(rec);
+
+    rec.trackStarted(makeTrack(QStringLiteral("/radio-a")), false, QStringLiteral("radio"));
+    clock += 5000;
+    rec.trackStarted(makeTrack(QStringLiteral("/radio-b")), true, QStringLiteral("radio"),
+                     QStringLiteral("navigated"));
+
+    QCOMPARE(sink.events.size(), 1);
+    QCOMPARE(sink.events.first().outcome, QStringLiteral("navigated"));
+    QCOMPARE(sink.events.first().source, QStringLiteral("radio"));
 }
 
 void TestPlayEvents::recorderPauseExcludedFromPlayed()

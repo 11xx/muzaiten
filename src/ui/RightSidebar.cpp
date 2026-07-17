@@ -60,6 +60,8 @@ RightSidebar::RightSidebar(QWidget *parent)
     connect(m_queueTable, &QueueTable::clearPlayNextPriorityRequested, this, &RightSidebar::clearPlayNextPriorityRequested);
     connect(m_queueTable, &QueueTable::saveQueueAsRequested, this, &RightSidebar::saveQueueAsRequested);
     connect(m_queueTable, &QueueTable::restorePreviousQueueRequested, this, &RightSidebar::restorePreviousQueueRequested);
+    connect(m_queueTable, &QueueTable::refreshRadioPicksBelowRequested,
+            this, &RightSidebar::refreshRadioPicksBelowRequested);
     connect(m_queueTable, &QueueTable::unlinkFromPlaylistRequested, this, &RightSidebar::unlinkQueueFromPlaylistRequested);
     connect(m_queueTable, &QueueTable::findFileRequested, this, &RightSidebar::findFileRequested);
     connect(m_queueTable, &QueueTable::propertiesRequested, this, &RightSidebar::propertiesRequested);
@@ -119,6 +121,11 @@ void RightSidebar::setTrackFlagResolver(std::function<bool(const Track &, const 
 void RightSidebar::setQueueIsPlaylistSourced(bool sourced)
 {
     m_queueTable->setQueueIsPlaylistSourced(sourced);
+}
+
+void RightSidebar::setRadioActive(bool active)
+{
+    m_queueTable->setRadioActive(active);
 }
 
 void RightSidebar::setQueue(const QVector<Track> &tracks)

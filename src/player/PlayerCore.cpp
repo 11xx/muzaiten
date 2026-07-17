@@ -43,6 +43,9 @@ void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused,
     m_pendingDsdTakeover.active = false;
 
     const int previousIndex = m_queueIndex;
+    if (explicitJump && previousIndex >= 0) {
+        emit aboutToNavigateWithoutRejecting();
+    }
     m_queueIndex = index;
     if (explicitJump) {
         // A manual jump to any row (forward or backward) clears the play-next
@@ -214,7 +217,7 @@ void PlayerCore::previous()
     if (m_queue.isEmpty()) {
         return;
     }
-    emit aboutToNavigateBack();
+    emit aboutToNavigateWithoutRejecting();
     if (m_shuffleMode != ShuffleMode::Off && !m_shuffleHistory.isEmpty()) {
         int previousIndex = m_shuffleHistory.takeLast();
         previousIndex = std::clamp(previousIndex, 0, static_cast<int>(m_queue.size()) - 1);
