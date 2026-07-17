@@ -99,6 +99,9 @@
 
 ### Fixed
 
+- Library startup no longer repeatedly decodes metadata blobs after the v7
+  technical-column backfill has completed.
+
 - Albums no longer show year 0 when a track lacks a year tag.
 
 - Library rescans no longer accumulate duplicate artist and album rows. Existing
