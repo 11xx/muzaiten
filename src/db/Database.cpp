@@ -752,7 +752,75 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 16;
+    // v17: collapse artist/album rows accumulated by the old insert-first
+    // upserts. References move to each practical-key group's oldest row before
+    // duplicate rows are removed. Artwork follows albums as well so its foreign
+    // key cannot block cleanup and cached art remains associated with the kept
+    // album.
+    {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 17"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            if (!m_db.transaction()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+            const QStringList v17Statements = {
+                QStringLiteral(
+                    "UPDATE albums SET album_artist_id = ("
+                    "SELECT MIN(kept.id) FROM artists duplicate "
+                    "JOIN artists kept ON kept.name = duplicate.name "
+                    "WHERE duplicate.id = albums.album_artist_id) "
+                    "WHERE EXISTS (SELECT 1 FROM artists duplicate "
+                    "JOIN artists kept ON kept.name = duplicate.name AND kept.id < duplicate.id "
+                    "WHERE duplicate.id = albums.album_artist_id)"),
+                QStringLiteral(
+                    "UPDATE tracks SET album_id = ("
+                    "SELECT MIN(kept.id) FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id "
+                    "WHERE duplicate.id = tracks.album_id) "
+                    "WHERE EXISTS (SELECT 1 FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id AND kept.id < duplicate.id "
+                    "WHERE duplicate.id = tracks.album_id)"),
+                QStringLiteral(
+                    "UPDATE artwork SET album_id = ("
+                    "SELECT MIN(kept.id) FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id "
+                    "WHERE duplicate.id = artwork.album_id) "
+                    "WHERE EXISTS (SELECT 1 FROM albums duplicate "
+                    "JOIN albums kept ON kept.title = duplicate.title "
+                    "AND kept.album_artist_id IS duplicate.album_artist_id AND kept.id < duplicate.id "
+                    "WHERE duplicate.id = artwork.album_id)"),
+                QStringLiteral(
+                    "DELETE FROM albums WHERE EXISTS (SELECT 1 FROM albums kept "
+                    "WHERE kept.title = albums.title "
+                    "AND kept.album_artist_id IS albums.album_artist_id AND kept.id < albums.id)"),
+                QStringLiteral(
+                    "DELETE FROM artists WHERE EXISTS (SELECT 1 FROM artists kept "
+                    "WHERE kept.name = artists.name AND kept.id < artists.id)"),
+                QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(17, datetime('now'))"),
+            };
+            for (const QString &statement : v17Statements) {
+                if (!execSql(query, statement, &m_lastError)) {
+                    m_db.rollback();
+                    return false;
+                }
+            }
+            if (!m_db.commit()) {
+                m_lastError = m_db.lastError().text();
+                return false;
+            }
+        }
+    }
+
+    return Schema::currentVersion == 17;
 }
 
 QString Database::lastError() const
