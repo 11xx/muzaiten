@@ -292,6 +292,10 @@ private:
     // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
     bool              m_radioAdventurous = false;
     bool              m_radioShuffleSessionActive = false;
+    // Restoring playback modes happens before restoring the saved queue. Keep
+    // the initial anchorless pool usable, then rebuild it once the silent queue
+    // presentation supplies the current library track.
+    bool              m_radioShuffleAwaitingInitialTrack = false;
     bool              m_radioRestoreDone = false;
     QString           m_radioSessionKind;
     QString           m_radioSessionSeedPath;

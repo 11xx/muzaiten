@@ -229,6 +229,7 @@ private slots:
     void excludePathsAreRespected();
     void rollingContextDriftsGenreWindow();
     void rollingSonicContextUsesPlayedMean();
+    void anchorlessInitialContextUsesScalarsAndEmbedding();
     void substitutedBestCopyFeedsRollingContext();
     void rollingAudioContextUsesSeedAndPlayedEmbeddings();
     void reasonForNonEmptyOnPick();
@@ -1388,6 +1389,37 @@ void RadioTest::rollingSonicContextUsesPlayedMean()
     const QList<TrackScorer::Component> components = session.reasonComponentsFor(QStringLiteral("/target"));
     QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("tempo")), 0.4));
     QVERIFY(qFuzzyCompare(componentValue(components, QStringLiteral("energy")), 0.6));
+}
+
+void RadioTest::anchorlessInitialContextUsesScalarsAndEmbedding()
+{
+    const QHash<qint64, QVector<float>> embeddings{
+        {1, QVector<float>{1.0F, 0.0F}},
+        {2, QVector<float>{1.0F, 0.0F}},
+    };
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/target"), QStringLiteral("target"), {QStringLiteral("rock")},
+                      2000, -1, false, QStringLiteral("album-target"), QStringLiteral("song-target"),
+                      120.0, 0.5, 2),
+        makeCandidate(QStringLiteral("/current"), QStringLiteral("current"), {QStringLiteral("rock")},
+                      2000, -1, false, QStringLiteral("album-current"), QStringLiteral("song-current"),
+                      120.0, 0.5, 1),
+    };
+    QRandomGenerator rng(9u);
+    RadioSession session(pool, {}, {{QStringLiteral("rock"), 1.0}}, 30, 1'000'000'000, &rng,
+                         TrackScorer::defaultWeights(), embeddings);
+    // Radio Shuffle remains anchorless, but registers the enriched current
+    // candidate before feeding the audible track into its rolling context.
+    session.notePlayed(playedTrack(QStringLiteral("/current"), QStringLiteral("current")));
+
+    const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 1);
+    QCOMPARE(picks.first().path, QStringLiteral("/target"));
+
+    const QList<TrackScorer::Component> components = session.reasonComponentsFor(QStringLiteral("/target"));
+    QVERIFY(hasComponent(components, QStringLiteral("tempo")));
+    QVERIFY(hasComponent(components, QStringLiteral("energy")));
+    QVERIFY(hasComponent(components, QStringLiteral("audio")));
 }
 
 void RadioTest::substitutedBestCopyFeedsRollingContext()

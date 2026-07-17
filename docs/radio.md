@@ -13,7 +13,10 @@ history. There is no cloud, no account, and nothing leaves your machine.
   `Radio > Start artist radio`.
 - **Radio shuffle** is the ambient variant: the shuffle button cycles to a
   taste-aware mode that uses the radio engine for library pulls without a
-  visible session. Its pull chance is configurable at
+  visible session. It starts its rolling mood from the current library track,
+  including the same genre, tempo, energy, sonic-neighbor, and CLAP audio
+  context as Start Radio, then follows the rolling context as tracks play. Its
+  pull chance is configurable at
   `Radio > Radio shuffle percent…` (default 80%).
 - **Mixes**: `Radio > Play Rediscovery mix` (loved-but-forgotten) and
   `Play Deep cuts mix` (rarely surfaced album tracks).
