@@ -485,14 +485,26 @@ bool Database::migrate()
         }
     }
 
-    // Backfill from stored metadata blobs for rows that have a blob but NULL tech columns
+    // Backfill from stored metadata blobs for rows that have a blob but NULL tech columns.
+    // Guard on v7 so blobs without technical properties are not decoded again
+    // on every launch.
     {
-        QSqlQuery bfQuery(m_db);
-        bfQuery.prepare(QStringLiteral(
-            "SELECT t.path, t.id, m.raw_size, m.data "
-            "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
-            "WHERE t.sample_rate_hz IS NULL AND t.bitrate_kbps IS NULL"));
-        if (bfQuery.exec()) {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 7"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            QSqlQuery bfQuery(m_db);
+            bfQuery.prepare(QStringLiteral(
+                "SELECT t.path, t.id, m.raw_size, m.data "
+                "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
+                "WHERE t.sample_rate_hz IS NULL AND t.bitrate_kbps IS NULL"));
+            if (!bfQuery.exec()) {
+                m_lastError = bfQuery.lastError().text();
+                return false;
+            }
             QSqlQuery upd(m_db);
             upd.prepare(QStringLiteral(
                 "UPDATE tracks SET sample_rate_hz=?, bitrate_kbps=?, channels=?, codec=? WHERE id=?"));
@@ -507,14 +519,16 @@ bool Database::migrate()
                     upd.addBindValue(meta.channels > 0 ? QVariant(meta.channels) : QVariant());
                     upd.addBindValue(meta.codec.isEmpty() ? QVariant() : QVariant(meta.codec));
                     upd.addBindValue(trackId);
-                    upd.exec();
+                    if (!upd.exec()) {
+                        m_lastError = upd.lastError().text();
+                        return false;
+                    }
                 }
             }
+            if (!execSql(query, QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(7, datetime('now'))"), &m_lastError)) {
+                return false;
+            }
         }
-    }
-
-    if (!execSql(query, QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(7, datetime('now'))"), &m_lastError)) {
-        return false;
     }
 
     // v8: fast-first-pass placeholders + bit depth.
