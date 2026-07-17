@@ -5,12 +5,13 @@
 #include <QJsonValue>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
 namespace {
 
-constexpr double kTempoFalloffBpm = 60.0;
+constexpr double kTempoFalloffOctaves = 1.0;
 constexpr double kEnergyFalloff = 1.0;
 
 void pushIfNonZero(TrackScorer::Scored &scored, const QString &name, double value)
@@ -62,6 +63,17 @@ double linearProximity(double left, double right, double span)
         return 0.0;
     }
     return std::max(0.0, 1.0 - std::abs(left - right) / span);
+}
+
+double octaveTolerantTempoProximity(double candidateBpm, double contextBpm)
+{
+    constexpr std::array<double, 3> kOctaveMultipliers{0.5, 1.0, 2.0};
+    double minimumDistance = std::numeric_limits<double>::infinity();
+    for (const double multiplier : kOctaveMultipliers) {
+        minimumDistance = std::min(minimumDistance,
+                                   std::abs(std::log2(candidateBpm / (contextBpm * multiplier))));
+    }
+    return std::max(0.0, 1.0 - minimumDistance / kTempoFalloffOctaves);
 }
 
 double dotProduct(const QVector<float> &left, const QVector<float> &right)
@@ -338,9 +350,8 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     // previous score exactly.
     if (candidate.tempoBpm > 0.0 && seed.contextTempoBpm > 0.0) {
         pushIfNonZero(scored, QStringLiteral("tempo"),
-                      weights.tempoWeight * linearProximity(candidate.tempoBpm,
-                                                            seed.contextTempoBpm,
-                                                            kTempoFalloffBpm));
+                      weights.tempoWeight * octaveTolerantTempoProximity(candidate.tempoBpm,
+                                                                          seed.contextTempoBpm));
     }
     if (candidate.energy >= 0.0 && seed.contextEnergy >= 0.0) {
         pushIfNonZero(scored, QStringLiteral("energy"),

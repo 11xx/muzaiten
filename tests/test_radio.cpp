@@ -912,7 +912,8 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
         makeCandidate(QStringLiteral("/near"), QStringLiteral("a"), {}, 0, -1, false,
                       QStringLiteral("album"), QStringLiteral("song"), 150.0, 0.25),
         {}, seed, weights);
-    QVERIFY(qFuzzyCompare(componentValue(adjacent, QStringLiteral("tempo")), 0.4 * 0.5));
+    QVERIFY(qFuzzyCompare(componentValue(adjacent, QStringLiteral("tempo")),
+                           0.4 * (1.0 - std::log2(1.25))));
     QVERIFY(qFuzzyCompare(componentValue(adjacent, QStringLiteral("energy")), 0.6 * 0.5));
 
     const TrackScorer::Scored exact = TrackScorer::score(
@@ -924,15 +925,13 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
 
     const TrackScorer::Scored distant = TrackScorer::score(
         makeCandidate(QStringLiteral("/far"), QStringLiteral("a"), {}, 0, -1, false,
-                      QStringLiteral("album"), QStringLiteral("song"), 181.0, 1.9),
+                      QStringLiteral("album"), QStringLiteral("song"), 480.0, 1.9),
         {}, seed, weights);
     QVERIFY(!hasComponent(distant, QStringLiteral("tempo")));
     QVERIFY(!hasComponent(distant, QStringLiteral("energy")));
 
-    // F5b's v1->v2 comparison measured tempo and energy as exactly stable on
-    // both the synthetic oracle and the real DSF/high-resolution corpus. Keep
-    // the downstream near-octave ranking explicit: a true 85 BPM neighbor
-    // must beat its 170 BPM octave under the existing 60 BPM linear falloff.
+    // Tempo estimation can fold an otherwise matching rhythm to a half or
+    // double octave. Those estimates must score as exact tempo matches.
     seed.contextTempoBpm = 85.0;
     const TrackScorer::Scored sameOctave = TrackScorer::score(
         makeCandidate(QStringLiteral("/85"), QStringLiteral("a"), {}, 0, -1, false,
@@ -948,9 +947,17 @@ void RadioTest::tempoAndEnergyUseSonicProximity()
         {}, seed, weights);
     const double sameTempo = componentValue(sameOctave, QStringLiteral("tempo"));
     const double nearbyTempo = componentValue(nearby, QStringLiteral("tempo"));
+    const double doubleOctaveTempo = componentValue(doubleOctave, QStringLiteral("tempo"));
     QVERIFY(sameTempo > nearbyTempo);
     QVERIFY(nearbyTempo > 0.0);
-    QVERIFY(!hasComponent(doubleOctave, QStringLiteral("tempo")));
+    QVERIFY(qFuzzyCompare(doubleOctaveTempo, sameTempo));
+
+    seed.contextTempoBpm = 90.0;
+    const TrackScorer::Scored halfOctave = TrackScorer::score(
+        makeCandidate(QStringLiteral("/45"), QStringLiteral("a"), {}, 0, -1, false,
+                      QStringLiteral("album"), QStringLiteral("song"), 45.0, 0.75),
+        {}, seed, weights);
+    QVERIFY(qFuzzyCompare(componentValue(halfOctave, QStringLiteral("tempo")), 0.4));
 }
 
 void RadioTest::unknownTempoOrEnergyYieldsNoComponent()
