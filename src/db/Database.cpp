@@ -1,5 +1,6 @@
 #include "db/Database.h"
 
+#include "core/FoldKey.h"
 #include "core/GenreTags.h"
 #include "db/Schema.h"
 #include "search/SearchRecord.h"
@@ -19,6 +20,7 @@ namespace {
 
 constexpr int kInteractiveCacheKiB = 65536;
 constexpr int kIdleCacheKiB = 2000;
+constexpr int kTrackSongIdentityKeyVersion = 1;
 
 // These spellings are persisted in the DB column. See ratingSourceName() in
 // mpris/MprisService.cpp for the separately persisted status-JSON spellings;
@@ -823,6 +825,83 @@ bool Database::migrate()
         }
     }
 
+    // Derived exact-fold index for narrow song-identity traversal. This is
+    // versioned separately from the library schema because it contains no
+    // source data and can be rebuilt from tracks whenever FoldKey changes.
+    const QStringList songIdentityStatements = {
+        QStringLiteral("CREATE TABLE IF NOT EXISTS track_song_identity_keys (track_id INTEGER PRIMARY KEY, fallback_key TEXT NOT NULL, FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS track_song_identity_meta (slot INTEGER PRIMARY KEY CHECK(slot = 1), key_version INTEGER NOT NULL)"),
+    };
+    for (const QString &statement : songIdentityStatements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
+    bool rebuildSongIdentityKeys = true;
+    QSqlQuery keyVersionQuery(m_db);
+    if (keyVersionQuery.exec(QStringLiteral(
+            "SELECT key_version FROM track_song_identity_meta WHERE slot = 1"))
+        && keyVersionQuery.next()) {
+        rebuildSongIdentityKeys = keyVersionQuery.value(0).toInt() != kTrackSongIdentityKeyVersion;
+    }
+    keyVersionQuery.finish();
+    if (!m_db.transaction()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    if (rebuildSongIdentityKeys
+        && !execSql(query, QStringLiteral("DELETE FROM track_song_identity_keys"), &m_lastError)) {
+        m_db.rollback();
+        return false;
+    }
+    QSqlQuery missingKeys(m_db);
+    if (!missingKeys.exec(QStringLiteral(
+            "SELECT t.id, t.artist_name, t.title FROM tracks t "
+            "LEFT JOIN track_song_identity_keys i ON i.track_id = t.id "
+            "WHERE i.track_id IS NULL"))) {
+        m_lastError = missingKeys.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+    QList<std::tuple<qint64, QString, QString>> missingKeyRows;
+    while (missingKeys.next()) {
+        missingKeyRows.emplaceBack(missingKeys.value(0).toLongLong(),
+                                   missingKeys.value(1).toString(),
+                                   missingKeys.value(2).toString());
+    }
+    missingKeys.finish();
+    for (const auto &[trackId, artist, title] : missingKeyRows) {
+        if (!updateTrackSongIdentityKey(trackId, artist, title)) {
+            m_db.rollback();
+            return false;
+        }
+    }
+    QSqlQuery recordKeyVersion(m_db);
+    recordKeyVersion.prepare(QStringLiteral(
+        "INSERT INTO track_song_identity_meta(slot, key_version) VALUES(1, ?) "
+        "ON CONFLICT(slot) DO UPDATE SET key_version=excluded.key_version"));
+    recordKeyVersion.addBindValue(kTrackSongIdentityKeyVersion);
+    if (!recordKeyVersion.exec()) {
+        m_lastError = recordKeyVersion.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+    if (!m_db.commit()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+
+    const QStringList songIdentityIndexStatements = {
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tracks_recording_mbid ON tracks(musicbrainz_recording_id)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS idx_track_song_identity_fallback ON track_song_identity_keys(fallback_key)"),
+    };
+    for (const QString &statement : songIdentityIndexStatements) {
+        if (!execSql(query, statement, &m_lastError)) {
+            return false;
+        }
+    }
+
     return Schema::currentVersion == 17;
 }
 
@@ -942,6 +1021,24 @@ qint64 Database::upsertAlbum(const Track &track, qint64 albumArtistId)
     return id;
 }
 
+bool Database::updateTrackSongIdentityKey(qint64 trackId, const QString &artist, const QString &title)
+{
+    if (trackId <= 0) {
+        return false;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO track_song_identity_keys(track_id, fallback_key) VALUES(?, ?) "
+        "ON CONFLICT(track_id) DO UPDATE SET fallback_key=excluded.fallback_key"));
+    query.addBindValue(trackId);
+    query.addBindValue(FoldKey::songKey({}, artist, title));
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 bool Database::upsertTrack(const Track &track)
 {
     const qint64 artistId = upsertArtist(track.albumArtistName.isEmpty() ? track.artistName : track.albumArtistName);
@@ -999,22 +1096,26 @@ bool Database::upsertTrack(const Track &track)
         return false;
     }
 
+    qint64 trackId = 0;
+    if (query.next()) {
+        trackId = query.value(0).toLongLong();
+    }
+    if (trackId <= 0) {
+        QSqlQuery idQuery(m_db);
+        idQuery.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
+        idQuery.addBindValue(track.path);
+        if (idQuery.exec() && idQuery.next()) {
+            trackId = idQuery.value(0).toLongLong();
+        }
+    }
+    if (trackId <= 0 || !updateTrackSongIdentityKey(trackId, track.artistName, track.title)) {
+        return false;
+    }
+
     if (!track.fullMetadataBlob.isEmpty()) {
         // The upsert's RETURNING id gives the row id directly (insert or update),
         // avoiding a separate SELECT per track. Fall back to a lookup only if the
         // driver didn't surface the returned row.
-        qint64 trackId = 0;
-        if (query.next()) {
-            trackId = query.value(0).toLongLong();
-        }
-        if (trackId <= 0) {
-            QSqlQuery idQuery(m_db);
-            idQuery.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
-            idQuery.addBindValue(track.path);
-            if (idQuery.exec() && idQuery.next()) {
-                trackId = idQuery.value(0).toLongLong();
-            }
-        }
         if (trackId > 0) {
             QSqlQuery metaQuery(m_db);
             metaQuery.prepare(QStringLiteral(
@@ -1069,7 +1170,7 @@ bool Database::insertEnumeratedPlaceholders(const QVector<Track> &tracks)
         "INSERT INTO tracks(path, parent_dir, filename, title, artist_name, album_artist_name, album_title, "
         "track_number, file_size, file_mtime, scanned_at, metadata_scanned) "
         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 0) "
-        "ON CONFLICT(path) DO NOTHING"));
+        "ON CONFLICT(path) DO NOTHING RETURNING id"));
     for (const Track &track : tracks) {
         query.addBindValue(track.path);
         query.addBindValue(track.parentDir);
@@ -1088,6 +1189,14 @@ bool Database::insertEnumeratedPlaceholders(const QVector<Track> &tracks)
             m_db.rollback();
             return false;
         }
+        if (query.next()) {
+            const qint64 trackId = query.value(0).toLongLong();
+            if (!updateTrackSongIdentityKey(trackId, track.artistName, track.title)) {
+                m_db.rollback();
+                return false;
+            }
+        }
+        query.finish();
     }
     if (!m_db.commit()) {
         m_lastError = m_db.lastError().text();
@@ -1206,9 +1315,9 @@ QStringList Database::missingTrackPaths() const
     return paths;
 }
 
-QList<std::tuple<QString, QString, QString, QString>> Database::trackMatchRows() const
+QList<Database::TrackMatchRow> Database::trackMatchRows() const
 {
-    QList<std::tuple<QString, QString, QString, QString>> rows;
+    QList<TrackMatchRow> rows;
     QSqlQuery query(m_db);
     if (!query.exec(QStringLiteral(
             "SELECT path, artist_name, title, musicbrainz_recording_id FROM tracks WHERE missing = 0"))) {
@@ -1218,6 +1327,59 @@ QList<std::tuple<QString, QString, QString, QString>> Database::trackMatchRows()
         rows.emplaceBack(query.value(0).toString(), query.value(1).toString(),
                          query.value(2).toString(), query.value(3).toString());
     }
+    return rows;
+}
+
+QList<Database::TrackMatchRow> Database::trackMatchRowsForIdentityKeys(
+    const QStringList &paths,
+    const QStringList &recordingMbids,
+    const QStringList &fallbackKeys) const
+{
+    QList<TrackMatchRow> rows;
+    QSet<QString> seenPaths;
+    constexpr qsizetype kChunk = 500;
+
+    const auto appendMatches = [this, &rows, &seenPaths, kChunk](QStringList values,
+                                                                 const QString &join,
+                                                                 const QString &valueExpression,
+                                                                 const QString &extraPredicate) {
+        values.removeAll(QString());
+        values.removeDuplicates();
+        for (qsizetype start = 0; start < values.size(); start += kChunk) {
+            const qsizetype count = std::min(kChunk, values.size() - start);
+            QString sql = QStringLiteral(
+                "SELECT t.path, t.artist_name, t.title, t.musicbrainz_recording_id "
+                "FROM tracks t %1 WHERE t.missing = 0 AND %2 IN (%3)")
+                              .arg(join, valueExpression, sqlPlaceholders(count));
+            if (!extraPredicate.isEmpty()) {
+                sql += QStringLiteral(" AND ") + extraPredicate;
+            }
+            QSqlQuery query(m_db);
+            query.prepare(sql);
+            for (qsizetype i = 0; i < count; ++i) {
+                query.addBindValue(values.at(start + i));
+            }
+            if (!query.exec()) {
+                continue;
+            }
+            while (query.next()) {
+                const QString path = query.value(0).toString();
+                if (seenPaths.contains(path)) {
+                    continue;
+                }
+                seenPaths.insert(path);
+                rows.emplaceBack(path, query.value(1).toString(), query.value(2).toString(),
+                                 query.value(3).toString());
+            }
+        }
+    };
+
+    appendMatches(paths, {}, QStringLiteral("t.path"), {});
+    appendMatches(recordingMbids, {}, QStringLiteral("t.musicbrainz_recording_id"), {});
+    appendMatches(fallbackKeys,
+                  QStringLiteral("JOIN track_song_identity_keys i ON i.track_id = t.id"),
+                  QStringLiteral("i.fallback_key"),
+                  QStringLiteral("(t.musicbrainz_recording_id IS NULL OR t.musicbrainz_recording_id = '')"));
     return rows;
 }
 
