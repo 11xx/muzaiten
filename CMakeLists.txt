@@ -61,6 +61,7 @@ set(MUZAITEN_SOURCES
     src/db/Database.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
+    src/db/SqlUtil.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
     src/features/QueryVectorCache.cpp
@@ -367,6 +368,7 @@ add_executable(muzaitenctl
     src/app/AppPaths.cpp
     src/ipc/IpcSocket.cpp
     src/db/Database.cpp
+    src/db/SqlUtil.cpp
     src/features/FeatureStore.cpp
     src/features/QualityRank.cpp
     src/features/QueryEmbedding.cpp

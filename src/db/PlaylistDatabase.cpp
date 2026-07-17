@@ -1,4 +1,5 @@
 #include "db/PlaylistDatabase.h"
+#include "db/SqlUtil.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -154,18 +155,8 @@ bool PlaylistDatabase::migrate()
 
     // v2: candidates column (JSON array of paths) for MultiMatch import items.
     // Fresh databases get it from the CREATE above; v1 databases need the ALTER.
-    bool hasCandidates = false;
-    if (query.exec(QStringLiteral("PRAGMA table_info(playlist_items)"))) {
-        while (query.next()) {
-            if (query.value(1).toString() == QStringLiteral("candidates")) {
-                hasCandidates = true;
-                break;
-            }
-        }
-    }
-    if (!hasCandidates
-        && !query.exec(QStringLiteral("ALTER TABLE playlist_items ADD COLUMN candidates TEXT"))) {
-        m_lastError = query.lastError().text();
+    if (!SqlUtil::ensureColumn(m_db, QStringLiteral("playlist_items"), QStringLiteral("candidates"),
+                               QStringLiteral("candidates TEXT"), &m_lastError)) {
         return false;
     }
     if (!query.exec(QStringLiteral(
@@ -176,18 +167,8 @@ bool PlaylistDatabase::migrate()
 
     // v3: external_id column (import source id, e.g. "youtube:ID") for link-back
     // and idempotent re-import. Same column-presence self-heal as v2.
-    bool hasExternalId = false;
-    if (query.exec(QStringLiteral("PRAGMA table_info(playlist_items)"))) {
-        while (query.next()) {
-            if (query.value(1).toString() == QStringLiteral("external_id")) {
-                hasExternalId = true;
-                break;
-            }
-        }
-    }
-    if (!hasExternalId
-        && !query.exec(QStringLiteral("ALTER TABLE playlist_items ADD COLUMN external_id TEXT"))) {
-        m_lastError = query.lastError().text();
+    if (!SqlUtil::ensureColumn(m_db, QStringLiteral("playlist_items"), QStringLiteral("external_id"),
+                               QStringLiteral("external_id TEXT"), &m_lastError)) {
         return false;
     }
     if (!query.exec(QStringLiteral(
@@ -198,18 +179,8 @@ bool PlaylistDatabase::migrate()
 
     // v4: source_text column — the original import string, kept immutable even when
     // the item is later matched/replaced. Same column-presence self-heal.
-    bool hasSourceText = false;
-    if (query.exec(QStringLiteral("PRAGMA table_info(playlist_items)"))) {
-        while (query.next()) {
-            if (query.value(1).toString() == QStringLiteral("source_text")) {
-                hasSourceText = true;
-                break;
-            }
-        }
-    }
-    if (!hasSourceText
-        && !query.exec(QStringLiteral("ALTER TABLE playlist_items ADD COLUMN source_text TEXT"))) {
-        m_lastError = query.lastError().text();
+    if (!SqlUtil::ensureColumn(m_db, QStringLiteral("playlist_items"), QStringLiteral("source_text"),
+                               QStringLiteral("source_text TEXT"), &m_lastError)) {
         return false;
     }
     if (!query.exec(QStringLiteral(

@@ -3,6 +3,7 @@
 #include "core/FoldKey.h"
 #include "core/GenreTags.h"
 #include "db/Schema.h"
+#include "db/SqlUtil.h"
 #include "search/SearchRecord.h"
 #include "search/fold/Fold.h"
 
@@ -86,29 +87,6 @@ QString trackFlagColumn(Database::TrackFlag flag)
     return {};
 }
 
-bool tableHasColumn(QSqlDatabase database, const QString &table, const QString &column)
-{
-    QSqlQuery query(database);
-    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) {
-        return false;
-    }
-    while (query.next()) {
-        if (query.value(1).toString() == column) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ensureColumn(QSqlDatabase database, const QString &table, const QString &column, const QString &definition, QString *error)
-{
-    if (tableHasColumn(database, table, column)) {
-        return true;
-    }
-    QSqlQuery query(database);
-    return execSql(query, QStringLiteral("ALTER TABLE %1 ADD COLUMN %2").arg(table, definition), error);
-}
-
 QString cleanRootPath(const QString &path)
 {
     const QString cleaned = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
@@ -146,10 +124,7 @@ QString enabledLibraryRootPredicate(const QString &trackAlias, const QVector<Sca
     QStringList clauses;
     clauses.reserve(roots.size());
     for (const ScanRoot &root : roots) {
-        QString likePrefix = root.path;
-        likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-        likePrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
-        likePrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+        QString likePrefix = SqlUtil::likeEscaped(root.path);
         likePrefix += QStringLiteral("/%");
         clauses << QStringLiteral("%1.path = %2 OR %1.path LIKE %3 ESCAPE '\\'")
                        .arg(trackAlias, sqlQuote(root.path), sqlQuote(likePrefix));
@@ -167,17 +142,6 @@ QString visibleTrackPredicate(const QString &alias, bool showGuessed)
         return QStringLiteral("(%1.metadata_scanned = 1 OR %1.album_artist_name IS NOT NULL)").arg(alias);
     }
     return QStringLiteral("%1.metadata_scanned = 1").arg(alias);
-}
-
-// "?, ?, ..." for an IN (...) clause with `count` bound parameters.
-QString sqlPlaceholders(qsizetype count)
-{
-    QStringList marks;
-    marks.reserve(count);
-    for (qsizetype i = 0; i < count; ++i) {
-        marks << QStringLiteral("?");
-    }
-    return marks.join(QStringLiteral(", "));
 }
 
 QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases,
@@ -389,6 +353,63 @@ void Database::restoreCacheMemory()
     pragma.exec(QStringLiteral("PRAGMA cache_size=-%1").arg(kInteractiveCacheKiB));
 }
 
+bool Database::rebuildTrackGenres(bool clearFirst, QString *error)
+{
+    if (!m_db.transaction()) {
+        if (error != nullptr) {
+            *error = m_db.lastError().text();
+        }
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    if (clearFirst && !execSql(query, QStringLiteral("DELETE FROM track_genres"), error)) {
+        m_db.rollback();
+        return false;
+    }
+
+    QSqlQuery bfQuery(m_db);
+    bfQuery.prepare(QStringLiteral(
+        "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
+    if (!bfQuery.exec()) {
+        if (error != nullptr) {
+            *error = bfQuery.lastError().text();
+        }
+        m_db.rollback();
+        return false;
+    }
+
+    QSqlQuery ins(m_db);
+    ins.prepare(QStringLiteral(
+        "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
+    while (bfQuery.next()) {
+        const qint64 trackId = bfQuery.value(0).toLongLong();
+        const qint64 rawSize = bfQuery.value(1).toLongLong();
+        const QByteArray blob = bfQuery.value(2).toByteArray();
+        const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
+        for (const QString &genre : GenreTags::fromMetadata(meta)) {
+            ins.addBindValue(trackId);
+            ins.addBindValue(genre);
+            ins.addBindValue(GenreTags::folded(genre));
+            if (!ins.exec()) {
+                if (error != nullptr) {
+                    *error = ins.lastError().text();
+                }
+                m_db.rollback();
+                return false;
+            }
+        }
+    }
+
+    if (!m_db.commit()) {
+        if (error != nullptr) {
+            *error = m_db.lastError().text();
+        }
+        return false;
+    }
+    return true;
+}
+
 bool Database::migrate()
 {
     QSqlQuery query(m_db);
@@ -433,7 +454,7 @@ bool Database::migrate()
         {QStringLiteral("last_error"), QStringLiteral("last_error TEXT")},
     };
     for (const auto &column : scanRootColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("scan_roots"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("scan_roots"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -456,7 +477,7 @@ bool Database::migrate()
         {QStringLiteral("missing_since"), QStringLiteral("missing_since TEXT")},
     };
     for (const auto &column : trackColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -480,19 +501,31 @@ bool Database::migrate()
         {QStringLiteral("codec"),          QStringLiteral("codec TEXT")},
     };
     for (const auto &column : techColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
 
-    // Backfill from stored metadata blobs for rows that have a blob but NULL tech columns
+    // Backfill from stored metadata blobs for rows that have a blob but NULL tech columns.
+    // Guard on v7 so blobs without technical properties are not decoded again
+    // on every launch.
     {
-        QSqlQuery bfQuery(m_db);
-        bfQuery.prepare(QStringLiteral(
-            "SELECT t.path, t.id, m.raw_size, m.data "
-            "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
-            "WHERE t.sample_rate_hz IS NULL AND t.bitrate_kbps IS NULL"));
-        if (bfQuery.exec()) {
+        QSqlQuery versionCheck(m_db);
+        versionCheck.prepare(QStringLiteral("SELECT 1 FROM schema_migrations WHERE version = 7"));
+        if (!versionCheck.exec()) {
+            m_lastError = versionCheck.lastError().text();
+            return false;
+        }
+        if (!versionCheck.next()) {
+            QSqlQuery bfQuery(m_db);
+            bfQuery.prepare(QStringLiteral(
+                "SELECT t.path, t.id, m.raw_size, m.data "
+                "FROM tracks t JOIN track_metadata m ON m.track_id = t.id "
+                "WHERE t.sample_rate_hz IS NULL AND t.bitrate_kbps IS NULL"));
+            if (!bfQuery.exec()) {
+                m_lastError = bfQuery.lastError().text();
+                return false;
+            }
             QSqlQuery upd(m_db);
             upd.prepare(QStringLiteral(
                 "UPDATE tracks SET sample_rate_hz=?, bitrate_kbps=?, channels=?, codec=? WHERE id=?"));
@@ -507,14 +540,16 @@ bool Database::migrate()
                     upd.addBindValue(meta.channels > 0 ? QVariant(meta.channels) : QVariant());
                     upd.addBindValue(meta.codec.isEmpty() ? QVariant() : QVariant(meta.codec));
                     upd.addBindValue(trackId);
-                    upd.exec();
+                    if (!upd.exec()) {
+                        m_lastError = upd.lastError().text();
+                        return false;
+                    }
                 }
             }
+            if (!execSql(query, QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(7, datetime('now'))"), &m_lastError)) {
+                return false;
+            }
         }
-    }
-
-    if (!execSql(query, QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(7, datetime('now'))"), &m_lastError)) {
-        return false;
     }
 
     // v8: fast-first-pass placeholders + bit depth.
@@ -528,7 +563,7 @@ bool Database::migrate()
         {QStringLiteral("bit_depth"),        QStringLiteral("bit_depth INTEGER")},
     };
     for (const auto &column : v8Columns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -551,7 +586,7 @@ bool Database::migrate()
         {QStringLiteral("album_sort"),        QStringLiteral("album_sort TEXT")},
     };
     for (const auto &column : sortColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -593,39 +628,7 @@ bool Database::migrate()
             return false;
         }
         if (!versionCheck.next()) {
-            if (!m_db.transaction()) {
-                m_lastError = m_db.lastError().text();
-                return false;
-            }
-            QSqlQuery bfQuery(m_db);
-            bfQuery.prepare(QStringLiteral(
-                "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
-            if (!bfQuery.exec()) {
-                m_lastError = bfQuery.lastError().text();
-                m_db.rollback();
-                return false;
-            }
-            QSqlQuery ins(m_db);
-            ins.prepare(QStringLiteral(
-                "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
-            while (bfQuery.next()) {
-                const qint64 trackId = bfQuery.value(0).toLongLong();
-                const qint64 rawSize = bfQuery.value(1).toLongLong();
-                const QByteArray blob = bfQuery.value(2).toByteArray();
-                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
-                for (const QString &genre : GenreTags::fromMetadata(meta)) {
-                    ins.addBindValue(trackId);
-                    ins.addBindValue(genre);
-                    ins.addBindValue(GenreTags::folded(genre));
-                    if (!ins.exec()) {
-                        m_lastError = ins.lastError().text();
-                        m_db.rollback();
-                        return false;
-                    }
-                }
-            }
-            if (!m_db.commit()) {
-                m_lastError = m_db.lastError().text();
+            if (!rebuildTrackGenres(false, &m_lastError)) {
                 return false;
             }
         }
@@ -672,43 +675,7 @@ bool Database::migrate()
             return false;
         }
         if (!versionCheck.next()) {
-            if (!m_db.transaction()) {
-                m_lastError = m_db.lastError().text();
-                return false;
-            }
-            if (!execSql(query, QStringLiteral("DELETE FROM track_genres"), &m_lastError)) {
-                m_db.rollback();
-                return false;
-            }
-            QSqlQuery bfQuery(m_db);
-            bfQuery.prepare(QStringLiteral(
-                "SELECT t.id, m.raw_size, m.data FROM tracks t JOIN track_metadata m ON m.track_id = t.id"));
-            if (!bfQuery.exec()) {
-                m_lastError = bfQuery.lastError().text();
-                m_db.rollback();
-                return false;
-            }
-            QSqlQuery ins(m_db);
-            ins.prepare(QStringLiteral(
-                "INSERT OR IGNORE INTO track_genres(track_id, genre, genre_folded) VALUES(?, ?, ?)"));
-            while (bfQuery.next()) {
-                const qint64 trackId = bfQuery.value(0).toLongLong();
-                const qint64 rawSize = bfQuery.value(1).toLongLong();
-                const QByteArray blob = bfQuery.value(2).toByteArray();
-                const MetadataBlob::FullMetadata meta = MetadataBlob::decode(blob, rawSize);
-                for (const QString &genre : GenreTags::fromMetadata(meta)) {
-                    ins.addBindValue(trackId);
-                    ins.addBindValue(genre);
-                    ins.addBindValue(GenreTags::folded(genre));
-                    if (!ins.exec()) {
-                        m_lastError = ins.lastError().text();
-                        m_db.rollback();
-                        return false;
-                    }
-                }
-            }
-            if (!m_db.commit()) {
-                m_lastError = m_db.lastError().text();
+            if (!rebuildTrackGenres(true, &m_lastError)) {
                 return false;
             }
         }
@@ -1284,10 +1251,7 @@ QHash<QString, TrackFingerprint> Database::trackFingerprints(const QString &root
     } else {
         query.prepare(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"));
         query.addBindValue(rootPrefix);
-        QString likePrefix = rootPrefix;
-        likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-        likePrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
-        likePrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+        const QString likePrefix = SqlUtil::likeEscaped(rootPrefix);
         query.addBindValue(likePrefix + QStringLiteral("/%"));
     }
     if (!query.exec()) {
@@ -1319,7 +1283,7 @@ int Database::markTracksMissing(const QStringList &paths)
         QSqlQuery query(m_db);
         query.prepare(QStringLiteral(
             "UPDATE tracks SET missing=1, missing_since=datetime('now') WHERE missing = 0 AND path IN (%1)")
-            .arg(sqlPlaceholders(count)));
+            .arg(SqlUtil::sqlPlaceholders(count)));
         for (qsizetype i = 0; i < count; ++i) {
             query.addBindValue(paths.at(start + i));
         }
@@ -1381,7 +1345,7 @@ QList<Database::TrackMatchRow> Database::trackMatchRowsForIdentityKeys(
             QString sql = QStringLiteral(
                 "SELECT t.path, t.artist_name, t.title, t.musicbrainz_recording_id "
                 "FROM tracks t %1 WHERE t.missing = 0 AND %2 IN (%3)")
-                              .arg(join, valueExpression, sqlPlaceholders(count));
+                              .arg(join, valueExpression, SqlUtil::sqlPlaceholders(count));
             if (!extraPredicate.isEmpty()) {
                 sql += QStringLiteral(" AND ") + extraPredicate;
             }
@@ -1708,7 +1672,7 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     if (!filters.isEmpty()) {
-        sql += QStringLiteral(" AND t.album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
+        sql += QStringLiteral(" AND t.album_title IN (%1)").arg(SqlUtil::sqlPlaceholders(filters.size()));
     }
     sql += QStringLiteral(" ORDER BY lower(t.album_title), t.disc_number, t.track_number, lower(t.title)");
     query.prepare(sql);
@@ -1784,10 +1748,7 @@ QVector<Track> Database::searchTracksLike(const QString &text, int limit) const
         "OR t.album_artist_name LIKE ? ESCAPE '\\' OR t.album_title LIKE ? ESCAPE '\\' OR t.filename LIKE ? ESCAPE '\\') "
         "ORDER BY lower(t.album_artist_name), lower(t.album_title), t.disc_number, t.track_number, lower(t.title) "
         "LIMIT ?"));
-    QString escaped = needle;
-    escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
-    escaped.replace(QLatin1Char('%'), QLatin1String("\\%"));
-    escaped.replace(QLatin1Char('_'), QLatin1String("\\_"));
+    const QString escaped = SqlUtil::likeEscaped(needle);
     const QString pattern = QStringLiteral("%%%1%%").arg(escaped);
     for (int i = 0; i < 5; ++i) {
         query.addBindValue(pattern);
@@ -2514,7 +2475,7 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
         "AND t.id IN (SELECT track_id FROM track_genres WHERE genre_folded IN (%1))")
-        .arg(sqlPlaceholders(lookupGenres.size()));
+        .arg(SqlUtil::sqlPlaceholders(lookupGenres.size()));
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -2606,7 +2567,7 @@ QVector<RadioCandidateRow> Database::radioCandidatesForPaths(const QStringList &
             "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
             "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
             "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND t.path IN (%1)")
-            .arg(sqlPlaceholders(count));
+            .arg(SqlUtil::sqlPlaceholders(count));
         if (hasScanRoots(m_db)) {
             sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
         }
@@ -3042,7 +3003,7 @@ QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QS
         "FROM mpd_tracks "
         "WHERE album_artist_name = ?");
     if (!filters.isEmpty()) {
-        sql += QStringLiteral(" AND album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
+        sql += QStringLiteral(" AND album_title IN (%1)").arg(SqlUtil::sqlPlaceholders(filters.size()));
     }
     sql += QStringLiteral(" ORDER BY lower(album_title), disc_number, track_number, lower(title)");
     query.prepare(sql);
