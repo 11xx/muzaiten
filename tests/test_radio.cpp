@@ -219,6 +219,12 @@ private slots:
     void skipPenaltyScalesWithSkipRate();
     void recencyPenaltyDecaysWithTime();
     void noveltyAtZeroHistoryScalesWithExploration();
+    void decayInactiveBeforeThreshold();
+    void linearDecayProgression();
+    void exponentialDecayProgression();
+    void decayFloorsAreEnforced();
+    void sessionDepthDecaysBehavioralWeights();
+    void sessionDecayPreservesSonicHierarchy();
     void componentsSumAndSignsMatchScore();
     void unratedAndUnknownYearYieldNoComponent();
 
@@ -1205,6 +1211,99 @@ void RadioTest::noveltyAtZeroHistoryScalesWithExploration()
     const TrackScorer::Scored scored =
         TrackScorer::score(makeCandidate(QStringLiteral("/a"), QStringLiteral("a"), {}), heard, exploratory);
     QVERIFY(!hasComponent(scored, QStringLiteral("novelty")));
+}
+
+void RadioTest::decayInactiveBeforeThreshold()
+{
+    const TrackScorer::RadioSessionDecay decay = TrackScorer::defaultSessionDecay();
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(1, decay), 1.0));
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(4, decay), 1.0));
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(5, decay), 1.0));
+}
+
+void RadioTest::linearDecayProgression()
+{
+    const TrackScorer::RadioSessionDecay decay = TrackScorer::defaultSessionDecay();
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(5, decay), 1.0));
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(6, decay), 0.9));
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(7, decay), 0.8));
+}
+
+void RadioTest::exponentialDecayProgression()
+{
+    TrackScorer::RadioSessionDecay decay = TrackScorer::defaultSessionDecay();
+    decay.decayCurve = 1.0;
+
+    QVERIFY(qFuzzyCompare(TrackScorer::computeDecayFactor(5, decay), 1.0));
+    QVERIFY(std::abs(TrackScorer::computeDecayFactor(10, decay) - std::exp(-0.75)) < 0.000001);
+    QVERIFY(std::abs(TrackScorer::computeDecayFactor(20, decay) - std::exp(-2.25)) < 0.000001);
+}
+
+void RadioTest::decayFloorsAreEnforced()
+{
+    TrackScorer::RadioSessionDecay decay = TrackScorer::defaultSessionDecay();
+    decay.decayStartTrack = 0;
+
+    QVERIFY(qFuzzyCompare(TrackScorer::applyDecayToNoveltyWeight(0.8, 100, decay),
+                           decay.noveltyDecayFloor));
+    QVERIFY(qFuzzyCompare(TrackScorer::applyDecayToRatingWeight(1.5, 100, decay),
+                           decay.ratingDecayFloor));
+    QCOMPARE(TrackScorer::applyDecayToNoveltyWeight(0.0, 100, decay), 0.0);
+    QCOMPARE(TrackScorer::applyDecayToRatingWeight(0.0, 100, decay), 0.0);
+}
+
+void RadioTest::sessionDepthDecaysBehavioralWeights()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 6; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/track%1").arg(i), QStringLiteral("artist%1").arg(i),
+                                     {}, 0, 100));
+    }
+    QRandomGenerator rng(71u);
+    RadioSession session(pool, {}, {}, 30, 1'000'000'000, &rng);
+
+    const QVector<Track> picks = session.nextTracks(6, {}, resolvePathToTrack);
+    QCOMPARE(picks.size(), 6);
+    const QList<TrackScorer::Component> fifth = session.reasonComponentsFor(picks.at(4).path);
+    const QList<TrackScorer::Component> sixth = session.reasonComponentsFor(picks.at(5).path);
+    QVERIFY(qFuzzyCompare(componentValue(fifth, QStringLiteral("rating")), 1.5));
+    QVERIFY(qFuzzyCompare(componentValue(sixth, QStringLiteral("rating")), 1.5 * 0.9));
+    QVERIFY(qFuzzyCompare(componentValue(fifth, QStringLiteral("novelty")), 0.8 * 0.8));
+    QVERIFY(qFuzzyCompare(componentValue(sixth, QStringLiteral("novelty")), 0.8 * 0.9 * 0.8));
+}
+
+void RadioTest::sessionDecayPreservesSonicHierarchy()
+{
+    const QHash<qint64, QVector<float>> embeddings{{10, {1.0F, 0.0F}}};
+    TrackScorer::SeedContext early;
+    early.genresFolded = {QStringLiteral("rock")};
+    early.genreIdf = {{QStringLiteral("rock"), 6.0}};
+    early.contextTempoBpm = 120.0;
+    early.contextEnergy = 0.5;
+    early.audioCentroid = {1.0F, 0.0F};
+    early.embeddingsByGroup = &embeddings;
+    early.sessionTrackNumber = 1;
+
+    const TrackScorer::Candidate candidate = makeCandidate(
+        QStringLiteral("/complete"), QStringLiteral("artist"), {QStringLiteral("rock")}, 0, 100, false,
+        {}, {}, 120.0, 0.5, 10);
+    TrackScorer::SeedContext deep = early;
+    deep.sessionTrackNumber = 100;
+
+    const TrackScorer::Scored earlyScored = TrackScorer::score(candidate, {}, early);
+    const TrackScorer::Scored deepScored = TrackScorer::score(candidate, {}, deep);
+    QVERIFY(!hasComponent(earlyScored, QStringLiteral("genre")));
+    QVERIFY(!hasComponent(deepScored, QStringLiteral("genre")));
+    QVERIFY(qFuzzyCompare(componentValue(earlyScored, QStringLiteral("tempo")),
+                           componentValue(deepScored, QStringLiteral("tempo"))));
+    QVERIFY(qFuzzyCompare(componentValue(earlyScored, QStringLiteral("energy")),
+                           componentValue(deepScored, QStringLiteral("energy"))));
+    QVERIFY(qFuzzyCompare(componentValue(earlyScored, QStringLiteral("audio")),
+                           componentValue(deepScored, QStringLiteral("audio"))));
+    QVERIFY(componentValue(deepScored, QStringLiteral("rating"))
+            < componentValue(earlyScored, QStringLiteral("rating")));
+    QVERIFY(componentValue(deepScored, QStringLiteral("novelty"))
+            < componentValue(earlyScored, QStringLiteral("novelty")));
 }
 
 void RadioTest::componentsSumAndSignsMatchScore()

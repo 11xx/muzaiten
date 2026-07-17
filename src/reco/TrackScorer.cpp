@@ -129,6 +129,16 @@ bool hasCompleteDspClapPair(const TrackScorer::Candidate &candidate,
         && it.value().size() == seed.audioCentroid.size();
 }
 
+double applyDecayToWeight(double baseWeight, int trackNumber, const TrackScorer::RadioSessionDecay &decay,
+                          double floor)
+{
+    // A zero scoring-weight is an intentional user setting, not an invitation
+    // for the session floor to silently turn that signal back on.
+    return baseWeight > 0.0
+        ? std::max(floor, baseWeight * TrackScorer::computeDecayFactor(trackNumber, decay))
+        : baseWeight;
+}
+
 } // namespace
 
 namespace TrackScorer {
@@ -160,6 +170,34 @@ bool SeedContext::hasValidGenre() const
 Weights defaultWeights()
 {
     return {};
+}
+
+RadioSessionDecay defaultSessionDecay()
+{
+    return {};
+}
+
+double computeDecayFactor(int trackNumber, const RadioSessionDecay &decay)
+{
+    if (trackNumber < decay.decayStartTrack) {
+        return 1.0;
+    }
+
+    const int depth = trackNumber - decay.decayStartTrack;
+    if (decay.decayCurve < 0.5) {
+        return std::max(0.0, 1.0 - static_cast<double>(depth) * 0.1);
+    }
+    return std::exp(-static_cast<double>(depth) * 0.15);
+}
+
+double applyDecayToNoveltyWeight(double baseWeight, int trackNumber, const RadioSessionDecay &decay)
+{
+    return applyDecayToWeight(baseWeight, trackNumber, decay, decay.noveltyDecayFloor);
+}
+
+double applyDecayToRatingWeight(double baseWeight, int trackNumber, const RadioSessionDecay &decay)
+{
+    return applyDecayToWeight(baseWeight, trackNumber, decay, decay.ratingDecayFloor);
 }
 
 Weights getWeights(bool dspAvailable)
@@ -459,7 +497,9 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     // Behavioral signals stay active regardless of metadata or DSP availability.
     // rating: effective rating, with a boost when it is the user's own rating.
     if (candidate.effectiveRating0To100 >= 0) {
-        const double base = effectiveWeights.ratingWeight * (candidate.effectiveRating0To100 / 100.0);
+        const double base = applyDecayToRatingWeight(effectiveWeights.ratingWeight,
+                                                     seed.sessionTrackNumber, seed.sessionDecay)
+            * (candidate.effectiveRating0To100 / 100.0);
         pushIfNonZero(scored, QStringLiteral("rating"),
                       candidate.hasUserRating ? base * effectiveWeights.userRatingBoost : base);
     }
@@ -477,8 +517,9 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     const double noveltyRatio = std::max(0.0, 1.0 - totalPlays / effectiveWeights.noveltyZeroAt);
     if (noveltyRatio > 0.0) {
         const double explorationScale = 0.5 + exploration / 100.0;
-        pushIfNonZero(scored, QStringLiteral("novelty"),
-                      effectiveWeights.noveltyWeight * noveltyRatio * explorationScale);
+        const double noveltyWeight = applyDecayToNoveltyWeight(effectiveWeights.noveltyWeight,
+                                                                seed.sessionTrackNumber, seed.sessionDecay);
+        pushIfNonZero(scored, QStringLiteral("novelty"), noveltyWeight * noveltyRatio * explorationScale);
     }
 
     // recency: penalize a track played recently, exponentially fading with time.

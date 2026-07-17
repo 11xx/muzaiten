@@ -135,6 +135,8 @@ private:
     QHash<qint64, QVector<float>> m_embeddingsByGroup;
     TrackScorer::Candidate m_seed;
     TrackScorer::Weights m_weights;
+    TrackScorer::RadioSessionDecay m_sessionDecay = TrackScorer::defaultSessionDecay();
+    int m_generatedPickCount = 0;
     int m_exploration = 30;
     qint64 m_nowSecs = 0;
     QRandomGenerator *m_rng = nullptr;

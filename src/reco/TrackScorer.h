@@ -44,6 +44,16 @@ struct Affinity {
     int baselineMax = 0;           // max playcount baseline across services
 };
 
+// Session-depth decay keeps novelty and rating influential at the start of
+// radio, then lets the rolling sonic context take priority. `decayCurve` below
+// 0.5 selects linear decay; 0.5 and above selects exponential decay.
+struct RadioSessionDecay {
+    int decayStartTrack = 5;
+    double decayCurve = 0.0;
+    double noveltyDecayFloor = 0.1;
+    double ratingDecayFloor = 0.2;
+};
+
 // The rolling mood context a candidate is scored against.
 struct SeedContext {
     QStringList genresFolded;          // seed + last few played tracks (folded)
@@ -62,6 +72,10 @@ struct SeedContext {
     const QHash<qint64, QVector<float>> *embeddingsByGroup = nullptr;
     qint64 nowSecs = 0;
     int exploration0To100 = 30;        // conservative .. exploratory
+    // One-based radio pick number. RadioSession advances it for every queued
+    // radio pick, including picks later skipped by the listener.
+    int sessionTrackNumber = 1;
+    RadioSessionDecay sessionDecay;
 
     // A rolling DSP or CLAP context. The candidate's embedding is checked
     // against embeddingsByGroup when scoring.
@@ -113,6 +127,14 @@ struct WeightSpec {
 };
 
 Weights defaultWeights();
+RadioSessionDecay defaultSessionDecay();
+// `trackNumber` is one-based. The configured threshold itself retains full
+// weight; later picks decay. Disabled base weights remain disabled.
+double computeDecayFactor(int trackNumber, const RadioSessionDecay &decay);
+double applyDecayToNoveltyWeight(double baseWeight, int trackNumber,
+                                 const RadioSessionDecay &decay);
+double applyDecayToRatingWeight(double baseWeight, int trackNumber,
+                                const RadioSessionDecay &decay);
 // Effective per-pair weights. Complete DSP/CLAP pairs suppress genre; incomplete
 // pairs suppress DSP/CLAP and use genre as the metadata fallback.
 Weights getWeights(bool dspAvailable);

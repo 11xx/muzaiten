@@ -4,6 +4,11 @@
 
 ### Added
 
+- Radio sessions now ease from discovery toward a coherent rolling sound:
+  after five queued radio picks, novelty and rating rewards taper by 10% per
+  pick to small floors while the sonic and metadata matching signals stay
+  active.
+
 - The semantic model can now be installed audio-only: the download consent
   dialog offers "Audio only" (about 285 MB) alongside the full bundle
   (about 790 MB), and `muzaiten-features model download` gained
