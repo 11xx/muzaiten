@@ -99,6 +99,8 @@
 
 ### Fixed
 
+- Search results always show the same rating as the library views.
+
 - Library startup no longer repeatedly decodes metadata blobs after the v7
   technical-column backfill has completed.
 
