@@ -52,6 +52,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <utility>
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -936,24 +937,71 @@ QStringList AppCore::pathsForSongKeyOfTrack(const QString &trackPath) const
         return {};
     }
 
-    const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
-    const QString targetSongKey = resolvedSongKeys.value(trackPath);
-    if (targetSongKey.isEmpty()) {
-        return {trackPath};
-    }
+    QHash<QString, SongIdentity::TrackIdentity> identities;
+    QStringList pendingPaths{trackPath};
+    QStringList pendingMbids;
+    QStringList pendingFallbacks;
+    QSet<QString> scheduledPaths{trackPath};
+    QSet<QString> scheduledMbids;
+    QSet<QString> scheduledFallbacks;
+    QSet<qint64> expandedGroups;
 
-    QStringList paths;
-    for (auto it = resolvedSongKeys.cbegin(); it != resolvedSongKeys.cend(); ++it) {
-        if (it.value() == targetSongKey) {
-            paths.push_back(it.key());
+    const auto schedule = [](const QString &value, QStringList &pending, QSet<QString> &scheduled) {
+        if (!value.isEmpty() && !scheduled.contains(value)) {
+            scheduled.insert(value);
+            pending.push_back(value);
+        }
+    };
+
+    while (!pendingPaths.isEmpty() || !pendingMbids.isEmpty() || !pendingFallbacks.isEmpty()) {
+        const auto rows = m_database->trackMatchRowsForIdentityKeys(
+            std::exchange(pendingPaths, QStringList{}),
+            std::exchange(pendingMbids, QStringList{}),
+            std::exchange(pendingFallbacks, QStringList{}));
+        QStringList rowPaths;
+        rowPaths.reserve(rows.size());
+        for (const auto &[path, artist, title, recordingMbid] : rows) {
+            Q_UNUSED(artist);
+            Q_UNUSED(title);
+            Q_UNUSED(recordingMbid);
+            if (!identities.contains(path)) {
+                rowPaths.push_back(path);
+            }
+        }
+        const QHash<QString, qint64> contentGroups =
+            (m_features != nullptr && m_features->isOpen())
+                ? m_features->contentGroupsForPaths(rowPaths)
+                : QHash<QString, qint64>{};
+
+        for (const auto &[path, artist, title, recordingMbid] : rows) {
+            if (identities.contains(path)) {
+                continue;
+            }
+            const SongIdentity::TrackIdentity identity{
+                path,
+                artist,
+                title,
+                recordingMbid,
+                contentGroups.value(path, -1),
+            };
+            identities.insert(path, identity);
+
+            if (!recordingMbid.isEmpty()) {
+                schedule(recordingMbid, pendingMbids, scheduledMbids);
+            } else {
+                schedule(FoldKey::songKey({}, artist, title), pendingFallbacks, scheduledFallbacks);
+            }
+            if (identity.contentGroupId >= 0 && !expandedGroups.contains(identity.contentGroupId)) {
+                expandedGroups.insert(identity.contentGroupId);
+                for (const QString &groupPath : m_features->pathsInGroup(identity.contentGroupId)) {
+                    schedule(groupPath, pendingPaths, scheduledPaths);
+                }
+            }
         }
     }
-    if (paths.isEmpty()) {
-        paths.push_back(trackPath);
-    }
-    paths.removeDuplicates();
-    paths.sort(Qt::CaseInsensitive);
-    return paths;
+
+    const QStringList paths = SongIdentity::pathsConnectedToTrack(identities.values(), trackPath);
+    return paths.isEmpty() ? QStringList{trackPath} : paths;
 }
 
 QHash<QString, QString> AppCore::buildResolvedSongKeyMap() const
