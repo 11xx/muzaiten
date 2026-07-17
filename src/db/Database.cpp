@@ -200,6 +200,22 @@ constexpr char kTrackSelectFrom[] =
     "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
     "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path ";
 
+constexpr char kRatingOverlayStatusesSql[] = "'pending', 'failed', 'blocked_no_writable_path'";
+
+bool ratingOverlayActive(const QString &status)
+{
+    return status == QStringLiteral("pending") || status == QStringLiteral("failed")
+        || status == QStringLiteral("blocked_no_writable_path");
+}
+
+int resolveEffectiveRating(int scanned, bool hasUser, int user, const QString &status)
+{
+    if (ratingOverlayActive(status) && hasUser) {
+        return user;
+    }
+    return scanned >= 0 ? scanned : (hasUser ? user : Rating::unset);
+}
+
 // "SELECT <cols> <from/joins> " prefix; callers append their WHERE/ORDER/LIMIT.
 QString trackSelectPrefix()
 {
@@ -227,13 +243,10 @@ Track readTrackRow(const QSqlQuery &query)
     track.durationMs      = query.value(9).toLongLong();
     track.rating0To100    = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
     track.hasUserRating   = !query.value(11).isNull();
-    const QString pendingStatus = query.value(16).toString();
-    const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
-        || pendingStatus == QStringLiteral("failed")
-        || pendingStatus == QStringLiteral("blocked_no_writable_path");
-    track.effectiveRating0To100 = pendingDbRating && track.hasUserRating
-        ? query.value(11).toInt()
-        : (track.rating0To100 >= 0 ? track.rating0To100 : (track.hasUserRating ? query.value(11).toInt() : Rating::unset));
+    track.effectiveRating0To100 = resolveEffectiveRating(track.rating0To100,
+                                                        track.hasUserRating,
+                                                        query.value(11).toInt(),
+                                                        query.value(16).toString());
     track.date         = query.value(12).toString();
     track.originalDate = query.value(13).toString();
     track.fileSize     = query.value(14).toLongLong();
@@ -279,13 +292,10 @@ RadioCandidateRow readRadioCandidateRow(const QSqlQuery &query)
     row.year = parseLeadingYear(!original.isEmpty() ? original : query.value(9).toString());
     const int scannedRating = query.value(10).isNull() ? Rating::unset : query.value(10).toInt();
     row.hasUserRating = !query.value(11).isNull();
-    const QString status = query.value(12).toString();
-    const bool pendingDbRating = status == QStringLiteral("pending")
-        || status == QStringLiteral("failed")
-        || status == QStringLiteral("blocked_no_writable_path");
-    row.effectiveRating0To100 = pendingDbRating && row.hasUserRating
-        ? query.value(11).toInt()
-        : (scannedRating >= 0 ? scannedRating : (row.hasUserRating ? query.value(11).toInt() : Rating::unset));
+    row.effectiveRating0To100 = resolveEffectiveRating(scannedRating,
+                                                      row.hasUserRating,
+                                                      query.value(11).toInt(),
+                                                      query.value(12).toString());
     return row;
 }
 
@@ -1614,9 +1624,9 @@ QVector<Album> Database::albumsForArtist(const QString &albumArtist) const
     QVector<Album> albums;
     QSqlQuery query(m_db);
     const QString effectiveTrackRating = QStringLiteral(
-        "COALESCE("
-        "CASE WHEN p.status IN ('pending', 'failed', 'blocked_no_writable_path') THEN utr.rating_0_100 ELSE t.rating_0_100 END, "
-        "utr.rating_0_100)");
+        "COALESCE(CASE WHEN p.status IN (%1) THEN utr.rating_0_100 ELSE t.rating_0_100 END, "
+        "utr.rating_0_100)")
+                                             .arg(QString::fromLatin1(kRatingOverlayStatusesSql));
     query.prepare(QStringLiteral(
         "SELECT t.album_title, MIN(t.date), COUNT(*), "
         "AVG(%1), "
@@ -1807,13 +1817,10 @@ Database::TrackRatingSnapshot Database::trackRatingSnapshot(const QString &track
     const int scannedRating = query.value(0).isNull() ? -1 : query.value(0).toInt();
     snapshot.hasUserRating = !query.value(1).isNull();
     snapshot.userRating0To100 = snapshot.hasUserRating ? query.value(1).toInt() : -1;
-    const QString pendingStatus = query.value(2).toString();
-    const bool pendingDbRating = pendingStatus == QStringLiteral("pending")
-        || pendingStatus == QStringLiteral("failed")
-        || pendingStatus == QStringLiteral("blocked_no_writable_path");
-    snapshot.effectiveRating0To100 = pendingDbRating && snapshot.hasUserRating
-        ? snapshot.userRating0To100
-        : (scannedRating >= 0 ? scannedRating : snapshot.userRating0To100);
+    snapshot.effectiveRating0To100 = resolveEffectiveRating(scannedRating,
+                                                            snapshot.hasUserRating,
+                                                            snapshot.userRating0To100,
+                                                            query.value(2).toString());
     snapshot.mbRecordingId = query.value(3).toString();
     return snapshot;
 }
@@ -1976,8 +1983,9 @@ QVector<Track> Database::tracksWithPendingRatingWrites() const
         "SELECT t.path, t.parent_dir, t.filename, t.title, t.artist_name, t.album_artist_name, t.album_title, "
         "t.track_number, t.disc_number, t.duration_ms, t.rating_0_100, p.rating_0_100, t.date, t.original_date, t.file_size, t.file_mtime "
         "FROM pending_track_rating_writes p JOIN tracks t ON t.path = p.track_path "
-        "WHERE p.status IN ('pending', 'failed', 'blocked_no_writable_path') "
-        "ORDER BY p.updated_at ASC"));
+        "WHERE p.status IN (%1) "
+        "ORDER BY p.updated_at ASC")
+                   .arg(QString::fromLatin1(kRatingOverlayStatusesSql)));
     while (query.next()) {
         Track track;
         track.path = query.value(0).toString();
