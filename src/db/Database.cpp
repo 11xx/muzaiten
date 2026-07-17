@@ -3,6 +3,7 @@
 #include "core/FoldKey.h"
 #include "core/GenreTags.h"
 #include "db/Schema.h"
+#include "db/SqlUtil.h"
 #include "search/SearchRecord.h"
 #include "search/fold/Fold.h"
 
@@ -86,29 +87,6 @@ QString trackFlagColumn(Database::TrackFlag flag)
     return {};
 }
 
-bool tableHasColumn(QSqlDatabase database, const QString &table, const QString &column)
-{
-    QSqlQuery query(database);
-    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) {
-        return false;
-    }
-    while (query.next()) {
-        if (query.value(1).toString() == column) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ensureColumn(QSqlDatabase database, const QString &table, const QString &column, const QString &definition, QString *error)
-{
-    if (tableHasColumn(database, table, column)) {
-        return true;
-    }
-    QSqlQuery query(database);
-    return execSql(query, QStringLiteral("ALTER TABLE %1 ADD COLUMN %2").arg(table, definition), error);
-}
-
 QString cleanRootPath(const QString &path)
 {
     const QString cleaned = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
@@ -146,10 +124,7 @@ QString enabledLibraryRootPredicate(const QString &trackAlias, const QVector<Sca
     QStringList clauses;
     clauses.reserve(roots.size());
     for (const ScanRoot &root : roots) {
-        QString likePrefix = root.path;
-        likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-        likePrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
-        likePrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+        QString likePrefix = SqlUtil::likeEscaped(root.path);
         likePrefix += QStringLiteral("/%");
         clauses << QStringLiteral("%1.path = %2 OR %1.path LIKE %3 ESCAPE '\\'")
                        .arg(trackAlias, sqlQuote(root.path), sqlQuote(likePrefix));
@@ -167,17 +142,6 @@ QString visibleTrackPredicate(const QString &alias, bool showGuessed)
         return QStringLiteral("(%1.metadata_scanned = 1 OR %1.album_artist_name IS NOT NULL)").arg(alias);
     }
     return QStringLiteral("%1.metadata_scanned = 1").arg(alias);
-}
-
-// "?, ?, ..." for an IN (...) clause with `count` bound parameters.
-QString sqlPlaceholders(qsizetype count)
-{
-    QStringList marks;
-    marks.reserve(count);
-    for (qsizetype i = 0; i < count; ++i) {
-        marks << QStringLiteral("?");
-    }
-    return marks.join(QStringLiteral(", "));
 }
 
 QStringList radioGenreLookupTerms(const QStringList &foldedGenres, const QHash<QString, QString> &aliases,
@@ -490,7 +454,7 @@ bool Database::migrate()
         {QStringLiteral("last_error"), QStringLiteral("last_error TEXT")},
     };
     for (const auto &column : scanRootColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("scan_roots"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("scan_roots"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -513,7 +477,7 @@ bool Database::migrate()
         {QStringLiteral("missing_since"), QStringLiteral("missing_since TEXT")},
     };
     for (const auto &column : trackColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -537,7 +501,7 @@ bool Database::migrate()
         {QStringLiteral("codec"),          QStringLiteral("codec TEXT")},
     };
     for (const auto &column : techColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -599,7 +563,7 @@ bool Database::migrate()
         {QStringLiteral("bit_depth"),        QStringLiteral("bit_depth INTEGER")},
     };
     for (const auto &column : v8Columns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -622,7 +586,7 @@ bool Database::migrate()
         {QStringLiteral("album_sort"),        QStringLiteral("album_sort TEXT")},
     };
     for (const auto &column : sortColumns) {
-        if (!ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
+        if (!SqlUtil::ensureColumn(m_db, QStringLiteral("tracks"), column.first, column.second, &m_lastError)) {
             return false;
         }
     }
@@ -1287,10 +1251,7 @@ QHash<QString, TrackFingerprint> Database::trackFingerprints(const QString &root
     } else {
         query.prepare(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"));
         query.addBindValue(rootPrefix);
-        QString likePrefix = rootPrefix;
-        likePrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-        likePrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
-        likePrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+        const QString likePrefix = SqlUtil::likeEscaped(rootPrefix);
         query.addBindValue(likePrefix + QStringLiteral("/%"));
     }
     if (!query.exec()) {
@@ -1322,7 +1283,7 @@ int Database::markTracksMissing(const QStringList &paths)
         QSqlQuery query(m_db);
         query.prepare(QStringLiteral(
             "UPDATE tracks SET missing=1, missing_since=datetime('now') WHERE missing = 0 AND path IN (%1)")
-            .arg(sqlPlaceholders(count)));
+            .arg(SqlUtil::sqlPlaceholders(count)));
         for (qsizetype i = 0; i < count; ++i) {
             query.addBindValue(paths.at(start + i));
         }
@@ -1384,7 +1345,7 @@ QList<Database::TrackMatchRow> Database::trackMatchRowsForIdentityKeys(
             QString sql = QStringLiteral(
                 "SELECT t.path, t.artist_name, t.title, t.musicbrainz_recording_id "
                 "FROM tracks t %1 WHERE t.missing = 0 AND %2 IN (%3)")
-                              .arg(join, valueExpression, sqlPlaceholders(count));
+                              .arg(join, valueExpression, SqlUtil::sqlPlaceholders(count));
             if (!extraPredicate.isEmpty()) {
                 sql += QStringLiteral(" AND ") + extraPredicate;
             }
@@ -1711,7 +1672,7 @@ QVector<Track> Database::tracksForArtist(const QString &albumArtist, const QStri
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
     if (!filters.isEmpty()) {
-        sql += QStringLiteral(" AND t.album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
+        sql += QStringLiteral(" AND t.album_title IN (%1)").arg(SqlUtil::sqlPlaceholders(filters.size()));
     }
     sql += QStringLiteral(" ORDER BY lower(t.album_title), t.disc_number, t.track_number, lower(t.title)");
     query.prepare(sql);
@@ -1787,10 +1748,7 @@ QVector<Track> Database::searchTracksLike(const QString &text, int limit) const
         "OR t.album_artist_name LIKE ? ESCAPE '\\' OR t.album_title LIKE ? ESCAPE '\\' OR t.filename LIKE ? ESCAPE '\\') "
         "ORDER BY lower(t.album_artist_name), lower(t.album_title), t.disc_number, t.track_number, lower(t.title) "
         "LIMIT ?"));
-    QString escaped = needle;
-    escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
-    escaped.replace(QLatin1Char('%'), QLatin1String("\\%"));
-    escaped.replace(QLatin1Char('_'), QLatin1String("\\_"));
+    const QString escaped = SqlUtil::likeEscaped(needle);
     const QString pattern = QStringLiteral("%%%1%%").arg(escaped);
     for (int i = 0; i < 5; ++i) {
         query.addBindValue(pattern);
@@ -2517,7 +2475,7 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
         "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
         "AND t.id IN (SELECT track_id FROM track_genres WHERE genre_folded IN (%1))")
-        .arg(sqlPlaceholders(lookupGenres.size()));
+        .arg(SqlUtil::sqlPlaceholders(lookupGenres.size()));
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -2609,7 +2567,7 @@ QVector<RadioCandidateRow> Database::radioCandidatesForPaths(const QStringList &
             "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
             "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
             "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND t.path IN (%1)")
-            .arg(sqlPlaceholders(count));
+            .arg(SqlUtil::sqlPlaceholders(count));
         if (hasScanRoots(m_db)) {
             sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
         }
@@ -3045,7 +3003,7 @@ QVector<Track> Database::mpdTracksForArtist(const QString &albumArtist, const QS
         "FROM mpd_tracks "
         "WHERE album_artist_name = ?");
     if (!filters.isEmpty()) {
-        sql += QStringLiteral(" AND album_title IN (%1)").arg(sqlPlaceholders(filters.size()));
+        sql += QStringLiteral(" AND album_title IN (%1)").arg(SqlUtil::sqlPlaceholders(filters.size()));
     }
     sql += QStringLiteral(" ORDER BY lower(album_title), disc_number, track_number, lower(title)");
     query.prepare(sql);

@@ -46,6 +46,15 @@ target_link_libraries(test_metadata_blob PRIVATE Qt6::Core Qt6::Test PkgConfig::
 target_compile_features(test_metadata_blob PRIVATE cxx_std_26)
 add_test(NAME test_metadata_blob COMMAND test_metadata_blob)
 
+add_executable(test_sql_util
+    test_sql_util.cpp
+    ../src/db/SqlUtil.cpp
+)
+target_include_directories(test_sql_util PRIVATE ../src)
+target_link_libraries(test_sql_util PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_sql_util PRIVATE cxx_std_26)
+add_test(NAME test_sql_util COMMAND test_sql_util)
+
 add_executable(test_schema
     test_schema.cpp
     ../src/app/AppPaths.cpp
@@ -53,6 +62,7 @@ add_executable(test_schema
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/db/SqlUtil.cpp
     ../src/fs/PathResolver.cpp
     ../src/search/IndexCache.cpp
     ../src/search/fold/Fold.cpp
@@ -71,6 +81,7 @@ add_executable(test_search_cli
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/db/SqlUtil.cpp
     ../src/fs/PathResolver.cpp
     ../src/core/MusicSort.cpp
     ../src/scrobble/ListenHistoryStore.cpp
@@ -95,6 +106,7 @@ add_test(NAME test_search_cli COMMAND test_search_cli)
 add_executable(test_playlist_database
     test_playlist_database.cpp
     ../src/db/PlaylistDatabase.cpp
+    ../src/db/SqlUtil.cpp
 )
 target_include_directories(test_playlist_database PRIVATE ../src)
 target_link_libraries(test_playlist_database PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
@@ -160,6 +172,7 @@ add_executable(test_curation_dialog_data
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/db/SqlUtil.cpp
     ../src/features/FeatureStore.cpp
     ../src/features/QualityRank.cpp
     ../src/reco/GenreCuration.cpp
@@ -256,6 +269,7 @@ add_executable(test_radio
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/db/SqlUtil.cpp
     ../src/features/FeatureStore.cpp
     ../src/features/QualityRank.cpp
     ../src/features/SongIdentity.cpp
@@ -323,6 +337,7 @@ add_executable(test_scan_pipeline
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/db/SqlUtil.cpp
     ../src/fs/PathResolver.cpp
     ../src/search/fold/Fold.cpp
 )
@@ -539,6 +554,7 @@ set_tests_properties(test_queue_table PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 add_executable(test_playlist_view
     test_playlist_view.cpp
     ../src/db/PlaylistDatabase.cpp
+    ../src/db/SqlUtil.cpp
     ../src/ui/PlaylistView.cpp
     ../src/ui/TrackMenuSections.cpp
     ../src/ui/IdleReleaseController.cpp
@@ -778,6 +794,7 @@ add_executable(playlist_match_bench
     ../src/core/MetadataBlob.cpp
     ../src/core/Rating.cpp
     ../src/db/Database.cpp
+    ../src/db/SqlUtil.cpp
     ../src/fs/PathResolver.cpp
     ../src/playlist/PlaylistImport.cpp
     ../src/playlist/PlaylistMatcher.cpp
