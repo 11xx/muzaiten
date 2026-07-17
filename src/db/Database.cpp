@@ -20,6 +20,9 @@ namespace {
 constexpr int kInteractiveCacheKiB = 65536;
 constexpr int kIdleCacheKiB = 2000;
 
+// These spellings are persisted in the DB column. See ratingSourceName() in
+// mpris/MprisService.cpp for the separately persisted status-JSON spellings;
+// they must not be unified.
 QString sourceName(Rating::Source source)
 {
     switch (source) {
