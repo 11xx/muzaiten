@@ -9,7 +9,11 @@ By default, muzaiten uses XDG paths:
 
 The data directory holds the library (`library.sqlite`), playlists, and
 audio-analysis results (`features.sqlite`); state holds listening history
-and UI state; cache holds artwork and the search index.
+and UI state; cache holds artwork and the search index. The restored free-roam
+file-explorer directory must be a nonempty, existing, readable directory. If
+that saved directory is no longer browsable, Muzaiten immediately repairs only
+that setting to the cleaned home directory, or to the filesystem root when the
+home directory is not browsable, while preserving the other window settings.
 
 ## Overrides
 

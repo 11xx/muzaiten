@@ -2964,13 +2964,33 @@ void MainWindow::setLibraryExplorerDirectory(const QString &path)
     ensureDirectoryScanned(m_libraryExplorerDirectory);
 }
 
+QString MainWindow::browsableDirectoryPath(const QString &path)
+{
+    if (path.isEmpty()) {
+        return {};
+    }
+    const QString cleaned = cleanDirectoryPath(path);
+    const QFileInfo info(cleaned);
+    return info.exists() && info.isDir() && QDir(cleaned).isReadable() ? cleaned : QString();
+}
+
+QString MainWindow::restoredFreeRoamDirectory(const QString &path)
+{
+    const QString restored = browsableDirectoryPath(path);
+    if (!restored.isEmpty()) {
+        return restored;
+    }
+    const QString home = browsableDirectoryPath(QDir::homePath());
+    return home.isEmpty() ? browsableDirectoryPath(QDir::rootPath()) : home;
+}
+
 void MainWindow::setFreeRoamDirectory(const QString &path)
 {
-    const QFileInfo info(path);
-    if (!info.exists() || !info.isDir()) {
+    const QString directory = browsableDirectoryPath(path);
+    if (directory.isEmpty()) {
         return;
     }
-    m_freeRoamDirectory = cleanDirectoryPath(path);
+    m_freeRoamDirectory = directory;
     if (m_freeRoamFileExplorer != nullptr) {
         m_freeRoamFileExplorer->setRootPath(m_freeRoamDirectory);
     }

@@ -6,6 +6,7 @@
 #include "player/PlayerCore.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
+#include "ui/FileExplorerView.h"
 #include "ui/MusicExplorerView.h"
 #include "ui/PanelSearchController.h"
 #include "ui/PlaylistView.h"
@@ -21,6 +22,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QToolButton>
 #include <QtTest/QtTest>
@@ -32,7 +34,9 @@ private slots:
     void init()
     {
         QVERIFY(m_stateRoot.isValid());
-        qputenv("MUZAITEN_STATE_ROOT", m_stateRoot.path().toUtf8());
+        const QString testStateRoot = m_stateRoot.filePath(QString::fromLatin1(QTest::currentTestFunction()));
+        QVERIFY(QDir().mkpath(testStateRoot));
+        qputenv("MUZAITEN_STATE_ROOT", testStateRoot.toUtf8());
         qputenv("MUZAITEN_DEMO_SILENT_AUDIO", "1");
     }
 
@@ -73,6 +77,160 @@ private slots:
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);
+    }
+
+    void repairsMissingRestoredFreeRoamDirectory()
+    {
+        QTemporaryDir browsingRoot;
+        QVERIFY(browsingRoot.isValid());
+        const QString missing = browsingRoot.filePath(QStringLiteral("gone"));
+
+        AppCore core;
+        QJsonObject stored{
+            {QStringLiteral("freeRoamDirectory"), missing},
+            {QStringLiteral("unrelated"), QStringLiteral("preserved")},
+        };
+        core.settings()->setSetting(QStringLiteral("mainWindow.view"),
+                                    QString::fromUtf8(QJsonDocument(stored).toJson(QJsonDocument::Compact)));
+
+        MainWindow window(&core);
+        const QString expectedHome = MainWindow::browsableDirectoryPath(QDir::homePath());
+        const QString expected = expectedHome.isEmpty()
+            ? MainWindow::browsableDirectoryPath(QDir::rootPath())
+            : expectedHome;
+        QCOMPARE(window.m_freeRoamDirectory, expected);
+
+        const QJsonObject repaired = QJsonDocument::fromJson(
+            core.settings()->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
+        QCOMPARE(repaired.value(QStringLiteral("freeRoamDirectory")).toString(), expected);
+        QCOMPARE(repaired.value(QStringLiteral("unrelated")).toString(), QStringLiteral("preserved"));
+    }
+
+    void repairsToRootWhenHomeIsNotBrowsable()
+    {
+        QTemporaryDir browsingRoot;
+        QVERIFY(browsingRoot.isValid());
+        const QString missingHome = browsingRoot.filePath(QStringLiteral("missing-home"));
+        const QString stale = browsingRoot.filePath(QStringLiteral("stale"));
+
+        const bool hadHome = qEnvironmentVariableIsSet("HOME");
+        const QByteArray oldHome = qgetenv("HOME");
+        const auto restoreHome = qScopeGuard([hadHome, oldHome] {
+            if (hadHome) {
+                qputenv("HOME", oldHome);
+            } else {
+                qunsetenv("HOME");
+            }
+        });
+        qputenv("HOME", missingHome.toUtf8());
+        QCOMPARE(QDir::homePath(), missingHome);
+
+        AppCore core;
+        QJsonObject stored{
+            {QStringLiteral("freeRoamDirectory"), stale},
+            {QStringLiteral("unrelated"), QStringLiteral("preserved")},
+        };
+        core.settings()->setSetting(QStringLiteral("mainWindow.view"),
+                                    QString::fromUtf8(QJsonDocument(stored).toJson(QJsonDocument::Compact)));
+
+        MainWindow window(&core);
+        const QString expected = MainWindow::browsableDirectoryPath(QDir::rootPath());
+        QVERIFY(!expected.isEmpty());
+        QCOMPARE(window.m_freeRoamDirectory, expected);
+        const QJsonObject repaired = QJsonDocument::fromJson(
+            core.settings()->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
+        QCOMPARE(repaired.value(QStringLiteral("freeRoamDirectory")).toString(), expected);
+        QCOMPARE(repaired.value(QStringLiteral("unrelated")).toString(), QStringLiteral("preserved"));
+    }
+
+    void invalidFreeRoamRequestsPreserveLocationAndState()
+    {
+        QTemporaryDir browsingRoot;
+        QVERIFY(browsingRoot.isValid());
+        const QString valid = QDir::cleanPath(browsingRoot.path());
+        QFile file(browsingRoot.filePath(QStringLiteral("track.flac")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+
+        AppCore core;
+        MainWindow window(&core);
+        window.setFreeRoamDirectory(valid);
+        FileExplorerView *explorer = window.ensureFreeRoamFileExplorer();
+        const QString stored = core.settings()->setting(QStringLiteral("mainWindow.view"));
+
+        const QStringList invalid{
+            QString(),
+            browsingRoot.filePath(QStringLiteral("missing")),
+            file.fileName(),
+        };
+        for (const QString &path : invalid) {
+            window.setFreeRoamDirectory(path);
+            QCOMPARE(window.m_freeRoamDirectory, valid);
+            QCOMPARE(explorer->currentDirectory(), valid);
+            QCOMPARE(core.settings()->setting(QStringLiteral("mainWindow.view")), stored);
+        }
+    }
+
+    void unreadableFreeRoamRequestPreservesLocationAndState()
+    {
+        QTemporaryDir browsingRoot;
+        QVERIFY(browsingRoot.isValid());
+        const QString unreadable = browsingRoot.filePath(QStringLiteral("unreadable"));
+        QVERIFY(QDir().mkdir(unreadable));
+        QVERIFY(QFile::setPermissions(unreadable, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        QVERIFY(QFile::setPermissions(unreadable, QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        if (QDir(unreadable).isReadable()) {
+            QSKIP("QDir reports the permission-restricted fixture as readable in this environment");
+        }
+
+        AppCore core;
+        QJsonObject stored{
+            {QStringLiteral("freeRoamDirectory"), unreadable},
+            {QStringLiteral("unrelated"), QStringLiteral("preserved")},
+        };
+        core.settings()->setSetting(QStringLiteral("mainWindow.view"),
+                                    QString::fromUtf8(QJsonDocument(stored).toJson(QJsonDocument::Compact)));
+
+        MainWindow window(&core);
+        const QString expectedHome = MainWindow::browsableDirectoryPath(QDir::homePath());
+        const QString expected = expectedHome.isEmpty()
+            ? MainWindow::browsableDirectoryPath(QDir::rootPath())
+            : expectedHome;
+        QCOMPARE(window.m_freeRoamDirectory, expected);
+        const QJsonObject repaired = QJsonDocument::fromJson(
+            core.settings()->setting(QStringLiteral("mainWindow.view")).toUtf8()).object();
+        QCOMPARE(repaired.value(QStringLiteral("freeRoamDirectory")).toString(), expected);
+        QCOMPARE(repaired.value(QStringLiteral("unrelated")).toString(), QStringLiteral("preserved"));
+
+        window.setFreeRoamDirectory(browsingRoot.path());
+        const QString current = window.m_freeRoamDirectory;
+        const QString storedSettings = core.settings()->setting(QStringLiteral("mainWindow.view"));
+        window.setFreeRoamDirectory(unreadable);
+        QCOMPARE(window.m_freeRoamDirectory, current);
+        QCOMPARE(core.settings()->setting(QStringLiteral("mainWindow.view")), storedSettings);
+    }
+
+    void fileExplorerUpButtonIsAccessibleAndNavigates()
+    {
+        QTemporaryDir browsingRoot;
+        QVERIFY(browsingRoot.isValid());
+        const QString child = browsingRoot.filePath(QStringLiteral("child"));
+        QVERIFY(QDir().mkdir(child));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.setFreeRoamDirectory(child);
+        FileExplorerView *explorer = window.ensureFreeRoamFileExplorer();
+        auto *up = explorer->findChild<QToolButton *>(QStringLiteral("FileExplorerUpButton"));
+        QVERIFY(up != nullptr);
+        QCOMPARE(up->text(), QString());
+        QCOMPARE(up->focusPolicy(), Qt::NoFocus);
+        QCOMPARE(up->toolTip(), QStringLiteral("Go up one directory"));
+        QCOMPARE(up->accessibleName(), QStringLiteral("Go up one directory"));
+        QVERIFY(!up->icon().isNull());
+
+        QTest::mouseClick(up, Qt::LeftButton);
+        QCOMPARE(explorer->currentDirectory(), QDir::cleanPath(browsingRoot.path()));
     }
 
     void playerBarGraysVolumeWhenControlIsDisabled()
