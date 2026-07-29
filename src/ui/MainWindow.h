@@ -152,6 +152,8 @@ private:
     void revealTrackInLibrary(const Track &track);
     void setLibraryExplorerDirectory(const QString &path);
     void setFreeRoamDirectory(const QString &path);
+    static QString browsableDirectoryPath(const QString &path);
+    static QString restoredFreeRoamDirectory(const QString &path);
     void refreshLibraryFileExplorer();
     void loadQueueState();
     void saveQueueState();

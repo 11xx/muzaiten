@@ -63,7 +63,10 @@ Selectable keybinding profiles from the explorer context menu:
   next, `i` import, `f` open containing directory, `b` jump to start
   folder, `~` home.
 
-`Backspace` is "up/back directory" in both. The free-roam explorer can
-set a start folder from its context menu; `b` jumps back to it.
+`Backspace` and the icon-only **Go up one directory** button navigate to the
+parent directory in both explorers. The button does not take keyboard focus.
+The free-roam explorer can set a start folder from its context menu; `b` jumps
+back to it. Requests for empty, missing, non-directory, or unreadable locations
+leave the free-roam explorer at its current location.
 Unsupported files are hidden by default — enable `View > List unsupported
 files in explorer` while in an explorer view to show them.

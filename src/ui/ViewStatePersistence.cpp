@@ -89,7 +89,14 @@ void ViewStatePersistence::loadViewSettings()
                             kCenterSplitterMinimumTotal);
     m_window.m_mainView = mainViewFromName(mainWindow.value(QStringLiteral("mainView")).toString());
     m_window.m_libraryExplorerDirectory = mainWindow.value(QStringLiteral("libraryExplorerDirectory")).toString();
-    m_window.m_freeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString(QDir::homePath());
+    const QString storedFreeRoamDirectory = mainWindow.value(QStringLiteral("freeRoamDirectory")).toString();
+    m_window.m_freeRoamDirectory = MainWindow::restoredFreeRoamDirectory(storedFreeRoamDirectory);
+    if (m_window.m_freeRoamDirectory != storedFreeRoamDirectory) {
+        QJsonObject repairedMainWindow = mainWindow;
+        repairedMainWindow.insert(QStringLiteral("freeRoamDirectory"), m_window.m_freeRoamDirectory);
+        m_window.m_state->setSetting(QStringLiteral("mainWindow.view"),
+                                     QString::fromUtf8(QJsonDocument(repairedMainWindow).toJson(QJsonDocument::Compact)));
+    }
 
     const bool showUnsupported = m_window.m_state->setting(QStringLiteral("fileExplorer.showUnsupported")) == QStringLiteral("true");
     m_window.m_playerBar->setListUnsupportedFiles(showUnsupported);

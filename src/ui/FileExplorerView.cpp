@@ -21,6 +21,7 @@
 #include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPalette>
@@ -31,6 +32,7 @@
 #include <QStringList>
 #include <QStyle>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QVariant>
@@ -136,7 +138,12 @@ FileExplorerView::FileExplorerView(QWidget *parent, int idleReleaseMs)
     modeTitleFont.setBold(true);
     m_modeTitle->setFont(modeTitleFont);
     m_modeTitle->setContentsMargins(0, 0, 12, 0);
-    auto *up = new QPushButton(QStringLiteral("Up"), bar);
+    auto *up = new QToolButton(bar);
+    up->setObjectName(QStringLiteral("FileExplorerUpButton"));
+    up->setIcon(QIcon::fromTheme(QStringLiteral("go-up"), style()->standardIcon(QStyle::SP_ArrowUp)));
+    up->setFocusPolicy(Qt::NoFocus);
+    up->setToolTip(QStringLiteral("Go up one directory"));
+    up->setAccessibleName(QStringLiteral("Go up one directory"));
     up->setFixedHeight(24);
     m_pathLabel = new QLabel(bar);
     m_pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -218,7 +225,7 @@ FileExplorerView::FileExplorerView(QWidget *parent, int idleReleaseMs)
 
     setKeyBindingProfileName(QStringLiteral("vim"));
 
-    connect(up, &QPushButton::clicked, this, &FileExplorerView::navigateUp);
+    connect(up, &QToolButton::clicked, this, &FileExplorerView::navigateUp);
     connect(m_tree, &QTreeWidget::itemActivated, this, &FileExplorerView::activateItem);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &FileExplorerView::showContextMenu);
     // Remember the cursor position per directory so returning to a directory
