@@ -35,16 +35,30 @@ QVector<Track> LibraryScanner::scan(const QString &rootPath) const
 const QSet<QString> &LibraryScanner::supportedAudioExtensions()
 {
     static const QSet<QString> extensions = {
-        QStringLiteral("flac"),
-        QStringLiteral("mp3"),
-        QStringLiteral("m4a"),
-        QStringLiteral("ogg"),
-        QStringLiteral("opus"),
-        QStringLiteral("wav"),
-        QStringLiteral("wv"),
+        QStringLiteral("aac"),
+        QStringLiteral("aif"),
+        QStringLiteral("aifc"),
+        QStringLiteral("aiff"),
         QStringLiteral("ape"),
-        QStringLiteral("dsf"),
         QStringLiteral("dff"),
+        QStringLiteral("dsdiff"),
+        QStringLiteral("dsf"),
+        QStringLiteral("flac"),
+        QStringLiteral("m4a"),
+        QStringLiteral("m4b"),
+        QStringLiteral("mka"),
+        QStringLiteral("mp2"),
+        QStringLiteral("mp3"),
+        QStringLiteral("mp4"),
+        QStringLiteral("mpc"),
+        QStringLiteral("oga"),
+        QStringLiteral("ogg"),
+        QStringLiteral("ogx"),
+        QStringLiteral("opus"),
+        QStringLiteral("tta"),
+        QStringLiteral("wav"),
+        QStringLiteral("wma"),
+        QStringLiteral("wv"),
     };
     return extensions;
 }

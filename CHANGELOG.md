@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- The library scanner and free-roam file explorer now recognize Ogg media
+  (`.oga` and `.ogx`) plus common AAC, AIFF, MP2, MP4 audiobook/audio,
+  Matroska Audio, Musepack, True Audio, and Windows Media Audio extensions.
+
 ### Fixed
 
 - The free-roam file explorer now repairs a missing or unreadable restored directory to a readable home directory or filesystem root, and rejects invalid navigation requests without losing the current location.

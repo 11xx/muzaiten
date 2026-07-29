@@ -68,5 +68,9 @@ parent directory in both explorers. The button does not take keyboard focus.
 The free-roam explorer can set a start folder from its context menu; `b` jumps
 back to it. Requests for empty, missing, non-directory, or unreadable locations
 leave the free-roam explorer at its current location.
+The scanner and free-roam explorer recognize AAC, AIFF, Monkey's Audio, DSD,
+FLAC, MP2/MP3, MP4/M4A/M4B, Matroska Audio, Musepack, Ogg
+(`.oga`, `.ogg`, `.ogx`, `.opus`), True Audio, WAV, Windows Media Audio, and
+WavPack files. Playback still requires a matching GStreamer decoder plugin.
 Unsupported files are hidden by default — enable `View > List unsupported
 files in explorer` while in an explorer view to show them.

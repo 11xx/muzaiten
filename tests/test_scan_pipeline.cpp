@@ -19,7 +19,7 @@ class ScanPipelineTest final : public QObject {
 private slots:
     void fastFirstPassDefersThenFills();
     void turboFillReadsEveryFile();
-    void dsdExtensionsAreSupported();
+    void audioExtensionsAreSupported();
 
 private:
     static void writeWav(const QString &path, int sampleRate, int bitsPerSample, int channels, int frames);
@@ -216,11 +216,27 @@ void ScanPipelineTest::turboFillReadsEveryFile()
     QVERIFY(batches > 1);
 }
 
-void ScanPipelineTest::dsdExtensionsAreSupported()
+void ScanPipelineTest::audioExtensionsAreSupported()
 {
-    QVERIFY(LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.dsf")));
-    QVERIFY(LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.DFF")));
-    QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.dsf.txt")));
+    const QStringList supported = {
+        QStringLiteral("aac"), QStringLiteral("aif"), QStringLiteral("aifc"),
+        QStringLiteral("aiff"), QStringLiteral("ape"), QStringLiteral("dff"),
+        QStringLiteral("dsdiff"), QStringLiteral("dsf"), QStringLiteral("flac"),
+        QStringLiteral("m4a"),
+        QStringLiteral("m4b"), QStringLiteral("mka"), QStringLiteral("mp2"),
+        QStringLiteral("mp3"), QStringLiteral("mp4"), QStringLiteral("mpc"),
+        QStringLiteral("oga"), QStringLiteral("ogg"), QStringLiteral("ogx"),
+        QStringLiteral("opus"), QStringLiteral("tta"), QStringLiteral("wav"),
+        QStringLiteral("wma"), QStringLiteral("wv"),
+    };
+    for (const QString &extension : supported) {
+        QVERIFY2(LibraryScanner::isSupportedAudioFile(
+                     QStringLiteral("/music/example.%1").arg(extension.toUpper())),
+                 qPrintable(extension));
+    }
+
+    QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.ogx.txt")));
+    QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.mkv")));
 }
 
 QTEST_MAIN(ScanPipelineTest)
