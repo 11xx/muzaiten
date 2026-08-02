@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Track-list refreshes now keep surviving selections, the current track, and the
+  visible position instead of jumping to another row.
 - The free-roam file explorer now repairs a missing or unreadable restored directory to a readable home directory or filesystem root, and rejects invalid navigation requests without losing the current location.
 - The file explorer's up action is now an accessible icon button that does not take keyboard focus.
 
