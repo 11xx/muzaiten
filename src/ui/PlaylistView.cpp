@@ -170,6 +170,7 @@ constexpr int PlaylistGroupRole = Qt::UserRole + 13;      // saved-queue fold gr
 enum PlaylistItemRoles {
     ItemIdRole = Qt::UserRole,
     HoverRatingRole = Qt::UserRole + 2,
+    PlaylistItemIdentityRole = TableViewState::IdentityRole,
 };
 
 struct PlaylistColumnSpec {
@@ -519,6 +520,11 @@ public:
         }
 
         const PlaylistItem &item = m_rows.at(index.row());
+        if (role == PlaylistItemIdentityRole) {
+            return item.id > 0
+                ? QStringLiteral("item:%1").arg(item.id)
+                : QStringLiteral("saved:%1").arg(item.ordinal);
+        }
         if (role == ItemIdRole) {
             if (index.column() == RatingColumn) {
                 return item.effectiveRating0To100;
@@ -870,10 +876,12 @@ PlaylistView::PlaylistView(QWidget *parent, int idleReleaseMs)
 
 void PlaylistView::releaseIdleResources()
 {
+    rememberTracklistViewState();
     m_items.clear();
     if (m_itemModel != nullptr) {
         m_itemModel->setItems({});
     }
+    m_loadedTracklistStateKey.clear();
 }
 
 QVector<Search::MatchDocument> PlaylistView::searchDocuments() const
@@ -1320,26 +1328,14 @@ void PlaylistView::refreshImportingPlaylist(qint64 playlistId)
     m_playlistList->viewport()->update();
     // If the user is watching this playlist, show the new rows live.
     if (playlistId == m_currentPlaylistId) {
-        const int keepRow = currentItemRow();
-        QScrollBar *vbar = m_itemTable->verticalScrollBar();
-        const int keepScroll = vbar != nullptr ? vbar->value() : 0;
         reloadItems();
-        if (keepRow >= 0) {
-            setCurrentItemRow(keepRow);
-        }
-        // New rows stream in at the bottom; don't yank the viewport back to the
-        // keyboard cursor on every tick — that fights a mouse user scrolling
-        // through the partially-filled list. The keyboard cursor still moves the
-        // view normally; this only stops the live refresh from stealing scroll.
-        if (vbar != nullptr) {
-            vbar->setValue(std::min(keepScroll, vbar->maximum()));
-        }
     }
 }
 
 void PlaylistView::reloadItems()
 {
-    if (m_loadedTracklistStateKey == tracklistViewStateKey()) {
+    const QString targetKey = tracklistViewStateKey();
+    if (m_loadedTracklistStateKey == targetKey) {
         rememberTracklistViewState();
     }
     m_items.clear();
@@ -1355,9 +1351,12 @@ void PlaylistView::reloadItems()
         m_items = m_db->items(m_currentPlaylistId);
     }
     refreshItemRatings();
-    populateItems();
-    m_loadedTracklistStateKey = tracklistViewStateKey();
-    restoreTracklistViewState();
+    const auto stateIt = m_tracklistViewStates.constFind(targetKey);
+    const TableViewState::Snapshot state = stateIt == m_tracklistViewStates.cend()
+        ? TableViewState::Snapshot{}
+        : stateIt.value();
+    m_loadedTracklistStateKey = targetKey;
+    populateItems(state);
     emit viewSettingsChanged();
 }
 
@@ -1437,12 +1436,14 @@ QVector<PlaylistItem> PlaylistView::displayItems() const
 
 void PlaylistView::populateItems()
 {
-    const int keepRow = currentItemRow();
+    populateItems(TableViewState::capture(*m_itemTable));
+}
+
+void PlaylistView::populateItems(const TableViewState::Snapshot &state)
+{
     const QVector<PlaylistItem> rows = displayItems();
     m_itemModel->setItems(rows);
-    if (m_itemModel->rowCount() > 0) {
-        setCurrentItemRow(std::clamp(keepRow, 0, m_itemModel->rowCount() - 1));
-    }
+    TableViewState::restore(*m_itemTable, state);
     updateHeader();
     updatePlayingHighlight();
 }
@@ -2144,50 +2145,10 @@ QString PlaylistView::tracklistViewStateKey() const
 void PlaylistView::rememberTracklistViewState()
 {
     const QString key = tracklistViewStateKey();
-    if (key.isEmpty() || m_itemModel == nullptr || m_itemTable == nullptr) {
+    if (key.isEmpty() || key != m_loadedTracklistStateKey || m_itemModel == nullptr || m_itemTable == nullptr) {
         return;
     }
-    TracklistViewState state;
-    state.scrollValue = m_itemTable->verticalScrollBar()->value();
-    if (const PlaylistItem *current = itemForDisplayRow(currentItemRow()); current != nullptr) {
-        state.currentItemId = current->id;
-    }
-    if (const QItemSelectionModel *selection = m_itemTable->selectionModel(); selection != nullptr) {
-        for (const QModelIndex &index : selection->selectedRows(0)) {
-            if (const PlaylistItem *item = itemForDisplayRow(index.row()); item != nullptr) {
-                state.selectedItemIds.push_back(item->id);
-            }
-        }
-    }
-    m_tracklistViewStates.insert(key, state);
-}
-
-void PlaylistView::restoreTracklistViewState()
-{
-    const auto it = m_tracklistViewStates.constFind(tracklistViewStateKey());
-    if (it == m_tracklistViewStates.cend() || m_itemModel == nullptr) {
-        return;
-    }
-    const TracklistViewState &state = it.value();
-    QHash<qint64, int> rows;
-    for (int row = 0; row < m_itemModel->rowCount(); ++row) {
-        if (const PlaylistItem *item = itemForDisplayRow(row); item != nullptr) {
-            rows.insert(item->id, row);
-        }
-    }
-    if (QItemSelectionModel *selection = m_itemTable->selectionModel(); selection != nullptr) {
-        selection->clearSelection();
-        for (qint64 id : state.selectedItemIds) {
-            if (const auto row = rows.constFind(id); row != rows.cend()) {
-                selection->select(m_itemModel->index(*row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
-            }
-        }
-    }
-    if (const auto row = rows.constFind(state.currentItemId); row != rows.cend()) {
-        setCurrentItemRow(*row);
-    }
-    m_itemTable->verticalScrollBar()->setValue(
-        std::min(state.scrollValue, m_itemTable->verticalScrollBar()->maximum()));
+    m_tracklistViewStates.insert(key, TableViewState::capture(*m_itemTable));
 }
 
 void PlaylistView::updatePlayingHighlight()

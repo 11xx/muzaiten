@@ -14,6 +14,12 @@ and each item carries a metadata snapshot plus the search query that
 produced it — so a playlist survives rescans and keeps remembering tracks
 even after they go missing (missing entries stay, marked with a red `×`).
 
+The item table keeps selection, the current item, and the top-visible item with
+its pixel offset when rows refresh, reorder, sort, stream in, or are restored
+after an idle release. Each playlist and saved queue has independent table
+state, while deliberate reorder, edit, and now-playing actions still take
+precedence.
+
 ## Importing
 
 Add to an existing playlist or create a new one from:

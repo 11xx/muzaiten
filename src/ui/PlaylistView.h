@@ -5,6 +5,7 @@
 #include "search/SearchMatcher.h"
 #include "ui/IdleReleaseController.h"
 #include "ui/KeyBindingTypes.h"
+#include "ui/TableViewState.h"
 
 #include <functional>
 #include <QHash>
@@ -178,6 +179,7 @@ private:
     void cycleAddedSort();
     void sortByColumn(int column);
     void populateItems();
+    void populateItems(const TableViewState::Snapshot &state);
     // Frees the populated track rows when idle-hidden; reloadPlaylists() (run on
     // the way back in) refetches them.
     void releaseIdleResources();
@@ -215,7 +217,6 @@ private:
     // whenever the tracklist is rebuilt (populateItems).
     void updatePlayingHighlight();
     void rememberTracklistViewState();
-    void restoreTracklistViewState();
     QString tracklistViewStateKey() const;
 
     // Folding for the saved-queue selector groups ("manual"/"auto"/"radio").
@@ -260,12 +261,7 @@ private:
     QString m_currentQueueSnapshotId;
     QVector<SavedQueuePlaylistEntry> m_savedQueueEntries;
     QVector<PlaylistItem> m_items;   // canonical, ordinal order
-    struct TracklistViewState {
-        QVector<qint64> selectedItemIds;
-        qint64 currentItemId = 0;
-        int scrollValue = 0;
-    };
-    QHash<QString, TracklistViewState> m_tracklistViewStates;
+    QHash<QString, TableViewState::Snapshot> m_tracklistViewStates;
     // Key represented by the current model contents. Selector rebuilds briefly
     // empty the model; this prevents that transient state from overwriting the
     // saved state of the playlist we are about to restore.

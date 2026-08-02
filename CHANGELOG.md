@@ -12,6 +12,9 @@
 
 - Track-list refreshes now keep the surviving selection, the keyboard cursor
   row, and the visible scroll position instead of jumping to another row.
+- Playlist item-table state now follows stable item identities through database
+  reorders, display sorts, streaming imports, playlist switches, and idle
+  resource release; saved queues use their canonical ordinals.
 - Row navigation in an auto-height track list (the Music Explorer's expanded
   album) no longer snaps the columns back to the left edge when the list is
   scrolled sideways.
