@@ -1657,7 +1657,7 @@ void MainWindow::changeEvent(QEvent *event)
 
 void MainWindow::persistViewState()
 {
-    rememberTrackTableViewState();
+    saveAllViewSettings();
 }
 
 void MainWindow::restylePanelBorders()
@@ -1877,14 +1877,12 @@ void MainWindow::showArtist(const QString &artistName, bool forceReload, bool cl
         return;
     }
 
-    rememberTrackTableViewState();
     m_currentArtist = artistName;
     m_selectedAlbumTitles = nextAlbumFilters;
     m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
     rememberCurrentSourceSelection();
     refreshAlbumGrid(forceReload || artistChanged);
     refreshTrackTable();
-    restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
@@ -1893,7 +1891,6 @@ void MainWindow::showArtist(const QString &artistName, bool forceReload, bool cl
 
 void MainWindow::selectAlbumFilter(const QString &albumTitle)
 {
-    rememberTrackTableViewState();
     m_selectedAlbumTitles = (m_selectedAlbumTitles.size() == 1 && m_selectedAlbumTitles.first() == albumTitle)
         ? QStringList()
         : QStringList{albumTitle};
@@ -1901,7 +1898,6 @@ void MainWindow::selectAlbumFilter(const QString &albumTitle)
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
-    restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
@@ -1914,13 +1910,11 @@ void MainWindow::narrowAlbumFilters(const QStringList &albumTitles)
     if (nextAlbumTitles.isEmpty() || nextAlbumTitles == m_selectedAlbumTitles) {
         return;
     }
-    rememberTrackTableViewState();
     m_selectedAlbumTitles = nextAlbumTitles;
     m_selectedAlbumTitle = m_selectedAlbumTitles.size() == 1 ? m_selectedAlbumTitles.first() : QString();
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
-    restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
@@ -1938,12 +1932,10 @@ void MainWindow::setAlbumNarrowFromGrid(const QStringList &albumTitles)
     if (next == m_selectedAlbumTitles) {
         return;
     }
-    rememberTrackTableViewState();
     m_selectedAlbumTitles = next;
     m_selectedAlbumTitle = next.size() == 1 ? next.first() : QString();
     rememberCurrentSourceSelection();
     refreshTrackTable();
-    restoreTrackTableViewState();
     m_albumGrid->setSelectedAlbumTitle(m_selectedAlbumTitle);
     m_loadedPanelArtist = m_currentArtist;
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
@@ -1956,13 +1948,11 @@ void MainWindow::clearAlbumFilter()
     if (m_selectedAlbumTitles.isEmpty()) {
         return;
     }
-    rememberTrackTableViewState();
     m_selectedAlbumTitles.clear();
     m_selectedAlbumTitle.clear();
     rememberCurrentSourceSelection();
     refreshAlbumGrid();
     refreshTrackTable();
-    restoreTrackTableViewState();
     m_loadedPanelArtist = m_currentArtist;
     m_loadedPanelAlbumFilter = albumFilterKey(m_selectedAlbumTitles);
     m_loadedPanelSource = m_librarySource;
@@ -4390,10 +4380,8 @@ void MainWindow::configureSourceDirectories()
         }
     }
 
-    rememberTrackTableViewState();
     refreshArtists();
     refreshLibraryFileExplorer();
-    restoreTrackTableViewState();
     statusBar()->showMessage(QStringLiteral("Source directories updated"), 3000);
 }
 
@@ -6148,22 +6136,6 @@ void MainWindow::updatePlaybackPosition()
         m_lastHealthyTrackPath = m_player->currentTrack().path;
         m_lastHealthyPositionMs = positionMs;
     }
-}
-
-void MainWindow::rememberTrackTableViewState()
-{
-    if (m_trackTable == nullptr) {
-        return;
-    }
-
-    m_trackSortColumn = m_trackTable->sortColumn();
-    m_trackSortOrder = m_trackTable->sortOrder();
-    m_trackScrollValue = m_trackTable->verticalScrollValue();
-}
-
-void MainWindow::restoreTrackTableViewState()
-{
-    m_trackTable->restoreViewState(m_trackSortColumn, m_trackSortOrder, m_trackScrollValue);
 }
 
 void MainWindow::updateCurrentAlbumArt()

@@ -39,8 +39,6 @@ public:
     void setHeaderHeight(int height);
     int sortColumn() const;
     Qt::SortOrder sortOrder() const;
-    int verticalScrollValue() const;
-    void restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int verticalScrollValue);
     // In-place rating patch for the row(s) matching this path; avoids a full
     // setTracks() rebuild when a rating is edited or synced. No-op if absent.
     void updateTrackRating(const QString &path, int effectiveRating, bool hasUserRating);

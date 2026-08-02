@@ -20,6 +20,7 @@
 #include <QAbstractTableModel>
 #include <QClipboard>
 #include <QFrame>
+#include <QHash>
 #include <QGuiApplication>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -580,19 +581,6 @@ Qt::SortOrder TrackTable::sortOrder() const
     return horizontalHeader()->sortIndicatorOrder();
 }
 
-int TrackTable::verticalScrollValue() const
-{
-    return verticalScrollBar()->value();
-}
-
-void TrackTable::restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int verticalScrollValue)
-{
-    if (sortColumn >= 0 && sortColumn < model()->columnCount()) {
-        sortByColumn(sortColumn, sortOrder);
-    }
-    verticalScrollBar()->setValue(std::clamp(verticalScrollValue, verticalScrollBar()->minimum(), verticalScrollBar()->maximum()));
-}
-
 QString TrackTable::viewSettingsJson() const
 {
     QJsonArray visibleColumns;
@@ -684,9 +672,36 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
     if (trackModel == nullptr) {
         return;
     }
-    const QString currentPath = currentIndex().isValid()
-        ? currentIndex().data(TrackRole).value<Track>().path
-        : QString();
+
+    QHash<QString, int> selectedPathRows;
+    if (selectionModel() != nullptr) {
+        for (const QModelIndex &index : selectionModel()->selectedRows()) {
+            const QString path = index.data(TrackRole).value<Track>().path;
+            if (!path.isEmpty()) {
+                selectedPathRows.insert(path, index.row());
+            }
+        }
+    }
+
+    QString currentPath;
+    int oldCurrentRow = -1;
+    const QModelIndex oldCurrentIndex = currentIndex();
+    if (oldCurrentIndex.isValid()) {
+        currentPath = oldCurrentIndex.data(TrackRole).value<Track>().path;
+        oldCurrentRow = oldCurrentIndex.row();
+    }
+
+    QString topVisiblePath;
+    int topVisibleOffset = 0;
+    if (viewport() != nullptr && !viewport()->rect().isEmpty()) {
+        const QModelIndex topIndex = indexAt(viewport()->rect().topLeft());
+        if (topIndex.isValid()) {
+            const Track track = model()->index(topIndex.row(), 0).data(TrackRole).value<Track>();
+            topVisiblePath = track.path;
+            topVisibleOffset = visualRect(topIndex).top();
+        }
+    }
+
     trackModel->setTracks(tracks);
     QSet<QString> availablePaths;
     availablePaths.reserve(tracks.size());
@@ -703,22 +718,91 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
         }
     }
     sortByColumn(sortColumn(), sortOrder());
-    if (!currentPath.isEmpty()) {
-        selectTrackByPath(currentPath);
-    }
-    if (model()->rowCount() > 0) {
-        const int row = currentIndex().isValid() ? currentIndex().row() : 0;
-        const bool rowSelected = selectionModel() != nullptr
-            && currentIndex().isValid()
-            && selectionModel()->isRowSelected(currentIndex().row(), currentIndex().parent());
-        if (!currentIndex().isValid() || !rowSelected) {
-            setCurrentRow(std::clamp(row, 0, model()->rowCount() - 1));
+
+    QHash<QString, int> pathToRow;
+    pathToRow.reserve(model()->rowCount());
+    for (int row = 0; row < model()->rowCount(); ++row) {
+        const QString path = model()->index(row, 0).data(TrackRole).value<Track>().path;
+        if (!path.isEmpty()) {
+            pathToRow.insert(path, row);
         }
     }
+
+    bool restoredSelection = false;
+    bool restoredCurrent = false;
+    if (selectionModel() != nullptr) {
+        selectionModel()->clearSelection();
+        for (const QString &path : selectedPathRows.keys()) {
+            const auto row = pathToRow.constFind(path);
+            if (row == pathToRow.constEnd()) {
+                continue;
+            }
+            selectionModel()->select(model()->index(row.value(), 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            restoredSelection = true;
+        }
+
+        if (!currentPath.isEmpty()) {
+            const auto row = pathToRow.constFind(currentPath);
+            if (row != pathToRow.constEnd()) {
+                selectionModel()->setCurrentIndex(model()->index(row.value(), 0), QItemSelectionModel::NoUpdate);
+                restoredCurrent = true;
+            }
+        }
+
+        if (!restoredCurrent && restoredSelection) {
+            QString nearestPath;
+            int nearestOldRow = -1;
+            int nearestDistance = std::numeric_limits<int>::max();
+            for (auto it = selectedPathRows.cbegin(); it != selectedPathRows.cend(); ++it) {
+                if (pathToRow.constFind(it.key()) == pathToRow.constEnd()) {
+                    continue;
+                }
+                const int selectedOldRow = it.value();
+                const int distance = std::abs(selectedOldRow - oldCurrentRow);
+                if (distance < nearestDistance || (distance == nearestDistance && selectedOldRow < nearestOldRow)) {
+                    nearestPath = it.key();
+                    nearestOldRow = selectedOldRow;
+                    nearestDistance = distance;
+                }
+            }
+            if (!nearestPath.isEmpty()) {
+                const auto row = pathToRow.constFind(nearestPath);
+                if (row != pathToRow.constEnd()) {
+                    selectionModel()->setCurrentIndex(model()->index(row.value(), 0), QItemSelectionModel::NoUpdate);
+                    restoredCurrent = true;
+                }
+            }
+        }
+    }
+    if (!restoredCurrent && model()->rowCount() > 0) {
+        setCurrentRow(0);
+    }
+
     reselectMarkedRows();
     if (m_autoHeightToRows) {
         setAutoHeightToRows(false);
         setAutoHeightToRows(true);
+    }
+
+    if (verticalScrollBar() != nullptr) {
+        const auto anchorRow = pathToRow.constFind(topVisiblePath);
+        if (anchorRow != pathToRow.constEnd()) {
+            int anchorColumn = 0;
+            while (anchorColumn < model()->columnCount() && isColumnHidden(anchorColumn)) {
+                ++anchorColumn;
+            }
+            if (anchorColumn == model()->columnCount()) {
+                anchorColumn = 0;
+            }
+            const QModelIndex anchorIndex = model()->index(anchorRow.value(), anchorColumn);
+            scrollTo(anchorIndex, QAbstractItemView::PositionAtTop);
+            if (verticalScrollMode() == QAbstractItemView::ScrollPerPixel) {
+                const QRect anchorRect = visualRect(anchorIndex);
+                verticalScrollBar()->setValue(verticalScrollBar()->value() + anchorRect.top() - topVisibleOffset);
+            }
+        } else {
+            verticalScrollBar()->setValue(verticalScrollBar()->minimum());
+        }
     }
 }
 
@@ -743,9 +827,6 @@ void TrackTable::setCurrentRow(int row, int scrollDirection)
     if (m_autoHeightToRows) {
         if (verticalScrollBar() != nullptr) {
             verticalScrollBar()->setValue(0);
-        }
-        if (horizontalScrollBar() != nullptr) {
-            horizontalScrollBar()->setValue(0);
         }
     }
     reselectMarkedRows();

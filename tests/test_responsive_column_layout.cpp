@@ -6,6 +6,7 @@
 #include <QBrush>
 #include <QFrame>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QScrollBar>
@@ -343,6 +344,158 @@ private slots:
         QVERIFY(brushValue.isValid());
         QCOMPARE(brushValue.value<QBrush>().color(), headerLabelBrush(QApplication::palette(), kHeaderStyle.labels).color());
         QCOMPARE(table.horizontalHeader()->styleSheet(), headerViewStyleSheet(kHeaderStyle, table.horizontalHeader()));
+    }
+
+    void trackRefreshPreservesIdentityState()
+    {
+        constexpr int trackRole = Qt::UserRole + 1;
+        const auto makeTrack = [](int number, const QString &prefix) {
+            Track track;
+            const QString id = QStringLiteral("%1").arg(number, 3, 10, QLatin1Char('0'));
+            track.path = QStringLiteral("/music/track-%1.flac").arg(id);
+            track.title = QStringLiteral("%1 Track %2").arg(prefix, id);
+            track.artistName = QStringLiteral("Artist %1").arg(prefix);
+            return track;
+        };
+        const auto pathForRow = [trackRole](const QModelIndex &index) {
+            return index.data(trackRole).value<Track>().path;
+        };
+
+        TrackTable table;
+        table.setFixedSize(700, 180);
+        table.show();
+        QTest::qWait(0);
+
+        QVector<Track> initialTracks;
+        for (int number = 0; number < 60; ++number) {
+            initialTracks.push_back(makeTrack(number, QStringLiteral("Initial")));
+        }
+        table.setTracks(initialTracks);
+        table.sortByColumn(2, Qt::AscendingOrder);
+
+        const auto selectedPaths = [&table, pathForRow]() {
+            QSet<QString> paths;
+            for (const QModelIndex &index : table.selectionModel()->selectedRows()) {
+                const QString path = pathForRow(index);
+                if (!path.isEmpty()) {
+                    paths.insert(path);
+                }
+            }
+            return paths;
+        };
+        const auto topVisibleIndex = [&table]() {
+            const QRect viewportRect = table.viewport()->rect();
+            return table.indexAt(QPoint(viewportRect.left() + 1, viewportRect.top() + 1));
+        };
+
+        table.selectionModel()->clearSelection();
+        for (const int row : {10, 20, 50}) {
+            table.selectionModel()->select(table.model()->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+        table.selectionModel()->setCurrentIndex(table.model()->index(35, 0), QItemSelectionModel::NoUpdate);
+        QCOMPARE(table.currentIndex().row(), 35);
+        QVERIFY(selectedPaths().size() >= 2);
+
+        table.scrollTo(table.model()->index(30, 0), QAbstractItemView::PositionAtTop);
+        QTest::qWait(0);
+        const QModelIndex topBefore = topVisibleIndex();
+        QVERIFY(topBefore.isValid());
+        QCOMPARE(topBefore.row(), 30);
+        const QString topPath = pathForRow(topBefore);
+        const int topOffset = table.visualRect(topBefore).top();
+        const QSet<QString> selectedBefore = selectedPaths();
+        const QString currentPath = pathForRow(table.currentIndex());
+        QVERIFY(!currentPath.isEmpty());
+
+        QVector<Track> refreshedTracks;
+        for (int number = 59; number >= 0; --number) {
+            refreshedTracks.push_back(makeTrack(number, QStringLiteral("Refreshed")));
+        }
+        table.setTracks(refreshedTracks);
+        QTest::qWait(0);
+
+        QVERIFY(selectedPaths() == selectedBefore);
+        QCOMPARE(pathForRow(table.currentIndex()), currentPath);
+        const QModelIndex topAfter = topVisibleIndex();
+        QVERIFY(topAfter.isValid());
+        QCOMPARE(pathForRow(topAfter), topPath);
+        QCOMPARE(table.visualRect(topAfter).top(), topOffset);
+
+        const QString removedSelectionPath = pathForRow(table.model()->index(10, 0));
+        const int oldCurrentRow = table.currentIndex().row();
+        QSet<QString> survivingPaths = selectedBefore;
+        survivingPaths.remove(removedSelectionPath);
+        survivingPaths.remove(currentPath);
+
+        QVector<Track> reducedTracks;
+        for (int number = 59; number >= 0; --number) {
+            if (number == 10 || number == 35) {
+                continue;
+            }
+            reducedTracks.push_back(makeTrack(number, QStringLiteral("Reduced")));
+        }
+        table.setTracks(reducedTracks);
+        QTest::qWait(0);
+
+        QVERIFY(!selectedPaths().contains(removedSelectionPath));
+        QVERIFY(!selectedPaths().contains(currentPath));
+        QVERIFY(selectedPaths() == survivingPaths);
+        QCOMPARE(oldCurrentRow, 35);
+        QCOMPARE(pathForRow(table.currentIndex()), QStringLiteral("/music/track-020.flac"));
+        const QModelIndex topAfterRemoval = topVisibleIndex();
+        QVERIFY(topAfterRemoval.isValid());
+        QCOMPARE(pathForRow(topAfterRemoval), topPath);
+        QCOMPARE(table.visualRect(topAfterRemoval).top(), topOffset);
+
+        QVector<Track> anchorlessTracks;
+        for (int number = 59; number >= 0; --number) {
+            if (number == 10 || number == 30 || number == 35) {
+                continue;
+            }
+            anchorlessTracks.push_back(makeTrack(number, QStringLiteral("Anchorless")));
+        }
+        table.setTracks(anchorlessTracks);
+        QTest::qWait(0);
+        QCOMPARE(table.verticalScrollBar()->value(), table.verticalScrollBar()->minimum());
+    }
+
+    void autoHeightNavigationPreservesHorizontalScroll()
+    {
+        Track track;
+        track.path = QStringLiteral("/music/auto-height.flac");
+        track.title = QString(500, QLatin1Char('x'));
+
+        QWidget host;
+        TrackTable table(&host);
+        host.resize(600, 120);
+        table.setGeometry(host.rect());
+        host.show();
+        table.show();
+        QTest::qWait(0);
+        table.setTracks({track});
+        QTest::qWait(0);
+        host.resize(100, 120);
+        table.setGeometry(host.rect());
+        QTest::qWait(0);
+        auto *layout = table.findChild<ResponsiveColumnLayout *>();
+        QVERIFY(layout != nullptr);
+        layout->setUserVisibleColumns({QStringLiteral("title"), QStringLiteral("year")});
+        layout->setColumnPriority(QStringLiteral("year"), ResponsiveColumnPriority::Keep);
+        layout->setColumnMinimumWidth(QStringLiteral("title"), 500);
+        QTest::qWait(0);
+        table.setAutoHeightToRows(true);
+        QTest::qWait(0);
+        layout->relayout();
+        QTest::qWait(0);
+
+        QVERIFY(table.horizontalScrollBar()->maximum() > 0);
+        table.horizontalScrollBar()->setValue(table.horizontalScrollBar()->maximum());
+        QVERIFY(table.horizontalScrollBar()->value() > 0);
+        const int horizontalValue = table.horizontalScrollBar()->value();
+
+        table.setCurrentRow(0);
+
+        QCOMPARE(table.horizontalScrollBar()->value(), horizontalValue);
     }
 };
 

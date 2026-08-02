@@ -81,7 +81,7 @@ public:
     explicit MainWindow(AppCore *core, QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    // Called by AppCore::releaseWindow() to snapshot ephemeral view state
+    // Called by AppCore::releaseWindow() to durably save every view setting
     // before the widget tree is destroyed.
     void persistViewState();
     bool showDemoArtist(const QString &artistName);
@@ -439,8 +439,6 @@ private:
     // kept alive across opens so its loaded embeddings matrix survives.
     void openSemanticSearchDialog();
     QString resolvedReadPathForTrack(const Track &track) const;
-    void rememberTrackTableViewState();
-    void restoreTrackTableViewState();
     void updateCurrentAlbumArt();
     void applyTrackInfoPaneVisible(bool visible);
     void applyCompactMenu(bool compact);
@@ -511,9 +509,6 @@ private:
     // every later add while that playlist backs the queue, so ticking the box on
     // "Queue only" keeps queueing rather than silently switching to saving.
     PlaylistMirrorChoice m_rememberedMirrorChoice = PlaylistMirrorChoice::AddToPlaylist;
-    int m_trackSortColumn = 0;
-    Qt::SortOrder m_trackSortOrder = Qt::AscendingOrder;
-    int m_trackScrollValue = 0;
     LibrarySource m_librarySource = LibrarySource::Local;
     LibrarySource m_loadedPanelSource = LibrarySource::Local;
     MainView m_mainView = MainView::LibraryPanels;
