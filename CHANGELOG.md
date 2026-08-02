@@ -15,7 +15,7 @@
 
 ### Changed
 
-- During an explicit Radio session, ordinary menu **Add to queue** actions now
+- During an explicit Radio session, ordinary **Add to queue** actions now
   use play-next ordering and return to appending at the tail when radio stops.
 - `Radio > Customization…` now marks the three genre scoring weights as
   "(fallback only)" and explains in their tooltips that tracks carrying DSP and
