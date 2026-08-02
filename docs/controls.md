@@ -28,33 +28,7 @@ start radio). Right-clicking **empty space** opens view-level menus:
 queue-wide actions in the queue, play-all/layout in the track table,
 search options in search, sort/alignment in the album views.
 
-## Table behavior parity checklist
-
-### Common baseline
-
-- Rowwise keyboard navigation keeps current rows visible.
-- Extended selection and current identity survive model resets when identities remain.
-- Top-visible identity and pixel offset survive refreshes and display-row changes.
-- Missing current identity falls back to the nearest surviving prior selection, then row zero.
-- Missing viewport identity falls back to the top.
-- Existing deterministic/stable sort behavior remains where sorting exists.
-- Existing muted, flat, responsive headers and empty-table behavior remain unchanged.
-
-### Track table exceptions
-
-- Identity is track path.
-- Marked rows are a TrackTable action set, reapplied after generic restoration and pruned when paths disappear.
-- Auto-height is recomputed after row-count changes.
-- Ratings and TrackTable’s MusicSort chains remain table-specific.
-
-### Playlist item-table exceptions
-
-- Identity is database item ID; saved queues use canonical ordinal within their queue-specific key.
-- State is keyed independently for each playlist and saved queue.
-- Display sorting never changes canonical database ordinal.
-- Keyboard and drag reorder force canonical order and intentionally override final cursor/moved-block selection.
-- Streaming import refresh uses generic identity state rather than transient rows.
-- Post-edit and reveal-now-playing focus overrides remain intentional.
+Refreshing a track list or playlist keeps your selection, the keyboard cursor, and the scroll position on the same rows, even when the rows move.
 
 ## Settings worth knowing
 
