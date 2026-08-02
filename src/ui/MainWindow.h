@@ -81,9 +81,8 @@ public:
     explicit MainWindow(AppCore *core, QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    // Called by AppCore::releaseWindow() to save view settings before the widget
-    // tree is destroyed. The tray-release paths do not pass through closeEvent,
-    // so this is their only save.
+    // Called by AppCore::releaseWindow() to durably save every view setting
+    // before the widget tree is destroyed.
     void persistViewState();
     bool showDemoArtist(const QString &artistName);
     bool showDemoAlbum(const QString &artistName, const QString &albumTitle, QString *error = nullptr);
