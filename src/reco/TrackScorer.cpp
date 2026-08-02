@@ -21,47 +21,48 @@ struct WeightEntry {
     double maximum;
     const char *label;
     const char *description;
+    bool fallbackOnly;
 };
 
 constexpr double kMaximumWeight = std::numeric_limits<double>::max();
 
 constexpr std::array<WeightEntry, 18> kWeightEntries{{
     {"genreWeight", &TrackScorer::Weights::genreWeight, 0.0, kMaximumWeight,
-     "Genre match", "Reward for matching the seed and rolling-context genres."},
+     "Genre match", "Reward for matching the seed and rolling-context genres.", true},
     {"genreIdfSaturation", &TrackScorer::Weights::genreIdfSaturation, 0.001, kMaximumWeight,
-     "Genre rarity saturation", "Shared genre rarity value that reaches the full genre reward."},
+     "Genre rarity saturation", "Shared genre rarity value that reaches the full genre reward.", true},
     {"genreCrowdingSoftLimit", &TrackScorer::Weights::genreCrowdingSoftLimit, 1.0, kMaximumWeight,
-     "Genre crowding soft limit", "Genre counts above this are damped so tag soup does not dominate."},
+     "Genre crowding soft limit", "Genre counts above this are damped so tag soup does not dominate.", true},
     {"eraWeight", &TrackScorer::Weights::eraWeight, 0.0, kMaximumWeight,
-     "Era proximity", "Reward for release years close to the current context."},
+     "Era proximity", "Reward for release years close to the current context.", false},
     {"eraSpanYears", &TrackScorer::Weights::eraSpanYears, 0.001, kMaximumWeight,
-     "Era span", "Year distance where the era reward falls to zero."},
+     "Era span", "Year distance where the era reward falls to zero.", false},
     {"tempoWeight", &TrackScorer::Weights::tempoWeight, 0.0, kMaximumWeight,
-     "Tempo proximity", "Reward for tempo close to the current sonic context."},
+     "Tempo proximity", "Reward for tempo close to the current sonic context.", false},
     {"energyWeight", &TrackScorer::Weights::energyWeight, 0.0, kMaximumWeight,
-     "Energy proximity", "Reward for DSP energy close to the current sonic context."},
+     "Energy proximity", "Reward for DSP energy close to the current sonic context.", false},
     {"audioWeight", &TrackScorer::Weights::audioWeight, 0.0, kMaximumWeight,
-     "Audio similarity", "Reward for CLAP embedding similarity to the session centroid."},
+     "Audio similarity", "Reward for CLAP embedding similarity to the session centroid.", false},
     {"ratingWeight", &TrackScorer::Weights::ratingWeight, 0.0, kMaximumWeight,
-     "Rating", "Reward from effective library rating."},
+     "Rating", "Reward from effective library rating.", false},
     {"userRatingBoost", &TrackScorer::Weights::userRatingBoost, 0.0, kMaximumWeight,
-     "User rating boost", "Multiplier for ratings explicitly set by the user."},
+     "User rating boost", "Multiplier for ratings explicitly set by the user.", false},
     {"historyWeight", &TrackScorer::Weights::historyWeight, 0.0, kMaximumWeight,
-     "Listening history", "Reward from accumulated local and imported listens."},
+     "Listening history", "Reward from accumulated local and imported listens.", false},
     {"historySaturation", &TrackScorer::Weights::historySaturation, 0.001, kMaximumWeight,
-     "History saturation", "Listen count where the history reward nears its full value."},
+     "History saturation", "Listen count where the history reward nears its full value.", false},
     {"noveltyWeight", &TrackScorer::Weights::noveltyWeight, 0.0, kMaximumWeight,
-     "Novelty", "Reward for tracks with little or no listening history."},
+     "Novelty", "Reward for tracks with little or no listening history.", false},
     {"noveltyZeroAt", &TrackScorer::Weights::noveltyZeroAt, 0.001, kMaximumWeight,
-     "Novelty zero point", "Listen count where the novelty reward falls to zero."},
+     "Novelty zero point", "Listen count where the novelty reward falls to zero.", false},
     {"recencyPenalty", &TrackScorer::Weights::recencyPenalty, -100.0, 0.0,
-     "Recency penalty", "Penalty for tracks played recently."},
+     "Recency penalty", "Penalty for tracks played recently.", false},
     {"recencyHalfLifeDays", &TrackScorer::Weights::recencyHalfLifeDays, 0.001, kMaximumWeight,
-     "Recency half-life", "Days for the recent-play penalty to halve."},
+     "Recency half-life", "Days for the recent-play penalty to halve.", false},
     {"skipPenalty", &TrackScorer::Weights::skipPenalty, -100.0, 0.0,
-     "Skip penalty", "Penalty for tracks with a high skip rate."},
+     "Skip penalty", "Penalty for tracks with a high skip rate.", false},
     {"sameArtistPenalty", &TrackScorer::Weights::sameArtistPenalty, -100.0, 0.0,
-     "Same artist penalty", "Soft penalty for repeating recently heard artists."},
+     "Same artist penalty", "Soft penalty for repeating recently heard artists.", false},
 }};
 
 auto findWeightEntry(const QString &key)
@@ -283,7 +284,7 @@ QVector<WeightSpec> weightSpecs()
     for (const WeightEntry &entry : kWeightEntries) {
         specs.push_back({QString::fromLatin1(entry.key), QString::fromLatin1(entry.label),
                          QString::fromLatin1(entry.description), entry.minimum, entry.maximum,
-                         defaults.*(entry.member)});
+                         defaults.*(entry.member), entry.fallbackOnly});
     }
     return specs;
 }

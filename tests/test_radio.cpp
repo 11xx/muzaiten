@@ -204,6 +204,7 @@ private slots:
     void scoringWeightsJsonOverridesDefaults();
     void scoringWeightsJsonRoundTripsAllFields();
     void scoringWeightSpecsRoundTripThroughJson();
+    void genreWeightSpecsAreMarkedFallbackOnly();
     void scoringWeightsJsonRejectsUnknownAndInvalidFields();
     void weightLearnerLearnsDirectionalMultipliers();
     void weightLearnerStrengthensVindicatedPenalties();
@@ -817,6 +818,26 @@ void RadioTest::scoringWeightSpecsRoundTripThroughJson()
         QVERIFY(qFuzzyCompare(json.value(spec.key).toDouble(), expected));
         QVERIFY(qFuzzyCompare(expected, actual));
     }
+}
+
+void RadioTest::genreWeightSpecsAreMarkedFallbackOnly()
+{
+    const QVector<TrackScorer::WeightSpec> specs = TrackScorer::weightSpecs();
+    QCOMPARE(specs.size(), 18);
+
+    const QSet<QString> fallbackKeys{
+        QStringLiteral("genreWeight"),
+        QStringLiteral("genreIdfSaturation"),
+        QStringLiteral("genreCrowdingSoftLimit"),
+    };
+    QSet<QString> markedFallbackKeys;
+    for (const TrackScorer::WeightSpec &spec : specs) {
+        QCOMPARE(spec.fallbackOnly, fallbackKeys.contains(spec.key));
+        if (spec.fallbackOnly) {
+            markedFallbackKeys.insert(spec.key);
+        }
+    }
+    QCOMPARE(markedFallbackKeys, fallbackKeys);
 }
 
 void RadioTest::scoringWeightsJsonRejectsUnknownAndInvalidFields()

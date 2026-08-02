@@ -62,9 +62,16 @@ RadioCustomizationDialog::RadioCustomizationDialog(AppCore *core, QWidget *paren
     auto *weightsBox = new QGroupBox(QStringLiteral("Scoring weights"), content);
     auto *weightsForm = new QFormLayout(weightsBox);
     for (const TrackScorer::WeightSpec &spec : TrackScorer::weightSpecs()) {
+        const QString label = spec.fallbackOnly
+            ? spec.label + QStringLiteral(" (fallback only)")
+            : spec.label;
+        const QString tooltip = spec.fallbackOnly
+            ? spec.tooltip + QStringLiteral("\n\nApplies only to tracks without audio analysis data. "
+                                            "Tracks with DSP and CLAP features ignore this weight.")
+            : spec.tooltip;
         QDoubleSpinBox *spinBox = makeDoubleSpinBox(spec.minimum, spec.maximum, weightsBox);
-        spinBox->setToolTip(spec.tooltip);
-        weightsForm->addRow(spec.label, spinBox);
+        spinBox->setToolTip(tooltip);
+        weightsForm->addRow(label, spinBox);
         m_weightControls.insert(spec.key, spinBox);
         connect(spinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
                 [this](double) { previewEdits(); });

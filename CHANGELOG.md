@@ -13,6 +13,15 @@
 - The free-roam file explorer now repairs a missing or unreadable restored directory to a readable home directory or filesystem root, and rejects invalid navigation requests without losing the current location.
 - The file explorer's up action is now an accessible icon button that does not take keyboard focus.
 
+### Changed
+
+- `Radio > Customization…` now marks the three genre scoring weights as
+  "(fallback only)" and explains in their tooltips that tracks carrying DSP and
+  CLAP features ignore them. Genre has been a metadata fallback rather than a
+  co-signal since radio scoring was reordered around audio analysis, so for an
+  analyzed library those controls had no effect while still presenting an
+  adjustable value.
+
 ### Documentation
 
 - `docs/features-schema.md` now documents that tempo is quantized to the

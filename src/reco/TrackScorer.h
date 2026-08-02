@@ -124,6 +124,8 @@ struct WeightSpec {
     double minimum = 0.0;
     double maximum = 0.0;
     double defaultValue = 0.0;
+    // Applies only when DSP/CLAP features are unavailable for a pair; getWeights() zeroes it otherwise.
+    bool fallbackOnly = false;
 };
 
 Weights defaultWeights();
