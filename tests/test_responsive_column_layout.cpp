@@ -441,7 +441,7 @@ private slots:
         QVERIFY(!selectedPaths().contains(currentPath));
         QVERIFY(selectedPaths() == survivingPaths);
         QCOMPARE(oldCurrentRow, 35);
-        QCOMPARE(pathForRow(table.currentIndex()), pathForRow(table.model()->index(48, 0)));
+        QCOMPARE(pathForRow(table.currentIndex()), QStringLiteral("/music/track-020.flac"));
         const QModelIndex topAfterRemoval = topVisibleIndex();
         QVERIFY(topAfterRemoval.isValid());
         QCOMPARE(pathForRow(topAfterRemoval), topPath);

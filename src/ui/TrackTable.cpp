@@ -581,19 +581,6 @@ Qt::SortOrder TrackTable::sortOrder() const
     return horizontalHeader()->sortIndicatorOrder();
 }
 
-int TrackTable::verticalScrollValue() const
-{
-    return verticalScrollBar()->value();
-}
-
-void TrackTable::restoreViewState(int sortColumn, Qt::SortOrder sortOrder, int verticalScrollValue)
-{
-    if (sortColumn >= 0 && sortColumn < model()->columnCount()) {
-        sortByColumn(sortColumn, sortOrder);
-    }
-    verticalScrollBar()->setValue(std::clamp(verticalScrollValue, verticalScrollBar()->minimum(), verticalScrollBar()->maximum()));
-}
-
 QString TrackTable::viewSettingsJson() const
 {
     QJsonArray visibleColumns;
@@ -686,12 +673,12 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
         return;
     }
 
-    QSet<QString> selectedPaths;
+    QHash<QString, int> selectedPathRows;
     if (selectionModel() != nullptr) {
         for (const QModelIndex &index : selectionModel()->selectedRows()) {
             const QString path = index.data(TrackRole).value<Track>().path;
             if (!path.isEmpty()) {
-                selectedPaths.insert(path);
+                selectedPathRows.insert(path, index.row());
             }
         }
     }
@@ -745,7 +732,7 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
     bool restoredCurrent = false;
     if (selectionModel() != nullptr) {
         selectionModel()->clearSelection();
-        for (const QString &path : selectedPaths) {
+        for (const QString &path : selectedPathRows.keys()) {
             const auto row = pathToRow.constFind(path);
             if (row == pathToRow.constEnd()) {
                 continue;
@@ -763,22 +750,27 @@ void TrackTable::setTracks(const QVector<Track> &tracks)
         }
 
         if (!restoredCurrent && restoredSelection) {
-            int nearestRow = -1;
+            QString nearestPath;
+            int nearestOldRow = -1;
             int nearestDistance = std::numeric_limits<int>::max();
-            for (const QString &path : selectedPaths) {
-                const auto row = pathToRow.constFind(path);
-                if (row == pathToRow.constEnd()) {
+            for (auto it = selectedPathRows.cbegin(); it != selectedPathRows.cend(); ++it) {
+                if (pathToRow.constFind(it.key()) == pathToRow.constEnd()) {
                     continue;
                 }
-                const int distance = std::abs(row.value() - oldCurrentRow);
-                if (distance < nearestDistance || (distance == nearestDistance && row.value() < nearestRow)) {
-                    nearestRow = row.value();
+                const int selectedOldRow = it.value();
+                const int distance = std::abs(selectedOldRow - oldCurrentRow);
+                if (distance < nearestDistance || (distance == nearestDistance && selectedOldRow < nearestOldRow)) {
+                    nearestPath = it.key();
+                    nearestOldRow = selectedOldRow;
                     nearestDistance = distance;
                 }
             }
-            if (nearestRow >= 0) {
-                selectionModel()->setCurrentIndex(model()->index(nearestRow, 0), QItemSelectionModel::NoUpdate);
-                restoredCurrent = true;
+            if (!nearestPath.isEmpty()) {
+                const auto row = pathToRow.constFind(nearestPath);
+                if (row != pathToRow.constEnd()) {
+                    selectionModel()->setCurrentIndex(model()->index(row.value(), 0), QItemSelectionModel::NoUpdate);
+                    restoredCurrent = true;
+                }
             }
         }
     }
