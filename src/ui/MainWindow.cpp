@@ -3117,7 +3117,7 @@ void MainWindow::addQueueSnapshotByIdToQueue(const QString &id)
         statusBar()->showMessage(QStringLiteral("Saved queue is empty"), 3000);
         return;
     }
-    addTracksToQueue(tracks);
+    enqueueTracksFromUi(tracks, QueueAddMode::Append);
 }
 
 void MainWindow::playNextQueueSnapshotById(const QString &id)
@@ -3385,11 +3385,7 @@ void MainWindow::enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMod
         }
     }
     m_suppressPlaylistMirror = suppressMirror;
-    if (mode == QueueAddMode::PlayNext) {
-        playNextTracks(tracks);
-    } else {
-        addTracksToQueue(tracks);
-    }
+    enqueueTracksFromUi(tracks, mode);
     m_suppressPlaylistMirror = false;
 }
 
@@ -5754,6 +5750,15 @@ void MainWindow::playNextTracks(const QVector<Track> &tracks)
 void MainWindow::addTracksToQueue(const QVector<Track> &tracks)
 {
     m_player->appendTracks(tracks);
+}
+
+void MainWindow::enqueueTracksFromUi(const QVector<Track> &tracks, QueueAddMode mode)
+{
+    if (mode == QueueAddMode::PlayNext || m_player->radioActive()) {
+        playNextTracks(tracks);
+    } else {
+        addTracksToQueue(tracks);
+    }
 }
 
 void MainWindow::moveQueueRows(const QVector<int> &rows, int destinationRow)

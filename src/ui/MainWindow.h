@@ -298,6 +298,7 @@ private:
     void appendAndPlayTrack(const Track &track);
     void playNextTracks(const QVector<Track> &tracks);
     void addTracksToQueue(const QVector<Track> &tracks);
+    void enqueueTracksFromUi(const QVector<Track> &tracks, QueueAddMode mode);
     // Menu-driven queue adds funnel through here so that, when the queue is
     // mirroring a playlist, the user is warned that the tracks would also be
     // saved to the playlist (with an option to add them to the queue only).

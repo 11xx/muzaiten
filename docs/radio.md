@@ -71,6 +71,9 @@ below).
 - **Refresh picks below** appears when you right-click a queue row during a
   radio session. It replaces only the unplayed radio picks below that row;
   earlier rows and manually queued tracks are kept.
+- During an explicit radio session, ordinary **Add to queue** actions become
+  play-next operations while preserving selection and album order. When radio
+  stops, they return to appending at the tail.
 
 ## Tuning the scoring
 
