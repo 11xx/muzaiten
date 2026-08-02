@@ -403,6 +403,60 @@ private slots:
         }
     }
 
+    void radioAddsUsePlayNextPolicy()
+    {
+        AppCore core;
+        MainWindow window(&core);
+
+        const auto makeTrack = [](const QString &path) {
+            Track track;
+            track.path = path;
+            return track;
+        };
+        const Track current = makeTrack(QStringLiteral("/music/current.flac"));
+        const Track radioPickOne = makeTrack(QStringLiteral("/music/radio-pick-one.flac"));
+        const Track radioPickTwo = makeTrack(QStringLiteral("/music/radio-pick-two.flac"));
+        const Track firstAddOne = makeTrack(QStringLiteral("/music/first-add-one.flac"));
+        const Track firstAddTwo = makeTrack(QStringLiteral("/music/first-add-two.flac"));
+        const Track secondAddOne = makeTrack(QStringLiteral("/music/second-add-one.flac"));
+        const Track secondAddTwo = makeTrack(QStringLiteral("/music/second-add-two.flac"));
+        const Track regularAdd = makeTrack(QStringLiteral("/music/regular-add.flac"));
+        const auto queuePaths = [&window] {
+            QStringList paths;
+            for (const Track &track : window.m_player->queue()) {
+                paths.append(track.path);
+            }
+            return paths;
+        };
+
+        window.m_player->resetQueue({current, radioPickOne, radioPickTwo}, 0, 1);
+        QCOMPARE(window.m_player->queueIndex(), 0);
+        window.m_player->setRadioActive(true);
+        QVERIFY(window.m_player->radioActive());
+
+        window.enqueueTracksFromMenu({firstAddOne, firstAddTwo}, QueueAddMode::Append, false);
+        QCOMPARE(queuePaths(), (QStringList{
+            current.path, firstAddOne.path, firstAddTwo.path, radioPickOne.path, radioPickTwo.path,
+        }));
+        QCOMPARE(window.m_player->playNextInsertIndex(), 3);
+
+        window.enqueueTracksFromMenu({secondAddOne, secondAddTwo}, QueueAddMode::Append, false);
+        QCOMPARE(queuePaths(), (QStringList{
+            current.path, firstAddOne.path, firstAddTwo.path,
+            secondAddOne.path, secondAddTwo.path, radioPickOne.path, radioPickTwo.path,
+        }));
+        QCOMPARE(window.m_player->playNextInsertIndex(), 5);
+
+        window.m_player->setRadioActive(false);
+        QVERIFY(!window.m_player->radioActive());
+        window.enqueueTracksFromMenu({regularAdd}, QueueAddMode::Append, false);
+        QCOMPARE(queuePaths(), (QStringList{
+            current.path, firstAddOne.path, firstAddTwo.path,
+            secondAddOne.path, secondAddTwo.path, radioPickOne.path, radioPickTwo.path,
+            regularAdd.path,
+        }));
+    }
+
     void unlimitedSavedQueueTogglesDisableTrimming()
     {
         AppCore core;

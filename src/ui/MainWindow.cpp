@@ -3385,7 +3385,8 @@ void MainWindow::enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMod
         }
     }
     m_suppressPlaylistMirror = suppressMirror;
-    if (mode == QueueAddMode::PlayNext) {
+    if (mode == QueueAddMode::PlayNext
+        || (mode == QueueAddMode::Append && m_player->radioActive())) {
         playNextTracks(tracks);
     } else {
         addTracksToQueue(tracks);
