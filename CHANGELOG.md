@@ -13,6 +13,16 @@
 - The free-roam file explorer now repairs a missing or unreadable restored directory to a readable home directory or filesystem root, and rejects invalid navigation requests without losing the current location.
 - The file explorer's up action is now an accessible icon button that does not take keyboard focus.
 
+### Documentation
+
+- `docs/features-schema.md` now documents that tempo is quantized to the
+  integer autocorrelation-lag grid (a ±2.8 BPM floor near 120 BPM, wider at
+  higher tempos), so small BPM differences carry no meaning. It also records
+  that the long-caveated tempo salience gate will not be implemented: corpus
+  measurement shows the cohort resting on the 120 BPM prior is more rhythmic
+  than the library average, not less, so such a gate would mislabel about as
+  much material as it corrected.
+
 ## [2026.07.19]
 
 ### Added

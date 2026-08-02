@@ -222,9 +222,14 @@ NULL means the extractor could not report that value for the representative.
 Near-silence has NULL loudness and energy; a flat or empty onset envelope
 (true silence) has NULL tempo.
 
-Known tempo caveats, pending a salience gate that needs real-corpus evidence
-to tune:
+Known tempo caveats:
 
+- Tempo is quantized. `estimateBpm` picks an integer autocorrelation lag over
+  an onset envelope sampled at `kSampleRateHz / kHop`, so every value is
+  `2583.98 / lag` for some integer lag, and only a few dozen values are
+  achievable at all. Near 120 BPM consecutive lags are ~5.7 BPM apart, a ±2.8
+  BPM quantization floor; near 172 BPM the step is ~11 BPM. Never treat a small
+  BPM difference as meaningful, and never compare tempo for exact equality.
 - The global estimate may fold to the half or double octave toward the edges
   of the common range (a 180 BPM track can report 90) — the standard
   limitation of autocorrelation tempo estimation under a 120 BPM-centered
@@ -232,6 +237,14 @@ to tune:
 - Non-rhythmic but non-silent material (drones, noise, field recordings)
   does NOT get NULL: the prior pulls the estimate toward ~120 BPM, so its
   `tempo_bpm` is unreliable rather than absent.
+
+A salience gate forcing that last class to NULL is deliberately not
+implemented. Corpus measurement does not support it: the cohort sitting on the
+prior has a *higher* onset rate and *lower* spectral flatness than the rest of
+the library, so it is more rhythmic rather than less, and the population such a
+gate would target is a fraction of a percent of a library, about half of which
+does not sit on the prior at all. A gate tuned to fire there would mislabel
+roughly as much material as it corrected.
 
 - `tempo_bpm`: global tempo estimate in beats per minute.
 - `loudness_lufs`: BS.1770-style integrated loudness in LUFS.
@@ -250,9 +263,10 @@ to tune:
 
 Caveats:
 
+- Tempo is quantized to the integer-lag grid; small BPM differences are not
+  meaningful.
 - Tempo may fold to a half/double octave at extreme BPM.
-- Tempo on non-rhythmic material is unreliable pending a salience gate backed by
-  real-corpus evidence.
+- Tempo on non-rhythmic material is unreliable rather than NULL.
 
 ## Embedding Rows
 
