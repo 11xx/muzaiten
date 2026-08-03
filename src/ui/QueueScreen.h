@@ -44,7 +44,7 @@ signals:
     void findFileRequested(const Track &track);
     void addToPlaylistRequested(const QVector<Track> &tracks);
     void propertiesRequested(const Track &track);
-    void startRadioRequested(const Track &track);
+    void startRadioRequested(const QVector<Track> &tracks);
     void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void trackLibraryRequested(const Track &track);
     void viewSettingsChanged();

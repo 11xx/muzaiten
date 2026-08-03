@@ -89,8 +89,9 @@ public:
     // path that actually entered the queue.
     void aliasResolvedPath(const QString &candidatePath, const QString &resolvedPath);
 
-    // Reconcile queued generated identities without confirming any survivor.
-    void retainPendingPaths(const QStringList &orderedPaths);
+    // Reconcile queued generated identities without confirming any survivor;
+    // returns whether the ordered pending list changed.
+    bool retainPendingPaths(const QStringList &orderedPaths);
 
     // Feed every track that actually becomes current while radio is active
     // (the seed, radio picks, and user-queued interruptions). Advances the

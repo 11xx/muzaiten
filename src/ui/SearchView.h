@@ -72,7 +72,7 @@ signals:
     void findFileRequested(Track track);
     void propertiesRequested(Track track);
     void searchRankingRequested();
-    void startRadioRequested(const Track &track);
+    void startRadioRequested(const QVector<Track> &tracks);
     void trackFlagChanged(const Track &track, const QString &flag, bool on);
 
 protected:

@@ -73,10 +73,11 @@ public:
     QThread               *listenBrainzThread() const;
     QThread               *lastFmThread() const;
 
-    // Start a rule-based radio session seeded from a library track. An already
-    // playing seed is kept in place without restarting; another seed starts
-    // immediately. Recommendation preparation and queue extension follow
-    // asynchronously. Returns false when the path is not in the library.
+    // Start a rule-based radio session seeded from one or more library tracks.
+    // An already playing first seed is kept in place without restarting; another
+    // seed starts immediately. Recommendation preparation and queue extension
+    // follow asynchronously. Returns false when any path is not in the library.
+    bool startRadio(const QStringList &seedPaths);
     bool startRadio(const QString &seedPath);
     // Start a radio session seeded from an album-artist name. Uses a synthetic
     // seed built from the artist's genre/era aggregate and opens with a
@@ -115,6 +116,8 @@ public:
     void setRadioBatchSize(int value1To100);
     int radioRefillThreshold() const;
     void setRadioRefillThreshold(int value0To100);
+    QString radioAnchorMode() const;
+    void setRadioAnchorMode(const QString &mode);
     // The "Adventurous (this session)" boost: while a session is active, toggles
     // the LIVE session exploration between 85 and the persisted value; with no
     // session active it arms the next startRadio to begin at 85 (one-shot --
@@ -204,8 +207,9 @@ private:
     void attachRadioFeatures(QVector<TrackScorer::Candidate> &candidates) const;
     void attachRadioFeatures(TrackScorer::Candidate &candidate) const;
     QStringList radioNeighborCandidatePaths(const QStringList &anchorPaths) const;
-    QHash<qint64, QVector<float>> radioEmbeddingsForSession(const QVector<TrackScorer::Candidate> &pool,
-                                                            const TrackScorer::Candidate &seed = {}) const;
+    QHash<qint64, QVector<float>> radioEmbeddingsForSession(
+        const QVector<TrackScorer::Candidate> &pool,
+        const QVector<TrackScorer::Candidate> &anchors = {}) const;
     TrackScorer::Candidate buildRadioSeedCandidate(const Track &seed, const QStringList &seedGenresFolded,
                                                    const QHash<QString, QString> &resolvedSongKeys) const;
     QVector<TrackScorer::Candidate> buildRadioCandidatePool(const QStringList &informativeGenres,
@@ -230,6 +234,7 @@ private:
     void saveRadioSessionState();
     void clearRadioSessionState();
     void maybeRestoreRadioSession();
+    void reconcileRadioPendingState();
     // Maintains the ambient, anchorless radio provider used only by
     // ShuffleMode::Radio. Explicit Start Radio owns m_radioSession while
     // PlayerCore::radioActive() is true and takes precedence.
@@ -239,7 +244,7 @@ private:
     // context on a worker, resolves the chosen paths on the GUI thread, then
     // queues them via PlayerCore::injectTracks. Stale snapshots are discarded.
     void appendRadioBatch(int count);
-    void finishSeededRadioStart(const QString &seedPath, quint64 requestId);
+    void finishSeededRadioStart(const QStringList &seedPaths, quint64 requestId);
     void setRadioLoading(bool loading);
     // Hooked off PlayerCore::currentIndexChanged: while radio is active and
     // batching (batchSize > 1), keeps the configured number of rows queued
@@ -308,6 +313,7 @@ private:
     bool              m_radioLoading = false;
     quint64           m_radioRequestId = 0;
     quint64           m_radioSessionRevision = 0;
+    quint64           m_radioQueueRevision = 0;
     // "Adventurous" boost state -- see setRadioAdventurous's doc comment.
     bool              m_radioAdventurous = false;
     bool              m_radioShuffleSessionActive = false;
@@ -317,7 +323,9 @@ private:
     bool              m_radioShuffleAwaitingInitialTrack = false;
     bool              m_radioRestoreDone = false;
     QString           m_radioSessionKind;
+    QStringList       m_radioSessionSeedPaths;
     QString           m_radioSessionSeedPath;
+    QString           m_radioSessionAnchorMode = QStringLiteral("pinned");
     QString           m_radioSessionArtistName;
     int               m_radioSessionExploration = 30;
     TrackScorer::Weights m_radioSessionWeights;

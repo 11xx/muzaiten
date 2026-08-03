@@ -4,6 +4,11 @@
 
 ### Added
 
+- `Radio > Anchor for new sessions` can keep new seeded and artist sessions
+  near the starting song or let them drift with what plays.
+- Track selections can use `Start Radio` (`Start Radio (N)` for a
+  multi-selection): the first library track plays and the other library tracks
+  become equal starting points.
 - Playback can now stop after a chosen time or a number of finished songs, from
   `Playback > Stop after` or the player timeline context menu. Arming a new
   condition replaces the previous one, and a clickable indicator in the player

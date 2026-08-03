@@ -189,6 +189,7 @@ private slots:
     void stagedStartResumesStoppedSourceViaToggle();
     void stagedStartSurvivesQueuePreservingMutations();
     void resetQueueChangedCurrentClearsStagedStart();
+    void queueResetEmitsOnceOnlyForReset();
     void stopAfterOrdinaryPauseResumeDoesNotDuplicateNotification();
     void stopAfterManualNavigationClearsStagedNotification();
     void stopAfterLateSuppressionCommitsPreparedShuffleRow();
@@ -1259,6 +1260,27 @@ void PlayerCoreTest::resetQueueChangedCurrentClearsStagedStart()
 
     QCOMPARE(currentChanged.count(), 0);
     QCOMPARE(m_backend->state(), PlaybackBackend::State::Playing);
+}
+
+void PlayerCoreTest::queueResetEmitsOnceOnlyForReset()
+{
+    QSignalSpy resetSpy(m_core.get(), &PlayerCore::queueReset);
+    QSignalSpy changedSpy(m_core.get(), &PlayerCore::queueChanged);
+
+    m_core->resetQueue(makeTracks({QStringLiteral("/a")}));
+    QCOMPARE(resetSpy.count(), 1);
+    QCOMPARE(changedSpy.count(), 0);
+
+    m_core->appendTracks(makeTracks({QStringLiteral("/b")}));
+    QCOMPARE(resetSpy.count(), 1);
+    QCOMPARE(changedSpy.count(), 1);
+
+    m_core->clearAll();
+    QCOMPARE(resetSpy.count(), 1);
+    QCOMPARE(changedSpy.count(), 2);
+
+    m_core->resetQueue(makeTracks({QStringLiteral("/c")}));
+    QCOMPARE(resetSpy.count(), 2);
 }
 
 void PlayerCoreTest::stopAfterOrdinaryPauseResumeDoesNotDuplicateNotification()

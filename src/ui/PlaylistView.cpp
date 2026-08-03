@@ -1872,7 +1872,7 @@ void PlaylistView::showPlaylistMenu(const QPoint &pos)
     if (!radioSeedPath.isEmpty()) {
         QAction *startRadio = menu.addAction(QStringLiteral("Start Radio"));
         connect(startRadio, &QAction::triggered, this, [this, radioSeedPath]() {
-            emit startRadioRequested(radioSeedPath);
+            emit startRadioRequested(QStringList{radioSeedPath});
         });
     }
 
@@ -1936,7 +1936,8 @@ void PlaylistView::showItemMenu(const QPoint &pos)
     if (!m_itemTable->selectionModel()->isRowSelected(index.row(), QModelIndex())) {
         setCurrentItemRow(index.row());
     } else {
-        m_itemTable->setCurrentIndex(m_itemModel->index(index.row(), 0));
+        m_itemTable->selectionModel()->setCurrentIndex(m_itemModel->index(index.row(), 0),
+                                                        QItemSelectionModel::NoUpdate);
     }
 
     const PlaylistItem *item = itemForDisplayRow(index.row());
@@ -1971,9 +1972,8 @@ void PlaylistView::showItemMenu(const QPoint &pos)
             callbacks.addToQueueTemporary = [this]() { enqueueSelectedItems(false, true); };
         }
     }
-    if (item != nullptr && isPlayablePlaylistItem(*item)) {
-        const QString seedPath = item->trackPath;
-        callbacks.startRadio = [this, seedPath]() { emit startRadioRequested(seedPath); };
+    if (hasPlayableSelection) {
+        callbacks.startRadio = [this, selectedPaths]() { emit startRadioRequested(selectedPaths); };
     }
     if (hasPlayableSelection) {
         callbacks.addToPlaylist = [this]() { addSelectedItemsToPlaylist(); };

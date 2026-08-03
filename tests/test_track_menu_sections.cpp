@@ -44,7 +44,7 @@ private slots:
                              QStringLiteral("|"),
                              QStringLiteral("Add to playlist… (3)"),
                              QStringLiteral("|"),
-                             QStringLiteral("Start Radio"),
+                             QStringLiteral("Start Radio (3)"),
                              QStringLiteral("Refresh picks below"),
                              QStringLiteral("Never play on radio"),
                              QStringLiteral("Don't learn from this"),

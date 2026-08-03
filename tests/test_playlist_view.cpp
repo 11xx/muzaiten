@@ -664,6 +664,71 @@ private slots:
         QCOMPARE(header->visualIndex(5), header->count() - 1);
     }
 
+    void itemRadioMenuEmitsSelectedPathsInDisplayOrder()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-radio-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Radio seeds"));
+        QVERIFY(playlistId > 0);
+        const QStringList paths{QStringLiteral("/first.flac"), QStringLiteral("/second.flac"), QStringLiteral("/third.flac")};
+        for (const QString &path : paths) {
+            PlaylistItem item;
+            item.trackPath = path;
+            item.titleSnapshot = path;
+            item.status = PlaylistItemStatus::Matched;
+            QVERIFY(db.addItem(playlistId, item) > 0);
+        }
+
+        PlaylistView view;
+        view.setDatabase(&db);
+        view.setTrackResolver([](const QString &path) {
+            Track track;
+            track.path = path;
+            return track;
+        });
+        view.selectPlaylist(playlistId);
+        view.resize(900, 420);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        QTableView *table = itemTable(view);
+        QVERIFY(table != nullptr);
+        QCoreApplication::processEvents();
+        QVERIFY(table->model()->rowCount() == paths.size());
+        table->selectionModel()->clearSelection();
+        for (const int row : {2, 0, 1}) {
+            table->selectionModel()->select(table->model()->index(row, 0),
+                                           QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+        table->selectionModel()->setCurrentIndex(table->model()->index(1, 0), QItemSelectionModel::NoUpdate);
+
+        QSignalSpy startSpy(&view, &PlaylistView::startRadioRequested);
+        bool sawAction = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Start Radio (3)")) {
+                    sawAction = true;
+                    action->trigger();
+                    break;
+                }
+            }
+            menu->close();
+        });
+
+        const QRect rowRect = table->visualRect(table->model()->index(1, 0));
+        QVERIFY(QMetaObject::invokeMethod(table, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, rowRect.center())));
+        QVERIFY(sawAction);
+        QCOMPARE(startSpy.count(), 1);
+        QCOMPARE(qvariant_cast<QStringList>(startSpy.first().at(0)), paths);
+    }
+
     void emptyItemMenuOffersPlaylistActions()
     {
         QTemporaryDir dir;

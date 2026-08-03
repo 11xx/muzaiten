@@ -267,6 +267,7 @@ private slots:
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
     void movingBatchMatchesRepeatedSingles();
     void movingPendingArtistThrottlePersistsAcrossCalls();
+    void retainPendingPathsReportsNoOpRemovalAndReorder();
     void movingConfirmationReplacesPendingContext();
     void movingPendingInvalidationDoesNotConfirm();
     void movingConfirmedContextSurvivesPendingReconciliation();
@@ -2075,6 +2076,33 @@ void RadioTest::movingPendingArtistThrottlePersistsAcrossCalls()
              QJsonDocument(singles.constraintState()).toJson(QJsonDocument::Compact));
 }
 
+void RadioTest::retainPendingPathsReportsNoOpRemovalAndReorder()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/pending-a"), QStringLiteral("artist-a"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/pending-b"), QStringLiteral("artist-b"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/pending-c"), QStringLiteral("artist-c"), {QStringLiteral("rock")}),
+    };
+    QRandomGenerator rng(37u);
+    RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QCOMPARE(session.nextTracks(2, {}, resolvePathToTrack).size(), 2);
+
+    const QJsonArray pendingJson = session.constraintState().value(QStringLiteral("pendingPaths")).toArray();
+    QStringList pending;
+    for (const QJsonValue &value : pendingJson) {
+        pending.push_back(value.toString());
+    }
+    QCOMPARE(pending.size(), 2);
+    QVERIFY(!session.retainPendingPaths(pending));
+
+    const QStringList reordered{pending.at(1), pending.at(0)};
+    QVERIFY(session.retainPendingPaths(reordered));
+    QVERIFY(!session.retainPendingPaths(reordered));
+    QVERIFY(session.retainPendingPaths({reordered.first()}));
+    QVERIFY(!session.retainPendingPaths({reordered.first()}));
+}
+
 void RadioTest::movingConfirmationReplacesPendingContext()
 {
     const QVector<TrackScorer::Candidate> pool{
@@ -2666,6 +2694,10 @@ void RadioTest::movingSinglePermanentVectorPreservesLegacySequence()
     QCOMPARE(trackPaths(legacy.nextTracks(5, {}, resolvePathToTrack)),
              trackPaths(vector.nextTracks(5, {}, resolvePathToTrack)));
     QCOMPARE(legacyRng.generate64(), vectorRng.generate64());
+    const QJsonObject legacyState = legacy.constraintState();
+    QVERIFY(!legacyState.contains(QStringLiteral("pendingPaths")));
+    QVERIFY(!legacyState.contains(QStringLiteral("rngState")));
+    QVERIFY(!legacyState.contains(QStringLiteral("confirmedContext")));
 }
 
 void RadioTest::movingAnchorsRoundRobinIsReproducible()

@@ -57,7 +57,7 @@ public:
 
 signals:
     void trackActivated(int index);
-    void startRadioRequested(const Track &track);
+    void startRadioRequested(const QVector<Track> &tracks);
     void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void trackRatingChanged(const Track &track, int rating0To100);
     void rowsMoveRequested(const QVector<int> &rows, int destinationRow);

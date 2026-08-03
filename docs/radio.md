@@ -23,11 +23,27 @@ history. There is no cloud, no account, and nothing leaves your machine.
 
 Starting radio snapshots the current queue first, so "Restore saved queue…"
 can undo it. While a session runs, a radio indicator appears in the player
-bar — click to stop (the queue is kept), right-click for session options.
+bar. Click to stop (the queue is kept), or right-click for session options.
 Starting from the track that is already playing keeps its playback position
 and replaces only the queue around it. Starting from another track plays that
 seed immediately. In both cases recommendations load in the background and an
 indeterminate status-bar indicator remains visible until the new tail arrives.
+
+## Anchor for new sessions
+
+`Radio > Anchor for new sessions` sets how far a new session may travel from
+where it started. `Stay near the starting song` (the default) keeps every pick
+close to the track you seeded from. `Drift with what plays` lets the direction
+move as the session runs: queued picks nudge it, and a song that actually starts
+playing steers it strongly. Rows you remove, refresh, or skip past stop steering
+it. The choice applies to new seeded and artist sessions; a running session,
+Mixes, and Radio shuffle are unaffected.
+
+## Multiple starting points
+
+Selecting several tracks and choosing `Start Radio (N)` plays the first one and
+treats the rest as equal starting points, taking turns between them rather than
+averaging them together. Rows that are not in your library are ignored.
 
 ## How picks are scored
 

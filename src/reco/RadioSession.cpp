@@ -1097,10 +1097,10 @@ void RadioSession::aliasResolvedPath(const QString &candidatePath, const QString
     }
 }
 
-void RadioSession::retainPendingPaths(const QStringList &orderedPaths)
+bool RadioSession::retainPendingPaths(const QStringList &orderedPaths)
 {
     if (m_contextMode != ContextMode::MovingContext) {
-        return;
+        return false;
     }
     QStringList retained;
     QSet<QString> seen;
@@ -1110,7 +1110,11 @@ void RadioSession::retainPendingPaths(const QStringList &orderedPaths)
             retained.push_back(path);
         }
     }
+    if (retained == m_pendingPaths) {
+        return false;
+    }
     m_pendingPaths = std::move(retained);
+    return true;
 }
 
 void RadioSession::setExploration(int exploration0To100)

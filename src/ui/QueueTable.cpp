@@ -1114,14 +1114,16 @@ void QueueTable::showQueueMenu(const QPoint &pos)
             }
         }
     };
+    QAction *play = menu.addAction(QStringLiteral("Play"));
+    connect(play, &QAction::triggered, this, [this, row]() { emit trackActivated(row); });
+
     TrackMenuSections::Callbacks callbacks;
-    callbacks.playNow = [this, row]() { emit trackActivated(row); };
     callbacks.addToPlaylist = [this, actionTracks]() {
         if (!actionTracks.isEmpty()) {
             emit addToPlaylistRequested(actionTracks);
         }
     };
-    callbacks.startRadio = [this, track]() { emit startRadioRequested(track); };
+    callbacks.startRadio = [this, actionTracks]() { emit startRadioRequested(actionTracks); };
     if (m_radioActive) {
         callbacks.refreshRadioPicksBelow = [this, row]() {
             emit refreshRadioPicksBelowRequested(row);
@@ -1134,7 +1136,7 @@ void QueueTable::showQueueMenu(const QPoint &pos)
     callbacks.copyPath = [actionTracks]() { QGuiApplication::clipboard()->setText(joinedTrackPaths(actionTracks)); };
     callbacks.properties = [this, track]() { emit propertiesRequested(track); };
     TrackMenuSections::State state;
-    state.trackCount = 1;
+    state.trackCount = std::max(1, static_cast<int>(actionTracks.size()));
     state.neverRadioChecked = allFlagged(QStringLiteral("never_radio"));
     state.noLearnChecked = allFlagged(QStringLiteral("no_learn"));
     state.refreshRadioPicksBelowEnabled = row >= m_store->currentIndex();

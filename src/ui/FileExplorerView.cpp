@@ -585,9 +585,16 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
     if (tracks.isEmpty()) {
         return;
     }
-    // Only offer a seed when the clicked file resolves to a scanned library
-    // track — FreeRoam rows can be tag-read-only files that were never indexed.
-    const bool seedIsLibraryTrack = m_trackResolver && !m_trackResolver(tracks.first().path).path.isEmpty();
+    QVector<Track> libraryTracks;
+    if (m_trackResolver) {
+        libraryTracks.reserve(tracks.size());
+        for (const Track &track : tracks) {
+            const Track libraryTrack = m_trackResolver(track.path);
+            if (!libraryTrack.path.isEmpty()) {
+                libraryTracks.push_back(libraryTrack);
+            }
+        }
+    }
     TrackMenuSections::Callbacks callbacks;
     callbacks.playNow = [this, tracks]() { emit trackActivated(tracks.first()); };
     callbacks.playNext = [this, tracks]() { emit playNextRequested(tracks); };
@@ -597,8 +604,8 @@ void FileExplorerView::showContextMenu(const QPoint &pos)
         callbacks.addToQueueTemporary = [this, tracks]() { emit addToQueueTemporaryRequested(tracks); };
     }
     callbacks.addToPlaylist = [this, tracks]() { emit addToPlaylistRequested(tracks); };
-    if (seedIsLibraryTrack) {
-        callbacks.startRadio = [this, tracks]() { emit startRadioRequested(tracks.first()); };
+    if (!libraryTracks.isEmpty()) {
+        callbacks.startRadio = [this, libraryTracks]() { emit startRadioRequested(libraryTracks); };
     }
     callbacks.openContainingDirectory = [this, tracks]() { emit findFileRequested(tracks.first()); };
     callbacks.copyPath = [tracks]() { QGuiApplication::clipboard()->setText(joinedTrackPaths(tracks)); };
@@ -948,8 +955,10 @@ QVector<Track> FileExplorerView::tracksForDirectory(const QString &path) const
 QVector<Track> FileExplorerView::selectedTracks() const
 {
     QVector<Track> tracks;
-    for (QTreeWidgetItem *item : m_tree->selectedItems()) {
-        if (item != nullptr && item->data(0, TypeRole).toInt() == TrackItem) {
+    for (int row = 0; row < m_tree->topLevelItemCount(); ++row) {
+        QTreeWidgetItem *item = m_tree->topLevelItem(row);
+        if (item != nullptr && item->isSelected()
+            && item->data(0, TypeRole).toInt() == TrackItem) {
             const Track track = item->data(0, TrackRole).value<Track>();
             if (!track.path.isEmpty()) {
                 tracks.push_back(track);

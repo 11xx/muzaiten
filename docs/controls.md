@@ -20,13 +20,16 @@ Keybindings are customizable at `Settings > Keybinds…`.
 
 Every track surface (library table, queue, playlists, search results,
 explorers, music explorer) shares one menu vocabulary: play/queue actions,
-`Add to playlist…`, `Start Radio`, the taste flags (`Never play on
-radio`, `Don't learn from this`), `Find in library`, `Open containing
-directory`, `Copy path`, and `Properties`. Albums and artists carry
-collection-level equivalents (play/queue all, add album to playlist,
-start radio). Right-clicking **empty space** opens view-level menus:
-queue-wide actions in the queue, play-all/layout in the track table,
-search options in search, sort/alignment in the album views.
+`Add to playlist…`, `Start Radio` (`Start Radio (N)` for a multi-selection), the
+taste flags (`Never play on radio`, `Don't learn from this`), `Find in library`,
+`Open containing directory`, `Copy path`, and `Properties`. Albums and artists
+carry collection-level equivalents (play/queue all, add album to playlist,
+start radio). A mixed selection ignores rows that are not in the library; the
+first library track plays and the other library tracks become equal starting
+points. Right-clicking
+**empty space** opens view-level menus: queue-wide actions in the queue,
+play-all/layout in the track table, search options in search, sort/alignment in
+the album views.
 
 Refreshing a track list or playlist keeps your selection, the keyboard cursor, and the scroll position on the same rows, even when the rows move.
 
@@ -66,6 +69,8 @@ and are not restored after restart.
   off; with **Allow resampling** DSD decodes to PCM for shared output.
 - `Playback > Resume behavior…` — whether position and playback state are
   restored across launches.
+- `Radio > Anchor for new sessions` — choose `Stay near the starting song` or
+  `Drift with what plays` for new seeded and artist sessions.
 - `Radio > Customization…` / `Radio > Genre curation…` — engine tuning
   ([radio.md](radio.md)).
 - `Settings > Track information panel…` — fields shown in the right-side
