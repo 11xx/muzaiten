@@ -57,6 +57,8 @@ struct RadioSessionDecay {
 // The rolling mood context a candidate is scored against.
 struct SeedContext {
     QStringList genresFolded;          // seed + last few played tracks (folded)
+    // Normalized folded genre weights for moving-context sessions.
+    QHash<QString, double> weightedGenres;
     // Folded genre -> IDF weight (log(taggedLibraryTracks / trackCount(genre))),
     // covering the full library vocabulary so rolling-context genres picked up
     // from played tracks (not just the seed's) resolve too. A genre absent from
@@ -66,6 +68,7 @@ struct SeedContext {
     QHash<QString, double> genreIdf;
     QSet<QString> recentArtistsFolded; // for the soft same-artist term (not the hard constraint)
     int year = 0;
+    double contextYear = 0.0;
     double contextTempoBpm = -1.0;
     double contextEnergy = -1.0;
     QVector<float> audioCentroid;       // L2-normalized; empty = unknown
