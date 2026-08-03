@@ -315,7 +315,8 @@ private:
     void clearPlayNextPriority();
     // Snapshots the current queue to the backlog (same as Clear queue) so
     // "Restore previous queue" can undo a radio start, then hands the seed
-    // path to AppCore::startRadio(). Shows a status message on an unknown seed.
+    // paths to AppCore::startRadio(). Shows a status message on an unknown seed.
+    void startRadioFromSeeds(const QStringList &paths);
     void startRadioFromSeed(const QString &path);
     // Same snapshot policy as Start Radio, but seeds the session from an album
     // artist name instead of one track path.

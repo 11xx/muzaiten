@@ -1037,7 +1037,7 @@ void TrackTable::showCellMenu(const QPoint &pos)
     }
     const Track track = model()->index(index.row(), 0).data(TrackRole).value<Track>();
     callbacks.addToPlaylist = [this, tracks]() { emit addToPlaylistRequested(tracks); };
-    callbacks.startRadio = [this, track]() { emit startRadioRequested(track); };
+    callbacks.startRadio = [this, tracks]() { emit startRadioRequested(tracks); };
     callbacks.setNeverRadio = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("never_radio"), on); };
     callbacks.setNoLearn = [setFlagForTracks](bool on) { setFlagForTracks(QStringLiteral("no_learn"), on); };
     callbacks.openContainingDirectory = [this, track]() { emit findFileRequested(track); };

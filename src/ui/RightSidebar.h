@@ -70,7 +70,7 @@ signals:
     void albumRequested(const QString &artistName, const QString &albumTitle);
     void findFileRequested(const Track &track);
     void propertiesRequested(const Track &track);
-    void startRadioRequested(const Track &track);
+    void startRadioRequested(const QVector<Track> &tracks);
     void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void trackLibraryRequested(const Track &track);
     void viewSettingsChanged();

@@ -1,4 +1,7 @@
+#include <sstream>
+#define private public
 #include "app/AppCore.h"
+#undef private
 #include "core/Artist.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
@@ -6,6 +9,7 @@
 #include "ipc/IpcServer.h"
 #include "mpris/MprisService.h"
 #include "player/PlayerCore.h"
+#include "reco/RadioSession.h"
 #include "scrobble/PlayEventRecorder.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
@@ -15,6 +19,7 @@
 #include "ui/PlaylistView.h"
 #include "ui/SelectionColors.h"
 #include "ui/StopAfterDialog.h"
+#include "ui/TrackTable.h"
 
 #define private public
 #include "ui/MainWindow.h"
@@ -22,6 +27,7 @@
 #undef private
 
 #include <QDataStream>
+#include <algorithm>
 #include <QDateTime>
 #include <QFile>
 #include <QFontMetrics>
@@ -37,9 +43,13 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QScopeGuard>
+#include <QSet>
+#include <QStatusBar>
 #include <QSpinBox>
 #include <QSystemTrayIcon>
+#include <QTableView>
 #include <QTemporaryDir>
+#include <QTreeWidget>
 #include <QTimer>
 #include <QToolButton>
 #include <QtTest/QtTest>
@@ -72,6 +82,16 @@ bool writeSilentWav(const QString &path)
         out << qint16{0};
     }
     return out.status() == QDataStream::Ok;
+}
+
+QStringList trackPaths(const QVector<Track> &tracks)
+{
+    QStringList paths;
+    paths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        paths.push_back(track.path);
+    }
+    return paths;
 }
 
 } // namespace
@@ -626,6 +646,757 @@ private slots:
         QCOMPARE(core.player()->currentTrack().path, target.path);
         QVERIFY2(core.radioPickReason(target.path).contains(QStringLiteral("genre")),
                  qPrintable(core.radioPickReason(target.path)));
+    }
+
+    void radioAnchorModePersistsAndMenuActionsAreExclusive()
+    {
+        AppCore core;
+        core.database()->setSetting(QStringLiteral("radio.anchorMode"), QStringLiteral("invalid"));
+        QCOMPARE(core.radioAnchorMode(), QStringLiteral("pinned"));
+        core.setRadioAnchorMode(QStringLiteral("drift"));
+        QCOMPARE(core.radioAnchorMode(), QStringLiteral("drift"));
+        QCOMPARE(core.database()->setting(QStringLiteral("radio.anchorMode")), QStringLiteral("drift"));
+
+        MainWindow window(&core);
+        QMenu *radioMenu = nullptr;
+        for (QAction *action : window.m_playerBar->m_menuBar->actions()) {
+            if (action->text() == QStringLiteral("Radio")) {
+                radioMenu = action->menu();
+                break;
+            }
+        }
+        QVERIFY(radioMenu != nullptr);
+        QMenu *anchorMenu = nullptr;
+        QAction *anchorAction = nullptr;
+        QAction *explorationAction = nullptr;
+        for (QAction *action : radioMenu->actions()) {
+            if (action->text() == QStringLiteral("Anchor for new sessions")) {
+                anchorAction = action;
+                anchorMenu = action->menu();
+            } else if (action->text() == QStringLiteral("Exploration…")) {
+                explorationAction = action;
+            }
+        }
+        QVERIFY(anchorAction != nullptr);
+        QVERIFY(explorationAction != nullptr);
+        QCOMPARE(radioMenu->actions().indexOf(anchorAction) + 1,
+                 radioMenu->actions().indexOf(explorationAction));
+        QVERIFY(anchorMenu != nullptr);
+        QCOMPARE(anchorMenu->actions().size(), 2);
+        QCOMPARE(anchorMenu->actions().at(0)->text(), QStringLiteral("Stay near the starting song"));
+        QCOMPARE(anchorMenu->actions().at(1)->text(), QStringLiteral("Drift with what plays"));
+        QVERIFY(anchorMenu->actions().at(0)->isCheckable());
+        QVERIFY(anchorMenu->actions().at(1)->isCheckable());
+
+        radioMenu->aboutToShow();
+        QVERIFY(!anchorMenu->actions().at(0)->isChecked());
+        QVERIFY(anchorMenu->actions().at(1)->isChecked());
+
+        QSignalSpy modeSpy(window.m_playerBar, &PlayerBar::radioAnchorModeChanged);
+        anchorMenu->actions().at(0)->trigger();
+        QVERIFY(anchorMenu->actions().at(0)->isChecked());
+        QVERIFY(!anchorMenu->actions().at(1)->isChecked());
+        QCOMPARE(core.radioAnchorMode(), QStringLiteral("pinned"));
+        QCOMPARE(modeSpy.count(), 1);
+    }
+
+    void radioSelectionFiltersMissingTracksBeforeSnapshot()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        const QString libraryPath = libraryRoot.filePath(QStringLiteral("library-track.wav"));
+        const QString missingPath = libraryRoot.filePath(QStringLiteral("missing-track.wav"));
+        QVERIFY(writeSilentWav(libraryPath));
+
+        Track libraryTrack;
+        libraryTrack.path = libraryPath;
+        libraryTrack.parentDir = libraryRoot.path();
+        libraryTrack.filename = QStringLiteral("library-track.wav");
+        libraryTrack.title = QStringLiteral("Library track");
+        libraryTrack.artistName = QStringLiteral("Library artist");
+        libraryTrack.albumArtistName = libraryTrack.artistName;
+        libraryTrack.albumTitle = QStringLiteral("Library album");
+        libraryTrack.codec = QStringLiteral("wav");
+        MetadataBlob::FullMetadata metadata;
+        metadata.tags.insert(QStringLiteral("GENRE"), {QStringLiteral("Rock")});
+        const MetadataBlob::Encoded encoded = MetadataBlob::encode(metadata);
+        libraryTrack.fullMetadataBlob = encoded.data;
+        libraryTrack.fullMetadataRawSize = encoded.rawSize;
+
+        AppCore core;
+        QVERIFY2(core.database()->upsertTrack(libraryTrack), qPrintable(core.database()->lastError()));
+        MainWindow window(&core);
+        Track sentinel;
+        sentinel.path = QStringLiteral("/sentinel.wav");
+        window.m_player->resetQueue({sentinel}, 0);
+        window.startRadioFromSeeds({missingPath, libraryPath, libraryPath});
+
+        QCOMPARE(window.m_player->queue().first().path, libraryPath);
+        QVERIFY(core.player()->radioActive());
+        const QJsonArray radioBacklog = window.loadQueueSnapshotsRoot()
+            .value(QStringLiteral("radioBacklog")).toArray();
+        QCOMPARE(radioBacklog.size(), 1);
+        QCOMPARE(radioBacklog.first().toObject().value(QStringLiteral("tracks")).toArray()
+                     .first().toObject().value(QStringLiteral("path")).toString(), sentinel.path);
+
+        core.stopRadio();
+        window.m_player->resetQueue({sentinel}, 0);
+        const int backlogBeforeMissing = window.loadQueueSnapshotsRoot()
+            .value(QStringLiteral("radioBacklog")).toArray().size();
+        window.startRadioFromSeeds({missingPath, libraryRoot.filePath(QStringLiteral("also-missing.wav"))});
+        QCOMPARE(window.statusBar()->currentMessage(),
+                 QStringLiteral("Start Radio: none of these tracks are in the library"));
+        window.startRadioFromSeeds({missingPath});
+        QCOMPARE(window.statusBar()->currentMessage(),
+                 QStringLiteral("Start Radio: that track is not in the library"));
+        QCOMPARE(window.m_player->queue().first().path, sentinel.path);
+        QVERIFY(!core.player()->radioActive());
+        QCOMPARE(window.loadQueueSnapshotsRoot().value(QStringLiteral("radioBacklog")).toArray().size(),
+                 backlogBeforeMissing);
+    }
+
+    void fileExplorerRadioKeepsResolvableMixedSelection()
+    {
+        Track unresolved;
+        unresolved.path = QStringLiteral("/free-roam/a-unresolved.wav");
+        unresolved.filename = QStringLiteral("a-unresolved.wav");
+        Track libraryTrack;
+        libraryTrack.path = QStringLiteral("/library/b-library.wav");
+        libraryTrack.filename = QStringLiteral("b-library.wav");
+
+        FileExplorerView view;
+        view.setTrackResolver([libraryTrack](const QString &path) {
+            return path == libraryTrack.path ? libraryTrack : Track{};
+        });
+        view.setLibraryEntries({}, {unresolved, libraryTrack});
+        view.resize(640, 260);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *tree = view.findChild<QTreeWidget *>();
+        QVERIFY(tree != nullptr);
+        tree->selectAll();
+
+        QSignalSpy startSpy(&view, &FileExplorerView::startRadioRequested);
+        bool sawStartRadio = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Start Radio (2)")) {
+                    sawStartRadio = true;
+                    action->trigger();
+                    break;
+                }
+            }
+            menu->close();
+        });
+
+        const QRect rowRect = tree->visualRect(tree->model()->index(0, 0));
+        QVERIFY(QMetaObject::invokeMethod(tree, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, rowRect.center())));
+        QVERIFY(sawStartRadio);
+        QCOMPARE(startSpy.count(), 1);
+        const QVector<Track> tracks = qvariant_cast<QVector<Track>>(startSpy.first().at(0));
+        QCOMPARE(tracks.size(), 1);
+        QCOMPARE(tracks.first().path, libraryTrack.path);
+    }
+
+    void radioQueueLifecycleReconcilesPendingPaths()
+    {
+        const auto candidate = [](const QString &path, const QString &artist) {
+            TrackScorer::Candidate row;
+            row.path = path;
+            row.songKey = QStringLiteral("song:") + path;
+            row.artistFolded = artist;
+            row.albumKey = QStringLiteral("album:") + path;
+            row.genresFolded = {QStringLiteral("rock")};
+            return row;
+        };
+
+        AppCore core;
+        const QString anchorPath = QStringLiteral("/anchor.wav");
+        const QVector<TrackScorer::Candidate> pool{
+            candidate(QStringLiteral("/pick-a.wav"), QStringLiteral("artist-a")),
+            candidate(QStringLiteral("/pick-b.wav"), QStringLiteral("artist-b")),
+            candidate(QStringLiteral("/pick-c.wav"), QStringLiteral("artist-c")),
+        };
+        const QVector<TrackScorer::Candidate> anchors{
+            candidate(anchorPath, QStringLiteral("anchor")),
+        };
+        auto session = std::make_unique<RadioSession>(
+            pool, QHash<QString, TrackScorer::Affinity>{}, QHash<QString, double>{}, anchors,
+            RadioSession::ContextMode::MovingContext, 30, 1'000'000'000);
+        const QVector<Track> picks = session->nextTracks(3, {}, [](const QString &path) {
+            Track track;
+            track.path = path;
+            return track;
+        });
+        QCOMPARE(picks.size(), 3);
+
+        QVector<Track> queue{Track{.path = anchorPath}};
+        queue += picks;
+        Track manual;
+        manual.path = QStringLiteral("/manual.wav");
+        queue.insert(3, manual);
+        core.player()->resetQueue(queue, 0);
+        core.m_radioSession = std::move(session);
+        const QStringList generatedPaths = trackPaths(picks);
+        core.m_radioPickPaths = QSet<QString>(generatedPaths.cbegin(), generatedPaths.cend());
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPaths = {anchorPath};
+        core.m_radioSessionSeedPath = anchorPath;
+        core.m_radioSessionAnchorMode = QStringLiteral("drift");
+        core.player()->setRadioActive(true);
+        core.reconcileRadioPendingState();
+
+        auto pendingPaths = [&core]() {
+            QStringList paths;
+            for (const QJsonValue &value : core.m_radioSession->constraintState()
+                                                .value(QStringLiteral("pendingPaths")).toArray()) {
+                paths.push_back(value.toString());
+            }
+            return paths;
+        };
+        const auto orderedGeneratedPaths = [&core]() {
+            QStringList paths;
+            const int firstPendingRow = std::max(0, core.player()->queueIndex() + 1);
+            for (int row = firstPendingRow; row < core.player()->queue().size(); ++row) {
+                const QString &path = core.player()->queue().at(row).path;
+                if (core.m_radioPickPaths.contains(path)) {
+                    paths.push_back(path);
+                }
+            }
+            return paths;
+        };
+        QCOMPARE(pendingPaths(), orderedGeneratedPaths());
+
+        core.player()->removeRows({2});
+        QCOMPARE(pendingPaths(), orderedGeneratedPaths());
+
+        core.player()->moveRows({3}, 1);
+        QCOMPARE(pendingPaths(), orderedGeneratedPaths());
+
+        core.player()->resetQueue({queue.at(0), picks.at(2), manual}, 0);
+        QCOMPARE(pendingPaths(), orderedGeneratedPaths());
+        const QJsonObject saved = QJsonDocument::fromJson(
+            core.settings()->setting(QStringLiteral("radio.session.state")).toUtf8()).object();
+        QJsonArray expectedPending;
+        for (const QString &path : orderedGeneratedPaths()) {
+            expectedPending.append(path);
+        }
+        QCOMPARE(saved.value(QStringLiteral("pendingPaths")).toArray(), expectedPending);
+        core.stopRadio();
+    }
+
+    void radioRefreshPicksBelowReconcilesPendingState()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        const auto candidate = [](const QString &path, int index) {
+            TrackScorer::Candidate row;
+            row.path = path;
+            row.songKey = QStringLiteral("song:refresh-") + QString::number(index);
+            row.artistFolded = QStringLiteral("refresh-artist-") + QString::number(index);
+            row.albumKey = QStringLiteral("album:refresh-") + QString::number(index);
+            row.genresFolded = {QStringLiteral("rock")};
+            return row;
+        };
+
+        AppCore core;
+        core.player()->setPathResolver([](const Track &track) { return track.path; });
+        QVector<TrackScorer::Candidate> pool;
+        pool.reserve(5);
+        for (int index = 0; index < 5; ++index) {
+            const QString filename = QStringLiteral("refresh-%1.wav").arg(index);
+            Track track;
+            track.path = libraryRoot.filePath(filename);
+            track.parentDir = libraryRoot.path();
+            track.filename = filename;
+            track.title = filename;
+            track.artistName = QStringLiteral("Refresh artist %1").arg(index);
+            track.albumArtistName = track.artistName;
+            track.albumTitle = QStringLiteral("Refresh album %1").arg(index);
+            track.fileSize = 1;
+            track.fileMtime = 1;
+            track.codec = QStringLiteral("wav");
+            QVERIFY(writeSilentWav(track.path));
+            QVERIFY2(core.database()->upsertTrack(track), qPrintable(core.database()->lastError()));
+            pool.push_back(candidate(track.path, index));
+        }
+
+        const QString anchorPath = QStringLiteral("/refresh-anchor.wav");
+        const QVector<TrackScorer::Candidate> anchors{
+            candidate(anchorPath, 99),
+        };
+        auto session = std::make_unique<RadioSession>(
+            pool, QHash<QString, TrackScorer::Affinity>{}, QHash<QString, double>{}, anchors,
+            RadioSession::ContextMode::MovingContext, 30, 1'000'000'000);
+        const QVector<Track> picks = session->nextTracks(3, {}, [](const QString &path) {
+            Track track;
+            track.path = path;
+            return track;
+        });
+        QCOMPARE(picks.size(), 3);
+
+        Track anchor;
+        anchor.path = anchorPath;
+        Track manual;
+        manual.path = QStringLiteral("/refresh-manual.wav");
+        core.player()->resetQueue({anchor, picks.at(0), picks.at(1), manual, picks.at(2)}, 0);
+        core.m_radioSession = std::move(session);
+        const QStringList generatedPaths = trackPaths(picks);
+        core.m_radioPickPaths = QSet<QString>(generatedPaths.cbegin(), generatedPaths.cend());
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPaths = {anchorPath};
+        core.m_radioSessionSeedPath = anchorPath;
+        core.m_radioSessionAnchorMode = QStringLiteral("drift");
+        core.setRadioBatchSize(1);
+        core.player()->setRadioActive(true);
+        core.reconcileRadioPendingState();
+
+        const QString keptPath = picks.at(0).path;
+        const QString refreshedPath = picks.at(1).path;
+        const QString laterRefreshedPath = picks.at(2).path;
+        QVERIFY(core.refreshRadioPicksBelow(1));
+        QVERIFY(core.m_radioTopUpInProgress);
+        QTRY_VERIFY_WITH_TIMEOUT(!core.m_radioTopUpInProgress, 10000);
+
+        QStringList pendingPaths;
+        for (const QJsonValue &value : core.m_radioSession->constraintState()
+                                             .value(QStringLiteral("pendingPaths")).toArray()) {
+            pendingPaths.push_back(value.toString());
+        }
+        QVERIFY(pendingPaths.contains(keptPath));
+        QVERIFY(!pendingPaths.contains(refreshedPath));
+        QVERIFY(!pendingPaths.contains(laterRefreshedPath));
+
+        QStringList queuePaths;
+        for (const Track &track : core.player()->queue()) {
+            queuePaths.push_back(track.path);
+        }
+        QVERIFY(queuePaths.contains(keptPath));
+        QVERIFY(queuePaths.contains(manual.path));
+        QVERIFY(!queuePaths.contains(refreshedPath));
+        QVERIFY(!queuePaths.contains(laterRefreshedPath));
+        core.stopRadio();
+    }
+
+    void radioForwardJumpReconcilesPendingAndConfirmsCurrent()
+    {
+        const auto candidate = [](const QString &path, const QString &artist) {
+            TrackScorer::Candidate row;
+            row.path = path;
+            row.songKey = QStringLiteral("song:") + path;
+            row.artistFolded = artist;
+            row.albumKey = QStringLiteral("album:") + path;
+            row.genresFolded = {QStringLiteral("rock")};
+            return row;
+        };
+
+        AppCore core;
+        core.player()->setPathResolver([](const Track &track) { return track.path; });
+        const QString anchorPath = QStringLiteral("/forward-anchor.wav");
+        const QVector<TrackScorer::Candidate> pool{
+            candidate(QStringLiteral("/forward-a.wav"), QStringLiteral("artist-a")),
+            candidate(QStringLiteral("/forward-b.wav"), QStringLiteral("artist-b")),
+            candidate(QStringLiteral("/forward-c.wav"), QStringLiteral("artist-c")),
+        };
+        const QVector<TrackScorer::Candidate> anchors{candidate(anchorPath, QStringLiteral("anchor"))};
+        auto session = std::make_unique<RadioSession>(
+            pool, QHash<QString, TrackScorer::Affinity>{}, QHash<QString, double>{}, anchors,
+            RadioSession::ContextMode::MovingContext, 30, 1'000'000'000);
+        const QVector<Track> picks = session->nextTracks(3, {}, [](const QString &path) {
+            Track track;
+            track.path = path;
+            return track;
+        });
+        QCOMPARE(picks.size(), 3);
+        Track anchor;
+        anchor.path = anchorPath;
+        Track manual;
+        manual.path = QStringLiteral("/forward-manual.wav");
+        QVector<Track> queue{anchor, picks.at(0), picks.at(1), manual, picks.at(2)};
+        core.player()->resetQueue(queue, 0);
+        core.m_radioSession = std::move(session);
+        const QStringList generatedPaths = trackPaths(picks);
+        core.m_radioPickPaths = QSet<QString>(generatedPaths.cbegin(), generatedPaths.cend());
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPaths = {anchorPath};
+        core.m_radioSessionSeedPath = anchorPath;
+        core.m_radioSessionAnchorMode = QStringLiteral("drift");
+        core.player()->setRadioActive(true);
+        core.reconcileRadioPendingState();
+
+        core.player()->playAt(2, true, true, true);
+        const QJsonObject state = core.m_radioSession->constraintState();
+        QCOMPARE(state.value(QStringLiteral("pendingPaths")).toArray(), QJsonArray{picks.at(2).path});
+        const QJsonArray confirmed = state.value(QStringLiteral("confirmedContext")).toArray();
+        QCOMPARE(confirmed.size(), 1);
+        QCOMPARE(confirmed.first().toObject().value(QStringLiteral("path")).toString(), picks.at(1).path);
+        const QJsonObject saved = QJsonDocument::fromJson(
+            core.settings()->setting(QStringLiteral("radio.session.state")).toUtf8()).object();
+        QCOMPARE(saved.value(QStringLiteral("pendingPaths")).toArray(), QJsonArray{picks.at(2).path});
+        core.stopRadio();
+    }
+
+    void radioQueueRevisionRejectsStaleWorkerCompletion()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        const QString generatedPath = libraryRoot.filePath(QStringLiteral("stale-worker.wav"));
+        QVERIFY(writeSilentWav(generatedPath));
+
+        Track generatedTrack;
+        generatedTrack.path = generatedPath;
+        generatedTrack.parentDir = libraryRoot.path();
+        generatedTrack.filename = QStringLiteral("stale-worker.wav");
+        generatedTrack.title = QStringLiteral("Stale worker");
+        generatedTrack.artistName = QStringLiteral("Stale artist");
+        generatedTrack.albumArtistName = generatedTrack.artistName;
+        generatedTrack.albumTitle = QStringLiteral("Stale album");
+        generatedTrack.fileSize = 1;
+        generatedTrack.fileMtime = 1;
+        generatedTrack.codec = QStringLiteral("wav");
+
+        AppCore core;
+        QVERIFY2(core.database()->upsertTrack(generatedTrack), qPrintable(core.database()->lastError()));
+        core.player()->setPathResolver([](const Track &track) { return track.path; });
+        TrackScorer::Candidate generated;
+        generated.path = generatedPath;
+        generated.songKey = QStringLiteral("song:stale-worker");
+        generated.artistFolded = QStringLiteral("stale-artist");
+        generated.albumKey = QStringLiteral("album:stale-worker");
+        generated.genresFolded = {QStringLiteral("rock")};
+        auto session = std::make_unique<RadioSession>(
+            QVector<TrackScorer::Candidate>{generated}, QHash<QString, TrackScorer::Affinity>{},
+            QHash<QString, double>{}, QVector<TrackScorer::Candidate>{},
+            RadioSession::ContextMode::MovingContext, 30, 1'000'000'000);
+        Track current;
+        current.path = QStringLiteral("/stale-current.wav");
+        Track manual;
+        manual.path = QStringLiteral("/stale-manual.wav");
+        core.player()->resetQueue({current}, 0);
+        core.m_radioSession = std::move(session);
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPath = current.path;
+        core.m_radioSessionSeedPaths = {current.path};
+        core.m_radioSessionAnchorMode = QStringLiteral("drift");
+        core.setRadioBatchSize(1);
+        core.player()->setRadioActive(true);
+        core.reconcileRadioPendingState();
+
+        const QJsonObject before = core.m_radioSession->constraintState();
+        QSignalSpy loading(&core, &AppCore::radioLoadingChanged);
+        core.appendRadioBatch(1);
+        QVERIFY(core.m_radioTopUpInProgress);
+        const quint64 capturedWorkerRevision = core.m_radioQueueRevision;
+        core.player()->appendTracks({manual});
+        QVERIFY(core.m_radioQueueRevision > capturedWorkerRevision);
+        QVERIFY(capturedWorkerRevision != core.m_radioQueueRevision);
+        QTRY_VERIFY_WITH_TIMEOUT(!core.m_radioTopUpInProgress
+                                     && !loading.isEmpty()
+                                     && !loading.last().at(0).toBool(),
+                                 10000);
+
+        QStringList queuePaths;
+        for (const Track &track : core.player()->queue()) {
+            queuePaths.push_back(track.path);
+        }
+        QVERIFY(!queuePaths.contains(generatedPath));
+        QVERIFY(!core.m_radioPickPaths.contains(generatedPath));
+        const QJsonObject after = core.m_radioSession->constraintState();
+        QCOMPARE(after.value(QStringLiteral("pendingPaths")), before.value(QStringLiteral("pendingPaths")));
+        QCOMPARE(after.value(QStringLiteral("usedPaths")), before.value(QStringLiteral("usedPaths")));
+        QCOMPARE(after.value(QStringLiteral("generatedPickCount")),
+                 before.value(QStringLiteral("generatedPickCount")));
+        QVERIFY(core.m_radioSession->reasonComponentsFor(generatedPath).isEmpty());
+        QVERIFY(core.m_radioSession->pickReasons().isEmpty());
+        core.stopRadio();
+    }
+
+    void radioBatchDropsGuiResolutionFailure()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        const QString generatedPath = libraryRoot.filePath(QStringLiteral("gui-resolution.wav"));
+        QVERIFY(writeSilentWav(generatedPath));
+
+        Track generatedTrack;
+        generatedTrack.path = generatedPath;
+        generatedTrack.parentDir = libraryRoot.path();
+        generatedTrack.filename = QStringLiteral("gui-resolution.wav");
+        generatedTrack.title = QStringLiteral("GUI resolution");
+        generatedTrack.artistName = QStringLiteral("GUI artist");
+        generatedTrack.albumArtistName = generatedTrack.artistName;
+        generatedTrack.albumTitle = QStringLiteral("GUI album");
+        generatedTrack.fileSize = 1;
+        generatedTrack.fileMtime = 1;
+        generatedTrack.codec = QStringLiteral("wav");
+
+        AppCore core;
+        QVERIFY2(core.database()->upsertTrack(generatedTrack), qPrintable(core.database()->lastError()));
+        TrackScorer::Candidate generated;
+        generated.path = generatedPath;
+        generated.songKey = QStringLiteral("song:gui-resolution");
+        generated.artistFolded = QStringLiteral("gui-artist");
+        generated.albumKey = QStringLiteral("album:gui-resolution");
+        generated.genresFolded = {QStringLiteral("rock")};
+        auto session = std::make_unique<RadioSession>(
+            QVector<TrackScorer::Candidate>{generated}, QHash<QString, TrackScorer::Affinity>{},
+            QHash<QString, double>{}, QVector<TrackScorer::Candidate>{},
+            RadioSession::ContextMode::MovingContext, 30, 1'000'000'000);
+        Track current;
+        current.path = QStringLiteral("/gui-resolution-current.wav");
+        core.player()->resetQueue({current}, 0);
+        core.m_radioSession = std::move(session);
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPath = current.path;
+        core.m_radioSessionSeedPaths = {current.path};
+        core.m_radioSessionAnchorMode = QStringLiteral("drift");
+        core.setRadioBatchSize(1);
+        core.player()->setRadioActive(true);
+        core.reconcileRadioPendingState();
+
+        core.appendRadioBatch(1);
+        QVERIFY(core.m_radioTopUpInProgress);
+        QCOMPARE(core.database()->markTracksMissing({generatedPath}), 1);
+        QCOMPARE(core.database()->removeMissingTracks(), 1);
+        QTRY_VERIFY_WITH_TIMEOUT(!core.m_radioTopUpInProgress, 10000);
+
+        QStringList queuePaths;
+        for (const Track &track : core.player()->queue()) {
+            queuePaths.push_back(track.path);
+        }
+        QVERIFY(!queuePaths.contains(generatedPath));
+        QVERIFY(!core.m_radioPickPaths.contains(generatedPath));
+        const QJsonObject state = core.m_radioSession->constraintState();
+        QCOMPARE(state.value(QStringLiteral("pendingPaths")).toArray(), QJsonArray{});
+        core.stopRadio();
+    }
+
+    void radioPickRestoreUsesExplicitIdentity()
+    {
+        AppCore core;
+        Track anchor;
+        anchor.path = QStringLiteral("/restore-anchor.wav");
+        anchor.artistName = QStringLiteral("Anchor");
+        anchor.parentDir = QStringLiteral("/");
+        anchor.filename = QStringLiteral("restore-anchor.wav");
+        anchor.fileSize = 1;
+        anchor.fileMtime = 1;
+        anchor.albumArtistName = anchor.artistName;
+        anchor.albumTitle = QStringLiteral("Anchor album");
+        anchor.title = QStringLiteral("Anchor");
+        MetadataBlob::FullMetadata anchorMetadata;
+        anchorMetadata.tags.insert(QStringLiteral("GENRE"), {QStringLiteral("Rock")});
+        anchor.fullMetadataBlob = MetadataBlob::encode(anchorMetadata).data;
+        Track manual = anchor;
+        manual.path = QStringLiteral("/manual-interruption.wav");
+        manual.artistName = QStringLiteral("Manual");
+        manual.albumArtistName = manual.artistName;
+        manual.title = QStringLiteral("Manual");
+        Track pick = anchor;
+        pick.path = QStringLiteral("/generated-pick.wav");
+        pick.artistName = QStringLiteral("Generated");
+        pick.albumArtistName = pick.artistName;
+        pick.title = QStringLiteral("Generated");
+        for (const Track &track : {anchor, manual, pick}) {
+            QVERIFY2(core.database()->upsertTrack(track), qPrintable(core.database()->lastError()));
+        }
+        core.player()->resetQueue({anchor, manual, pick}, 0);
+
+        const auto stateWith = [](bool explicitIdentity, bool pendingIdentity) {
+            QJsonObject state{
+                {QStringLiteral("active"), true},
+                {QStringLiteral("kind"), QStringLiteral("seeded")},
+                {QStringLiteral("seedPath"), QStringLiteral("/restore-anchor.wav")},
+                {QStringLiteral("seedPaths"), QJsonArray{QStringLiteral("/restore-anchor.wav")}},
+                {QStringLiteral("anchorMode"), QStringLiteral("drift")},
+                {QStringLiteral("exploration"), 30},
+                {QStringLiteral("usedPaths"), QJsonArray{
+                    QStringLiteral("/manual-interruption.wav"), QStringLiteral("/generated-pick.wav")}},
+            };
+            if (explicitIdentity) {
+                state.insert(QStringLiteral("radioPickPaths"), QJsonArray{
+                    QStringLiteral("/restore-anchor.wav"), QStringLiteral("/generated-pick.wav")});
+            }
+            if (pendingIdentity) {
+                state.insert(QStringLiteral("pendingPaths"), QJsonArray{
+                    explicitIdentity ? QStringLiteral("/manual-interruption.wav")
+                                     : QStringLiteral("/generated-pick.wav")});
+            }
+            return state;
+        };
+        const auto restore = [&core, &anchor, &manual, &pick](const QJsonObject &state,
+                                                                 const QSet<QString> &expectedPaths) {
+            core.stopRadio();
+            core.player()->setRadioActive(false);
+            core.player()->resetQueue({anchor, manual, pick}, 0);
+            core.settings()->setSetting(QStringLiteral("radio.session.state"),
+                                        QString::fromUtf8(QJsonDocument(state).toJson(QJsonDocument::Compact)));
+            core.m_radioRestoreDone = false;
+            core.maybeRestoreRadioSession();
+            QCOMPARE(core.m_radioPickPaths, expectedPaths);
+        };
+
+        restore(stateWith(true, true), QSet<QString>{pick.path});
+        restore(stateWith(false, true), QSet<QString>{pick.path});
+        restore(stateWith(false, false), QSet<QString>{manual.path, pick.path});
+        core.stopRadio();
+    }
+
+    void movingMultiAnchorStartPersistsAndRestoresOrderedState()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        auto makeLibraryTrack = [&libraryRoot](const QString &filename, const QString &artist,
+                                                const QString &genre) {
+            Track track;
+            track.path = libraryRoot.filePath(filename);
+            track.parentDir = libraryRoot.path();
+            track.filename = filename;
+            track.title = filename;
+            track.artistName = artist;
+            track.albumArtistName = artist;
+            track.albumTitle = QStringLiteral("Radio album");
+            track.durationMs = 180'000;
+            track.fileSize = 44;
+            track.fileMtime = 1;
+            track.codec = QStringLiteral("wav");
+            MetadataBlob::FullMetadata metadata;
+            metadata.tags.insert(QStringLiteral("GENRE"), {genre});
+            const MetadataBlob::Encoded encoded = MetadataBlob::encode(metadata);
+            track.fullMetadataBlob = encoded.data;
+            track.fullMetadataRawSize = encoded.rawSize;
+            return track;
+        };
+
+        const Track first = makeLibraryTrack(QStringLiteral("first.wav"), QStringLiteral("First Artist"),
+                                             QStringLiteral("Rock"));
+        const Track second = makeLibraryTrack(QStringLiteral("second.wav"), QStringLiteral("Second Artist"),
+                                              QStringLiteral("Jazz"));
+        const Track rockCandidate = makeLibraryTrack(QStringLiteral("candidate-rock.wav"),
+                                                     QStringLiteral("Rock Candidate"), QStringLiteral("Rock"));
+        const Track jazzCandidate = makeLibraryTrack(QStringLiteral("candidate-jazz.wav"),
+                                                     QStringLiteral("Jazz Candidate"), QStringLiteral("Jazz"));
+        QVERIFY(writeSilentWav(first.path));
+        QVERIFY(writeSilentWav(second.path));
+        QVERIFY(writeSilentWav(rockCandidate.path));
+        QVERIFY(writeSilentWav(jazzCandidate.path));
+        const QString missing = libraryRoot.filePath(QStringLiteral("missing.wav"));
+
+        {
+            AppCore core;
+            QVERIFY2(core.database()->upsertTrack(first), qPrintable(core.database()->lastError()));
+            QVERIFY2(core.database()->upsertTrack(second), qPrintable(core.database()->lastError()));
+            QVERIFY2(core.database()->upsertTrack(rockCandidate), qPrintable(core.database()->lastError()));
+            QVERIFY2(core.database()->upsertTrack(jazzCandidate), qPrintable(core.database()->lastError()));
+            core.database()->setSetting(QStringLiteral("radio.batchSize"), QStringLiteral("3"));
+            core.setRadioAnchorMode(QStringLiteral("drift"));
+            MainWindow window(&core);
+
+            Track sentinel;
+            sentinel.path = QStringLiteral("/sentinel.wav");
+            core.player()->resetQueue({sentinel}, 0);
+            QVERIFY(!core.startRadio(QStringList{first.path, missing, second.path}));
+            QCOMPARE(core.player()->queue().size(), 1);
+            QCOMPARE(core.player()->queue().first().path, sentinel.path);
+            QVERIFY(!core.player()->radioActive());
+
+            QSignalSpy loading(&core, &AppCore::radioLoadingChanged);
+            QVERIFY(core.startRadio(QStringList{QString(), first.path, second.path, first.path}));
+            QTRY_VERIFY_WITH_TIMEOUT(!loading.isEmpty() && !loading.last().at(0).toBool(), 10000);
+
+            const QJsonObject state = QJsonDocument::fromJson(
+                core.settings()->setting(QStringLiteral("radio.session.state")).toUtf8()).object();
+            QCOMPARE(state.value(QStringLiteral("kind")).toString(), QStringLiteral("seeded"));
+            QCOMPARE(state.value(QStringLiteral("seedPath")).toString(), first.path);
+            QCOMPARE(state.value(QStringLiteral("anchorMode")).toString(), QStringLiteral("drift"));
+            const QJsonArray savedSeeds = state.value(QStringLiteral("seedPaths")).toArray();
+            QCOMPARE(savedSeeds, (QJsonArray{first.path, second.path}));
+            QCOMPARE(core.player()->queue().first().path, first.path);
+            QVERIFY(!std::any_of(core.player()->queue().cbegin() + 1, core.player()->queue().cend(),
+                                 [&second](const Track &track) { return track.path == second.path; }));
+            QStringList queuedPaths;
+            for (const Track &track : core.player()->queue()) {
+                queuedPaths.push_back(track.path);
+            }
+            QVERIFY(queuedPaths.contains(rockCandidate.path));
+            QVERIFY(queuedPaths.contains(jazzCandidate.path));
+            window.saveQueueState();
+            core.player()->setRadioActive(false);
+            core.player()->setRadioProvider({});
+            core.player()->stop();
+        }
+
+        AppCore restored;
+        restored.showWindow();
+        QTRY_VERIFY_WITH_TIMEOUT(restored.player()->radioActive(), 5000);
+        QCOMPARE(restored.player()->queue().first().path, first.path);
+        const QJsonObject restoredState = QJsonDocument::fromJson(
+            restored.settings()->setting(QStringLiteral("radio.session.state")).toUtf8()).object();
+        QCOMPARE(restoredState.value(QStringLiteral("anchorMode")).toString(), QStringLiteral("drift"));
+        QCOMPARE(restoredState.value(QStringLiteral("seedPaths")).toArray(), (QJsonArray{first.path, second.path}));
+        restored.player()->setRadioActive(false);
+        restored.player()->setRadioProvider({});
+        restored.player()->stop();
+        restored.releaseWindow();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
+
+    void trackTableRadioMenuEmitsSelectedTracksInRowOrder()
+    {
+        TrackTable table;
+        Track first;
+        first.path = QStringLiteral("/first.flac");
+        Track second;
+        second.path = QStringLiteral("/second.flac");
+        Track third;
+        third.path = QStringLiteral("/third.flac");
+        table.setTracks({first, second, third});
+        table.resize(700, 260);
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+        QTableView *view = &table;
+        view->selectionModel()->clearSelection();
+        for (const int row : {2, 0, 1}) {
+            view->selectionModel()->select(view->model()->index(row, 0),
+                                           QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+        view->selectionModel()->setCurrentIndex(view->model()->index(1, 0), QItemSelectionModel::NoUpdate);
+
+        QSignalSpy startSpy(&table, &TrackTable::startRadioRequested);
+        bool sawAction = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Start Radio (3)")) {
+                    sawAction = true;
+                    action->trigger();
+                    break;
+                }
+            }
+            menu->close();
+        });
+
+        const QRect rowRect = view->visualRect(view->model()->index(1, 0));
+        QVERIFY(QMetaObject::invokeMethod(view, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, rowRect.center())));
+        QVERIFY(sawAction);
+        QCOMPARE(startSpy.count(), 1);
+        const QVector<Track> tracks = qvariant_cast<QVector<Track>>(startSpy.first().at(0));
+        QCOMPARE(tracks.size(), 3);
+        QCOMPARE(tracks.at(0).path, first.path);
+        QCOMPARE(tracks.at(1).path, second.path);
+        QCOMPARE(tracks.at(2).path, third.path);
     }
 
     void savedQueueLimitsDefaultToFifteenUnlessUnlimited()

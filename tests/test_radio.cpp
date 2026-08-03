@@ -129,6 +129,16 @@ Track playedTrack(const QString &path, const QString &artistName)
     return track;
 }
 
+QStringList trackPaths(const QVector<Track> &tracks)
+{
+    QStringList paths;
+    paths.reserve(tracks.size());
+    for (const Track &track : tracks) {
+        paths.push_back(track.path);
+    }
+    return paths;
+}
+
 TrackScorer::Affinity makeAffinity(int playEvents, int finished, int skipped,
                                    qint64 lastPlayedAtSecs, int listenCount, int baselineMax)
 {
@@ -255,6 +265,29 @@ private slots:
     void reasonBreakdownFormatsSigned();
     void setExplorationTakesEffectOnSubsequentPicks();
     void batchOfFifteenRespectsThrottlesAndIsDistinct();
+    void movingBatchMatchesRepeatedSingles();
+    void movingPendingArtistThrottlePersistsAcrossCalls();
+    void retainPendingPathsReportsNoOpRemovalAndReorder();
+    void movingConfirmationReplacesPendingContext();
+    void movingPendingInvalidationDoesNotConfirm();
+    void movingConfirmedContextSurvivesPendingReconciliation();
+    void movingConfirmedWeightsOutliveArtistThrottle();
+    void movingConfirmedContextPrunesAtBoundedSize();
+    void movingWeightedContextUsesConfirmedFields();
+    void movingWeightedContextUsesDecayedFields();
+    void movingRestoredStateValidatesSnapshots();
+    void movingRestoredHistoryIsBounded();
+    void movingRestoredConfirmedRowsFilterBeforeBound();
+    void movingPendingOnlyGhostSnapshotIsRejected();
+    void movingAliasCollisionRejectsUnrelatedDestination();
+    void movingSinglePermanentVectorPreservesLegacySequence();
+    void movingAnchorsRoundRobinIsReproducible();
+    void multiAnchorSchedulingAndExclusion();
+    void movingConstraintStateRoundTrips();
+    void movingStateRestoresAliasesAndRngAcrossReorderedAnchors();
+    void movingUnresolvedAttemptsDoNotRecordState();
+    void movingAliasRewritesPendingIdentity();
+    void movingForeignTrackSurvivesFreshRestore();
     void isEarlySkipUsesHalfDurationCappedAtFourMinutes();
     void anchorlessSessionDriftsFromPlayedContext();
     void syntheticArtistSeedThrottlesSeedArtistAndIsNotPickable();
@@ -1955,6 +1988,17 @@ void RadioTest::batchOfFifteenRespectsThrottlesAndIsDistinct()
 
     const QVector<Track> picks = session.nextTracks(15, {}, resolvePathToTrack);
     QCOMPARE(picks.size(), 15);
+    QStringList paths;
+    for (const Track &pick : picks) {
+        paths.push_back(pick.path);
+    }
+    const QStringList expectedPaths{
+        QStringLiteral("/hot4"), QStringLiteral("/f4"), QStringLiteral("/f3"), QStringLiteral("/f5"),
+        QStringLiteral("/hot2"), QStringLiteral("/f1"), QStringLiteral("/f0"), QStringLiteral("/f2"),
+        QStringLiteral("/hot1"), QStringLiteral("/f10"), QStringLiteral("/f8"), QStringLiteral("/f12"),
+        QStringLiteral("/hot0"), QStringLiteral("/f9"), QStringLiteral("/f13"),
+    };
+    QCOMPARE(paths, expectedPaths);
 
     const auto artistOf = [](const QString &path) {
         return path.startsWith(QStringLiteral("/hot")) ? QStringLiteral("hot") : path.mid(2);
@@ -1968,6 +2012,1021 @@ void RadioTest::batchOfFifteenRespectsThrottlesAndIsDistinct()
                      "same artist picked back-to-back in a 15-pick batch");
         }
     }
+}
+
+void RadioTest::movingBatchMatchesRepeatedSingles()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 10; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/moving%1").arg(i), QStringLiteral("artist%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000));
+    }
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/anchor-rock"), QStringLiteral("anchor-rock"),
+                      {QStringLiteral("rock")}, 2000),
+        makeCandidate(QStringLiteral("/anchor-jazz"), QStringLiteral("anchor-jazz"),
+                      {QStringLiteral("jazz")}, 2000),
+    };
+    const QHash<QString, double> genreIdf{
+        {QStringLiteral("rock"), 2.0},
+        {QStringLiteral("jazz"), 2.0},
+    };
+    QRandomGenerator batchRng(2025u);
+    RadioSession batch(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                       30, 1'000'000'000, &batchRng);
+    const QVector<Track> batchPicks = batch.nextTracks(6, {}, resolvePathToTrack);
+
+    QRandomGenerator singleRng(2025u);
+    RadioSession singles(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &singleRng);
+    QVector<Track> singlePicks;
+    for (int i = 0; i < 6; ++i) {
+        singlePicks += singles.nextTracks(1, {}, resolvePathToTrack);
+    }
+
+    QCOMPARE(trackPaths(batchPicks), trackPaths(singlePicks));
+    QCOMPARE(QJsonDocument(batch.constraintState()).toJson(QJsonDocument::Compact),
+             QJsonDocument(singles.constraintState()).toJson(QJsonDocument::Compact));
+}
+
+void RadioTest::movingPendingArtistThrottlePersistsAcrossCalls()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 12; ++i) {
+        const QString artist = QStringLiteral("artist%1").arg(i % 4);
+        pool.push_back(makeCandidate(QStringLiteral("/pending-artist%1").arg(i), artist, {}, 2000,
+                                     -1, false, QStringLiteral("album%1\n%2").arg(artist).arg(i)));
+    }
+
+    QRandomGenerator batchRng(2026u);
+    RadioSession batch(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                       30, 1'000'000'000, &batchRng);
+    const QVector<Track> batchPicks = batch.nextTracks(8, {}, resolvePathToTrack);
+
+    QRandomGenerator singleRng(2026u);
+    RadioSession singles(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &singleRng);
+    QVector<Track> singlePicks;
+    for (int i = 0; i < 8; ++i) {
+        singlePicks += singles.nextTracks(1, {}, resolvePathToTrack);
+    }
+
+    QCOMPARE(trackPaths(batchPicks), trackPaths(singlePicks));
+    QCOMPARE(QJsonDocument(batch.constraintState()).toJson(QJsonDocument::Compact),
+             QJsonDocument(singles.constraintState()).toJson(QJsonDocument::Compact));
+}
+
+void RadioTest::retainPendingPathsReportsNoOpRemovalAndReorder()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/pending-a"), QStringLiteral("artist-a"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/pending-b"), QStringLiteral("artist-b"), {QStringLiteral("rock")}),
+        makeCandidate(QStringLiteral("/pending-c"), QStringLiteral("artist-c"), {QStringLiteral("rock")}),
+    };
+    QRandomGenerator rng(37u);
+    RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QCOMPARE(session.nextTracks(2, {}, resolvePathToTrack).size(), 2);
+
+    const QJsonArray pendingJson = session.constraintState().value(QStringLiteral("pendingPaths")).toArray();
+    QStringList pending;
+    for (const QJsonValue &value : pendingJson) {
+        pending.push_back(value.toString());
+    }
+    QCOMPARE(pending.size(), 2);
+    QVERIFY(!session.retainPendingPaths(pending));
+
+    const QStringList reordered{pending.at(1), pending.at(0)};
+    QVERIFY(session.retainPendingPaths(reordered));
+    QVERIFY(!session.retainPendingPaths(reordered));
+    QVERIFY(session.retainPendingPaths({reordered.first()}));
+    QVERIFY(!session.retainPendingPaths({reordered.first()}));
+}
+
+void RadioTest::movingConfirmationReplacesPendingContext()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/started"), QStringLiteral("started"), {QStringLiteral("rock")}, 2000,
+                      100, true),
+        makeCandidate(QStringLiteral("/future"), QStringLiteral("future"), {QStringLiteral("rock")}, 2000),
+    };
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/anchor"), QStringLiteral("anchor"), {QStringLiteral("jazz")}, 2000),
+    };
+    const QHash<QString, double> genreIdf{
+        {QStringLiteral("rock"), 4.0},
+        {QStringLiteral("jazz"), 4.0},
+    };
+    QRandomGenerator confirmedRng(31u);
+    QRandomGenerator pendingRng(31u);
+    RadioSession confirmed(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                           30, 1'000'000'000, &confirmedRng);
+    RadioSession pending(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                        30, 1'000'000'000, &pendingRng);
+
+    const QSet<QString> holdFuture{QStringLiteral("/future")};
+    const QVector<Track> started = confirmed.nextTracks(1, holdFuture, resolvePathToTrack);
+    const QVector<Track> pendingStarted = pending.nextTracks(1, holdFuture, resolvePathToTrack);
+    QCOMPARE(started.size(), 1);
+    QCOMPARE(trackPaths(started), trackPaths(pendingStarted));
+    QCOMPARE(started.first().path, QStringLiteral("/started"));
+
+    const QJsonObject pendingBefore = confirmed.constraintState();
+    QCOMPARE(pendingBefore.value(QStringLiteral("confirmedContext")).toArray().size(), 0);
+    QCOMPARE(pendingBefore.value(QStringLiteral("pendingPaths")).toArray().size(), 1);
+
+    confirmed.notePlayed(started.first());
+    const QJsonObject confirmedState = confirmed.constraintState();
+    QCOMPARE(confirmedState.value(QStringLiteral("pendingPaths")).toArray().size(), 0);
+    const QJsonArray confirmedRows = confirmedState.value(QStringLiteral("confirmedContext")).toArray();
+    QCOMPARE(confirmedRows.size(), 1);
+    QCOMPARE(confirmedRows.first().toObject().value(QStringLiteral("path")).toString(), started.first().path);
+    QCOMPARE(confirmedRows.first().toObject().value(QStringLiteral("weight")).toDouble(), 1.0);
+
+    const QVector<Track> futureConfirmed = confirmed.nextTracks(1, {}, resolvePathToTrack);
+    const QVector<Track> futurePending = pending.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(futureConfirmed.size(), 1);
+    QCOMPARE(futurePending.size(), 1);
+    QCOMPARE(futureConfirmed.first().path, QStringLiteral("/future"));
+    QCOMPARE(futurePending.first().path, QStringLiteral("/future"));
+    const double confirmedGenre = componentValue(confirmed.reasonComponentsFor(QStringLiteral("/future")),
+                                                 QStringLiteral("genre"));
+    const double pendingGenre = componentValue(pending.reasonComponentsFor(QStringLiteral("/future")),
+                                               QStringLiteral("genre"));
+    QVERIFY(confirmedGenre > pendingGenre);
+}
+
+void RadioTest::movingPendingInvalidationDoesNotConfirm()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/pending"), QStringLiteral("pending"), {QStringLiteral("rock")}, 2000,
+                      100, true),
+        makeCandidate(QStringLiteral("/future"), QStringLiteral("future"), {QStringLiteral("rock")}, 2000),
+    };
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/anchor"), QStringLiteral("anchor"), {QStringLiteral("jazz")}, 2000),
+    };
+    const QHash<QString, double> genreIdf{
+        {QStringLiteral("rock"), 4.0},
+        {QStringLiteral("jazz"), 4.0},
+    };
+    QRandomGenerator retainedRng(32u);
+    QRandomGenerator invalidatedRng(32u);
+    RadioSession retained(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                          30, 1'000'000'000, &retainedRng);
+    RadioSession invalidated(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                             30, 1'000'000'000, &invalidatedRng);
+    const QSet<QString> holdFuture{QStringLiteral("/future")};
+    QCOMPARE(retained.nextTracks(1, holdFuture, resolvePathToTrack).size(), 1);
+    QCOMPARE(invalidated.nextTracks(1, holdFuture, resolvePathToTrack).size(), 1);
+    invalidated.retainPendingPaths({QStringLiteral("/not-pending")});
+
+    const QJsonObject invalidatedState = invalidated.constraintState();
+    QCOMPARE(invalidatedState.value(QStringLiteral("pendingPaths")).toArray().size(), 0);
+    QCOMPARE(invalidatedState.value(QStringLiteral("confirmedContext")).toArray().size(), 0);
+
+    const QVector<Track> retainedFuture = retained.nextTracks(1, {}, resolvePathToTrack);
+    const QVector<Track> invalidatedFuture = invalidated.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(retainedFuture.size(), 1);
+    QCOMPARE(invalidatedFuture.size(), 1);
+    QCOMPARE(retainedFuture.first().path, QStringLiteral("/future"));
+    QCOMPARE(invalidatedFuture.first().path, QStringLiteral("/future"));
+    const double retainedGenre = componentValue(retained.reasonComponentsFor(QStringLiteral("/future")),
+                                                QStringLiteral("genre"));
+    QVERIFY(retainedGenre > 0.0);
+    QVERIFY(!invalidated.reasonFor(QStringLiteral("/future")).contains(QStringLiteral("genre")));
+}
+
+void RadioTest::movingConfirmedContextSurvivesPendingReconciliation()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/started"), QStringLiteral("started"), {QStringLiteral("rock")}, 2000,
+                      100, true),
+        makeCandidate(QStringLiteral("/future"), QStringLiteral("future"), {QStringLiteral("rock")}, 2000),
+    };
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/anchor"), QStringLiteral("anchor"), {QStringLiteral("jazz")}, 2000),
+    };
+    const QHash<QString, double> genreIdf{
+        {QStringLiteral("rock"), 4.0},
+        {QStringLiteral("jazz"), 4.0},
+    };
+    QRandomGenerator rng(33u);
+    RadioSession session(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    const QSet<QString> holdFuture{QStringLiteral("/future")};
+    const QVector<Track> started = session.nextTracks(1, holdFuture, resolvePathToTrack);
+    QCOMPARE(started.size(), 1);
+    session.notePlayed(started.first());
+    session.retainPendingPaths({});
+
+    const QJsonObject state = session.constraintState();
+    QCOMPARE(state.value(QStringLiteral("pendingPaths")).toArray().size(), 0);
+    QCOMPARE(state.value(QStringLiteral("confirmedContext")).toArray().size(), 1);
+    const QVector<Track> future = session.nextTracks(1, {}, resolvePathToTrack);
+    QCOMPARE(future.size(), 1);
+    QCOMPARE(future.first().path, QStringLiteral("/future"));
+    QVERIFY(session.reasonFor(QStringLiteral("/future")).contains(QStringLiteral("genre")));
+}
+
+void RadioTest::movingConfirmedWeightsOutliveArtistThrottle()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 5; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/confirmed%1").arg(i), QStringLiteral("artist%1").arg(i),
+                                     {QStringLiteral("genre%1").arg(i)}, 2000));
+    }
+    RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000);
+    for (int i = 0; i < pool.size(); ++i) {
+        session.notePlayed(playedTrack(pool.at(i).path, QStringLiteral("Artist %1").arg(i)));
+    }
+
+    const QJsonObject state = session.constraintState();
+    QCOMPARE(state.value(QStringLiteral("recentArtists")).toArray().size(), 3);
+    const QJsonArray rows = state.value(QStringLiteral("confirmedContext")).toArray();
+    QCOMPARE(rows.size(), 5);
+    const double decay = std::exp2(-1.0 / 3.0);
+    for (int i = 0; i < rows.size(); ++i) {
+        const double expected = std::pow(decay, rows.size() - i - 1);
+        QVERIFY(std::abs(rows.at(i).toObject().value(QStringLiteral("weight")).toDouble() - expected) < 0.000001);
+    }
+}
+
+void RadioTest::movingConfirmedContextPrunesAtBoundedSize()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 300; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/long-context%1").arg(i),
+                                     QStringLiteral("long-artist%1").arg(i), {}, 2000));
+    }
+    RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000);
+    for (const TrackScorer::Candidate &candidate : pool) {
+        session.notePlayed(playedTrack(candidate.path, candidate.artistFolded));
+    }
+
+    const QJsonObject state = session.constraintState();
+    const QJsonArray rows = state.value(QStringLiteral("confirmedContext")).toArray();
+    QVERIFY(rows.size() < 70);
+    QVERIFY(rows.size() > 1);
+    QCOMPARE(rows.last().toObject().value(QStringLiteral("path")).toString(), QStringLiteral("/long-context299"));
+    QCOMPARE(rows.last().toObject().value(QStringLiteral("weight")).toDouble(), 1.0);
+    QVERIFY(rows.first().toObject().value(QStringLiteral("weight")).toDouble() < 1.0);
+    QCOMPARE(state.value(QStringLiteral("contextCandidates")).toArray().size(), rows.size());
+}
+
+void RadioTest::movingWeightedContextUsesConfirmedFields()
+{
+    {
+        const QVector<TrackScorer::Candidate> pool{
+            makeCandidate(QStringLiteral("/played-genre"), QStringLiteral("played"), {QStringLiteral("jazz")}),
+            makeCandidate(QStringLiteral("/target-genre"), QStringLiteral("target"), {QStringLiteral("jazz")}),
+        };
+        QRandomGenerator rng(1u);
+        RadioSession session(pool, {}, {{QStringLiteral("jazz"), 2.0}}, {},
+                             RadioSession::ContextMode::MovingContext, 30, 1'000'000'000, &rng);
+        session.notePlayed(resolvePathToTrack(QStringLiteral("/played-genre")));
+        const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+        QCOMPARE(picks.size(), 1);
+        QVERIFY(hasComponent(session.reasonComponentsFor(picks.first().path), QStringLiteral("genre")));
+    }
+
+    {
+        const QVector<TrackScorer::Candidate> pool{
+            makeCandidate(QStringLiteral("/played-year"), QStringLiteral("played"), {}, 1990),
+            makeCandidate(QStringLiteral("/target-year"), QStringLiteral("target"), {}, 1990),
+        };
+        QRandomGenerator rng(2u);
+        RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                             30, 1'000'000'000, &rng);
+        session.notePlayed(resolvePathToTrack(QStringLiteral("/played-year")));
+        const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+        QCOMPARE(picks.size(), 1);
+        QVERIFY(hasComponent(session.reasonComponentsFor(picks.first().path), QStringLiteral("era")));
+    }
+
+    {
+        const QVector<TrackScorer::Candidate> pool{
+            makeCandidate(QStringLiteral("/played-sonic"), QStringLiteral("played"), {}, 0, -1, false,
+                          {}, {}, 120.0, 0.5),
+            makeCandidate(QStringLiteral("/target-sonic"), QStringLiteral("target"), {}, 0, -1, false,
+                          {}, {}, 120.0, 0.5),
+        };
+        QRandomGenerator rng(3u);
+        RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                             30, 1'000'000'000, &rng);
+        session.notePlayed(resolvePathToTrack(QStringLiteral("/played-sonic")));
+        const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+        QCOMPARE(picks.size(), 1);
+        const QList<TrackScorer::Component> components = session.reasonComponentsFor(picks.first().path);
+        QVERIFY(hasComponent(components, QStringLiteral("tempo")));
+        QVERIFY(hasComponent(components, QStringLiteral("energy")));
+    }
+
+    {
+        const QHash<qint64, QVector<float>> embeddings{
+            {1, {1.0F, 0.0F}},
+            {2, {1.0F, 0.0F}},
+        };
+        const QVector<TrackScorer::Candidate> pool{
+            makeCandidate(QStringLiteral("/played-audio"), QStringLiteral("played"), {}, 0, -1, false,
+                          {}, {}, -1.0, -1.0, 1),
+            makeCandidate(QStringLiteral("/target-audio"), QStringLiteral("target"), {}, 0, -1, false,
+                          {}, {}, -1.0, -1.0, 2),
+        };
+        QRandomGenerator rng(4u);
+        RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                             30, 1'000'000'000, &rng, TrackScorer::defaultWeights(), embeddings);
+        session.notePlayed(resolvePathToTrack(QStringLiteral("/played-audio")));
+        const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+        QCOMPARE(picks.size(), 1);
+        QVERIFY(hasComponent(session.reasonComponentsFor(picks.first().path), QStringLiteral("audio")));
+    }
+}
+
+void RadioTest::movingWeightedContextUsesDecayedFields()
+{
+    const auto historyState = [](const QVector<TrackScorer::Candidate> &history,
+                                 const QHash<QString, double> &genreIdf,
+                                 const QHash<qint64, QVector<float>> &embeddings) {
+        QRandomGenerator rng(501u);
+        RadioSession session(history, {}, genreIdf, {}, RadioSession::ContextMode::MovingContext,
+                             30, 1'000'000'000, &rng, TrackScorer::defaultWeights(), embeddings);
+        session.notePlayed(resolvePathToTrack(history.at(0).path));
+        session.notePlayed(resolvePathToTrack(history.at(1).path));
+        return session.constraintState();
+    };
+    const auto componentFor = [](const QJsonObject &state, TrackScorer::Candidate target,
+                                 const QHash<QString, double> &genreIdf,
+                                 const QHash<qint64, QVector<float>> &embeddings,
+                                 const QString &component) {
+        QRandomGenerator rng(502u);
+        RadioSession session({std::move(target)}, {}, genreIdf, {},
+                             RadioSession::ContextMode::MovingContext, 30, 1'000'000'000,
+                             &rng, TrackScorer::defaultWeights(), embeddings);
+        session.restoreConstraintState(state);
+        const QVector<Track> picks = session.nextTracks(1, {}, resolvePathToTrack);
+        if (picks.size() != 1) {
+            return -1.0;
+        }
+        return componentValue(session.reasonComponentsFor(picks.first().path), component);
+    };
+
+    {
+        const QVector<TrackScorer::Candidate> history{
+            makeCandidate(QStringLiteral("/old-genre"), QStringLiteral("old-genre"), {QStringLiteral("old")}),
+            makeCandidate(QStringLiteral("/new-genre"), QStringLiteral("new-genre"), {QStringLiteral("new")}),
+        };
+        const QHash<QString, double> idf{{QStringLiteral("old"), 4.0}, {QStringLiteral("new"), 4.0}};
+        const QJsonObject state = historyState(history, idf, {});
+        const double recent = componentFor(
+            state, makeCandidate(QStringLiteral("/target-new-genre"), QStringLiteral("target"), {QStringLiteral("new")}),
+            idf, {}, QStringLiteral("genre"));
+        const double older = componentFor(
+            state, makeCandidate(QStringLiteral("/target-old-genre"), QStringLiteral("target"), {QStringLiteral("old")}),
+            idf, {}, QStringLiteral("genre"));
+        QVERIFY(recent > older + 0.01);
+    }
+
+    {
+        const QVector<TrackScorer::Candidate> history{
+            makeCandidate(QStringLiteral("/old-year"), QStringLiteral("old-year"), {}, 1980),
+            makeCandidate(QStringLiteral("/new-year"), QStringLiteral("new-year"), {}, 2020),
+        };
+        const QJsonObject state = historyState(history, {}, {});
+        const double recent = componentFor(
+            state, makeCandidate(QStringLiteral("/target-new-year"), QStringLiteral("target"), {}, 2020),
+            {}, {}, QStringLiteral("era"));
+        const double older = componentFor(
+            state, makeCandidate(QStringLiteral("/target-old-year"), QStringLiteral("target"), {}, 1980),
+            {}, {}, QStringLiteral("era"));
+        QVERIFY(recent > older + 0.01);
+    }
+
+    {
+        const QVector<TrackScorer::Candidate> history{
+            makeCandidate(QStringLiteral("/old-tempo"), QStringLiteral("old-tempo"), {}, 0, -1, false,
+                          {}, {}, 100.0, 0.5),
+            makeCandidate(QStringLiteral("/new-tempo"), QStringLiteral("new-tempo"), {}, 0, -1, false,
+                          {}, {}, 130.0, 0.5),
+        };
+        const QJsonObject state = historyState(history, {}, {});
+        const double recent = componentFor(
+            state, makeCandidate(QStringLiteral("/target-new-tempo"), QStringLiteral("target"), {}, 0, -1, false,
+                                 {}, {}, 130.0, 0.5), {}, {}, QStringLiteral("tempo"));
+        const double older = componentFor(
+            state, makeCandidate(QStringLiteral("/target-old-tempo"), QStringLiteral("target"), {}, 0, -1, false,
+                                 {}, {}, 100.0, 0.5), {}, {}, QStringLiteral("tempo"));
+        QVERIFY(recent > older + 0.01);
+    }
+
+    {
+        const QVector<TrackScorer::Candidate> history{
+            makeCandidate(QStringLiteral("/old-energy"), QStringLiteral("old-energy"), {}, 0, -1, false,
+                          {}, {}, 120.0, 0.0),
+            makeCandidate(QStringLiteral("/new-energy"), QStringLiteral("new-energy"), {}, 0, -1, false,
+                          {}, {}, 120.0, 1.0),
+        };
+        const QJsonObject state = historyState(history, {}, {});
+        const double recent = componentFor(
+            state, makeCandidate(QStringLiteral("/target-new-energy"), QStringLiteral("target"), {}, 0, -1, false,
+                                 {}, {}, 120.0, 1.0), {}, {}, QStringLiteral("energy"));
+        const double older = componentFor(
+            state, makeCandidate(QStringLiteral("/target-old-energy"), QStringLiteral("target"), {}, 0, -1, false,
+                                 {}, {}, 120.0, 0.0), {}, {}, QStringLiteral("energy"));
+        QVERIFY(recent > older + 0.01);
+    }
+
+    {
+        const QHash<qint64, QVector<float>> embeddings{
+            {1, {1.0F, 0.0F}},
+            {2, {0.0F, 1.0F}},
+        };
+        const QVector<TrackScorer::Candidate> history{
+            makeCandidate(QStringLiteral("/old-audio"), QStringLiteral("old-audio"), {}, 0, -1, false,
+                          {}, {}, -1.0, -1.0, 1),
+            makeCandidate(QStringLiteral("/new-audio"), QStringLiteral("new-audio"), {}, 0, -1, false,
+                          {}, {}, -1.0, -1.0, 2),
+        };
+        const QJsonObject state = historyState(history, {}, embeddings);
+        const double recent = componentFor(
+            state, makeCandidate(QStringLiteral("/target-new-audio"), QStringLiteral("target"), {}, 0, -1, false,
+                                 {}, {}, -1.0, -1.0, 2), {}, embeddings, QStringLiteral("audio"));
+        const double older = componentFor(
+            state, makeCandidate(QStringLiteral("/target-old-audio"), QStringLiteral("target"), {}, 0, -1, false,
+                                 {}, {}, -1.0, -1.0, 1), {}, embeddings, QStringLiteral("audio"));
+        QVERIFY(recent > older + 0.01);
+    }
+}
+
+void RadioTest::movingRestoredStateValidatesSnapshots()
+{
+    const TrackScorer::Candidate live = makeCandidate(
+        QStringLiteral("/live"), QStringLiteral("live"), {QStringLiteral("live")}, 2020, 80, true,
+        QStringLiteral("live\nalbum"), QStringLiteral("song:live"), 120.0, 0.5, 7);
+    QRandomGenerator rng(503u);
+    RadioSession source({live}, {}, {{QStringLiteral("live"), 2.0}}, {},
+                        RadioSession::ContextMode::MovingContext, 30, 1'000'000'000, &rng);
+    source.notePlayed(resolvePathToTrack(live.path));
+    QJsonObject state = source.constraintState();
+
+    const QJsonArray originalCandidates = state.value(QStringLiteral("contextCandidates")).toArray();
+    QCOMPARE(originalCandidates.size(), 1);
+    const QJsonObject liveRow = originalCandidates.first().toObject();
+
+    QJsonObject malformedLive = liveRow;
+    malformedLive.insert(QStringLiteral("contentGroupId"), QStringLiteral("9223372036854775808"));
+    malformedLive.insert(QStringLiteral("genresFolded"), QJsonArray{QStringLiteral("corrupt")});
+    malformedLive.insert(QStringLiteral("hasUserRating"), 1);
+
+    QJsonObject unreferenced = liveRow;
+    unreferenced.insert(QStringLiteral("path"), QStringLiteral("/unreferenced"));
+    unreferenced.insert(QStringLiteral("sourcePath"), QStringLiteral("/unreferenced"));
+    unreferenced.insert(QStringLiteral("songKey"), QStringLiteral("song:unreferenced"));
+
+    QJsonObject foreign = liveRow;
+    foreign.insert(QStringLiteral("path"), QStringLiteral("/foreign"));
+    foreign.insert(QStringLiteral("sourcePath"), QStringLiteral("/foreign"));
+    foreign.insert(QStringLiteral("songKey"), QStringLiteral("song:foreign"));
+    foreign.insert(QStringLiteral("artistFolded"), QStringLiteral("foreign"));
+    foreign.insert(QStringLiteral("albumKey"), QStringLiteral("foreign\nalbum"));
+    foreign.insert(QStringLiteral("contentGroupId"), QStringLiteral("9223372036854775808"));
+
+    QJsonObject mismatchedAlias = liveRow;
+    mismatchedAlias.insert(QStringLiteral("path"), QStringLiteral("/alias"));
+    mismatchedAlias.insert(QStringLiteral("sourcePath"), live.path);
+    mismatchedAlias.insert(QStringLiteral("songKey"), QStringLiteral("song:mismatch"));
+
+    state.insert(QStringLiteral("confirmedContext"), QJsonArray{
+        QJsonObject{{QStringLiteral("path"), live.path}, {QStringLiteral("weight"), 1.0}},
+        QJsonObject{{QStringLiteral("path"), QStringLiteral("/foreign")}, {QStringLiteral("weight"), 1.0}},
+    });
+    state.insert(QStringLiteral("pendingPaths"), QJsonArray{QStringLiteral("/alias")});
+    state.insert(QStringLiteral("contextCandidates"), QJsonArray{
+        malformedLive, liveRow, unreferenced, foreign, mismatchedAlias,
+    });
+
+    RadioSession restored({live}, {}, {{QStringLiteral("live"), 2.0}}, {},
+                          RadioSession::ContextMode::MovingContext, 30, 1'000'000'000);
+    restored.restoreConstraintState(state);
+    const QJsonObject restoredState = restored.constraintState();
+    const QJsonArray confirmed = restoredState.value(QStringLiteral("confirmedContext")).toArray();
+    QCOMPARE(confirmed.size(), 1);
+    QCOMPARE(confirmed.first().toObject().value(QStringLiteral("path")).toString(), live.path);
+    QCOMPARE(restoredState.value(QStringLiteral("pendingPaths")).toArray().size(), 0);
+
+    const QJsonArray candidates = restoredState.value(QStringLiteral("contextCandidates")).toArray();
+    QCOMPARE(candidates.size(), 1);
+    const QJsonObject restoredLive = candidates.first().toObject();
+    QCOMPARE(restoredLive.value(QStringLiteral("path")).toString(), live.path);
+    QCOMPARE(restoredLive.value(QStringLiteral("contentGroupId")).toString(), QStringLiteral("7"));
+    QCOMPARE(restoredLive.value(QStringLiteral("genresFolded")).toArray(),
+             QJsonArray{QStringLiteral("live")});
+    QCOMPARE(restoredLive.value(QStringLiteral("hasUserRating")).toBool(), true);
+}
+
+void RadioTest::movingRestoredHistoryIsBounded()
+{
+    QRandomGenerator rng(504u);
+    RadioSession session({}, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QJsonObject state = session.constraintState();
+    QJsonArray confirmed;
+    QJsonArray candidates;
+    for (int i = 0; i < 80; ++i) {
+        const QString path = QStringLiteral("/restored-history%1").arg(i);
+        confirmed.append(QJsonObject{{QStringLiteral("path"), path}, {QStringLiteral("weight"), 1.0}});
+        candidates.append(QJsonObject{
+            {QStringLiteral("path"), path},
+            {QStringLiteral("contentGroupId"), QStringLiteral("-1")},
+            {QStringLiteral("songKey"), QStringLiteral("path:") + path},
+            {QStringLiteral("artistFolded"), QStringLiteral("artist%1").arg(i)},
+            {QStringLiteral("albumKey"), QStringLiteral("album%1").arg(i)},
+            {QStringLiteral("genresFolded"), QJsonArray{}},
+            {QStringLiteral("year"), 0},
+            {QStringLiteral("tempoBpm"), -1.0},
+            {QStringLiteral("energy"), -1.0},
+            {QStringLiteral("effectiveRating0To100"), -1},
+            {QStringLiteral("hasUserRating"), false},
+            {QStringLiteral("sourcePath"), path},
+        });
+    }
+    state.insert(QStringLiteral("confirmedContext"), confirmed);
+    state.insert(QStringLiteral("contextCandidates"), candidates);
+
+    session.restoreConstraintState(state);
+    const QJsonArray restored = session.constraintState().value(QStringLiteral("confirmedContext")).toArray();
+    QCOMPARE(restored.size(), 60);
+    QCOMPARE(restored.first().toObject().value(QStringLiteral("path")).toString(),
+             QStringLiteral("/restored-history20"));
+    QCOMPARE(restored.last().toObject().value(QStringLiteral("path")).toString(),
+             QStringLiteral("/restored-history79"));
+    QCOMPARE(session.constraintState().value(QStringLiteral("contextCandidates")).toArray().size(), 60);
+}
+
+void RadioTest::movingRestoredConfirmedRowsFilterBeforeBound()
+{
+    QRandomGenerator rng(506u);
+    RadioSession session({}, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QJsonObject state = session.constraintState();
+    QJsonArray confirmed;
+    QJsonArray candidates;
+    for (int i = 0; i < 60; ++i) {
+        const QString path = QStringLiteral("/valid-confirmed%1").arg(i);
+        confirmed.append(QJsonObject{{QStringLiteral("path"), path}, {QStringLiteral("weight"), 1.0}});
+        candidates.append(QJsonObject{
+            {QStringLiteral("path"), path},
+            {QStringLiteral("contentGroupId"), QStringLiteral("-1")},
+            {QStringLiteral("songKey"), QStringLiteral("song:") + path},
+            {QStringLiteral("artistFolded"), QStringLiteral("artist%1").arg(i)},
+            {QStringLiteral("albumKey"), QStringLiteral("album%1").arg(i)},
+            {QStringLiteral("genresFolded"), QJsonArray{}},
+            {QStringLiteral("year"), 0},
+            {QStringLiteral("tempoBpm"), -1.0},
+            {QStringLiteral("energy"), -1.0},
+            {QStringLiteral("effectiveRating0To100"), -1},
+            {QStringLiteral("hasUserRating"), false},
+            {QStringLiteral("sourcePath"), path},
+        });
+    }
+    confirmed.append(QJsonObject{{QStringLiteral("path"), QStringLiteral("/missing-confirmed")},
+                                 {QStringLiteral("weight"), 1.0}});
+    state.insert(QStringLiteral("confirmedContext"), confirmed);
+    state.insert(QStringLiteral("contextCandidates"), candidates);
+
+    session.restoreConstraintState(state);
+    const QJsonArray restored = session.constraintState().value(QStringLiteral("confirmedContext")).toArray();
+    QCOMPARE(restored.size(), 60);
+    QCOMPARE(restored.first().toObject().value(QStringLiteral("path")).toString(),
+             QStringLiteral("/valid-confirmed0"));
+    QCOMPARE(restored.last().toObject().value(QStringLiteral("path")).toString(),
+             QStringLiteral("/valid-confirmed59"));
+}
+
+void RadioTest::movingPendingOnlyGhostSnapshotIsRejected()
+{
+    QRandomGenerator rng(507u);
+    RadioSession session({}, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QJsonObject state = session.constraintState();
+    const QString path = QStringLiteral("/pending-ghost");
+    state.insert(QStringLiteral("pendingPaths"), QJsonArray{path});
+    state.insert(QStringLiteral("contextCandidates"), QJsonArray{QJsonObject{
+        {QStringLiteral("path"), path},
+        {QStringLiteral("contentGroupId"), QStringLiteral("-1")},
+        {QStringLiteral("songKey"), QStringLiteral("song:pending-ghost")},
+        {QStringLiteral("artistFolded"), QStringLiteral("ghost")},
+        {QStringLiteral("albumKey"), QStringLiteral("ghost\nalbum")},
+        {QStringLiteral("genresFolded"), QJsonArray{}},
+        {QStringLiteral("year"), 0},
+        {QStringLiteral("tempoBpm"), -1.0},
+        {QStringLiteral("energy"), -1.0},
+        {QStringLiteral("effectiveRating0To100"), -1},
+        {QStringLiteral("hasUserRating"), false},
+        {QStringLiteral("sourcePath"), path},
+    }});
+
+    session.restoreConstraintState(state);
+    const QJsonObject restored = session.constraintState();
+    QCOMPARE(restored.value(QStringLiteral("pendingPaths")).toArray().size(), 0);
+    QCOMPARE(restored.value(QStringLiteral("confirmedContext")).toArray().size(), 0);
+    QCOMPARE(restored.value(QStringLiteral("contextCandidates")).toArray().size(), 0);
+}
+
+void RadioTest::movingAliasCollisionRejectsUnrelatedDestination()
+{
+    const TrackScorer::Candidate source = makeCandidate(
+        QStringLiteral("/alias-source"), QStringLiteral("source"), {QStringLiteral("rock")}, 2000,
+        -1, false, QStringLiteral("source\nalbum"), QStringLiteral("song:source"));
+    const TrackScorer::Candidate destination = makeCandidate(
+        QStringLiteral("/alias-destination"), QStringLiteral("destination"), {QStringLiteral("jazz")}, 1990,
+        -1, false, QStringLiteral("destination\nalbum"), QStringLiteral("song:destination"));
+    QRandomGenerator rng(508u);
+    RadioSession session({source, destination}, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QJsonObject state = session.constraintState();
+    state.insert(QStringLiteral("confirmedContext"), QJsonArray{
+        QJsonObject{{QStringLiteral("path"), destination.path}, {QStringLiteral("weight"), 1.0}},
+    });
+    state.insert(QStringLiteral("pendingPaths"), QJsonArray{destination.path});
+    state.insert(QStringLiteral("contextCandidates"), QJsonArray{QJsonObject{
+        {QStringLiteral("path"), destination.path},
+        {QStringLiteral("contentGroupId"), QStringLiteral("-1")},
+        {QStringLiteral("songKey"), source.songKey},
+        {QStringLiteral("artistFolded"), source.artistFolded},
+        {QStringLiteral("albumKey"), source.albumKey},
+        {QStringLiteral("genresFolded"), QJsonArray{QStringLiteral("rock")}},
+        {QStringLiteral("year"), source.year},
+        {QStringLiteral("tempoBpm"), -1.0},
+        {QStringLiteral("energy"), -1.0},
+        {QStringLiteral("effectiveRating0To100"), -1},
+        {QStringLiteral("hasUserRating"), false},
+        {QStringLiteral("sourcePath"), source.path},
+    }});
+
+    session.restoreConstraintState(state);
+    const QJsonObject restored = session.constraintState();
+    QCOMPARE(restored.value(QStringLiteral("confirmedContext")).toArray().size(), 0);
+    QCOMPARE(restored.value(QStringLiteral("pendingPaths")).toArray().size(), 0);
+    QCOMPARE(restored.value(QStringLiteral("contextCandidates")).toArray().size(), 0);
+}
+
+void RadioTest::movingSinglePermanentVectorPreservesLegacySequence()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 8; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/legacy%1").arg(i),
+                                     QStringLiteral("legacy-artist%1").arg(i),
+                                     {QStringLiteral("rock")}, 2000));
+    }
+    const TrackScorer::Candidate seed = makeCandidate(
+        QStringLiteral("/legacy-seed"), QStringLiteral("legacy-seed"), {QStringLiteral("rock")}, 2000);
+    QRandomGenerator legacyRng(505u);
+    QRandomGenerator vectorRng(505u);
+    RadioSession legacy(pool, {}, {{QStringLiteral("rock"), 2.0}}, seed,
+                        30, 1'000'000'000, &legacyRng);
+    RadioSession vector(pool, {}, {{QStringLiteral("rock"), 2.0}}, {seed},
+                        RadioSession::ContextMode::PermanentAnchor, 30, 1'000'000'000,
+                        &vectorRng);
+
+    QCOMPARE(trackPaths(legacy.nextTracks(5, {}, resolvePathToTrack)),
+             trackPaths(vector.nextTracks(5, {}, resolvePathToTrack)));
+    QCOMPARE(legacyRng.generate64(), vectorRng.generate64());
+    const QJsonObject legacyState = legacy.constraintState();
+    QVERIFY(!legacyState.contains(QStringLiteral("pendingPaths")));
+    QVERIFY(!legacyState.contains(QStringLiteral("rngState")));
+    QVERIFY(!legacyState.contains(QStringLiteral("confirmedContext")));
+}
+
+void RadioTest::movingAnchorsRoundRobinIsReproducible()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 8; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/round%1").arg(i), QStringLiteral("artist%1").arg(i), {}));
+    }
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/anchor0"), QStringLiteral("anchor0"), {}),
+        makeCandidate(QStringLiteral("/anchor1"), QStringLiteral("anchor1"), {}),
+        makeCandidate(QStringLiteral("/anchor2"), QStringLiteral("anchor2"), {}),
+    };
+    QRandomGenerator rngA(34u);
+    QRandomGenerator rngB(34u);
+    RadioSession first(pool, {}, {}, anchors, RadioSession::ContextMode::MovingContext,
+                       30, 1'000'000'000, &rngA);
+    RadioSession second(pool, {}, {}, anchors, RadioSession::ContextMode::MovingContext,
+                        30, 1'000'000'000, &rngB);
+
+    const QVector<Track> firstRound = first.nextTracks(3, {}, resolvePathToTrack);
+    const QJsonObject firstState = first.constraintState();
+    const QJsonArray firstOrder = firstState.value(QStringLiteral("anchorRoundOrder")).toArray();
+    QCOMPARE(firstRound.size(), 3);
+    QCOMPARE(firstOrder.size(), 3);
+    QCOMPARE(firstState.value(QStringLiteral("anchorCursor")).toInt(), 3);
+    QSet<QString> firstIdentities;
+    for (const QJsonValue &value : firstOrder) {
+        firstIdentities.insert(value.toString());
+    }
+    QCOMPARE(firstIdentities, QSet<QString>({QStringLiteral("path:/anchor0"),
+                                              QStringLiteral("path:/anchor1"),
+                                              QStringLiteral("path:/anchor2")}));
+
+    const QVector<Track> secondRound = first.nextTracks(3, {}, resolvePathToTrack);
+    const QJsonObject secondState = first.constraintState();
+    const QJsonArray secondOrder = secondState.value(QStringLiteral("anchorRoundOrder")).toArray();
+    QCOMPARE(secondRound.size(), 3);
+    QCOMPARE(secondOrder.size(), 3);
+    QCOMPARE(secondState.value(QStringLiteral("anchorCursor")).toInt(), 3);
+    QSet<QString> secondIdentities;
+    for (const QJsonValue &value : secondOrder) {
+        secondIdentities.insert(value.toString());
+    }
+    QCOMPARE(secondIdentities, QSet<QString>({QStringLiteral("path:/anchor0"),
+                                               QStringLiteral("path:/anchor1"),
+                                               QStringLiteral("path:/anchor2")}));
+
+    const QVector<Track> secondFirstRound = second.nextTracks(3, {}, resolvePathToTrack);
+    const QVector<Track> secondSecondRound = second.nextTracks(3, {}, resolvePathToTrack);
+    QCOMPARE(trackPaths(firstRound), trackPaths(secondFirstRound));
+    QCOMPARE(trackPaths(secondRound), trackPaths(secondSecondRound));
+}
+
+void RadioTest::multiAnchorSchedulingAndExclusion()
+{
+    const TrackScorer::Candidate rockAnchor = makeCandidate(
+        QStringLiteral("/anchor-rock"), QStringLiteral("anchor-rock"), {QStringLiteral("rock")}, 2000,
+        -1, false, QStringLiteral("anchor-rock\nalbum"), QStringLiteral("song:anchor-rock"));
+    const TrackScorer::Candidate jazzAnchor = makeCandidate(
+        QStringLiteral("/anchor-jazz"), QStringLiteral("anchor-jazz"), {QStringLiteral("jazz")}, 2000,
+        -1, false, QStringLiteral("anchor-jazz\nalbum"), QStringLiteral("song:anchor-jazz"));
+    QVector<TrackScorer::Candidate> pool{rockAnchor, jazzAnchor,
+        makeCandidate(QStringLiteral("/anchor-rock-copy"), QStringLiteral("anchor-rock-copy"),
+                      {QStringLiteral("rock")}, 2000, -1, false, {}, rockAnchor.songKey),
+        makeCandidate(QStringLiteral("/anchor-jazz-copy"), QStringLiteral("anchor-jazz-copy"),
+                      {QStringLiteral("jazz")}, 2000, -1, false, {}, jazzAnchor.songKey)};
+    for (int i = 0; i < 7; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/rock-pool%1").arg(i),
+                                     QStringLiteral("rock-pool%1").arg(i), {QStringLiteral("rock")}, 2000,
+                                     -1, false, QStringLiteral("rock-album%1").arg(i)));
+        pool.push_back(makeCandidate(QStringLiteral("/jazz-pool%1").arg(i),
+                                     QStringLiteral("jazz-pool%1").arg(i), {QStringLiteral("jazz")}, 2000,
+                                     -1, false, QStringLiteral("jazz-album%1").arg(i)));
+    }
+    const QVector<TrackScorer::Candidate> anchors{rockAnchor, jazzAnchor};
+    const QHash<QString, double> genreIdf{{QStringLiteral("rock"), 4.0},
+                                          {QStringLiteral("jazz"), 4.0}};
+
+    const auto checkMode = [&](RadioSession::ContextMode mode) {
+        QRandomGenerator rng(77u);
+        RadioSession session(pool, {}, genreIdf, anchors, mode, 30, 1'000'000'000, &rng);
+        const QVector<Track> picks = session.nextTracks(2, {}, resolvePathToTrack);
+        QCOMPARE(picks.size(), 2);
+        const QJsonArray order = session.constraintState().value(QStringLiteral("anchorRoundOrder")).toArray();
+        QCOMPARE(order.size(), 2);
+        for (int i = 0; i < picks.size(); ++i) {
+            const QString expectedGenre = order.at(i).toString().contains(QStringLiteral("rock"))
+                ? QStringLiteral("rock") : QStringLiteral("jazz");
+            QVERIFY(picks.at(i).path.startsWith(QStringLiteral("/%1-pool").arg(expectedGenre)));
+            QVERIFY(hasComponent(session.reasonComponentsFor(picks.at(i).path), QStringLiteral("genre")));
+        }
+        QVERIFY(!trackPaths(picks).contains(QStringLiteral("/anchor-rock")));
+        QVERIFY(!trackPaths(picks).contains(QStringLiteral("/anchor-jazz")));
+        QVERIFY(!trackPaths(picks).contains(QStringLiteral("/anchor-rock-copy")));
+        QVERIFY(!trackPaths(picks).contains(QStringLiteral("/anchor-jazz-copy")));
+    };
+
+    checkMode(RadioSession::ContextMode::MovingContext);
+    checkMode(RadioSession::ContextMode::PermanentAnchor);
+}
+
+void RadioTest::movingConstraintStateRoundTrips()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 8; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/state%1").arg(i), QStringLiteral("artist%1").arg(i),
+                                     {QStringLiteral("genre%1").arg(i % 2)}));
+    }
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/state-anchor0"), QStringLiteral("state-anchor0"),
+                      {QStringLiteral("genre0")}),
+        makeCandidate(QStringLiteral("/state-anchor1"), QStringLiteral("state-anchor1"),
+                      {QStringLiteral("genre1")}),
+    };
+    const QHash<QString, double> genreIdf{
+        {QStringLiteral("genre0"), 2.0},
+        {QStringLiteral("genre1"), 2.0},
+    };
+    QRandomGenerator originalRng(35u);
+    QRandomGenerator restoredRng(35u);
+    RadioSession original(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                          30, 1'000'000'000, &originalRng);
+    RadioSession restored(pool, {}, genreIdf, anchors, RadioSession::ContextMode::MovingContext,
+                          30, 1'000'000'000, &restoredRng);
+
+    const QVector<Track> originalPrefix = original.nextTracks(2, {}, resolvePathToTrack);
+    const QVector<Track> restoredPrefix = restored.nextTracks(2, {}, resolvePathToTrack);
+    QCOMPARE(trackPaths(originalPrefix), trackPaths(restoredPrefix));
+    original.notePlayed(originalPrefix.first());
+    restored.notePlayed(restoredPrefix.first());
+    QCOMPARE(trackPaths(original.nextTracks(1, {}, resolvePathToTrack)),
+             trackPaths(restored.nextTracks(1, {}, resolvePathToTrack)));
+    const QJsonObject state = original.constraintState();
+    QVERIFY(state.contains(QStringLiteral("generatedPickCount")));
+    QVERIFY(state.contains(QStringLiteral("confirmedContext")));
+    QVERIFY(state.contains(QStringLiteral("pendingPaths")));
+    QVERIFY(state.contains(QStringLiteral("anchorRoundOrder")));
+    QVERIFY(state.contains(QStringLiteral("anchorCursor")));
+
+    restored.restoreConstraintState(state);
+    const QVector<Track> originalContinuation = original.nextTracks(3, {}, resolvePathToTrack);
+    const QVector<Track> restoredContinuation = restored.nextTracks(3, {}, resolvePathToTrack);
+    QCOMPARE(trackPaths(originalContinuation), trackPaths(restoredContinuation));
+    QCOMPARE(QJsonDocument(original.constraintState()).toJson(QJsonDocument::Compact),
+             QJsonDocument(restored.constraintState()).toJson(QJsonDocument::Compact));
+}
+
+void RadioTest::movingStateRestoresAliasesAndRngAcrossReorderedAnchors()
+{
+    QVector<TrackScorer::Candidate> pool;
+    for (int i = 0; i < 12; ++i) {
+        pool.push_back(makeCandidate(QStringLiteral("/restore%1").arg(i),
+                                     QStringLiteral("restore-artist%1").arg(i), {}, 2000));
+    }
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/restore-anchor0"), QStringLiteral("anchor0"), {}),
+        makeCandidate(QStringLiteral("/restore-anchor1"), QStringLiteral("anchor1"), {}),
+        makeCandidate(QStringLiteral("/restore-anchor2"), QStringLiteral("anchor2"), {}),
+    };
+    QRandomGenerator originalRng(88u);
+    RadioSession original(pool, {}, {}, anchors, RadioSession::ContextMode::MovingContext,
+                          30, 1'000'000'000, &originalRng);
+    QCOMPARE(original.nextTracks(1, {}, resolvePathToTrack).size(), 1);
+    const QJsonObject state = original.constraintState();
+    QVERIFY(state.value(QStringLiteral("rngState")).isString());
+    QVERIFY(state.value(QStringLiteral("anchorRoundOrder")).toArray().first().isString());
+
+    const QVector<TrackScorer::Candidate> reordered{anchors.at(2), anchors.at(0), anchors.at(1)};
+    QRandomGenerator restoredRng(999u);
+    restoredRng.generate64();
+    RadioSession restored(pool, {}, {}, reordered, RadioSession::ContextMode::MovingContext,
+                          30, 1'000'000'000, &restoredRng);
+
+    const QVector<Track> originalContinuation = original.nextTracks(4, {}, resolvePathToTrack);
+    restored.restoreConstraintState(state);
+    const QVector<Track> restoredContinuation = restored.nextTracks(4, {}, resolvePathToTrack);
+    QCOMPARE(trackPaths(restoredContinuation), trackPaths(originalContinuation));
+    QCOMPARE(QJsonDocument(restored.constraintState()).toJson(QJsonDocument::Compact),
+             QJsonDocument(original.constraintState()).toJson(QJsonDocument::Compact));
+}
+
+void RadioTest::movingUnresolvedAttemptsDoNotRecordState()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/unresolved"), QStringLiteral("unresolved"), {}, 2000),
+        makeCandidate(QStringLiteral("/resolved"), QStringLiteral("resolved"), {}, 2000),
+    };
+    const QVector<TrackScorer::Candidate> anchors{
+        makeCandidate(QStringLiteral("/unresolved-anchor0"), QStringLiteral("anchor0"), {}),
+        makeCandidate(QStringLiteral("/unresolved-anchor1"), QStringLiteral("anchor1"), {}),
+    };
+    QRandomGenerator rng(90u);
+    RadioSession session(pool, {}, {}, anchors, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000, &rng);
+    QStringList attempts;
+    const QVector<Track> picks = session.nextTracks(1, {}, [&](const QString &path) {
+        attempts.push_back(path);
+        return attempts.size() == 1 ? Track{} : resolvePathToTrack(path);
+    });
+
+    QCOMPARE(attempts.size(), 2);
+    QCOMPARE(picks.size(), 1);
+    QVERIFY(attempts.first() != picks.first().path);
+    const QJsonObject state = session.constraintState();
+    QCOMPARE(state.value(QStringLiteral("generatedPickCount")).toInt(), 1);
+    QCOMPARE(state.value(QStringLiteral("pendingPaths")).toArray().size(), 1);
+    QCOMPARE(state.value(QStringLiteral("confirmedContext")).toArray().size(), 0);
+    QCOMPARE(state.value(QStringLiteral("anchorCursor")).toInt(), 1);
+    QVERIFY(!state.value(QStringLiteral("usedPaths")).toArray().contains(QJsonValue(attempts.first())));
+    QVERIFY(session.reasonFor(attempts.first()).isEmpty());
+    QVERIFY(!session.reasonFor(picks.first().path).isEmpty());
+
+    QVector<TrackScorer::Candidate> sameAlbum;
+    for (int i = 0; i < 4; ++i) {
+        sameAlbum.push_back(makeCandidate(QStringLiteral("/same-album%1").arg(i),
+                                          QStringLiteral("same-album-artist%1").arg(i), {}, 2000,
+                                          -1, false, QStringLiteral("same-album")));
+    }
+    QRandomGenerator albumRng(91u);
+    RadioSession albumSession(sameAlbum, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                              30, 1'000'000'000, &albumRng);
+    int albumAttempts = 0;
+    const QVector<Track> albumPicks = albumSession.nextTracks(1, {}, [&](const QString &path) {
+        ++albumAttempts;
+        return albumAttempts <= 3 ? Track{} : resolvePathToTrack(path);
+    });
+    QCOMPARE(albumAttempts, 4);
+    QCOMPARE(albumPicks.size(), 1);
+    QCOMPARE(albumSession.constraintState().value(QStringLiteral("albumGroupCounts"))
+                 .toObject().value(QStringLiteral("same-album")).toInt(), 1);
+}
+
+void RadioTest::movingAliasRewritesPendingIdentity()
+{
+    const QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/worker"), QStringLiteral("worker"), {QStringLiteral("rock")}),
+    };
+    RadioSession session(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000);
+    const QVector<Track> picks = session.nextTracks(1, {}, [](const QString &path) {
+        return resolvePathToTrack(path);
+    });
+    QCOMPARE(picks.size(), 1);
+    const QJsonArray pending = session.constraintState().value(QStringLiteral("pendingPaths")).toArray();
+    QCOMPARE(pending.size(), 1);
+    QCOMPARE(pending.first().toString(), QStringLiteral("/worker"));
+
+    session.aliasResolvedPath(QStringLiteral("/worker"), QStringLiteral("/resolved"));
+    const QJsonObject aliased = session.constraintState();
+    const QJsonArray aliasedPending = aliased.value(QStringLiteral("pendingPaths")).toArray();
+    QCOMPARE(aliasedPending.size(), 1);
+    QCOMPARE(aliasedPending.first().toString(), QStringLiteral("/resolved"));
+    const QJsonArray contextCandidates = aliased.value(QStringLiteral("contextCandidates")).toArray();
+    QCOMPARE(contextCandidates.size(), 1);
+    QCOMPARE(contextCandidates.first().toObject().value(QStringLiteral("sourcePath")).toString(),
+             QStringLiteral("/worker"));
+
+    RadioSession fresh(pool, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                       30, 1'000'000'000);
+    fresh.restoreConstraintState(aliased);
+    QCOMPARE(fresh.constraintState().value(QStringLiteral("pendingPaths")).toArray().size(), 1);
+    fresh.notePlayed(resolvePathToTrack(QStringLiteral("/resolved")));
+    const QJsonArray confirmed = fresh.constraintState().value(QStringLiteral("confirmedContext")).toArray();
+    QCOMPARE(confirmed.size(), 1);
+    QCOMPARE(confirmed.first().toObject().value(QStringLiteral("path")).toString(), QStringLiteral("/resolved"));
+
+    QJsonObject corruptedAlias = aliased;
+    QJsonObject aliasRow = corruptedAlias.value(QStringLiteral("contextCandidates")).toArray().first().toObject();
+    aliasRow.insert(QStringLiteral("genresFolded"), QJsonArray{QStringLiteral("jazz")});
+    aliasRow.insert(QStringLiteral("year"), 1900);
+    aliasRow.insert(QStringLiteral("tempoBpm"), 60.0);
+    aliasRow.insert(QStringLiteral("energy"), 0.1);
+    corruptedAlias.insert(QStringLiteral("contextCandidates"), QJsonArray{aliasRow});
+
+    const TrackScorer::Candidate targetRock = makeCandidate(
+        QStringLiteral("/target-rock"), QStringLiteral("target-rock"), {QStringLiteral("rock")});
+    const TrackScorer::Candidate targetJazz = makeCandidate(
+        QStringLiteral("/target-jazz"), QStringLiteral("target-jazz"), {QStringLiteral("jazz")});
+    QRandomGenerator scoringRng(92u);
+    RadioSession scoring({pool.first(), targetRock, targetJazz}, {},
+                         {{QStringLiteral("rock"), 4.0}, {QStringLiteral("jazz"), 4.0}}, {},
+                         RadioSession::ContextMode::MovingContext, 30, 1'000'000'000, &scoringRng);
+    scoring.restoreConstraintState(corruptedAlias);
+    const QJsonObject restoredAlias = scoring.constraintState().value(QStringLiteral("contextCandidates"))
+                                          .toArray().first().toObject();
+    QCOMPARE(restoredAlias.value(QStringLiteral("genresFolded")).toArray(),
+             QJsonArray{QStringLiteral("rock")});
+    scoring.notePlayed(resolvePathToTrack(QStringLiteral("/resolved")));
+    const QVector<Track> scoringPick = scoring.nextTracks(
+        1, QSet<QString>{QStringLiteral("/target-jazz")}, resolvePathToTrack);
+    QCOMPARE(scoringPick.size(), 1);
+    QVERIFY(hasComponent(scoring.reasonComponentsFor(scoringPick.first().path), QStringLiteral("genre")));
+}
+
+void RadioTest::movingForeignTrackSurvivesFreshRestore()
+{
+    RadioSession session({}, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                         30, 1'000'000'000);
+    Track foreign;
+    foreign.path = QStringLiteral("/foreign-user-choice");
+    foreign.title = QStringLiteral("Manual Song");
+    foreign.artistName = QStringLiteral("Foreign Artist");
+    foreign.albumArtistName = QStringLiteral("Foreign Artist");
+    foreign.albumTitle = QStringLiteral("Manual Album");
+    foreign.originalDate = QStringLiteral("1999-05-01");
+    foreign.musicBrainz.recordingId = QStringLiteral("foreign-recording");
+    foreign.effectiveRating0To100 = 80;
+    foreign.hasUserRating = true;
+    session.notePlayed(foreign);
+
+    const QJsonObject state = session.constraintState();
+    QCOMPARE(state.value(QStringLiteral("confirmedContext")).toArray().size(), 1);
+    const QJsonArray candidates = state.value(QStringLiteral("contextCandidates")).toArray();
+    QCOMPARE(candidates.size(), 1);
+    const QJsonObject candidate = candidates.first().toObject();
+    QCOMPARE(candidate.value(QStringLiteral("path")).toString(), foreign.path);
+    QCOMPARE(candidate.value(QStringLiteral("artistFolded")).toString(), QStringLiteral("foreign artist"));
+    QCOMPARE(candidate.value(QStringLiteral("year")).toInt(), 1999);
+    QCOMPARE(candidate.value(QStringLiteral("songKey")).toString(),
+             QStringLiteral("mbid:foreign-recording"));
+
+    RadioSession restored({}, {}, {}, {}, RadioSession::ContextMode::MovingContext,
+                          30, 1'000'000'000);
+    restored.restoreConstraintState(state);
+    const QJsonObject restoredState = restored.constraintState();
+    QCOMPARE(restoredState.value(QStringLiteral("confirmedContext")).toArray().size(), 1);
+    QCOMPARE(restoredState.value(QStringLiteral("confirmedContext")).toArray().first()
+                 .toObject().value(QStringLiteral("path")).toString(), foreign.path);
 }
 
 void RadioTest::isEarlySkipUsesHalfDurationCappedAtFourMinutes()

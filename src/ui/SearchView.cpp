@@ -663,16 +663,27 @@ Track SearchView::trackAt(const QModelIndex &index) const
 
 QVector<Track> SearchView::selectedTracks() const
 {
-    const QModelIndexList sel = m_resultList->selectionModel()->selectedIndexes();
-    const QModelIndexList indices = sel.isEmpty()
-        ? QModelIndexList{m_resultList->currentIndex()}
-        : sel;
+    const QModelIndexList selected = m_resultList->selectionModel()->selectedRows(0);
+    QVector<int> rows;
+    if (selected.isEmpty()) {
+        if (m_resultList->currentIndex().isValid()) {
+            rows.push_back(m_resultList->currentIndex().row());
+        }
+    } else {
+        rows.reserve(selected.size());
+        for (const QModelIndex &index : selected) {
+            rows.push_back(index.row());
+        }
+        std::sort(rows.begin(), rows.end());
+    }
 
     QVector<Track> tracks;
-    tracks.reserve(indices.size());
-    for (const QModelIndex &idx : indices) {
-        const Track t = trackAt(idx);
-        if (!t.path.isEmpty()) tracks.append(t);
+    tracks.reserve(rows.size());
+    for (const int row : rows) {
+        const Track track = trackAt(m_model->index(row, 0));
+        if (!track.path.isEmpty()) {
+            tracks.push_back(track);
+        }
     }
     return tracks;
 }
@@ -756,7 +767,7 @@ void SearchView::showContextMenu(const QPoint &pos)
         callbacks.addToQueueTemporary = [this, targets]() { emit addToQueueTemporaryRequested(targets); };
     }
     callbacks.addToPlaylist = [this, targets]() { emit addToPlaylistRequested(targets); };
-    callbacks.startRadio = [this, single]() { emit startRadioRequested(single); };
+    callbacks.startRadio = [this, targets]() { emit startRadioRequested(targets); };
     callbacks.setNeverRadio = [setFlagForTargets](bool on) { setFlagForTargets(QStringLiteral("never_radio"), on); };
     callbacks.setNoLearn = [setFlagForTargets](bool on) { setFlagForTargets(QStringLiteral("no_learn"), on); };
     callbacks.findInLibrary = [this, single]() { emit findInLibraryRequested(single); };

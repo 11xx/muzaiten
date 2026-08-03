@@ -828,6 +828,7 @@ void PlayerCore::resetQueue(const QVector<Track> &tracks, int index, int playNex
         || m_pendingStagedStartPath != m_currentTrack.path) {
         m_pendingStagedStartPath.clear();
     }
+    emit queueReset();
 }
 
 void PlayerCore::presentTrack(const Track &track)

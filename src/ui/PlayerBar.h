@@ -67,6 +67,7 @@ public:
     // action; synced by MainWindow on radioMenuAboutToShow. Signal-blocked while
     // set so this never re-emits radioAdventurousChanged.
     void setRadioAdventurous(bool on);
+    void setRadioAnchorMode(const QString &mode);
     // Cycle the modes as a left-click would; lets keyboard shortcuts share the
     // exact same behaviour as the buttons.
     void cycleRepeatMode();
@@ -168,6 +169,7 @@ signals:
     // setRadioAdventurous before it's shown.
     void radioMenuAboutToShow();
     void radioAdventurousChanged(bool on);
+    void radioAnchorModeChanged(const QString &mode);
     void radioExplorationSettingsRequested();
     void radioBatchSizeSettingsRequested();
     void radioRefillThresholdSettingsRequested();
@@ -211,6 +213,8 @@ private:
     // Menu-bar mirrors of the radio indicator's session controls; kept in
     // sync with m_radioAdventurousAction by setRadioAdventurous.
     class QAction *m_radioBarAdventurousAction = nullptr;
+    class QAction *m_radioPinnedAction = nullptr;
+    class QAction *m_radioDriftAction = nullptr;
     class QAction *m_stopRadioAction = nullptr;
     RepeatMode m_repeatMode = RepeatMode::Off;
     ShuffleMode m_shuffleMode = ShuffleMode::Off;

@@ -380,11 +380,20 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     // Genre is a metadata fallback only. A complete DSP/CLAP pair is richer
     // and more reliable than tags, so it suppresses this component entirely.
     if (effectiveWeights.genreWeight != 0.0 && seed.hasValidGenre() && candidate.hasValidGenre()) {
-        const QSet<QString> seedGenres(seed.genresFolded.cbegin(), seed.genresFolded.cend());
         double idfSum = 0.0;
-        for (const QString &genre : candidate.genresFolded) {
-            if (seedGenres.contains(genre)) {
-                idfSum += seed.genreIdf.value(genre, 0.0);
+        if (seed.weightedGenres.isEmpty()) {
+            const QSet<QString> seedGenres(seed.genresFolded.cbegin(), seed.genresFolded.cend());
+            for (const QString &genre : candidate.genresFolded) {
+                if (seedGenres.contains(genre)) {
+                    idfSum += seed.genreIdf.value(genre, 0.0);
+                }
+            }
+        } else {
+            for (const QString &genre : candidate.genresFolded) {
+                const double contextWeight = seed.weightedGenres.value(genre, 0.0);
+                if (contextWeight > 0.0 && std::isfinite(contextWeight)) {
+                    idfSum += contextWeight * seed.genreIdf.value(genre, 0.0);
+                }
             }
         }
         idfSum *= crowdingScale(seed.genresFolded.size(), candidate.genresFolded.size(),
@@ -396,8 +405,9 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
     }
 
     // era: linear proximity in years, both years known.
-    if (candidate.year > 0 && seed.year > 0) {
-        const double delta = std::min(static_cast<double>(std::abs(candidate.year - seed.year)),
+    const double contextYear = seed.contextYear > 0.0 ? seed.contextYear : static_cast<double>(seed.year);
+    if (candidate.year > 0 && contextYear > 0.0) {
+        const double delta = std::min(std::abs(static_cast<double>(candidate.year) - contextYear),
                                       effectiveWeights.eraSpanYears);
         pushIfNonZero(scored, QStringLiteral("era"),
                       effectiveWeights.eraWeight * (1.0 - delta / effectiveWeights.eraSpanYears));

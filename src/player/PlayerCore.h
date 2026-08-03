@@ -172,6 +172,8 @@ signals:
     void aboutToInjectLibraryTrack(const Track &track);
     // Queue contents/order changed; observers re-derive every queue view.
     void queueChanged();
+    // A silent queue replacement completed; emitted because resetQueue() intentionally does not emit queueChanged.
+    void queueReset();
     // Queue track metadata changed in place; row order/current index did not.
     void queueTracksChanged(const QVector<int> &rows);
     // userInitiated gates "reveal the playing row" behaviour (explicit plays

@@ -72,7 +72,7 @@ signals:
     void playNextTemporaryRequested(const QVector<Track> &tracks);
     void addToQueueTemporaryRequested(const QVector<Track> &tracks);
     void addToPlaylistRequested(const QVector<Track> &tracks);
-    void startRadioRequested(const Track &track);
+    void startRadioRequested(const QVector<Track> &tracks);
     void startArtistRadioRequested(const QString &artistName);
     void trackFlagChanged(const Track &track, const QString &flag, bool on);
     void findFileRequested(const Track &track);

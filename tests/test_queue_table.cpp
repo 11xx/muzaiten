@@ -192,6 +192,95 @@ private slots:
                           }));
     }
 
+    void radioRowMenuEmitsSelectedTracksInRowOrder()
+    {
+        QueueStore store;
+        Track first;
+        first.path = QStringLiteral("/first.flac");
+        Track second;
+        second.path = QStringLiteral("/second.flac");
+        Track third;
+        third.path = QStringLiteral("/third.flac");
+        store.setSnapshot({first, second, third}, 0, -1, -1);
+
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        table.resize(640, 260);
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+        view->selectionModel()->clearSelection();
+        for (const int row : {2, 0, 1}) {
+            view->selectionModel()->select(view->model()->index(row, 0),
+                                           QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+        view->selectionModel()->setCurrentIndex(view->model()->index(1, 0), QItemSelectionModel::NoUpdate);
+
+        QSignalSpy playSpy(&table, &QueueTable::trackActivated);
+        QSignalSpy startSpy(&table, &QueueTable::startRadioRequested);
+        bool sawPlay = false;
+        bool sawCountedPlay = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Play")) {
+                    sawPlay = true;
+                    action->trigger();
+                } else if (action->text() == QStringLiteral("Play now (3)")) {
+                    sawCountedPlay = true;
+                }
+            }
+            menu->close();
+        });
+
+        int clickedY = -1;
+        for (int y = 0; y < view->height(); ++y) {
+            if (view->rowAt(y) == 1) {
+                clickedY = y;
+                break;
+            }
+        }
+        QVERIFY(clickedY >= 0);
+        const QPoint clickedPoint(1, clickedY);
+        QVERIFY(QMetaObject::invokeMethod(view, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, clickedPoint)));
+        QVERIFY(sawPlay);
+        QVERIFY(!sawCountedPlay);
+        QCOMPARE(playSpy.count(), 1);
+        QCOMPARE(playSpy.first().at(0).toInt(), 1);
+
+        bool sawStartRadio = false;
+        QTimer::singleShot(0, [&]() {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu == nullptr) {
+                return;
+            }
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Start Radio (3)")) {
+                    sawStartRadio = true;
+                    action->trigger();
+                    break;
+                }
+            }
+            menu->close();
+        });
+        QVERIFY(QMetaObject::invokeMethod(view, "customContextMenuRequested",
+                                          Qt::DirectConnection,
+                                          Q_ARG(QPoint, clickedPoint)));
+        QVERIFY(sawStartRadio);
+        QCOMPARE(startSpy.count(), 1);
+        const QVector<Track> tracks = qvariant_cast<QVector<Track>>(startSpy.first().at(0));
+        QCOMPARE(tracks.size(), 3);
+        QCOMPARE(tracks.at(0).path, first.path);
+        QCOMPARE(tracks.at(1).path, second.path);
+        QCOMPARE(tracks.at(2).path, third.path);
+    }
+
     void radioRowMenuOffersExplicitRefresh()
     {
         QueueStore store;

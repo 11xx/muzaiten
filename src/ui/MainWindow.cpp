@@ -1309,9 +1309,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_playerBar, &PlayerBar::radioMenuAboutToShow, this, [this]() {
         m_playerBar->setRadioAdventurous(m_core->radioAdventurous());
+        m_playerBar->setRadioAnchorMode(m_core->radioAnchorMode());
     });
     connect(m_playerBar, &PlayerBar::radioAdventurousChanged, this, [this](bool on) {
         m_core->setRadioAdventurous(on);
+    });
+    connect(m_playerBar, &PlayerBar::radioAnchorModeChanged, this, [this](const QString &mode) {
+        m_core->setRadioAnchorMode(mode);
     });
     connect(m_playerBar, &PlayerBar::radioExplorationSettingsRequested, this, [this]() {
         bool ok = false;
@@ -1426,14 +1430,26 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_trackTable, &TrackTable::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_trackTable, &TrackTable::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_trackTable, &TrackTable::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
-    connect(m_trackTable, &TrackTable::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_trackTable, &TrackTable::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_trackTable, &TrackTable::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
     connect(m_rightSidebar, &RightSidebar::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_rightSidebar, &RightSidebar::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_rightSidebar, &RightSidebar::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_rightSidebar, &RightSidebar::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_rightSidebar, &RightSidebar::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_rightSidebar, &RightSidebar::saveQueueAsRequested, this, &MainWindow::saveCurrentQueueAs);
@@ -2198,8 +2214,14 @@ QueueScreen *MainWindow::ensureQueueScreen()
     connect(m_queueScreen, &QueueScreen::clearPlayNextPriorityRequested, this, &MainWindow::clearPlayNextPriority);
     connect(m_queueScreen, &QueueScreen::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_queueScreen, &QueueScreen::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_queueScreen, &QueueScreen::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_queueScreen, &QueueScreen::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_queueScreen, &QueueScreen::trackFlagChanged, this, &MainWindow::applyTrackFlag);
     connect(m_queueScreen, &QueueScreen::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
@@ -2251,8 +2273,14 @@ SearchView *MainWindow::ensureSearchView()
     connect(m_searchView, &SearchView::propertiesRequested, this, &MainWindow::showTrackProperties);
     connect(m_searchView, &SearchView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_searchView, &SearchView::searchRankingRequested, this, &MainWindow::configureSearchRanking);
-    connect(m_searchView, &SearchView::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_searchView, &SearchView::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_searchView, &SearchView::trackFlagChanged, this, &MainWindow::applyTrackFlag);
 
@@ -2328,8 +2356,14 @@ void MainWindow::ensureFileExplorers()
     });
     connect(m_libraryFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_libraryFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_libraryFileExplorer, &FileExplorerView::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_libraryFileExplorer, &FileExplorerView::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_libraryFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_freeRoamFileExplorer, &FileExplorerView::directoryRequested, this, &MainWindow::setFreeRoamDirectory);
@@ -2351,8 +2385,14 @@ void MainWindow::ensureFileExplorers()
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_freeRoamFileExplorer, &FileExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_freeRoamFileExplorer, &FileExplorerView::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_freeRoamFileExplorer, &FileExplorerView::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_freeRoamFileExplorer, &FileExplorerView::addToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_libraryFileExplorer, &FileExplorerView::trackRatingChangeRequested, this, [this](const Track &track, int rating) {
@@ -2473,8 +2513,14 @@ MusicExplorerView *MainWindow::ensureMusicExplorerView()
     connect(m_musicExplorerView, &MusicExplorerView::trackAddToPlaylistRequested, this, &MainWindow::openAddToPlaylistDialog);
     connect(m_musicExplorerView, &MusicExplorerView::findFileRequested, this, &MainWindow::findTrackFile);
     connect(m_musicExplorerView, &MusicExplorerView::propertiesRequested, this, &MainWindow::showTrackProperties);
-    connect(m_musicExplorerView, &MusicExplorerView::startRadioRequested, this, [this](const Track &track) {
-        startRadioFromSeed(track.path);
+    connect(m_musicExplorerView, &MusicExplorerView::startRadioRequested, this, [this](const QVector<Track> &tracks) {
+        QStringList paths;
+        for (const Track &track : tracks) {
+            if (!track.path.isEmpty()) {
+                paths.push_back(track.path);
+            }
+        }
+        startRadioFromSeeds(paths);
     });
     connect(m_musicExplorerView, &MusicExplorerView::startArtistRadioRequested, this, &MainWindow::startArtistRadio);
     connect(m_musicExplorerView, &MusicExplorerView::trackFlagChanged, this, &MainWindow::applyTrackFlag);
@@ -2708,7 +2754,7 @@ PlaylistView *MainWindow::ensurePlaylistView()
         track.path = path;
         applyTrackFlag(track, flag, on);
     });
-    connect(m_playlistView, &PlaylistView::startRadioRequested, this, &MainWindow::startRadioFromSeed);
+    connect(m_playlistView, &PlaylistView::startRadioRequested, this, &MainWindow::startRadioFromSeeds);
     connect(m_playlistView, &PlaylistView::addSongRequested, this, &MainWindow::openPlaylistAddModal);
     connect(m_playlistView, &PlaylistView::importRequested, this, &MainWindow::openPlaylistImportDialog);
     connect(m_playlistView, &PlaylistView::importNewRequested, this, &MainWindow::importAsNewPlaylist);
@@ -5831,17 +5877,44 @@ void MainWindow::clearPlayNextPriority()
     scheduleQueueStateSave();
 }
 
-void MainWindow::startRadioFromSeed(const QString &path)
+void MainWindow::startRadioFromSeeds(const QStringList &paths)
 {
-    if (path.isEmpty()) {
+    if (paths.isEmpty() || m_database == nullptr) {
         return;
     }
+
+    QStringList libraryPaths;
+    QSet<QString> seenPaths;
+    for (const QString &path : paths) {
+        if (path.isEmpty()) {
+            continue;
+        }
+        const Track track = m_database->trackForPath(path);
+        if (track.path.isEmpty() || seenPaths.contains(track.path)) {
+            continue;
+        }
+        seenPaths.insert(track.path);
+        libraryPaths.push_back(track.path);
+    }
+    const QString missingMessage = paths.size() == 1
+        ? QStringLiteral("Start Radio: that track is not in the library")
+        : QStringLiteral("Start Radio: none of these tracks are in the library");
+    if (libraryPaths.isEmpty()) {
+        statusBar()->showMessage(missingMessage, 4000);
+        return;
+    }
+
     // Same snapshot call Clear queue uses before wiping the queue, so a radio
     // start can be undone via "Restore previous queue".
     snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
-    if (!m_core->startRadio(path)) {
-        statusBar()->showMessage(QStringLiteral("Start Radio: track not found in library"), 4000);
+    if (!m_core->startRadio(libraryPaths)) {
+        statusBar()->showMessage(missingMessage, 4000);
     }
+}
+
+void MainWindow::startRadioFromSeed(const QString &path)
+{
+    startRadioFromSeeds(QStringList{path});
 }
 
 void MainWindow::startArtistRadio(const QString &artistName)

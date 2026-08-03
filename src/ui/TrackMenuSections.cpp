@@ -81,7 +81,7 @@ void appendTrackSections(QMenu &menu, const Callbacks &callbacks, const State &s
         || callbacks.setNeverRadio || callbacks.setNoLearn;
     if (hasRadioGroup) {
         addSeparatorIfNeeded(menu);
-        addAction(menu, QStringLiteral("Start Radio"), callbacks.startRadio);
+        addAction(menu, QStringLiteral("Start Radio%1").arg(suffix), callbacks.startRadio);
         addAction(menu, QStringLiteral("Refresh picks below"), callbacks.refreshRadioPicksBelow,
                   state.refreshRadioPicksBelowEnabled);
         addCheckableAction(menu, QStringLiteral("Never play on radio"), state.neverRadioChecked,

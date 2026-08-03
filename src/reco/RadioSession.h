@@ -26,6 +26,8 @@ class QRandomGenerator;
 // provider closure calls it on the main thread. Not thread-safe.
 class RadioSession final {
 public:
+    enum class ContextMode { PermanentAnchor, MovingContext };
+
     struct PickReason {
         QString path;
         QList<TrackScorer::Component> components;
@@ -62,6 +64,18 @@ public:
                  QHash<qint64, QVector<float>> embeddingsByGroup = {},
                  TrackScorer::RadioSessionDecay sessionDecay = TrackScorer::defaultSessionDecay());
 
+    RadioSession(QVector<TrackScorer::Candidate> pool,
+                 QHash<QString, TrackScorer::Affinity> affinities,
+                 QHash<QString, double> genreIdf,
+                 QVector<TrackScorer::Candidate> anchors,
+                 ContextMode contextMode,
+                 int exploration0To100,
+                 qint64 nowSecs,
+                 QRandomGenerator *rng = nullptr,
+                 TrackScorer::Weights weights = TrackScorer::defaultWeights(),
+                 QHash<qint64, QVector<float>> embeddingsByGroup = {},
+                 TrackScorer::RadioSessionDecay sessionDecay = TrackScorer::defaultSessionDecay());
+
     // Up to `count` picks scored against the CURRENT rolling context, resolved to
     // full Tracks via `resolveTrack`. `excludePaths` (typically the live queue)
     // and the session's own already-picked/played paths are hard-excluded.
@@ -74,6 +88,10 @@ public:
     // explanations, repeat prevention, and later notePlayed() calls follow the
     // path that actually entered the queue.
     void aliasResolvedPath(const QString &candidatePath, const QString &resolvedPath);
+
+    // Reconcile queued generated identities without confirming any survivor;
+    // returns whether the ordered pending list changed.
+    bool retainPendingPaths(const QStringList &orderedPaths);
 
     // Feed every track that actually becomes current while radio is active
     // (the seed, radio picks, and user-queued interruptions). Advances the
@@ -121,6 +139,22 @@ private:
         double energy = -1.0;
     };
 
+    struct ConfirmedContextEntry {
+        QString path;
+        double weight = 0.0;
+    };
+
+    TrackScorer::SeedContext movingContext(const TrackScorer::Candidate *anchor) const;
+    TrackScorer::SeedContext permanentMultiContext(const TrackScorer::Candidate *anchor,
+                                                   const QStringList &recentArtists) const;
+    const TrackScorer::Candidate *nextAnchor();
+    void consumeAnchor();
+    QStringList pendingArtists() const;
+    bool anchorExcluded(const TrackScorer::Candidate &candidate) const;
+    double drawRandomDouble();
+    quint64 nextOwnedRandom();
+    quint64 ownedBounded(quint64 bound);
+
     // Rolling genre window: seed genres unioned with the last few played tracks'
     // genres — the seed anchors the mood, the window lets it drift.
     QStringList rollingGenres() const;
@@ -132,9 +166,22 @@ private:
     void recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
                     const QString &resolvedPath);
 
+    ContextMode m_contextMode = ContextMode::PermanentAnchor;
+    bool m_vectorAnchorSession = false;
+    QVector<TrackScorer::Candidate> m_anchors;
+    QSet<QString> m_anchorPaths;
+    QSet<QString> m_anchorSongKeys;
+    QVector<ConfirmedContextEntry> m_confirmedContext;
+    QHash<QString, QString> m_contextSourcePaths;
+    QStringList m_pendingPaths;
+    QVector<int> m_anchorRoundOrder;
+    int m_anchorCursor = 0;
+    quint64 m_ownedRngState = 0;
+    bool m_usesOwnedRng = false;
+
     QVector<TrackScorer::Candidate> m_pool;
     QHash<QString, TrackScorer::Affinity> m_affinities;
-    QHash<QString, TrackScorer::Candidate> m_byPath; // pool + seed, for notePlayed lookups
+    QHash<QString, TrackScorer::Candidate> m_byPath; // pool + anchors, for notePlayed lookups
     QHash<QString, double> m_genreIdf;
     QHash<qint64, QVector<float>> m_embeddingsByGroup;
     TrackScorer::Candidate m_seed;

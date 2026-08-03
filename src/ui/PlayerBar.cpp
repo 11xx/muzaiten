@@ -666,6 +666,24 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_radioBarAdventurousAction = radioMenu->addAction(QStringLiteral("Adventurous (this session)"));
     m_radioBarAdventurousAction->setCheckable(true);
     connect(m_radioBarAdventurousAction, &QAction::toggled, this, &PlayerBar::radioAdventurousChanged);
+    QMenu *anchorMenu = radioMenu->addMenu(QStringLiteral("Anchor for new sessions"));
+    auto *anchorGroup = new QActionGroup(anchorMenu);
+    anchorGroup->setExclusive(true);
+    m_radioPinnedAction = anchorMenu->addAction(QStringLiteral("Stay near the starting song"));
+    m_radioPinnedAction->setCheckable(true);
+    m_radioPinnedAction->setActionGroup(anchorGroup);
+    m_radioDriftAction = anchorMenu->addAction(QStringLiteral("Drift with what plays"));
+    m_radioDriftAction->setCheckable(true);
+    m_radioDriftAction->setActionGroup(anchorGroup);
+    m_radioPinnedAction->setChecked(true);
+    connect(m_radioPinnedAction, &QAction::triggered, this, [this]() {
+        setRadioAnchorMode(QStringLiteral("pinned"));
+        emit radioAnchorModeChanged(QStringLiteral("pinned"));
+    });
+    connect(m_radioDriftAction, &QAction::triggered, this, [this]() {
+        setRadioAnchorMode(QStringLiteral("drift"));
+        emit radioAnchorModeChanged(QStringLiteral("drift"));
+    });
     QAction *radioExplorationBar = radioMenu->addAction(QStringLiteral("Exploration…"));
     connect(radioExplorationBar, &QAction::triggered, this, &PlayerBar::radioExplorationSettingsRequested);
     QAction *radioBatchSizeBar = radioMenu->addAction(QStringLiteral("Radio batch size…"));
@@ -1727,6 +1745,19 @@ void PlayerBar::setRadioAdventurous(bool on)
     if (m_radioBarAdventurousAction != nullptr) {
         const QSignalBlocker blocker(m_radioBarAdventurousAction);
         m_radioBarAdventurousAction->setChecked(on);
+    }
+}
+
+void PlayerBar::setRadioAnchorMode(const QString &mode)
+{
+    const bool drift = mode == QLatin1String("drift");
+    if (m_radioPinnedAction != nullptr) {
+        const QSignalBlocker blocker(m_radioPinnedAction);
+        m_radioPinnedAction->setChecked(!drift);
+    }
+    if (m_radioDriftAction != nullptr) {
+        const QSignalBlocker blocker(m_radioDriftAction);
+        m_radioDriftAction->setChecked(drift);
     }
 }
 
