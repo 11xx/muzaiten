@@ -48,6 +48,10 @@ public:
     // cannot distinguish the two; backends that can should override.
     virtual void loadPaused(const QUrl &url) { play(url); pause(); }
     virtual void prepareNext(const QUrl &url) = 0;
+    virtual void setGaplessStopPending(bool pending)
+    {
+        Q_UNUSED(pending);
+    }
     virtual void pause() = 0;
     virtual void resume() = 0;
     virtual void stop() = 0;

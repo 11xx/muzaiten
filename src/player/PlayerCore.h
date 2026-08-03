@@ -2,11 +2,14 @@
 
 #include "core/Track.h"
 
+#include <QDeadlineTimer>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
+#include <QTimer>
 #include <QVector>
 
+#include <chrono>
 #include <functional>
 
 class PlaybackBackend;
@@ -55,6 +58,14 @@ public:
     };
     using PlaybackStartPlanner = std::function<PlaybackStartPlan(const Track &)>;
 
+    enum class StopAfterMode { None, Deadline, NaturalCompletions };
+
+    struct StopAfterStatus {
+        StopAfterMode mode = StopAfterMode::None;
+        qint64 remainingMs = 0;
+        int remainingCompletions = 0;
+    };
+
     // Takes ownership of the (required) backend; tests inject a fake.
     explicit PlayerCore(PlaybackBackend *backend, QObject *parent = nullptr);
 
@@ -100,7 +111,13 @@ public:
     void previous();
     void togglePlayPause();
     void play();  // resume, or start the queue when nothing is loaded (MPRIS Play)
+    void stop();
     void seekRelative(qint64 offsetMs);
+    StopAfterStatus stopAfterStatus() const;
+    void armStopAfterMinutes(int minutes);
+    void armStopAfterDuration(std::chrono::milliseconds duration);
+    void armStopAfterCompletions(int count);
+    void cancelStopAfter();
     void setVolume(double volume0To1);
     // Completes the one outstanding native-DSD takeover request. Stale UI timer
     // callbacks are harmless: they become no-ops after a different track starts.
@@ -183,6 +200,10 @@ signals:
     void libraryShufflePercentChanged(int percent);
     void radioShufflePercentChanged(int percent);
     void radioActiveChanged(bool active);
+    void stopAfterChanged();
+    // Signals a deadline pause in place, an existing-row completion staged
+    // paused at zero, or a no-existing-row completion that stopped playback.
+    void stopAfterTriggered();
 
 private:
     // A resolved auto-advance target: either an existing queue row (`index`) or
@@ -210,16 +231,27 @@ private:
     void refreshShuffleForManualPick(int previousIndex, int selectedIndex);
     void resetShuffleState();
 
+    void consumePendingStagedStart();
     void playCurrent(bool notifyScrobbler, bool startPaused);
     void startTrack(const Track &track, const QString &playbackPath, bool notifyScrobbler,
                     bool startPaused, const PlaybackStartPlan &plan);
     void skipCurrentTrack();
     void collapsePlayNextIfStale();
+    void scheduleStopAfterDeadlineWakeup();
+    void handleStopAfterDeadlineWakeup();
+    bool consumeNaturalCompletion();
+    void disarmStopAfter(bool restoreGaplessPreparation);
+    void stageExistingAutoNext(const AutoNext &next);
     void onPreparedTrackStarted();
     void onFinished();
     QString resolvePath(const Track &track) const;
 
     PlaybackBackend *m_backend = nullptr;
+    QDeadlineTimer m_stopAfterDeadline;
+    QTimer m_stopAfterTimer;
+    StopAfterMode m_stopAfterMode = StopAfterMode::None;
+    int m_stopAfterRemainingCompletions = 0;
+    bool m_preservePreparedNextForStopAfter = false;
     PathResolver m_resolvePath;
     RandomTrackProvider m_randomTracks;
     RandomTrackProvider m_radioTracks;
@@ -228,6 +260,7 @@ private:
     int m_queueIndex = -1;
     int m_playNextInsertIndex = -1;
     Track m_currentTrack;
+    QString m_pendingStagedStartPath;
     double m_volume = 1.0;
 
     RepeatMode m_repeatMode = RepeatMode::Off;
@@ -239,6 +272,7 @@ private:
     // backend reports the prepared track started (so the index lands on the row
     // actually preloaded, not a freshly re-rolled shuffle pick).
     AutoNext m_preparedNext;
+    quint64 m_prepareNextGeneration = 0;
     // Queue rows already played in the current shuffle cycle (includes current).
     QSet<int> m_shuffleVisited;
     // Previously-current rows, for retracing under shuffle on Previous (back trail).
