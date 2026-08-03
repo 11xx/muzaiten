@@ -7,6 +7,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <chrono>
 
 PlayerCore::PlayerCore(PlaybackBackend *backend, QObject *parent)
     : QObject(parent)
@@ -23,6 +24,12 @@ PlayerCore::PlayerCore(PlaybackBackend *backend, QObject *parent)
             m_skipDsdTakeoverBlock = false;
         }
     });
+    m_stopAfterTimer.setSingleShot(true);
+    m_stopAfterTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_stopAfterTimer,
+            &QTimer::timeout,
+            this,
+            &PlayerCore::handleStopAfterDeadlineWakeup);
 }
 
 QString PlayerCore::resolvePath(const Track &track) const
@@ -33,6 +40,7 @@ QString PlayerCore::resolvePath(const Track &track) const
 void PlayerCore::playAt(int index, bool notifyScrobbler, bool startPaused,
                         bool explicitJump, bool userInitiated)
 {
+    m_pendingStagedStartPath.clear();
     if (index < 0 || index >= m_queue.size()) {
         return;
     }
@@ -96,6 +104,7 @@ void PlayerCore::playCurrent(bool notifyScrobbler, bool startPaused)
         // auto-advance the old source is already at EOS. Do not present or
         // scrobble the new track until the user accepts the takeover.
         m_backend->prepareNext({});
+        m_pendingStagedStartPath.clear();
         m_backend->stop();
         m_pendingDsdTakeover = {true, track, playbackPath, plan.device, notifyScrobbler, startPaused};
         emit dsdTakeoverRequested(track, plan.device);
@@ -113,6 +122,7 @@ void PlayerCore::startTrack(const Track &track, const QString &playbackPath, boo
                                  : PlaybackBackend::OutputMode::Normal,
                              plan.device);
 
+    m_pendingStagedStartPath.clear();
     m_currentTrack = track;
     markVisited(m_queueIndex);
     emit currentTrackChanged(m_currentTrack, notifyScrobbler);
@@ -175,6 +185,8 @@ void PlayerCore::skipCurrentTrack()
         } else if (target.index >= 0 && target.index < m_queue.size()) {
             playAt(target.index, true, false, false, /*userInitiated=*/false);
         } else {
+            disarmStopAfter(/*restoreGaplessPreparation=*/false);
+            m_pendingStagedStartPath.clear();
             m_backend->stop();
             break;
         }
@@ -182,6 +194,8 @@ void PlayerCore::skipCurrentTrack()
     // Everything reachable was skippable (e.g. an all-DSD queue under Repeat All
     // with the takeover declined). Stop rather than loop forever.
     if (m_skipPending && guard <= 0) {
+        disarmStopAfter(/*restoreGaplessPreparation=*/false);
+        m_pendingStagedStartPath.clear();
         m_backend->stop();
     }
     m_skipInProgress = false;
@@ -255,8 +269,17 @@ void PlayerCore::togglePlayPause()
     if (m_backend->state() == PlaybackBackend::State::Playing) {
         m_backend->pause();
     } else {
-        m_backend->resume();
+        play();
     }
+}
+
+void PlayerCore::consumePendingStagedStart()
+{
+    if (m_pendingStagedStartPath.isEmpty() || m_pendingStagedStartPath != m_currentTrack.path) {
+        return;
+    }
+    m_pendingStagedStartPath.clear();
+    emit currentTrackChanged(m_currentTrack, /*notifyScrobbler=*/true);
 }
 
 void PlayerCore::play()
@@ -268,12 +291,69 @@ void PlayerCore::play()
         return;
     }
     if (m_backend->hasSource()) {
+        consumePendingStagedStart();
         m_backend->resume();
         return;
     }
     if (!m_queue.isEmpty()) {
         playAt(m_queueIndex >= 0 ? m_queueIndex : 0);
     }
+}
+
+void PlayerCore::stop()
+{
+    m_pendingStagedStartPath.clear();
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
+    m_backend->stop();
+}
+
+PlayerCore::StopAfterStatus PlayerCore::stopAfterStatus() const
+{
+    StopAfterStatus status;
+    status.mode = m_stopAfterMode;
+    if (m_stopAfterMode == StopAfterMode::Deadline) {
+        status.remainingMs = std::max<qint64>(0, m_stopAfterDeadline.remainingTime());
+    } else if (m_stopAfterMode == StopAfterMode::NaturalCompletions) {
+        status.remainingCompletions = m_stopAfterRemainingCompletions;
+    }
+    return status;
+}
+
+void PlayerCore::armStopAfterMinutes(int minutes)
+{
+    armStopAfterDuration(std::chrono::minutes(std::clamp(minutes, 1, 1440)));
+}
+
+void PlayerCore::armStopAfterDuration(std::chrono::milliseconds duration)
+{
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
+    m_backend->stabilizeGaplessHandoff();
+    m_stopAfterMode = StopAfterMode::Deadline;
+    m_stopAfterDeadline = QDeadlineTimer(duration, Qt::PreciseTimer);
+    m_stopAfterRemainingCompletions = 0;
+    prepareNext();
+    emit stopAfterChanged();
+    scheduleStopAfterDeadlineWakeup();
+}
+
+void PlayerCore::armStopAfterCompletions(int count)
+{
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
+    m_backend->stabilizeGaplessHandoff();
+    m_stopAfterMode = StopAfterMode::NaturalCompletions;
+    m_stopAfterDeadline = QDeadlineTimer();
+    m_stopAfterRemainingCompletions = std::max(1, count);
+    m_preservePreparedNextForStopAfter = m_stopAfterRemainingCompletions == 1;
+    prepareNext();
+    m_preservePreparedNextForStopAfter = false;
+    emit stopAfterChanged();
+}
+
+void PlayerCore::cancelStopAfter()
+{
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
+    m_backend->stabilizeGaplessHandoff();
+    prepareNext();
 }
 
 void PlayerCore::seekRelative(qint64 offsetMs)
@@ -557,6 +637,8 @@ void PlayerCore::removeRows(const QVector<int> &rows)
         }
     } else {
         m_currentTrack = {};
+        m_pendingStagedStartPath.clear();
+        disarmStopAfter(/*restoreGaplessPreparation=*/false);
         m_backend->stop();
         emit playbackCleared();
     }
@@ -571,6 +653,13 @@ void PlayerCore::clearKeepingCurrent()
         return;
     }
     const Track current = m_queue.at(m_queueIndex);
+    const bool preservePendingStagedStart = m_backend->hasSource()
+        && !m_pendingStagedStartPath.isEmpty()
+        && m_pendingStagedStartPath == m_currentTrack.path
+        && m_currentTrack.path == current.path;
+    if (!preservePendingStagedStart) {
+        m_pendingStagedStartPath.clear();
+    }
     m_queue.clear();
     m_queue.push_back(current);
     m_queueIndex = 0;
@@ -585,6 +674,8 @@ void PlayerCore::clearKeepingCurrent()
 
 void PlayerCore::clearAll()
 {
+    m_pendingStagedStartPath.clear();
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
     m_backend->stabilizeGaplessHandoff();
     m_queue.clear();
     m_queueIndex = -1;
@@ -732,33 +823,66 @@ void PlayerCore::resetQueue(const QVector<Track> &tracks, int index, int playNex
         ? -1
         : std::clamp(playNextInsertIndex, m_queueIndex + 1, static_cast<int>(m_queue.size()));
     resetShuffleState();
+    if (m_queueIndex < 0 || m_queueIndex >= m_queue.size()
+        || m_queue.at(m_queueIndex).path != m_currentTrack.path
+        || m_pendingStagedStartPath != m_currentTrack.path) {
+        m_pendingStagedStartPath.clear();
+    }
 }
 
 void PlayerCore::presentTrack(const Track &track)
 {
+    m_pendingStagedStartPath.clear();
     m_currentTrack = track;
     emit currentTrackChanged(m_currentTrack, /*notifyScrobbler=*/false);
 }
 
 void PlayerCore::prepareNext()
 {
+    const quint64 generation = ++m_prepareNextGeneration;
+    const bool stopGapless = m_stopAfterMode == StopAfterMode::NaturalCompletions
+        && m_stopAfterRemainingCompletions == 1;
+    if (stopGapless && m_preservePreparedNextForStopAfter) {
+        m_backend->setGaplessStopPending(true);
+        if (generation != m_prepareNextGeneration) {
+            return;
+        }
+        m_backend->prepareNext({});
+        return;
+    }
     m_preparedNext = {};
     if (m_queueIndex < 0 || m_queueIndex >= m_queue.size()) {
+        m_backend->setGaplessStopPending(stopGapless);
+        if (generation != m_prepareNextGeneration) {
+            return;
+        }
         m_backend->prepareNext({});
         return;
     }
     // Repeat-one loops via onFinished (a re-play), not gapless preloading: a
     // seamless self-loop is niche and fiddly to drive through the backend.
     if (m_repeatMode == RepeatMode::One) {
+        m_backend->setGaplessStopPending(stopGapless);
+        if (generation != m_prepareNextGeneration) {
+            return;
+        }
         m_backend->prepareNext({});
         return;
     }
-    m_preparedNext = decideAutoNext();
+    const AutoNext target = decideAutoNext();
+    if (generation != m_prepareNextGeneration) {
+        return;
+    }
+    m_preparedNext = target;
     // Only an in-queue follow-up can be gaplessly preloaded; library injections
     // (and end-of-queue) preload nothing and are handled in onFinished.
     const bool gapless = m_preparedNext.index >= 0 && m_preparedNext.index < m_queue.size()
         && m_preparedNext.injected.path.isEmpty();
     if (!gapless) {
+        m_backend->setGaplessStopPending(stopGapless);
+        if (generation != m_prepareNextGeneration) {
+            return;
+        }
         m_backend->prepareNext({});
         return;
     }
@@ -766,11 +890,21 @@ void PlayerCore::prepareNext()
     // DSD start may wait on the asynchronous takeover prompt. Never preload
     // through playbin across either side of that boundary.
     if (isDsdTrack(m_currentTrack) || isDsdTrack(m_queue.at(m_preparedNext.index))) {
+        m_backend->setGaplessStopPending(stopGapless);
+        if (generation != m_prepareNextGeneration) {
+            return;
+        }
         m_backend->prepareNext({});
         return;
     }
     const QString nextPath = resolvePath(m_queue.at(m_preparedNext.index));
-    m_backend->prepareNext(nextPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(nextPath));
+    m_backend->setGaplessStopPending(stopGapless);
+    if (generation != m_prepareNextGeneration) {
+        return;
+    }
+    m_backend->prepareNext(stopGapless || nextPath.isEmpty()
+                                ? QUrl()
+                                : QUrl::fromLocalFile(nextPath));
 }
 
 void PlayerCore::collapsePlayNextIfStale()
@@ -779,6 +913,66 @@ void PlayerCore::collapsePlayNextIfStale()
         m_playNextInsertIndex = -1;
     } else if (m_playNextInsertIndex <= m_queueIndex || m_playNextInsertIndex > m_queue.size()) {
         m_playNextInsertIndex = m_queueIndex + 1;
+    }
+}
+
+void PlayerCore::scheduleStopAfterDeadlineWakeup()
+{
+    if (m_stopAfterMode != StopAfterMode::Deadline) {
+        return;
+    }
+    const qint64 remaining = m_stopAfterDeadline.remainingTime();
+    if (remaining <= 0) {
+        m_stopAfterTimer.start(0);
+        return;
+    }
+    const qint64 wakeupMs = std::min<qint64>(remaining, 1000);
+    m_stopAfterTimer.start(static_cast<int>(wakeupMs));
+}
+
+void PlayerCore::handleStopAfterDeadlineWakeup()
+{
+    if (m_stopAfterMode != StopAfterMode::Deadline) {
+        return;
+    }
+    const qint64 remaining = m_stopAfterDeadline.remainingTime();
+    if (remaining > 0) {
+        emit stopAfterChanged();
+        scheduleStopAfterDeadlineWakeup();
+        return;
+    }
+    m_backend->pause();
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
+    emit stopAfterTriggered();
+}
+
+bool PlayerCore::consumeNaturalCompletion()
+{
+    if (m_stopAfterMode != StopAfterMode::NaturalCompletions) {
+        return false;
+    }
+    if (m_stopAfterRemainingCompletions > 1) {
+        --m_stopAfterRemainingCompletions;
+        emit stopAfterChanged();
+        return false;
+    }
+    return true;
+}
+
+void PlayerCore::disarmStopAfter(bool restoreGaplessPreparation)
+{
+    const bool wasArmed = m_stopAfterMode != StopAfterMode::None;
+    m_stopAfterTimer.stop();
+    m_stopAfterDeadline = QDeadlineTimer();
+    m_stopAfterMode = StopAfterMode::None;
+    m_stopAfterRemainingCompletions = 0;
+    m_preservePreparedNextForStopAfter = false;
+    m_backend->setGaplessStopPending(false);
+    if (restoreGaplessPreparation) {
+        prepareNext();
+    }
+    if (wasArmed) {
+        emit stopAfterChanged();
     }
 }
 
@@ -1038,16 +1232,58 @@ void PlayerCore::resetShuffleState()
     }
 }
 
+void PlayerCore::stageExistingAutoNext(const AutoNext &next)
+{
+    if (next.injected.path.isEmpty() && next.index >= 0 && next.index < m_queue.size()) {
+        const Track candidate = m_queue.at(next.index);
+        const QString candidatePath = resolvePath(candidate);
+        const PlaybackStartPlan plan = m_playbackStartPlanner
+            ? m_playbackStartPlanner(candidate) : PlaybackStartPlan{};
+        if (candidatePath.isEmpty()
+            || isDsdTrack(m_currentTrack)
+            || isDsdTrack(candidate)
+            || plan.action != PlaybackStartPlan::Action::Normal) {
+            m_pendingStagedStartPath.clear();
+            m_backend->stop();
+            return;
+        }
+
+        m_backend->setOutputMode(PlaybackBackend::OutputMode::Normal);
+        const bool linearConsume = m_shuffleMode == ShuffleMode::Off
+            && next.index == m_queueIndex + 1;
+        recordForwardStep(m_queueIndex, next.index);
+        if (linearConsume) {
+            m_queueIndex = next.index;
+            collapsePlayNextIfStale();
+        } else {
+            m_queueIndex = next.index;
+            m_playNextInsertIndex = m_queueIndex + 1;
+        }
+        emit currentIndexChanged(m_queueIndex, /*userInitiated=*/false);
+        emit playNextRangeChanged();
+        m_pendingStagedStartPath.clear();
+        m_currentTrack = candidate;
+        m_pendingStagedStartPath = m_currentTrack.path;
+        markVisited(m_queueIndex);
+        emit currentTrackChanged(m_currentTrack, /*notifyScrobbler=*/false);
+        m_backend->loadPaused(QUrl::fromLocalFile(candidatePath));
+        prepareNext();
+        return;
+    }
+    m_pendingStagedStartPath.clear();
+    m_backend->stop();
+}
+
 void PlayerCore::onPreparedTrackStarted()
 {
     // The backend started the track we gaplessly preloaded; commit the same row
     // it prepared (which, under shuffle/repeat-all, is not simply index + 1).
-    int target = (m_preparedNext.index >= 0 && m_preparedNext.injected.path.isEmpty())
-        ? m_preparedNext.index
-        : m_queueIndex + 1;
-    if (target < 0 || target >= m_queue.size()) {
+    if (!m_preparedNext.injected.path.isEmpty()
+        || m_preparedNext.index < 0
+        || m_preparedNext.index >= m_queue.size()) {
         return;
     }
+    const int target = m_preparedNext.index;
 
     // The outgoing track reached its natural end: the backend never emits
     // finished() when a gaplessly-preloaded track takes over, so signal it here
@@ -1055,6 +1291,7 @@ void PlayerCore::onPreparedTrackStarted()
     if (!m_currentTrack.path.isEmpty()) {
         emit trackFinished(m_currentTrack);
     }
+    const bool triggered = consumeNaturalCompletion();
 
     m_backend->onGaplessTrackAdvanced();
     // Mirror applyAutoNext: only a plain non-shuffle step to the next row consumes
@@ -1070,21 +1307,49 @@ void PlayerCore::onPreparedTrackStarted()
     }
     emit currentIndexChanged(m_queueIndex, /*userInitiated=*/false);
     emit playNextRangeChanged();
+    m_pendingStagedStartPath.clear();
     m_currentTrack = m_queue.at(m_queueIndex);
+    if (triggered) {
+        m_pendingStagedStartPath = m_currentTrack.path;
+    }
     markVisited(m_queueIndex);
-    emit currentTrackChanged(m_currentTrack, /*notifyScrobbler=*/true);
+    emit currentTrackChanged(m_currentTrack, /*notifyScrobbler=*/!triggered);
+    if (triggered) {
+        m_backend->pause();
+        disarmStopAfter(/*restoreGaplessPreparation=*/true);
+        emit stopAfterTriggered();
+        return;
+    }
     prepareNext();
 }
 
 void PlayerCore::onFinished()
 {
     if (m_queue.isEmpty() || m_queueIndex < 0) {
+        disarmStopAfter(/*restoreGaplessPreparation=*/false);
+        m_pendingStagedStartPath.clear();
         m_backend->stop();
         return;
     }
     // The backend reported the current track played out to its natural end.
     if (!m_currentTrack.path.isEmpty()) {
         emit trackFinished(m_currentTrack);
+    }
+    const bool triggered = consumeNaturalCompletion();
+    if (triggered) {
+        AutoNext next = m_preparedNext;
+        if (m_repeatMode == RepeatMode::One) {
+            next = {m_queueIndex, {}};
+        }
+        disarmStopAfter(/*restoreGaplessPreparation=*/false);
+        if (next.injected.path.isEmpty() && next.index >= 0 && next.index < m_queue.size()) {
+            stageExistingAutoNext(next);
+        } else {
+            m_pendingStagedStartPath.clear();
+            m_backend->stop();
+        }
+        emit stopAfterTriggered();
+        return;
     }
     if (m_repeatMode == RepeatMode::One) {
         // Re-play the current track from the top.
@@ -1100,5 +1365,7 @@ void PlayerCore::onFinished()
     }
     // End of queue: tear the pipeline down so hasSource() is false and
     // the output device is freed. A later Play will restart cleanly.
+    disarmStopAfter(/*restoreGaplessPreparation=*/false);
+    m_pendingStagedStartPath.clear();
     m_backend->stop();
 }

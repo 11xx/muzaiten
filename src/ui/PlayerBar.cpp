@@ -649,6 +649,7 @@ PlayerBar::PlayerBar(QWidget *parent)
     // profile holding a card), so refresh it each time the menu opens.
     connect(playbackMenu, &QMenu::aboutToShow, this, &PlayerBar::playbackMenuAboutToShow);
     QAction *playbackResume = playbackMenu->addAction(QStringLiteral("Resume behavior…"));
+    buildStopAfterMenu(playbackMenu, &m_stopAfterCancelAction);
     QAction *libraryShuffleSettings = playbackMenu->addAction(QStringLiteral("Library shuffle…"));
 
     // Radio gets a top-level menu: session control, the mixes, and every
@@ -923,6 +924,14 @@ PlayerBar::PlayerBar(QWidget *parent)
     progressLayout->addLayout(timeline);
     controls->addLayout(progressLayout, 1);
 
+    m_stopAfterIndicator = new QToolButton(this);
+    m_stopAfterIndicator->setObjectName(QStringLiteral("StopAfterIndicator"));
+    m_stopAfterIndicator->setAutoRaise(true);
+    m_stopAfterIndicator->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_stopAfterIndicator->setToolTip(QStringLiteral("Cancel Stop after"));
+    m_stopAfterIndicator->setVisible(false);
+    controls->addWidget(m_stopAfterIndicator);
+
     auto *volume = new VolumeButton(this);
     volume->volumeChanged = [this](int value) {
         emit volumeChanged(value);
@@ -987,6 +996,34 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(m_radio, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
         m_radioMenu->exec(m_radio->mapToGlobal(pos));
     });
+    connect(m_stopAfterIndicator, &QToolButton::clicked,
+            this, &PlayerBar::stopAfterCancelRequested);
+
+    const auto showStopAfterContextMenu = [this](QWidget *widget, const QPoint &pos) {
+        QMenu menu(this);
+        buildStopAfterMenu(&menu);
+        menu.exec(widget->mapToGlobal(pos));
+    };
+    m_elapsed->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_elapsed, &QWidget::customContextMenuRequested, this,
+            [this, showStopAfterContextMenu](const QPoint &pos) {
+                showStopAfterContextMenu(m_elapsed, pos);
+            });
+    m_progress->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_progress, &QWidget::customContextMenuRequested, this,
+            [this, showStopAfterContextMenu](const QPoint &pos) {
+                showStopAfterContextMenu(m_progress, pos);
+            });
+    m_duration->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_duration, &QWidget::customContextMenuRequested, this,
+            [this, showStopAfterContextMenu](const QPoint &pos) {
+                showStopAfterContextMenu(m_duration, pos);
+            });
+
+    m_stopAfterDisplayTimer = new QTimer(this);
+    m_stopAfterDisplayTimer->setInterval(1000);
+    connect(m_stopAfterDisplayTimer, &QTimer::timeout,
+            this, &PlayerBar::refreshStopAfterIndicator);
 
     connect(m_previous, &QToolButton::clicked, this, &PlayerBar::previousRequested);
     connect(openLibrary, &QAction::triggered, this, &PlayerBar::openLibraryRequested);
@@ -1378,6 +1415,90 @@ void PlayerBar::setPosition(qint64 positionMs, qint64 durationMs)
     }
     m_lastProgressPositionMs = safePosition;
     m_lastProgressDurationMs = safeDuration;
+}
+
+QMenu *PlayerBar::buildStopAfterMenu(QMenu *parentMenu, QAction **persistentCancelAction)
+{
+    QMenu *menu = parentMenu->addMenu(QStringLiteral("Stop after"));
+    const auto addMinutes = [this, menu](const QString &label, int minutes) {
+        QAction *action = menu->addAction(label);
+        connect(action, &QAction::triggered, this, [this, minutes]() {
+            emit stopAfterMinutesRequested(minutes);
+        });
+    };
+    const auto addCompletions = [this, menu](const QString &label, int count) {
+        QAction *action = menu->addAction(label);
+        connect(action, &QAction::triggered, this, [this, count]() {
+            emit stopAfterCompletionsRequested(count);
+        });
+    };
+
+    addMinutes(QStringLiteral("15 minutes"), 15);
+    addMinutes(QStringLiteral("30 minutes"), 30);
+    addMinutes(QStringLiteral("1 hour"), 60);
+    addMinutes(QStringLiteral("2 hours"), 120);
+    menu->addSeparator();
+    addCompletions(QStringLiteral("Current song"), 1);
+    addCompletions(QStringLiteral("3 songs"), 3);
+    addCompletions(QStringLiteral("5 songs"), 5);
+    addCompletions(QStringLiteral("10 songs"), 10);
+    menu->addSeparator();
+    QAction *custom = menu->addAction(QStringLiteral("Custom…"));
+    connect(custom, &QAction::triggered, this, &PlayerBar::stopAfterCustomRequested);
+    menu->addSeparator();
+    QAction *cancel = menu->addAction(QStringLiteral("Cancel Stop after"));
+    cancel->setVisible(m_stopAfterStatus.mode != PlayerCore::StopAfterMode::None);
+    connect(cancel, &QAction::triggered, this, &PlayerBar::stopAfterCancelRequested);
+    if (persistentCancelAction != nullptr) {
+        *persistentCancelAction = cancel;
+    }
+    return menu;
+}
+
+void PlayerBar::setStopAfterStatus(const PlayerCore::StopAfterStatus &status)
+{
+    m_stopAfterStatus = status;
+    if (status.mode == PlayerCore::StopAfterMode::Deadline) {
+        m_stopAfterDisplayRemainingMs = std::max<qint64>(0, status.remainingMs);
+        m_stopAfterDisplayClock.restart();
+        m_stopAfterDisplayTimer->start();
+    } else {
+        m_stopAfterDisplayRemainingMs = 0;
+        m_stopAfterDisplayClock.invalidate();
+        m_stopAfterDisplayTimer->stop();
+    }
+    if (m_stopAfterCancelAction != nullptr) {
+        m_stopAfterCancelAction->setVisible(status.mode != PlayerCore::StopAfterMode::None);
+    }
+    refreshStopAfterIndicator();
+}
+
+void PlayerBar::refreshStopAfterIndicator()
+{
+    if (m_stopAfterStatus.mode == PlayerCore::StopAfterMode::None) {
+        m_stopAfterIndicator->setMinimumWidth(0);
+        m_stopAfterIndicator->setVisible(false);
+        return;
+    }
+
+    QString visibleText;
+    if (m_stopAfterStatus.mode == PlayerCore::StopAfterMode::Deadline) {
+        if (m_stopAfterDisplayClock.isValid()) {
+            m_stopAfterDisplayRemainingMs = std::max<qint64>(
+                0, m_stopAfterDisplayRemainingMs - m_stopAfterDisplayClock.elapsed());
+            m_stopAfterDisplayClock.restart();
+        }
+        m_stopAfterStatus.remainingMs = m_stopAfterDisplayRemainingMs;
+        visibleText = QStringLiteral("Stop after %1").arg(formatTime(m_stopAfterDisplayRemainingMs));
+    } else if (m_stopAfterStatus.remainingCompletions == 1) {
+        visibleText = QStringLiteral("Stop after current song");
+    } else {
+        visibleText = QStringLiteral("Stop after %1 songs").arg(m_stopAfterStatus.remainingCompletions);
+    }
+    m_stopAfterIndicator->setText(visibleText);
+    m_stopAfterIndicator->setMinimumWidth(
+        std::max(m_stopAfterIndicator->minimumWidth(), m_stopAfterIndicator->sizeHint().width()));
+    m_stopAfterIndicator->setVisible(true);
 }
 
 bool PlayerBar::shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs)

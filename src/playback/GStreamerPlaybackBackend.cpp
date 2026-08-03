@@ -490,6 +490,15 @@ void GStreamerPlaybackBackend::prepareNext(const QUrl &url)
     m_preparedUri = uri;
 }
 
+void GStreamerPlaybackBackend::setGaplessStopPending(bool pending)
+{
+    QMutexLocker locker(&m_mutex);
+    m_gaplessStopPending = pending;
+    if (pending) {
+        m_preparedUri.clear();
+    }
+}
+
 void GStreamerPlaybackBackend::pause()
 {
     if (m_playbin == nullptr) {
@@ -828,7 +837,9 @@ void GStreamerPlaybackBackend::aboutToFinishCallback(GstElement *playbin, void *
     QString preparedUri;
     {
         QMutexLocker locker(&self->m_mutex);
-        preparedUri = self->m_preparedUri;
+        if (!self->m_gaplessStopPending) {
+            preparedUri = self->m_preparedUri;
+        }
         self->m_preparedUri.clear();
         if (!preparedUri.isEmpty() && !self->m_gaplessAdvancePending) {
             ++self->m_gaplessGeneration;

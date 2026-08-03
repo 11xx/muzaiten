@@ -619,7 +619,7 @@ void AppCore::setupMprisWiring()
     connect(m_mpris, &MprisService::shuffleModeRequested, m_player, &PlayerCore::setShuffleMode);
     connect(m_mpris, &MprisService::pauseRequested, m_playback, &PlaybackBackend::pause);
     connect(m_mpris, &MprisService::playPauseRequested, m_player, &PlayerCore::togglePlayPause);
-    connect(m_mpris, &MprisService::stopRequested, m_playback, &PlaybackBackend::stop);
+    connect(m_mpris, &MprisService::stopRequested, m_player, &PlayerCore::stop);
     connect(m_mpris, &MprisService::playRequested, m_player, &PlayerCore::play);
     connect(m_mpris, &MprisService::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_mpris, &MprisService::relativeSeekRequested, m_player, &PlayerCore::seekRelative);
@@ -829,7 +829,7 @@ void AppCore::setupTrayIcon()
     menu->addAction(QStringLiteral("Play/Pause"), m_player, &PlayerCore::togglePlayPause);
     menu->addAction(QStringLiteral("Next"), m_player, &PlayerCore::next);
     menu->addAction(QStringLiteral("Previous"), m_player, &PlayerCore::previous);
-    menu->addAction(QStringLiteral("Stop"), m_playback, &PlaybackBackend::stop);
+    menu->addAction(QStringLiteral("Stop"), m_player, &PlayerCore::stop);
     menu->addSeparator();
     menu->addAction(QStringLiteral("Quit"), this, &AppCore::quit);
     m_tray->setContextMenu(menu);
@@ -2491,7 +2491,7 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         return status();
     }
     if (command == QLatin1String("stop")) {
-        m_playback->stop();
+        m_player->stop();
         return status();
     }
     if (command == QLatin1String("next")) {

@@ -30,6 +30,26 @@ search options in search, sort/alignment in the album views.
 
 Refreshing a track list or playlist keeps your selection, the keyboard cursor, and the scroll position on the same rows, even when the rows move.
 
+## Stop after
+
+Choose `Playback > Stop after`, or right-click anywhere on the player timeline.
+Both offer `15 minutes`, `30 minutes`, `1 hour`, `2 hours`, `Current song`, `3
+songs`, `5 songs`, `10 songs`, and `Custom…`. `Custom…` opens a dialog with
+minute values from 1 to 1440 or song values from 1 to 999. Arming a new
+condition replaces the previous one. `Cancel Stop after` is available while a
+condition is armed.
+
+Song conditions count songs that finish naturally. Manual Next, Previous,
+direct queue jumps, seeking, and pausing do not count. A deadline pauses
+playback in place, and Play resumes the same position. After the last counted
+song, an existing next song is ready to play but remains paused; if there is no
+existing next song, playback stops on the completed song. Queue contents and
+order, radio activity, and radio refill behavior are unchanged.
+
+The `Stop after …` indicator is in the player bar between the timeline and
+volume; click it to cancel immediately. Stop-after conditions are process-local
+and are not restored after restart.
+
 ## Settings worth knowing
 
 - `Library > Source directories…` — scan-enabled and library-visible roots;

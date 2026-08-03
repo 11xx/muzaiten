@@ -94,6 +94,44 @@ private slots:
         QCOMPARE(errors.count(), 0);
     }
 
+    void lateStopSuppressionCancelsConsumedSuccessor()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString firstPath = dir.filePath(QStringLiteral("late-one.wav"));
+        const QString secondPath = dir.filePath(QStringLiteral("late-two.wav"));
+        QVERIFY(writeToneWav(firstPath, 440.0, 1800));
+        QVERIFY(writeToneWav(secondPath, 660.0, 5000));
+
+        auto *backend = new GStreamerPlaybackBackend;
+        PlayerCore player(backend);
+        Track first;
+        first.path = firstPath;
+        player.resetQueue({first});
+        QSignalSpy errors(backend, &PlaybackBackend::errorOccurred);
+        bool suppressionArmed = false;
+        connect(backend, &PlaybackBackend::aboutToNeedNext, this, [&]() {
+            if (!suppressionArmed) {
+                suppressionArmed = true;
+                backend->stabilizeGaplessHandoff();
+                backend->setGaplessStopPending(true);
+            }
+        });
+        QStringList finishedTracks;
+        connect(&player, &PlayerCore::trackFinished, this,
+                [&](const Track &track) { finishedTracks.push_back(track.path); });
+
+        player.playAt(0);
+        backend->prepareNext(QUrl::fromLocalFile(secondPath));
+
+        QTRY_VERIFY_WITH_TIMEOUT(suppressionArmed, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!finishedTracks.isEmpty(), 8000);
+        QCOMPARE(finishedTracks, QStringList({firstPath}));
+        QCOMPARE(player.currentTrack().path, firstPath);
+        QCOMPARE(backend->state(), PlaybackBackend::State::Stopped);
+        QCOMPARE(errors.count(), 0);
+    }
+
     void gaplessHandoffsCommitEverySuccessorAtZero()
     {
         QTemporaryDir dir;

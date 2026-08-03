@@ -4,6 +4,10 @@
 
 ### Added
 
+- Playback can now stop after a chosen time or a number of finished songs, from
+  `Playback > Stop after` or the player timeline context menu. Arming a new
+  condition replaces the previous one, and a clickable indicator in the player
+  bar cancels it.
 - The library scanner and free-roam file explorer now recognize Ogg media
   (`.oga` and `.ogx`) plus common AAC, AIFF, MP2, MP4 audiobook/audio,
   Matroska Audio, Musepack, True Audio, and Windows Media Audio extensions.

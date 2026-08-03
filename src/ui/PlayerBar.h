@@ -6,7 +6,9 @@
 #include <QList>
 #include <QWidget>
 
+class QAction;
 class QLabel;
+class QMenu;
 class QSlider;
 class QImage;
 class AlbumArtView;
@@ -51,6 +53,7 @@ public:
     void setReleaseDeviceVisible(bool visible);
     void setPlaying(bool playing);
     void setPosition(qint64 positionMs, qint64 durationMs);
+    void setStopAfterStatus(const PlayerCore::StopAfterStatus &status);
     void setVolume(int volume0To100);
     void setVolumeControlEnabled(bool enabled);
     // Reflect externally-driven mode state (persisted settings, MPRIS) on the
@@ -144,6 +147,10 @@ signals:
     void playPauseRequested();
     void nextRequested();
     void stopRequested();
+    void stopAfterMinutesRequested(int minutes);
+    void stopAfterCompletionsRequested(int count);
+    void stopAfterCustomRequested();
+    void stopAfterCancelRequested();
     void seekRequested(qint64 positionMs);
     void volumeChanged(int volume0To100);
     void currentTrackRatingChanged(int rating0To100);
@@ -185,6 +192,8 @@ private:
     void updateShuffleIcon();
     void updateRepeatIcon();
     void updateRadioIcon();
+    QMenu *buildStopAfterMenu(QMenu *parentMenu, QAction **persistentCancelAction = nullptr);
+    void refreshStopAfterIndicator();
     bool shouldHoldTransitionPosition(qint64 positionMs, qint64 durationMs);
 
     class QToolButton *m_menuButton = nullptr;
@@ -237,6 +246,12 @@ private:
     QLabel *m_elapsed = nullptr;
     QLabel *m_duration = nullptr;
     QSlider *m_progress = nullptr;
+    class QToolButton *m_stopAfterIndicator = nullptr;
+    class QTimer *m_stopAfterDisplayTimer = nullptr;
+    class QAction *m_stopAfterCancelAction = nullptr;
+    PlayerCore::StopAfterStatus m_stopAfterStatus;
+    QElapsedTimer m_stopAfterDisplayClock;
+    qint64 m_stopAfterDisplayRemainingMs = 0;
     QElapsedTimer m_trackStartGuardTimer;
     qint64 m_lastProgressPositionMs = 0;
     qint64 m_lastProgressDurationMs = -1;

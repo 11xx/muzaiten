@@ -578,6 +578,7 @@ private:
     // because PipeWire still owns the card. This outlives the backend Error
     // state, whose zero position must never overwrite the requested resume.
     bool m_profileTakeoverResumePending = false;
+    quint64 m_stopAfterTriggerGeneration = 0;
     QString m_profileTakeoverTrackPath;
     qint64 m_profileTakeoverPositionMs = 0;
     bool m_profileTakeoverWasPlaying = false;

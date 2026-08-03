@@ -20,6 +20,7 @@ public:
     void play(const QUrl &url) override;
     void loadPaused(const QUrl &url) override;
     void prepareNext(const QUrl &url) override;
+    void setGaplessStopPending(bool pending) override;
     void pause() override;
     void resume() override;
     void stop() override;
@@ -131,6 +132,7 @@ private:
     bool m_waitingForTargetState = false;
     bool m_gaplessAdvancePending = false;
     bool m_gaplessStartQueued = false;
+    bool m_gaplessStopPending = false;
     quint64 m_gaplessGeneration = 0;
     GstPad *m_audioSinkPad = nullptr;
     unsigned long m_audioSinkProbeId = 0;
