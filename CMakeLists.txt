@@ -178,6 +178,7 @@ set(MUZAITEN_SOURCES
     src/ui/SourceDirectoriesDialog.cpp
     src/ui/StarRating.cpp
     src/ui/StarRatingDelegate.cpp
+    src/ui/TableViewState.cpp
     src/ui/TrackMenuSections.cpp
     src/ui/TrackPropertiesDialog.cpp
     src/ui/TrackTable.cpp
@@ -316,6 +317,7 @@ set(MUZAITEN_HEADERS
     src/ui/SplitterPersistence.h
     src/ui/StarRating.h
     src/ui/StarRatingDelegate.h
+    src/ui/TableViewState.h
     src/ui/TrackPropertiesDialog.h
     src/ui/TrackTable.h
     src/ui/UiMetrics.h

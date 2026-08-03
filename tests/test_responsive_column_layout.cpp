@@ -1,5 +1,6 @@
 #include "ui/HeaderLabelStyle.h"
 #include "ui/ResponsiveColumnLayout.h"
+#include "ui/TableViewState.h"
 #include "ui/TrackTable.h"
 
 #include <QApplication>
@@ -348,7 +349,7 @@ private slots:
 
     void trackRefreshPreservesIdentityState()
     {
-        constexpr int trackRole = Qt::UserRole + 1;
+        constexpr int identityRole = TableViewState::IdentityRole;
         const auto makeTrack = [](int number, const QString &prefix) {
             Track track;
             const QString id = QStringLiteral("%1").arg(number, 3, 10, QLatin1Char('0'));
@@ -357,8 +358,8 @@ private slots:
             track.artistName = QStringLiteral("Artist %1").arg(prefix);
             return track;
         };
-        const auto pathForRow = [trackRole](const QModelIndex &index) {
-            return index.data(trackRole).value<Track>().path;
+        const auto pathForRow = [identityRole](const QModelIndex &index) {
+            return index.data(identityRole).toString();
         };
 
         TrackTable table;
@@ -457,6 +458,47 @@ private slots:
         table.setTracks(anchorlessTracks);
         QTest::qWait(0);
         QCOMPARE(table.verticalScrollBar()->value(), table.verticalScrollBar()->minimum());
+    }
+
+    void trackRefreshKeepsMarksAndRecomputesAutoHeight()
+    {
+        const auto makeTrack = [](int number) {
+            Track track;
+            track.path = QStringLiteral("/music/mark-%1.flac").arg(number);
+            track.title = QStringLiteral("Track %1").arg(number);
+            return track;
+        };
+        const auto selectedPaths = [](const TrackTable &table) {
+            QSet<QString> paths;
+            for (const QModelIndex &index : table.selectionModel()->selectedRows()) {
+                paths.insert(index.data(TableViewState::IdentityRole).toString());
+            }
+            return paths;
+        };
+
+        TrackTable table;
+        table.resize(700, 180);
+        table.show();
+        QTest::qWait(0);
+        table.setAutoHeightToRows(true);
+        table.setTracks({makeTrack(1), makeTrack(2)});
+        QTest::qWait(0);
+        table.setCurrentRow(1);
+        table.markCurrentTrack();
+        const int initialHeight = table.height();
+
+        table.setTracks({makeTrack(2), makeTrack(3), makeTrack(4), makeTrack(1)});
+        QTest::qWait(0);
+        QVERIFY(table.height() > initialHeight);
+        QCOMPARE(selectedPaths(table), QSet<QString>{QStringLiteral("/music/mark-2.flac")});
+
+        table.setTracks({makeTrack(3), makeTrack(4), makeTrack(1)});
+        QTest::qWait(0);
+        QVERIFY(!selectedPaths(table).contains(QStringLiteral("/music/mark-2.flac")));
+
+        table.setTracks({makeTrack(2), makeTrack(3), makeTrack(4), makeTrack(1)});
+        QTest::qWait(0);
+        QVERIFY(!selectedPaths(table).contains(QStringLiteral("/music/mark-2.flac")));
     }
 
     void autoHeightNavigationPreservesHorizontalScroll()

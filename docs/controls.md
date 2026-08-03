@@ -28,6 +28,8 @@ start radio). Right-clicking **empty space** opens view-level menus:
 queue-wide actions in the queue, play-all/layout in the track table,
 search options in search, sort/alignment in the album views.
 
+Refreshing a track list or playlist keeps your selection, the keyboard cursor, and the scroll position on the same rows, even when the rows move.
+
 ## Settings worth knowing
 
 - `Library > Source directories…` — scan-enabled and library-visible roots;

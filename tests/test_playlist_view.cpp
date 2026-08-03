@@ -1,10 +1,13 @@
 #include "db/PlaylistDatabase.h"
 #include "ui/HeaderLabelStyle.h"
 #include "ui/PlaylistView.h"
+#include "ui/TableViewState.h"
 
 #include <QApplication>
+#include <algorithm>
 #include <QBrush>
 #include <QDateTime>
+#include <functional>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -17,10 +20,97 @@
 #include <QSplitter>
 #include <QTableView>
 #include <QHeaderView>
+#include <QHash>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
 #include <QUuid>
+
+namespace {
+
+QTableView *itemTable(PlaylistView &view)
+{
+    return view.findChild<QTableView *>(QStringLiteral("PlaylistItemTable"));
+}
+
+QString identityAt(const QTableView &table, int row)
+{
+    return row >= 0 && row < table.model()->rowCount()
+        ? table.model()->index(row, 0).data(TableViewState::IdentityRole).toString()
+        : QString();
+}
+
+QSet<QString> selectedIdentities(const QTableView &table)
+{
+    QSet<QString> identities;
+    if (const QItemSelectionModel *selection = table.selectionModel(); selection != nullptr) {
+        for (const QModelIndex &index : selection->selectedRows(0)) {
+            const QString identity = identityAt(table, index.row());
+            if (!identity.isEmpty()) {
+                identities.insert(identity);
+            }
+        }
+    }
+    return identities;
+}
+
+QString currentIdentity(const QTableView &table)
+{
+    return table.currentIndex().isValid() ? identityAt(table, table.currentIndex().row()) : QString();
+}
+
+QPair<QString, int> topAnchor(const QTableView &table)
+{
+    if (table.viewport() == nullptr || table.viewport()->rect().isEmpty()) {
+        return {};
+    }
+    const QModelIndex top = table.indexAt(table.viewport()->rect().topLeft());
+    return top.isValid() ? qMakePair(identityAt(table, top.row()), table.visualRect(top).top()) : QPair<QString, int>();
+}
+
+QHash<QString, int> rowsByIdentity(const QTableView &table)
+{
+    QHash<QString, int> rows;
+    for (int row = 0; row < table.model()->rowCount(); ++row) {
+        const QString identity = identityAt(table, row);
+        if (!identity.isEmpty()) {
+            rows.insert(identity, row);
+        }
+    }
+    return rows;
+}
+
+void establishState(QTableView &table, const QVector<int> &selectedRows, int currentRow, int anchorRow)
+{
+    table.setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    QItemSelectionModel *selection = table.selectionModel();
+    QVERIFY(selection != nullptr);
+    selection->clearSelection();
+    for (const int row : selectedRows) {
+        selection->select(table.model()->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
+    selection->setCurrentIndex(table.model()->index(currentRow, 0), QItemSelectionModel::NoUpdate);
+    table.scrollTo(table.model()->index(anchorRow, 0), QAbstractItemView::PositionAtTop);
+    table.verticalScrollBar()->setValue(table.verticalScrollBar()->value() + 7);
+    QCoreApplication::processEvents();
+}
+
+QVector<qint64> addItems(PlaylistDatabase &db, qint64 playlistId, int count,
+                         const std::function<QString(int)> &titleFor)
+{
+    QVector<qint64> ids;
+    ids.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        PlaylistItem item;
+        item.titleSnapshot = titleFor(i);
+        item.artistSnapshot = QStringLiteral("Artist %1").arg(i);
+        ids.push_back(db.addItem(playlistId, item));
+    }
+    return ids;
+}
+
+} // namespace
 
 class PlaylistViewTest : public QObject {
     Q_OBJECT
@@ -315,6 +405,230 @@ private slots:
         QCOMPARE(table->verticalScrollBar()->value(), scrollBefore);
         QVERIFY(table->currentIndex().isValid());
         QCOMPARE(table->currentIndex().row(), 50);
+    }
+
+    void tracklistIdentityStateSurvivesDatabaseReorder()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-reorder-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Reordered"));
+        QVERIFY(playlistId > 0);
+        const QVector<qint64> ids = addItems(db, playlistId, 80, [](int i) {
+            return QStringLiteral("Track %1").arg(i, 3, 10, QLatin1Char('0'));
+        });
+        QCOMPARE(ids.size(), 80);
+
+        PlaylistView view;
+        view.resize(900, 220);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectPlaylist(playlistId);
+        QCoreApplication::processEvents();
+        QTableView *table = itemTable(view);
+        QVERIFY(table != nullptr);
+        establishState(*table, {10, 30, 60}, 45, 25);
+
+        const QSet<QString> selectedBefore = selectedIdentities(*table);
+        const QString currentBefore = currentIdentity(*table);
+        const QPair<QString, int> anchorBefore = topAnchor(*table);
+        const QHash<QString, int> rowsBefore = rowsByIdentity(*table);
+        QVERIFY(selectedBefore.size() >= 3);
+        QVERIFY(!currentBefore.isEmpty());
+        QVERIFY(!anchorBefore.first.isEmpty());
+
+        QVector<qint64> reversed = ids;
+        std::reverse(reversed.begin(), reversed.end());
+        QVERIFY(db.reorderItems(playlistId, reversed));
+        view.reloadItems();
+        QCoreApplication::processEvents();
+
+        const QHash<QString, int> rowsAfter = rowsByIdentity(*table);
+        QCOMPARE(selectedIdentities(*table), selectedBefore);
+        QCOMPARE(currentIdentity(*table), currentBefore);
+        QCOMPARE(topAnchor(*table), anchorBefore);
+        for (const QString &identity : selectedBefore) {
+            QVERIFY(rowsAfter.value(identity) != rowsBefore.value(identity));
+        }
+        QVERIFY(rowsAfter.value(currentBefore) != rowsBefore.value(currentBefore));
+        QVERIFY(rowsAfter.value(anchorBefore.first) != rowsBefore.value(anchorBefore.first));
+    }
+
+    void tracklistSortResetPreservesIdentityState()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-sort-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Sorted"));
+        QVERIFY(playlistId > 0);
+        const QVector<qint64> ids = addItems(db, playlistId, 60, [](int i) {
+            return QStringLiteral("Title %1").arg(59 - i, 3, 10, QLatin1Char('0'));
+        });
+        QCOMPARE(ids.size(), 60);
+
+        PlaylistView view;
+        view.resize(900, 220);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectPlaylist(playlistId);
+        QCoreApplication::processEvents();
+        QTableView *table = itemTable(view);
+        QVERIFY(table != nullptr);
+        establishState(*table, {5, 20, 50}, 35, 12);
+        const QSet<QString> selectedBefore = selectedIdentities(*table);
+        const QString currentBefore = currentIdentity(*table);
+        const QPair<QString, int> anchorBefore = topAnchor(*table);
+        const QHash<QString, int> rowsBefore = rowsByIdentity(*table);
+
+        QVERIFY(QMetaObject::invokeMethod(table->horizontalHeader(), "sectionClicked",
+                                          Qt::DirectConnection, Q_ARG(int, 1)));
+        QCoreApplication::processEvents();
+
+        const QHash<QString, int> rowsAfter = rowsByIdentity(*table);
+        QCOMPARE(selectedIdentities(*table), selectedBefore);
+        QCOMPARE(currentIdentity(*table), currentBefore);
+        QCOMPARE(topAnchor(*table), anchorBefore);
+        for (const QString &identity : selectedBefore) {
+            QVERIFY(rowsAfter.value(identity) != rowsBefore.value(identity));
+        }
+        QVERIFY(rowsAfter.value(currentBefore) != rowsBefore.value(currentBefore));
+        QVERIFY(rowsAfter.value(anchorBefore.first) != rowsBefore.value(anchorBefore.first));
+    }
+
+    void streamingImportRefreshPreservesIdentityState()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-stream-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Streaming"));
+        QVERIFY(playlistId > 0);
+        const QVector<qint64> ids = addItems(db, playlistId, 60, [](int i) {
+            return QStringLiteral("Item %1").arg(i, 3, 10, QLatin1Char('0'));
+        });
+        QCOMPARE(ids.size(), 60);
+
+        PlaylistView view;
+        view.resize(900, 220);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectPlaylist(playlistId);
+        QCoreApplication::processEvents();
+        QTableView *table = itemTable(view);
+        QVERIFY(table != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(table->horizontalHeader(), "sectionClicked",
+                                          Qt::DirectConnection, Q_ARG(int, 1)));
+        QCoreApplication::processEvents();
+        establishState(*table, {15, 40}, 30, 20);
+        const QSet<QString> selectedBefore = selectedIdentities(*table);
+        const QString currentBefore = currentIdentity(*table);
+        const QPair<QString, int> anchorBefore = topAnchor(*table);
+        const QHash<QString, int> rowsBefore = rowsByIdentity(*table);
+
+        PlaylistItem item;
+        item.titleSnapshot = QStringLiteral("Aardvark");
+        QVERIFY(db.addItem(playlistId, item) > 0);
+        view.refreshImportingPlaylist(playlistId);
+        QCoreApplication::processEvents();
+
+        const QHash<QString, int> rowsAfter = rowsByIdentity(*table);
+        QCOMPARE(selectedIdentities(*table), selectedBefore);
+        QCOMPARE(currentIdentity(*table), currentBefore);
+        QCOMPARE(topAnchor(*table), anchorBefore);
+        for (const QString &identity : selectedBefore) {
+            QVERIFY(rowsAfter.value(identity) != rowsBefore.value(identity));
+        }
+        QVERIFY(rowsAfter.value(currentBefore) != rowsBefore.value(currentBefore));
+        QVERIFY(rowsAfter.value(anchorBefore.first) != rowsBefore.value(anchorBefore.first));
+    }
+
+    void tracklistStateIsKeyedByPlaylist()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-keyed-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 firstId = db.createPlaylist(QStringLiteral("First"));
+        const qint64 secondId = db.createPlaylist(QStringLiteral("Second"));
+        QVERIFY(firstId > 0 && secondId > 0);
+        QCOMPARE(addItems(db, firstId, 30, [](int i) { return QStringLiteral("First %1").arg(i); }).size(), 30);
+        QCOMPARE(addItems(db, secondId, 30, [](int i) { return QStringLiteral("Second %1").arg(i); }).size(), 30);
+
+        PlaylistView view;
+        view.resize(900, 220);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectPlaylist(firstId);
+        QCoreApplication::processEvents();
+        QTableView *table = itemTable(view);
+        QVERIFY(table != nullptr);
+        establishState(*table, {2, 9}, 6, 4);
+        const QSet<QString> firstSelected = selectedIdentities(*table);
+        const QString firstCurrent = currentIdentity(*table);
+        const QPair<QString, int> firstAnchor = topAnchor(*table);
+
+        view.selectPlaylist(secondId);
+        QCoreApplication::processEvents();
+        establishState(*table, {3, 14}, 10, 8);
+        const QSet<QString> secondSelected = selectedIdentities(*table);
+        const QString secondCurrent = currentIdentity(*table);
+        const QPair<QString, int> secondAnchor = topAnchor(*table);
+
+        view.selectPlaylist(firstId);
+        QCoreApplication::processEvents();
+        QCOMPARE(selectedIdentities(*table), firstSelected);
+        QCOMPARE(currentIdentity(*table), firstCurrent);
+        QCOMPARE(topAnchor(*table), firstAnchor);
+
+        view.selectPlaylist(secondId);
+        QCoreApplication::processEvents();
+        QCOMPARE(selectedIdentities(*table), secondSelected);
+        QCOMPARE(currentIdentity(*table), secondCurrent);
+        QCOMPARE(topAnchor(*table), secondAnchor);
+    }
+
+    void idleReleasePreservesKeyedTracklistState()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        PlaylistDatabase db(QStringLiteral("playlist-view-idle-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QVERIFY(db.open(dir.filePath(QStringLiteral("playlists.sqlite"))));
+        const qint64 playlistId = db.createPlaylist(QStringLiteral("Idle"));
+        QVERIFY(playlistId > 0);
+        QCOMPARE(addItems(db, playlistId, 50, [](int i) { return QStringLiteral("Idle %1").arg(i); }).size(), 50);
+
+        PlaylistView view(nullptr, 30);
+        view.resize(900, 220);
+        view.setDatabase(&db);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectPlaylist(playlistId);
+        QCoreApplication::processEvents();
+        QTableView *table = itemTable(view);
+        QVERIFY(table != nullptr);
+        establishState(*table, {7, 22}, 15, 12);
+        const QSet<QString> selectedBefore = selectedIdentities(*table);
+        const QString currentBefore = currentIdentity(*table);
+        const QPair<QString, int> anchorBefore = topAnchor(*table);
+
+        view.hide();
+        QTest::qWait(80);
+        QVERIFY(table->model()->rowCount() == 0);
+
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.reloadPlaylists();
+        QCoreApplication::processEvents();
+        QVERIFY(table->model()->rowCount() > 0);
+        QCOMPARE(selectedIdentities(*table), selectedBefore);
+        QCOMPARE(currentIdentity(*table), currentBefore);
+        QCOMPARE(topAnchor(*table), anchorBefore);
     }
 
     void selectorMetadataModePersistsInViewSettings()

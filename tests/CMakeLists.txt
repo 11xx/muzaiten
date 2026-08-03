@@ -556,6 +556,7 @@ add_executable(test_playlist_view
     ../src/db/PlaylistDatabase.cpp
     ../src/db/SqlUtil.cpp
     ../src/ui/PlaylistView.cpp
+    ../src/ui/TableViewState.cpp
     ../src/ui/TrackMenuSections.cpp
     ../src/ui/IdleReleaseController.cpp
     ../src/ui/PanelSearchBar.cpp
@@ -584,6 +585,7 @@ add_executable(test_responsive_column_layout
     test_responsive_column_layout.cpp
     ../src/ui/ResponsiveColumnLayout.cpp
     ../src/ui/ResponsiveColumnOptionsDialog.cpp
+    ../src/ui/TableViewState.cpp
     ../src/ui/TrackTable.cpp
     ../src/ui/TrackMenuSections.cpp
     ../src/ui/DenseTableDelegate.cpp
@@ -668,6 +670,7 @@ set_tests_properties(test_album_grid PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=off
 add_executable(test_music_explorer_view
     test_music_explorer_view.cpp
     ../src/ui/MusicExplorerView.cpp
+    ../src/ui/TableViewState.cpp
     ../src/ui/TrackTable.cpp
     ../src/ui/TrackMenuSections.cpp
     ../src/ui/DenseTableDelegate.cpp
