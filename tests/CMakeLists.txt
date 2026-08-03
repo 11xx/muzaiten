@@ -233,6 +233,15 @@ target_link_libraries(bench_fft PRIVATE muzaiten_dsp)
 target_compile_features(bench_fft PRIVATE cxx_std_26)
 target_compile_options(bench_fft PRIVATE ${MUZAITEN_DSP_ORACLE_FLAGS})
 
+# Radio context/fill benchmark. Built by default but not registered with CTest:
+# its timings are a product-decision artifact, not a hermetic pass/fail test.
+add_executable(bench_radio_context
+    bench_radio_context.cpp
+)
+target_include_directories(bench_radio_context PRIVATE ../src)
+target_link_libraries(bench_radio_context PRIVATE muzaiten_app_objects)
+target_compile_features(bench_radio_context PRIVATE cxx_std_26)
+
 add_executable(test_features_refresh
     test_features_refresh.cpp
 )
