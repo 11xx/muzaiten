@@ -15,6 +15,9 @@ that saved directory is no longer browsable, Muzaiten immediately repairs only
 that setting to the cleaned home directory, or to the filesystem root when the
 home directory is not browsable, while preserving the other window settings.
 
+Stop after conditions are process-local. They are never persisted and are not
+restored after restart.
+
 ## Overrides
 
 CLI flags:

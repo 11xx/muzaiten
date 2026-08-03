@@ -153,6 +153,7 @@ set(MUZAITEN_SOURCES
     src/ui/PanelOrderDialog.cpp
     src/ui/PlaybackProfileDialog.cpp
     src/ui/PlaybackResumeDialog.cpp
+    src/ui/StopAfterDialog.cpp
     src/ui/PanelSearchBar.cpp
     src/ui/PanelSearchController.cpp
     src/ui/PlayerBar.cpp
@@ -294,6 +295,7 @@ set(MUZAITEN_HEADERS
     src/ui/PanelOrderDialog.h
     src/ui/PlaybackProfileDialog.h
     src/ui/PlaybackResumeDialog.h
+    src/ui/StopAfterDialog.h
     src/ui/PlayerBar.h
     src/ui/RadioCustomizationDialog.h
     src/reco/RadioProfile.h

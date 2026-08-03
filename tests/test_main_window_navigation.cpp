@@ -3,7 +3,10 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "db/SettingsStore.h"
+#include "ipc/IpcServer.h"
+#include "mpris/MprisService.h"
 #include "player/PlayerCore.h"
+#include "scrobble/PlayEventRecorder.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/FileExplorerView.h"
@@ -11,21 +14,67 @@
 #include "ui/PanelSearchController.h"
 #include "ui/PlaylistView.h"
 #include "ui/SelectionColors.h"
+#include "ui/StopAfterDialog.h"
 
 #define private public
 #include "ui/MainWindow.h"
 #include "ui/PlayerBar.h"
 #undef private
 
+#include <QDataStream>
 #include <QDateTime>
 #include <QFile>
+#include <QFontMetrics>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QAction>
+#include <QComboBox>
+#include <QDialogButtonBox>
 #include <QJsonObject>
+#include <QLabel>
+#include <QLayout>
+#include <QLocalSocket>
+#include <QMenu>
+#include <QMenuBar>
 #include <QScopeGuard>
+#include <QSpinBox>
+#include <QSystemTrayIcon>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QToolButton>
 #include <QtTest/QtTest>
+
+namespace {
+
+bool writeSilentWav(const QString &path)
+{
+    constexpr quint32 sampleRate = 8000;
+    constexpr quint16 channels = 1;
+    constexpr quint16 bitsPerSample = 16;
+    constexpr quint32 sampleCount = sampleRate;
+    constexpr quint32 dataBytes = sampleCount * channels * (bitsPerSample / 8);
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        return false;
+    }
+    QDataStream out(&file);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out.writeRawData("RIFF", 4);
+    out << quint32{36 + dataBytes};
+    out.writeRawData("WAVEfmt ", 8);
+    out << quint32{16} << quint16{1} << channels << sampleRate;
+    out << quint32{sampleRate * channels * (bitsPerSample / 8)};
+    out << quint16{channels * (bitsPerSample / 8)} << bitsPerSample;
+    out.writeRawData("data", 4);
+    out << dataBytes;
+    for (quint32 sample = 0; sample < sampleCount; ++sample) {
+        out << qint16{0};
+    }
+    return out.status() == QDataStream::Ok;
+}
+
+} // namespace
 
 class MainWindowNavigationTest final : public QObject {
     Q_OBJECT
@@ -247,6 +296,276 @@ private slots:
         bar.setVolumeControlEnabled(true);
         QVERIFY(bar.m_volumeButton->isEnabled());
         QCOMPARE(bar.m_volumeButton->toolTip(), QStringLiteral("Volume"));
+    }
+
+    void stopAfterDialogUsesExactRangesAndModes()
+    {
+        StopAfterDialog dialog;
+        QCOMPARE(dialog.windowTitle(), QStringLiteral("Stop after"));
+        auto *condition = dialog.findChild<QComboBox *>(QStringLiteral("StopAfterCondition"));
+        auto *value = dialog.findChild<QSpinBox *>(QStringLiteral("StopAfterValue"));
+        auto *buttons = dialog.findChild<QDialogButtonBox *>();
+        QVERIFY(condition != nullptr);
+        QVERIFY(value != nullptr);
+        QVERIFY(buttons != nullptr);
+        QCOMPARE(condition->count(), 2);
+        QCOMPARE(condition->itemText(0), QStringLiteral("Minutes"));
+        QCOMPARE(condition->itemText(1), QStringLiteral("Songs"));
+        QCOMPARE(value->minimum(), 1);
+        QCOMPARE(value->maximum(), 1440);
+        QCOMPARE(value->value(), 60);
+        QVERIFY(buttons->button(QDialogButtonBox::Ok) != nullptr);
+        QVERIFY(buttons->button(QDialogButtonBox::Cancel) != nullptr);
+        QCOMPARE(dialog.mode(), StopAfterDialog::Mode::Minutes);
+
+        condition->setCurrentIndex(1);
+        QCOMPARE(value->minimum(), 1);
+        QCOMPARE(value->maximum(), 999);
+        QCOMPARE(value->value(), 5);
+        QCOMPARE(dialog.mode(), StopAfterDialog::Mode::Songs);
+
+        condition->setCurrentIndex(0);
+        QCOMPARE(value->minimum(), 1);
+        QCOMPARE(value->maximum(), 1440);
+        QCOMPARE(value->value(), 60);
+        QCOMPARE(dialog.mode(), StopAfterDialog::Mode::Minutes);
+    }
+
+    void playerBarStopAfterMenuAndIndicatorUseSettledUi()
+    {
+        PlayerBar bar;
+        QMenu *playbackMenu = nullptr;
+        for (QAction *action : bar.m_menuBar->actions()) {
+            if (action->text() == QStringLiteral("Playback")) {
+                playbackMenu = action->menu();
+                break;
+            }
+        }
+        QVERIFY(playbackMenu != nullptr);
+        QMenu *stopAfterMenu = nullptr;
+        for (QAction *action : playbackMenu->actions()) {
+            if (action->text() == QStringLiteral("Stop after")) {
+                stopAfterMenu = action->menu();
+                break;
+            }
+        }
+        QVERIFY(stopAfterMenu != nullptr);
+
+        QStringList labels;
+        for (QAction *action : stopAfterMenu->actions()) {
+            labels.append(action->isSeparator() ? QStringLiteral("<separator>") : action->text());
+        }
+        QCOMPARE(labels, (QStringList{
+            QStringLiteral("15 minutes"),
+            QStringLiteral("30 minutes"),
+            QStringLiteral("1 hour"),
+            QStringLiteral("2 hours"),
+            QStringLiteral("<separator>"),
+            QStringLiteral("Current song"),
+            QStringLiteral("3 songs"),
+            QStringLiteral("5 songs"),
+            QStringLiteral("10 songs"),
+            QStringLiteral("<separator>"),
+            QStringLiteral("Custom…"),
+            QStringLiteral("<separator>"),
+            QStringLiteral("Cancel Stop after"),
+        }));
+        QCOMPARE(bar.m_stopAfterCancelAction, stopAfterMenu->actions().last());
+        QVERIFY(!stopAfterMenu->actions().last()->isVisible());
+        QCOMPARE(bar.m_stopAfterIndicator->toolButtonStyle(), Qt::ToolButtonTextOnly);
+
+        QLayout *rootLayout = bar.layout();
+        QVERIFY(rootLayout != nullptr);
+        QLayout *controlsLayout = rootLayout->itemAt(1)->layout();
+        QVERIFY(controlsLayout != nullptr);
+        const int indicatorIndex = controlsLayout->indexOf(bar.m_stopAfterIndicator);
+        const int volumeIndex = controlsLayout->indexOf(bar.m_volumeButton);
+        QVERIFY(indicatorIndex >= 1);
+        QCOMPARE(volumeIndex, indicatorIndex + 1);
+        QVERIFY(controlsLayout->itemAt(indicatorIndex - 1)->layout() != nullptr);
+        QLayout *progressLayout = controlsLayout->itemAt(indicatorIndex - 1)->layout();
+        QVERIFY(progressLayout->itemAt(1)->layout() != nullptr);
+        QCOMPARE(progressLayout->itemAt(1)->layout()->indexOf(bar.m_stopAfterIndicator), -1);
+        QCOMPARE(bar.m_elapsed->contextMenuPolicy(), Qt::CustomContextMenu);
+        QCOMPARE(bar.m_progress->contextMenuPolicy(), Qt::CustomContextMenu);
+        QCOMPARE(bar.m_duration->contextMenuPolicy(), Qt::CustomContextMenu);
+
+        QSignalSpy cancelRequested(&bar, &PlayerBar::stopAfterCancelRequested);
+        PlayerCore::StopAfterStatus deadline;
+        deadline.mode = PlayerCore::StopAfterMode::Deadline;
+        deadline.remainingMs = 1'799'000;
+        bar.setStopAfterStatus(deadline);
+        QCOMPARE(bar.m_stopAfterIndicator->text(), QStringLiteral("Stop after 29:59"));
+        QVERIFY(!bar.m_stopAfterIndicator->isHidden());
+        QCOMPARE(bar.m_stopAfterIndicator->toolTip(), QStringLiteral("Cancel Stop after"));
+        QVERIFY(bar.m_stopAfterIndicator->accessibleName().isEmpty());
+        const int renderedTextWidth = QFontMetrics(bar.m_stopAfterIndicator->font())
+            .horizontalAdvance(bar.m_stopAfterIndicator->text());
+        QVERIFY(bar.m_stopAfterIndicator->sizeHint().width() > renderedTextWidth);
+        QVERIFY(bar.m_stopAfterIndicator->minimumWidth() >= bar.m_stopAfterIndicator->sizeHint().width());
+        const int deadlineMinimumWidth = bar.m_stopAfterIndicator->minimumWidth();
+        QVERIFY(stopAfterMenu->actions().last()->isVisible());
+        bar.m_stopAfterIndicator->click();
+        QCOMPARE(cancelRequested.count(), 1);
+
+        PlayerCore::StopAfterStatus currentSong;
+        currentSong.mode = PlayerCore::StopAfterMode::NaturalCompletions;
+        currentSong.remainingCompletions = 1;
+        bar.setStopAfterStatus(currentSong);
+        QCOMPARE(bar.m_stopAfterIndicator->text(), QStringLiteral("Stop after current song"));
+        QVERIFY(bar.m_stopAfterIndicator->accessibleName().isEmpty());
+        QVERIFY(bar.m_stopAfterIndicator->minimumWidth() >= deadlineMinimumWidth);
+
+        currentSong.remainingCompletions = 3;
+        bar.setStopAfterStatus(currentSong);
+        QCOMPARE(bar.m_stopAfterIndicator->text(), QStringLiteral("Stop after 3 songs"));
+        QVERIFY(bar.m_stopAfterIndicator->accessibleName().isEmpty());
+        QVERIFY(bar.m_stopAfterIndicator->minimumWidth() >= deadlineMinimumWidth);
+
+        bar.setStopAfterStatus({});
+        QVERIFY(bar.m_stopAfterIndicator->isHidden());
+        QCOMPARE(bar.m_stopAfterIndicator->minimumWidth(), 0);
+        QVERIFY(bar.m_stopAfterIndicator->accessibleName().isEmpty());
+        QVERIFY(!stopAfterMenu->actions().last()->isVisible());
+    }
+
+    void overlappingProfileTransitionsIgnoreStopAfterTrigger()
+    {
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QFile audioFile(audioRoot.filePath(QStringLiteral("profile-transition.wav")));
+        QVERIFY(audioFile.open(QIODevice::WriteOnly));
+        audioFile.close();
+
+        AppCore core;
+        MainWindow window(&core);
+        Track track;
+        track.path = audioFile.fileName();
+        window.m_player->resetQueue({track}, 0);
+
+        const QList<QTimer *> existingTimers = window.findChildren<QTimer *>();
+        PlaybackProfile next = window.m_playbackProfile;
+        next.device = QStringLiteral("hw:stop-after-profile-test");
+        const auto scheduleTransition = [&]() {
+            window.applyOutputProfile(next, next.device, -1, 0, 0, true, true);
+        };
+        scheduleTransition();
+        scheduleTransition();
+
+        QList<QTimer *> transitionTimers;
+        for (QTimer *timer : window.findChildren<QTimer *>()) {
+            if (!existingTimers.contains(timer) && timer->interval() == 1000) {
+                transitionTimers.append(timer);
+            }
+        }
+        QCOMPARE(transitionTimers.size(), 2);
+
+        emit core.player()->stopAfterTriggered();
+        for (QTimer *timer : transitionTimers) {
+            for (int tick = 0; tick < 10; ++tick) {
+                QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+            }
+        }
+        QVERIFY(!window.m_playback->hasSource());
+    }
+
+    void stopAfterTriggerCancelsDelayedResume()
+    {
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("resume-race.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        Track track;
+        track.path = audioPath;
+        track.durationMs = 120'000;
+        window.m_player->resetQueue({track}, 0);
+        QSignalSpy playEvents(core.playEventRecorder(), &PlayEventRecorder::playEventReady);
+
+        window.resumePlaybackAt(0, 5'000, /*playing=*/false, /*settleDelayMs=*/100);
+        window.m_playback->stop();
+        const QString savedPlaybackState = QStringLiteral("sentinel");
+        window.m_state->setSetting(QStringLiteral("playback.state"), savedPlaybackState);
+        core.mpris()->setPositionMs(777);
+        const QString elapsed = window.m_playerBar->m_elapsed->text();
+
+        emit core.player()->stopAfterTriggered();
+        QTest::qWait(150);
+
+        QCOMPARE(core.mpris()->positionUsec(), qlonglong{777'000});
+        QCOMPARE(window.m_playerBar->m_elapsed->text(), elapsed);
+        QCOMPARE(window.m_state->setting(QStringLiteral("playback.state")), savedPlaybackState);
+        core.playEventRecorder()->flushSessionEnd();
+        QCOMPARE(playEvents.count(), 0);
+    }
+
+    void manualStopRoutesDisarmStopAfter()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        const auto arm = [&core]() {
+            core.player()->armStopAfterCompletions(3);
+            QCOMPARE(core.player()->stopAfterStatus().mode, PlayerCore::StopAfterMode::NaturalCompletions);
+        };
+
+        arm();
+        emit core.mpris()->stopRequested();
+        QCOMPARE(core.player()->stopAfterStatus().mode, PlayerCore::StopAfterMode::None);
+
+        arm();
+        emit window.m_playerBar->stopRequested();
+        QCOMPARE(core.player()->stopAfterStatus().mode, PlayerCore::StopAfterMode::None);
+
+        arm();
+        QLocalSocket socket;
+        socket.connectToServer(core.ipc()->serverPath());
+        QVERIFY2(socket.waitForConnected(1000), qPrintable(socket.errorString()));
+        socket.write(QJsonDocument(QJsonObject{{QStringLiteral("command"), QStringLiteral("stop")}})
+                         .toJson(QJsonDocument::Compact) + '\n');
+        QVERIFY(socket.waitForBytesWritten(1000));
+        QTRY_VERIFY_WITH_TIMEOUT(socket.bytesAvailable() > 0, 1000);
+        const QJsonObject reply = QJsonDocument::fromJson(socket.readLine()).object();
+        QVERIFY(reply.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(core.player()->stopAfterStatus().mode, PlayerCore::StopAfterMode::None);
+
+        if (auto *tray = core.findChild<QSystemTrayIcon *>(); tray != nullptr
+            && tray->contextMenu() != nullptr) {
+            QAction *stop = nullptr;
+            for (QAction *action : tray->contextMenu()->actions()) {
+                if (action->text() == QStringLiteral("Stop")) {
+                    stop = action;
+                    break;
+                }
+            }
+            QVERIFY(stop != nullptr);
+            arm();
+            stop->trigger();
+            QCOMPARE(core.player()->stopAfterStatus().mode, PlayerCore::StopAfterMode::None);
+        }
+    }
+
+    void stopAfterDoesNotEnterSavedQueueOrPlaybackJson()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        Track track;
+        track.path = QStringLiteral("/temporary/stop-after.wav");
+        track.title = QStringLiteral("Stop after test");
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->armStopAfterCompletions(3);
+        window.saveQueueState();
+        window.savePlaybackState(true);
+
+        const QJsonObject queue = window.queueSnapshotObject(QStringLiteral("saved queue"));
+        QVERIFY(!queue.contains(QStringLiteral("stopAfter")));
+        const QJsonObject storedQueue = QJsonDocument::fromJson(
+            window.m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
+        QVERIFY(!storedQueue.contains(QStringLiteral("stopAfter")));
+        const QJsonObject playback = QJsonDocument::fromJson(
+            window.m_state->setting(QStringLiteral("playback.state")).toUtf8()).object();
+        QVERIFY(!playback.contains(QStringLiteral("stopAfter")));
     }
 
     void restoredRadioShuffleUsesCurrentTrackContext()

@@ -41,6 +41,7 @@
 #include "ui/PanelSearchController.h"
 #include "ui/PlaybackProfileDialog.h"
 #include "ui/PlaybackResumeDialog.h"
+#include "ui/StopAfterDialog.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueScreen.h"
 #include "ui/QueueStore.h"
@@ -834,6 +835,12 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         }
         releaseDsdDeviceForPcmTrack(track);
     });
+    connect(m_player, &PlayerCore::stopAfterChanged, this, [this]() {
+        m_playerBar->setStopAfterStatus(m_player->stopAfterStatus());
+    });
+    connect(m_player, &PlayerCore::stopAfterTriggered, this, [this]() {
+        ++m_stopAfterTriggerGeneration;
+    });
     connect(m_player, &PlayerCore::currentTrackUpdated, this, &MainWindow::presentCurrentTrackUpdate);
     connect(m_player, &PlayerCore::playbackCleared, this, &MainWindow::clearPresentedTrack);
     connect(m_player, &PlayerCore::volumeChanged, this, &MainWindow::applyPlayerVolume);
@@ -1195,6 +1202,24 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::playbackProfileRequested, this, &MainWindow::configurePlaybackProfile);
     connect(m_playerBar, &PlayerBar::playbackResumeRequested, this, &MainWindow::configurePlaybackResume);
     connect(m_playerBar, &PlayerBar::releaseDeviceRequested, this, &MainWindow::releaseHeldOutputDevice);
+    connect(m_playerBar, &PlayerBar::stopAfterMinutesRequested,
+            m_player, &PlayerCore::armStopAfterMinutes);
+    connect(m_playerBar, &PlayerBar::stopAfterCompletionsRequested,
+            m_player, &PlayerCore::armStopAfterCompletions);
+    connect(m_playerBar, &PlayerBar::stopAfterCancelRequested,
+            m_player, &PlayerCore::cancelStopAfter);
+    connect(m_playerBar, &PlayerBar::stopAfterCustomRequested, this, [this]() {
+        StopAfterDialog dialog(this);
+        if (dialog.exec() != QDialog::Accepted) {
+            return;
+        }
+        if (dialog.mode() == StopAfterDialog::Mode::Minutes) {
+            m_player->armStopAfterMinutes(dialog.value());
+        } else {
+            m_player->armStopAfterCompletions(dialog.value());
+        }
+    });
+    m_playerBar->setStopAfterStatus(m_player->stopAfterStatus());
     connect(m_playerBar, &PlayerBar::playbackMenuAboutToShow, this, [this]() {
         m_playerBar->setReleaseDeviceVisible(canReleaseOutputDevice());
     });
@@ -1387,7 +1412,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             m_player->setRadioShufflePercent(percent);
         }
     });
-    connect(m_playerBar, &PlayerBar::stopRequested, m_playback, &PlaybackBackend::stop);
+    connect(m_playerBar, &PlayerBar::stopRequested, m_player, &PlayerCore::stop);
     connect(m_playerBar, &PlayerBar::seekRequested, m_playback, &PlaybackBackend::seek);
     connect(m_playerBar, &PlayerBar::volumeChanged, this, [this](int volume) {
         const int clamped = std::clamp(volume, 0, 100);
@@ -3714,8 +3739,13 @@ void MainWindow::resumePlaybackAt(int queueIndex, qint64 positionMs, bool playin
     // Either way, skip scrobbler notification here — the backend transiently
     // reports states while starting up. Notify only when the session is
     // genuinely playing (checked in the settle timer below).
+    const quint64 stopAfterTriggerGeneration = m_stopAfterTriggerGeneration;
     playQueueIndex(queueIndex, /*notifyScrobbler=*/false, /*startPaused=*/!playing);
-    QTimer::singleShot(settleDelayMs, this, [this, positionMs, playing]() {
+    QTimer::singleShot(settleDelayMs, this, [this, positionMs, playing,
+                                             stopAfterTriggerGeneration]() {
+        if (stopAfterTriggerGeneration != m_stopAfterTriggerGeneration) {
+            return;
+        }
         if (positionMs > 0) {
             m_playback->seek(positionMs);
             m_playerBar->setPosition(positionMs, std::max<qint64>(m_playback->duration(), m_player->currentTrack().durationMs));
@@ -3809,9 +3839,11 @@ void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &
         // the device's delayed graph rebuild, leaving the new stream silent.
         applied.device = releasedHw;
     }
-    const auto apply = [this, applied, queueIndex, positionMs, wasActive, wasPlaying]() {
+    const quint64 stopAfterTriggerGeneration = m_stopAfterTriggerGeneration;
+    const auto apply = [this, applied, queueIndex, positionMs, wasActive, wasPlaying,
+                        stopAfterTriggerGeneration]() {
         m_playback->setProfile(applied);
-        if (wasActive) {
+        if (wasActive && stopAfterTriggerGeneration == m_stopAfterTriggerGeneration) {
             // Re-open the current track at the captured position; the settle
             // delay lets the freshly-built sink preroll before the seek.
             resumePlaybackAt(queueIndex, positionMs, wasPlaying, /*settleDelayMs=*/600);
