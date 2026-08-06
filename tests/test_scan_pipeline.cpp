@@ -224,7 +224,7 @@ void ScanPipelineTest::audioExtensionsAreSupported()
         QStringLiteral("dsdiff"), QStringLiteral("dsf"), QStringLiteral("flac"),
         QStringLiteral("m4a"),
         QStringLiteral("m4b"), QStringLiteral("mka"), QStringLiteral("mp2"),
-        QStringLiteral("mp3"), QStringLiteral("mp4"), QStringLiteral("mpc"),
+        QStringLiteral("mp3"), QStringLiteral("mpc"),
         QStringLiteral("oga"), QStringLiteral("ogg"), QStringLiteral("ogx"),
         QStringLiteral("opus"), QStringLiteral("tta"), QStringLiteral("wav"),
         QStringLiteral("wma"), QStringLiteral("wv"),
@@ -237,6 +237,8 @@ void ScanPipelineTest::audioExtensionsAreSupported()
 
     QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.ogx.txt")));
     QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.mkv")));
+    // Video containers stay out; MP4-family audio is reached through m4a/m4b.
+    QVERIFY(!LibraryScanner::isSupportedAudioFile(QStringLiteral("/music/example.mp4")));
 }
 
 QTEST_MAIN(ScanPipelineTest)
