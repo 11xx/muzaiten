@@ -96,8 +96,10 @@ The free-roam explorer can set a start folder from its context menu; `b` jumps
 back to it. Requests for empty, missing, non-directory, or unreadable locations
 leave the free-roam explorer at its current location.
 The scanner and free-roam explorer recognize AAC, AIFF, Monkey's Audio, DSD,
-FLAC, MP2/MP3, MP4/M4A/M4B, Matroska Audio, Musepack, Ogg
+FLAC, MP2/MP3, M4A/M4B (MP4 audio), Matroska Audio, Musepack, Ogg
 (`.oga`, `.ogg`, `.ogx`, `.opus`), True Audio, WAV, Windows Media Audio, and
-WavPack files. Playback still requires a matching GStreamer decoder plugin.
+WavPack files. Bare `.mp4` is not scanned, since a video file carrying an audio
+track is indistinguishable from an audio one by extension. Playback still
+requires a matching GStreamer decoder plugin.
 Unsupported files are hidden by default — enable `View > List unsupported
 files in explorer` while in an explorer view to show them.

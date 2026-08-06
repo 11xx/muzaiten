@@ -32,6 +32,9 @@ QVector<Track> LibraryScanner::scan(const QString &rootPath) const
     return tracks;
 }
 
+// Audio-only extensions. MP4-family audio enters through m4a/m4b; bare .mp4 is
+// excluded because nothing downstream tells an audio stream from a video one,
+// so admitting it would file movies as library tracks.
 const QSet<QString> &LibraryScanner::supportedAudioExtensions()
 {
     static const QSet<QString> extensions = {
@@ -49,7 +52,6 @@ const QSet<QString> &LibraryScanner::supportedAudioExtensions()
         QStringLiteral("mka"),
         QStringLiteral("mp2"),
         QStringLiteral("mp3"),
-        QStringLiteral("mp4"),
         QStringLiteral("mpc"),
         QStringLiteral("oga"),
         QStringLiteral("ogg"),
