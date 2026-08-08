@@ -19,6 +19,8 @@
 
 ### Fixed
 
+- Toggling repeat or shuffle while an exhausted radio queue is refilling no
+  longer lets speculative gapless preparation duplicate the next recommendation.
 - Track-list refreshes now keep the surviving selection, the keyboard cursor
   row, and the visible scroll position instead of jumping to another row.
 - Playlist item-table state now follows stable item identities through database

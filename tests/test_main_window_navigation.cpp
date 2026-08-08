@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <QDateTime>
 #include <QFile>
+#include <QFileInfo>
 #include <QFontMetrics>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1114,6 +1115,68 @@ private slots:
                  before.value(QStringLiteral("generatedPickCount")));
         QVERIFY(core.m_radioSession->reasonComponentsFor(generatedPath).isEmpty());
         QVERIFY(core.m_radioSession->pickReasons().isEmpty());
+        core.stopRadio();
+    }
+
+    void radioSpeculativeJitInvalidatesInFlightBatch()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        AppCore core;
+
+        QVector<TrackScorer::Candidate> candidates;
+        for (int index = 0; index < 2; ++index) {
+            Track track;
+            track.path = libraryRoot.filePath(QStringLiteral("jit-race-%1.wav").arg(index));
+            track.parentDir = libraryRoot.path();
+            track.filename = QFileInfo(track.path).fileName();
+            track.title = QStringLiteral("JIT race %1").arg(index);
+            track.artistName = QStringLiteral("JIT artist %1").arg(index);
+            track.albumArtistName = track.artistName;
+            track.albumTitle = QStringLiteral("JIT album %1").arg(index);
+            track.fileSize = 1;
+            track.fileMtime = 1;
+            track.codec = QStringLiteral("wav");
+            QVERIFY(writeSilentWav(track.path));
+            QVERIFY2(core.database()->upsertTrack(track), qPrintable(core.database()->lastError()));
+
+            TrackScorer::Candidate candidate;
+            candidate.path = track.path;
+            candidate.songKey = QStringLiteral("song:jit-race-%1").arg(index);
+            candidate.artistFolded = QStringLiteral("jit-artist-%1").arg(index);
+            candidate.albumKey = QStringLiteral("album:jit-race-%1").arg(index);
+            candidate.genresFolded = {QStringLiteral("rock")};
+            candidates.push_back(std::move(candidate));
+        }
+
+        Track current;
+        current.path = QStringLiteral("/jit-current.wav");
+        core.player()->resetQueue({current}, 0);
+        core.m_radioSession = std::make_unique<RadioSession>(
+            candidates, QHash<QString, TrackScorer::Affinity>{}, QHash<QString, double>{},
+            QVector<TrackScorer::Candidate>{}, RadioSession::ContextMode::MovingContext,
+            30, 1'000'000'000);
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPath = current.path;
+        core.m_radioSessionSeedPaths = {current.path};
+        core.m_radioSessionAnchorMode = QStringLiteral("drift");
+        core.setRadioBatchSize(1);
+        core.player()->setRadioActive(true);
+        core.installRadioProvider(/*markPicksAsRadio=*/true);
+
+        core.appendRadioBatch(1);
+        QVERIFY(core.m_radioTopUpInProgress);
+        core.player()->setRepeatMode(RepeatMode::All);
+        const QSet<QString> preparedPaths = core.m_radioPickPaths;
+        QCOMPARE(preparedPaths.size(), 1);
+
+        QTRY_VERIFY_WITH_TIMEOUT(!core.m_radioTopUpInProgress, 10000);
+        for (const Track &track : core.player()->queue()) {
+            QVERIFY(!preparedPaths.contains(track.path));
+        }
+        const QJsonArray usedPaths = core.m_radioSession->constraintState()
+                                         .value(QStringLiteral("usedPaths")).toArray();
+        QVERIFY(usedPaths.contains(QJsonValue(*preparedPaths.cbegin())));
         core.stopRadio();
     }
 
