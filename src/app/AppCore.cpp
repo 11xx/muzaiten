@@ -1836,6 +1836,9 @@ void AppCore::installRadioProvider(bool markPicksAsRadio)
         const QVector<Track> picks = m_radioSession->nextTracks(count, excludePaths, [this, blockedPaths](const QString &path) {
             return resolveRadioPick(path, blockedPaths);
         });
+        if (!picks.isEmpty()) {
+            ++m_radioSessionRevision;
+        }
         recordRadioPicks(picks);
         if (markPicksAsRadio) {
             for (const Track &track : picks) {
