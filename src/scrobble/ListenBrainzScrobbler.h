@@ -13,10 +13,16 @@
 
 class QNetworkReply;
 
-// Uploads the shared local listen history (ListenHistoryStore) to ListenBrainz
-// and sends rate-limited "playing now" updates. Listen detection itself lives
-// in ListenTracker; this class only drains the unsent backlog, oldest first,
-// marking rows sent on acceptance so nothing is ever double-submitted.
+// Uploads the shared local listen history (ListenHistoryStore) to one
+// ListenBrainz-compatible destination and sends it rate-limited "playing now"
+// updates. Listen detection itself lives in ListenTracker; this class only
+// drains that destination's unsent backlog, oldest first, marking rows sent on
+// acceptance so nothing is ever double-submitted.
+//
+// One instance per destination. Everything that can stall or fail is per
+// instance (in-flight state, retry timer, backoff, failure count), so a
+// destination that is rate limited, unreachable, or rejecting its token holds
+// up only itself. Instances share a worker thread; they never share state.
 class ListenBrainzScrobbler final : public QObject {
     Q_OBJECT
 
@@ -24,11 +30,15 @@ public:
     explicit ListenBrainzScrobbler(QObject *parent = nullptr);
     ~ListenBrainzScrobbler() override;
 
+    QString destinationId() const { return m_destinationId; }
+
 public slots:
+    // Binds this scrobbler to one destination and its credentials.
     // uploadAllowed=false is the offline buffer: credentials stay configured
     // and history keeps accumulating, but nothing is sent (no listens, no
     // playing-now) until uploads are re-allowed.
-    void configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath);
+    void configure(const QString &destinationId, const QString &displayName, const QString &apiRoot,
+                   bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath);
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
     void playbackStateChanged(bool playing);
@@ -38,14 +48,19 @@ public slots:
     void resendNowPlaying();
     // Drain unsent history listens in batches, respecting service limits.
     void uploadBacklog();
-    // Check a user token against /1/validate-token and report the username.
-    void validateToken(const QString &token);
+    // Check a token against a server's validate-token endpoint and report the
+    // username. Destination, URL, and token are all explicit so a single
+    // instance can test a destination that is not configured yet, or a URL the
+    // user has typed but not saved.
+    void validateToken(const QString &destinationId, const QString &apiRoot, const QString &token);
 
 signals:
-    void submissionFailed(QString message);
-    void backlogProcessed(int sentCount, int skippedCount, int remainingCount);
-    void disabledAfterFailures(QString message);
-    void tokenValidated(bool valid, QString username);
+    // Every signal names its destination: with several configured, an
+    // unattributed failure tells the user nothing about which one to fix.
+    void submissionFailed(QString destinationId, QString message);
+    void backlogProcessed(QString destinationId, int sentCount, int skippedCount, int remainingCount);
+    void disabledAfterFailures(QString destinationId, QString message);
+    void tokenValidated(QString destinationId, bool valid, QString username);
 
 private slots:
     void submitPendingTrackStartPlayingNow();
@@ -71,6 +86,9 @@ private:
     QTimer *m_retryTimer = nullptr;
     QTimer *m_trackStartPlayingNowTimer = nullptr;
     std::unique_ptr<ListenHistoryStore> m_history;
+    QString m_destinationId;
+    QString m_displayName;
+    QString m_apiRoot;
     bool m_enabled = false;
     bool m_uploadAllowed = true;
     QString m_token;

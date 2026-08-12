@@ -704,17 +704,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     auto *historyMenu = new QMenu(QStringLiteral("History"), this);
     QAction *listeningHistory = historyMenu->addAction(QStringLiteral("Listening history…"));
     auto *scrobblersMenu = new StayOpenMenu(QStringLiteral("Scrobblers"), this);
-    m_listenBrainzEnabled = scrobblersMenu->addAction(QStringLiteral("ListenBrainz scrobbling"));
-    m_listenBrainzEnabled->setCheckable(true);
-    QAction *listenBrainzToken = scrobblersMenu->addAction(QStringLiteral("Set ListenBrainz token…"));
-    m_clearListenBrainzBacklog = scrobblersMenu->addAction(QStringLiteral("Clear ListenBrainz backlog"));
-    m_clearListenBrainzBacklog->setVisible(false);
-    scrobblersMenu->addSeparator();
-    m_lastFmEnabled = scrobblersMenu->addAction(QStringLiteral("Last.fm scrobbling"));
-    m_lastFmEnabled->setCheckable(true);
+    // Every destination, reserved or custom, is configured in one place.
+    QAction *manageScrobblers = scrobblersMenu->addAction(QStringLiteral("Manage scrobblers…"));
     QAction *lastFmSettings = scrobblersMenu->addAction(QStringLiteral("Last.fm API settings…"));
-    m_clearLastFmBacklog = scrobblersMenu->addAction(QStringLiteral("Clear Last.fm backlog"));
-    m_clearLastFmBacklog->setVisible(false);
     scrobblersMenu->addSeparator();
     m_scrobbleOffline = scrobblersMenu->addAction(QStringLiteral("Offline mode (buffer listens locally)"));
     m_scrobbleOffline->setCheckable(true);
@@ -1111,12 +1103,8 @@ PlayerBar::PlayerBar(QWidget *parent)
     connect(deletePlaylist, &QAction::triggered, this, &PlayerBar::playlistDeleteRequested);
     connect(movePlaylistItemUp, &QAction::triggered, this, &PlayerBar::playlistMoveItemUpRequested);
     connect(movePlaylistItemDown, &QAction::triggered, this, &PlayerBar::playlistMoveItemDownRequested);
-    connect(m_listenBrainzEnabled, &QAction::toggled, this, &PlayerBar::listenBrainzEnabledChanged);
-    connect(listenBrainzToken, &QAction::triggered, this, &PlayerBar::listenBrainzTokenRequested);
-    connect(m_clearListenBrainzBacklog, &QAction::triggered, this, &PlayerBar::listenBrainzBacklogClearRequested);
-    connect(m_lastFmEnabled, &QAction::toggled, this, &PlayerBar::lastFmEnabledChanged);
+    connect(manageScrobblers, &QAction::triggered, this, &PlayerBar::manageScrobblersRequested);
     connect(lastFmSettings, &QAction::triggered, this, &PlayerBar::lastFmSettingsRequested);
-    connect(m_clearLastFmBacklog, &QAction::triggered, this, &PlayerBar::lastFmBacklogClearRequested);
     connect(m_scrobbleOffline, &QAction::toggled, this, &PlayerBar::scrobbleOfflineChanged);
     connect(m_importListenBrainzAction, &QAction::triggered, this, [this]() {
         emit backfillStartRequested(QStringLiteral("listenbrainz"));
@@ -1143,21 +1131,6 @@ void PlayerBar::setReleaseDeviceVisible(bool visible)
     }
 }
 
-void PlayerBar::setScrobbleBacklogCounts(int lastFmPending, int listenBrainzPending)
-{
-    if (m_clearLastFmBacklog != nullptr) {
-        m_clearLastFmBacklog->setVisible(lastFmPending > 0);
-        m_clearLastFmBacklog->setText(lastFmPending > 0
-                                          ? QStringLiteral("Clear Last.fm backlog (%1)").arg(lastFmPending)
-                                          : QStringLiteral("Clear Last.fm backlog"));
-    }
-    if (m_clearListenBrainzBacklog != nullptr) {
-        m_clearListenBrainzBacklog->setVisible(listenBrainzPending > 0);
-        m_clearListenBrainzBacklog->setText(listenBrainzPending > 0
-                                                ? QStringLiteral("Clear ListenBrainz backlog (%1)").arg(listenBrainzPending)
-                                                : QStringLiteral("Clear ListenBrainz backlog"));
-    }
-}
 
 void PlayerBar::setBackfillStatus(bool running, const QString &statusText, bool lbResumable)
 {
@@ -1213,14 +1186,6 @@ void PlayerBar::setTrackInfo(const QString &title, const QString &subtitle, int 
     }
 }
 
-void PlayerBar::setListenBrainzEnabled(bool enabled)
-{
-    if (m_listenBrainzEnabled == nullptr) {
-        return;
-    }
-    const QSignalBlocker blocker(m_listenBrainzEnabled);
-    m_listenBrainzEnabled->setChecked(enabled);
-}
 
 void PlayerBar::setScrobbleOffline(bool offline)
 {
@@ -1231,14 +1196,6 @@ void PlayerBar::setScrobbleOffline(bool offline)
     m_scrobbleOffline->setChecked(offline);
 }
 
-void PlayerBar::setLastFmEnabled(bool enabled)
-{
-    if (m_lastFmEnabled == nullptr) {
-        return;
-    }
-    const QSignalBlocker blocker(m_lastFmEnabled);
-    m_lastFmEnabled->setChecked(enabled);
-}
 
 void PlayerBar::setTrackInfoPaneVisible(bool visible)
 {

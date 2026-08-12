@@ -101,11 +101,14 @@ set(MUZAITEN_SOURCES
     src/scrobble/BackfillParse.cpp
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
+    src/scrobble/ListenBrainzHub.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
+    src/scrobble/ListenBrainzUrl.cpp
     src/scrobble/ListenHistoryStore.cpp
     src/scrobble/ListenTracker.cpp
     src/scrobble/PlayEventRecorder.cpp
     src/scrobble/ScrobbleBackfill.cpp
+    src/scrobble/ScrobbleDestination.cpp
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
     src/search/FuzzyMatch.cpp
@@ -138,6 +141,8 @@ set(MUZAITEN_SOURCES
     src/ui/ListeningHistoryDialog.cpp
     src/ui/MainWindow.cpp
     src/ui/ScanController.cpp
+    src/ui/ScrobbleDestinationsDialog.cpp
+    src/ui/ScrobbleUploadDispatcher.cpp
     src/ui/RatingSyncController.cpp
     src/ui/ViewStatePersistence.cpp
     src/ui/QueueSnapshotStore.cpp
@@ -251,7 +256,12 @@ set(MUZAITEN_HEADERS
     src/scrobble/LastFmApi.h
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
+    src/scrobble/ListenBrainzHub.h
     src/scrobble/ListenBrainzScrobbler.h
+    src/scrobble/ListenBrainzUrl.h
+    src/scrobble/ScrobbleDestination.h
+    src/ui/ScrobbleDestinationsDialog.h
+    src/ui/ScrobbleUploadDispatcher.h
     src/scrobble/ListenHistoryStore.h
     src/scrobble/ListenTracker.h
     src/scrobble/ScrobbleBackfill.h

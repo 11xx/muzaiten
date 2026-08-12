@@ -26,6 +26,30 @@ out when you opt in.
 Missing files are marked missing rather than deleted from the database until you
 explicitly choose `File > Remove missing tracks`.
 
+## Listening history and scrobbling
+
+Local listening history is permanent and independent of every scrobbling
+service. Nothing a scrobbler does removes a listen from it.
+
+Delivery is tracked separately, one record per listen and destination. A record
+exists only for destinations that were enabled when the listen happened, so
+adding or enabling a destination never enqueues history it did not witness; you
+can still queue specific rows yourself from Listening History.
+
+The destructive-looking actions are deliberately narrow:
+
+- **Clear backlog** drops one destination's undelivered records. The listens
+  stay, and deliveries already completed stay recorded as completed.
+- **Removing a destination** deletes that destination's delivery records and its
+  stored token, and nothing else. Other destinations' backlogs are untouched,
+  and the listening history is kept in full. The dialog states how many pending
+  deliveries are being discarded before you confirm.
+- **Editing a destination's URL** keeps its identity and its backlog: pending
+  listens follow it to the new address rather than being dropped.
+
+Identifiers minted for custom destinations are never reused, so a removed
+destination's records can never be inherited by a later one.
+
 ## Application state
 
 Application-owned state belongs under XDG locations:

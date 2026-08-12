@@ -75,9 +75,15 @@ and are not restored after restart.
   ([radio.md](radio.md)).
 - `Settings > Track information panel…` — fields shown in the right-side
   info pane. `Settings > Album art resolution…` — cached artwork size.
-- `History > Scrobblers ▸` — ListenBrainz/Last.fm toggles, offline
-  buffering, history backfill; `Last.fm API settings…` accepts your own
-  credentials.
+- `History > Scrobblers ▸ > Manage scrobblers…` — every scrobbling
+  destination in one list: Last.fm, ListenBrainz, and any number of
+  ListenBrainz-compatible servers such as Koito. Add, edit, enable,
+  disable, test, and remove them here. ListenBrainz's token can be replaced
+  here while its built-in identity and URL stay fixed. The same menu holds offline
+  buffering and history backfill; `Last.fm API settings…` accepts your
+  own Last.fm credentials.
+- `History > Listening history…` — pick a destination to see and manage
+  its delivery state, or `All destinations` for a read-only overview.
 
 ## File explorers
 

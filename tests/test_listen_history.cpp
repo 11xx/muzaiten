@@ -2,8 +2,13 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QVariant>
 #include <QtTest>
+
+#include <array>
 
 class TestListenHistory final : public QObject {
     Q_OBJECT
@@ -12,10 +17,12 @@ private slots:
     void recordAndQueryUnsent();
     void recordOnlyOwesEnabledServices();
     void recordWithNoServicesKeepsHistoryOnly();
+    void recordDeduplicatesNonEmptyObligations();
+    void recordRollsBackWhenDeliveryInsertFails();
     void duplicateTimestampCollapses();
     void markSentPerService();
     void clearPendingPreservesHistory();
-    void markOwedQueuesOnlyUnsentRows();
+    void markOwedSkipsAlreadyOwedRows();
     void invalidListensRejected();
     void recordAndQueryRatingEvents();
     void ratingEventsDoNotAffectAffinities();
@@ -24,8 +31,71 @@ private slots:
     void recordAndQueryRadioPicks();
     void radioPicksDoNotAffectAffinities();
     void schemaVersionIsCurrent();
+    void destinationsDeliverIndependently();
+    void backlogDrainsOldestFirstPerDestination();
+    void enablingADestinationDoesNotClaimOldListens();
+    void removingADestinationDropsOnlyItsRows();
+    void historyRowsSummarizeDeliveryAcrossDestinations();
+    void migratesLegacyFlagsOnce();
+    void migrationLeavesLegacyColumnsInPlace();
 
 private:
+    // A history database as an earlier build left it: fixed owed_*/sent_*
+    // columns, no delivery rows, and no migration marker.
+    static void writeLegacyHistory(const QString &path)
+    {
+        const QString connection = QStringLiteral("legacy-history-fixture");
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+            db.setDatabaseName(path);
+            QVERIFY(db.open());
+
+            QSqlQuery create(db);
+            QVERIFY(create.exec(QStringLiteral(
+                "CREATE TABLE listens ("
+                " id INTEGER PRIMARY KEY,"
+                " listened_at INTEGER NOT NULL,"
+                " title TEXT NOT NULL,"
+                " artist TEXT NOT NULL,"
+                " album TEXT,"
+                " path TEXT,"
+                " duration_ms INTEGER,"
+                " track_json TEXT NOT NULL,"
+                " owed_lastfm INTEGER NOT NULL DEFAULT 0,"
+                " sent_lastfm INTEGER NOT NULL DEFAULT 0,"
+                " owed_listenbrainz INTEGER NOT NULL DEFAULT 0,"
+                " sent_listenbrainz INTEGER NOT NULL DEFAULT 0,"
+                " UNIQUE(listened_at, artist, title))")));
+            QVERIFY(create.exec(QStringLiteral("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")));
+            QVERIFY(create.exec(QStringLiteral("INSERT INTO meta(key, value) VALUES('schemaVersion', '7')")));
+
+            // Owed to both, delivered to neither; delivered to Last.fm only;
+            // owed to ListenBrainz only; owed to nobody.
+            const QList<std::array<int, 5>> rows = {
+                {1000, 1, 0, 1, 0},
+                {2000, 1, 1, 0, 0},
+                {3000, 0, 0, 1, 0},
+                {4000, 0, 0, 0, 0},
+            };
+            for (const auto &row : rows) {
+                QSqlQuery insert(db);
+                insert.prepare(QStringLiteral(
+                    "INSERT INTO listens(listened_at, title, artist, album, path, duration_ms, track_json,"
+                    " owed_lastfm, sent_lastfm, owed_listenbrainz, sent_listenbrainz)"
+                    " VALUES(?, ?, 'Artist', 'Album', '/music/a.flac', 200000, '{\"title\":\"Song\"}', ?, ?, ?, ?)"));
+                insert.addBindValue(row[0]);
+                insert.addBindValue(QStringLiteral("Song %1").arg(row[0]));
+                insert.addBindValue(row[1]);
+                insert.addBindValue(row[2]);
+                insert.addBindValue(row[3]);
+                insert.addBindValue(row[4]);
+                QVERIFY(insert.exec());
+            }
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connection);
+    }
+
     static Track makeTrack(const QString &title = QStringLiteral("Song"),
                            const QString &artist = QStringLiteral("Artist"))
     {
@@ -47,11 +117,11 @@ void TestListenHistory::recordAndQueryUnsent()
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
     QVERIFY(store.isOpen());
 
-    QVERIFY(store.recordListen(makeTrack(), 1000, true, true) > 0);
-    QVERIFY(store.recordListen(makeTrack(QStringLiteral("Other")), 2000, true, true) > 0);
+    QVERIFY(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}) > 0);
+    QVERIFY(store.recordListen(makeTrack(QStringLiteral("Other")), 2000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}) > 0);
     QCOMPARE(store.totalCount(), 2);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 2);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::ListenBrainz), 2);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 2);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 2);
 
     const auto listens = store.unsent(ListenHistoryStore::LastFm, 10);
     QCOMPARE(listens.size(), 2);
@@ -70,15 +140,16 @@ void TestListenHistory::recordOnlyOwesEnabledServices()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    QVERIFY(store.recordListen(makeTrack(), 1000, true, false) > 0);
+    QVERIFY(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm}) > 0);
     QCOMPARE(store.totalCount(), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::ListenBrainz), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 1);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 0);
 
     const auto rows = store.historyRows(10);
     QCOMPARE(rows.size(), 1);
-    QVERIFY(rows.first().owedLastFm);
-    QVERIFY(!rows.first().owedListenBrainz);
+    QVERIFY(rows.first().owedTo(ListenHistoryStore::LastFm));
+    QVERIFY(!rows.first().owedTo(ListenHistoryStore::ListenBrainz));
+    QCOMPARE(rows.first().owedCount(), 1);
 }
 
 void TestListenHistory::recordWithNoServicesKeepsHistoryOnly()
@@ -86,10 +157,47 @@ void TestListenHistory::recordWithNoServicesKeepsHistoryOnly()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    QVERIFY(store.recordListen(makeTrack(), 1000, false, false) > 0);
+    QVERIFY(store.recordListen(makeTrack(), 1000, {}) > 0);
     QCOMPARE(store.totalCount(), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 0);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::ListenBrainz), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 0);
+}
+
+void TestListenHistory::recordDeduplicatesNonEmptyObligations()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    QVERIFY(store.recordListen(makeTrack(), 1000,
+                               {ListenHistoryStore::LastFm, QStringLiteral("  "), ListenHistoryStore::LastFm})
+            > 0);
+    QCOMPARE(store.totalCount(), 1);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 1);
+}
+
+void TestListenHistory::recordRollsBackWhenDeliveryInsertFails()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("history.sqlite"));
+    ListenHistoryStore store(path);
+    QVERIFY(store.isOpen());
+
+    const QString connection = QStringLiteral("record-listen-delivery-failure");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery trigger(db);
+        QVERIFY(trigger.exec(QStringLiteral(
+            "CREATE TRIGGER reject_delivery BEFORE INSERT ON listen_deliveries "
+            "BEGIN SELECT RAISE(ABORT, 'delivery rejected'); END")));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    QCOMPARE(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm}), -1);
+    QCOMPARE(store.totalCount(), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
 }
 
 void TestListenHistory::duplicateTimestampCollapses()
@@ -97,8 +205,8 @@ void TestListenHistory::duplicateTimestampCollapses()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    QVERIFY(store.recordListen(makeTrack(), 1000, true, true) > 0);
-    QCOMPARE(store.recordListen(makeTrack(), 1000, true, true), -1);
+    QVERIFY(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}) > 0);
+    QCOMPARE(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}), -1);
     QCOMPARE(store.totalCount(), 1);
 }
 
@@ -107,10 +215,10 @@ void TestListenHistory::markSentPerService()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const qint64 id = store.recordListen(makeTrack(), 1000, true, true);
+    const qint64 id = store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz});
     store.markSent(ListenHistoryStore::LastFm, {id});
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 0);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::ListenBrainz), 1);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 1);
 }
 
 void TestListenHistory::clearPendingPreservesHistory()
@@ -118,27 +226,27 @@ void TestListenHistory::clearPendingPreservesHistory()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    QVERIFY(store.recordListen(makeTrack(), 1000, true, false) > 0);
+    QVERIFY(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm}) > 0);
     QCOMPARE(store.clearPending(ListenHistoryStore::LastFm), 1);
     QCOMPARE(store.totalCount(), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
     const auto rows = store.historyRows(10);
     QCOMPARE(rows.size(), 1);
-    QVERIFY(!rows.first().owedLastFm);
-    QVERIFY(!rows.first().sentLastFm);
+    QVERIFY(!rows.first().owedTo(ListenHistoryStore::LastFm));
+    QVERIFY(!rows.first().sentTo(ListenHistoryStore::LastFm));
 }
 
-void TestListenHistory::markOwedQueuesOnlyUnsentRows()
+void TestListenHistory::markOwedSkipsAlreadyOwedRows()
 {
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const qint64 unsentId = store.recordListen(makeTrack(), 1000, false, false);
-    const qint64 sentId = store.recordListen(makeTrack(QStringLiteral("Other")), 2000, true, false);
+    const qint64 unsentId = store.recordListen(makeTrack(), 1000, {});
+    const qint64 sentId = store.recordListen(makeTrack(QStringLiteral("Other")), 2000, {ListenHistoryStore::LastFm});
     store.markSent(ListenHistoryStore::LastFm, {sentId});
 
     QCOMPARE(store.markOwed(ListenHistoryStore::LastFm, {unsentId, sentId}), 1);
-    QCOMPARE(store.unsentCount(ListenHistoryStore::LastFm), 1);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 1);
 }
 
 void TestListenHistory::invalidListensRejected()
@@ -146,14 +254,14 @@ void TestListenHistory::invalidListensRejected()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    QCOMPARE(store.recordListen(makeTrack(), 0, true, true), -1);
+    QCOMPARE(store.recordListen(makeTrack(), 0, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}), -1);
     Track untitled;
-    QCOMPARE(store.recordListen(untitled, 1000, true, true), -1);
+    QCOMPARE(store.recordListen(untitled, 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}), -1);
     // A title-less track still records under its filename (local history keeps
     // everything; per-service metadata rules apply only at upload time).
     Track fileOnly;
     fileOnly.filename = QStringLiteral("a.flac");
-    QVERIFY(store.recordListen(fileOnly, 1000, true, true) > 0);
+    QVERIFY(store.recordListen(fileOnly, 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}) > 0);
 }
 
 void TestListenHistory::recordAndQueryRatingEvents()
@@ -249,7 +357,7 @@ void TestListenHistory::ratingEventsDoNotAffectAffinities()
     play.sessionId = QStringLiteral("session-1");
     play.track = track;
     QVERIFY(store.recordPlayEvent(play) > 0);
-    QVERIFY(store.recordListen(track, 1000, false, false) > 0);
+    QVERIFY(store.recordListen(track, 1000, {}) > 0);
 
     const auto before = store.trackAffinities();
     QVERIFY(before.contains(track.path));
@@ -346,7 +454,7 @@ void TestListenHistory::queueRemovalsDoNotAffectAffinities()
     play.sessionId = QStringLiteral("session-1");
     play.track = track;
     QVERIFY(store.recordPlayEvent(play) > 0);
-    QVERIFY(store.recordListen(track, 1000, false, false) > 0);
+    QVERIFY(store.recordListen(track, 1000, {}) > 0);
 
     const auto before = store.trackAffinities();
     QVERIFY(before.contains(track.path));
@@ -453,7 +561,7 @@ void TestListenHistory::radioPicksDoNotAffectAffinities()
     play.sessionId = QStringLiteral("session-1");
     play.track = track;
     QVERIFY(store.recordPlayEvent(play) > 0);
-    QVERIFY(store.recordListen(track, 1000, false, false) > 0);
+    QVERIFY(store.recordListen(track, 1000, {}) > 0);
 
     const auto before = store.trackAffinities();
     QVERIFY(before.contains(track.path));
@@ -498,7 +606,210 @@ void TestListenHistory::schemaVersionIsCurrent()
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
     QVERIFY(store.isOpen());
 
-    QCOMPARE(store.metaValue(QStringLiteral("schemaVersion")), QStringLiteral("7"));
+    QCOMPARE(store.metaValue(QStringLiteral("schemaVersion")), QStringLiteral("8"));
+}
+
+void TestListenHistory::destinationsDeliverIndependently()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    const QString other = QStringLiteral("5e97b3c7-5a40-4d1f-bfdc-d9a5cf8e205f");
+
+    const qint64 first = store.recordListen(makeTrack(), 1000, {koito, other});
+    const qint64 second = store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {koito, other});
+    const qint64 third = store.recordListen(makeTrack(QStringLiteral("Three")), 3000, {koito});
+
+    QCOMPARE(store.pendingCount(koito), 3);
+    QCOMPARE(store.pendingCount(other), 2);
+
+    // Draining one destination leaves the other's backlog exactly as it was.
+    store.markSent(koito, {first, second, third});
+    QCOMPARE(store.pendingCount(koito), 0);
+    QCOMPARE(store.sentCount(koito), 3);
+    QCOMPARE(store.pendingCount(other), 2);
+    QCOMPARE(store.sentCount(other), 0);
+
+    // And so does clearing one destination's backlog.
+    QCOMPARE(store.clearPending(other), 2);
+    QCOMPARE(store.pendingCount(other), 0);
+    QCOMPARE(store.sentCount(koito), 3);
+    QCOMPARE(store.totalCount(), 3);
+}
+
+void TestListenHistory::backlogDrainsOldestFirstPerDestination()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    store.recordListen(makeTrack(QStringLiteral("Third")), 3000, {koito});
+    store.recordListen(makeTrack(QStringLiteral("First")), 1000, {koito});
+    store.recordListen(makeTrack(QStringLiteral("Second")), 2000, {koito});
+
+    const auto listens = store.unsent(koito, 10);
+    QCOMPARE(listens.size(), 3);
+    QCOMPARE(listens.at(0).listenedAtSecs, 1000);
+    QCOMPARE(listens.at(1).listenedAtSecs, 2000);
+    QCOMPARE(listens.at(2).listenedAtSecs, 3000);
+
+    // The batch limit takes the oldest, not an arbitrary slice.
+    const auto batch = store.unsent(koito, 2);
+    QCOMPARE(batch.size(), 2);
+    QCOMPARE(batch.at(0).listenedAtSecs, 1000);
+    QCOMPARE(batch.at(1).listenedAtSecs, 2000);
+}
+
+void TestListenHistory::enablingADestinationDoesNotClaimOldListens()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm});
+    store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {ListenHistoryStore::LastFm});
+
+    // A destination configured after the fact starts empty: history it never
+    // witnessed is not a backlog it is owed.
+    QCOMPARE(store.pendingCount(koito), 0);
+    QCOMPARE(store.unsent(koito, 10).size(), 0);
+
+    // The user can still enqueue specific rows explicitly.
+    const auto rows = store.historyRows(10);
+    QCOMPARE(store.markOwed(koito, {rows.first().id}), 1);
+    QCOMPARE(store.pendingCount(koito), 1);
+}
+
+void TestListenHistory::removingADestinationDropsOnlyItsRows()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    const QString other = QStringLiteral("5e97b3c7-5a40-4d1f-bfdc-d9a5cf8e205f");
+    const qint64 id = store.recordListen(makeTrack(), 1000, {koito, other, ListenHistoryStore::LastFm});
+    store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {koito, other});
+    store.markSent(koito, {id});
+
+    // Removal takes delivered and pending rows alike, and nothing else.
+    QCOMPARE(store.forgetDestination(koito), 2);
+    QCOMPARE(store.pendingCount(koito), 0);
+    QCOMPARE(store.sentCount(koito), 0);
+    QCOMPARE(store.pendingCount(other), 2);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 1);
+    // Local history is permanent; it is not a scrobbler's to delete.
+    QCOMPARE(store.totalCount(), 2);
+}
+
+void TestListenHistory::historyRowsSummarizeDeliveryAcrossDestinations()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    const qint64 id = store.recordListen(makeTrack(), 1000, {koito, ListenHistoryStore::LastFm});
+    store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {});
+    store.markSent(koito, {id});
+
+    const auto rows = store.historyRows(10);
+    QCOMPARE(rows.size(), 2);
+
+    // Newest first, so the listen owed to nobody leads.
+    QCOMPARE(rows.at(0).listenedAtSecs, 2000);
+    QCOMPARE(rows.at(0).owedCount(), 0);
+    QCOMPARE(rows.at(0).sentCount(), 0);
+
+    const ListenHistoryStore::HistoryRow &owed = rows.at(1);
+    QCOMPARE(owed.owedCount(), 2);
+    QCOMPARE(owed.sentCount(), 1);
+    QVERIFY(owed.sentTo(koito));
+    QVERIFY(owed.owedTo(ListenHistoryStore::LastFm));
+    QVERIFY(!owed.sentTo(ListenHistoryStore::LastFm));
+    QVERIFY(!owed.owedTo(ListenHistoryStore::ListenBrainz));
+}
+
+void TestListenHistory::migratesLegacyFlagsOnce()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("history.sqlite"));
+    writeLegacyHistory(path);
+
+    {
+        ListenHistoryStore store(path);
+        QVERIFY(store.isOpen());
+
+        // Each legacy owed flag becomes a delivery row carrying its sent state.
+        QCOMPARE(store.totalCount(), 4);
+        QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 1);
+        QCOMPARE(store.sentCount(ListenHistoryStore::LastFm), 1);
+        QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 2);
+        QCOMPARE(store.sentCount(ListenHistoryStore::ListenBrainz), 0);
+
+        // A listen that was owed to nobody stays owed to nobody.
+        const auto rows = store.historyRows(10);
+        QCOMPARE(rows.size(), 4);
+        for (const auto &row : rows) {
+            if (row.listenedAtSecs == 4000) {
+                QCOMPARE(row.owedCount(), 0);
+            }
+        }
+    }
+
+    // Work done after migrating must survive reopening: the marker is what stops
+    // a second pass from resurrecting a backlog the user deliberately cleared.
+    {
+        ListenHistoryStore store(path);
+        QCOMPARE(store.clearPending(ListenHistoryStore::ListenBrainz), 2);
+        store.markSent(ListenHistoryStore::LastFm, {1});
+    }
+    {
+        ListenHistoryStore store(path);
+        QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 0);
+        QCOMPARE(store.sentCount(ListenHistoryStore::ListenBrainz), 0);
+        QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
+        QCOMPARE(store.sentCount(ListenHistoryStore::LastFm), 2);
+        QCOMPARE(store.totalCount(), 4);
+    }
+}
+
+void TestListenHistory::migrationLeavesLegacyColumnsInPlace()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("history.sqlite"));
+    writeLegacyHistory(path);
+
+    {
+        ListenHistoryStore store(path);
+        QVERIFY(store.isOpen());
+        // New listens no longer write the legacy flags, but the columns stay:
+        // dropping them would mean rewriting the whole listens table.
+        store.recordListen(makeTrack(QStringLiteral("Fresh")), 9000, {ListenHistoryStore::LastFm});
+        QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 2);
+    }
+
+    const QString connection = QStringLiteral("legacy-columns-check");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+
+        QSqlQuery columns(db);
+        QVERIFY(columns.exec(QStringLiteral("SELECT COUNT(*) FROM pragma_table_info('listens') "
+                                            "WHERE name IN ('owed_lastfm','sent_lastfm',"
+                                            "'owed_listenbrainz','sent_listenbrainz')")));
+        QVERIFY(columns.next());
+        QCOMPARE(columns.value(0).toInt(), 4);
+
+        // The fresh listen left them at their defaults rather than writing them.
+        QSqlQuery fresh(db);
+        QVERIFY(fresh.exec(QStringLiteral("SELECT owed_lastfm, sent_lastfm FROM listens WHERE listened_at = 9000")));
+        QVERIFY(fresh.next());
+        QCOMPARE(fresh.value(0).toInt(), 0);
+        QCOMPARE(fresh.value(1).toInt(), 0);
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
 }
 
 QTEST_GUILESS_MAIN(TestListenHistory)

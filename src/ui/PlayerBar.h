@@ -22,10 +22,7 @@ public:
     void setTrackText(const QString &text);
     void setTrackInfo(const QString &title, const QString &subtitle, int rating0To100);
     void setTrackInfoPaneVisible(bool visible);
-    void setListenBrainzEnabled(bool enabled);
-    void setLastFmEnabled(bool enabled);
     void setScrobbleOffline(bool offline);
-    void setScrobbleBacklogCounts(int lastFmPending, int listenBrainzPending);
     // running: show live status text + Cancel, disable the start actions.
     // idle: hide status unless statusText carries a last-outcome message,
     // hide Cancel, re-enable the start actions. lbResumable relabels the
@@ -104,8 +101,6 @@ signals:
     void mpdImportRequested();
     void listeningHistoryRequested();
     void scrobblersMenuAboutToShow();
-    void lastFmBacklogClearRequested();
-    void listenBrainzBacklogClearRequested();
     void backfillStartRequested(QString service);
     void backfillCancelRequested();
     void compactMenuChanged(bool compact);
@@ -139,9 +134,7 @@ signals:
     void playlistDeleteRequested();
     void playlistMoveItemUpRequested();
     void playlistMoveItemDownRequested();
-    void listenBrainzEnabledChanged(bool enabled);
-    void listenBrainzTokenRequested();
-    void lastFmEnabledChanged(bool enabled);
+    void manageScrobblersRequested();
     void lastFmSettingsRequested();
     void scrobbleOfflineChanged(bool offline);
     void previousRequested();
@@ -226,11 +219,7 @@ private:
     class QAction *m_analysisPowerActions[3] = {nullptr, nullptr, nullptr};
     class QAction *m_showGuessedPlaceholders = nullptr;
     class QAction *m_trackInfoPaneVisible = nullptr;
-    class QAction *m_listenBrainzEnabled = nullptr;
-    class QAction *m_lastFmEnabled = nullptr;
     class QAction *m_scrobbleOffline = nullptr;
-    class QAction *m_clearLastFmBacklog = nullptr;
-    class QAction *m_clearListenBrainzBacklog = nullptr;
     class QAction *m_backfillStatusAction = nullptr;
     class QAction *m_importListenBrainzAction = nullptr;
     class QAction *m_syncLastFmAction = nullptr;

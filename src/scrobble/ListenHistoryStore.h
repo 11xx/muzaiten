@@ -27,14 +27,23 @@ public:
         Track track;
     };
 
+    // One listen's obligation towards one destination. The row existing at all
+    // means the listen is owed there; `sent` records whether delivery completed.
+    struct Delivery {
+        QString destinationId;
+        bool sent = false;
+    };
+
     struct HistoryRow {
         qint64 id = 0;
         qint64 listenedAtSecs = 0;
         Track track;
-        bool owedLastFm = false;
-        bool sentLastFm = false;
-        bool owedListenBrainz = false;
-        bool sentListenBrainz = false;
+        QList<Delivery> deliveries;   // only destinations this listen is owed to
+
+        int owedCount() const { return static_cast<int>(deliveries.size()); }
+        int sentCount() const;
+        bool owedTo(const QString &destinationId) const;
+        bool sentTo(const QString &destinationId) const;
     };
 
     // A single track playback ("spin"): how it ended, how much was actually
@@ -144,7 +153,8 @@ public:
         int baselineMax = 0;   // max playcount baseline across services
     };
 
-    // Service identifiers for the sent flags.
+    // Reserved destination identifiers. These doubled as the legacy per-service
+    // flag names, which is why migrating the old columns needs no id remapping.
     static const QString LastFm;
     static const QString ListenBrainz;
 
@@ -159,19 +169,28 @@ public:
 
     // Records a completed listen. Duplicate (timestamp, artist, title) rows are
     // ignored so replays of the same event (e.g. session restore) collapse.
-    // Per-service owed flags capture which scrobblers were enabled when the
-    // listen happened; disabled services must not claim old rows later.
-    // Returns the row id, or -1 if not inserted.
-    qint64 recordListen(const Track &track, qint64 listenedAtSecs, bool oweLastFm, bool oweListenBrainz);
+    // One delivery row is created per destination that was enabled when the
+    // listen happened; destinations enabled later must not claim old listens,
+    // which is exactly what "no row" means. Returns the row id, or -1 if not
+    // inserted.
+    qint64 recordListen(const Track &track, qint64 listenedAtSecs, const QStringList &destinationIds);
 
-    // Oldest-first unsent listens for a service (uploads must be in order).
-    QList<Listen> unsent(const QString &service, int limit) const;
-    int unsentCount(const QString &service) const;
-    int pendingCount(const QString &service) const;
+    // Oldest-first undelivered listens for one destination (uploads must be in
+    // order). Delivery is per destination throughout: one destination's backlog,
+    // failures, or removal never touch another's.
+    QList<Listen> unsent(const QString &destinationId, int limit) const;
+    int pendingCount(const QString &destinationId) const;
+    int sentCount(const QString &destinationId) const;
     int totalCount() const;
-    void markSent(const QString &service, const QList<qint64> &ids);
-    int clearPending(const QString &service);
-    int markOwed(const QString &service, const QList<qint64> &ids);
+    void markSent(const QString &destinationId, const QList<qint64> &ids);
+    // Drops the destination's undelivered obligations, leaving local history and
+    // anything already delivered intact. Returns rows dropped.
+    int clearPending(const QString &destinationId);
+    // Enqueues listens for a destination that does not already owe them.
+    int markOwed(const QString &destinationId, const QList<qint64> &ids);
+    // Forgets a destination entirely: every delivery row it owns, sent or not.
+    int forgetDestination(const QString &destinationId);
+
     QList<HistoryRow> historyRows(int limit, int offset = 0) const;
 
     // Records one finalized play event. Rejected (returns -1) if the store is
@@ -219,6 +238,10 @@ public:
     void setMetaValue(const QString &key, const QString &value);
 
 private:
+    // Converts the legacy fixed owed_*/sent_* columns into delivery rows for the
+    // two reserved destinations, once, under its own idempotence marker.
+    void migrateLegacyDeliveries();
+    int deliveryCount(const QString &destinationId, bool sent) const;
 
     QString m_connectionName;
     QSqlDatabase m_db;

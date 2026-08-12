@@ -1,6 +1,7 @@
 #include "scrobble/ListenBrainzScrobbler.h"
 
 #include "Version.h"
+#include "scrobble/ListenBrainzUrl.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -17,8 +18,6 @@ Q_LOGGING_CATEGORY(listenBrainzLog, "muzaiten.listenbrainz")
 namespace {
 constexpr int maxListensPerImport = 99;
 constexpr int maxConsecutiveSubmissionFailures = 3;
-constexpr auto apiUrl = "https://api.listenbrainz.org/1/submit-listens";
-constexpr auto validateTokenUrl = "https://api.listenbrainz.org/1/validate-token";
 // Minimum seconds between "playing_now" resubmissions on play/resume, to
 // prevent play-pause spam from flooding ListenBrainz with update requests.
 constexpr qint64 kPlayingNowResubmitMinSecs = 30;
@@ -66,8 +65,13 @@ ListenBrainzScrobbler::ListenBrainzScrobbler(QObject *parent)
 
 ListenBrainzScrobbler::~ListenBrainzScrobbler() = default;
 
-void ListenBrainzScrobbler::configure(bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath)
+void ListenBrainzScrobbler::configure(const QString &destinationId, const QString &displayName,
+                                      const QString &apiRoot, bool enabled, bool uploadAllowed,
+                                      const QString &token, const QString &historyPath)
 {
+    m_destinationId = destinationId;
+    m_displayName = displayName;
+    m_apiRoot = apiRoot;
     m_enabled = enabled;
     m_uploadAllowed = uploadAllowed;
     m_token = token.trimmed();
@@ -138,7 +142,7 @@ void ListenBrainzScrobbler::uploadBacklog()
     QJsonArray listens;
     QList<qint64> submittedIds;
     while (listens.isEmpty()) {
-        const QList<ListenHistoryStore::Listen> rows = m_history->unsent(ListenHistoryStore::ListenBrainz, maxListensPerImport);
+        const QList<ListenHistoryStore::Listen> rows = m_history->unsent(m_destinationId, maxListensPerImport);
         if (rows.isEmpty()) {
             return;
         }
@@ -154,9 +158,9 @@ void ListenBrainzScrobbler::uploadBacklog()
             listens.append(listenObject(row.track, row.listenedAtSecs));
             submittedIds.push_back(row.id);
         }
-        m_history->markSent(ListenHistoryStore::ListenBrainz, skippedIds);
+        m_history->markSent(m_destinationId, skippedIds);
         if (!skippedIds.isEmpty()) {
-            emit backlogProcessed(0, static_cast<int>(skippedIds.size()), m_history->pendingCount(ListenHistoryStore::ListenBrainz));
+            emit backlogProcessed(m_destinationId, 0, static_cast<int>(skippedIds.size()), m_history->pendingCount(m_destinationId));
         }
         if (skippedIds.isEmpty() && listens.isEmpty()) {
             return;
@@ -169,18 +173,19 @@ void ListenBrainzScrobbler::uploadBacklog()
     submitPayload(body, SubmissionKind::Listen, submittedIds);
 }
 
-void ListenBrainzScrobbler::validateToken(const QString &token)
+void ListenBrainzScrobbler::validateToken(const QString &destinationId, const QString &apiRoot,
+                                          const QString &token)
 {
-    QNetworkRequest request(QUrl(QString::fromLatin1(validateTokenUrl)));
+    QNetworkRequest request{QUrl(ListenBrainzUrl::validateTokenUrl(apiRoot))};
     request.setTransferTimeout(30000);
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("Authorization", QStringLiteral("Token %1").arg(token.trimmed()).toUtf8());
 
     QNetworkReply *reply = m_network->get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, destinationId]() {
         const QJsonObject body = QJsonDocument::fromJson(reply->isOpen() ? reply->readAll() : QByteArray()).object();
         const bool valid = reply->error() == QNetworkReply::NoError && body.value(QStringLiteral("valid")).toBool();
-        emit tokenValidated(valid, body.value(QStringLiteral("user_name")).toString());
+        emit tokenValidated(destinationId, valid, body.value(QStringLiteral("user_name")).toString());
         reply->deleteLater();
     });
 }
@@ -236,7 +241,7 @@ void ListenBrainzScrobbler::submitPendingTrackStartPlayingNow()
 
 void ListenBrainzScrobbler::submitPayload(const QJsonObject &payload, SubmissionKind kind, const QList<qint64> &submittedIds)
 {
-    QNetworkRequest request(QUrl(QString::fromLatin1(apiUrl)));
+    QNetworkRequest request{QUrl(ListenBrainzUrl::submitListensUrl(m_apiRoot))};
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     request.setTransferTimeout(30000);
     request.setRawHeader("Accept", "application/json");
@@ -297,14 +302,16 @@ bool ListenBrainzScrobbler::hasMinimumMetadata(const Track &track, bool warn) co
 {
     const bool ok = !trackTitle(track).isEmpty() && !artistName(track).isEmpty();
     if (!ok && warn) {
-        qCWarning(listenBrainzLog) << "cannot submit track without title and artist" << track.path;
+        qCWarning(listenBrainzLog) << m_displayName << "cannot submit track without title and artist" << track.path;
     }
     return ok;
 }
 
 bool ListenBrainzScrobbler::canUpload() const
 {
-    return m_enabled && m_uploadAllowed && !m_token.isEmpty();
+    // Without a resolved API root there is nowhere to send, so an unconfigured
+    // destination is inert rather than falling back to some default server.
+    return m_enabled && m_uploadAllowed && !m_token.isEmpty() && !m_apiRoot.isEmpty();
 }
 
 void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<qint64> submittedIds)
@@ -317,11 +324,11 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
     const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
     if (!ok) {
         const QString statusText = status > 0 ? QString::number(status) : QStringLiteral("network");
-        const QString message = QStringLiteral("ListenBrainz submission failed (%1): %2").arg(statusText, errorString);
+        const QString message = QStringLiteral("%1 submission failed (%2): %3").arg(m_displayName, statusText, errorString);
         qCWarning(listenBrainzLog) << message;
         reply->deleteLater();
         if (status == 401 || status == 403) {
-            disableScrobbling(QStringLiteral("ListenBrainz token was rejected. Scrobbling has been disabled."));
+            disableScrobbling(QStringLiteral("%1 rejected its token. Scrobbling to it has been disabled.").arg(m_displayName));
             return;
         }
         if (status == 429) {
@@ -332,7 +339,7 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
             m_retryTimer->start(parsedResetIn && resetInSecs > 0 ? (resetInSecs + 1) * 1000 : 60000);
             return;
         }
-        emit submissionFailed(message);
+        emit submissionFailed(m_destinationId, message);
         // Only real listen submissions count toward permanent disablement.
         // 'playing now' updates are best-effort (a transient 429/500 on a
         // throttled ping must never disable scrobbling) — this mirrors
@@ -340,7 +347,8 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
         if (kind == SubmissionKind::Listen) {
             ++m_consecutiveFailures;
             if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
-                disableScrobbling(QStringLiteral("ListenBrainz submissions failed %1 times. Scrobbling has been disabled.")
+                disableScrobbling(QStringLiteral("%1 submissions failed %2 times. Scrobbling to it has been disabled.")
+                                      .arg(m_displayName)
                                       .arg(maxConsecutiveSubmissionFailures));
             }
         }
@@ -352,8 +360,8 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
         m_retryTimer->start(60000);
     }
     if (kind == SubmissionKind::Listen && !submittedIds.isEmpty() && m_history != nullptr) {
-        m_history->markSent(ListenHistoryStore::ListenBrainz, submittedIds);
-        emit backlogProcessed(static_cast<int>(submittedIds.size()), 0, m_history->pendingCount(ListenHistoryStore::ListenBrainz));
+        m_history->markSent(m_destinationId, submittedIds);
+        emit backlogProcessed(m_destinationId, static_cast<int>(submittedIds.size()), 0, m_history->pendingCount(m_destinationId));
         // Keep draining until the backlog is empty.
         uploadBacklog();
     }
@@ -365,5 +373,5 @@ void ListenBrainzScrobbler::disableScrobbling(const QString &message)
 {
     m_enabled = false;
     m_retryTimer->stop();
-    emit disabledAfterFailures(message);
+    emit disabledAfterFailures(m_destinationId, message);
 }

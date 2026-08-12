@@ -392,6 +392,55 @@ target_link_libraries(test_mpd_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 target_compile_features(test_mpd_client PRIVATE cxx_std_26)
 add_test(NAME test_mpd_client COMMAND test_mpd_client)
 
+add_executable(test_listenbrainz_url
+    test_listenbrainz_url.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+)
+target_include_directories(test_listenbrainz_url PRIVATE ../src)
+target_link_libraries(test_listenbrainz_url PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_listenbrainz_url PRIVATE cxx_std_26)
+add_test(NAME test_listenbrainz_url COMMAND test_listenbrainz_url)
+
+add_executable(test_listenbrainz_multi_destination
+    test_listenbrainz_multi_destination.cpp
+    ../src/scrobble/ListenBrainzHub.cpp
+    ../src/scrobble/ListenBrainzScrobbler.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/scrobble/ScrobbleDestination.cpp
+)
+target_include_directories(test_listenbrainz_multi_destination PRIVATE
+    ../src
+    ${CMAKE_CURRENT_BINARY_DIR}/../generated
+)
+target_link_libraries(test_listenbrainz_multi_destination PRIVATE Qt6::Core Qt6::Network Qt6::Sql Qt6::Test)
+target_compile_features(test_listenbrainz_multi_destination PRIVATE cxx_std_26)
+add_test(NAME test_listenbrainz_multi_destination COMMAND test_listenbrainz_multi_destination)
+
+add_executable(test_scrobble_destinations
+    test_scrobble_destinations.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+    ../src/scrobble/ScrobbleDestination.cpp
+    ../src/ui/ScrobbleUploadDispatcher.cpp
+)
+target_include_directories(test_scrobble_destinations PRIVATE ../src)
+target_link_libraries(test_scrobble_destinations PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_scrobble_destinations PRIVATE cxx_std_26)
+add_test(NAME test_scrobble_destinations COMMAND test_scrobble_destinations)
+
+add_executable(test_scrobble_destinations_dialog
+    test_scrobble_destinations_dialog.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/scrobble/ScrobbleDestination.cpp
+    ../src/ui/ScrobbleDestinationsDialog.cpp
+)
+target_include_directories(test_scrobble_destinations_dialog PRIVATE ../src)
+target_link_libraries(test_scrobble_destinations_dialog PRIVATE Qt6::Core Qt6::Sql Qt6::Widgets Qt6::Test)
+target_compile_features(test_scrobble_destinations_dialog PRIVATE cxx_std_26)
+add_test(NAME test_scrobble_destinations_dialog COMMAND test_scrobble_destinations_dialog)
+set_tests_properties(test_scrobble_destinations_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_lastfm_api
     test_lastfm_api.cpp
     ../src/scrobble/LastFmApi.cpp
@@ -786,6 +835,12 @@ target_link_libraries(test_idle_release_controller PRIVATE Qt6::Core Qt6::Gui Qt
 target_compile_features(test_idle_release_controller PRIVATE cxx_std_26)
 add_test(NAME test_idle_release_controller COMMAND test_idle_release_controller)
 set_tests_properties(test_idle_release_controller PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_listening_history_dialog test_listening_history_dialog.cpp)
+target_link_libraries(test_listening_history_dialog PRIVATE muzaiten_app_objects Qt6::Test)
+target_compile_features(test_listening_history_dialog PRIVATE cxx_std_26)
+add_test(NAME test_listening_history_dialog COMMAND test_listening_history_dialog)
+set_tests_properties(test_listening_history_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_main_window_navigation test_main_window_navigation.cpp)
 target_link_libraries(test_main_window_navigation PRIVATE muzaiten_app_objects Qt6::Test)
