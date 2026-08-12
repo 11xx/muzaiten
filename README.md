@@ -62,7 +62,8 @@ match preview and triage. → [docs/playlists.md](docs/playlists.md)
 
 **And the rest:** two file explorers with Vim/Dired key profiles
 ([docs/controls.md](docs/controls.md)) · ratings with MusicBee-compatible
-tag sync · ListenBrainz + Last.fm scrobbling with full history backfill ·
+tag sync · scrobbling to Last.fm, ListenBrainz, and any number of
+ListenBrainz-compatible servers, with full history backfill ·
 MPD metadata import · bit-perfect DSD (`.dsf`) to direct ALSA devices ·
 persistent UI state throughout.
 

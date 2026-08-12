@@ -4,6 +4,20 @@
 
 ### Added
 
+- Scrobbling destinations are now configurable. Alongside Last.fm and official
+  ListenBrainz, you can add any number of ListenBrainz-compatible servers (such
+  as Koito), each with its own URL, token, and delivery backlog. They are all
+  managed from `History > Scrobblers > Manage scrobblers…`, which shows each
+  destination's enabled state, credential or test status, and pending count,
+  and supports add, edit, enable/disable, test, and removal.
+- Delivery is tracked per destination, so a rate-limited, unreachable, or
+  token-rejecting server no longer holds up or disables the others. A failure
+  disables only the destination it came from, and every scrobbling message now
+  names the destination it refers to.
+- `Listening history…` gained a destination selector. Choosing one scopes the
+  delivery column, the pending count, `Scrobble selected`, `Clear backlog`, and
+  the retry action to it; `All destinations` is a read-only overview showing
+  how many deliveries have completed.
 - `Radio > Anchor for new sessions` can keep new seeded and artist sessions
   near the starting song or let them drift with what plays.
 - Track selections can use `Start Radio` (`Start Radio (N)` for a
@@ -34,6 +48,14 @@
 
 ### Changed
 
+- The Scrobblers menu no longer carries a per-service scrobbling toggle,
+  ListenBrainz token prompt, or clear-backlog action. Enabling and credentials
+  moved to `Manage scrobblers…`, and clearing a backlog moved to `Listening
+  history…`, where it applies to the destination you have selected.
+- Existing listening history is migrated to the new per-destination delivery
+  records on first launch, once, preserving what each of Last.fm and
+  ListenBrainz was owed and had already received. A previously configured
+  ListenBrainz token and the two services' enabled states carry over unchanged.
 - During an explicit Radio session, ordinary **Add to queue** actions now
   use play-next ordering and return to appending at the tail when radio stops.
 - `Radio > Customization…` now marks the three genre scoring weights as
