@@ -822,6 +822,12 @@ target_compile_features(test_idle_release_controller PRIVATE cxx_std_26)
 add_test(NAME test_idle_release_controller COMMAND test_idle_release_controller)
 set_tests_properties(test_idle_release_controller PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_listening_history_dialog test_listening_history_dialog.cpp)
+target_link_libraries(test_listening_history_dialog PRIVATE muzaiten_app_objects Qt6::Test)
+target_compile_features(test_listening_history_dialog PRIVATE cxx_std_26)
+add_test(NAME test_listening_history_dialog COMMAND test_listening_history_dialog)
+set_tests_properties(test_listening_history_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_main_window_navigation test_main_window_navigation.cpp)
 target_link_libraries(test_main_window_navigation PRIVATE muzaiten_app_objects Qt6::Test)
 target_compile_features(test_main_window_navigation PRIVATE cxx_std_26)

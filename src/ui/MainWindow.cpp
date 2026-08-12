@@ -36,6 +36,7 @@
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/ListeningHistoryDialog.h"
+#include "ui/ScrobbleDestinationsDialog.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/PanelOrderDialog.h"
@@ -1006,7 +1007,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_lastFmScrobbler, &LastFmScrobbler::disabledAfterFailures, this, [this](const QString &message) {
         m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
-        m_playerBar->setLastFmEnabled(false);
         statusBar()->showMessage(message, 15000);
         QMessageBox::warning(this, QStringLiteral("Last.fm"), message);
     });
@@ -1251,12 +1251,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::mpdImportRequested, this, &MainWindow::importMpdLibraryMetadata);
     connect(m_playerBar, &PlayerBar::listeningHistoryRequested, this, &MainWindow::showListeningHistory);
     connect(m_playerBar, &PlayerBar::scrobblersMenuAboutToShow, this, &MainWindow::updateScrobbleBacklogActions);
-    connect(m_playerBar, &PlayerBar::lastFmBacklogClearRequested, this, [this]() {
-        clearScrobbleBacklog(ListenHistoryStore::LastFm);
-    });
-    connect(m_playerBar, &PlayerBar::listenBrainzBacklogClearRequested, this, [this]() {
-        clearScrobbleBacklog(ListenHistoryStore::ListenBrainz);
-    });
     connect(m_playerBar, &PlayerBar::backfillStartRequested, this, [this](const QString &service) {
         const QString result = m_core->startBackfill(service);
         QString message;
@@ -1388,9 +1382,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         switchMainView(MainView::Playlist);
         ensurePlaylistView()->createPlaylist();
     });
-    connect(m_playerBar, &PlayerBar::listenBrainzEnabledChanged, this, &MainWindow::setListenBrainzEnabled);
-    connect(m_playerBar, &PlayerBar::listenBrainzTokenRequested, this, &MainWindow::setListenBrainzToken);
-    connect(m_playerBar, &PlayerBar::lastFmEnabledChanged, this, &MainWindow::setLastFmEnabled);
+    connect(m_playerBar, &PlayerBar::manageScrobblersRequested, this, &MainWindow::manageScrobblers);
     connect(m_playerBar, &PlayerBar::lastFmSettingsRequested, this, &MainWindow::showLastFmSettings);
     connect(m_playerBar, &PlayerBar::scrobbleOfflineChanged, this, &MainWindow::setScrobbleOffline);
     connect(m_playerBar, &PlayerBar::previousRequested, this, &MainWindow::playPreviousTrack);
@@ -5294,9 +5286,6 @@ QString MainWindow::mpdMusicDirectory() const
 void MainWindow::configureListenBrainz()
 {
     const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
-    const ScrobbleDestination *official =
-        destinations.find(ScrobbleDestinationConfig::listenBrainzId());
-    m_playerBar->setListenBrainzEnabled(official != nullptr && official->enabled);
 
     m_listenBrainzHub->configure(
         destinations,
@@ -5308,6 +5297,43 @@ void MainWindow::configureListenBrainz()
             return token;
         },
         !scrobbleOffline(), listenHistoryPath());
+}
+
+void MainWindow::manageScrobblers()
+{
+    ScrobbleDestinationsDialog::Callbacks callbacks;
+    callbacks.readToken = [this](const QString &id) {
+        return m_database->setting(ScrobbleDestinationConfig::tokenSettingKey(id));
+    };
+    callbacks.writeToken = [this](const QString &id, const QString &token) {
+        m_database->setSetting(ScrobbleDestinationConfig::tokenSettingKey(id), token);
+    };
+    callbacks.removeToken = [this](const QString &id) {
+        m_database->setSetting(ScrobbleDestinationConfig::tokenSettingKey(id), QString());
+    };
+    callbacks.lastFmConfigured = [this]() {
+        return !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
+    };
+
+    callbacks.testDestination = [this](const QString &id, const QString &apiRoot, const QString &token) {
+        m_listenBrainzHub->validateToken(id, apiRoot, token);
+    };
+
+    ScrobbleDestinationsDialog dialog(m_core->scrobbleDestinations(), m_listenHistory, callbacks, this);
+    // Test results come back from the worker thread; route them to the dialog
+    // for as long as it is open.
+    const auto connection = connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, &dialog,
+                                    &ScrobbleDestinationsDialog::reportTestResult);
+    const bool accepted = dialog.exec() == QDialog::Accepted;
+    disconnect(connection);
+    if (!accepted) {
+        return;
+    }
+
+    m_core->setScrobbleDestinations(dialog.destinations());
+    configureListenBrainz();
+    configureLastFm();
+    updateScrobbleBacklogActions();
 }
 
 QString MainWindow::scrobbleDestinationName(const QString &destinationId) const
@@ -5338,7 +5364,7 @@ void MainWindow::showListeningHistory()
         return;
     }
 
-    ListeningHistoryDialog dialog(m_listenHistory, this);
+    ListeningHistoryDialog dialog(m_listenHistory, m_core->scrobbleDestinations(), this);
     if (m_state != nullptr) {
         bool ok = false;
         const int saved = m_state->setting(QStringLiteral("listeningHistory.rowHeight")).toInt(&ok);
@@ -5370,32 +5396,6 @@ void MainWindow::showListeningHistory()
     dialog.exec();
 }
 
-void MainWindow::clearScrobbleBacklog(const QString &service)
-{
-    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
-        statusBar()->showMessage(QStringLiteral("Listening history is unavailable"), 4000);
-        return;
-    }
-    const int pending = m_listenHistory->pendingCount(service);
-    if (pending <= 0) {
-        statusBar()->showMessage(QStringLiteral("No pending %1 scrobbles")
-                                     .arg(service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz")),
-                                 4000);
-        return;
-    }
-    const QString serviceName = service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz");
-    const auto choice = QMessageBox::question(this,
-                                              QStringLiteral("Clear scrobble backlog"),
-                                              QStringLiteral("Clear %1 pending %2 scrobbles? Permanent listening history will stay saved.")
-                                                  .arg(pending)
-                                                  .arg(serviceName));
-    if (choice != QMessageBox::Yes) {
-        return;
-    }
-    const int cleared = m_listenHistory->clearPending(service);
-    statusBar()->showMessage(QStringLiteral("Cleared %1 pending %2 scrobbles").arg(cleared).arg(serviceName), 5000);
-    updateScrobbleBacklogActions();
-}
 
 void MainWindow::triggerScrobbleUpload(const QString &service)
 {
@@ -5408,12 +5408,6 @@ void MainWindow::triggerScrobbleUpload(const QString &service)
 
 void MainWindow::updateScrobbleBacklogActions()
 {
-    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
-        m_playerBar->setScrobbleBacklogCounts(0, 0);
-    } else {
-        m_playerBar->setScrobbleBacklogCounts(m_listenHistory->pendingCount(ListenHistoryStore::LastFm),
-                                              m_listenHistory->pendingCount(ListenHistoryStore::ListenBrainz));
-    }
     updateBackfillStatusDisplay();
 }
 
@@ -5486,43 +5480,7 @@ void MainWindow::setScrobbleOffline(bool offline)
                              5000);
 }
 
-void MainWindow::setListenBrainzEnabled(bool enabled)
-{
-    setScrobbleDestinationEnabled(ScrobbleDestinationConfig::listenBrainzId(), enabled);
-    // If a track is already playing when the scrobbler is toggled on, catch up
-    // so it doesn't miss the current track.  The queued configure() runs first
-    // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
-    if (enabled && !m_player->currentTrack().path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
-        const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
-        const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
-        m_listenBrainzHub->resumeTrack(m_player->currentTrack(), elapsedMs, playing);
-    }
-    statusBar()->showMessage(enabled ? QStringLiteral("ListenBrainz scrobbling enabled") : QStringLiteral("ListenBrainz scrobbling disabled"), 3000);
-}
 
-void MainWindow::setListenBrainzToken()
-{
-    const QString current = m_database->setting(QStringLiteral("listenbrainz.token"));
-    bool ok = false;
-    const QString token = QInputDialog::getText(this,
-                                                QStringLiteral("ListenBrainz token"),
-                                                QStringLiteral("User token"),
-                                                QLineEdit::Password,
-                                                current,
-                                                &ok)
-                              .trimmed();
-    if (!ok) {
-        return;
-    }
-
-    m_database->setSetting(QStringLiteral("listenbrainz.token"), token);
-    configureListenBrainz();
-    statusBar()->showMessage(QStringLiteral("ListenBrainz token updated"), 3000);
-    if (!token.isEmpty()) {
-        m_listenBrainzHub->validateToken(ScrobbleDestinationConfig::listenBrainzId(),
-                                         ListenBrainzUrl::officialApiRoot(), token);
-    }
-}
 
 QString MainWindow::lastFmApiKey() const
 {
@@ -5565,10 +5523,11 @@ bool MainWindow::hasDefaultLastFmCredentials() const
 
 void MainWindow::configureLastFm()
 {
-    const bool enabled = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
+    const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    const ScrobbleDestination *lastFm = destinations.find(ScrobbleDestinationConfig::lastFmId());
+    const bool enabled = lastFm != nullptr && lastFm->enabled;
     const QString sessionKey = m_database->setting(QStringLiteral("lastfm.sessionKey"));
 
-    m_playerBar->setLastFmEnabled(enabled);
     QMetaObject::invokeMethod(m_lastFmScrobbler,
                               "configure",
                               Qt::QueuedConnection,
@@ -5580,21 +5539,6 @@ void MainWindow::configureLastFm()
                               Q_ARG(QString, listenHistoryPath()));
 }
 
-void MainWindow::setLastFmEnabled(bool enabled)
-{
-    m_database->setSetting(QStringLiteral("lastfm.enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
-    configureLastFm();
-    // If a track is already playing when the scrobbler is toggled on, catch up
-    // so it doesn't miss the current track.  The queued configure() runs first
-    // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
-    if (enabled && !m_player->currentTrack().path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
-        const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
-        const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
-        QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
-                                  Q_ARG(Track, m_player->currentTrack()), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
-    }
-    statusBar()->showMessage(enabled ? QStringLiteral("Last.fm scrobbling enabled") : QStringLiteral("Last.fm scrobbling disabled"), 3000);
-}
 
 void MainWindow::showLastFmSettings()
 {

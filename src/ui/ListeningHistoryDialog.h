@@ -1,6 +1,7 @@
 #pragma once
 
 #include "scrobble/ListenHistoryStore.h"
+#include "scrobble/ScrobbleDestination.h"
 
 #include <QDialog>
 #include <QList>
@@ -8,6 +9,7 @@
 
 #include <optional>
 
+class QComboBox;
 class QLabel;
 class QPushButton;
 class QAbstractTableModel;
@@ -18,7 +20,8 @@ class ListeningHistoryDialog final : public QDialog {
     Q_OBJECT
 
 public:
-    explicit ListeningHistoryDialog(ListenHistoryStore *store, QWidget *parent = nullptr);
+    ListeningHistoryDialog(ListenHistoryStore *store, ScrobbleDestinationSet destinations,
+                           QWidget *parent = nullptr);
 
     // Restores the persisted Ctrl+wheel row height (the dialog is recreated per
     // open, so the owner round-trips it through settings).
@@ -40,6 +43,9 @@ private:
     void forgetSelectedBehavior();
     void updateActions();
     QList<qint64> selectedIds() const;
+    // The chosen destination, or empty for the aggregate view.
+    QString selectedDestinationId() const;
+    QString destinationName(const QString &destinationId) const;
     std::optional<ListenHistoryStore::HistoryRow> selectedHistoryRow() const;
 
     ListenHistoryStore *m_store = nullptr;
@@ -47,9 +53,10 @@ private:
     QTableView *m_view = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     QLabel *m_summary = nullptr;
-    QPushButton *m_queueLastFm = nullptr;
-    QPushButton *m_queueListenBrainz = nullptr;
+    QComboBox *m_destinationSelector = nullptr;
+    QPushButton *m_queueSelected = nullptr;
     QPushButton *m_forgetBehavior = nullptr;
-    QPushButton *m_clearLastFm = nullptr;
-    QPushButton *m_clearListenBrainz = nullptr;
+    QPushButton *m_retryPending = nullptr;
+    QPushButton *m_clearBacklog = nullptr;
+    ScrobbleDestinationSet m_destinations;
 };

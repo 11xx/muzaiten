@@ -10,6 +10,7 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QDateTime>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QEvent>
 #include <QHeaderView>
@@ -30,27 +31,33 @@ namespace {
 
 constexpr int kHistoryLimit = 5000;
 
+// The table's placeholder for a cell with no value.
+const auto kEmptyCell = QStringLiteral("—");
+
 enum Column {
     TimeColumn,
     TitleColumn,
     ArtistColumn,
     AlbumColumn,
     DurationColumn,
-    LastFmColumn,
-    ListenBrainzColumn,
+    DeliveryColumn,
     PathColumn,
     ColumnCount,
 };
 
-QString serviceStatus(bool owed, bool sent)
+// The delivery cell for one listen. With a destination selected it reports that
+// destination alone; in aggregate mode it summarizes how many of the
+// destinations owed this listen have received it.
+QString deliveryText(const ListenHistoryStore::HistoryRow &row, const QString &destinationId)
 {
-    if (sent) {
+    if (destinationId.isEmpty()) {
+        return row.owedCount() == 0 ? kEmptyCell
+                                    : QStringLiteral("%1/%2 sent").arg(row.sentCount()).arg(row.owedCount());
+    }
+    if (row.sentTo(destinationId)) {
         return QStringLiteral("Sent");
     }
-    if (owed) {
-        return QStringLiteral("Pending");
-    }
-    return QStringLiteral("Not queued");
+    return row.owedTo(destinationId) ? QStringLiteral("Pending") : QStringLiteral("Not queued");
 }
 
 bool rowQueueableForService(const ListenHistoryStore::HistoryRow &row, const QString &service)
@@ -66,8 +73,7 @@ QVector<ResponsiveColumnSpec> historyResponsiveSpecs()
         {ArtistColumn, QStringLiteral("artist"), 200, 110, ResponsiveColumnPriority::Keep},
         {AlbumColumn, QStringLiteral("album"), 220, 110, ResponsiveColumnPriority::Normal},
         {DurationColumn, QStringLiteral("duration"), 80, 70, ResponsiveColumnPriority::Normal},
-        {LastFmColumn, QStringLiteral("lastfm"), 105, 90, ResponsiveColumnPriority::Keep},
-        {ListenBrainzColumn, QStringLiteral("listenbrainz"), 120, 100, ResponsiveColumnPriority::Keep},
+        {DeliveryColumn, QStringLiteral("delivery"), 120, 100, ResponsiveColumnPriority::Keep},
         {PathColumn, QStringLiteral("path"), 320, 120, ResponsiveColumnPriority::HideEarly},
     };
 }
@@ -112,10 +118,8 @@ public:
             return QStringLiteral("Album");
         case DurationColumn:
             return QStringLiteral("Duration");
-        case LastFmColumn:
-            return QStringLiteral("Last.fm");
-        case ListenBrainzColumn:
-            return QStringLiteral("ListenBrainz");
+        case DeliveryColumn:
+            return QStringLiteral("Delivery");
         case PathColumn:
             return QStringLiteral("Path");
         }
@@ -146,11 +150,8 @@ public:
             return row.track.albumTitle;
         case DurationColumn:
             return humanquantity::formatClock(row.track.durationMs);
-        case LastFmColumn:
-            return serviceStatus(row.owedTo(ListenHistoryStore::LastFm), row.sentTo(ListenHistoryStore::LastFm));
-        case ListenBrainzColumn:
-            return serviceStatus(row.owedTo(ListenHistoryStore::ListenBrainz),
-                                 row.sentTo(ListenHistoryStore::ListenBrainz));
+        case DeliveryColumn:
+            return deliveryText(row, m_destinationId);
         case PathColumn:
             return row.track.path;
         }
@@ -187,15 +188,26 @@ public:
         return m_rows.at(row);
     }
 
+    // Empty means the aggregate "All destinations" view.
+    void setDestination(const QString &destinationId)
+    {
+        beginResetModel();
+        m_destinationId = destinationId;
+        endResetModel();
+    }
+
 private:
     QList<ListenHistoryStore::HistoryRow> m_rows;
+    QString m_destinationId;
 };
 
 } // namespace
 
-ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidget *parent)
+ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
+                                               ScrobbleDestinationSet destinations, QWidget *parent)
     : QDialog(parent)
     , m_store(store)
+    , m_destinations(std::move(destinations))
 {
     setWindowTitle(QStringLiteral("Listening history"));
     resize(1100, 650);
@@ -203,6 +215,19 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);
+
+    // Delivery is per destination, so the table shows one at a time. The
+    // aggregate entry is a read-only overview across all of them.
+    m_destinationSelector = new QComboBox(this);
+    m_destinationSelector->addItem(QStringLiteral("All destinations"), QString());
+    for (const ScrobbleDestination &destination : m_destinations.items) {
+        m_destinationSelector->addItem(destination.name, destination.id);
+    }
+    auto *selectorRow = new QHBoxLayout;
+    selectorRow->addWidget(new QLabel(QStringLiteral("Destination"), this));
+    selectorRow->addWidget(m_destinationSelector);
+    selectorRow->addStretch();
+    layout->addLayout(selectorRow);
 
     m_summary = new QLabel(this);
     layout->addWidget(m_summary);
@@ -234,18 +259,16 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     layout->addWidget(m_view, 1);
 
     auto *actions = new QHBoxLayout;
-    m_queueLastFm = new QPushButton(QStringLiteral("Scrobble to Last.fm"), this);
-    m_queueListenBrainz = new QPushButton(QStringLiteral("Scrobble to ListenBrainz"), this);
+    m_queueSelected = new QPushButton(QStringLiteral("Scrobble selected"), this);
     m_forgetBehavior = new QPushButton(QStringLiteral("Forget track's listening behavior…"), this);
-    m_clearLastFm = new QPushButton(QStringLiteral("Clear Last.fm backlog"), this);
-    m_clearListenBrainz = new QPushButton(QStringLiteral("Clear ListenBrainz backlog"), this);
+    m_retryPending = new QPushButton(QStringLiteral("Retry pending"), this);
+    m_clearBacklog = new QPushButton(QStringLiteral("Clear backlog"), this);
     auto *refresh = new QPushButton(QStringLiteral("Refresh"), this);
-    actions->addWidget(m_queueLastFm);
-    actions->addWidget(m_queueListenBrainz);
+    actions->addWidget(m_queueSelected);
     actions->addWidget(m_forgetBehavior);
     actions->addStretch();
-    actions->addWidget(m_clearLastFm);
-    actions->addWidget(m_clearListenBrainz);
+    actions->addWidget(m_retryPending);
+    actions->addWidget(m_clearBacklog);
     actions->addWidget(refresh);
     layout->addLayout(actions);
 
@@ -254,11 +277,22 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store, QWidge
     layout->addWidget(buttons);
 
     connect(refresh, &QPushButton::clicked, this, &ListeningHistoryDialog::reload);
-    connect(m_queueLastFm, &QPushButton::clicked, this, [this]() { queueSelected(ListenHistoryStore::LastFm); });
-    connect(m_queueListenBrainz, &QPushButton::clicked, this, [this]() { queueSelected(ListenHistoryStore::ListenBrainz); });
+    connect(m_destinationSelector, &QComboBox::currentIndexChanged, this, [this]() {
+        static_cast<ListeningHistoryModel *>(m_model)->setDestination(selectedDestinationId());
+        reload();
+    });
+    connect(m_queueSelected, &QPushButton::clicked, this, [this]() { queueSelected(selectedDestinationId()); });
     connect(m_forgetBehavior, &QPushButton::clicked, this, &ListeningHistoryDialog::forgetSelectedBehavior);
-    connect(m_clearLastFm, &QPushButton::clicked, this, [this]() { clearPending(ListenHistoryStore::LastFm); });
-    connect(m_clearListenBrainz, &QPushButton::clicked, this, [this]() { clearPending(ListenHistoryStore::ListenBrainz); });
+    connect(m_retryPending, &QPushButton::clicked, this, [this]() {
+        const QString destinationId = selectedDestinationId();
+        const int pending = m_store == nullptr ? 0 : m_store->pendingCount(destinationId);
+        emit backlogChanged(destinationId, pending);
+        emit statusMessageRequested(QStringLiteral("Retrying %1 pending listens for %2")
+                                        .arg(pending)
+                                        .arg(destinationName(destinationId)),
+                                    5000);
+    });
+    connect(m_clearBacklog, &QPushButton::clicked, this, [this]() { clearPending(selectedDestinationId()); });
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { updateActions(); });
 
     reload();
@@ -290,26 +324,36 @@ void ListeningHistoryDialog::reload()
     if (m_store == nullptr || !m_store->isOpen()) {
         static_cast<ListeningHistoryModel *>(m_model)->setRows({});
         m_summary->setText(QStringLiteral("Listening history is unavailable."));
-        m_clearLastFm->setEnabled(false);
-        m_clearListenBrainz->setEnabled(false);
         updateActions();
         return;
     }
 
     static_cast<ListeningHistoryModel *>(m_model)->setRows(m_store->historyRows(kHistoryLimit));
     const int total = m_store->totalCount();
-    const int lastFmPending = m_store->pendingCount(ListenHistoryStore::LastFm);
-    const int listenBrainzPending = m_store->pendingCount(ListenHistoryStore::ListenBrainz);
-    m_summary->setText(QStringLiteral("Showing latest %1 of %2 listens. Pending: Last.fm %3, ListenBrainz %4.")
-                           .arg(std::min(kHistoryLimit, total))
-                           .arg(total)
-                           .arg(lastFmPending)
-                           .arg(listenBrainzPending));
-    // The clear-backlog buttons track the store's pending counts, not the
-    // selection, so set them here from the counts reload() already fetched
-    // instead of re-querying on every selection change in updateActions().
-    m_clearLastFm->setEnabled(lastFmPending > 0);
-    m_clearListenBrainz->setEnabled(listenBrainzPending > 0);
+    const QString destinationId = selectedDestinationId();
+    const QString shown = QStringLiteral("Showing latest %1 of %2 listens.")
+                              .arg(std::min(kHistoryLimit, total))
+                              .arg(total);
+    if (destinationId.isEmpty()) {
+        // Aggregate mode reports the whole picture and mutates nothing, so it
+        // sums deliveries across destinations instead of naming a backlog.
+        int owed = 0;
+        int sent = 0;
+        for (const ScrobbleDestination &destination : m_destinations.items) {
+            owed += m_store->pendingCount(destination.id) + m_store->sentCount(destination.id);
+            sent += m_store->sentCount(destination.id);
+        }
+        m_summary->setText(QStringLiteral("%1 %2/%3 sent across %4 destinations.")
+                               .arg(shown)
+                               .arg(sent)
+                               .arg(owed)
+                               .arg(m_destinations.items.size()));
+    } else {
+        m_summary->setText(QStringLiteral("%1 %2: %3 pending, %4 sent.")
+                               .arg(shown, destinationName(destinationId))
+                               .arg(m_store->pendingCount(destinationId))
+                               .arg(m_store->sentCount(destinationId)));
+    }
     updateActions();
 }
 
@@ -337,9 +381,22 @@ std::optional<ListenHistoryStore::HistoryRow> ListeningHistoryDialog::selectedHi
     return static_cast<ListeningHistoryModel *>(m_model)->rowAt(rows.first().row());
 }
 
+QString ListeningHistoryDialog::selectedDestinationId() const
+{
+    return m_destinationSelector == nullptr ? QString() : m_destinationSelector->currentData().toString();
+}
+
+QString ListeningHistoryDialog::destinationName(const QString &destinationId) const
+{
+    if (const ScrobbleDestination *destination = m_destinations.find(destinationId)) {
+        return destination->name;
+    }
+    return destinationId;
+}
+
 void ListeningHistoryDialog::queueSelected(const QString &service)
 {
-    if (m_store == nullptr || m_view == nullptr || m_view->selectionModel() == nullptr) {
+    if (m_store == nullptr || service.isEmpty() || m_view == nullptr || m_view->selectionModel() == nullptr) {
         return;
     }
     const QList<qint64> ids = static_cast<ListeningHistoryModel *>(m_model)->idsQueueableForService(m_view->selectionModel()->selectedRows(), service);
@@ -348,13 +405,13 @@ void ListeningHistoryDialog::queueSelected(const QString &service)
     emit backlogChanged(service, changed);
     emit statusMessageRequested(QStringLiteral("Marked %1 history listens to scrobble to %2")
                                     .arg(changed)
-                                    .arg(service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz")),
+                                    .arg(destinationName(service)),
                                 5000);
 }
 
 void ListeningHistoryDialog::clearPending(const QString &service)
 {
-    if (m_store == nullptr) {
+    if (m_store == nullptr || service.isEmpty()) {
         return;
     }
     const int cleared = m_store->clearPending(service);
@@ -362,7 +419,7 @@ void ListeningHistoryDialog::clearPending(const QString &service)
     emit backlogChanged(service, cleared);
     emit statusMessageRequested(QStringLiteral("Cleared %1 pending %2 scrobbles")
                                     .arg(cleared)
-                                    .arg(service == ListenHistoryStore::LastFm ? QStringLiteral("Last.fm") : QStringLiteral("ListenBrainz")),
+                                    .arg(destinationName(service)),
                                 5000);
 }
 
@@ -400,9 +457,15 @@ void ListeningHistoryDialog::updateActions()
     const std::optional<ListenHistoryStore::HistoryRow> selectedRow = selectedHistoryRow();
     const QModelIndexList selectedRows = m_view->selectionModel() == nullptr ? QModelIndexList{} : m_view->selectionModel()->selectedRows();
     auto *model = static_cast<ListeningHistoryModel *>(m_model);
-    m_queueLastFm->setEnabled(hasSelection && model->hasQueueableForService(selectedRows, ListenHistoryStore::LastFm));
-    m_queueListenBrainz->setEnabled(hasSelection && model->hasQueueableForService(selectedRows, ListenHistoryStore::ListenBrainz));
+    const QString destinationId = selectedDestinationId();
+    // Aggregate mode is a read-only overview: with no destination chosen there
+    // is no single backlog to queue into, clear, or retry.
+    const bool concrete = !destinationId.isEmpty();
+    const int pending = concrete && m_store != nullptr ? m_store->pendingCount(destinationId) : 0;
+
+    m_queueSelected->setEnabled(concrete && hasSelection
+                                && model->hasQueueableForService(selectedRows, destinationId));
     m_forgetBehavior->setEnabled(selectedRow.has_value() && !selectedRow->track.path.isEmpty());
-    // The clear-backlog buttons are selection-independent; reload() sets them
-    // from the pending counts it already fetches.
+    m_clearBacklog->setEnabled(concrete && pending > 0);
+    m_retryPending->setEnabled(concrete && pending > 0);
 }
