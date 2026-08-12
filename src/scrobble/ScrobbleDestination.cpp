@@ -174,6 +174,40 @@ QString toJson(const ScrobbleDestinationSet &destinations)
 
 QString documentSettingKey() { return QStringLiteral("scrobble.destinations"); }
 
+ScrobbleDestinationSet load(const SettingReader &read)
+{
+    const QString document = read(documentSettingKey());
+    if (!document.isEmpty()) {
+        return fromJson(document);
+    }
+
+    // No document yet: this is the first run after gaining configurable
+    // destinations. Carry the two reserved switches over from the settings that
+    // used to hold them so nothing silently stops scrobbling.
+    ScrobbleDestinationSet set = defaults();
+    for (ScrobbleDestination &item : set.items) {
+        const QString legacyKey = item.id == lastFmId() ? QStringLiteral("lastfm.enabled")
+                                                        : QStringLiteral("listenbrainz.enabled");
+        item.enabled = read(legacyKey) == QLatin1String("true");
+    }
+    return set;
+}
+
+void save(const SettingWriter &write, const ScrobbleDestinationSet &destinations)
+{
+    write(documentSettingKey(), toJson(destinations));
+    // The legacy switches stay in step so anything still reading them, and a
+    // downgrade to an older build, sees the reserved destinations' real state.
+    for (const ScrobbleDestination &item : destinations.items) {
+        if (!item.isReserved()) {
+            continue;
+        }
+        const QString legacyKey = item.id == lastFmId() ? QStringLiteral("lastfm.enabled")
+                                                        : QStringLiteral("listenbrainz.enabled");
+        write(legacyKey, item.enabled ? QStringLiteral("true") : QStringLiteral("false"));
+    }
+}
+
 QString tokenSettingKey(const QString &id)
 {
     if (id == listenBrainzId()) {

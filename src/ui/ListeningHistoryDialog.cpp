@@ -55,13 +55,7 @@ QString serviceStatus(bool owed, bool sent)
 
 bool rowQueueableForService(const ListenHistoryStore::HistoryRow &row, const QString &service)
 {
-    if (service == ListenHistoryStore::LastFm) {
-        return !row.sentLastFm && !row.owedLastFm;
-    }
-    if (service == ListenHistoryStore::ListenBrainz) {
-        return !row.sentListenBrainz && !row.owedListenBrainz;
-    }
-    return false;
+    return !row.owedTo(service);
 }
 
 QVector<ResponsiveColumnSpec> historyResponsiveSpecs()
@@ -153,9 +147,10 @@ public:
         case DurationColumn:
             return humanquantity::formatClock(row.track.durationMs);
         case LastFmColumn:
-            return serviceStatus(row.owedLastFm, row.sentLastFm);
+            return serviceStatus(row.owedTo(ListenHistoryStore::LastFm), row.sentTo(ListenHistoryStore::LastFm));
         case ListenBrainzColumn:
-            return serviceStatus(row.owedListenBrainz, row.sentListenBrainz);
+            return serviceStatus(row.owedTo(ListenHistoryStore::ListenBrainz),
+                                 row.sentTo(ListenHistoryStore::ListenBrainz));
         case PathColumn:
             return row.track.path;
         }

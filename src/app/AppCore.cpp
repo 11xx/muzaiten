@@ -299,13 +299,20 @@ AppCore::AppCore(QObject *parent)
 
     m_listenTracker = new ListenTracker(this);
     connect(m_listenTracker, &ListenTracker::listenReached, this, [this](const Track &track, qint64 startedAtSecs) {
-        const bool oweListenBrainz = m_database->setting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-        const bool oweLastFm = m_database->setting(QStringLiteral("lastfm.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-        m_listenHistory->recordListen(track, startedAtSecs, oweLastFm, oweListenBrainz);
-        if (oweListenBrainz) {
+        // Only destinations enabled at this moment are owed the listen; one
+        // enabled later must not inherit history it never saw.
+        const ScrobbleDestinationSet destinations = scrobbleDestinations();
+        QStringList owed;
+        for (const ScrobbleDestination &destination : destinations.items) {
+            if (destination.enabled) {
+                owed << destination.id;
+            }
+        }
+        m_listenHistory->recordListen(track, startedAtSecs, owed);
+        if (owed.contains(ScrobbleDestinationConfig::listenBrainzId())) {
             QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
         }
-        if (oweLastFm) {
+        if (owed.contains(ScrobbleDestinationConfig::lastFmId())) {
             QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
         }
     });
@@ -482,6 +489,19 @@ PlayEventRecorder *AppCore::playEventRecorder() const { return m_playEventRecord
 MprisService *AppCore::mpris() const { return m_mpris; }
 IpcServer *AppCore::ipc() const { return m_ipc; }
 MainWindow *AppCore::window() const { return m_window; }
+ScrobbleDestinationSet AppCore::scrobbleDestinations() const
+{
+    return ScrobbleDestinationConfig::load(
+        [this](const QString &key) { return m_database->setting(key); });
+}
+
+void AppCore::setScrobbleDestinations(const ScrobbleDestinationSet &destinations)
+{
+    ScrobbleDestinationConfig::save(
+        [this](const QString &key, const QString &value) { m_database->setSetting(key, value); },
+        destinations);
+}
+
 ListenBrainzScrobbler *AppCore::listenBrainzScrobbler() const { return m_listenBrainzScrobbler; }
 LastFmScrobbler *AppCore::lastFmScrobbler() const { return m_lastFmScrobbler; }
 QThread *AppCore::listenBrainzThread() const { return m_listenBrainzThread; }

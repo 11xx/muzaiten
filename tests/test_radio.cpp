@@ -4063,8 +4063,8 @@ void RadioTest::trackAffinitiesAggregateAllSources()
     }
 
     // listens: 2 local listens (distinct timestamps).
-    QVERIFY(store.recordListen(track, 5000, false, false) > 0);
-    QVERIFY(store.recordListen(track, 6000, false, false) > 0);
+    QVERIFY(store.recordListen(track, 5000, {}) > 0);
+    QVERIFY(store.recordListen(track, 6000, {}) > 0);
 
     // imported_listens: 3 matched to the path.
     QList<ListenHistoryStore::ImportedListen> imported;
@@ -4134,8 +4134,8 @@ void RadioTest::contentGroupAffinityPoolsDisagreeingTags()
 
     ListenHistoryStore history(dir.filePath(QStringLiteral("history.sqlite")));
     QVERIFY(history.isOpen());
-    QVERIFY(history.recordListen(albumCopy, 1000, false, false) > 0);
-    QVERIFY(history.recordListen(compilationCopy, 2000, false, false) > 0);
+    QVERIFY(history.recordListen(albumCopy, 1000, {}) > 0);
+    QVERIFY(history.recordListen(compilationCopy, 2000, {}) > 0);
 
     QHash<QString, TrackScorer::Affinity> affinities;
     const QHash<QString, ListenHistoryStore::TrackAffinityRow> rows = history.trackAffinities();

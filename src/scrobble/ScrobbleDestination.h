@@ -3,6 +3,8 @@
 #include <QList>
 #include <QString>
 
+#include <functional>
+
 // One place a listen can be delivered to. Two destinations are reserved and
 // always present: Last.fm and the official ListenBrainz service. Beyond those,
 // the user may configure any number of ListenBrainz-compatible servers (Koito
@@ -62,6 +64,16 @@ QString toJson(const ScrobbleDestinationSet &destinations);
 
 // Settings key holding the destination document.
 QString documentSettingKey();
+
+using SettingReader = std::function<QString(const QString &key)>;
+using SettingWriter = std::function<void(const QString &key, const QString &value)>;
+
+// Reads the configured set. On the first read after upgrading, when no document
+// exists yet, the reserved destinations inherit their enabled state from the
+// long-standing `lastfm.enabled` / `listenbrainz.enabled` settings, so a user
+// who had scrobbling on keeps it on.
+ScrobbleDestinationSet load(const SettingReader &read);
+void save(const SettingWriter &write, const ScrobbleDestinationSet &destinations);
 // Settings key holding one destination's token. The reserved destinations keep
 // their long-standing keys so existing credentials survive untouched.
 QString tokenSettingKey(const QString &id);

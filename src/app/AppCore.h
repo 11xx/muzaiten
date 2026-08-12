@@ -4,6 +4,7 @@
 #include "reco/RadioProfile.h"
 #include "reco/TrackScorer.h"
 #include "scrobble/ScrobbleBackfill.h"
+#include "scrobble/ScrobbleDestination.h"
 
 #include <QHash>
 #include <QJsonObject>
@@ -72,6 +73,10 @@ public:
     LastFmScrobbler       *lastFmScrobbler() const;
     QThread               *listenBrainzThread() const;
     QThread               *lastFmThread() const;
+
+    // The configured scrobbling destinations, read from the library settings.
+    ScrobbleDestinationSet scrobbleDestinations() const;
+    void setScrobbleDestinations(const ScrobbleDestinationSet &destinations);
 
     // Start a rule-based radio session seeded from one or more library tracks.
     // An already playing first seed is kept in place without restarting; another

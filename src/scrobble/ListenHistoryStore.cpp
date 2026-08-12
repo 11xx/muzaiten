@@ -12,7 +12,13 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 7;
+constexpr int kSchemaVersion = 8;
+
+// Marks the one-time move from the fixed owed_*/sent_* columns to row-based
+// delivery state. Its own key rather than the schema version, because the
+// version is rewritten unconditionally on every open and so cannot say whether
+// a particular one-time conversion has already run.
+constexpr auto kDeliveryMigrationKey = "deliveriesMigratedFromLegacyFlags";
 
 void insertIfPresent(QJsonObject &object, const QString &key, const QString &value)
 {
@@ -90,28 +96,6 @@ Track trackFromJson(const QJsonObject &json)
     track.channels = json.value(QStringLiteral("channels")).toInt();
     track.bitDepth = json.value(QStringLiteral("bitDepth")).toInt();
     return track;
-}
-
-QString sentColumn(const QString &service)
-{
-    if (service == ListenHistoryStore::LastFm) {
-        return QStringLiteral("sent_lastfm");
-    }
-    if (service == ListenHistoryStore::ListenBrainz) {
-        return QStringLiteral("sent_listenbrainz");
-    }
-    return {};
-}
-
-QString owedColumn(const QString &service)
-{
-    if (service == ListenHistoryStore::LastFm) {
-        return QStringLiteral("owed_lastfm");
-    }
-    if (service == ListenHistoryStore::ListenBrainz) {
-        return QStringLiteral("owed_listenbrainz");
-    }
-    return {};
 }
 
 QString placeholders(qsizetype count)
@@ -217,10 +201,26 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " owed_listenbrainz INTEGER NOT NULL DEFAULT 0,"
         " sent_listenbrainz INTEGER NOT NULL DEFAULT 0,"
         " UNIQUE(listened_at, artist, title))"));
+    // Delivery state, one row per (listen, destination) obligation. The row
+    // existing means the listen is owed there; `sent` means it arrived. This is
+    // what makes the destination set open-ended: adding one adds rows, removing
+    // one deletes only its own, and no destination can stall another.
+    //
+    // The legacy owed_*/sent_* columns above are deliberately left in place but
+    // no longer written. Dropping them would mean rewriting the `listens` table,
+    // and they cost nothing where they sit.
     create.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_listens_unsent_lastfm ON listens(listened_at) WHERE owed_lastfm = 1 AND sent_lastfm = 0"));
+        "CREATE TABLE IF NOT EXISTS listen_deliveries ("
+        " listen_id INTEGER NOT NULL,"
+        " destination_id TEXT NOT NULL,"
+        " sent INTEGER NOT NULL DEFAULT 0,"
+        " PRIMARY KEY(listen_id, destination_id)) WITHOUT ROWID"));
+    // Draining a backlog is always "oldest pending listen for this destination".
     create.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_listens_unsent_listenbrainz ON listens(listened_at) WHERE owed_listenbrainz = 1 AND sent_listenbrainz = 0"));
+        "CREATE INDEX IF NOT EXISTS idx_listen_deliveries_pending "
+        "ON listen_deliveries(destination_id, listen_id) WHERE sent = 0"));
+    create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_listen_deliveries_listen ON listen_deliveries(listen_id)"));
     create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS play_events ("
         " id INTEGER PRIMARY KEY,"
@@ -315,6 +315,48 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
     version.addBindValue(QString::number(kSchemaVersion));
     version.exec();
+
+    migrateLegacyDeliveries();
+}
+
+void ListenHistoryStore::migrateLegacyDeliveries()
+{
+    if (!m_db.isOpen() || metaValue(QString::fromLatin1(kDeliveryMigrationKey)) == QLatin1String("1")) {
+        return;
+    }
+
+    // One transaction covering both services and the marker, so an interrupted
+    // run leaves the store either fully converted or wholly untouched. Rerunning
+    // is a no-op regardless: the marker short-circuits, and the inserts below
+    // ignore rows that already exist.
+    m_db.transaction();
+
+    const auto convert = [this](const QString &owedColumn, const QString &sentColumn, const QString &destinationId) {
+        QSqlQuery query(m_db);
+        query.prepare(QStringLiteral("INSERT OR IGNORE INTO listen_deliveries(listen_id, destination_id, sent) "
+                                     "SELECT id, ?, %1 FROM listens WHERE %2 = 1")
+                          .arg(sentColumn, owedColumn));
+        query.addBindValue(destinationId);
+        return query.exec();
+    };
+
+    const bool converted =
+        convert(QStringLiteral("owed_lastfm"), QStringLiteral("sent_lastfm"), LastFm)
+        && convert(QStringLiteral("owed_listenbrainz"), QStringLiteral("sent_listenbrainz"), ListenBrainz);
+    if (!converted) {
+        m_db.rollback();
+        return;
+    }
+
+    QSqlQuery marker(m_db);
+    marker.prepare(QStringLiteral("INSERT INTO meta(key, value) VALUES(?, '1') "
+                                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
+    marker.addBindValue(QString::fromLatin1(kDeliveryMigrationKey));
+    if (!marker.exec()) {
+        m_db.rollback();
+        return;
+    }
+    m_db.commit();
 }
 
 ListenHistoryStore::~ListenHistoryStore()
@@ -342,7 +384,7 @@ void ListenHistoryStore::releaseCacheMemory()
 }
 
 qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSecs,
-                                        bool oweLastFm, bool oweListenBrainz)
+                                        const QStringList &destinationIds)
 {
     const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
     const QString artist = track.artistName.trimmed().isEmpty() ? track.albumArtistName.trimmed() : track.artistName.trimmed();
@@ -352,9 +394,8 @@ qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSec
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "INSERT OR IGNORE INTO listens(listened_at, title, artist, album, path, duration_ms, track_json, "
-        "owed_lastfm, sent_lastfm, owed_listenbrainz, sent_listenbrainz) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        "INSERT OR IGNORE INTO listens(listened_at, title, artist, album, path, duration_ms, track_json) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?)"));
     query.addBindValue(listenedAtSecs);
     query.addBindValue(title);
     // A null QString binds as SQL NULL, which the NOT NULL constraint rejects
@@ -364,29 +405,38 @@ qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSec
     query.addBindValue(track.path);
     query.addBindValue(track.durationMs);
     query.addBindValue(QString::fromUtf8(QJsonDocument(trackToJson(track)).toJson(QJsonDocument::Compact)));
-    query.addBindValue(oweLastFm ? 1 : 0);
-    query.addBindValue(0);
-    query.addBindValue(oweListenBrainz ? 1 : 0);
-    query.addBindValue(0);
     if (!query.exec() || query.numRowsAffected() <= 0) {
         return -1;
     }
-    return query.lastInsertId().toLongLong();
+
+    const qint64 listenId = query.lastInsertId().toLongLong();
+    for (const QString &destinationId : destinationIds) {
+        if (destinationId.isEmpty()) {
+            continue;
+        }
+        QSqlQuery delivery(m_db);
+        delivery.prepare(QStringLiteral(
+            "INSERT OR IGNORE INTO listen_deliveries(listen_id, destination_id, sent) VALUES(?, ?, 0)"));
+        delivery.addBindValue(listenId);
+        delivery.addBindValue(destinationId);
+        delivery.exec();
+    }
+    return listenId;
 }
 
-QList<ListenHistoryStore::Listen> ListenHistoryStore::unsent(const QString &service, int limit) const
+QList<ListenHistoryStore::Listen> ListenHistoryStore::unsent(const QString &destinationId, int limit) const
 {
     QList<Listen> listens;
-    const QString column = sentColumn(service);
-    const QString owed = owedColumn(service);
-    if (!m_db.isOpen() || column.isEmpty() || owed.isEmpty() || limit <= 0) {
+    if (!m_db.isOpen() || destinationId.isEmpty() || limit <= 0) {
         return listens;
     }
 
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT id, listened_at, track_json FROM listens "
-                                 "WHERE %1 = 1 AND %2 = 0 ORDER BY listened_at ASC LIMIT ?")
-                      .arg(owed, column));
+    query.prepare(QStringLiteral(
+        "SELECT l.id, l.listened_at, l.track_json FROM listens l "
+        "JOIN listen_deliveries d ON d.listen_id = l.id "
+        "WHERE d.destination_id = ? AND d.sent = 0 ORDER BY l.listened_at ASC LIMIT ?"));
+    query.addBindValue(destinationId);
     query.addBindValue(limit);
     if (!query.exec()) {
         return listens;
@@ -401,20 +451,27 @@ QList<ListenHistoryStore::Listen> ListenHistoryStore::unsent(const QString &serv
     return listens;
 }
 
-int ListenHistoryStore::unsentCount(const QString &service) const
+int ListenHistoryStore::pendingCount(const QString &destinationId) const
 {
-    return pendingCount(service);
+    return deliveryCount(destinationId, false);
 }
 
-int ListenHistoryStore::pendingCount(const QString &service) const
+int ListenHistoryStore::sentCount(const QString &destinationId) const
 {
-    const QString column = sentColumn(service);
-    const QString owed = owedColumn(service);
-    if (!m_db.isOpen() || column.isEmpty() || owed.isEmpty()) {
+    return deliveryCount(destinationId, true);
+}
+
+int ListenHistoryStore::deliveryCount(const QString &destinationId, bool sent) const
+{
+    if (!m_db.isOpen() || destinationId.isEmpty()) {
         return 0;
     }
     QSqlQuery query(m_db);
-    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM listens WHERE %1 = 1 AND %2 = 0").arg(owed, column)) || !query.next()) {
+    query.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM listen_deliveries WHERE destination_id = ? AND sent = ?"));
+    query.addBindValue(destinationId);
+    query.addBindValue(sent ? 1 : 0);
+    if (!query.exec() || !query.next()) {
         return 0;
     }
     return query.value(0).toInt();
@@ -432,51 +489,101 @@ int ListenHistoryStore::totalCount() const
     return query.value(0).toInt();
 }
 
-void ListenHistoryStore::markSent(const QString &service, const QList<qint64> &ids)
+void ListenHistoryStore::markSent(const QString &destinationId, const QList<qint64> &ids)
 {
-    const QString column = sentColumn(service);
-    if (!m_db.isOpen() || column.isEmpty() || ids.isEmpty()) {
+    if (!m_db.isOpen() || destinationId.isEmpty() || ids.isEmpty()) {
         return;
     }
-    QStringList idText;
-    for (qint64 id : ids) {
-        idText << QString::number(id);
-    }
     QSqlQuery query(m_db);
-    query.exec(QStringLiteral("UPDATE listens SET %1 = 1 WHERE id IN (%2)").arg(column, idText.join(QLatin1Char(','))));
+    query.prepare(QStringLiteral("UPDATE listen_deliveries SET sent = 1 "
+                                 "WHERE destination_id = ? AND listen_id IN (%1)")
+                      .arg(placeholders(ids.size())));
+    query.addBindValue(destinationId);
+    for (qint64 id : ids) {
+        query.addBindValue(id);
+    }
+    query.exec();
 }
 
-int ListenHistoryStore::clearPending(const QString &service)
+int ListenHistoryStore::clearPending(const QString &destinationId)
 {
-    const QString column = sentColumn(service);
-    const QString owed = owedColumn(service);
-    if (!m_db.isOpen() || column.isEmpty() || owed.isEmpty()) {
+    if (!m_db.isOpen() || destinationId.isEmpty()) {
         return 0;
     }
+    // Dropping the obligation, not the listen: local history is permanent and
+    // deliveries already completed stay recorded as completed.
     QSqlQuery query(m_db);
-    if (!query.exec(QStringLiteral("UPDATE listens SET %1 = 0 WHERE %1 = 1 AND %2 = 0").arg(owed, column))) {
+    query.prepare(QStringLiteral("DELETE FROM listen_deliveries WHERE destination_id = ? AND sent = 0"));
+    query.addBindValue(destinationId);
+    if (!query.exec()) {
         return 0;
     }
     return query.numRowsAffected();
 }
 
-int ListenHistoryStore::markOwed(const QString &service, const QList<qint64> &ids)
+int ListenHistoryStore::markOwed(const QString &destinationId, const QList<qint64> &ids)
 {
-    const QString column = sentColumn(service);
-    const QString owed = owedColumn(service);
-    if (!m_db.isOpen() || column.isEmpty() || owed.isEmpty() || ids.isEmpty()) {
+    if (!m_db.isOpen() || destinationId.isEmpty() || ids.isEmpty()) {
         return 0;
     }
-    QStringList idText;
+    int enqueued = 0;
+    m_db.transaction();
     for (qint64 id : ids) {
-        idText << QString::number(id);
+        QSqlQuery query(m_db);
+        query.prepare(QStringLiteral(
+            "INSERT OR IGNORE INTO listen_deliveries(listen_id, destination_id, sent) "
+            "SELECT id, ?, 0 FROM listens WHERE id = ?"));
+        query.addBindValue(destinationId);
+        query.addBindValue(id);
+        if (query.exec()) {
+            enqueued += query.numRowsAffected();
+        }
+    }
+    m_db.commit();
+    return enqueued;
+}
+
+int ListenHistoryStore::forgetDestination(const QString &destinationId)
+{
+    if (!m_db.isOpen() || destinationId.isEmpty()) {
+        return 0;
     }
     QSqlQuery query(m_db);
-    if (!query.exec(QStringLiteral("UPDATE listens SET %1 = 1 WHERE %1 = 0 AND %2 = 0 AND id IN (%3)")
-                        .arg(owed, column, idText.join(QLatin1Char(','))))) {
+    query.prepare(QStringLiteral("DELETE FROM listen_deliveries WHERE destination_id = ?"));
+    query.addBindValue(destinationId);
+    if (!query.exec()) {
         return 0;
     }
     return query.numRowsAffected();
+}
+
+int ListenHistoryStore::HistoryRow::sentCount() const
+{
+    int count = 0;
+    for (const Delivery &delivery : deliveries) {
+        count += delivery.sent ? 1 : 0;
+    }
+    return count;
+}
+
+bool ListenHistoryStore::HistoryRow::owedTo(const QString &destinationId) const
+{
+    for (const Delivery &delivery : deliveries) {
+        if (delivery.destinationId == destinationId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ListenHistoryStore::HistoryRow::sentTo(const QString &destinationId) const
+{
+    for (const Delivery &delivery : deliveries) {
+        if (delivery.destinationId == destinationId) {
+            return delivery.sent;
+        }
+    }
+    return false;
 }
 
 QList<ListenHistoryStore::HistoryRow> ListenHistoryStore::historyRows(int limit, int offset) const
@@ -488,23 +595,47 @@ QList<ListenHistoryStore::HistoryRow> ListenHistoryStore::historyRows(int limit,
 
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
-        "SELECT id, listened_at, track_json, owed_lastfm, sent_lastfm, owed_listenbrainz, sent_listenbrainz "
+        "SELECT id, listened_at, track_json "
         "FROM listens ORDER BY listened_at DESC, id DESC LIMIT ? OFFSET ?"));
     query.addBindValue(limit);
     query.addBindValue(offset);
     if (!query.exec()) {
         return rows;
     }
+    QHash<qint64, qsizetype> rowByListenId;
     while (query.next()) {
         HistoryRow row;
         row.id = query.value(0).toLongLong();
         row.listenedAtSecs = query.value(1).toLongLong();
         row.track = trackFromJson(QJsonDocument::fromJson(query.value(2).toString().toUtf8()).object());
-        row.owedLastFm = query.value(3).toInt() != 0;
-        row.sentLastFm = query.value(4).toInt() != 0;
-        row.owedListenBrainz = query.value(5).toInt() != 0;
-        row.sentListenBrainz = query.value(6).toInt() != 0;
+        rowByListenId.insert(row.id, rows.size());
         rows.push_back(row);
+    }
+    if (rows.isEmpty()) {
+        return rows;
+    }
+
+    // Deliveries for exactly the page just read, in one pass, so the cost stays
+    // proportional to the page rather than to the whole history.
+    QSqlQuery deliveries(m_db);
+    deliveries.prepare(QStringLiteral(
+        "SELECT listen_id, destination_id, sent FROM listen_deliveries "
+        "WHERE listen_id IN (%1) ORDER BY destination_id ASC")
+                           .arg(placeholders(rows.size())));
+    for (const HistoryRow &row : rows) {
+        deliveries.addBindValue(row.id);
+    }
+    if (deliveries.exec()) {
+        while (deliveries.next()) {
+            const auto position = rowByListenId.constFind(deliveries.value(0).toLongLong());
+            if (position == rowByListenId.constEnd()) {
+                continue;
+            }
+            Delivery delivery;
+            delivery.destinationId = deliveries.value(1).toString();
+            delivery.sent = deliveries.value(2).toInt() != 0;
+            rows[*position].deliveries.push_back(delivery);
+        }
     }
     return rows;
 }

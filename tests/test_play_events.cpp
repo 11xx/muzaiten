@@ -152,7 +152,7 @@ void TestPlayEvents::storeForgetBehaviorRemovesPlayEventsAndOptionalImports()
 
     const Track a = makeTrack(QStringLiteral("/music/a.flac"));
     const Track b = makeTrack(QStringLiteral("/music/b.flac"));
-    QVERIFY(store.recordListen(a, 1000, true, true) > 0);
+    QVERIFY(store.recordListen(a, 1000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}) > 0);
 
     PlayEvent eventA;
     eventA.startedAtSecs = 2000;

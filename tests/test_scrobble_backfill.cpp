@@ -245,7 +245,7 @@ void TestScrobbleBackfill::importedCrossDedupSkipsOwnScrobbles()
     track.path = QStringLiteral("/music/mine.flac");
     track.title = QStringLiteral("Mine");
     track.artistName = QStringLiteral("Me");
-    QVERIFY(store.recordListen(track, 5000, true, true) > 0);
+    QVERIFY(store.recordListen(track, 5000, {ListenHistoryStore::LastFm, ListenHistoryStore::ListenBrainz}) > 0);
 
     QList<ImportedListen> rows{
         makeImported(5000, QStringLiteral("Me"), QStringLiteral("Mine")),   // echo of own scrobble
