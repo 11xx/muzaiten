@@ -107,6 +107,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/ListenTracker.cpp
     src/scrobble/PlayEventRecorder.cpp
     src/scrobble/ScrobbleBackfill.cpp
+    src/scrobble/ScrobbleDestination.cpp
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
     src/search/FuzzyMatch.cpp
