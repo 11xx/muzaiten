@@ -392,6 +392,15 @@ target_link_libraries(test_mpd_client PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 target_compile_features(test_mpd_client PRIVATE cxx_std_26)
 add_test(NAME test_mpd_client COMMAND test_mpd_client)
 
+add_executable(test_listenbrainz_url
+    test_listenbrainz_url.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+)
+target_include_directories(test_listenbrainz_url PRIVATE ../src)
+target_link_libraries(test_listenbrainz_url PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_listenbrainz_url PRIVATE cxx_std_26)
+add_test(NAME test_listenbrainz_url COMMAND test_listenbrainz_url)
+
 add_executable(test_lastfm_api
     test_lastfm_api.cpp
     ../src/scrobble/LastFmApi.cpp

@@ -102,6 +102,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
+    src/scrobble/ListenBrainzUrl.cpp
     src/scrobble/ListenHistoryStore.cpp
     src/scrobble/ListenTracker.cpp
     src/scrobble/PlayEventRecorder.cpp
