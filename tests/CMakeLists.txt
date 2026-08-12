@@ -421,11 +421,25 @@ add_executable(test_scrobble_destinations
     test_scrobble_destinations.cpp
     ../src/scrobble/ListenBrainzUrl.cpp
     ../src/scrobble/ScrobbleDestination.cpp
+    ../src/ui/ScrobbleUploadDispatcher.cpp
 )
 target_include_directories(test_scrobble_destinations PRIVATE ../src)
 target_link_libraries(test_scrobble_destinations PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_scrobble_destinations PRIVATE cxx_std_26)
 add_test(NAME test_scrobble_destinations COMMAND test_scrobble_destinations)
+
+add_executable(test_scrobble_destinations_dialog
+    test_scrobble_destinations_dialog.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/scrobble/ScrobbleDestination.cpp
+    ../src/ui/ScrobbleDestinationsDialog.cpp
+)
+target_include_directories(test_scrobble_destinations_dialog PRIVATE ../src)
+target_link_libraries(test_scrobble_destinations_dialog PRIVATE Qt6::Core Qt6::Sql Qt6::Widgets Qt6::Test)
+target_compile_features(test_scrobble_destinations_dialog PRIVATE cxx_std_26)
+add_test(NAME test_scrobble_destinations_dialog COMMAND test_scrobble_destinations_dialog)
+set_tests_properties(test_scrobble_destinations_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_lastfm_api
     test_lastfm_api.cpp

@@ -34,7 +34,7 @@ const auto kEmptyCell = QStringLiteral("—");
 class CompatibleDestinationDialog final : public QDialog {
 public:
     CompatibleDestinationDialog(const QString &title, const QString &name, const QString &apiRoot,
-                                const QString &token, QWidget *parent)
+                                const QString &token, bool endpointEditable, QWidget *parent)
         : QDialog(parent)
     {
         setWindowTitle(title);
@@ -45,6 +45,8 @@ public:
         m_url->setPlaceholderText(QStringLiteral("https://koito.example"));
         m_token = new QLineEdit(token, this);
         m_token->setEchoMode(QLineEdit::Password);
+        m_name->setEnabled(endpointEditable);
+        m_url->setEnabled(endpointEditable);
 
         m_error = new QLabel(this);
         m_error->setWordWrap(true);
@@ -257,7 +259,7 @@ void ScrobbleDestinationsDialog::updateButtons()
 
     // The reserved destinations are part of the app: their identity and URL are
     // not the user's to edit, and they cannot be removed.
-    m_editButton->setEnabled(compatible && !selected->isReserved());
+    m_editButton->setEnabled(compatible);
     m_removeButton->setEnabled(selected != nullptr && !selected->isReserved());
     m_testButton->setEnabled(compatible);
     m_toggleButton->setEnabled(selected != nullptr);
@@ -267,7 +269,7 @@ void ScrobbleDestinationsDialog::updateButtons()
 
 void ScrobbleDestinationsDialog::addDestination()
 {
-    CompatibleDestinationDialog editor(QStringLiteral("Add scrobbling server"), {}, {}, {}, this);
+    CompatibleDestinationDialog editor(QStringLiteral("Add scrobbling server"), {}, {}, {}, true, this);
     if (editor.exec() != QDialog::Accepted) {
         return;
     }
@@ -281,20 +283,21 @@ void ScrobbleDestinationsDialog::editSelected()
 {
     const QString id = selectedId();
     const ScrobbleDestination *existing = m_destinations.find(id);
-    if (existing == nullptr || existing->isReserved()
-        || existing->type != ScrobbleDestination::Type::ListenBrainzCompatible) {
+    if (existing == nullptr || existing->type != ScrobbleDestination::Type::ListenBrainzCompatible) {
         return;
     }
 
     const QString token = m_pendingTokens.value(id, m_callbacks.readToken(id));
-    CompatibleDestinationDialog editor(QStringLiteral("Edit scrobbling server"), existing->name,
-                                       existing->apiRoot, token, this);
+    const bool endpointEditable = !existing->isReserved();
+    CompatibleDestinationDialog editor(endpointEditable ? QStringLiteral("Edit scrobbling server")
+                                                     : QStringLiteral("Set ListenBrainz token"),
+                                       existing->name, existing->apiRoot, token, endpointEditable, this);
     if (editor.exec() != QDialog::Accepted) {
         return;
     }
 
     const int pending = m_history != nullptr ? m_history->pendingCount(id) : 0;
-    if (editor.apiRoot() != existing->apiRoot && pending > 0) {
+    if (endpointEditable && editor.apiRoot() != existing->apiRoot && pending > 0) {
         // The backlog belongs to the destination, not to the URL, so it follows
         // the destination to its new address. Say so before it happens.
         const auto answer = QMessageBox::question(
@@ -310,7 +313,7 @@ void ScrobbleDestinationsDialog::editSelected()
     }
 
     for (ScrobbleDestination &destination : m_destinations.items) {
-        if (destination.id == id) {
+        if (destination.id == id && endpointEditable) {
             destination.name = editor.name();
             destination.apiRoot = editor.apiRoot();
         }

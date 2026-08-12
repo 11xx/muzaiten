@@ -142,6 +142,7 @@ set(MUZAITEN_SOURCES
     src/ui/MainWindow.cpp
     src/ui/ScanController.cpp
     src/ui/ScrobbleDestinationsDialog.cpp
+    src/ui/ScrobbleUploadDispatcher.cpp
     src/ui/RatingSyncController.cpp
     src/ui/ViewStatePersistence.cpp
     src/ui/QueueSnapshotStore.cpp
@@ -260,6 +261,7 @@ set(MUZAITEN_HEADERS
     src/scrobble/ListenBrainzUrl.h
     src/scrobble/ScrobbleDestination.h
     src/ui/ScrobbleDestinationsDialog.h
+    src/ui/ScrobbleUploadDispatcher.h
     src/scrobble/ListenHistoryStore.h
     src/scrobble/ListenTracker.h
     src/scrobble/ScrobbleBackfill.h

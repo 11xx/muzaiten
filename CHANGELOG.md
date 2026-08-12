@@ -10,6 +10,11 @@
   managed from `History > Scrobblers > Manage scrobblers…`, which shows each
   destination's enabled state, credential or test status, and pending count,
   and supports add, edit, enable/disable, test, and removal.
+
+### Fixed
+
+- Official ListenBrainz tokens can be set or replaced in `Manage scrobblers…`
+  without making its built-in identity or URL editable.
 - Delivery is tracked per destination, so a rate-limited, unreachable, or
   token-rejecting server no longer holds up or disables the others. A failure
   disables only the destination it came from, and every scrobbling message now

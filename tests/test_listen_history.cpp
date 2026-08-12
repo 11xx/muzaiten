@@ -17,6 +17,8 @@ private slots:
     void recordAndQueryUnsent();
     void recordOnlyOwesEnabledServices();
     void recordWithNoServicesKeepsHistoryOnly();
+    void recordDeduplicatesNonEmptyObligations();
+    void recordRollsBackWhenDeliveryInsertFails();
     void duplicateTimestampCollapses();
     void markSentPerService();
     void clearPendingPreservesHistory();
@@ -159,6 +161,43 @@ void TestListenHistory::recordWithNoServicesKeepsHistoryOnly()
     QCOMPARE(store.totalCount(), 1);
     QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
     QCOMPARE(store.pendingCount(ListenHistoryStore::ListenBrainz), 0);
+}
+
+void TestListenHistory::recordDeduplicatesNonEmptyObligations()
+{
+    QTemporaryDir dir;
+    ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
+
+    QVERIFY(store.recordListen(makeTrack(), 1000,
+                               {ListenHistoryStore::LastFm, QStringLiteral("  "), ListenHistoryStore::LastFm})
+            > 0);
+    QCOMPARE(store.totalCount(), 1);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 1);
+}
+
+void TestListenHistory::recordRollsBackWhenDeliveryInsertFails()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("history.sqlite"));
+    ListenHistoryStore store(path);
+    QVERIFY(store.isOpen());
+
+    const QString connection = QStringLiteral("record-listen-delivery-failure");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery trigger(db);
+        QVERIFY(trigger.exec(QStringLiteral(
+            "CREATE TRIGGER reject_delivery BEFORE INSERT ON listen_deliveries "
+            "BEGIN SELECT RAISE(ABORT, 'delivery rejected'); END")));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    QCOMPARE(store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm}), -1);
+    QCOMPARE(store.totalCount(), 0);
+    QCOMPARE(store.pendingCount(ListenHistoryStore::LastFm), 0);
 }
 
 void TestListenHistory::duplicateTimestampCollapses()
@@ -575,8 +614,8 @@ void TestListenHistory::destinationsDeliverIndependently()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const QString koito = QStringLiteral("custom-1");
-    const QString other = QStringLiteral("custom-2");
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    const QString other = QStringLiteral("5e97b3c7-5a40-4d1f-bfdc-d9a5cf8e205f");
 
     const qint64 first = store.recordListen(makeTrack(), 1000, {koito, other});
     const qint64 second = store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {koito, other});
@@ -604,7 +643,7 @@ void TestListenHistory::backlogDrainsOldestFirstPerDestination()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const QString koito = QStringLiteral("custom-1");
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
     store.recordListen(makeTrack(QStringLiteral("Third")), 3000, {koito});
     store.recordListen(makeTrack(QStringLiteral("First")), 1000, {koito});
     store.recordListen(makeTrack(QStringLiteral("Second")), 2000, {koito});
@@ -627,7 +666,7 @@ void TestListenHistory::enablingADestinationDoesNotClaimOldListens()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const QString koito = QStringLiteral("custom-1");
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
     store.recordListen(makeTrack(), 1000, {ListenHistoryStore::LastFm});
     store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {ListenHistoryStore::LastFm});
 
@@ -647,8 +686,8 @@ void TestListenHistory::removingADestinationDropsOnlyItsRows()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const QString koito = QStringLiteral("custom-1");
-    const QString other = QStringLiteral("custom-2");
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
+    const QString other = QStringLiteral("5e97b3c7-5a40-4d1f-bfdc-d9a5cf8e205f");
     const qint64 id = store.recordListen(makeTrack(), 1000, {koito, other, ListenHistoryStore::LastFm});
     store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {koito, other});
     store.markSent(koito, {id});
@@ -668,7 +707,7 @@ void TestListenHistory::historyRowsSummarizeDeliveryAcrossDestinations()
     QTemporaryDir dir;
     ListenHistoryStore store(dir.filePath(QStringLiteral("history.sqlite")));
 
-    const QString koito = QStringLiteral("custom-1");
+    const QString koito = QStringLiteral("4f32f046-df07-4be8-9d8b-6d7a8e6f1b2c");
     const qint64 id = store.recordListen(makeTrack(), 1000, {koito, ListenHistoryStore::LastFm});
     store.recordListen(makeTrack(QStringLiteral("Two")), 2000, {});
     store.markSent(koito, {id});

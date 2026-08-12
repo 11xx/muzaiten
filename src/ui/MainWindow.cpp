@@ -37,6 +37,7 @@
 #include "ui/LinkRootsDialog.h"
 #include "ui/ListeningHistoryDialog.h"
 #include "ui/ScrobbleDestinationsDialog.h"
+#include "ui/ScrobbleUploadDispatcher.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/PanelOrderDialog.h"
@@ -983,6 +984,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                 // Only the destination that failed is turned off; the others
                 // keep scrobbling.
                 setScrobbleDestinationEnabled(destinationId, false);
+                configureListenBrainz();
                 statusBar()->showMessage(message, 15000);
                 QMessageBox::warning(this, scrobbleDestinationName(destinationId), message);
             });
@@ -1006,7 +1008,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         updateScrobbleBacklogActions();
     });
     connect(m_lastFmScrobbler, &LastFmScrobbler::disabledAfterFailures, this, [this](const QString &message) {
-        m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
+        setScrobbleDestinationEnabled(ScrobbleDestinationConfig::lastFmId(), false);
+        configureLastFm();
         statusBar()->showMessage(message, 15000);
         QMessageBox::warning(this, QStringLiteral("Last.fm"), message);
     });
@@ -1017,7 +1020,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_lastFmScrobbler, &LastFmScrobbler::authenticationSucceeded, this, [this](const QString &username, const QString &sessionKey) {
         m_database->setSetting(QStringLiteral("lastfm.username"), username);
         m_database->setSetting(QStringLiteral("lastfm.sessionKey"), sessionKey);
-        m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("true"));
+        setScrobbleDestinationEnabled(ScrobbleDestinationConfig::lastFmId(), true);
         configureLastFm();
         statusBar()->showMessage(username.isEmpty() ? QStringLiteral("Last.fm authentication complete")
                                                     : QStringLiteral("Last.fm authenticated as %1").arg(username),
@@ -5348,13 +5351,10 @@ QString MainWindow::scrobbleDestinationName(const QString &destinationId) const
 void MainWindow::setScrobbleDestinationEnabled(const QString &destinationId, bool enabled)
 {
     ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
-    for (ScrobbleDestination &destination : destinations.items) {
-        if (destination.id == destinationId) {
-            destination.enabled = enabled;
-        }
+    if (!destinations.setEnabled(destinationId, enabled)) {
+        return;
     }
     m_core->setScrobbleDestinations(destinations);
-    configureListenBrainz();
 }
 
 void MainWindow::showListeningHistory()
@@ -5399,11 +5399,10 @@ void MainWindow::showListeningHistory()
 
 void MainWindow::triggerScrobbleUpload(const QString &service)
 {
-    if (service == ListenHistoryStore::LastFm) {
-        QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
-    } else if (service == ListenHistoryStore::ListenBrainz) {
-        m_listenBrainzHub->uploadBacklog();
-    }
+    ScrobbleUploadDispatcher::dispatch(
+        m_core->scrobbleDestinations(), service,
+        [this]() { QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection); },
+        [this](const QString &destinationId) { m_listenBrainzHub->uploadBacklog(destinationId); });
 }
 
 void MainWindow::updateScrobbleBacklogActions()
@@ -5649,7 +5648,7 @@ void MainWindow::showLastFmSettings()
         QMetaObject::invokeMethod(m_lastFmScrobbler, "cancelAuthentication", Qt::QueuedConnection);
         m_database->removeSetting(QStringLiteral("lastfm.sessionKey"));
         m_database->removeSetting(QStringLiteral("lastfm.username"));
-        m_database->setSetting(QStringLiteral("lastfm.enabled"), QStringLiteral("false"));
+        setScrobbleDestinationEnabled(ScrobbleDestinationConfig::lastFmId(), false);
         configureLastFm();
         refreshStatus();
     };

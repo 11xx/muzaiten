@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaType>
+#include <QSet>
 #include <QSqlQuery>
 #include <QStringList>
 #include <QVariant>
@@ -392,10 +393,20 @@ qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSec
         return -1;
     }
 
+    if (!m_db.transaction()) {
+        return -1;
+    }
+    const auto rollback = [this]() {
+        m_db.rollback();
+        return qint64(-1);
+    };
+
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(
+    if (!query.prepare(QStringLiteral(
         "INSERT OR IGNORE INTO listens(listened_at, title, artist, album, path, duration_ms, track_json) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?)"));
+        "VALUES(?, ?, ?, ?, ?, ?, ?)"))) {
+        return rollback();
+    }
     query.addBindValue(listenedAtSecs);
     query.addBindValue(title);
     // A null QString binds as SQL NULL, which the NOT NULL constraint rejects
@@ -406,20 +417,35 @@ qint64 ListenHistoryStore::recordListen(const Track &track, qint64 listenedAtSec
     query.addBindValue(track.durationMs);
     query.addBindValue(QString::fromUtf8(QJsonDocument(trackToJson(track)).toJson(QJsonDocument::Compact)));
     if (!query.exec() || query.numRowsAffected() <= 0) {
-        return -1;
+        return rollback();
     }
 
     const qint64 listenId = query.lastInsertId().toLongLong();
+    if (listenId <= 0) {
+        return rollback();
+    }
+    QSet<QString> uniqueDestinations;
     for (const QString &destinationId : destinationIds) {
-        if (destinationId.isEmpty()) {
-            continue;
+        const QString normalizedId = destinationId.trimmed();
+        if (!normalizedId.isEmpty()) {
+            uniqueDestinations.insert(normalizedId);
         }
+    }
+    for (const QString &destinationId : uniqueDestinations) {
         QSqlQuery delivery(m_db);
-        delivery.prepare(QStringLiteral(
-            "INSERT OR IGNORE INTO listen_deliveries(listen_id, destination_id, sent) VALUES(?, ?, 0)"));
+        if (!delivery.prepare(QStringLiteral(
+                "INSERT OR IGNORE INTO listen_deliveries(listen_id, destination_id, sent) VALUES(?, ?, 0)"))) {
+            return rollback();
+        }
         delivery.addBindValue(listenId);
         delivery.addBindValue(destinationId);
-        delivery.exec();
+        if (!delivery.exec()) {
+            return rollback();
+        }
+    }
+    if (!m_db.commit()) {
+        m_db.rollback();
+        return -1;
     }
     return listenId;
 }

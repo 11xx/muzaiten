@@ -216,8 +216,6 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);
 
-    // Delivery is per destination, so the table shows one at a time. The
-    // aggregate entry is a read-only overview across all of them.
     m_destinationSelector = new QComboBox(this);
     m_destinationSelector->addItem(QStringLiteral("All destinations"), QString());
     for (const ScrobbleDestination &destination : m_destinations.items) {

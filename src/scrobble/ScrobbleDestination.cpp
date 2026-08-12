@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QUuid>
 
 namespace {
 
@@ -13,21 +14,6 @@ constexpr int kDocumentVersion = 1;
 
 constexpr auto kTypeLastFm = "lastfm";
 constexpr auto kTypeCompatible = "listenbrainz";
-constexpr auto kCustomIdPrefix = "custom-";
-
-// The sequence number inside a minted id, or 0 for any id we did not mint.
-// Recovering it from the ids themselves keeps the counter ahead of the list even
-// if the stored counter is missing or has been edited backwards by hand.
-int customSequenceOf(const QString &id)
-{
-    if (!id.startsWith(QLatin1String(kCustomIdPrefix))) {
-        return 0;
-    }
-    bool numeric = false;
-    const int sequence = QStringView(id).mid(QLatin1String(kCustomIdPrefix).size()).toInt(&numeric);
-    return numeric ? sequence : 0;
-}
-
 QString typeToString(ScrobbleDestination::Type type)
 {
     return type == ScrobbleDestination::Type::LastFm ? QString::fromLatin1(kTypeLastFm)
@@ -54,9 +40,7 @@ const ScrobbleDestination *ScrobbleDestinationSet::find(const QString &id) const
 QString ScrobbleDestinationSet::addCustom(const QString &name, const QString &apiRoot, bool enabled)
 {
     ScrobbleDestination destination;
-    // The sequence only ever advances, so an id is never handed out twice even
-    // after the destination that held it is removed.
-    destination.id = QLatin1String(kCustomIdPrefix) + QString::number(nextCustomSequence++);
+    destination.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     destination.type = ScrobbleDestination::Type::ListenBrainzCompatible;
     destination.name = name;
     destination.apiRoot = apiRoot;
@@ -65,10 +49,27 @@ QString ScrobbleDestinationSet::addCustom(const QString &name, const QString &ap
     return destination.id;
 }
 
+bool ScrobbleDestinationSet::setEnabled(const QString &id, bool enabled)
+{
+    for (ScrobbleDestination &item : items) {
+        if (item.id == id) {
+            item.enabled = enabled;
+            return true;
+        }
+    }
+    return false;
+}
+
 namespace ScrobbleDestinationConfig {
 
 QString lastFmId() { return QStringLiteral("lastfm"); }
 QString listenBrainzId() { return QStringLiteral("listenbrainz"); }
+
+bool isCustomId(const QString &id)
+{
+    const QUuid uuid(id);
+    return !uuid.isNull() && uuid.toString(QUuid::WithoutBraces) == id;
+}
 
 ScrobbleDestinationSet defaults()
 {
@@ -98,7 +99,6 @@ ScrobbleDestinationSet fromJson(const QString &json)
 
     ScrobbleDestinationSet set;
     QSet<QString> seen;
-    int highestCustomSequence = 0;
     for (const QJsonValue &value : array) {
         const QJsonObject object = value.toObject();
         ScrobbleDestination destination;
@@ -112,6 +112,10 @@ ScrobbleDestinationSet fromJson(const QString &json)
         if (destination.id.isEmpty() || seen.contains(destination.id)) {
             continue;
         }
+        if (!destination.isReserved()
+            && (!isCustomId(destination.id) || destination.type != ScrobbleDestination::Type::ListenBrainzCompatible)) {
+            continue;
+        }
         // A compatible destination with no URL has nowhere to deliver, so it is
         // not a destination at all. The reserved ones carry their own defaults.
         if (!destination.isReserved() && destination.apiRoot.isEmpty()) {
@@ -123,7 +127,6 @@ ScrobbleDestinationSet fromJson(const QString &json)
         seen.insert(destination.id);
         set.items.push_back(destination);
 
-        highestCustomSequence = std::max(highestCustomSequence, customSequenceOf(destination.id));
     }
 
     // The reserved destinations are part of the contract, not of the saved data:
@@ -147,8 +150,6 @@ ScrobbleDestinationSet fromJson(const QString &json)
         }
     }
 
-    const int storedSequence = root.value(QStringLiteral("nextCustomSequence")).toInt();
-    set.nextCustomSequence = std::max({1, storedSequence, highestCustomSequence + 1});
     return set;
 }
 
@@ -167,7 +168,6 @@ QString toJson(const ScrobbleDestinationSet &destinations)
 
     QJsonObject root;
     root.insert(QStringLiteral("version"), kDocumentVersion);
-    root.insert(QStringLiteral("nextCustomSequence"), destinations.nextCustomSequence);
     root.insert(QStringLiteral("destinations"), array);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
 }
@@ -212,6 +212,9 @@ QString tokenSettingKey(const QString &id)
 {
     if (id == listenBrainzId()) {
         return QStringLiteral("listenbrainz.token");
+    }
+    if (!isCustomId(id)) {
+        return {};
     }
     return QStringLiteral("scrobble.destination.%1.token").arg(id);
 }

@@ -13,8 +13,8 @@
 // A destination's `id` is its permanent identity. It keys the delivery rows and
 // the stored token, so it survives a rename or a URL change: pointing a custom
 // destination at a moved server keeps the backlog that was owed to it. Minted
-// ids are opaque and never reused, so a deleted destination's rows can never be
-// inherited by a later one.
+// UUID-style ids are opaque and never reused, so a deleted destination's rows
+// can never be inherited by a later one.
 struct ScrobbleDestination {
     enum class Type {
         LastFm,
@@ -32,17 +32,16 @@ struct ScrobbleDestination {
     bool isReserved() const;
 };
 
-// A configured set of destinations plus the counter that guarantees minted ids
-// are never reused. Round-trips through the library settings store as one JSON
-// document, so the list and the counter can never disagree.
+// A configured set of destinations. Round-trips through the library settings
+// store as one JSON document.
 struct ScrobbleDestinationSet {
     QList<ScrobbleDestination> items;
-    int nextCustomSequence = 1;
 
     const ScrobbleDestination *find(const QString &id) const;
-    // Appends a ListenBrainz-compatible destination with a freshly minted id and
-    // returns that id, consuming one sequence number.
+    // Appends a ListenBrainz-compatible destination with a freshly minted,
+    // opaque id that is never deliberately reused.
     QString addCustom(const QString &name, const QString &apiRoot, bool enabled);
+    bool setEnabled(const QString &id, bool enabled);
 };
 
 namespace ScrobbleDestinationConfig {
@@ -52,13 +51,15 @@ namespace ScrobbleDestinationConfig {
 // remapping identity.
 QString lastFmId();
 QString listenBrainzId();
+bool isCustomId(const QString &id);
 
 // The two reserved destinations, disabled, in display order.
 ScrobbleDestinationSet defaults();
 
 // Parse a stored document. Anything malformed degrades to the defaults rather
 // than dropping the user's configuration silently; the reserved destinations are
-// re-inserted if absent, and custom entries missing an id or URL are discarded.
+// re-inserted if absent, and custom entries with an invalid UUID-style id or URL
+// are discarded.
 ScrobbleDestinationSet fromJson(const QString &json);
 QString toJson(const ScrobbleDestinationSet &destinations);
 

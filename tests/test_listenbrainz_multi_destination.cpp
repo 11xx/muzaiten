@@ -191,8 +191,10 @@ void ListenBrainzMultiDestinationTest::validationReportsPerDestination()
 
     // Neither destination is configured: testing a server the user has typed but
     // not saved is the normal case when adding one.
-    hub.validateToken(QStringLiteral("custom-7"), accepting.apiRoot(), QStringLiteral("token"));
-    hub.validateToken(QStringLiteral("custom-8"), rejecting.apiRoot(), QStringLiteral("token"));
+    const QString acceptedId = QStringLiteral("c144daa3-617d-497d-82c4-f22d915aa354");
+    const QString rejectedId = QStringLiteral("d31ed0b2-1dd3-49d4-b659-7849e06d4b07");
+    hub.validateToken(acceptedId, accepting.apiRoot(), QStringLiteral("token"));
+    hub.validateToken(rejectedId, rejecting.apiRoot(), QStringLiteral("token"));
 
     QTRY_COMPARE_WITH_TIMEOUT(validated.count(), 2, 10000);
 
@@ -200,8 +202,8 @@ void ListenBrainzMultiDestinationTest::validationReportsPerDestination()
     for (const QList<QVariant> &call : validated) {
         results.insert(call.at(0).toString(), call.at(1).toBool());
     }
-    QCOMPARE(results.value(QStringLiteral("custom-7")), true);
-    QCOMPARE(results.value(QStringLiteral("custom-8")), false);
+    QCOMPARE(results.value(acceptedId), true);
+    QCOMPARE(results.value(rejectedId), false);
 }
 
 QTEST_MAIN(ListenBrainzMultiDestinationTest)

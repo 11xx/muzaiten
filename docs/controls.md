@@ -78,7 +78,8 @@ and are not restored after restart.
 - `History > Scrobblers ▸ > Manage scrobblers…` — every scrobbling
   destination in one list: Last.fm, ListenBrainz, and any number of
   ListenBrainz-compatible servers such as Koito. Add, edit, enable,
-  disable, test, and remove them here. The same menu holds offline
+  disable, test, and remove them here. ListenBrainz's token can be replaced
+  here while its built-in identity and URL stay fixed. The same menu holds offline
   buffering and history backfill; `Last.fm API settings…` accepts your
   own Last.fm credentials.
 - `History > Listening history…` — pick a destination to see and manage
