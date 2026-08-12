@@ -27,7 +27,7 @@
 #include "scanner/ArtworkCache.h"
 #include "scrobble/LastFmCredentials.h"
 #include "scrobble/LastFmScrobbler.h"
-#include "scrobble/ListenBrainzScrobbler.h"
+#include "scrobble/ListenBrainzHub.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ListenTracker.h"
 #include "scrobble/PlayEventRecorder.h"
@@ -310,7 +310,7 @@ AppCore::AppCore(QObject *parent)
         }
         m_listenHistory->recordListen(track, startedAtSecs, owed);
         if (owed.contains(ScrobbleDestinationConfig::listenBrainzId())) {
-            QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
+            m_listenBrainzHub->uploadBacklog();
         }
         if (owed.contains(ScrobbleDestinationConfig::lastFmId())) {
             QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
@@ -367,11 +367,7 @@ AppCore::AppCore(QObject *parent)
         saveRadioSessionState();
     });
 
-    m_listenBrainzThread = new QThread(this);
-    m_listenBrainzScrobbler = new ListenBrainzScrobbler;
-    m_listenBrainzScrobbler->moveToThread(m_listenBrainzThread);
-    connect(m_listenBrainzThread, &QThread::finished, m_listenBrainzScrobbler, &QObject::deleteLater);
-    m_listenBrainzThread->start();
+    m_listenBrainzHub = new ListenBrainzHub(this);
 
     m_lastFmThread = new QThread(this);
     m_lastFmScrobbler = new LastFmScrobbler;
@@ -462,10 +458,6 @@ AppCore::~AppCore()
     if (m_playEventRecorder != nullptr) {
         m_playEventRecorder->flushSessionEnd();
     }
-    if (m_listenBrainzThread != nullptr) {
-        m_listenBrainzThread->quit();
-        m_listenBrainzThread->wait(3000);
-    }
     if (m_lastFmThread != nullptr) {
         m_lastFmThread->quit();
         m_lastFmThread->wait(3000);
@@ -502,9 +494,8 @@ void AppCore::setScrobbleDestinations(const ScrobbleDestinationSet &destinations
         destinations);
 }
 
-ListenBrainzScrobbler *AppCore::listenBrainzScrobbler() const { return m_listenBrainzScrobbler; }
+ListenBrainzHub *AppCore::listenBrainzHub() const { return m_listenBrainzHub; }
 LastFmScrobbler *AppCore::lastFmScrobbler() const { return m_lastFmScrobbler; }
-QThread *AppCore::listenBrainzThread() const { return m_listenBrainzThread; }
 QThread *AppCore::lastFmThread() const { return m_lastFmThread; }
 
 QString AppCore::databasePath() const
@@ -690,7 +681,7 @@ void AppCore::setupMprisWiring()
         m_mpris->setPlaybackState(state);
         m_listenTracker->playbackStateChanged(playing);
         m_playEventRecorder->playbackStateChanged(playing);
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
+        m_listenBrainzHub->playbackStateChanged(playing);
         QMetaObject::invokeMethod(m_lastFmScrobbler, "playbackStateChanged", Qt::QueuedConnection, Q_ARG(bool, playing));
         updateMprisCapabilities();
     });
@@ -928,7 +919,7 @@ void AppCore::updateMprisCapabilities()
 void AppCore::notifyScrobblersTrackStarted(const Track &track)
 {
     m_listenTracker->trackStarted(track);
-    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
+    m_listenBrainzHub->trackStarted(track);
     QMetaObject::invokeMethod(m_lastFmScrobbler, "trackStarted", Qt::QueuedConnection, Q_ARG(Track, track));
 }
 
@@ -936,8 +927,7 @@ void AppCore::resumeScrobblers(const Track &track, qint64 elapsedMs, bool playin
 {
     m_listenTracker->resumeTrack(track, elapsedMs, playing);
     m_playEventRecorder->resumeTrack(track, elapsedMs, playing, QStringLiteral("resume"));
-    QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
-                              Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+    m_listenBrainzHub->resumeTrack(track, elapsedMs, playing);
     QMetaObject::invokeMethod(m_lastFmScrobbler, "resumeTrack", Qt::QueuedConnection,
                               Q_ARG(Track, track), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
 }

@@ -101,6 +101,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/BackfillParse.cpp
     src/scrobble/LastFmApi.cpp
     src/scrobble/LastFmScrobbler.cpp
+    src/scrobble/ListenBrainzHub.cpp
     src/scrobble/ListenBrainzScrobbler.cpp
     src/scrobble/ListenBrainzUrl.cpp
     src/scrobble/ListenHistoryStore.cpp
@@ -253,7 +254,10 @@ set(MUZAITEN_HEADERS
     src/scrobble/LastFmApi.h
     src/scrobble/LastFmCredentials.h
     src/scrobble/LastFmScrobbler.h
+    src/scrobble/ListenBrainzHub.h
     src/scrobble/ListenBrainzScrobbler.h
+    src/scrobble/ListenBrainzUrl.h
+    src/scrobble/ScrobbleDestination.h
     src/scrobble/ListenHistoryStore.h
     src/scrobble/ListenTracker.h
     src/scrobble/ScrobbleBackfill.h

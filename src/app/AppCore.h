@@ -20,7 +20,7 @@ class Database;
 class FeatureStore;
 class IpcServer;
 class LastFmScrobbler;
-class ListenBrainzScrobbler;
+class ListenBrainzHub;
 class ListenHistoryStore;
 class ListenTracker;
 class MainWindow;
@@ -69,9 +69,8 @@ public:
     IpcServer           *ipc() const;
     MainWindow          *window() const;
 
-    ListenBrainzScrobbler *listenBrainzScrobbler() const;
+    ListenBrainzHub       *listenBrainzHub() const;
     LastFmScrobbler       *lastFmScrobbler() const;
-    QThread               *listenBrainzThread() const;
     QThread               *lastFmThread() const;
 
     // The configured scrobbling destinations, read from the library settings.
@@ -267,8 +266,7 @@ private:
     PlaybackBackend  *m_playback = nullptr;
     ListenTracker    *m_listenTracker = nullptr;
     PlayEventRecorder *m_playEventRecorder = nullptr;
-    QThread          *m_listenBrainzThread = nullptr;
-    ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
+    ListenBrainzHub  *m_listenBrainzHub = nullptr;
     QThread          *m_lastFmThread = nullptr;
     LastFmScrobbler  *m_lastFmScrobbler = nullptr;
     QThread          *m_scrobbleBackfillThread = nullptr;

@@ -34,7 +34,7 @@ class FileExplorerView;
 class QCloseEvent;
 class QEvent;
 class QImage;
-class ListenBrainzScrobbler;
+class ListenBrainzHub;
 class LastFmScrobbler;
 class ListenHistoryStore;
 class ListenTracker;
@@ -270,6 +270,10 @@ private:
     void importMpdLibraryMetadata();
     QString mpdMusicDirectory() const;
     void configureListenBrainz();
+    // Display name for a destination id, for status and dialog text.
+    QString scrobbleDestinationName(const QString &destinationId) const;
+    // Flips one destination's enabled state and reconfigures the hub.
+    void setScrobbleDestinationEnabled(const QString &destinationId, bool enabled);
     void showListeningHistory();
     void clearScrobbleBacklog(const QString &service);
     void triggerScrobbleUpload(const QString &service);
@@ -533,7 +537,7 @@ private:
     quint64 m_currentArtGeneration = 0;
     ListenHistoryStore *m_listenHistory = nullptr;
     ListenTracker *m_listenTracker = nullptr;
-    ListenBrainzScrobbler *m_listenBrainzScrobbler = nullptr;
+    ListenBrainzHub *m_listenBrainzHub = nullptr;
     LastFmScrobbler *m_lastFmScrobbler = nullptr;
     // Tracks the previous backfillStatusChanged running state so a
     // running->idle transition (finished/failed) can pop a transient

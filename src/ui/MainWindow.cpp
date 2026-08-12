@@ -21,7 +21,8 @@
 #include "scanner/RatingTagSyncWorker.h"
 #include "scrobble/LastFmCredentials.h"
 #include "scrobble/LastFmScrobbler.h"
-#include "scrobble/ListenBrainzScrobbler.h"
+#include "scrobble/ListenBrainzHub.h"
+#include "scrobble/ListenBrainzUrl.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ListenTracker.h"
 #include "scrobble/ScrobbleBackfill.h"
@@ -675,7 +676,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_listenTracker= m_core->listenTracker();
     m_mpris     = m_core->mpris();
     m_ipc       = m_core->ipc();
-    m_listenBrainzScrobbler = m_core->listenBrainzScrobbler();
+    m_listenBrainzHub = m_core->listenBrainzHub();
     m_lastFmScrobbler       = m_core->lastFmScrobbler();
     m_scanController = new ScanController(*this);
     m_ratingSyncController = new RatingSyncController(*this);
@@ -964,28 +965,33 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
 
     // scrobbler signal connections TO the UI (statusBar, QMessageBox).
     // The workers and threads themselves are owned by AppCore.
-    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::submissionFailed, this, [this](const QString &message) {
-        statusBar()->showMessage(message, 10000);
-    });
-    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::backlogProcessed, this, [this](int sent, int skipped, int remaining) {
-        statusBar()->showMessage(QStringLiteral("ListenBrainz processed %1 listens (%2 skipped, %3 pending)")
-                                     .arg(sent)
-                                     .arg(skipped)
-                                     .arg(remaining),
-                                 6000);
-        updateScrobbleBacklogActions();
-    });
-    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::disabledAfterFailures, this, [this](const QString &message) {
-        m_database->setSetting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false"));
-        m_playerBar->setListenBrainzEnabled(false);
-        statusBar()->showMessage(message, 15000);
-        QMessageBox::warning(this, QStringLiteral("ListenBrainz"), message);
-    });
-    connect(m_listenBrainzScrobbler, &ListenBrainzScrobbler::tokenValidated, this, [this](bool valid, const QString &username) {
-        statusBar()->showMessage(valid ? QStringLiteral("ListenBrainz token valid: connected as %1").arg(username)
-                                       : QStringLiteral("ListenBrainz token is invalid."),
-                                 8000);
-    });
+    connect(m_listenBrainzHub, &ListenBrainzHub::submissionFailed, this,
+            [this](const QString &, const QString &message) { statusBar()->showMessage(message, 10000); });
+    connect(m_listenBrainzHub, &ListenBrainzHub::backlogProcessed, this,
+            [this](const QString &destinationId, int sent, int skipped, int remaining) {
+                statusBar()->showMessage(QStringLiteral("%1 processed %2 listens (%3 skipped, %4 pending)")
+                                             .arg(scrobbleDestinationName(destinationId))
+                                             .arg(sent)
+                                             .arg(skipped)
+                                             .arg(remaining),
+                                         6000);
+                updateScrobbleBacklogActions();
+            });
+    connect(m_listenBrainzHub, &ListenBrainzHub::disabledAfterFailures, this,
+            [this](const QString &destinationId, const QString &message) {
+                // Only the destination that failed is turned off; the others
+                // keep scrobbling.
+                setScrobbleDestinationEnabled(destinationId, false);
+                statusBar()->showMessage(message, 15000);
+                QMessageBox::warning(this, scrobbleDestinationName(destinationId), message);
+            });
+    connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, this,
+            [this](const QString &destinationId, bool valid, const QString &username) {
+                const QString name = scrobbleDestinationName(destinationId);
+                statusBar()->showMessage(valid ? QStringLiteral("%1 token valid: connected as %2").arg(name, username)
+                                               : QStringLiteral("%1 token is invalid.").arg(name),
+                                         8000);
+            });
 
     connect(m_lastFmScrobbler, &LastFmScrobbler::submissionFailed, this, [this](const QString &message) {
         statusBar()->showMessage(message, 10000);
@@ -5287,20 +5293,42 @@ QString MainWindow::mpdMusicDirectory() const
 
 void MainWindow::configureListenBrainz()
 {
-    const bool enabled = m_database->setting(QStringLiteral("listenbrainz.enabled"), QStringLiteral("false")) == QStringLiteral("true");
-    QString token = m_database->setting(QStringLiteral("listenbrainz.token"));
-    if (token.isEmpty()) {
-        token = QString::fromLocal8Bit(qgetenv("LISTENBRAINZ_TOKEN")).trimmed();
-    }
+    const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    const ScrobbleDestination *official =
+        destinations.find(ScrobbleDestinationConfig::listenBrainzId());
+    m_playerBar->setListenBrainzEnabled(official != nullptr && official->enabled);
 
-    m_playerBar->setListenBrainzEnabled(enabled);
-    QMetaObject::invokeMethod(m_listenBrainzScrobbler,
-                              "configure",
-                              Qt::QueuedConnection,
-                              Q_ARG(bool, enabled),
-                              Q_ARG(bool, !scrobbleOffline()),
-                              Q_ARG(QString, token),
-                              Q_ARG(QString, listenHistoryPath()));
+    m_listenBrainzHub->configure(
+        destinations,
+        [this](const QString &destinationId) {
+            QString token = m_database->setting(ScrobbleDestinationConfig::tokenSettingKey(destinationId));
+            if (token.isEmpty() && destinationId == ScrobbleDestinationConfig::listenBrainzId()) {
+                token = QString::fromLocal8Bit(qgetenv("LISTENBRAINZ_TOKEN")).trimmed();
+            }
+            return token;
+        },
+        !scrobbleOffline(), listenHistoryPath());
+}
+
+QString MainWindow::scrobbleDestinationName(const QString &destinationId) const
+{
+    const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    if (const ScrobbleDestination *destination = destinations.find(destinationId)) {
+        return destination->name;
+    }
+    return destinationId;
+}
+
+void MainWindow::setScrobbleDestinationEnabled(const QString &destinationId, bool enabled)
+{
+    ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    for (ScrobbleDestination &destination : destinations.items) {
+        if (destination.id == destinationId) {
+            destination.enabled = enabled;
+        }
+    }
+    m_core->setScrobbleDestinations(destinations);
+    configureListenBrainz();
 }
 
 void MainWindow::showListeningHistory()
@@ -5374,7 +5402,7 @@ void MainWindow::triggerScrobbleUpload(const QString &service)
     if (service == ListenHistoryStore::LastFm) {
         QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
     } else if (service == ListenHistoryStore::ListenBrainz) {
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "uploadBacklog", Qt::QueuedConnection);
+        m_listenBrainzHub->uploadBacklog();
     }
 }
 
@@ -5450,7 +5478,7 @@ void MainWindow::setScrobbleOffline(bool offline)
     // first.
     if (!offline && !m_player->currentTrack().path.isEmpty()
         && m_playback->state() == PlaybackBackend::State::Playing) {
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resendNowPlaying", Qt::QueuedConnection);
+        m_listenBrainzHub->resendNowPlaying();
         QMetaObject::invokeMethod(m_lastFmScrobbler, "resendNowPlaying", Qt::QueuedConnection);
     }
     statusBar()->showMessage(offline ? QStringLiteral("Scrobble uploads paused, listens are buffered locally")
@@ -5460,16 +5488,14 @@ void MainWindow::setScrobbleOffline(bool offline)
 
 void MainWindow::setListenBrainzEnabled(bool enabled)
 {
-    m_database->setSetting(QStringLiteral("listenbrainz.enabled"), enabled ? QStringLiteral("true") : QStringLiteral("false"));
-    configureListenBrainz();
+    setScrobbleDestinationEnabled(ScrobbleDestinationConfig::listenBrainzId(), enabled);
     // If a track is already playing when the scrobbler is toggled on, catch up
     // so it doesn't miss the current track.  The queued configure() runs first
     // (Qt::QueuedConnection), so credentials are set before resumeTrack fires.
     if (enabled && !m_player->currentTrack().path.isEmpty() && m_playback->state() != PlaybackBackend::State::Stopped) {
         const qint64 elapsedMs = std::max<qint64>(0, m_playback->position());
         const bool playing = m_playback->state() == PlaybackBackend::State::Playing;
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "resumeTrack", Qt::QueuedConnection,
-                                  Q_ARG(Track, m_player->currentTrack()), Q_ARG(qint64, elapsedMs), Q_ARG(bool, playing));
+        m_listenBrainzHub->resumeTrack(m_player->currentTrack(), elapsedMs, playing);
     }
     statusBar()->showMessage(enabled ? QStringLiteral("ListenBrainz scrobbling enabled") : QStringLiteral("ListenBrainz scrobbling disabled"), 3000);
 }
@@ -5493,7 +5519,8 @@ void MainWindow::setListenBrainzToken()
     configureListenBrainz();
     statusBar()->showMessage(QStringLiteral("ListenBrainz token updated"), 3000);
     if (!token.isEmpty()) {
-        QMetaObject::invokeMethod(m_listenBrainzScrobbler, "validateToken", Qt::QueuedConnection, Q_ARG(QString, token));
+        m_listenBrainzHub->validateToken(ScrobbleDestinationConfig::listenBrainzId(),
+                                         ListenBrainzUrl::officialApiRoot(), token);
     }
 }
 

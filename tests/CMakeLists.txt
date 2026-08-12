@@ -401,6 +401,22 @@ target_link_libraries(test_listenbrainz_url PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_listenbrainz_url PRIVATE cxx_std_26)
 add_test(NAME test_listenbrainz_url COMMAND test_listenbrainz_url)
 
+add_executable(test_listenbrainz_multi_destination
+    test_listenbrainz_multi_destination.cpp
+    ../src/scrobble/ListenBrainzHub.cpp
+    ../src/scrobble/ListenBrainzScrobbler.cpp
+    ../src/scrobble/ListenBrainzUrl.cpp
+    ../src/scrobble/ListenHistoryStore.cpp
+    ../src/scrobble/ScrobbleDestination.cpp
+)
+target_include_directories(test_listenbrainz_multi_destination PRIVATE
+    ../src
+    ${CMAKE_CURRENT_BINARY_DIR}/../generated
+)
+target_link_libraries(test_listenbrainz_multi_destination PRIVATE Qt6::Core Qt6::Network Qt6::Sql Qt6::Test)
+target_compile_features(test_listenbrainz_multi_destination PRIVATE cxx_std_26)
+add_test(NAME test_listenbrainz_multi_destination COMMAND test_listenbrainz_multi_destination)
+
 add_executable(test_scrobble_destinations
     test_scrobble_destinations.cpp
     ../src/scrobble/ListenBrainzUrl.cpp
