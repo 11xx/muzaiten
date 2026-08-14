@@ -211,6 +211,39 @@ private slots:
         core.stopRadio();
     }
 
+    void failedMixDoesNotCancelPendingSeededStart()
+    {
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+
+        Track seed;
+        seed.path = libraryRoot.filePath(QStringLiteral("seed.wav"));
+        seed.parentDir = libraryRoot.path();
+        seed.filename = QStringLiteral("seed.wav");
+        seed.title = QStringLiteral("Seed");
+        seed.artistName = QStringLiteral("Seed Artist");
+        seed.albumArtistName = seed.artistName;
+        seed.albumTitle = QStringLiteral("Seed Album");
+        seed.durationMs = 1000;
+        seed.fileSize = 1;
+        seed.fileMtime = 1;
+        seed.codec = QStringLiteral("wav");
+        QVERIFY(writeSilentWav(seed.path));
+
+        AppCore core;
+        QVERIFY2(core.database()->upsertTrack(seed), qPrintable(core.database()->lastError()));
+        core.database()->setSetting(QStringLiteral("radio.batchSize"), QStringLiteral("1"));
+        QVERIFY(core.startRadio(seed.path));
+        QVERIFY(core.player()->radioActive());
+        QVERIFY(!core.startMix(QStringLiteral("rediscovery")));
+
+        QTRY_VERIFY_WITH_TIMEOUT(core.m_radioSession != nullptr, 10000);
+        QVERIFY(core.player()->radioActive());
+        QCOMPARE(core.player()->queue().first().path, seed.path);
+        core.stopRadio();
+        core.player()->stop();
+    }
+
     void failedRadioStartsDoNotCreateSnapshots()
     {
         AppCore core;
