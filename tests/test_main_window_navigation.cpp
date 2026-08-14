@@ -40,6 +40,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLayout>
+#include <QProgressBar>
 #include <QLocalSocket>
 #include <QMenu>
 #include <QMenuBar>
@@ -147,6 +148,85 @@ private slots:
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);
+    }
+
+    void radioUiStateSurvivesWindowRebuild()
+    {
+        AppCore core;
+        core.setRadioLoading(true);
+        core.showWindow();
+        QVERIFY(core.window() != nullptr);
+
+        core.player()->setRadioActive(true);
+        QVERIFY(core.window()->m_playerBar->m_radioActive);
+        QVERIFY(core.window()->m_playerBar->m_radio->isChecked());
+
+        core.releaseWindow();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+        QVERIFY(core.window() == nullptr);
+
+        core.showWindow();
+        QVERIFY(core.window() != nullptr);
+        QVERIFY(core.window()->m_playerBar->m_radioActive);
+        QVERIFY(core.window()->m_playerBar->m_radio->isChecked());
+        QVERIFY(core.window()->m_playerBar->m_radio->isVisible());
+        QVERIFY(core.window()->m_playerBar->m_stopRadioAction->isEnabled());
+        QVERIFY(core.window()->m_radioProgress->isVisible());
+
+        core.stopRadio();
+        core.releaseWindow();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
+
+    void failedMixPreservesActiveRadioRefill()
+    {
+        AppCore core;
+        Track current;
+        current.path = QStringLiteral("/radio-current.flac");
+        core.player()->resetQueue({current}, 0);
+
+        TrackScorer::Candidate candidate;
+        candidate.path = QStringLiteral("/unresolvable-radio-candidate.flac");
+        candidate.songKey = QStringLiteral("song:unresolvable-radio-candidate");
+        candidate.artistFolded = QStringLiteral("radio-artist");
+        candidate.albumKey = QStringLiteral("radio-album");
+        core.m_radioSession = std::make_unique<RadioSession>(
+            QVector<TrackScorer::Candidate>{candidate}, QHash<QString, TrackScorer::Affinity>{},
+            QHash<QString, double>{}, 30, QDateTime::currentSecsSinceEpoch());
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.player()->setRadioActive(true);
+
+        core.appendRadioBatch(1);
+        QVERIFY(core.m_radioTopUpInProgress);
+        QVERIFY(!core.startMix(QStringLiteral("rediscovery")));
+        QVERIFY(core.player()->radioActive());
+        QVERIFY(core.m_radioSession != nullptr);
+
+        QTRY_VERIFY_WITH_TIMEOUT(!core.m_radioTopUpInProgress, 10000);
+        QVERIFY(core.player()->radioActive());
+        QVERIFY(core.m_radioSession != nullptr);
+        QCOMPARE(core.player()->queue().first().path, current.path);
+        core.stopRadio();
+    }
+
+    void failedRadioStartsDoNotCreateSnapshots()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        Track current;
+        current.path = QStringLiteral("/failed-radio-start.flac");
+        window.m_player->resetQueue({current}, 0);
+
+        window.startMix(QStringLiteral("rediscovery"));
+        window.startArtistRadio(QStringLiteral("Missing Artist"));
+
+        QCOMPARE(window.m_player->queue().size(), 1);
+        QCOMPARE(window.m_player->queue().first().path, current.path);
+        QVERIFY(window.m_queueId.isEmpty());
+        QCOMPARE(window.loadQueueSnapshotsRoot().value(QStringLiteral("radioBacklog")).toArray().size(), 0);
+        QVERIFY(!core.player()->radioActive());
     }
 
     void repairsMissingRestoredFreeRoamDirectory()

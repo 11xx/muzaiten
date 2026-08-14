@@ -315,6 +315,7 @@ private:
     void removeQueueRows(const QVector<int> &rows);
     void clearQueue();
     void clearPlayNextPriority();
+    void syncRadioUiState();
     // Snapshots the current queue to the backlog (same as Clear queue) so
     // "Restore previous queue" can undo a radio start, then hands the seed
     // paths to AppCore::startRadio(). Shows a status message on an unknown seed.

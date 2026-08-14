@@ -484,15 +484,26 @@ bool QueueSnapshotStore::currentQueueBacklogEligible() const
     return !m_window.m_player->queue().isEmpty() && m_window.m_queueSourceKind == QStringLiteral("queue");
 }
 
-void QueueSnapshotStore::pushCurrentQueueToBacklog(const QString &name, const QString &source)
+QJsonObject QueueSnapshotStore::captureCurrentQueueSnapshot(const QString &source)
 {
     if (!currentQueueBacklogEligible()) {
+        return {};
+    }
+    QJsonObject snapshot = queueSnapshotObject(QString(), source);
+    if (snapshot.value(QStringLiteral("id")).toString().isEmpty()) {
+        snapshot.insert(QStringLiteral("id"), newQueueIdentity());
+    }
+    return snapshot;
+}
+
+void QueueSnapshotStore::pushQueueSnapshotToBacklog(const QJsonObject &snapshot)
+{
+    if (snapshot.isEmpty()) {
         return;
     }
-    ensureCurrentQueueIdentity();
+
     QJsonObject root = loadQueueSnapshotsRoot();
-    const QString snapshotId = m_window.m_queueId;
-    QJsonObject snapshot = queueSnapshotObject(name, source);
+    const QString snapshotId = snapshot.value(QStringLiteral("id")).toString();
     QJsonArray backlog = queueBacklogFromRoot(root);
     QJsonArray radioBacklog = radioQueueBacklogFromRoot(root);
     const bool radioSnapshot = queueSnapshotIsRadio(snapshot);
@@ -502,7 +513,8 @@ void QueueSnapshotStore::pushCurrentQueueToBacklog(const QString &name, const QS
     updatedBacklog.append(snapshot);
     for (const QJsonValue &value : targetBacklog) {
         const QJsonObject candidate = value.toObject();
-        if (candidate.isEmpty() || candidate.value(QStringLiteral("id")).toString() == snapshotId) {
+        if (candidate.isEmpty() || (!snapshotId.isEmpty()
+                                    && candidate.value(QStringLiteral("id")).toString() == snapshotId)) {
             continue;
         }
         updatedBacklog.append(candidate);
@@ -515,6 +527,15 @@ void QueueSnapshotStore::pushCurrentQueueToBacklog(const QString &name, const QS
     root.insert(QStringLiteral("backlog"), backlog);
     root.insert(QStringLiteral("radioBacklog"), radioBacklog);
     saveQueueSnapshotsRoot(root);
+}
+
+void QueueSnapshotStore::pushCurrentQueueToBacklog(const QString &name, const QString &source)
+{
+    if (!currentQueueBacklogEligible()) {
+        return;
+    }
+    ensureCurrentQueueIdentity();
+    pushQueueSnapshotToBacklog(queueSnapshotObject(name, source));
 }
 
 void QueueSnapshotStore::snapshotCurrentQueueAsPrevious(const QString &source)

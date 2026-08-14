@@ -18,6 +18,8 @@ public:
     bool radioSavedQueueUnlimitedSetting() const;
     void ensureCurrentQueueIdentity();
     bool currentQueueBacklogEligible() const;
+    QJsonObject captureCurrentQueueSnapshot(const QString &source = {});
+    void pushQueueSnapshotToBacklog(const QJsonObject &snapshot);
     void pushCurrentQueueToBacklog(const QString &, const QString & = {});
     void snapshotCurrentQueueAsPrevious(const QString & = {});
     void markQueueAsSpontaneous(const QString & = {});

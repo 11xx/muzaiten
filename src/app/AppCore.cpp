@@ -2130,10 +2130,6 @@ bool AppCore::startArtistRadio(const QString &artistName)
     if (trimmedArtist.isEmpty() || artistTracks.isEmpty()) {
         return false;
     }
-    ++m_radioRequestId;
-    ++m_radioQueueRevision;
-    setRadioLoading(false);
-
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
     const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
@@ -2148,6 +2144,9 @@ bool AppCore::startArtistRadio(const QString &artistName)
     if (representative.path.isEmpty()) {
         return false;
     }
+    ++m_radioRequestId;
+    ++m_radioQueueRevision;
+    setRadioLoading(false);
     QVector<TrackScorer::Candidate> pool =
         buildRadioCandidatePool(informativeGenres, genreAliases, ignoredRadioGenres, resolvedSongKeys,
                                 {representative.path});
@@ -2210,10 +2209,6 @@ bool AppCore::startMix(const QString &mode)
     if (!mixMode || m_database == nullptr || m_player == nullptr) {
         return false;
     }
-    ++m_radioRequestId;
-    ++m_radioQueueRevision;
-    setRadioLoading(false);
-
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
     const QSet<QString> ignoredRadioGenres = m_database->ignoredRadioGenres();
     const QHash<QString, QString> resolvedSongKeys = buildResolvedSongKeyMap();
@@ -2226,32 +2221,36 @@ bool AppCore::startMix(const QString &mode)
         return false;
     }
 
+    const int batchSize = std::clamp(
+        m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
+        1, 100);
     const int persistedExploration = std::clamp(
         m_database->setting(QStringLiteral("radio.exploration"), QString::number(kDefaultRadioExploration)).toInt(),
         0, 100);
     const int exploration = m_radioAdventurous ? kAdventurousExploration : persistedExploration;
-
-    m_radioBatchSize = std::clamp(
-        m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
-        1, 100);
-
-    m_radioSessionWeights = radioScoringWeights();
-    m_radioSessionDecay = radioSessionDecay();
+    const TrackScorer::Weights sessionWeights = radioScoringWeights();
+    const TrackScorer::RadioSessionDecay sessionDecay = radioSessionDecay();
     QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
     auto session = std::make_unique<RadioSession>(std::move(pool), affinities,
-                                                  buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
-                                                  exploration, nowSecs, nullptr, m_radioSessionWeights,
-                                                  std::move(embeddings), m_radioSessionDecay);
+                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
+                                                   exploration, nowSecs, nullptr, sessionWeights,
+                                                   std::move(embeddings), sessionDecay);
     const QSet<QString> neverRadioPaths = m_database != nullptr
         ? m_database->flaggedPaths(Database::TrackFlag::NeverRadio)
         : QSet<QString>{};
-    QVector<Track> picks = session->nextTracks(m_radioBatchSize, {}, [this, neverRadioPaths](const QString &path) {
+    QVector<Track> picks = session->nextTracks(batchSize, {}, [this, neverRadioPaths](const QString &path) {
         return resolveRadioPick(path, neverRadioPaths);
     });
     if (picks.isEmpty()) {
         return false;
     }
 
+    ++m_radioRequestId;
+    ++m_radioQueueRevision;
+    setRadioLoading(false);
+    m_radioBatchSize = batchSize;
+    m_radioSessionWeights = sessionWeights;
+    m_radioSessionDecay = sessionDecay;
     m_radioAdventurous = false;
     m_radioPickPaths.clear();
     m_radioShuffleSessionActive = false;

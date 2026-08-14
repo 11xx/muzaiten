@@ -24,6 +24,8 @@ history. There is no cloud, no account, and nothing leaves your machine.
 Starting radio snapshots the current queue first, so "Restore saved queue…"
 can undo it. While a session runs, a radio indicator appears in the player
 bar. Click to stop (the queue is kept), or right-click for session options.
+Closing the window to the tray does not stop the session; reopening it restores
+the indicator and its session controls.
 Starting from the track that is already playing keeps its playback position
 and replaces only the queue around it. Starting from another track plays that
 seed immediately. In both cases recommendations load in the background and an

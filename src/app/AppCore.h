@@ -56,6 +56,7 @@ public:
     ~AppCore() override;
 
     PlayerCore          *player() const;
+    bool radioLoading() const { return m_radioLoading; }
     PlaybackBackend     *backend() const;
     Database            *database() const;
     PlaylistDatabase    *playlistDatabase() const;

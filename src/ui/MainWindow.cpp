@@ -784,6 +784,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_radioProgress->setVisible(false);
     statusBar()->addPermanentWidget(m_radioProgress);
     connect(m_core, &AppCore::radioLoadingChanged, m_radioProgress, &QWidget::setVisible);
+    m_radioProgress->setVisible(m_core->radioLoading());
     m_stopScanButton = new QPushButton(QStringLiteral("Stop scan"), this);
     m_stopScanButton->setVisible(false);
     m_stopScanButton->setToolTip(QStringLiteral("Cancel the current library scan"));
@@ -856,11 +857,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         m_playerBar->setShuffleMode(mode);
     });
     connect(m_player, &PlayerCore::radioActiveChanged, this, [this](bool active) {
-        m_playerBar->setRadioActive(active);
-        m_rightSidebar->setRadioActive(active);
-        if (m_queueScreen != nullptr) {
-            m_queueScreen->setRadioActive(active);
-        }
+        syncRadioUiState();
         // Radio replaces the queue with its own session. Sever any playlist
         // backing BEFORE the seed lands: radioActiveChanged fires ahead of the
         // clearAll/appendAndPlay sequence in AppCore::startRadio, and with a
@@ -1583,6 +1580,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     loadSearchRankingConfig();
     loadPlaybackModes();
     loadQueueState();
+    syncRadioUiState();
     refreshSavedQueuePlaylistEntries();
     loadExplorerState();
     m_playerBar->setScrobbleOffline(scrobbleOffline());
@@ -1648,6 +1646,16 @@ MainWindow::~MainWindow()
         if (!m_dropImportThread->wait(5000)) {
             m_dropImportThread->wait();
         }
+    }
+}
+
+void MainWindow::syncRadioUiState()
+{
+    const bool active = m_player != nullptr && m_player->radioActive();
+    m_playerBar->setRadioActive(active);
+    m_rightSidebar->setRadioActive(active);
+    if (m_queueScreen != nullptr) {
+        m_queueScreen->setRadioActive(active);
     }
 }
 
@@ -5874,11 +5882,13 @@ void MainWindow::startRadioFromSeeds(const QStringList &paths)
         return;
     }
 
-    // Same snapshot call Clear queue uses before wiping the queue, so a radio
-    // start can be undone via "Restore previous queue".
-    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+    // Capture before the queue is replaced, then publish the snapshot only if
+    // the radio start commits successfully.
+    const QJsonObject previous = m_queueSnapshotStore->captureCurrentQueueSnapshot(QStringLiteral("radio"));
     if (!m_core->startRadio(libraryPaths)) {
         statusBar()->showMessage(missingMessage, 4000);
+    } else {
+        m_queueSnapshotStore->pushQueueSnapshotToBacklog(previous);
     }
 }
 
@@ -5893,9 +5903,11 @@ void MainWindow::startArtistRadio(const QString &artistName)
     if (trimmedArtist.isEmpty()) {
         return;
     }
-    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+    const QJsonObject previous = m_queueSnapshotStore->captureCurrentQueueSnapshot(QStringLiteral("radio"));
     if (!m_core->startArtistRadio(trimmedArtist)) {
         statusBar()->showMessage(QStringLiteral("Start Artist Radio: artist not found in library"), 4000);
+    } else {
+        m_queueSnapshotStore->pushQueueSnapshotToBacklog(previous);
     }
 }
 
@@ -5920,9 +5932,11 @@ void MainWindow::applyTrackFlag(const Track &track, const QString &flag, bool on
 
 void MainWindow::startMix(const QString &mode)
 {
-    snapshotCurrentQueueAsPrevious(QStringLiteral("radio"));
+    const QJsonObject previous = m_queueSnapshotStore->captureCurrentQueueSnapshot(QStringLiteral("radio"));
     if (!m_core->startMix(mode)) {
         statusBar()->showMessage(QStringLiteral("Not enough listening data for this mix yet"), 4000);
+    } else {
+        m_queueSnapshotStore->pushQueueSnapshotToBacklog(previous);
     }
 }
 

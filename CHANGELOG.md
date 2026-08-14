@@ -38,6 +38,10 @@
 
 ### Fixed
 
+- Reopening a tray-hidden window now restores the active radio indicator and
+  its queue controls while the existing session continues refilling.
+- Failed artist-radio and mix starts no longer invalidate an active radio
+  refill or create a restore snapshot when no session was started.
 - Toggling repeat or shuffle while an exhausted radio queue is refilling no
   longer lets speculative gapless preparation duplicate the next recommendation.
 - Track-list refreshes now keep the surviving selection, the keyboard cursor
