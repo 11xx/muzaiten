@@ -20,7 +20,6 @@
 #include <QDialogButtonBox>
 #include <QFrame>
 #include <QGridLayout>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -56,13 +55,26 @@ enum class Health {
     Busy,      // a test is in flight
 };
 
-// Column headers and other secondary text. PlaceholderText tracks the active
-// theme, which a hardcoded colour cannot.
-void makeMuted(QWidget *widget)
+// Column headers, the empty-value placeholder, and other secondary text.
+// PlaceholderText tracks the active theme, which a hardcoded colour cannot.
+// The source is always the application palette, so tinting a widget twice does
+// not compound.
+void setMuted(QWidget *widget, bool muted)
 {
     QPalette palette = widget->palette();
-    palette.setColor(QPalette::WindowText, palette.color(QPalette::PlaceholderText));
+    palette.setColor(QPalette::WindowText, QApplication::palette().color(muted ? QPalette::PlaceholderText
+                                                                               : QPalette::WindowText));
     widget->setPalette(palette);
+}
+
+void makeMuted(QWidget *widget) { setMuted(widget, true); }
+
+// A value, or the placeholder for its absence, which recedes rather than
+// competing with the values around it.
+void setValueOrDash(QLabel *label, const QString &value)
+{
+    label->setText(value.isEmpty() ? kEmptyCell : value);
+    setMuted(label, value.isEmpty());
 }
 
 QFrame *horizontalRule(QWidget *parent)
@@ -150,11 +162,17 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
 
-        const QRectF track(1, (height() - 18) / 2.0, 34, 18);
-        const QColor off = palette().color(isEnabled() ? QPalette::Active : QPalette::Disabled, QPalette::Mid);
-        const QColor on = palette().color(QPalette::Highlight);
+        const QRectF track(1.5, (height() - 18) / 2.0, 33, 18);
+        const QPalette::ColorGroup group = isEnabled() ? QPalette::Active : QPalette::Disabled;
+        const QColor off = palette().color(group, QPalette::Button);
+        const QColor on = palette().color(group, QPalette::Highlight);
         const auto blend = [this](qreal from, qreal to) { return static_cast<float>(from + (to - from) * m_position); };
-        painter.setPen(Qt::NoPen);
+        // An off switch is a track with nothing in it, and on a theme where the
+        // track and the window are near enough the same colour it would read as
+        // nothing at all. The outline is what makes it a control either way.
+        QColor outline = palette().color(group, QPalette::WindowText);
+        outline.setAlphaF(0.45 - 0.35 * m_position);
+        painter.setPen(QPen(outline, 1));
         painter.setBrush(QColor::fromRgbF(blend(off.redF(), on.redF()), blend(off.greenF(), on.greenF()),
                                           blend(off.blueF(), on.blueF())));
         painter.drawRoundedRect(track, track.height() / 2, track.height() / 2);
@@ -169,7 +187,7 @@ protected:
         const qreal travel = track.width() - track.height();
         const QPointF knob(track.left() + track.height() / 2 + travel * m_position, track.center().y());
         painter.setPen(Qt::NoPen);
-        painter.setBrush(palette().color(QPalette::BrightText));
+        painter.setBrush(palette().color(group, QPalette::BrightText));
         painter.drawEllipse(knob, track.height() / 2 - 2.5, track.height() / 2 - 2.5);
     }
 
@@ -240,9 +258,11 @@ public:
         // A built-in destination is not the user's to rename or repoint, so it
         // shows the value as text rather than as a field that refuses input.
         m_fixedName = new QLabel(m_destination.name, host);
-        m_fixedUrl = new QLabel(m_destination.lastFm ? kEmptyCell : m_destination.url, host);
+        m_fixedUrl = new QLabel(host);
         m_fixedUrl->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_fixedToken = new QLabel(kEmptyCell, host);
+        setValueOrDash(m_fixedUrl, m_destination.lastFm ? QString() : m_destination.url);
+        m_fixedToken = new QLabel(host);
+        setValueOrDash(m_fixedToken, {});
         // Indented to the text inset of the fields beside them, so a fixed value
         // and an editable one start at the same x.
         const int inset = host->style()->pixelMetric(QStyle::PM_DefaultFrameWidth) + 3;
@@ -357,7 +377,7 @@ private:
         }
         m_dot->setHealth(health);
         m_status->setText(text);
-        m_pending->setText(m_destination.pending > 0 ? QStringLiteral("%1").arg(m_destination.pending) : kEmptyCell);
+        setValueOrDash(m_pending, m_destination.pending > 0 ? QString::number(m_destination.pending) : QString());
         m_test->setEnabled(isValid());
         // With no OK button to gate on, an entry that cannot deliver is instead
         // one that cannot be enabled: it is saved, but never sent to.
@@ -445,22 +465,25 @@ QWidget *buildManagerTab(QWidget *parent)
     problem->setWordWrap(true);
     layout->addWidget(problem);
 
-    auto *addRowLayout = new QHBoxLayout;
+    // Add server, offline mode and the Last.fm settings share one row: all three
+    // are the dialog's miscellaneous controls, none of them belonging to a
+    // single destination. Adding sits under the list it adds to; the two that
+    // apply to scrobbling as a whole sit away from it, on the right.
+    auto *misc = new QHBoxLayout;
     auto *add = new QPushButton(QStringLiteral("Add server…"), page);
-    addRowLayout->addWidget(add);
-    addRowLayout->addStretch();
-    layout->addLayout(addRowLayout);
-
-    // The rest of the Scrobblers menu, in the dialog that owns the same subject.
-    auto *options = new QGroupBox(QStringLiteral("Scrobbling"), page);
-    auto *optionsLayout = new QHBoxLayout(options);
-    auto *offline = new QCheckBox(QStringLiteral("Offline mode (buffer listens locally)"), options);
-    offline->setToolTip(QStringLiteral("Keep collecting listening history but send nothing; unchecking uploads the "
-                                       "buffered backlog."));
-    optionsLayout->addWidget(offline);
-    optionsLayout->addStretch();
-    optionsLayout->addWidget(new QPushButton(QStringLiteral("Last.fm API settings…"), options));
-    layout->addWidget(options);
+    auto *offline = new ToggleSwitch(page);
+    auto *offlineLabel = new QLabel(QStringLiteral("Offline mode (buffer listens locally)"), page);
+    const auto offlineHint = QStringLiteral("Keep collecting listening history but send nothing; switching it off "
+                                            "uploads the buffered backlog.");
+    offline->setToolTip(offlineHint);
+    offlineLabel->setToolTip(offlineHint);
+    misc->addWidget(add);
+    misc->addStretch();
+    misc->addWidget(offline);
+    misc->addWidget(offlineLabel);
+    misc->addSpacing(16);
+    misc->addWidget(new QPushButton(QStringLiteral("Last.fm API settings…"), page));
+    layout->addLayout(misc);
 
     auto *saveNote = new QLabel(QStringLiteral("Changes are saved as you make them, and take effect when this window "
                                                "closes."),
