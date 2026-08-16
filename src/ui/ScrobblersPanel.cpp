@@ -111,6 +111,7 @@ public:
         connect(m_url, &QLineEdit::editingFinished, this, &DestinationRow::commitUrl);
         connect(m_url, &QLineEdit::textChanged, this, [this] {
             m_status.clear();
+            abandonOutstandingTest();
             refresh();
         });
 
@@ -120,6 +121,7 @@ public:
         connect(m_token, &QLineEdit::editingFinished, this, &DestinationRow::commitToken);
         connect(m_token, &QLineEdit::textChanged, this, [this] {
             m_status.clear();
+            abandonOutstandingTest();
             refresh();
         });
 
@@ -229,14 +231,13 @@ public:
         refresh();
     }
 
-    // A reply is this row's answer only while it still describes the address and
-    // token the test was issued for. Anything else is about a state the row has
-    // since left, whatever its id says.
-    bool awaitsTestResult() const
-    {
-        return m_testPending && m_testedApiRoot == m_destination.apiRoot
-            && m_testedToken == m_token->text().trimmed();
-    }
+    // A reply is this row's answer only while nothing it was asked about has
+    // moved. Any edit to the address or the token abandons the outstanding
+    // test, so a reply describing what was sent before it cannot land on a row
+    // that now shows something else, whatever its id says.
+    bool awaitsTestResult() const { return m_testPending; }
+
+    void abandonOutstandingTest() { m_testPending = false; }
 
     void testResultConsumed() { m_testPending = false; }
 
@@ -420,11 +421,9 @@ private:
             return;
         }
         commitToken();
-        m_testedApiRoot = m_destination.apiRoot;
-        m_testedToken = m_token->text().trimmed();
         m_testPending = true;
         setStatus(QStringLiteral("Testing…"), DestinationHealth::Busy);
-        m_dialog->m_callbacks.testDestination(m_destination.id, m_testedApiRoot, m_testedToken);
+        m_dialog->m_callbacks.testDestination(m_destination.id, m_destination.apiRoot, m_token->text().trimmed());
     }
 
     void refresh()
@@ -469,11 +468,9 @@ private:
     // Whether this destination is already part of the saved configuration, as
     // opposed to a row added here that has not earned an address yet.
     bool m_alreadyConfigured = false;
-    // The credentials the outstanding test was issued for, which is what makes
-    // its reply identifiable.
+    // Whether a test is outstanding. Abandoned by any edit to what it asked
+    // about, which is what keeps its reply from landing on a changed row.
     bool m_testPending = false;
-    QString m_testedApiRoot;
-    QString m_testedToken;
     QHBoxLayout *m_statusLayout = nullptr;
     QString m_status;
     DestinationHealth m_health = DestinationHealth::Unknown;
