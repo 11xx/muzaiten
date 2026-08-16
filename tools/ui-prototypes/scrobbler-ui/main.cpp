@@ -1,11 +1,15 @@
 // Standalone prototype for two scrobbling UI surfaces, built and run on its own
 // so the design can be iterated without rebuilding the application:
 //
-//   * the scrobbler manager as a list of per-destination rows, where every
-//     action is reachable in one click and the fields edit in place;
-//   * the listening-history destination filter as a multi-select popup that
+//   * the scrobbler manager as a per-destination grid, where every action is
+//     reachable in one click and the fields edit in place;
+//   * the listening history's destination filter as a multi-select popup that
 //     stays open while destinations are toggled, next to a table that keeps its
 //     selection visible while that popup holds focus.
+//
+// The widgets are stock Qt drawn by the active style, so a Kvantum or platform
+// theme dresses this the same way it dresses the application. The one drawn
+// control is the enable switch, which reads its colours out of the palette.
 //
 // It carries fake data and no persistence. Nothing here is linked into the
 // application; see tools/ui-prototypes/README.md.
@@ -14,15 +18,16 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QEnterEvent>
-#include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
-#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
@@ -31,70 +36,56 @@
 #include <QTabWidget>
 #include <QTableView>
 #include <QTimer>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <QVariantAnimation>
 
-#include <array>
+#include <functional>
 
 namespace {
+
+// The placeholder for a value a destination cannot have, matching the rest of
+// the app's tables.
+const auto kEmptyCell = QStringLiteral("—");
 
 // ---------------------------------------------------------------- shared bits
 
 enum class Health {
     Unknown,   // nothing tried yet
     Good,      // credentials verified
-    Bad,       // credentials rejected
+    Bad,       // credentials rejected, or a value the destination cannot work without
     Busy,      // a test is in flight
 };
 
-QColor healthColor(Health health, const QPalette &palette)
-{
-    switch (health) {
-    case Health::Good:
-        return QColor(0x3f, 0xa0, 0x5f);
-    case Health::Bad:
-        return QColor(0xc6, 0x4b, 0x4b);
-    case Health::Busy:
-        return palette.color(QPalette::Highlight);
-    case Health::Unknown:
-        break;
-    }
-    return palette.color(QPalette::Mid);
-}
-
-// Secondary text: readable, but clearly subordinate to the value beside it.
-// PlaceholderText tracks the theme, which a stylesheet colour cannot.
+// Column headers and other secondary text. PlaceholderText tracks the active
+// theme, which a hardcoded colour cannot.
 void makeMuted(QWidget *widget)
 {
     QPalette palette = widget->palette();
     palette.setColor(QPalette::WindowText, palette.color(QPalette::PlaceholderText));
-    palette.setColor(QPalette::Text, palette.color(QPalette::PlaceholderText));
     widget->setPalette(palette);
 }
 
-// A dot plus a word, sized like body text: enough to read the state at a glance
-// without the weight of a table cell.
-class StatusPill final : public QWidget {
+QFrame *horizontalRule(QWidget *parent)
+{
+    auto *rule = new QFrame(parent);
+    rule->setFrameShape(QFrame::HLine);
+    rule->setFrameShadow(QFrame::Sunken);
+    return rule;
+}
+
+// A dot ahead of the status word, sized to sit on the text's baseline.
+class HealthDot final : public QWidget {
 public:
-    explicit StatusPill(QWidget *parent = nullptr)
+    explicit HealthDot(QWidget *parent = nullptr)
         : QWidget(parent)
     {
-        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        setFixedWidth(10);
     }
 
-    void setState(Health health, const QString &text)
+    void setHealth(Health health)
     {
         m_health = health;
-        m_text = text;
-        updateGeometry();
         update();
-    }
-
-    QSize sizeHint() const override
-    {
-        const QFontMetrics metrics(font());
-        return {metrics.horizontalAdvance(m_text) + 18, metrics.height() + 4};
     }
 
 protected:
@@ -102,22 +93,33 @@ protected:
     {
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
-        const QColor color = healthColor(m_health, palette());
         painter.setPen(Qt::NoPen);
-        painter.setBrush(color);
-        const int dot = 7;
-        painter.drawEllipse(QPointF(dot / 2.0 + 1, height() / 2.0), dot / 2.0, dot / 2.0);
-        painter.setPen(palette().color(QPalette::Text));
-        painter.drawText(QRect(dot + 6, 0, width() - dot - 6, height()), Qt::AlignVCenter | Qt::AlignLeft, m_text);
+        painter.setBrush(color());
+        painter.drawEllipse(QPointF(width() / 2.0, height() / 2.0), 3.5, 3.5);
     }
 
 private:
+    QColor color() const
+    {
+        switch (m_health) {
+        case Health::Good:
+            return QColor(0x3f, 0xa0, 0x5f);
+        case Health::Bad:
+            return QColor(0xc6, 0x4b, 0x4b);
+        case Health::Busy:
+            return palette().color(QPalette::Highlight);
+        case Health::Unknown:
+            break;
+        }
+        return palette().color(QPalette::PlaceholderText);
+    }
+
     Health m_health = Health::Unknown;
-    QString m_text;
 };
 
-// A switch rather than a checkbox: it reads as a live state that a single click
-// flips, which is what enabling a destination is.
+// A switch rather than a checkbox: enabling a destination is a live state that
+// one click flips, and the switch says so without a label. Its colours come
+// from the palette, so it follows the theme like everything around it.
 class ToggleSwitch final : public QAbstractButton {
 public:
     explicit ToggleSwitch(QWidget *parent = nullptr)
@@ -148,23 +150,20 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
 
-        const QRectF track(1, (height() - 18) / 2.0, 36, 18);
-        const QColor off = palette().color(QPalette::Mid);
+        const QRectF track(1, (height() - 18) / 2.0, 34, 18);
+        const QColor off = palette().color(isEnabled() ? QPalette::Active : QPalette::Disabled, QPalette::Mid);
         const QColor on = palette().color(QPalette::Highlight);
         const auto blend = [this](qreal from, qreal to) { return static_cast<float>(from + (to - from) * m_position); };
-        QColor trackColor = QColor::fromRgbF(blend(off.redF(), on.redF()), blend(off.greenF(), on.greenF()),
-                                             blend(off.blueF(), on.blueF()));
-        if (!isEnabled()) {
-            trackColor = palette().color(QPalette::Disabled, QPalette::Mid);
-        }
         painter.setPen(Qt::NoPen);
-        painter.setBrush(trackColor);
+        painter.setBrush(QColor::fromRgbF(blend(off.redF(), on.redF()), blend(off.greenF(), on.greenF()),
+                                          blend(off.blueF(), on.blueF())));
         painter.drawRoundedRect(track, track.height() / 2, track.height() / 2);
 
         if (hasFocus()) {
             painter.setPen(QPen(palette().color(QPalette::Highlight), 1));
             painter.setBrush(Qt::NoBrush);
-            painter.drawRoundedRect(track.adjusted(-1, -1, 1, 1), track.height() / 2, track.height() / 2);
+            painter.drawRoundedRect(track.adjusted(-1.5, -1.5, 1.5, 1.5), track.height() / 2 + 1,
+                                    track.height() / 2 + 1);
         }
 
         const qreal travel = track.width() - track.height();
@@ -179,90 +178,6 @@ private:
     qreal m_position = 0.0;
 };
 
-// A field that reads as text until it is pointed at, so a row of values does not
-// look like a form yet still edits where it is displayed.
-class InlineEdit final : public QLineEdit {
-public:
-    explicit InlineEdit(const QString &text, QWidget *parent = nullptr)
-        : QLineEdit(text, parent)
-    {
-        setFrame(false);
-        applySkin(Skin::Resting);
-    }
-
-protected:
-    void enterEvent(QEnterEvent *event) override
-    {
-        QLineEdit::enterEvent(event);
-        if (isEnabled() && !isReadOnly() && !hasFocus()) {
-            applySkin(Skin::Hover);
-        }
-    }
-
-    void leaveEvent(QEvent *event) override
-    {
-        QLineEdit::leaveEvent(event);
-        if (!hasFocus()) {
-            applySkin(Skin::Resting);
-        }
-    }
-
-    void focusInEvent(QFocusEvent *event) override
-    {
-        QLineEdit::focusInEvent(event);
-        applySkin(isReadOnly() ? Skin::Resting : Skin::Editing);
-    }
-
-    void focusOutEvent(QFocusEvent *event) override
-    {
-        QLineEdit::focusOutEvent(event);
-        applySkin(Skin::Resting);
-    }
-
-private:
-    enum class Skin { Resting, Hover, Editing };
-
-    void applySkin(Skin skin)
-    {
-        static const auto kResting = QStringLiteral(
-            "QLineEdit{background:transparent;border:1px solid transparent;border-radius:3px;padding:1px 3px;}");
-        static const auto kHover = QStringLiteral(
-            "QLineEdit{background:transparent;border:1px solid palette(mid);border-radius:3px;padding:1px 3px;}");
-        static const auto kEditing = QStringLiteral(
-            "QLineEdit{background:palette(base);border:1px solid palette(highlight);border-radius:3px;padding:1px 3px;}");
-        switch (skin) {
-        case Skin::Resting:
-            setStyleSheet(kResting);
-            return;
-        case Skin::Hover:
-            setStyleSheet(kHover);
-            return;
-        case Skin::Editing:
-            setStyleSheet(kEditing);
-            return;
-        }
-    }
-};
-
-// A borderless button that only draws itself once the row is pointed at, so the
-// per-row actions stay available without turning the list into a toolbar.
-QToolButton *rowAction(const QString &text, const QString &tip, QWidget *parent)
-{
-    auto *button = new QToolButton(parent);
-    button->setText(text);
-    button->setToolTip(tip);
-    button->setAutoRaise(true);
-    button->setCursor(Qt::PointingHandCursor);
-    button->setStyleSheet(QStringLiteral("QToolButton{border:1px solid transparent;border-radius:3px;padding:2px 8px;}"
-                                         "QToolButton:hover{border-color:palette(mid);}"));
-    // A row that offers fewer actions still reserves their space, so the action
-    // column stays a column.
-    QSizePolicy policy = button->sizePolicy();
-    policy.setRetainSizeWhenHidden(true);
-    button->setSizePolicy(policy);
-    return button;
-}
-
 // ------------------------------------------------------- scrobbler manager tab
 
 struct Destination {
@@ -270,24 +185,37 @@ struct Destination {
     QString url;
     QString token;
     bool enabled = false;
-    bool reserved = false;   // Last.fm and official ListenBrainz: name and URL are not the user's
+    bool reserved = false;   // Last.fm and official ListenBrainz: identity and URL are not the user's
     bool lastFm = false;
     int pending = 0;
     Health health = Health::Unknown;
     QString status;
 };
 
-class DestinationRow final : public QFrame {
-public:
-    DestinationRow(Destination destination, QWidget *parent)
-        : QFrame(parent)
-        , m_destination(std::move(destination))
-    {
-        setObjectName(QStringLiteral("destinationRow"));
-        setFrameShape(QFrame::StyledPanel);
-        setAttribute(Qt::WA_Hover);
+enum ManagerColumn {
+    ToggleColumn,
+    NameColumn,
+    UrlColumn,
+    TokenColumn,
+    StatusColumn,
+    PendingColumn,
+    TestColumn,
+    RemoveColumn,
+    ManagerColumnCount,
+};
 
-        m_toggle = new ToggleSwitch(this);
+// One destination's controls, laid into a grid shared by every row so the
+// columns line up whatever each row happens to offer.
+class DestinationRow final : public QObject {
+public:
+    DestinationRow(Destination destination, QGridLayout *grid, int row, QWidget *host,
+                   std::function<void()> onChanged, std::function<void(DestinationRow *)> onRemove)
+        : QObject(host)
+        , m_destination(std::move(destination))
+        , m_onChanged(std::move(onChanged))
+        , m_onRemove(std::move(onRemove))
+    {
+        m_toggle = new ToggleSwitch(host);
         m_toggle->setChecked(m_destination.enabled);
         m_toggle->setToolTip(QStringLiteral("Send listens to this destination"));
         connect(m_toggle, &QAbstractButton::toggled, this, [this](bool on) {
@@ -295,38 +223,43 @@ public:
             refresh();
         });
 
-        m_name = new InlineEdit(m_destination.name, this);
-        QFont nameFont = m_name->font();
-        nameFont.setBold(true);
-        m_name->setFont(nameFont);
-        m_name->setReadOnly(m_destination.reserved);
-        m_name->setToolTip(m_destination.reserved ? QStringLiteral("Built in: this destination cannot be renamed")
-                                                  : QStringLiteral("Click to rename"));
-
-        m_url = new InlineEdit(m_destination.lastFm ? QString() : m_destination.url, this);
-        m_url->setPlaceholderText(m_destination.lastFm ? QStringLiteral("Authenticated in Last.fm settings")
-                                                       : QStringLiteral("https://koito.example"));
-        m_url->setReadOnly(m_destination.reserved);
-
-        m_token = new InlineEdit(m_destination.token, this);
+        m_name = new QLineEdit(m_destination.name, host);
+        m_name->setPlaceholderText(QStringLiteral("Koito"));
+        m_url = new QLineEdit(m_destination.url, host);
+        m_url->setPlaceholderText(QStringLiteral("https://koito.example"));
+        m_token = new QLineEdit(m_destination.token, host);
         m_token->setEchoMode(QLineEdit::Password);
         m_token->setPlaceholderText(QStringLiteral("user token"));
-        m_token->setMaximumWidth(150);
-        // Last.fm authenticates through its own settings dialog, so a token
-        // field here would be an empty promise.
-        m_token->setVisible(!m_destination.lastFm);
+        for (QLineEdit *field : {m_url, m_token}) {
+            connect(field, &QLineEdit::textChanged, this, [this] {
+                m_destination.status.clear();
+                refresh();
+            });
+        }
 
-        m_pill = new StatusPill(this);
-        m_pending = new QLabel(this);
-        makeMuted(m_pending);
+        // A built-in destination is not the user's to rename or repoint, so it
+        // shows the value as text rather than as a field that refuses input.
+        m_fixedName = new QLabel(m_destination.name, host);
+        m_fixedUrl = new QLabel(m_destination.lastFm ? kEmptyCell : m_destination.url, host);
+        m_fixedUrl->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_fixedToken = new QLabel(kEmptyCell, host);
+        // Indented to the text inset of the fields beside them, so a fixed value
+        // and an editable one start at the same x.
+        const int inset = host->style()->pixelMetric(QStyle::PM_DefaultFrameWidth) + 3;
+        for (QLabel *fixed : {m_fixedName, m_fixedUrl, m_fixedToken}) {
+            fixed->setTextFormat(Qt::PlainText);
+            fixed->setIndent(inset);
+        }
+        m_fixedToken->setToolTip(QStringLiteral("Last.fm signs in through Last.fm API settings"));
 
-        m_test = rowAction(QStringLiteral("Test"), QStringLiteral("Check the server and credentials"), this);
-        m_test->setVisible(!m_destination.lastFm);
-        m_remove = rowAction(QStringLiteral("✕"), QStringLiteral("Remove this destination"), this);
-        // A built-in destination cannot be removed, so it offers no control to
-        // grey out.
-        m_remove->setVisible(!m_destination.reserved);
-        connect(m_test, &QToolButton::clicked, this, [this] {
+        m_dot = new HealthDot(host);
+        m_status = new QLabel(host);
+        m_pending = new QLabel(host);
+        m_pending->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+        m_test = new QPushButton(QStringLiteral("Test"), host);
+        m_test->setToolTip(QStringLiteral("Check the server and credentials"));
+        connect(m_test, &QPushButton::clicked, this, [this] {
             m_destination.health = Health::Busy;
             m_destination.status = QStringLiteral("Testing…");
             refresh();
@@ -338,109 +271,169 @@ public:
                 refresh();
             });
         });
-        connect(m_remove, &QToolButton::clicked, this, [this] { deleteLater(); });
 
-        auto *identity = new QVBoxLayout;
-        identity->setSpacing(1);
-        identity->addWidget(m_name);
-        auto *endpoint = new QHBoxLayout;
-        endpoint->setSpacing(6);
-        m_url->setMinimumWidth(240);
-        endpoint->addWidget(m_url, 0);
-        auto *tokenLabel = new QLabel(QStringLiteral("Token"), this);
-        makeMuted(tokenLabel);
-        tokenLabel->setVisible(!m_destination.lastFm);
-        endpoint->addWidget(tokenLabel);
-        endpoint->addWidget(m_token);
-        endpoint->addStretch();
-        identity->addLayout(endpoint);
+        m_remove = new QPushButton(host);
+        m_remove->setIcon(QIcon::fromTheme(QStringLiteral("user-trash"),
+                                           host->style()->standardIcon(QStyle::SP_TrashIcon)));
+        m_remove->setToolTip(QStringLiteral("Remove this destination"));
+        connect(m_remove, &QPushButton::clicked, this, [this] { m_onRemove(this); });
 
-        auto *right = new QVBoxLayout;
-        right->setSpacing(1);
-        right->addWidget(m_pill, 0, Qt::AlignRight);
-        right->addWidget(m_pending, 0, Qt::AlignRight);
+        const bool fixed = m_destination.reserved;
+        auto *status = new QHBoxLayout;
+        status->setContentsMargins(0, 0, 0, 0);
+        status->setSpacing(4);
+        status->addWidget(m_dot);
+        status->addWidget(m_status);
+        status->addStretch();
 
-        auto *layout = new QHBoxLayout(this);
-        layout->setContentsMargins(10, 7, 8, 7);
-        layout->setSpacing(10);
-        layout->addWidget(m_toggle, 0, Qt::AlignVCenter);
-        layout->addLayout(identity, 1);
-        layout->addLayout(right);
-        layout->addWidget(m_test, 0, Qt::AlignVCenter);
-        layout->addWidget(m_remove, 0, Qt::AlignVCenter);
+        grid->addWidget(m_toggle, row, ToggleColumn);
+        grid->addWidget(fixed ? static_cast<QWidget *>(m_fixedName) : m_name, row, NameColumn);
+        grid->addWidget(fixed ? static_cast<QWidget *>(m_fixedUrl) : m_url, row, UrlColumn);
+        grid->addWidget(m_destination.lastFm ? static_cast<QWidget *>(m_fixedToken) : m_token, row, TokenColumn);
+        grid->addLayout(status, row, StatusColumn);
+        grid->addWidget(m_pending, row, PendingColumn);
+        grid->addWidget(m_test, row, TestColumn);
+        grid->addWidget(m_remove, row, RemoveColumn);
+
+        for (QWidget *unused : unusedWidgets()) {
+            unused->hide();
+        }
+        // A row that offers fewer actions still reserves their space, so the
+        // action columns stay columns.
+        m_test->setVisible(!m_destination.lastFm);
+        m_remove->setVisible(!m_destination.reserved);
+        for (QPushButton *button : {m_test, m_remove}) {
+            QSizePolicy policy = button->sizePolicy();
+            policy.setRetainSizeWhenHidden(true);
+            button->setSizePolicy(policy);
+        }
 
         refresh();
     }
 
-    bool enabled() const { return m_destination.enabled; }
-    bool compatible() const { return !m_destination.lastFm; }
+    // A ListenBrainz-compatible destination with no address has nowhere to
+    // deliver, which is fatal for that entry rather than a warning about it.
+    bool isValid() const { return m_destination.lastFm || !currentUrl().isEmpty(); }
+    QString name() const { return m_destination.reserved ? m_destination.name : m_name->text().trimmed(); }
+
+    void takeOutOf(QGridLayout *grid)
+    {
+        const QList<QWidget *> owned{m_toggle,     m_name,   m_url,     m_token,   m_fixedName, m_fixedUrl,
+                                     m_fixedToken, m_dot,    m_status,  m_pending, m_test,      m_remove};
+        for (QWidget *widget : owned) {
+            grid->removeWidget(widget);
+            widget->deleteLater();
+        }
+    }
 
 private:
+    QString currentUrl() const { return m_destination.reserved ? m_destination.url : m_url->text().trimmed(); }
+
+    QList<QWidget *> unusedWidgets() const
+    {
+        if (m_destination.reserved) {
+            return m_destination.lastFm ? QList<QWidget *>{m_name, m_url, m_token}
+                                        : QList<QWidget *>{m_name, m_url, m_fixedToken};
+        }
+        return {m_fixedName, m_fixedUrl, m_fixedToken};
+    }
+
     void refresh()
     {
-        const bool on = m_destination.enabled;
-        QString status = m_destination.status;
+        QString text = m_destination.status;
         Health health = m_destination.health;
-        if (status.isEmpty()) {
+        if (!isValid()) {
+            text = QStringLiteral("Server URL required");
+            health = Health::Bad;
+        } else if (text.isEmpty()) {
             if (m_destination.lastFm) {
-                status = QStringLiteral("Signed in");
+                text = QStringLiteral("Signed in");
                 health = Health::Good;
             } else {
-                status = m_token->text().isEmpty() ? QStringLiteral("No token") : QStringLiteral("Token set");
-                health = m_token->text().isEmpty() ? Health::Bad : Health::Unknown;
+                const bool hasToken = !m_token->text().isEmpty();
+                text = hasToken ? QStringLiteral("Token set") : QStringLiteral("No token");
+                health = hasToken ? Health::Unknown : Health::Bad;
             }
         }
-        m_pill->setState(health, status);
-        m_pending->setText(m_destination.pending > 0
-                               ? QStringLiteral("%1 waiting to send").arg(m_destination.pending)
-                               : QString());
-        // An enabled destination is outlined in the highlight colour, so the
-        // list reads as "these are live" without anything having to be selected.
-        setStyleSheet(on
-            ? QStringLiteral("#destinationRow{border:1px solid palette(highlight);border-radius:5px;}")
-            : QStringLiteral("#destinationRow{border:1px solid palette(mid);border-radius:5px;}"));
+        m_dot->setHealth(health);
+        m_status->setText(text);
+        m_pending->setText(m_destination.pending > 0 ? QStringLiteral("%1").arg(m_destination.pending) : kEmptyCell);
+        m_test->setEnabled(isValid());
+        // With no OK button to gate on, an entry that cannot deliver is instead
+        // one that cannot be enabled: it is saved, but never sent to.
+        if (!isValid() && m_destination.enabled) {
+            m_toggle->setChecked(false);
+            return;   // the toggle re-enters here
+        }
+        m_toggle->setEnabled(isValid());
+        m_toggle->setToolTip(isValid() ? QStringLiteral("Send listens to this destination")
+                                       : QStringLiteral("Give this destination a server address first"));
+        m_onChanged();
     }
 
     Destination m_destination;
+    std::function<void()> m_onChanged;
+    std::function<void(DestinationRow *)> m_onRemove;
     ToggleSwitch *m_toggle = nullptr;
-    InlineEdit *m_name = nullptr;
-    InlineEdit *m_url = nullptr;
-    InlineEdit *m_token = nullptr;
-    StatusPill *m_pill = nullptr;
+    QLineEdit *m_name = nullptr;
+    QLineEdit *m_url = nullptr;
+    QLineEdit *m_token = nullptr;
+    QLabel *m_fixedName = nullptr;
+    QLabel *m_fixedUrl = nullptr;
+    QLabel *m_fixedToken = nullptr;
+    HealthDot *m_dot = nullptr;
+    QLabel *m_status = nullptr;
     QLabel *m_pending = nullptr;
-    QToolButton *m_test = nullptr;
-    QToolButton *m_remove = nullptr;
+    QPushButton *m_test = nullptr;
+    QPushButton *m_remove = nullptr;
 };
+
+QList<Destination> seedDestinations()
+{
+    return {
+        {QStringLiteral("Last.fm"), {}, {}, true, true, true, 0, Health::Good, QStringLiteral("Signed in")},
+        {QStringLiteral("ListenBrainz"), QStringLiteral("https://api.listenbrainz.org/1"), QStringLiteral("secret"),
+         true, true, false, 12, Health::Good, QStringLiteral("Connected as lobo")},
+        {QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), QStringLiteral("secret"), true, false,
+         false, 0, Health::Unknown, {}},
+        {QStringLiteral("Maloja"), QStringLiteral("https://maloja.example/1"), {}, false, false, false, 3,
+         Health::Unknown, {}},
+    };
+}
 
 QWidget *buildManagerTab(QWidget *parent)
 {
     auto *page = new QWidget(parent);
     auto *layout = new QVBoxLayout(page);
-    layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(8);
 
-    auto *lede = new QLabel(QStringLiteral("Every listen is sent to each enabled destination."), page);
-    makeMuted(lede);
-    layout->addWidget(lede);
-
     auto *host = new QWidget(page);
-    auto *rows = new QVBoxLayout(host);
-    rows->setContentsMargins(0, 0, 0, 0);
-    rows->setSpacing(6);
+    auto *grid = new QGridLayout(host);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(10);
+    grid->setVerticalSpacing(5);
 
-    const std::array<Destination, 4> seed{{
-        {QStringLiteral("Last.fm"), {}, {}, true, true, true, 0, Health::Good, QStringLiteral("Signed in")},
-        {QStringLiteral("ListenBrainz"), QStringLiteral("https://api.listenbrainz.org/1"),
-         QStringLiteral("secret"), true, true, false, 12, Health::Good, QStringLiteral("Connected as lobo")},
-        {QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), QStringLiteral("secret"), true, false,
-         false, 0, Health::Unknown, {}},
-        {QStringLiteral("Maloja"), QStringLiteral("https://maloja.example/1"), {}, false, false, false, 3,
-         Health::Unknown, {}},
-    }};
-    for (const Destination &destination : seed) {
-        rows->addWidget(new DestinationRow(destination, host));
+    const QStringList headers{{},
+                              QStringLiteral("Name"),
+                              QStringLiteral("Server URL"),
+                              QStringLiteral("Token"),
+                              QStringLiteral("Status"),
+                              QStringLiteral("Pending"),
+                              {},
+                              {}};
+    for (int column = 0; column < ManagerColumnCount; ++column) {
+        if (headers.at(column).isEmpty()) {
+            continue;
+        }
+        auto *header = new QLabel(headers.at(column), host);
+        makeMuted(header);
+        header->setAlignment(column == PendingColumn ? Qt::AlignRight | Qt::AlignVCenter
+                                                     : Qt::AlignLeft | Qt::AlignVCenter);
+        grid->addWidget(header, 0, column);
     }
-    rows->addStretch();
+    grid->addWidget(horizontalRule(host), 1, 0, 1, ManagerColumnCount);
+    grid->setColumnStretch(NameColumn, 2);
+    grid->setColumnStretch(UrlColumn, 3);
 
     auto *scroll = new QScrollArea(page);
     scroll->setWidget(host);
@@ -448,28 +441,80 @@ QWidget *buildManagerTab(QWidget *parent)
     scroll->setFrameShape(QFrame::NoFrame);
     layout->addWidget(scroll, 1);
 
-    auto *warning = new QLabel(QStringLiteral("3 ListenBrainz-compatible destinations are enabled. Every listen is "
-                                              "submitted to each of them, so any server that relays to another may "
-                                              "receive it twice."),
-                               page);
-    warning->setWordWrap(true);
-    makeMuted(warning);
-    layout->addWidget(warning);
+    auto *problem = new QLabel(page);
+    problem->setWordWrap(true);
+    layout->addWidget(problem);
 
-    auto *addRow = new QHBoxLayout;
+    auto *addRowLayout = new QHBoxLayout;
     auto *add = new QPushButton(QStringLiteral("Add server…"), page);
-    QObject::connect(add, &QPushButton::clicked, page, [rows, host] {
-        rows->insertWidget(rows->count() - 1,
-                           new DestinationRow(Destination{QStringLiteral("New server"), {}, {}, false, false, false, 0,
-                                                          Health::Unknown, {}},
-                                              host));
-    });
-    addRow->addWidget(add);
-    addRow->addStretch();
-    layout->addLayout(addRow);
+    addRowLayout->addWidget(add);
+    addRowLayout->addStretch();
+    layout->addLayout(addRowLayout);
 
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, page);
-    layout->addWidget(buttons);
+    // The rest of the Scrobblers menu, in the dialog that owns the same subject.
+    auto *options = new QGroupBox(QStringLiteral("Scrobbling"), page);
+    auto *optionsLayout = new QHBoxLayout(options);
+    auto *offline = new QCheckBox(QStringLiteral("Offline mode (buffer listens locally)"), options);
+    offline->setToolTip(QStringLiteral("Keep collecting listening history but send nothing; unchecking uploads the "
+                                       "buffered backlog."));
+    optionsLayout->addWidget(offline);
+    optionsLayout->addStretch();
+    optionsLayout->addWidget(new QPushButton(QStringLiteral("Last.fm API settings…"), options));
+    layout->addWidget(options);
+
+    auto *saveNote = new QLabel(QStringLiteral("Changes are saved as you make them, and take effect when this window "
+                                               "closes."),
+                                page);
+    makeMuted(saveNote);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, page);
+    auto *footer = new QHBoxLayout;
+    footer->addWidget(saveNote);
+    footer->addStretch();
+    footer->addWidget(buttons);
+    layout->addLayout(footer);
+
+    // Rows are appended below the header rule; removing one takes its widgets
+    // out of the grid and leaves the rest where they are.
+    auto *rows = new QList<DestinationRow *>;
+    auto *nextRow = new int(2);
+    auto *revalidate = new std::function<void()>;
+    *revalidate = [rows, problem] {
+        QStringList broken;
+        for (DestinationRow *row : *rows) {
+            if (!row->isValid()) {
+                broken << (row->name().isEmpty() ? QStringLiteral("a new server") : row->name());
+            }
+        }
+        problem->setVisible(!broken.isEmpty());
+        problem->setText(broken.isEmpty()
+                             ? QString()
+                             : QStringLiteral("%1 has no server address, so it cannot be enabled. Give it one "
+                                              "or remove it.")
+                                   .arg(broken.join(QStringLiteral(", "))));
+    };
+
+    auto addRow = [grid, host, rows, nextRow, revalidate](const Destination &destination) {
+        auto *entry = new DestinationRow(
+            destination, grid, *nextRow, host, [revalidate] { (*revalidate)(); },
+            [grid, rows, revalidate](DestinationRow *row) {
+                rows->removeAll(row);
+                row->takeOutOf(grid);
+                row->deleteLater();
+                (*revalidate)();
+            });
+        rows->push_back(entry);
+        ++*nextRow;
+        (*revalidate)();
+    };
+    for (const Destination &destination : seedDestinations()) {
+        addRow(destination);
+    }
+    grid->setRowStretch(*nextRow + 64, 1);
+    QObject::connect(add, &QPushButton::clicked, page, [addRow] {
+        addRow({{}, {}, {}, false, false, false, 0, Health::Unknown, {}});
+    });
+
     return page;
 }
 
@@ -610,10 +655,11 @@ private:
     QStringList m_selected;
 };
 
-// Selection is drawn with the inactive palette group once a popup takes focus,
-// and on several styles that inactive highlight is close enough to the
-// alternating-row shade to disappear on odd rows. Pinning the inactive brushes
-// to the active ones keeps the selection legible for as long as the popup is up.
+// Selection is drawn from the inactive palette group once a popup takes the
+// window's activation, and on several themes that inactive highlight is close
+// enough to the alternating-row shade to disappear on odd rows. Pinning the
+// inactive brushes to the active ones keeps the selection legible while the
+// popup is up.
 void keepSelectionVisibleWhileUnfocused(QAbstractItemView *view, const QPalette &base, bool pin)
 {
     QPalette palette = base;
@@ -630,7 +676,6 @@ QWidget *buildHistoryTab(QWidget *parent)
 {
     auto *page = new QWidget(parent);
     auto *layout = new QVBoxLayout(page);
-    layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(8);
 
     auto *model = new HistoryModel(page);
@@ -642,9 +687,7 @@ QWidget *buildHistoryTab(QWidget *parent)
     view->verticalHeader()->setVisible(false);
     view->horizontalHeader()->setStretchLastSection(true);
 
-    auto *button = new QToolButton(page);
-    button->setPopupMode(QToolButton::InstantPopup);
-    button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    auto *button = new QPushButton(page);
     auto *menu = new StickyMenu(button);
     button->setMenu(menu);
 
@@ -657,23 +700,19 @@ QWidget *buildHistoryTab(QWidget *parent)
     menu->addSeparator();
     QAction *clear = menu->addAction(QStringLiteral("Show all destinations"));
 
-    auto selected = [destinationActions] {
+    auto sync = [button, model, destinationActions] {
         QStringList names;
         for (QAction *action : destinationActions) {
             if (action->isChecked()) {
                 names << action->text();
             }
         }
-        return names;
-    };
-    auto sync = [button, model, selected] {
-        const QStringList names = selected();
         if (names.isEmpty()) {
-            button->setText(QStringLiteral("All destinations  ▾"));
+            button->setText(QStringLiteral("All destinations"));
         } else if (names.size() == 1) {
-            button->setText(names.first() + QStringLiteral("  ▾"));
+            button->setText(names.first());
         } else {
-            button->setText(QStringLiteral("%1 of %2 destinations  ▾").arg(names.size()).arg(kDestinationNames.size()));
+            button->setText(QStringLiteral("%1 of %2 destinations").arg(names.size()).arg(kDestinationNames.size()));
         }
         model->setDestinations(names);
     };
@@ -719,9 +758,9 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     QTabWidget tabs;
     tabs.setWindowTitle(QStringLiteral("muzaiten scrobbling UI prototype"));
-    tabs.resize(860, 520);
+    tabs.resize(960, 580);
     tabs.addTab(buildManagerTab(&tabs), QStringLiteral("Scrobblers"));
-    tabs.addTab(buildHistoryTab(&tabs), QStringLiteral("Listening history filter"));
+    tabs.addTab(buildHistoryTab(&tabs), QStringLiteral("Listening history"));
     tabs.show();
 
     // `build.sh --shot <dir>` renders each tab to a PNG and exits, so a layout
