@@ -26,6 +26,8 @@ private slots:
     void aTokenIsHeldUntilThereIsSomewhereToSendIt();
     void aRejectedAddressIsNotTested();
     void externallyChangedStateIsAdopted();
+    void anAddedServerIsConfiguredOnceItIsSaved();
+    void aTestResultForChangedCredentialsIsIgnored();
 
 private:
     QHash<QString, QString> m_tokens;
@@ -51,6 +53,31 @@ private:
             }
         }
         return names;
+    }
+
+    // Adds a server and gives it an address, returning its minted id.
+    QString addServer(QWidget *panel, const QString &url)
+    {
+        const QStringList existing = urlFieldNames(panel);
+        for (QPushButton *candidate : panel->findChildren<QPushButton *>()) {
+            if (candidate->text() == QStringLiteral("Add server…")) {
+                candidate->click();
+            }
+        }
+        QCoreApplication::processEvents();
+
+        QStringList added = urlFieldNames(panel);
+        for (const QString &was : existing) {
+            added.removeOne(was);
+        }
+        if (added.size() != 1) {
+            return {};
+        }
+        const QString id = added.first().chopped(QStringLiteral(".url").size());
+        if (!url.isEmpty()) {
+            type(panel->findChild<QLineEdit *>(added.first()), url);
+        }
+        return id;
     }
 
     // Types into a field and ends the edit, which is what commits it.
@@ -286,6 +313,46 @@ void ScrobblersPanelTest::externallyChangedStateIsAdopted()
         ->click();
     QVERIFY(m_saved.find(id) != nullptr);
     QVERIFY(m_saved.find(id)->enabled);
+}
+
+// A row added here stops being provisional the moment it is saved with an
+// address: its delivery records exist from then on, so it gets the same
+// protection as one that was already configured.
+void ScrobblersPanelTest::anAddedServerIsConfiguredOnceItIsSaved()
+{
+    const auto panel = makePanel(ScrobbleDestinationConfig::defaults());
+    const QString id = addServer(panel.get(), QStringLiteral("https://koito.example"));
+    QVERIFY(panel->destinations().find(id) != nullptr);
+
+    auto *url = panel->findChild<QLineEdit *>(id + QStringLiteral(".url"));
+    type(url, QString());
+
+    QCOMPARE(url->text(), QStringLiteral("https://koito.example/1"));
+    QVERIFY(panel->destinations().find(id) != nullptr);
+}
+
+void ScrobblersPanelTest::aTestResultForChangedCredentialsIsIgnored()
+{
+    ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
+    const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
+
+    const auto panel = makePanel(destinations);
+    type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("first"));
+    panel->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
+
+    auto *status = panel->findChild<QLabel *>(id + QStringLiteral(".status"));
+    QCOMPARE(status->text(), QStringLiteral("Testing…"));
+
+    // The token changes while the request is in flight; the reply describes the
+    // token that was sent, not the one now on screen.
+    type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("second"));
+    panel->reportTestResult(id, true, QStringLiteral("somebody"));
+    QVERIFY(status->text() != QStringLiteral("Connected as somebody"));
+
+    // A reply to a test of what is actually on screen is still this row's.
+    panel->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
+    panel->reportTestResult(id, true, QStringLiteral("lobo"));
+    QCOMPARE(status->text(), QStringLiteral("Connected as lobo"));
 }
 
 QTEST_MAIN(ScrobblersPanelTest)

@@ -229,7 +229,16 @@ public:
         refresh();
     }
 
-    bool isTesting() const { return m_health == DestinationHealth::Busy; }
+    // A reply is this row's answer only while it still describes the address and
+    // token the test was issued for. Anything else is about a state the row has
+    // since left, whatever its id says.
+    bool awaitsTestResult() const
+    {
+        return m_testPending && m_testedApiRoot == m_destination.apiRoot
+            && m_testedToken == m_token->text().trimmed();
+    }
+
+    void testResultConsumed() { m_testPending = false; }
 
     void focusFirstField() { m_url->setFocus(); }
 
@@ -374,6 +383,9 @@ private:
         m_status.clear();
         refresh();
         m_dialog->save();
+        // Saved with an address, so from here it is a configured destination:
+        // its records exist, and clearing the address would strand them.
+        m_alreadyConfigured = true;
         if (wasUndeliverable) {
             // Any token typed while there was nowhere to send it was held back;
             // it has somewhere now.
@@ -408,8 +420,11 @@ private:
             return;
         }
         commitToken();
+        m_testedApiRoot = m_destination.apiRoot;
+        m_testedToken = m_token->text().trimmed();
+        m_testPending = true;
         setStatus(QStringLiteral("Testing…"), DestinationHealth::Busy);
-        m_dialog->m_callbacks.testDestination(m_destination.id, m_destination.apiRoot, m_token->text().trimmed());
+        m_dialog->m_callbacks.testDestination(m_destination.id, m_testedApiRoot, m_testedToken);
     }
 
     void refresh()
@@ -454,6 +469,11 @@ private:
     // Whether this destination is already part of the saved configuration, as
     // opposed to a row added here that has not earned an address yet.
     bool m_alreadyConfigured = false;
+    // The credentials the outstanding test was issued for, which is what makes
+    // its reply identifiable.
+    bool m_testPending = false;
+    QString m_testedApiRoot;
+    QString m_testedToken;
     QHBoxLayout *m_statusLayout = nullptr;
     QString m_status;
     DestinationHealth m_health = DestinationHealth::Unknown;
@@ -650,7 +670,8 @@ void ScrobblersPanel::reportTestResult(const QString &destinationId, bool valid,
     for (DestinationRow *row : std::as_const(m_rows)) {
         // A result that no longer answers a live test describes an address or a
         // token the row has since moved on from.
-        if (row->destination().id == destinationId && row->isTesting()) {
+        if (row->destination().id == destinationId && row->awaitsTestResult()) {
+            row->testResultConsumed();
             row->setStatus(valid ? QStringLiteral("Connected as %1").arg(username)
                                  : QStringLiteral("Token rejected"),
                            valid ? DestinationHealth::Good : DestinationHealth::Bad);
