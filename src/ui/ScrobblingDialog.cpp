@@ -20,6 +20,10 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
     // Editing a destination in one tab changes what the other is looking at.
     // Carrying that across is the reason these two are one window.
     connect(scrobblers, &ScrobblersPanel::destinationsChanged, history, &ListeningHistoryPanel::setDestinations);
+    // And queueing, retrying or clearing a backlog changes the pending count the
+    // other tab is showing for that destination.
+    connect(history, &ListeningHistoryPanel::backlogChanged, scrobblers,
+            [scrobblers]() { scrobblers->refreshPendingCounts(); });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);

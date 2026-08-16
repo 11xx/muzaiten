@@ -987,7 +987,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                 QMessageBox::warning(this, scrobbleDestinationName(destinationId), message);
             });
     connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, this,
-            [this](const QString &destinationId, bool valid, const QString &username) {
+            [this](const QString &destinationId, quint64, bool valid, const QString &username) {
                 const QString name = scrobbleDestinationName(destinationId);
                 statusBar()->showMessage(valid ? QStringLiteral("%1 token valid: connected as %2").arg(name, username)
                                                : QStringLiteral("%1 token is invalid.").arg(name),
@@ -5330,8 +5330,9 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     callbacks.lastFmConfigured = [this]() {
         return !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
     };
-    callbacks.testDestination = [this](const QString &id, const QString &apiRoot, const QString &token) {
-        m_listenBrainzHub->validateToken(id, apiRoot, token);
+    callbacks.testDestination = [this](const QString &id, quint64 requestId, const QString &apiRoot,
+                                      const QString &token) {
+        m_listenBrainzHub->validateToken(id, requestId, apiRoot, token);
     };
     // Saved as edited, but deliberately not applied: reconfiguring here would
     // make retyping a server URL reconnect on every keystroke.

@@ -28,6 +28,7 @@ private slots:
     void externallyChangedStateIsAdopted();
     void anAddedServerIsConfiguredOnceItIsSaved();
     void aTestResultForChangedCredentialsIsIgnored();
+    void anEarlierTestReplyCannotClaimALaterTest();
 
 private:
     QHash<QString, QString> m_tokens;
@@ -104,7 +105,7 @@ void ScrobblersPanelTest::init()
         ++m_saveCount;
     };
     m_callbacks.lastFmConfigured = []() { return false; };
-    m_callbacks.testDestination = [](const QString &, const QString &, const QString &) {};
+    m_callbacks.testDestination = [](const QString &, quint64, const QString &, const QString &) {};
     m_callbacks.readOffline = []() { return false; };
     m_callbacks.writeOffline = [](bool) {};
     m_callbacks.openLastFmSettings = []() {};
@@ -284,7 +285,7 @@ void ScrobblersPanelTest::aRejectedAddressIsNotTested()
     const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
 
     QStringList tested;
-    m_callbacks.testDestination = [&tested](const QString &, const QString &apiRoot, const QString &) {
+    m_callbacks.testDestination = [&tested](const QString &, quint64, const QString &apiRoot, const QString &) {
         tested << apiRoot;
     };
 
@@ -336,9 +337,15 @@ void ScrobblersPanelTest::aTestResultForChangedCredentialsIsIgnored()
     ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
     const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
 
+    QList<quint64> issued;
+    m_callbacks.testDestination = [&issued](const QString &, quint64 requestId, const QString &, const QString &) {
+        issued << requestId;
+    };
+
     const auto panel = makePanel(destinations);
     type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("first"));
     panel->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
+    QCOMPARE(issued.size(), 1);
 
     auto *status = panel->findChild<QLabel *>(id + QStringLiteral(".status"));
     QCOMPARE(status->text(), QStringLiteral("Testing…"));
@@ -346,12 +353,44 @@ void ScrobblersPanelTest::aTestResultForChangedCredentialsIsIgnored()
     // The token changes while the request is in flight; the reply describes the
     // token that was sent, not the one now on screen.
     type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("second"));
-    panel->reportTestResult(id, true, QStringLiteral("somebody"));
+    panel->reportTestResult(id, issued.last(), true, QStringLiteral("somebody"));
     QVERIFY(status->text() != QStringLiteral("Connected as somebody"));
 
     // A reply to a test of what is actually on screen is still this row's.
     panel->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
-    panel->reportTestResult(id, true, QStringLiteral("lobo"));
+    QCOMPARE(issued.size(), 2);
+    panel->reportTestResult(id, issued.last(), true, QStringLiteral("lobo"));
+    QCOMPARE(status->text(), QStringLiteral("Connected as lobo"));
+}
+
+// Two tests of the same credentials can still answer differently, because one
+// of them can meet a transient failure. The later request is the one the row
+// is waiting on, so the earlier answer cannot claim it.
+void ScrobblersPanelTest::anEarlierTestReplyCannotClaimALaterTest()
+{
+    ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
+    const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
+
+    QList<quint64> issued;
+    m_callbacks.testDestination = [&issued](const QString &, quint64 requestId, const QString &, const QString &) {
+        issued << requestId;
+    };
+
+    const auto panel = makePanel(destinations);
+    type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("token"));
+    auto *test = panel->findChild<QPushButton *>(id + QStringLiteral(".test"));
+    test->click();
+    test->click();
+    QCOMPARE(issued.size(), 2);
+    QVERIFY(issued.at(0) != issued.at(1));
+
+    auto *status = panel->findChild<QLabel *>(id + QStringLiteral(".status"));
+    // The first request comes back rejected, having met a transient failure.
+    panel->reportTestResult(id, issued.at(0), false, QString());
+    QCOMPARE(status->text(), QStringLiteral("Testing…"));
+
+    // The second is the one the row asked last, and it is what it reports.
+    panel->reportTestResult(id, issued.at(1), true, QStringLiteral("lobo"));
     QCOMPARE(status->text(), QStringLiteral("Connected as lobo"));
 }
 

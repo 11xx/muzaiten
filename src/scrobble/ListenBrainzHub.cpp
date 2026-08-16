@@ -113,9 +113,10 @@ void ListenBrainzHub::uploadBacklog(const QString &destinationId)
     }
 }
 
-void ListenBrainzHub::validateToken(const QString &destinationId, const QString &apiRoot, const QString &token)
+void ListenBrainzHub::validateToken(const QString &destinationId, quint64 requestId, const QString &apiRoot,
+                                    const QString &token)
 {
     ListenBrainzScrobbler *scrobbler = m_scrobblers.value(destinationId, m_probe);
     QMetaObject::invokeMethod(scrobbler, "validateToken", Qt::QueuedConnection, Q_ARG(QString, destinationId),
-                              Q_ARG(QString, apiRoot), Q_ARG(QString, token));
+                              Q_ARG(quint64, requestId), Q_ARG(QString, apiRoot), Q_ARG(QString, token));
 }

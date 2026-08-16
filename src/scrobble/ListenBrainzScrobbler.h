@@ -52,7 +52,8 @@ public slots:
     // username. Destination, URL, and token are all explicit so a single
     // instance can test a destination that is not configured yet, or a URL the
     // user has typed but not saved.
-    void validateToken(const QString &destinationId, const QString &apiRoot, const QString &token);
+    void validateToken(const QString &destinationId, quint64 requestId, const QString &apiRoot,
+                       const QString &token);
 
 signals:
     // Every signal names its destination: with several configured, an
@@ -60,7 +61,7 @@ signals:
     void submissionFailed(QString destinationId, QString message);
     void backlogProcessed(QString destinationId, int sentCount, int skippedCount, int remainingCount);
     void disabledAfterFailures(QString destinationId, QString message);
-    void tokenValidated(QString destinationId, bool valid, QString username);
+    void tokenValidated(QString destinationId, quint64 requestId, bool valid, QString username);
 
 private slots:
     void submitPendingTrackStartPlayingNow();

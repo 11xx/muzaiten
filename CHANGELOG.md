@@ -51,8 +51,12 @@
 - A token typed for a destination that has no address yet is held until it has
   one, rather than being stored against an id no configuration mentions.
 - `Test` no longer reports on the previous address after the field has refused
-  a new one, and a test result that no longer answers a live test is ignored
-  instead of overwriting a newer status.
+  a new one. Each test carries an identifier through to its answer, so a reply
+  to a test the row has abandoned or already superseded cannot claim it: two
+  tests of the same credentials can still differ if one meets a transient
+  failure, and it is the one you asked last that is reported.
+- Queueing, retrying or clearing a backlog in `Listening history` updates the
+  pending count the `Scrobblers` tab shows for that destination.
 - Removing a destination in the `Scrobblers` tab now updates the
   `Listening history` tab, which could otherwise still offer it and queue
   listens for a destination that no longer exists.

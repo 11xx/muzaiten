@@ -173,7 +173,7 @@ void ListenBrainzScrobbler::uploadBacklog()
     submitPayload(body, SubmissionKind::Listen, submittedIds);
 }
 
-void ListenBrainzScrobbler::validateToken(const QString &destinationId, const QString &apiRoot,
+void ListenBrainzScrobbler::validateToken(const QString &destinationId, quint64 requestId, const QString &apiRoot,
                                           const QString &token)
 {
     QNetworkRequest request{QUrl(ListenBrainzUrl::validateTokenUrl(apiRoot))};
@@ -182,10 +182,10 @@ void ListenBrainzScrobbler::validateToken(const QString &destinationId, const QS
     request.setRawHeader("Authorization", QStringLiteral("Token %1").arg(token.trimmed()).toUtf8());
 
     QNetworkReply *reply = m_network->get(request);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, destinationId]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, destinationId, requestId]() {
         const QJsonObject body = QJsonDocument::fromJson(reply->isOpen() ? reply->readAll() : QByteArray()).object();
         const bool valid = reply->error() == QNetworkReply::NoError && body.value(QStringLiteral("valid")).toBool();
-        emit tokenValidated(destinationId, valid, body.value(QStringLiteral("user_name")).toString());
+        emit tokenValidated(destinationId, requestId, valid, body.value(QStringLiteral("user_name")).toString());
         reply->deleteLater();
     });
 }

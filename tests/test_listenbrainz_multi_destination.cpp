@@ -193,17 +193,22 @@ void ListenBrainzMultiDestinationTest::validationReportsPerDestination()
     // not saved is the normal case when adding one.
     const QString acceptedId = QStringLiteral("c144daa3-617d-497d-82c4-f22d915aa354");
     const QString rejectedId = QStringLiteral("d31ed0b2-1dd3-49d4-b659-7849e06d4b07");
-    hub.validateToken(acceptedId, accepting.apiRoot(), QStringLiteral("token"));
-    hub.validateToken(rejectedId, rejecting.apiRoot(), QStringLiteral("token"));
+    hub.validateToken(acceptedId, 1, accepting.apiRoot(), QStringLiteral("token"));
+    hub.validateToken(rejectedId, 2, rejecting.apiRoot(), QStringLiteral("token"));
 
     QTRY_COMPARE_WITH_TIMEOUT(validated.count(), 2, 10000);
 
+    // Each answer carries back the request it belongs to, alongside its verdict.
     QHash<QString, bool> results;
+    QHash<QString, quint64> requests;
     for (const QList<QVariant> &call : validated) {
-        results.insert(call.at(0).toString(), call.at(1).toBool());
+        results.insert(call.at(0).toString(), call.at(2).toBool());
+        requests.insert(call.at(0).toString(), call.at(1).toULongLong());
     }
     QCOMPARE(results.value(acceptedId), true);
     QCOMPARE(results.value(rejectedId), false);
+    QCOMPARE(requests.value(acceptedId), 1u);
+    QCOMPARE(requests.value(rejectedId), 2u);
 }
 
 QTEST_MAIN(ListenBrainzMultiDestinationTest)

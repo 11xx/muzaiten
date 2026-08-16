@@ -165,6 +165,7 @@ public:
         m_url->setObjectName(m_destination.id + QStringLiteral(".url"));
         m_token->setObjectName(m_destination.id + QStringLiteral(".token"));
         m_statusLabel->setObjectName(m_destination.id + QStringLiteral(".status"));
+        m_pending->setObjectName(m_destination.id + QStringLiteral(".pending"));
         m_test->setObjectName(m_destination.id + QStringLiteral(".test"));
         m_remove->setObjectName(m_destination.id + QStringLiteral(".remove"));
 
@@ -231,17 +232,23 @@ public:
         refresh();
     }
 
-    // A reply is this row's answer only while nothing it was asked about has
-    // moved. Any edit to the address or the token abandons the outstanding
-    // test, so a reply describing what was sent before it cannot land on a row
-    // that now shows something else, whatever its id says.
-    bool awaitsTestResult() const { return m_testPending; }
-
-    void abandonOutstandingTest() { m_testPending = false; }
+    // A reply is this row's answer only if it answers the test the row is still
+    // waiting for. Any edit to the address or the token abandons that test, and
+    // a second test supersedes the first, so a reply about a state the row has
+    // left cannot land on it.
+    bool awaitsTestResult(quint64 requestId) const { return m_testPending && requestId == m_testRequestId; }
 
     void testResultConsumed() { m_testPending = false; }
 
+    void abandonOutstandingTest() { m_testPending = false; }
+
     void focusFirstField() { m_url->setFocus(); }
+
+    void refreshPendingCount()
+    {
+        const int pending = m_dialog->m_history != nullptr ? m_dialog->m_history->pendingCount(m_destination.id) : 0;
+        setValueOrDash(m_pending, pending > 0 ? QString::number(pending) : QString());
+    }
 
     void takeOutOf(QGridLayout *grid)
     {
@@ -421,9 +428,13 @@ private:
             return;
         }
         commitToken();
+        // A fresh id supersedes any test still in flight, so its answer, whether
+        // it is a rejection or a transient failure, cannot land on this one.
+        m_testRequestId = m_dialog->nextTestRequestId();
         m_testPending = true;
         setStatus(QStringLiteral("Testing…"), DestinationHealth::Busy);
-        m_dialog->m_callbacks.testDestination(m_destination.id, m_destination.apiRoot, m_token->text().trimmed());
+        m_dialog->m_callbacks.testDestination(m_destination.id, m_testRequestId, m_destination.apiRoot,
+                                              m_token->text().trimmed());
     }
 
     void refresh()
@@ -447,8 +458,7 @@ private:
         m_dot->setHealth(health);
         m_statusLabel->setText(text);
 
-        const int pending = m_dialog->m_history != nullptr ? m_dialog->m_history->pendingCount(m_destination.id) : 0;
-        setValueOrDash(m_pending, pending > 0 ? QString::number(pending) : QString());
+        refreshPendingCount();
 
         m_test->setEnabled(isDeliverable());
         // With no accept button to gate on, an entry that cannot deliver is
@@ -468,9 +478,11 @@ private:
     // Whether this destination is already part of the saved configuration, as
     // opposed to a row added here that has not earned an address yet.
     bool m_alreadyConfigured = false;
-    // Whether a test is outstanding. Abandoned by any edit to what it asked
-    // about, which is what keeps its reply from landing on a changed row.
+    // The outstanding test, if any. Abandoned by an edit to what it asked about
+    // and superseded by a later test, which is what keeps an answer to neither
+    // from landing on the row.
     bool m_testPending = false;
+    quint64 m_testRequestId = 0;
     QHBoxLayout *m_statusLayout = nullptr;
     QString m_status;
     DestinationHealth m_health = DestinationHealth::Unknown;
@@ -662,12 +674,18 @@ void ScrobblersPanel::removeRow(DestinationRow *row)
     save();
 }
 
-void ScrobblersPanel::reportTestResult(const QString &destinationId, bool valid, const QString &username)
+quint64 ScrobblersPanel::nextTestRequestId()
+{
+    return ++m_lastTestRequestId;
+}
+
+void ScrobblersPanel::reportTestResult(const QString &destinationId, quint64 requestId, bool valid,
+                                       const QString &username)
 {
     for (DestinationRow *row : std::as_const(m_rows)) {
         // A result that no longer answers a live test describes an address or a
         // token the row has since moved on from.
-        if (row->destination().id == destinationId && row->awaitsTestResult()) {
+        if (row->destination().id == destinationId && row->awaitsTestResult(requestId)) {
             row->testResultConsumed();
             row->setStatus(valid ? QStringLiteral("Connected as %1").arg(username)
                                  : QStringLiteral("Token rejected"),
@@ -684,6 +702,13 @@ void ScrobblersPanel::adoptEnabledState(const QString &destinationId, bool enabl
             row->setEnabled(enabled);
             return;
         }
+    }
+}
+
+void ScrobblersPanel::refreshPendingCounts()
+{
+    for (DestinationRow *row : std::as_const(m_rows)) {
+        row->refreshPendingCount();
     }
 }
 

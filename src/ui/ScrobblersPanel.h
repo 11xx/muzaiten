@@ -46,7 +46,11 @@ public:
         // settings dialog rather than a token field here.
         std::function<bool()> lastFmConfigured;
         // Fire and forget: the result arrives back through reportTestResult.
-        std::function<void(const QString &destinationId, const QString &apiRoot, const QString &token)> testDestination;
+        // `requestId` comes back with the result, so a row can tell which of its
+        // own tests an answer belongs to.
+        std::function<void(const QString &destinationId, quint64 requestId, const QString &apiRoot,
+                           const QString &token)>
+            testDestination;
         std::function<bool()> readOffline;
         std::function<void(bool offline)> writeOffline;
         std::function<void()> openLastFmSettings;
@@ -65,12 +69,16 @@ signals:
 
 public slots:
     // Result of a `testDestination` call, routed back by the owner.
-    void reportTestResult(const QString &destinationId, bool valid, const QString &username);
+    void reportTestResult(const QString &destinationId, quint64 requestId, bool valid, const QString &username);
 
     // A destination's enabled state changed outside this panel, which happens
     // when Last.fm authenticates or disables itself while the window is open.
     // Adopted into the working copy so the next save does not write it back.
     void adoptEnabledState(const QString &destinationId, bool enabled);
+
+    // Re-reads every row's pending count, which changes whenever a backlog is
+    // queued, retried, or cleared elsewhere.
+    void refreshPendingCounts();
 
 private:
     friend class DestinationRow;
@@ -79,6 +87,7 @@ private:
     void addDestination();
     void removeRow(DestinationRow *row);
     void save();
+    quint64 nextTestRequestId();
     void updateNotices();
 
     ListenHistoryStore *m_history = nullptr;
@@ -91,4 +100,5 @@ private:
     QLabel *m_relayWarning = nullptr;
     ToggleSwitch *m_offline = nullptr;
     int m_nextGridRow = 0;
+    quint64 m_lastTestRequestId = 0;
 };
