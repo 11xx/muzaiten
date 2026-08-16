@@ -10,8 +10,8 @@
 #include <QPushButton>
 #include <QTest>
 
-// The panel saves as it is edited and applies nothing, so these drive the
-// controls a user drives and assert on what reached the callbacks.
+// The panel saves as it is edited, so these drive the controls a user drives
+// and assert on what reached the callbacks.
 class ScrobblersPanelTest final : public QObject {
     Q_OBJECT
 

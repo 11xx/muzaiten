@@ -12,8 +12,8 @@ class ScrobblersPanel;
 // one is explained by a token or an address in the other), so they are tabs of
 // one window rather than two windows reached from two menu entries.
 //
-// Nothing here is accepted or cancelled. Both panels save as they are edited;
-// closing the window is what applies the result.
+// Nothing here is accepted or cancelled. Both panels save as they are edited,
+// and take effect with it.
 class ScrobblingDialog final : public QDialog {
     Q_OBJECT
 

@@ -5341,8 +5341,6 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
                                       const QString &token) {
         m_listenBrainzHub->validateToken(id, requestId, apiRoot, token);
     };
-    // Saved as edited, but deliberately not applied: reconfiguring here would
-    // make retyping a server URL reconnect on every keystroke.
     callbacks.saveDestinations = [this](const ScrobbleDestinationSet &destinations) {
         m_core->setScrobbleDestinations(destinations);
     };
