@@ -4,6 +4,7 @@
 #include "ui/ScrobblersPanel.h"
 
 #include <QDialogButtonBox>
+#include <QPushButton>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -25,11 +26,7 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
         "background:transparent;color:palette(window-text);}"
         "QTabBar::tab:hover{background:palette(alternate-base);}"
         "QTabBar::tab:selected{border-bottom:2px solid palette(highlight);"
-        "color:palette(window-text);}"
-        // Taking over the tab's shape takes over its focus ring too, and a
-        // keyboard user needs to see which strip has the focus.
-        "QTabBar::tab:focus{border:1px dotted palette(window-text);"
-        "border-bottom:2px solid palette(highlight);}"));
+        "color:palette(window-text);}"));
     m_tabs->addTab(scrobblers, QStringLiteral("Scrobblers"));
     m_tabs->addTab(history, QStringLiteral("Listening history"));
 
@@ -42,6 +39,7 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
             [scrobblers]() { scrobblers->refreshPendingCounts(); });
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    m_close = buttons->button(QDialogButtonBox::Close);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
 
     auto *layout = new QVBoxLayout(this);
@@ -49,6 +47,14 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
     layout->setSpacing(8);
     layout->addWidget(m_tabs, 1);
     layout->addWidget(buttons);
+
+    // Otherwise the strip is first in the focus chain and opens wearing the
+    // style's focus marks: a ring around the tab and a rule under its label,
+    // the second sitting directly above the strip's own. Neither says anything
+    // on a window that has only just appeared. Claiming the focus here settles
+    // it before the dialog hands it out; tabbing to the strip still marks it,
+    // which is when a focus mark means something.
+    m_close->setFocus(Qt::OtherFocusReason);
 }
 
 void ScrobblingDialog::showTab(Tab tab)

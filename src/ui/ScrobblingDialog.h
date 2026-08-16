@@ -3,6 +3,7 @@
 #include <QDialog>
 
 class ListeningHistoryPanel;
+class QPushButton;
 class QTabWidget;
 class ScrobblersPanel;
 
@@ -28,6 +29,8 @@ public:
 
     void showTab(Tab tab);
 
+
 private:
     QTabWidget *m_tabs = nullptr;
+    QPushButton *m_close = nullptr;
 };

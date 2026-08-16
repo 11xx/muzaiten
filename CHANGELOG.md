@@ -12,10 +12,14 @@
   and supports add, edit, enable/disable, test, and removal.
 - The destination popup marks the entry under the cursor with a wash of the
   palette's highlight instead of the flat grey card the theme paints there, so
-  picking a destination looks like every other selection in the app.
+  picking a destination looks like every other selection in the app. An entry
+  held down is marked the same way, rather than going pale the moment it is
+  clicked.
 - The scrobbling window's tabs are a thin, square label strip rather than the
   theme's rounded cards, which spent height on decoration and read as a
-  container the panels are not inside. The colours are still the palette's.
+  container the panels are not inside. The colours are still the palette's, and
+  the window no longer opens with the strip focused, which drew a ring around
+  the tab and a second rule under its label.
 - Scrobbling is one window with two tabs, `Scrobblers` and `Listening history`,
   reached from either menu entry. They are two views of the same subject and
   are read against each other constantly, since a backlog in one is explained

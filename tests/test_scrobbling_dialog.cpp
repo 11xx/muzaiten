@@ -6,6 +6,8 @@
 #include <QAction>
 #include <QLabel>
 #include <QPushButton>
+#include <QApplication>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -21,6 +23,7 @@ class ScrobblingDialogTest final : public QObject {
 private slots:
     void carriesBothPanelsAsTabs();
     void eachEntryPointOpensItsOwnTab();
+    void theTabStripDoesNotOpenWearingTheFocus();
     void aBacklogClearedInOneTabUpdatesTheOther();
     void aDestinationRemovedInOneTabLeavesTheOther();
 
@@ -156,6 +159,25 @@ void ScrobblingDialogTest::aDestinationRemovedInOneTabLeavesTheOther()
     // Saving without Koito is what removal amounts to from the history's side.
     emit scrobblers->destinationsChanged(ScrobbleDestinationConfig::defaults());
     QVERIFY(!offers(m_koitoId));
+}
+
+// The strip is first in the focus chain, so left alone it opens wearing the
+// style's focus marks: a ring around the tab and a rule under its label,
+// directly above the strip's own. A window that has only just appeared has
+// nothing to say with them.
+void ScrobblingDialogTest::theTabStripDoesNotOpenWearingTheFocus()
+{
+    const auto dialog = makeDialog();
+    dialog->show();
+    QCoreApplication::processEvents();
+
+    auto *bar = dialog->findChild<QTabBar *>();
+    QVERIFY(bar != nullptr);
+    QVERIFY(!bar->hasFocus());
+
+    // Still reachable, so a keyboard user can get to it and be shown that they
+    // have.
+    QVERIFY(bar->focusPolicy() & Qt::TabFocus);
 }
 
 QTEST_MAIN(ScrobblingDialogTest)

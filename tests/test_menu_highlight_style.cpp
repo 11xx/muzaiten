@@ -47,6 +47,7 @@ class MenuHighlightStyleTest final : public QObject {
 private slots:
     void solidFillsWithTheHighlightItself();
     void softStopsShortOfTheHighlight();
+    void aPressedEntryIsMarkedLikeAPointedAtOne();
     void aDisabledEntryIsLeftToTheTheme();
 };
 
@@ -81,13 +82,29 @@ void MenuHighlightStyleTest::softStopsShortOfTheHighlight()
     QVERIFY(moved);
 }
 
+// A theme marks pressed differently from pointed-at, usually lighter still, so
+// an entry answering only for the second went pale the moment it was clicked.
+void MenuHighlightStyleTest::aPressedEntryIsMarkedLikeAPointedAtOne()
+{
+    const QStyle::State pointedAt = QStyle::State_Enabled | QStyle::State_Selected;
+    const QStyle::State pressed = pointedAt | QStyle::State_Sunken;
+    for (const MenuHighlightStyle::Emphasis emphasis :
+         {MenuHighlightStyle::Emphasis::Solid, MenuHighlightStyle::Emphasis::Soft}) {
+        QCOMPARE(fillFor(emphasis, pressed), fillFor(emphasis, pointedAt));
+    }
+
+    // Held down without having been pointed at first is still pressed.
+    QCOMPARE(fillFor(MenuHighlightStyle::Emphasis::Soft, QStyle::State_Enabled | QStyle::State_Sunken),
+             fillFor(MenuHighlightStyle::Emphasis::Soft, pointedAt));
+}
+
 // An entry that cannot be chosen is not marked as the one being chosen, in
 // either emphasis: the theme's disabled rendering is left alone.
 void MenuHighlightStyleTest::aDisabledEntryIsLeftToTheTheme()
 {
     for (const MenuHighlightStyle::Emphasis emphasis :
          {MenuHighlightStyle::Emphasis::Solid, MenuHighlightStyle::Emphasis::Soft}) {
-        const QColor painted = fillFor(emphasis, QStyle::State_Selected);
+        const QColor painted = fillFor(emphasis, QStyle::State_Selected | QStyle::State_Sunken);
         QVERIFY(painted != QApplication::palette().color(QPalette::Highlight));
         QVERIFY(painted
                 != SelectionColors::dimmedHighlight(QApplication::palette().color(QPalette::Window),
