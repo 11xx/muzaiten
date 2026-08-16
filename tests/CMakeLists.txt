@@ -837,6 +837,12 @@ target_compile_features(test_idle_release_controller PRIVATE cxx_std_26)
 add_test(NAME test_idle_release_controller COMMAND test_idle_release_controller)
 set_tests_properties(test_idle_release_controller PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_menu_highlight_style test_menu_highlight_style.cpp)
+target_link_libraries(test_menu_highlight_style PRIVATE muzaiten_app_objects Qt6::Test)
+target_compile_features(test_menu_highlight_style PRIVATE cxx_std_26)
+add_test(NAME test_menu_highlight_style COMMAND test_menu_highlight_style)
+set_tests_properties(test_menu_highlight_style PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_scrobbling_dialog test_scrobbling_dialog.cpp)
 target_link_libraries(test_scrobbling_dialog PRIVATE muzaiten_app_objects Qt6::Test)
 target_compile_features(test_scrobbling_dialog PRIVATE cxx_std_26)
