@@ -13,6 +13,7 @@
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
 #include "ui/AudioAnalysisData.h"
+#include "scrobble/ScrobbleDestination.h"
 #include "ui/ScrobblingDialog.h"
 
 #include <functional>
@@ -278,6 +279,12 @@ private:
     // The scrobblers panel while its window is open, so state changed elsewhere
     // reaches the working copy it holds.
     QPointer<ScrobblersPanel> m_openScrobblersPanel;
+    // The destination set the scrobbler workers were last configured with.
+    ScrobbleDestinationSet m_appliedDestinations;
+    // Whether a destination's saved address has not reached its worker yet,
+    // which is the one case where delivering before applying would deliver to
+    // the wrong server.
+    bool addressAwaitingApply(const QString &destinationId) const;
     // Display name for a destination id, for status and dialog text.
     QString scrobbleDestinationName(const QString &destinationId) const;
     // Flips one destination's enabled state and reconfigures the hub.

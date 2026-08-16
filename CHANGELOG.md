@@ -55,10 +55,10 @@
   to a test the row has abandoned or already superseded cannot claim it: two
   tests of the same credentials can still differ if one meets a transient
   failure, and it is the one you asked last that is reported.
-- Retrying or queueing a backlog applies pending destination edits first, so
-  listens are delivered to the address a destination has now rather than to
-  the one it had before it was edited, and recorded as sent to the wrong
-  server.
+- Retrying or queueing a backlog for a destination whose address was just
+  edited applies that edit first, so the listens go to the address it has now
+  rather than to the one it had, and are not recorded as sent to a server that
+  never received them.
 - The pending count the `Scrobblers` tab shows follows every change to a
   backlog while the window is open, whether it came from the
   `Listening history` tab or from an upload finishing in the background.

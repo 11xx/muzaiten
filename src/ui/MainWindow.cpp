@@ -5305,6 +5305,9 @@ QString MainWindow::mpdMusicDirectory() const
 void MainWindow::configureListenBrainz()
 {
     const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    // What the workers are actually running, which is what tells later code
+    // whether a saved edit has reached them yet.
+    m_appliedDestinations = destinations;
 
     m_listenBrainzHub->configure(
         destinations,
@@ -5375,12 +5378,14 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
         if (changedCount <= 0) {
             return;
         }
-        // Editing is applied when the window closes, but handing a worker
-        // actual listens to deliver cannot wait for that: it would send them to
-        // the address the destination had before it was edited, and record them
-        // as delivered.
-        configureListenBrainz();
-        configureLastFm();
+        // Editing is applied when the window closes, but delivering to an
+        // address a destination no longer has would send the listens to the
+        // wrong server and record them as sent. Only a moved address needs the
+        // workers brought forward early, and configuring them flushes every
+        // enabled backlog, so nothing else does it.
+        if (addressAwaitingApply(service)) {
+            configureListenBrainz();
+        }
         triggerScrobbleUpload(service);
     });
     connect(history, &ListeningHistoryPanel::statusMessageRequested, this,
@@ -5411,6 +5416,16 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     configureListenBrainz();
     configureLastFm();
     updateScrobbleBacklogActions();
+}
+
+bool MainWindow::addressAwaitingApply(const QString &destinationId) const
+{
+    const ScrobbleDestination *saved = m_core->scrobbleDestinations().find(destinationId);
+    const ScrobbleDestination *applied = m_appliedDestinations.find(destinationId);
+    if (saved == nullptr) {
+        return false;
+    }
+    return applied == nullptr || applied->apiRoot != saved->apiRoot;
 }
 
 QString MainWindow::scrobbleDestinationName(const QString &destinationId) const
