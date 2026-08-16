@@ -7,6 +7,9 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QApplication>
+#include <QDialogButtonBox>
+#include <QImage>
+#include <QPushButton>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -175,9 +178,23 @@ void ScrobblingDialogTest::theTabStripDoesNotOpenWearingTheFocus()
     QVERIFY(bar != nullptr);
     QVERIFY(!bar->hasFocus());
 
-    // Still reachable, so a keyboard user can get to it and be shown that they
-    // have.
+    // Something else holds it, rather than nothing holding it: a dialog whose
+    // focus went nowhere would also pass a bare !hasFocus().
+    auto *close = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close);
+    QVERIFY(close != nullptr);
+    QCOMPARE(QApplication::focusWidget(), close);
+
+    // Reachable, and marked once reached. The strip carries no focus rule of
+    // its own, so this is the style's own marking; asserting that the strip
+    // renders differently pins it without pinning what it draws.
     QVERIFY(bar->focusPolicy() & Qt::TabFocus);
+    // Grabbed through the dialog: a tab bar rendered on its own carries no
+    // focus state into its pixmap and would compare equal either way.
+    const QImage unfocused = dialog->grab().toImage();
+    bar->setFocus(Qt::TabFocusReason);
+    QCoreApplication::processEvents();
+    QVERIFY(bar->hasFocus());
+    QVERIFY(dialog->grab().toImage() != unfocused);
 }
 
 QTEST_MAIN(ScrobblingDialogTest)
