@@ -6,6 +6,11 @@
 #include <QAction>
 #include <QLabel>
 #include <QPushButton>
+#include <QApplication>
+#include <QDialogButtonBox>
+
+#include <QPushButton>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -21,6 +26,7 @@ class ScrobblingDialogTest final : public QObject {
 private slots:
     void carriesBothPanelsAsTabs();
     void eachEntryPointOpensItsOwnTab();
+    void theTabStripDoesNotOpenWearingTheFocus();
     void aBacklogClearedInOneTabUpdatesTheOther();
     void aDestinationRemovedInOneTabLeavesTheOther();
 
@@ -156,6 +162,35 @@ void ScrobblingDialogTest::aDestinationRemovedInOneTabLeavesTheOther()
     // Saving without Koito is what removal amounts to from the history's side.
     emit scrobblers->destinationsChanged(ScrobbleDestinationConfig::defaults());
     QVERIFY(!offers(m_koitoId));
+}
+
+// The strip is first in the focus chain, so left alone it opens wearing the
+// style's focus marks: a ring around the tab and a rule under its label,
+// directly above the strip's own. A window that has only just appeared has
+// nothing to say with them.
+void ScrobblingDialogTest::theTabStripDoesNotOpenWearingTheFocus()
+{
+    const auto dialog = makeDialog();
+    dialog->show();
+    QCoreApplication::processEvents();
+
+    auto *bar = dialog->findChild<QTabBar *>();
+    QVERIFY(bar != nullptr);
+    QVERIFY(!bar->hasFocus());
+
+    // Something else holds it, rather than nothing holding it: a dialog whose
+    // focus went nowhere would also pass a bare !hasFocus().
+    auto *close = dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Close);
+    QVERIFY(close != nullptr);
+    QCOMPARE(QApplication::focusWidget(), close);
+
+    // Still reachable, so a keyboard user can get to it. That they are then
+    // shown they have is the style's doing rather than this window's: the strip
+    // carries no focus rule of its own. It is drawn from the widget's focus
+    // state and only while the window is active, which is not a condition an
+    // offscreen suite can hold, so it is checked by rendering the window rather
+    // than asserted here.
+    QVERIFY(bar->focusPolicy() & Qt::TabFocus);
 }
 
 QTEST_MAIN(ScrobblingDialogTest)
