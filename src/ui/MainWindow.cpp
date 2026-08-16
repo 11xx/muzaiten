@@ -5390,11 +5390,14 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     // window is open; the panel has to hear about it or its next save writes
     // the state back.
     m_openScrobblersPanel = scrobblers;
-    // Everything else this panel saves waits for the window to close. An
-    // address cannot: a listen finishing while the window is open, or a backlog
-    // retried from the other tab, would otherwise be delivered to the address
-    // the destination has stopped using and recorded as sent there.
-    connect(scrobblers, &ScrobblersPanel::addressChanged, this, &MainWindow::configureListenBrainz);
+    // Saved and applied together: while the two disagree, anything delivered in
+    // between goes out under credentials the destination has stopped using and
+    // is recorded as sent. Fields commit when they are left, so this is one
+    // apply per completed edit rather than one per keystroke.
+    connect(scrobblers, &ScrobblersPanel::applyRequested, this, [this]() {
+        configureListenBrainz();
+        configureLastFm();
+    });
     ScrobblingDialog dialog(scrobblers, history, this);
     dialog.showTab(tab);
     // Test results come back from the worker thread; route them to the panel
@@ -5405,7 +5408,8 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     disconnect(connection);
     m_openScrobblersPanel = nullptr;
 
-    // Editing saved as it went; closing is what applies it.
+    // Editing was applied as it went; this covers the last edit if a field was
+    // still focused when the window closed.
     configureListenBrainz();
     configureLastFm();
     updateScrobbleBacklogActions();

@@ -400,7 +400,6 @@ private:
         m_status.clear();
         refresh();
         m_dialog->save();
-        emit m_dialog->addressChanged();
         // Saved with an address, so from here it is a configured destination:
         // its records exist, and clearing the address would strand them.
         m_alreadyConfigured = true;
@@ -430,6 +429,9 @@ private:
         }
         m_dialog->m_callbacks.writeToken(m_destination.id, typed);
         refresh();
+        // A token the scrobblers have not been given yet is one they would
+        // deliver under, and record deliveries against, after it was replaced.
+        emit m_dialog->applyRequested();
     }
 
     void test()
@@ -605,7 +607,7 @@ ScrobblersPanel::ScrobblersPanel(ScrobbleDestinationSet destinations, ListenHist
     layout->addLayout(misc);
 
     auto *saveNote = new QLabel(
-        QStringLiteral("Changes are saved as you make them, and take effect when this window closes."), this);
+        QStringLiteral("Changes are saved and take effect as you make them."), this);
     setMuted(saveNote, true);
     layout->addWidget(saveNote);
 
@@ -643,6 +645,7 @@ void ScrobblersPanel::save()
     }
     updateNotices();
     emit destinationsChanged(saved);
+    emit applyRequested();
 }
 
 void ScrobblersPanel::addDestination()

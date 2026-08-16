@@ -21,10 +21,18 @@ class ToggleSwitch;
 // carries the two scrobbling-wide controls that belong with them, offline mode
 // and the Last.fm API credentials.
 //
-// Editing is stateless: a change is saved the moment it is made, and there is
-// no accept or cancel. What the panel deliberately does not do is apply the
-// result while it is open, so retyping a server URL cannot make the app
-// reconnect on every keystroke; the owner applies once, when the window closes.
+// Editing is stateless: a change is saved the moment it is made and applied
+// with it, and there is no accept or cancel. Applying is per completed edit,
+// never per keystroke, because a field commits when it is left rather than as
+// it is typed.
+//
+// Saving without applying was tried and abandoned. The two states then
+// disagree, and every path that delivers a listen in between - a backlog
+// retried from the history tab, a track simply finishing while the window sits
+// open - delivers through a scrobbler still holding the address or token the
+// destination has stopped using, and records it as sent. The scrobblers are
+// configured as a set, so applying one destination's edit applies every
+// destination's anyway; there was never a partial apply to be had.
 //
 // A destination with no server address cannot deliver, so it cannot be enabled
 // and it is not written to the configuration until it has one. Removal is
@@ -67,11 +75,9 @@ signals:
     // panel is looking at a set that has moved.
     void destinationsChanged(const ScrobbleDestinationSet &destinations);
 
-    // A destination now points somewhere else. Everything else this panel edits
-    // can wait for the window to close, but an address cannot: until the
-    // scrobbler running that destination is told, anything it delivers goes to
-    // the address the destination has stopped using and is recorded as sent.
-    void addressChanged();
+    // An edit has landed that the running scrobblers need to know about.
+    // Emitted once per completed edit, never per keystroke.
+    void applyRequested();
 
 public slots:
     // Result of a `testDestination` call, routed back by the owner.

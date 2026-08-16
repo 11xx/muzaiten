@@ -30,7 +30,7 @@ private slots:
     void aTestResultForChangedCredentialsIsIgnored();
     void anEarlierTestReplyCannotClaimALaterTest();
     void testIdsAreNotReusedByALaterPanel();
-    void aMovedAddressIsAnnouncedForImmediateApply();
+    void everyCompletedEditAsksToBeApplied();
 
 private:
     QHash<QString, QString> m_tokens;
@@ -424,24 +424,27 @@ void ScrobblersPanelTest::testIdsAreNotReusedByALaterPanel()
     QCOMPARE(status->text(), QStringLiteral("Testing…"));
 }
 
-// Everything this panel saves waits for the window to close, except an
-// address: until the scrobbler running that destination is told, anything it
-// delivers goes to the address the destination has stopped using.
-void ScrobblersPanelTest::aMovedAddressIsAnnouncedForImmediateApply()
+// Saving and applying travel together: while they disagree, a listen delivered
+// in between goes out under credentials the destination has stopped using.
+void ScrobblersPanelTest::everyCompletedEditAsksToBeApplied()
 {
     ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
     const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), true);
 
     const auto panel = makePanel(destinations);
-    int announced = 0;
-    connect(panel.get(), &ScrobblersPanel::addressChanged, panel.get(), [&announced]() { ++announced; });
+    int applied = 0;
+    connect(panel.get(), &ScrobblersPanel::applyRequested, panel.get(), [&applied]() { ++applied; });
 
     type(panel->findChild<QLineEdit *>(id + QStringLiteral(".url")), QStringLiteral("https://moved.example"));
-    QCOMPARE(announced, 1);
+    QVERIFY(applied > 0);
 
-    // Enabling is not an address, and waits for the window like everything else.
+    applied = 0;
+    type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("replacement"));
+    QVERIFY(applied > 0);
+
+    applied = 0;
     panel->findChild<ToggleSwitch *>(id + QStringLiteral(".enabled"))->click();
-    QCOMPARE(announced, 1);
+    QVERIFY(applied > 0);
 }
 
 QTEST_MAIN(ScrobblersPanelTest)

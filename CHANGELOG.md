@@ -17,8 +17,8 @@
 - `Manage scrobblers…` is now a list of per-destination rows. Enabling a
   destination is a single click, its name, address and token are edited where
   they are shown, and testing and removal are per-row buttons. Editing is
-  saved as you go, with no OK or Cancel; the result is applied when the window
-  closes, so retyping an address does not reconnect on every keystroke.
+  saved and applied as you go, with no OK or Cancel; a field commits when you
+  leave it, so retyping an address does not reconnect on every keystroke.
   Removal confirms first and cannot be undone. Offline mode and
   `Last.fm API settings…` are available in the same window as well as in the
   Scrobblers menu.
@@ -55,12 +55,13 @@
   to a test the row has abandoned or already superseded cannot claim it: two
   tests of the same credentials can still differ if one meets a transient
   failure, and it is the one you asked last that is reported.
-- Changing a destination's address takes effect at once rather than waiting for
-  the window to close. Everything else there still waits, but until a scrobbler
-  is told its destination moved, anything it delivers goes to the address that
-  destination has stopped using and is recorded as sent there: a listen
-  finishing while the window is open, or a backlog retried from the other tab,
-  would both have gone to the old server.
+- Edits in `Manage scrobblers…` take effect as they are made rather than when
+  the window closes. While the saved configuration and the running scrobblers
+  disagreed, anything delivered in between went out under an address or token
+  the destination had stopped using and was recorded as sent there: a listen
+  finishing while the window sat open, or a backlog retried from the other tab,
+  would both have gone to the old server or the old account. Applying is per
+  completed edit, not per keystroke, because a field commits when it is left.
 - The pending count the `Scrobblers` tab shows follows every change to a
   backlog while the window is open, whether it came from the
   `Listening history` tab or from an upload finishing in the background.
