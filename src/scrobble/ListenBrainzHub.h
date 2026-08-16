@@ -45,13 +45,15 @@ public:
 
     // Tests a URL and token that need not belong to a configured destination
     // yet, so the manager can validate before saving.
-    void validateToken(const QString &destinationId, const QString &apiRoot, const QString &token);
+    // `requestId` is echoed back with the result, so a caller that issued more
+    // than one test can tell which one an answer belongs to.
+    void validateToken(const QString &destinationId, quint64 requestId, const QString &apiRoot, const QString &token);
 
 signals:
     void submissionFailed(QString destinationId, QString message);
     void backlogProcessed(QString destinationId, int sentCount, int skippedCount, int remainingCount);
     void disabledAfterFailures(QString destinationId, QString message);
-    void tokenValidated(QString destinationId, bool valid, QString username);
+    void tokenValidated(QString destinationId, quint64 requestId, bool valid, QString username);
 
 private:
     ListenBrainzScrobbler *createScrobbler();

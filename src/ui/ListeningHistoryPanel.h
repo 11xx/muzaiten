@@ -3,27 +3,31 @@
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ScrobbleDestination.h"
 
-#include <QDialog>
 #include <QList>
 #include <QString>
+#include <QWidget>
 
 #include <optional>
 
-class QComboBox;
+class QAction;
 class QLabel;
 class QPushButton;
 class QAbstractTableModel;
 class QTableView;
 class ResponsiveColumnLayout;
 
-class ListeningHistoryDialog final : public QDialog {
+class ListeningHistoryPanel final : public QWidget {
     Q_OBJECT
 
 public:
-    ListeningHistoryDialog(ListenHistoryStore *store, ScrobbleDestinationSet destinations,
+    ListeningHistoryPanel(ListenHistoryStore *store, ScrobbleDestinationSet destinations,
                            QWidget *parent = nullptr);
 
-    // Restores the persisted Ctrl+wheel row height (the dialog is recreated per
+    // Adopts a destination set edited elsewhere while this panel is open,
+    // keeping whichever picks survived the change.
+    void setDestinations(const ScrobbleDestinationSet &destinations);
+
+    // Restores the persisted Ctrl+wheel row height (the panel is recreated per
     // open, so the owner round-trips it through settings).
     void setRowHeight(int height);
 
@@ -38,13 +42,19 @@ protected:
 
 private:
     void reload();
-    void queueSelected(const QString &service);
-    void clearPending(const QString &service);
+    void queueSelected();
+    void retryPending();
+    void clearBacklogs();
     void forgetSelectedBehavior();
     void updateActions();
+    void updateDestinationButton();
     QList<qint64> selectedIds() const;
-    // The chosen destination, or empty for the aggregate view.
-    QString selectedDestinationId() const;
+    // The destinations the user picked. Empty is the read-only overview, which
+    // is what the mutating actions test for.
+    QStringList scopedDestinationIds() const;
+    // The destinations the counts answer for: the picks, or every destination
+    // when nothing is picked.
+    QStringList effectiveScopeIds() const;
     QString destinationName(const QString &destinationId) const;
     std::optional<ListenHistoryStore::HistoryRow> selectedHistoryRow() const;
 
@@ -53,7 +63,8 @@ private:
     QTableView *m_view = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     QLabel *m_summary = nullptr;
-    QComboBox *m_destinationSelector = nullptr;
+    QPushButton *m_destinationButton = nullptr;
+    QList<QAction *> m_destinationActions;
     QPushButton *m_queueSelected = nullptr;
     QPushButton *m_forgetBehavior = nullptr;
     QPushButton *m_retryPending = nullptr;

@@ -38,12 +38,14 @@ can still queue specific rows yourself from Listening History.
 
 The destructive-looking actions are deliberately narrow:
 
-- **Clear backlog** drops one destination's undelivered records. The listens
-  stay, and deliveries already completed stay recorded as completed.
+- **Clear backlog** drops the undelivered records of every destination
+  currently picked. The listens stay, and deliveries already completed stay
+  recorded as completed.
 - **Removing a destination** deletes that destination's delivery records and its
   stored token, and nothing else. Other destinations' backlogs are untouched,
-  and the listening history is kept in full. The dialog states how many pending
-  deliveries are being discarded before you confirm.
+  and the listening history is kept in full. It takes effect on confirmation
+  and cannot be undone, so the prompt states how many pending deliveries are
+  being discarded before you confirm.
 - **Editing a destination's URL** keeps its identity and its backlog: pending
   listens follow it to the new address rather than being dropped.
 

@@ -35,8 +35,9 @@
 #include "ui/IdleReleaseController.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
-#include "ui/ListeningHistoryDialog.h"
-#include "ui/ScrobbleDestinationsDialog.h"
+#include "ui/ListeningHistoryPanel.h"
+#include "ui/ScrobblersPanel.h"
+#include "ui/ScrobblingDialog.h"
 #include "ui/ScrobbleUploadDispatcher.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelBorderStyle.h"
@@ -986,7 +987,14 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                 QMessageBox::warning(this, scrobbleDestinationName(destinationId), message);
             });
     connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, this,
-            [this](const QString &destinationId, bool valid, const QString &username) {
+            [this](const QString &destinationId, quint64, bool valid, const QString &username) {
+                // While the panel is open it reports each result on the row it
+                // belongs to, and it alone knows which replies are still
+                // current. Announcing them here as well would put a superseded
+                // one in the status bar.
+                if (m_openScrobblersPanel != nullptr) {
+                    return;
+                }
                 const QString name = scrobbleDestinationName(destinationId);
                 statusBar()->showMessage(valid ? QStringLiteral("%1 token valid: connected as %2").arg(name, username)
                                                : QStringLiteral("%1 token is invalid.").arg(name),
@@ -5310,9 +5318,13 @@ void MainWindow::configureListenBrainz()
         !scrobbleOffline(), listenHistoryPath());
 }
 
-void MainWindow::manageScrobblers()
+void MainWindow::manageScrobblers() { showScrobblingDialog(ScrobblingDialog::Tab::Scrobblers); }
+
+void MainWindow::showListeningHistory() { showScrobblingDialog(ScrobblingDialog::Tab::History); }
+
+void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
 {
-    ScrobbleDestinationsDialog::Callbacks callbacks;
+    ScrobblersPanel::Callbacks callbacks;
     callbacks.readToken = [this](const QString &id) {
         return m_database->setting(ScrobbleDestinationConfig::tokenSettingKey(id));
     };
@@ -5325,23 +5337,77 @@ void MainWindow::manageScrobblers()
     callbacks.lastFmConfigured = [this]() {
         return !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
     };
-
-    callbacks.testDestination = [this](const QString &id, const QString &apiRoot, const QString &token) {
-        m_listenBrainzHub->validateToken(id, apiRoot, token);
+    callbacks.testDestination = [this](const QString &id, quint64 requestId, const QString &apiRoot,
+                                      const QString &token) {
+        m_listenBrainzHub->validateToken(id, requestId, apiRoot, token);
     };
+    callbacks.saveDestinations = [this](const ScrobbleDestinationSet &destinations) {
+        m_core->setScrobbleDestinations(destinations);
+    };
+    callbacks.readOffline = [this]() { return scrobbleOffline(); };
+    callbacks.writeOffline = [this](bool offline) {
+        setScrobbleOffline(offline);
+        // The same switch lives in the Scrobblers menu; keep the two in step.
+        m_playerBar->setScrobbleOffline(offline);
+    };
+    callbacks.openLastFmSettings = [this]() { showLastFmSettings(); };
 
-    ScrobbleDestinationsDialog dialog(m_core->scrobbleDestinations(), m_listenHistory, callbacks, this);
-    // Test results come back from the worker thread; route them to the dialog
-    // for as long as it is open.
-    const auto connection = connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, &dialog,
-                                    &ScrobbleDestinationsDialog::reportTestResult);
-    const bool accepted = dialog.exec() == QDialog::Accepted;
-    disconnect(connection);
-    if (!accepted) {
-        return;
+    const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    auto *scrobblers = new ScrobblersPanel(destinations, m_listenHistory, callbacks);
+    auto *history = new ListeningHistoryPanel(m_listenHistory, destinations);
+
+    if (m_state != nullptr) {
+        bool ok = false;
+        const int saved = m_state->setting(QStringLiteral("listeningHistory.rowHeight")).toInt(&ok);
+        if (ok && saved > 0) {
+            history->setRowHeight(saved);
+        }
     }
+    connect(history, &ListeningHistoryPanel::rowHeightChanged, this, [this](int height) {
+        if (m_state != nullptr) {
+            m_state->setSetting(QStringLiteral("listeningHistory.rowHeight"), QString::number(height));
+        }
+    });
+    connect(history, &ListeningHistoryPanel::backlogChanged, this, [this](const QString &service, int changedCount) {
+        updateScrobbleBacklogActions();
+        if (changedCount > 0) {
+            triggerScrobbleUpload(service);
+        }
+    });
+    connect(history, &ListeningHistoryPanel::statusMessageRequested, this,
+            [this](const QString &message, int timeoutMs) { statusBar()->showMessage(message, timeoutMs); });
+    connect(history, &ListeningHistoryPanel::forgetBehaviorRequested, this,
+            [this](const Track &track, bool includeImportedListens) {
+                const int removed = m_core->forgetTrackBehaviorForSong(track.path, includeImportedListens);
+                const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
+                statusBar()->showMessage(QStringLiteral("Forgot %1 listening behavior rows for \"%2\"").arg(removed).arg(title),
+                                         5000);
+            });
 
-    m_core->setScrobbleDestinations(dialog.destinations());
+    // Last.fm can enable or disable itself from its own settings while this
+    // window is open; the panel has to hear about it or its next save writes
+    // the state back.
+    m_openScrobblersPanel = scrobblers;
+    // Saved and applied together: while the two disagree, anything delivered in
+    // between goes out under credentials the destination has stopped using and
+    // is recorded as sent. Fields commit when they are left, so this is one
+    // apply per completed edit rather than one per keystroke.
+    connect(scrobblers, &ScrobblersPanel::applyRequested, this, [this]() {
+        configureListenBrainz();
+        configureLastFm();
+    });
+    ScrobblingDialog dialog(scrobblers, history, this);
+    dialog.showTab(tab);
+    // Test results come back from the worker thread; route them to the panel
+    // for as long as the window is open.
+    const auto connection = connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, scrobblers,
+                                    &ScrobblersPanel::reportTestResult);
+    dialog.exec();
+    disconnect(connection);
+    m_openScrobblersPanel = nullptr;
+
+    // Editing was applied as it went; this covers the last edit if a field was
+    // still focused when the window closed.
     configureListenBrainz();
     configureLastFm();
     updateScrobbleBacklogActions();
@@ -5363,47 +5429,10 @@ void MainWindow::setScrobbleDestinationEnabled(const QString &destinationId, boo
         return;
     }
     m_core->setScrobbleDestinations(destinations);
-}
-
-void MainWindow::showListeningHistory()
-{
-    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
-        QMessageBox::warning(this, QStringLiteral("Listening history"), QStringLiteral("Listening history is unavailable."));
-        return;
+    if (m_openScrobblersPanel != nullptr) {
+        m_openScrobblersPanel->adoptEnabledState(destinationId, enabled);
     }
-
-    ListeningHistoryDialog dialog(m_listenHistory, m_core->scrobbleDestinations(), this);
-    if (m_state != nullptr) {
-        bool ok = false;
-        const int saved = m_state->setting(QStringLiteral("listeningHistory.rowHeight")).toInt(&ok);
-        if (ok && saved > 0) {
-            dialog.setRowHeight(saved);
-        }
-    }
-    connect(&dialog, &ListeningHistoryDialog::rowHeightChanged, this, [this](int height) {
-        if (m_state != nullptr) {
-            m_state->setSetting(QStringLiteral("listeningHistory.rowHeight"), QString::number(height));
-        }
-    });
-    connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
-        updateScrobbleBacklogActions();
-        if (changedCount > 0) {
-            triggerScrobbleUpload(service);
-        }
-    });
-    connect(&dialog, &ListeningHistoryDialog::statusMessageRequested, this, [this](const QString &message, int timeoutMs) {
-        statusBar()->showMessage(message, timeoutMs);
-    });
-    connect(&dialog, &ListeningHistoryDialog::forgetBehaviorRequested, this,
-            [this](const Track &track, bool includeImportedListens) {
-                const int removed = m_core->forgetTrackBehaviorForSong(track.path, includeImportedListens);
-                const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
-                statusBar()->showMessage(QStringLiteral("Forgot %1 listening behavior rows for \"%2\"").arg(removed).arg(title),
-                                         5000);
-            });
-    dialog.exec();
 }
-
 
 void MainWindow::triggerScrobbleUpload(const QString &service)
 {
@@ -5416,6 +5445,12 @@ void MainWindow::triggerScrobbleUpload(const QString &service)
 void MainWindow::updateScrobbleBacklogActions()
 {
     updateBackfillStatusDisplay();
+    // Every path that changes a backlog comes through here, including a worker
+    // finishing an upload, so this is where an open panel learns its pending
+    // counts have moved.
+    if (m_openScrobblersPanel != nullptr) {
+        m_openScrobblersPanel->refreshPendingCounts();
+    }
 }
 
 void MainWindow::updateBackfillStatusDisplay()

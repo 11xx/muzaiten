@@ -10,6 +10,22 @@
   managed from `History > Scrobblers > Manage scrobblers…`, which shows each
   destination's enabled state, credential or test status, and pending count,
   and supports add, edit, enable/disable, test, and removal.
+- Scrobbling is one window with two tabs, `Scrobblers` and `Listening history`,
+  reached from either menu entry. They are two views of the same subject and
+  are read against each other constantly, since a backlog in one is explained
+  by a token or an address in the other.
+- `Manage scrobblers…` is now a list of per-destination rows. Enabling a
+  destination is a single click, its name, address and token are edited where
+  they are shown, and testing and removal are per-row buttons. Editing is
+  saved and applied as you go, with no OK or Cancel; a field commits when you
+  leave it, so retyping an address does not reconnect on every keystroke.
+  Removal confirms first and cannot be undone. Offline mode and
+  `Last.fm API settings…` are available in the same window as well as in the
+  Scrobblers menu.
+- `Listening history…` can scope to several destinations at once. The
+  destination popup stays open while destinations are toggled, and the counts,
+  the summary, and the queue, retry and clear actions all apply to exactly the
+  destinations picked. The choice lasts as long as the window.
 
 ### Fixed
 
@@ -22,7 +38,43 @@
 - `Listening history…` gained a destination selector. Choosing one scopes the
   delivery column, the pending count, `Scrobble selected`, `Clear backlog`, and
   the retry action to it; `All destinations` is a read-only overview showing
-  how many deliveries have completed.
+  how many deliveries have completed. The column is named `Scrobbled`.
+- A selected row in `Listening history…` stays visibly selected while the
+  destination popup is open. The selection was previously drawn from the
+  inactive palette, which on some themes made it vanish on alternating rows.
+- A ListenBrainz-compatible destination with no server address can no longer be
+  enabled: it has nowhere to deliver, so it is held in the window until it has
+  one rather than being saved as a destination that silently does nothing. A
+  destination that is already configured cannot have its address cleared at
+  all, since dropping it from the configuration would strand its delivery
+  records; remove it instead, which says what it discards.
+- A token typed for a destination that has no address yet is held until it has
+  one, rather than being stored against an id no configuration mentions.
+- `Test` no longer reports on the previous address after the field has refused
+  a new one. Each test carries an identifier through to its answer, so a reply
+  to a test the row has abandoned or already superseded cannot claim it: two
+  tests of the same credentials can still differ if one meets a transient
+  failure, and it is the one you asked last that is reported.
+- Edits in `Manage scrobblers…` take effect as they are made rather than when
+  the window closes. While the saved configuration and the running scrobblers
+  disagreed, anything delivered in between went out under an address or token
+  the destination had stopped using and was recorded as sent there: a listen
+  finishing while the window sat open, or a backlog retried from the other tab,
+  would both have gone to the old server or the old account. Applying is per
+  completed edit, not per keystroke, because a field commits when it is left.
+- The pending count the `Scrobblers` tab shows follows every change to a
+  backlog while the window is open, whether it came from the
+  `Listening history` tab or from an upload finishing in the background.
+- While the window is open, a test result is reported on the row it belongs to
+  and no longer also in the status bar, where a superseded reply could
+  contradict what the row correctly shows.
+- Removing a destination in the `Scrobblers` tab now updates the
+  `Listening history` tab, which could otherwise still offer it and queue
+  listens for a destination that no longer exists.
+- Last.fm enabling or disabling itself while the window is open is adopted by
+  the `Scrobblers` tab, so the next edit there does not write that state back.
+- Clearing a backlog no longer triggers an upload attempt for the destination
+  whose backlog was just cleared.
 - `Radio > Anchor for new sessions` can keep new seeded and artist sessions
   near the starting song or let them drift with what plays.
 - Track selections can use `Start Radio` (`Start Radio (N)` for a
