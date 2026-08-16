@@ -30,6 +30,7 @@ private slots:
     void aTestResultForChangedCredentialsIsIgnored();
     void anEarlierTestReplyCannotClaimALaterTest();
     void testIdsAreNotReusedByALaterPanel();
+    void aMovedAddressIsAnnouncedForImmediateApply();
 
 private:
     QHash<QString, QString> m_tokens;
@@ -421,6 +422,26 @@ void ScrobblersPanelTest::testIdsAreNotReusedByALaterPanel()
     auto *status = second->findChild<QLabel *>(id + QStringLiteral(".status"));
     second->reportTestResult(id, issued.at(0), true, QStringLiteral("somebody"));
     QCOMPARE(status->text(), QStringLiteral("Testing…"));
+}
+
+// Everything this panel saves waits for the window to close, except an
+// address: until the scrobbler running that destination is told, anything it
+// delivers goes to the address the destination has stopped using.
+void ScrobblersPanelTest::aMovedAddressIsAnnouncedForImmediateApply()
+{
+    ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
+    const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), true);
+
+    const auto panel = makePanel(destinations);
+    int announced = 0;
+    connect(panel.get(), &ScrobblersPanel::addressChanged, panel.get(), [&announced]() { ++announced; });
+
+    type(panel->findChild<QLineEdit *>(id + QStringLiteral(".url")), QStringLiteral("https://moved.example"));
+    QCOMPARE(announced, 1);
+
+    // Enabling is not an address, and waits for the window like everything else.
+    panel->findChild<ToggleSwitch *>(id + QStringLiteral(".enabled"))->click();
+    QCOMPARE(announced, 1);
 }
 
 QTEST_MAIN(ScrobblersPanelTest)

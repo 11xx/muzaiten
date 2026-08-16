@@ -55,10 +55,12 @@
   to a test the row has abandoned or already superseded cannot claim it: two
   tests of the same credentials can still differ if one meets a transient
   failure, and it is the one you asked last that is reported.
-- Retrying or queueing a backlog for a destination whose address was just
-  edited applies that edit first, so the listens go to the address it has now
-  rather than to the one it had, and are not recorded as sent to a server that
-  never received them.
+- Changing a destination's address takes effect at once rather than waiting for
+  the window to close. Everything else there still waits, but until a scrobbler
+  is told its destination moved, anything it delivers goes to the address that
+  destination has stopped using and is recorded as sent there: a listen
+  finishing while the window is open, or a backlog retried from the other tab,
+  would both have gone to the old server.
 - The pending count the `Scrobblers` tab shows follows every change to a
   backlog while the window is open, whether it came from the
   `Listening history` tab or from an upload finishing in the background.

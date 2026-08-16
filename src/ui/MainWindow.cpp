@@ -5305,9 +5305,6 @@ QString MainWindow::mpdMusicDirectory() const
 void MainWindow::configureListenBrainz()
 {
     const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
-    // What the workers are actually running, which is what tells later code
-    // whether a saved edit has reached them yet.
-    m_appliedDestinations = destinations;
 
     m_listenBrainzHub->configure(
         destinations,
@@ -5375,18 +5372,9 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     });
     connect(history, &ListeningHistoryPanel::backlogChanged, this, [this](const QString &service, int changedCount) {
         updateScrobbleBacklogActions();
-        if (changedCount <= 0) {
-            return;
+        if (changedCount > 0) {
+            triggerScrobbleUpload(service);
         }
-        // Editing is applied when the window closes, but delivering to an
-        // address a destination no longer has would send the listens to the
-        // wrong server and record them as sent. Only a moved address needs the
-        // workers brought forward early, and configuring them flushes every
-        // enabled backlog, so nothing else does it.
-        if (addressAwaitingApply(service)) {
-            configureListenBrainz();
-        }
-        triggerScrobbleUpload(service);
     });
     connect(history, &ListeningHistoryPanel::statusMessageRequested, this,
             [this](const QString &message, int timeoutMs) { statusBar()->showMessage(message, timeoutMs); });
@@ -5402,6 +5390,11 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     // window is open; the panel has to hear about it or its next save writes
     // the state back.
     m_openScrobblersPanel = scrobblers;
+    // Everything else this panel saves waits for the window to close. An
+    // address cannot: a listen finishing while the window is open, or a backlog
+    // retried from the other tab, would otherwise be delivered to the address
+    // the destination has stopped using and recorded as sent there.
+    connect(scrobblers, &ScrobblersPanel::addressChanged, this, &MainWindow::configureListenBrainz);
     ScrobblingDialog dialog(scrobblers, history, this);
     dialog.showTab(tab);
     // Test results come back from the worker thread; route them to the panel
@@ -5416,16 +5409,6 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     configureListenBrainz();
     configureLastFm();
     updateScrobbleBacklogActions();
-}
-
-bool MainWindow::addressAwaitingApply(const QString &destinationId) const
-{
-    const ScrobbleDestination *saved = m_core->scrobbleDestinations().find(destinationId);
-    const ScrobbleDestination *applied = m_appliedDestinations.find(destinationId);
-    if (saved == nullptr) {
-        return false;
-    }
-    return applied == nullptr || applied->apiRoot != saved->apiRoot;
 }
 
 QString MainWindow::scrobbleDestinationName(const QString &destinationId) const

@@ -67,6 +67,12 @@ signals:
     // panel is looking at a set that has moved.
     void destinationsChanged(const ScrobbleDestinationSet &destinations);
 
+    // A destination now points somewhere else. Everything else this panel edits
+    // can wait for the window to close, but an address cannot: until the
+    // scrobbler running that destination is told, anything it delivers goes to
+    // the address the destination has stopped using and is recorded as sent.
+    void addressChanged();
+
 public slots:
     // Result of a `testDestination` call, routed back by the owner.
     void reportTestResult(const QString &destinationId, quint64 requestId, bool valid, const QString &username);

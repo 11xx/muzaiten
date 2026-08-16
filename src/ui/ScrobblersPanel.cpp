@@ -400,6 +400,7 @@ private:
         m_status.clear();
         refresh();
         m_dialog->save();
+        emit m_dialog->addressChanged();
         // Saved with an address, so from here it is a configured destination:
         // its records exist, and clearing the address would strand them.
         m_alreadyConfigured = true;
