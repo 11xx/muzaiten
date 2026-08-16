@@ -15,6 +15,9 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <array>
+#include <cstdlib>
+
 namespace {
 
 QPushButton *button(QWidget *parent, const QString &text)
@@ -322,15 +325,30 @@ void ListeningHistoryPanelTest::theEntryUnderTheCursorIsWashedInTheHighlight()
 
     // The corner is fill, clear of the checkmark and the label.
     const QColor painted = canvas.pixelColor(2, 2);
-    const QColor wash = StickyMenu::highlightWash(QApplication::palette(&menu));
-    QCOMPARE(painted, wash);
+    const QColor window = option.palette.color(QPalette::Window);
+    const QColor accent = option.palette.color(QPalette::Highlight);
 
-    // And it is recognisably the highlight rather than a grey: the wash leans
-    // the way the accent does, away from the window colour it sits on.
-    const QColor window = QApplication::palette(&menu).color(QPalette::Active, QPalette::Window);
-    const QColor accent = QApplication::palette(&menu).color(QPalette::Active, QPalette::Highlight);
-    QVERIFY(painted != window);
-    QCOMPARE(painted.blue() > painted.red(), accent.blue() > accent.red());
+    // Checked against the palette rather than against the blend that produced
+    // it: each channel has left the window colour, moved towards the accent,
+    // and stopped short of it. That is what "a wash of the highlight" means,
+    // and it fails for a grey card, for a full-strength fill, and for a blend
+    // computed the wrong way round.
+    const auto channels = [](const QColor &color) {
+        return std::array<int, 3>{color.red(), color.green(), color.blue()};
+    };
+    const std::array<int, 3> from = channels(window);
+    const std::array<int, 3> towards = channels(accent);
+    const std::array<int, 3> got = channels(painted);
+    bool moved = false;
+    for (int index = 0; index < 3; ++index) {
+        QVERIFY(got.at(index) >= std::min(from.at(index), towards.at(index)));
+        QVERIFY(got.at(index) <= std::max(from.at(index), towards.at(index)));
+        if (from.at(index) != towards.at(index)) {
+            QVERIFY(std::abs(got.at(index) - from.at(index)) < std::abs(towards.at(index) - from.at(index)));
+            moved = moved || got.at(index) != from.at(index);
+        }
+    }
+    QVERIFY(moved);
 }
 
 QTEST_MAIN(ListeningHistoryPanelTest)

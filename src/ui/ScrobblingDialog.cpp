@@ -25,7 +25,11 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
         "background:transparent;color:palette(window-text);}"
         "QTabBar::tab:hover{background:palette(alternate-base);}"
         "QTabBar::tab:selected{border-bottom:2px solid palette(highlight);"
-        "color:palette(window-text);}"));
+        "color:palette(window-text);}"
+        // Taking over the tab's shape takes over its focus ring too, and a
+        // keyboard user needs to see which strip has the focus.
+        "QTabBar::tab:focus{border:1px dotted palette(window-text);"
+        "border-bottom:2px solid palette(highlight);}"));
     m_tabs->addTab(scrobblers, QStringLiteral("Scrobblers"));
     m_tabs->addTab(history, QStringLiteral("Listening history"));
 
