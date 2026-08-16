@@ -988,6 +988,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
             });
     connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, this,
             [this](const QString &destinationId, quint64, bool valid, const QString &username) {
+                // While the panel is open it reports each result on the row it
+                // belongs to, and it alone knows which replies are still
+                // current. Announcing them here as well would put a superseded
+                // one in the status bar.
+                if (m_openScrobblersPanel != nullptr) {
+                    return;
+                }
                 const QString name = scrobbleDestinationName(destinationId);
                 statusBar()->showMessage(valid ? QStringLiteral("%1 token valid: connected as %2").arg(name, username)
                                                : QStringLiteral("%1 token is invalid.").arg(name),
@@ -5431,6 +5438,12 @@ void MainWindow::triggerScrobbleUpload(const QString &service)
 void MainWindow::updateScrobbleBacklogActions()
 {
     updateBackfillStatusDisplay();
+    // Every path that changes a backlog comes through here, including a worker
+    // finishing an upload, so this is where an open panel learns its pending
+    // counts have moved.
+    if (m_openScrobblersPanel != nullptr) {
+        m_openScrobblersPanel->refreshPendingCounts();
+    }
 }
 
 void MainWindow::updateBackfillStatusDisplay()

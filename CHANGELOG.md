@@ -55,8 +55,12 @@
   to a test the row has abandoned or already superseded cannot claim it: two
   tests of the same credentials can still differ if one meets a transient
   failure, and it is the one you asked last that is reported.
-- Queueing, retrying or clearing a backlog in `Listening history` updates the
-  pending count the `Scrobblers` tab shows for that destination.
+- The pending count the `Scrobblers` tab shows follows every change to a
+  backlog while the window is open, whether it came from the
+  `Listening history` tab or from an upload finishing in the background.
+- While the window is open, a test result is reported on the row it belongs to
+  and no longer also in the status bar, where a superseded reply could
+  contradict what the row correctly shows.
 - Removing a destination in the `Scrobblers` tab now updates the
   `Listening history` tab, which could otherwise still offer it and queue
   listens for a destination that no longer exists.
