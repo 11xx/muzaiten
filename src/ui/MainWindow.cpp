@@ -5372,9 +5372,16 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
     });
     connect(history, &ListeningHistoryPanel::backlogChanged, this, [this](const QString &service, int changedCount) {
         updateScrobbleBacklogActions();
-        if (changedCount > 0) {
-            triggerScrobbleUpload(service);
+        if (changedCount <= 0) {
+            return;
         }
+        // Editing is applied when the window closes, but handing a worker
+        // actual listens to deliver cannot wait for that: it would send them to
+        // the address the destination had before it was edited, and record them
+        // as delivered.
+        configureListenBrainz();
+        configureLastFm();
+        triggerScrobbleUpload(service);
     });
     connect(history, &ListeningHistoryPanel::statusMessageRequested, this,
             [this](const QString &message, int timeoutMs) { statusBar()->showMessage(message, timeoutMs); });

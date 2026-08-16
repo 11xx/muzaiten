@@ -29,6 +29,7 @@ private slots:
     void anAddedServerIsConfiguredOnceItIsSaved();
     void aTestResultForChangedCredentialsIsIgnored();
     void anEarlierTestReplyCannotClaimALaterTest();
+    void testIdsAreNotReusedByALaterPanel();
 
 private:
     QHash<QString, QString> m_tokens;
@@ -392,6 +393,34 @@ void ScrobblersPanelTest::anEarlierTestReplyCannotClaimALaterTest()
     // The second is the one the row asked last, and it is what it reports.
     panel->reportTestResult(id, issued.at(1), true, QStringLiteral("lobo"));
     QCOMPARE(status->text(), QStringLiteral("Connected as lobo"));
+}
+
+// A reply to a test issued before the window closed can still arrive after the
+// next one opens, so the ids the two panels mint must not collide.
+void ScrobblersPanelTest::testIdsAreNotReusedByALaterPanel()
+{
+    ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
+    const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
+
+    QList<quint64> issued;
+    m_callbacks.testDestination = [&issued](const QString &, quint64 requestId, const QString &, const QString &) {
+        issued << requestId;
+    };
+
+    {
+        const auto first = makePanel(destinations);
+        first->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
+    }
+    const auto second = makePanel(destinations);
+    second->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
+
+    QCOMPARE(issued.size(), 2);
+    QVERIFY(issued.at(0) != issued.at(1));
+
+    // The reply owed to the closed panel cannot answer this one's test.
+    auto *status = second->findChild<QLabel *>(id + QStringLiteral(".status"));
+    second->reportTestResult(id, issued.at(0), true, QStringLiteral("somebody"));
+    QCOMPARE(status->text(), QStringLiteral("Testing…"));
 }
 
 QTEST_MAIN(ScrobblersPanelTest)

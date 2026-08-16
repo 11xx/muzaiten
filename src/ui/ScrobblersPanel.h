@@ -100,5 +100,4 @@ private:
     QLabel *m_relayWarning = nullptr;
     ToggleSwitch *m_offline = nullptr;
     int m_nextGridRow = 0;
-    quint64 m_lastTestRequestId = 0;
 };

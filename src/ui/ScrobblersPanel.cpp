@@ -56,6 +56,15 @@ void setValueOrDash(QLabel *label, const QString &value)
     setMuted(label, value.isEmpty());
 }
 
+// Test request ids are unique for the life of the process, not of a panel: a
+// reply to a test issued before the window was closed can still arrive after
+// the next one opens, and must not be mistaken for an answer to its first test.
+quint64 nextGlobalTestRequestId()
+{
+    static quint64 lastId = 0;
+    return ++lastId;
+}
+
 QString mintCustomId()
 {
     ScrobbleDestinationSet minted;
@@ -676,7 +685,7 @@ void ScrobblersPanel::removeRow(DestinationRow *row)
 
 quint64 ScrobblersPanel::nextTestRequestId()
 {
-    return ++m_lastTestRequestId;
+    return nextGlobalTestRequestId();
 }
 
 void ScrobblersPanel::reportTestResult(const QString &destinationId, quint64 requestId, bool valid,
