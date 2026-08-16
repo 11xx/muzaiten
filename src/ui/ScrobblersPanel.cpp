@@ -15,6 +15,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -79,10 +80,11 @@ enum class DestinationHealth {
 class DestinationRow final : public QObject {
 public:
     DestinationRow(ScrobbleDestination destination, ScrobblersPanel *dialog, QGridLayout *grid, int gridRow,
-                   QWidget *host)
+                   QWidget *host, bool alreadyConfigured)
         : QObject(host)
         , m_dialog(dialog)
         , m_destination(std::move(destination))
+        , m_alreadyConfigured(alreadyConfigured)
     {
         const bool compatible = m_destination.type == ScrobbleDestination::Type::ListenBrainzCompatible;
         const bool reserved = m_destination.isReserved();
@@ -164,7 +166,8 @@ public:
         m_test->setObjectName(m_destination.id + QStringLiteral(".test"));
         m_remove->setObjectName(m_destination.id + QStringLiteral(".remove"));
 
-        auto *status = new QHBoxLayout;
+        m_statusLayout = new QHBoxLayout;
+        QHBoxLayout *status = m_statusLayout;
         status->setContentsMargins(0, 0, 0, 0);
         status->setSpacing(4);
         status->addWidget(m_dot);
@@ -198,6 +201,17 @@ public:
 
     const ScrobbleDestination &destination() const { return m_destination; }
 
+    void setEnabled(bool enabled)
+    {
+        if (m_destination.enabled == enabled) {
+            return;
+        }
+        m_destination.enabled = enabled;
+        const QSignalBlocker blocker(m_toggle);
+        m_toggle->setChecked(enabled);
+        refresh();
+    }
+
     // A ListenBrainz-compatible destination with no address has nowhere to
     // deliver, which is fatal for that entry rather than a warning about it.
     bool isDeliverable() const { return !m_destination.apiRoot.isEmpty() || !isCompatible(); }
@@ -215,10 +229,18 @@ public:
         refresh();
     }
 
+    bool isTesting() const { return m_health == DestinationHealth::Busy; }
+
     void focusFirstField() { m_url->setFocus(); }
 
     void takeOutOf(QGridLayout *grid)
     {
+        // The status cell is a nested layout, not a widget, so removing the
+        // widgets alone would leave its item behind in the grid.
+        grid->removeItem(m_statusLayout);
+        delete m_statusLayout;
+        m_statusLayout = nullptr;
+
         const QList<QWidget *> owned{m_toggle,     m_name, m_url,        m_token,   m_fixedName, m_fixedUrl,
                                      m_fixedToken, m_dot,  m_statusLabel, m_pending, m_test,      m_remove};
         for (QWidget *widget : owned) {
@@ -293,24 +315,35 @@ private:
         m_dialog->save();
     }
 
-    void commitUrl()
+    // Returns whether the field now holds an address this destination can use.
+    bool commitUrl()
     {
         const QString typed = m_url->text().trimmed();
         if (typed.isEmpty()) {
+            if (m_alreadyConfigured) {
+                // Dropping the address of a configured destination would take it
+                // out of the configuration and strand its delivery records.
+                // Removing it is the way to be rid of it, and that says what it
+                // discards first.
+                m_url->setText(m_destination.apiRoot);
+                setStatus(QStringLiteral("An address is required; remove the destination instead"),
+                          DestinationHealth::Bad);
+                return true;
+            }
             m_destination.apiRoot.clear();
             refresh();
             m_dialog->save();
-            return;
+            return false;
         }
 
         const ListenBrainzUrl::Normalized result = ListenBrainzUrl::normalizeBase(typed);
         if (!result.valid) {
             setStatus(result.error, DestinationHealth::Bad);
-            return;
+            return false;
         }
         if (result.apiRoot == m_destination.apiRoot) {
             m_url->setText(result.apiRoot);
-            return;
+            return true;
         }
 
         const int pending = m_dialog->m_history != nullptr ? m_dialog->m_history->pendingCount(m_destination.id) : 0;
@@ -326,10 +359,11 @@ private:
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
             if (answer != QMessageBox::Yes) {
                 m_url->setText(m_destination.apiRoot);
-                return;
+                return true;
             }
         }
 
+        const bool wasUndeliverable = !isDeliverable();
         m_destination.apiRoot = result.apiRoot;
         m_url->setText(result.apiRoot);
         // The name defaults to the address until the user gives it one of its own.
@@ -340,11 +374,24 @@ private:
         m_status.clear();
         refresh();
         m_dialog->save();
+        if (wasUndeliverable) {
+            // Any token typed while there was nowhere to send it was held back;
+            // it has somewhere now.
+            commitToken();
+        }
+        return true;
     }
 
     void commitToken()
     {
         if (!isCompatible()) {
+            return;
+        }
+        // A destination with nowhere to send is not in the configuration, so
+        // storing a token against its id would leave one behind that only an
+        // explicit removal would clean up. It is held until there is an address
+        // to go with it.
+        if (!isDeliverable()) {
             return;
         }
         const QString typed = m_token->text().trimmed();
@@ -357,11 +404,10 @@ private:
 
     void test()
     {
-        commitUrl();
-        commitToken();
-        if (!isDeliverable()) {
+        if (!commitUrl() || !isDeliverable()) {
             return;
         }
+        commitToken();
         setStatus(QStringLiteral("Testing…"), DestinationHealth::Busy);
         m_dialog->m_callbacks.testDestination(m_destination.id, m_destination.apiRoot, m_token->text().trimmed());
     }
@@ -405,6 +451,10 @@ private:
 
     ScrobblersPanel *m_dialog = nullptr;
     ScrobbleDestination m_destination;
+    // Whether this destination is already part of the saved configuration, as
+    // opposed to a row added here that has not earned an address yet.
+    bool m_alreadyConfigured = false;
+    QHBoxLayout *m_statusLayout = nullptr;
     QString m_status;
     DestinationHealth m_health = DestinationHealth::Unknown;
 
@@ -521,15 +571,15 @@ ScrobblersPanel::ScrobblersPanel(ScrobbleDestinationSet destinations, ListenHist
     layout->addWidget(saveNote);
 
     for (const ScrobbleDestination &destination : destinations.items) {
-        appendRow(destination);
+        appendRow(destination, true);
     }
     m_grid->setRowStretch(m_nextGridRow + 64, 1);
     updateNotices();
 }
 
-void ScrobblersPanel::appendRow(const ScrobbleDestination &destination)
+void ScrobblersPanel::appendRow(const ScrobbleDestination &destination, bool alreadyConfigured)
 {
-    m_rows.push_back(new DestinationRow(destination, this, m_grid, m_nextGridRow, m_rowHost));
+    m_rows.push_back(new DestinationRow(destination, this, m_grid, m_nextGridRow, m_rowHost, alreadyConfigured));
     ++m_nextGridRow;
 }
 
@@ -548,10 +598,12 @@ ScrobbleDestinationSet ScrobblersPanel::destinations() const
 
 void ScrobblersPanel::save()
 {
+    const ScrobbleDestinationSet saved = destinations();
     if (m_callbacks.saveDestinations) {
-        m_callbacks.saveDestinations(destinations());
+        m_callbacks.saveDestinations(saved);
     }
     updateNotices();
+    emit destinationsChanged(saved);
 }
 
 void ScrobblersPanel::addDestination()
@@ -559,7 +611,7 @@ void ScrobblersPanel::addDestination()
     ScrobbleDestination destination;
     destination.id = mintCustomId();
     destination.type = ScrobbleDestination::Type::ListenBrainzCompatible;
-    appendRow(destination);
+    appendRow(destination, false);
     m_rows.last()->focusFirstField();
     updateNotices();
 }
@@ -596,10 +648,22 @@ void ScrobblersPanel::removeRow(DestinationRow *row)
 void ScrobblersPanel::reportTestResult(const QString &destinationId, bool valid, const QString &username)
 {
     for (DestinationRow *row : std::as_const(m_rows)) {
-        if (row->destination().id == destinationId) {
+        // A result that no longer answers a live test describes an address or a
+        // token the row has since moved on from.
+        if (row->destination().id == destinationId && row->isTesting()) {
             row->setStatus(valid ? QStringLiteral("Connected as %1").arg(username)
                                  : QStringLiteral("Token rejected"),
                            valid ? DestinationHealth::Good : DestinationHealth::Bad);
+            return;
+        }
+    }
+}
+
+void ScrobblersPanel::adoptEnabledState(const QString &destinationId, bool enabled)
+{
+    for (DestinationRow *row : std::as_const(m_rows)) {
+        if (row->destination().id == destinationId) {
+            row->setEnabled(enabled);
             return;
         }
     }

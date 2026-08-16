@@ -247,7 +247,7 @@ ListeningHistoryPanel::ListeningHistoryPanel(ListenHistoryStore *store,
         action->setCheckable(true);
         action->setData(destination.id);
         connect(action, &QAction::triggered, this, [this]() {
-            static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
+            static_cast<ListeningHistoryModel *>(m_model)->setDestinations(effectiveScopeIds());
             updateDestinationButton();
             reload();
         });
@@ -259,7 +259,7 @@ ListeningHistoryPanel::ListeningHistoryPanel(ListenHistoryStore *store,
         for (QAction *action : std::as_const(m_destinationActions)) {
             action->setChecked(false);
         }
-        static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
+        static_cast<ListeningHistoryModel *>(m_model)->setDestinations(effectiveScopeIds());
         updateDestinationButton();
         reload();
     });
@@ -326,7 +326,7 @@ ListeningHistoryPanel::ListeningHistoryPanel(ListenHistoryStore *store,
     connect(m_clearBacklog, &QPushButton::clicked, this, &ListeningHistoryPanel::clearBacklogs);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { updateActions(); });
 
-    static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
+    static_cast<ListeningHistoryModel *>(m_model)->setDestinations(effectiveScopeIds());
     updateDestinationButton();
     reload();
 }
@@ -352,6 +352,22 @@ void ListeningHistoryPanel::setRowHeight(int height)
     m_view->verticalHeader()->setDefaultSectionSize(clamped);
 }
 
+QStringList ListeningHistoryPanel::effectiveScopeIds() const
+{
+    // Picking nothing is the overview, which answers for every destination
+    // rather than for none: a cell scoped to an empty set could only ever say
+    // there was nothing to report.
+    const QStringList picked = scopedDestinationIds();
+    if (!picked.isEmpty()) {
+        return picked;
+    }
+    QStringList all;
+    for (const ScrobbleDestination &destination : m_destinations.items) {
+        all << destination.id;
+    }
+    return all;
+}
+
 QStringList ListeningHistoryPanel::scopedDestinationIds() const
 {
     QStringList ids;
@@ -361,6 +377,39 @@ QStringList ListeningHistoryPanel::scopedDestinationIds() const
         }
     }
     return ids;
+}
+
+void ListeningHistoryPanel::setDestinations(const ScrobbleDestinationSet &destinations)
+{
+    const QStringList picked = scopedDestinationIds();
+    m_destinations = destinations;
+
+    auto *menu = m_destinationButton->menu();
+    for (QAction *action : std::as_const(m_destinationActions)) {
+        menu->removeAction(action);
+        action->deleteLater();
+    }
+    m_destinationActions.clear();
+
+    QAction *before = menu->actions().isEmpty() ? nullptr : menu->actions().first();
+    for (const ScrobbleDestination &destination : m_destinations.items) {
+        auto *action = new QAction(destination.name, menu);
+        action->setCheckable(true);
+        action->setData(destination.id);
+        // A destination that survived the change keeps the pick it had.
+        action->setChecked(picked.contains(destination.id));
+        connect(action, &QAction::triggered, this, [this]() {
+            static_cast<ListeningHistoryModel *>(m_model)->setDestinations(effectiveScopeIds());
+            updateDestinationButton();
+            reload();
+        });
+        menu->insertAction(before, action);
+        m_destinationActions.push_back(action);
+    }
+
+    static_cast<ListeningHistoryModel *>(m_model)->setDestinations(effectiveScopeIds());
+    updateDestinationButton();
+    reload();
 }
 
 void ListeningHistoryPanel::updateDestinationButton()

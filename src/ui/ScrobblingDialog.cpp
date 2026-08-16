@@ -17,6 +17,10 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
     m_tabs->addTab(scrobblers, QStringLiteral("Scrobblers"));
     m_tabs->addTab(history, QStringLiteral("Listening history"));
 
+    // Editing a destination in one tab changes what the other is looking at.
+    // Carrying that across is the reason these two are one window.
+    connect(scrobblers, &ScrobblersPanel::destinationsChanged, history, &ListeningHistoryPanel::setDestinations);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
 

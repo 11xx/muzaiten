@@ -23,6 +23,10 @@ public:
     ListeningHistoryPanel(ListenHistoryStore *store, ScrobbleDestinationSet destinations,
                            QWidget *parent = nullptr);
 
+    // Adopts a destination set edited elsewhere while this panel is open,
+    // keeping whichever picks survived the change.
+    void setDestinations(const ScrobbleDestinationSet &destinations);
+
     // Restores the persisted Ctrl+wheel row height (the panel is recreated per
     // open, so the owner round-trips it through settings).
     void setRowHeight(int height);
@@ -45,9 +49,12 @@ private:
     void updateActions();
     void updateDestinationButton();
     QList<qint64> selectedIds() const;
-    // The destinations the view is scoped to. Empty means every destination,
-    // which is the read-only overview.
+    // The destinations the user picked. Empty is the read-only overview, which
+    // is what the mutating actions test for.
     QStringList scopedDestinationIds() const;
+    // The destinations the counts answer for: the picks, or every destination
+    // when nothing is picked.
+    QStringList effectiveScopeIds() const;
     QString destinationName(const QString &destinationId) const;
     std::optional<ListenHistoryStore::HistoryRow> selectedHistoryRow() const;
 

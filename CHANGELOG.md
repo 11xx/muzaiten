@@ -44,7 +44,20 @@
   inactive palette, which on some themes made it vanish on alternating rows.
 - A ListenBrainz-compatible destination with no server address can no longer be
   enabled: it has nowhere to deliver, so it is held in the window until it has
-  one rather than being saved as a destination that silently does nothing.
+  one rather than being saved as a destination that silently does nothing. A
+  destination that is already configured cannot have its address cleared at
+  all, since dropping it from the configuration would strand its delivery
+  records; remove it instead, which says what it discards.
+- A token typed for a destination that has no address yet is held until it has
+  one, rather than being stored against an id no configuration mentions.
+- `Test` no longer reports on the previous address after the field has refused
+  a new one, and a test result that no longer answers a live test is ignored
+  instead of overwriting a newer status.
+- Removing a destination in the `Scrobblers` tab now updates the
+  `Listening history` tab, which could otherwise still offer it and queue
+  listens for a destination that no longer exists.
+- Last.fm enabling or disabling itself while the window is open is adopted by
+  the `Scrobblers` tab, so the next edit there does not write that state back.
 - Clearing a backlog no longer triggers an upload attempt for the destination
   whose backlog was just cleared.
 - `Radio > Anchor for new sessions` can keep new seeded and artist sessions

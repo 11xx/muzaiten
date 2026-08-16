@@ -58,14 +58,24 @@ public:
     // The saved set, which omits any destination still missing its address.
     ScrobbleDestinationSet destinations() const;
 
+signals:
+    // The set was just saved. Anything showing destinations alongside this
+    // panel is looking at a set that has moved.
+    void destinationsChanged(const ScrobbleDestinationSet &destinations);
+
 public slots:
     // Result of a `testDestination` call, routed back by the owner.
     void reportTestResult(const QString &destinationId, bool valid, const QString &username);
 
+    // A destination's enabled state changed outside this panel, which happens
+    // when Last.fm authenticates or disables itself while the window is open.
+    // Adopted into the working copy so the next save does not write it back.
+    void adoptEnabledState(const QString &destinationId, bool enabled);
+
 private:
     friend class DestinationRow;
 
-    void appendRow(const ScrobbleDestination &destination);
+    void appendRow(const ScrobbleDestination &destination, bool alreadyConfigured);
     void addDestination();
     void removeRow(DestinationRow *row);
     void save();

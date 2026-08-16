@@ -5378,6 +5378,10 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
                                          5000);
             });
 
+    // Last.fm can enable or disable itself from its own settings while this
+    // window is open; the panel has to hear about it or its next save writes
+    // the state back.
+    m_openScrobblersPanel = scrobblers;
     ScrobblingDialog dialog(scrobblers, history, this);
     dialog.showTab(tab);
     // Test results come back from the worker thread; route them to the panel
@@ -5386,6 +5390,7 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
                                     &ScrobblersPanel::reportTestResult);
     dialog.exec();
     disconnect(connection);
+    m_openScrobblersPanel = nullptr;
 
     // Editing saved as it went; closing is what applies it.
     configureListenBrainz();
@@ -5409,6 +5414,9 @@ void MainWindow::setScrobbleDestinationEnabled(const QString &destinationId, boo
         return;
     }
     m_core->setScrobbleDestinations(destinations);
+    if (m_openScrobblersPanel != nullptr) {
+        m_openScrobblersPanel->adoptEnabledState(destinationId, enabled);
+    }
 }
 
 void MainWindow::triggerScrobbleUpload(const QString &service)

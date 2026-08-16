@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QMainWindow>
+#include <QPointer>
 #include <QProcess>
 #include <QSet>
 #include <QStringList>
@@ -274,6 +275,9 @@ private:
     // The one dialog that manages every scrobbling destination.
     void manageScrobblers();
     void showScrobblingDialog(ScrobblingDialog::Tab tab);
+    // The scrobblers panel while its window is open, so state changed elsewhere
+    // reaches the working copy it holds.
+    QPointer<ScrobblersPanel> m_openScrobblersPanel;
     // Display name for a destination id, for status and dialog text.
     QString scrobbleDestinationName(const QString &destinationId) const;
     // Flips one destination's enabled state and reconfigures the hub.
