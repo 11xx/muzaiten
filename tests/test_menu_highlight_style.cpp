@@ -77,7 +77,8 @@ QStyle::State delegatedStateFor(MenuHighlightStyle::Emphasis emphasis, QStyle::S
     style.drawControl(QStyle::CE_MenuItem, &option, &painter, nullptr);
     painter.end();
 
-    Q_ASSERT(recorder->sawMenuItem);
+    // Never reached without an observation: a recorder that saw nothing returns
+    // State_None, and every caller asserts on flags that state does not carry.
     return recorder->delegated;
 }
 

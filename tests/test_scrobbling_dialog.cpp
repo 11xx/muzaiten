@@ -188,13 +188,18 @@ void ScrobblingDialogTest::theTabStripDoesNotOpenWearingTheFocus()
     // its own, so this is the style's own marking; asserting that the strip
     // renders differently pins it without pinning what it draws.
     QVERIFY(bar->focusPolicy() & Qt::TabFocus);
-    // Grabbed through the dialog: a tab bar rendered on its own carries no
-    // focus state into its pixmap and would compare equal either way.
-    const QImage unfocused = dialog->grab().toImage();
+    // Rendered through the dialog, because a tab bar grabbed on its own carries
+    // no focus state into its pixmap, then cropped back to the strip: comparing
+    // the whole dialog would also pass on Close merely losing its own mark.
+    // geometry() is relative to the tab widget, so it is mapped into the
+    // dialog before it can crop a render of the dialog.
+    const QRect strip(bar->mapTo(dialog.get(), QPoint(0, 0)), bar->size());
+    const auto stripOnly = [&dialog, strip]() { return dialog->grab().toImage().copy(strip); };
+    const QImage unfocused = stripOnly();
     bar->setFocus(Qt::TabFocusReason);
     QCoreApplication::processEvents();
     QVERIFY(bar->hasFocus());
-    QVERIFY(dialog->grab().toImage() != unfocused);
+    QVERIFY(stripOnly() != unfocused);
 }
 
 QTEST_MAIN(ScrobblingDialogTest)
