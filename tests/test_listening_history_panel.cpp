@@ -5,7 +5,11 @@
 
 #include <QAction>
 #include <QLabel>
+#include <QImage>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QStyle>
+#include <QStyleOptionMenuItem>
 #include <QPushButton>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -75,6 +79,7 @@ private slots:
     void clearingSeveralBacklogsClearsEachOne();
     void adoptingAChangedSetKeepsSurvivingPicks();
     void togglingADestinationDoesNotDismissTheMenu();
+    void theEntryUnderTheCursorIsWashedInTheHighlight();
 
 private:
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -290,6 +295,42 @@ void ListeningHistoryPanelTest::togglingADestinationDoesNotDismissTheMenu()
     click(plain);
     QVERIFY(acted);
     QVERIFY(!menu.isVisible());
+}
+
+// The theme marks the entry under the cursor with a flat grey card of its own,
+// which matches nothing else in the app. Painting the entry through the menu's
+// style must put the palette's highlight there instead.
+void ListeningHistoryPanelTest::theEntryUnderTheCursorIsWashedInTheHighlight()
+{
+    StickyMenu menu;
+    QAction *entry = menu.addAction(QStringLiteral("Koito"));
+    entry->setCheckable(true);
+
+    QStyleOptionMenuItem option;
+    option.rect = QRect(0, 0, 120, 24);
+    option.state = QStyle::State_Enabled | QStyle::State_Selected;
+    option.palette = QApplication::palette(&menu);
+    option.text = entry->text();
+    option.menuItemType = QStyleOptionMenuItem::Normal;
+
+    QImage canvas(option.rect.size(), QImage::Format_ARGB32);
+    canvas.fill(Qt::black);
+    {
+        QPainter painter(&canvas);
+        menu.style()->drawControl(QStyle::CE_MenuItem, &option, &painter, &menu);
+    }
+
+    // The corner is fill, clear of the checkmark and the label.
+    const QColor painted = canvas.pixelColor(2, 2);
+    const QColor wash = StickyMenu::highlightWash(QApplication::palette(&menu));
+    QCOMPARE(painted, wash);
+
+    // And it is recognisably the highlight rather than a grey: the wash leans
+    // the way the accent does, away from the window colour it sits on.
+    const QColor window = QApplication::palette(&menu).color(QPalette::Active, QPalette::Window);
+    const QColor accent = QApplication::palette(&menu).color(QPalette::Active, QPalette::Highlight);
+    QVERIFY(painted != window);
+    QCOMPARE(painted.blue() > painted.red(), accent.blue() > accent.red());
 }
 
 QTEST_MAIN(ListeningHistoryPanelTest)

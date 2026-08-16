@@ -40,13 +40,18 @@ inline QColor selectedFill(const QStyleOptionViewItem &option)
     return color;
 }
 
+// Alpha for a highlight that has to read as a present, deliberate selection
+// rather than a remembered one: the menu entry under the cursor, and anything
+// else a theme would otherwise mark in a flat grey of its own.
+inline constexpr int kSoftHighlightAlpha = 96;
+
 // Opaque equivalent of the translucent selectedFill, for views that paint their
 // own selection background through the palette Highlight role (e.g. QTableView)
 // rather than deferring entirely to the item delegate. Blending the highlight
 // over the base matches the dimmed look the delegate draws for list views.
-inline QColor dimmedHighlight(const QColor &base, const QColor &highlight)
+inline QColor dimmedHighlight(const QColor &base, const QColor &highlight, int alpha = kInactiveHighlightAlpha)
 {
-    const qreal a = kInactiveHighlightAlpha / 255.0;
+    const qreal a = alpha / 255.0;
     return QColor(qRound(base.red() * (1 - a) + highlight.red() * a),
                   qRound(base.green() * (1 - a) + highlight.green() * a),
                   qRound(base.blue() * (1 - a) + highlight.blue() * a));

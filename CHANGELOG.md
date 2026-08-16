@@ -10,6 +10,9 @@
   managed from `History > Scrobblers > Manage scrobblers…`, which shows each
   destination's enabled state, credential or test status, and pending count,
   and supports add, edit, enable/disable, test, and removal.
+- The destination popup marks the entry under the cursor with a wash of the
+  palette's highlight instead of the flat grey card the theme paints there, so
+  picking a destination looks like every other selection in the app.
 - The scrobbling window's tabs are a thin, square label strip rather than the
   theme's rounded cards, which spent height on decoration and read as a
   container the panels are not inside. The colours are still the palette's.
