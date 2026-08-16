@@ -10,6 +10,9 @@
   managed from `History > Scrobblers > Manage scrobblers…`, which shows each
   destination's enabled state, credential or test status, and pending count,
   and supports add, edit, enable/disable, test, and removal.
+- The scrobbling window's tabs are a thin, square label strip rather than the
+  theme's rounded cards, which spent height on decoration and read as a
+  container the panels are not inside. The colours are still the palette's.
 - Scrobbling is one window with two tabs, `Scrobblers` and `Listening history`,
   reached from either menu entry. They are two views of the same subject and
   are read against each other constantly, since a backlog in one is explained

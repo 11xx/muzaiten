@@ -4,6 +4,7 @@
 #include "ui/ScrobblersPanel.h"
 
 #include <QDialogButtonBox>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -14,6 +15,17 @@ ScrobblingDialog::ScrobblingDialog(ScrobblersPanel *scrobblers, ListeningHistory
     resize(1100, 650);
 
     m_tabs = new QTabWidget(this);
+    // A thin, square label strip rather than the theme's rounded cards: with one
+    // pane below two tabs, the card shape spends height on decoration and reads
+    // as a container the panels are not in. Every colour is still the palette's,
+    // so the strip follows the active theme even though it is not drawn by it.
+    m_tabs->setDocumentMode(true);
+    m_tabs->tabBar()->setStyleSheet(QStringLiteral(
+        "QTabBar::tab{border:none;border-radius:0;padding:4px 14px;margin:0;"
+        "background:transparent;color:palette(window-text);}"
+        "QTabBar::tab:hover{background:palette(alternate-base);}"
+        "QTabBar::tab:selected{border-bottom:2px solid palette(highlight);"
+        "color:palette(window-text);}"));
     m_tabs->addTab(scrobblers, QStringLiteral("Scrobblers"));
     m_tabs->addTab(history, QStringLiteral("Listening history"));
 
