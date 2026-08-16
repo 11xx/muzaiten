@@ -1,11 +1,10 @@
-#include "ui/ScrobbleDestinationsDialog.h"
+#include "ui/ScrobblersPanel.h"
 
 #include "scrobble/ListenBrainzUrl.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "ui/ToggleSwitch.h"
 
 #include <QApplication>
-#include <QDialogButtonBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -79,7 +78,7 @@ enum class DestinationHealth {
 // saves it.
 class DestinationRow final : public QObject {
 public:
-    DestinationRow(ScrobbleDestination destination, ScrobbleDestinationsDialog *dialog, QGridLayout *grid, int gridRow,
+    DestinationRow(ScrobbleDestination destination, ScrobblersPanel *dialog, QGridLayout *grid, int gridRow,
                    QWidget *host)
         : QObject(host)
         , m_dialog(dialog)
@@ -404,7 +403,7 @@ private:
         m_dialog->updateNotices();
     }
 
-    ScrobbleDestinationsDialog *m_dialog = nullptr;
+    ScrobblersPanel *m_dialog = nullptr;
     ScrobbleDestination m_destination;
     QString m_status;
     DestinationHealth m_health = DestinationHealth::Unknown;
@@ -423,15 +422,12 @@ private:
     QPushButton *m_remove = nullptr;
 };
 
-ScrobbleDestinationsDialog::ScrobbleDestinationsDialog(ScrobbleDestinationSet destinations, ListenHistoryStore *history,
+ScrobblersPanel::ScrobblersPanel(ScrobbleDestinationSet destinations, ListenHistoryStore *history,
                                                        Callbacks callbacks, QWidget *parent)
-    : QDialog(parent)
+    : QWidget(parent)
     , m_history(history)
     , m_callbacks(std::move(callbacks))
 {
-    setWindowTitle(QStringLiteral("Scrobblers"));
-    resize(960, 460);
-
     auto *layout = new QVBoxLayout(this);
     layout->setSpacing(8);
 
@@ -488,7 +484,7 @@ ScrobbleDestinationsDialog::ScrobbleDestinationsDialog(ScrobbleDestinationSet de
     // scrobbling as a whole sit away from it, on the right.
     auto *misc = new QHBoxLayout;
     auto *add = new QPushButton(QStringLiteral("Add server…"), this);
-    connect(add, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::addDestination);
+    connect(add, &QPushButton::clicked, this, &ScrobblersPanel::addDestination);
 
     m_offline = new ToggleSwitch(this);
     m_offline->setChecked(m_callbacks.readOffline ? m_callbacks.readOffline() : false);
@@ -522,13 +518,7 @@ ScrobbleDestinationsDialog::ScrobbleDestinationsDialog(ScrobbleDestinationSet de
     auto *saveNote = new QLabel(
         QStringLiteral("Changes are saved as you make them, and take effect when this window closes."), this);
     setMuted(saveNote, true);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
-    auto *footer = new QHBoxLayout;
-    footer->addWidget(saveNote);
-    footer->addStretch();
-    footer->addWidget(buttons);
-    layout->addLayout(footer);
+    layout->addWidget(saveNote);
 
     for (const ScrobbleDestination &destination : destinations.items) {
         appendRow(destination);
@@ -537,13 +527,13 @@ ScrobbleDestinationsDialog::ScrobbleDestinationsDialog(ScrobbleDestinationSet de
     updateNotices();
 }
 
-void ScrobbleDestinationsDialog::appendRow(const ScrobbleDestination &destination)
+void ScrobblersPanel::appendRow(const ScrobbleDestination &destination)
 {
     m_rows.push_back(new DestinationRow(destination, this, m_grid, m_nextGridRow, m_rowHost));
     ++m_nextGridRow;
 }
 
-ScrobbleDestinationSet ScrobbleDestinationsDialog::destinations() const
+ScrobbleDestinationSet ScrobblersPanel::destinations() const
 {
     ScrobbleDestinationSet set;
     for (const DestinationRow *row : m_rows) {
@@ -556,7 +546,7 @@ ScrobbleDestinationSet ScrobbleDestinationsDialog::destinations() const
     return set;
 }
 
-void ScrobbleDestinationsDialog::save()
+void ScrobblersPanel::save()
 {
     if (m_callbacks.saveDestinations) {
         m_callbacks.saveDestinations(destinations());
@@ -564,7 +554,7 @@ void ScrobbleDestinationsDialog::save()
     updateNotices();
 }
 
-void ScrobbleDestinationsDialog::addDestination()
+void ScrobblersPanel::addDestination()
 {
     ScrobbleDestination destination;
     destination.id = mintCustomId();
@@ -574,7 +564,7 @@ void ScrobbleDestinationsDialog::addDestination()
     updateNotices();
 }
 
-void ScrobbleDestinationsDialog::removeRow(DestinationRow *row)
+void ScrobblersPanel::removeRow(DestinationRow *row)
 {
     const ScrobbleDestination destination = row->destination();
     const int pending = m_history != nullptr ? m_history->pendingCount(destination.id) : 0;
@@ -603,7 +593,7 @@ void ScrobbleDestinationsDialog::removeRow(DestinationRow *row)
     save();
 }
 
-void ScrobbleDestinationsDialog::reportTestResult(const QString &destinationId, bool valid, const QString &username)
+void ScrobblersPanel::reportTestResult(const QString &destinationId, bool valid, const QString &username)
 {
     for (DestinationRow *row : std::as_const(m_rows)) {
         if (row->destination().id == destinationId) {
@@ -615,7 +605,7 @@ void ScrobbleDestinationsDialog::reportTestResult(const QString &destinationId, 
     }
 }
 
-void ScrobbleDestinationsDialog::updateNotices()
+void ScrobblersPanel::updateNotices()
 {
     QStringList incomplete;
     int enabledCompatible = 0;

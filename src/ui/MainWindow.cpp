@@ -35,8 +35,9 @@
 #include "ui/IdleReleaseController.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
-#include "ui/ListeningHistoryDialog.h"
-#include "ui/ScrobbleDestinationsDialog.h"
+#include "ui/ListeningHistoryPanel.h"
+#include "ui/ScrobblersPanel.h"
+#include "ui/ScrobblingDialog.h"
 #include "ui/ScrobbleUploadDispatcher.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelBorderStyle.h"
@@ -5310,9 +5311,13 @@ void MainWindow::configureListenBrainz()
         !scrobbleOffline(), listenHistoryPath());
 }
 
-void MainWindow::manageScrobblers()
+void MainWindow::manageScrobblers() { showScrobblingDialog(ScrobblingDialog::Tab::Scrobblers); }
+
+void MainWindow::showListeningHistory() { showScrobblingDialog(ScrobblingDialog::Tab::History); }
+
+void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
 {
-    ScrobbleDestinationsDialog::Callbacks callbacks;
+    ScrobblersPanel::Callbacks callbacks;
     callbacks.readToken = [this](const QString &id) {
         return m_database->setting(ScrobbleDestinationConfig::tokenSettingKey(id));
     };
@@ -5325,7 +5330,6 @@ void MainWindow::manageScrobblers()
     callbacks.lastFmConfigured = [this]() {
         return !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();
     };
-
     callbacks.testDestination = [this](const QString &id, const QString &apiRoot, const QString &token) {
         m_listenBrainzHub->validateToken(id, apiRoot, token);
     };
@@ -5342,11 +5346,44 @@ void MainWindow::manageScrobblers()
     };
     callbacks.openLastFmSettings = [this]() { showLastFmSettings(); };
 
-    ScrobbleDestinationsDialog dialog(m_core->scrobbleDestinations(), m_listenHistory, callbacks, this);
-    // Test results come back from the worker thread; route them to the dialog
-    // for as long as it is open.
-    const auto connection = connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, &dialog,
-                                    &ScrobbleDestinationsDialog::reportTestResult);
+    const ScrobbleDestinationSet destinations = m_core->scrobbleDestinations();
+    auto *scrobblers = new ScrobblersPanel(destinations, m_listenHistory, callbacks);
+    auto *history = new ListeningHistoryPanel(m_listenHistory, destinations);
+
+    if (m_state != nullptr) {
+        bool ok = false;
+        const int saved = m_state->setting(QStringLiteral("listeningHistory.rowHeight")).toInt(&ok);
+        if (ok && saved > 0) {
+            history->setRowHeight(saved);
+        }
+    }
+    connect(history, &ListeningHistoryPanel::rowHeightChanged, this, [this](int height) {
+        if (m_state != nullptr) {
+            m_state->setSetting(QStringLiteral("listeningHistory.rowHeight"), QString::number(height));
+        }
+    });
+    connect(history, &ListeningHistoryPanel::backlogChanged, this, [this](const QString &service, int changedCount) {
+        updateScrobbleBacklogActions();
+        if (changedCount > 0) {
+            triggerScrobbleUpload(service);
+        }
+    });
+    connect(history, &ListeningHistoryPanel::statusMessageRequested, this,
+            [this](const QString &message, int timeoutMs) { statusBar()->showMessage(message, timeoutMs); });
+    connect(history, &ListeningHistoryPanel::forgetBehaviorRequested, this,
+            [this](const Track &track, bool includeImportedListens) {
+                const int removed = m_core->forgetTrackBehaviorForSong(track.path, includeImportedListens);
+                const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
+                statusBar()->showMessage(QStringLiteral("Forgot %1 listening behavior rows for \"%2\"").arg(removed).arg(title),
+                                         5000);
+            });
+
+    ScrobblingDialog dialog(scrobblers, history, this);
+    dialog.showTab(tab);
+    // Test results come back from the worker thread; route them to the panel
+    // for as long as the window is open.
+    const auto connection = connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, scrobblers,
+                                    &ScrobblersPanel::reportTestResult);
     dialog.exec();
     disconnect(connection);
 
@@ -5373,46 +5410,6 @@ void MainWindow::setScrobbleDestinationEnabled(const QString &destinationId, boo
     }
     m_core->setScrobbleDestinations(destinations);
 }
-
-void MainWindow::showListeningHistory()
-{
-    if (m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
-        QMessageBox::warning(this, QStringLiteral("Listening history"), QStringLiteral("Listening history is unavailable."));
-        return;
-    }
-
-    ListeningHistoryDialog dialog(m_listenHistory, m_core->scrobbleDestinations(), this);
-    if (m_state != nullptr) {
-        bool ok = false;
-        const int saved = m_state->setting(QStringLiteral("listeningHistory.rowHeight")).toInt(&ok);
-        if (ok && saved > 0) {
-            dialog.setRowHeight(saved);
-        }
-    }
-    connect(&dialog, &ListeningHistoryDialog::rowHeightChanged, this, [this](int height) {
-        if (m_state != nullptr) {
-            m_state->setSetting(QStringLiteral("listeningHistory.rowHeight"), QString::number(height));
-        }
-    });
-    connect(&dialog, &ListeningHistoryDialog::backlogChanged, this, [this](const QString &service, int changedCount) {
-        updateScrobbleBacklogActions();
-        if (changedCount > 0) {
-            triggerScrobbleUpload(service);
-        }
-    });
-    connect(&dialog, &ListeningHistoryDialog::statusMessageRequested, this, [this](const QString &message, int timeoutMs) {
-        statusBar()->showMessage(message, timeoutMs);
-    });
-    connect(&dialog, &ListeningHistoryDialog::forgetBehaviorRequested, this,
-            [this](const Track &track, bool includeImportedListens) {
-                const int removed = m_core->forgetTrackBehaviorForSong(track.path, includeImportedListens);
-                const QString title = track.title.trimmed().isEmpty() ? track.filename : track.title.trimmed();
-                statusBar()->showMessage(QStringLiteral("Forgot %1 listening behavior rows for \"%2\"").arg(removed).arg(title),
-                                         5000);
-            });
-    dialog.exec();
-}
-
 
 void MainWindow::triggerScrobbleUpload(const QString &service)
 {

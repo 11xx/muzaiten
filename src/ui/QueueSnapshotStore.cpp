@@ -35,7 +35,7 @@
 #include "ui/IdleReleaseController.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
-#include "ui/ListeningHistoryDialog.h"
+#include "ui/ListeningHistoryPanel.h"
 #include "ui/PlayerBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/PanelOrderDialog.h"

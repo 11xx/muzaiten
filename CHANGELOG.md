@@ -10,6 +10,10 @@
   managed from `History > Scrobblers > Manage scrobblers…`, which shows each
   destination's enabled state, credential or test status, and pending count,
   and supports add, edit, enable/disable, test, and removal.
+- Scrobbling is one window with two tabs, `Scrobblers` and `Listening history`,
+  reached from either menu entry. They are two views of the same subject and
+  are read against each other constantly, since a backlog in one is explained
+  by a token or an address in the other.
 - `Manage scrobblers…` is now a list of per-destination rows. Enabling a
   destination is a single click, its name, address and token are edited where
   they are shown, and testing and removal are per-row buttons. Editing is

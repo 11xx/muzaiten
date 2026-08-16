@@ -1,4 +1,4 @@
-#include "ui/ListeningHistoryDialog.h"
+#include "ui/ListeningHistoryPanel.h"
 
 #include "core/HumanQuantity.h"
 #include "ui/DenseTableDelegate.h"
@@ -12,7 +12,6 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QDateTime>
-#include <QDialogButtonBox>
 #include <QEvent>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -227,17 +226,14 @@ private:
 
 } // namespace
 
-ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
+ListeningHistoryPanel::ListeningHistoryPanel(ListenHistoryStore *store,
                                                ScrobbleDestinationSet destinations, QWidget *parent)
-    : QDialog(parent)
+    : QWidget(parent)
     , m_store(store)
     , m_destinations(std::move(destinations))
 {
-    setWindowTitle(QStringLiteral("Listening history"));
-    resize(1100, 650);
-
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 10, 10, 10);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
     // Several destinations can be picked in one visit, and the choice lasts as
@@ -323,15 +319,11 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
     actions->addWidget(refresh);
     layout->addLayout(actions);
 
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    layout->addWidget(buttons);
-
-    connect(refresh, &QPushButton::clicked, this, &ListeningHistoryDialog::reload);
-    connect(m_queueSelected, &QPushButton::clicked, this, &ListeningHistoryDialog::queueSelected);
-    connect(m_forgetBehavior, &QPushButton::clicked, this, &ListeningHistoryDialog::forgetSelectedBehavior);
-    connect(m_retryPending, &QPushButton::clicked, this, &ListeningHistoryDialog::retryPending);
-    connect(m_clearBacklog, &QPushButton::clicked, this, &ListeningHistoryDialog::clearBacklogs);
+    connect(refresh, &QPushButton::clicked, this, &ListeningHistoryPanel::reload);
+    connect(m_queueSelected, &QPushButton::clicked, this, &ListeningHistoryPanel::queueSelected);
+    connect(m_forgetBehavior, &QPushButton::clicked, this, &ListeningHistoryPanel::forgetSelectedBehavior);
+    connect(m_retryPending, &QPushButton::clicked, this, &ListeningHistoryPanel::retryPending);
+    connect(m_clearBacklog, &QPushButton::clicked, this, &ListeningHistoryPanel::clearBacklogs);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { updateActions(); });
 
     static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
@@ -339,7 +331,7 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
     reload();
 }
 
-bool ListeningHistoryDialog::eventFilter(QObject *watched, QEvent *event)
+bool ListeningHistoryPanel::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_view->viewport() && event->type() == QEvent::Wheel) {
         auto *wheel = static_cast<QWheelEvent *>(event);
@@ -351,16 +343,16 @@ bool ListeningHistoryDialog::eventFilter(QObject *watched, QEvent *event)
             return true;
         }
     }
-    return QDialog::eventFilter(watched, event);
+    return QWidget::eventFilter(watched, event);
 }
 
-void ListeningHistoryDialog::setRowHeight(int height)
+void ListeningHistoryPanel::setRowHeight(int height)
 {
     const int clamped = std::clamp(height, 18, 48);
     m_view->verticalHeader()->setDefaultSectionSize(clamped);
 }
 
-QStringList ListeningHistoryDialog::scopedDestinationIds() const
+QStringList ListeningHistoryPanel::scopedDestinationIds() const
 {
     QStringList ids;
     for (const QAction *action : m_destinationActions) {
@@ -371,7 +363,7 @@ QStringList ListeningHistoryDialog::scopedDestinationIds() const
     return ids;
 }
 
-void ListeningHistoryDialog::updateDestinationButton()
+void ListeningHistoryPanel::updateDestinationButton()
 {
     const QStringList ids = scopedDestinationIds();
     if (ids.isEmpty()) {
@@ -384,7 +376,7 @@ void ListeningHistoryDialog::updateDestinationButton()
     }
 }
 
-void ListeningHistoryDialog::reload()
+void ListeningHistoryPanel::reload()
 {
     if (m_store == nullptr || !m_store->isOpen()) {
         static_cast<ListeningHistoryModel *>(m_model)->setRows({});
@@ -434,7 +426,7 @@ void ListeningHistoryDialog::reload()
     updateActions();
 }
 
-QList<qint64> ListeningHistoryDialog::selectedIds() const
+QList<qint64> ListeningHistoryPanel::selectedIds() const
 {
     if (m_view == nullptr || m_view->selectionModel() == nullptr) {
         return {};
@@ -446,7 +438,7 @@ QList<qint64> ListeningHistoryDialog::selectedIds() const
     return ids;
 }
 
-std::optional<ListenHistoryStore::HistoryRow> ListeningHistoryDialog::selectedHistoryRow() const
+std::optional<ListenHistoryStore::HistoryRow> ListeningHistoryPanel::selectedHistoryRow() const
 {
     if (m_view == nullptr || m_view->selectionModel() == nullptr || m_model == nullptr) {
         return std::nullopt;
@@ -458,7 +450,7 @@ std::optional<ListenHistoryStore::HistoryRow> ListeningHistoryDialog::selectedHi
     return static_cast<ListeningHistoryModel *>(m_model)->rowAt(rows.first().row());
 }
 
-QString ListeningHistoryDialog::destinationName(const QString &destinationId) const
+QString ListeningHistoryPanel::destinationName(const QString &destinationId) const
 {
     if (const ScrobbleDestination *destination = m_destinations.find(destinationId)) {
         return destination->name;
@@ -466,7 +458,7 @@ QString ListeningHistoryDialog::destinationName(const QString &destinationId) co
     return destinationId;
 }
 
-void ListeningHistoryDialog::queueSelected()
+void ListeningHistoryPanel::queueSelected()
 {
     const QStringList ids = scopedDestinationIds();
     if (m_store == nullptr || ids.isEmpty() || m_view == nullptr || m_view->selectionModel() == nullptr) {
@@ -489,7 +481,7 @@ void ListeningHistoryDialog::queueSelected()
                                 5000);
 }
 
-void ListeningHistoryDialog::retryPending()
+void ListeningHistoryPanel::retryPending()
 {
     const QStringList ids = scopedDestinationIds();
     if (m_store == nullptr || ids.isEmpty()) {
@@ -508,7 +500,7 @@ void ListeningHistoryDialog::retryPending()
                                 5000);
 }
 
-void ListeningHistoryDialog::clearBacklogs()
+void ListeningHistoryPanel::clearBacklogs()
 {
     const QStringList ids = scopedDestinationIds();
     if (m_store == nullptr || ids.isEmpty()) {
@@ -529,7 +521,7 @@ void ListeningHistoryDialog::clearBacklogs()
                                 5000);
 }
 
-void ListeningHistoryDialog::forgetSelectedBehavior()
+void ListeningHistoryPanel::forgetSelectedBehavior()
 {
     const std::optional<ListenHistoryStore::HistoryRow> row = selectedHistoryRow();
     if (!row.has_value() || row->track.path.isEmpty()) {
@@ -557,7 +549,7 @@ void ListeningHistoryDialog::forgetSelectedBehavior()
     reload();
 }
 
-void ListeningHistoryDialog::updateActions()
+void ListeningHistoryPanel::updateActions()
 {
     const std::optional<ListenHistoryStore::HistoryRow> selectedRow = selectedHistoryRow();
     const QModelIndexList selectedRows = m_view->selectionModel() == nullptr ? QModelIndexList{}

@@ -12,6 +12,7 @@
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
 #include "ui/AudioAnalysisData.h"
+#include "ui/ScrobblingDialog.h"
 
 #include <functional>
 #include <memory>
@@ -272,6 +273,7 @@ private:
     void configureListenBrainz();
     // The one dialog that manages every scrobbling destination.
     void manageScrobblers();
+    void showScrobblingDialog(ScrobblingDialog::Tab tab);
     // Display name for a destination id, for status and dialog text.
     QString scrobbleDestinationName(const QString &destinationId) const;
     // Flips one destination's enabled state and reconfigures the hub.

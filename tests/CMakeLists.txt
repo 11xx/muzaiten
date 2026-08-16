@@ -428,19 +428,19 @@ target_link_libraries(test_scrobble_destinations PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_scrobble_destinations PRIVATE cxx_std_26)
 add_test(NAME test_scrobble_destinations COMMAND test_scrobble_destinations)
 
-add_executable(test_scrobble_destinations_dialog
-    test_scrobble_destinations_dialog.cpp
+add_executable(test_scrobblers_panel
+    test_scrobblers_panel.cpp
     ../src/scrobble/ListenBrainzUrl.cpp
     ../src/scrobble/ListenHistoryStore.cpp
     ../src/scrobble/ScrobbleDestination.cpp
-    ../src/ui/ScrobbleDestinationsDialog.cpp
+    ../src/ui/ScrobblersPanel.cpp
     ../src/ui/ToggleSwitch.cpp
 )
-target_include_directories(test_scrobble_destinations_dialog PRIVATE ../src)
-target_link_libraries(test_scrobble_destinations_dialog PRIVATE Qt6::Core Qt6::Sql Qt6::Widgets Qt6::Test)
-target_compile_features(test_scrobble_destinations_dialog PRIVATE cxx_std_26)
-add_test(NAME test_scrobble_destinations_dialog COMMAND test_scrobble_destinations_dialog)
-set_tests_properties(test_scrobble_destinations_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+target_include_directories(test_scrobblers_panel PRIVATE ../src)
+target_link_libraries(test_scrobblers_panel PRIVATE Qt6::Core Qt6::Sql Qt6::Widgets Qt6::Test)
+target_compile_features(test_scrobblers_panel PRIVATE cxx_std_26)
+add_test(NAME test_scrobblers_panel COMMAND test_scrobblers_panel)
+set_tests_properties(test_scrobblers_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_lastfm_api
     test_lastfm_api.cpp
@@ -837,11 +837,17 @@ target_compile_features(test_idle_release_controller PRIVATE cxx_std_26)
 add_test(NAME test_idle_release_controller COMMAND test_idle_release_controller)
 set_tests_properties(test_idle_release_controller PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-add_executable(test_listening_history_dialog test_listening_history_dialog.cpp)
-target_link_libraries(test_listening_history_dialog PRIVATE muzaiten_app_objects Qt6::Test)
-target_compile_features(test_listening_history_dialog PRIVATE cxx_std_26)
-add_test(NAME test_listening_history_dialog COMMAND test_listening_history_dialog)
-set_tests_properties(test_listening_history_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+add_executable(test_scrobbling_dialog test_scrobbling_dialog.cpp)
+target_link_libraries(test_scrobbling_dialog PRIVATE muzaiten_app_objects Qt6::Test)
+target_compile_features(test_scrobbling_dialog PRIVATE cxx_std_26)
+add_test(NAME test_scrobbling_dialog COMMAND test_scrobbling_dialog)
+set_tests_properties(test_scrobbling_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_listening_history_panel test_listening_history_panel.cpp)
+target_link_libraries(test_listening_history_panel PRIVATE muzaiten_app_objects Qt6::Test)
+target_compile_features(test_listening_history_panel PRIVATE cxx_std_26)
+add_test(NAME test_listening_history_panel COMMAND test_listening_history_panel)
+set_tests_properties(test_listening_history_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_main_window_navigation test_main_window_navigation.cpp)
 target_link_libraries(test_main_window_navigation PRIVATE muzaiten_app_objects Qt6::Test)

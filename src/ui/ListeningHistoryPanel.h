@@ -3,9 +3,9 @@
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ScrobbleDestination.h"
 
-#include <QDialog>
 #include <QList>
 #include <QString>
+#include <QWidget>
 
 #include <optional>
 
@@ -16,14 +16,14 @@ class QAbstractTableModel;
 class QTableView;
 class ResponsiveColumnLayout;
 
-class ListeningHistoryDialog final : public QDialog {
+class ListeningHistoryPanel final : public QWidget {
     Q_OBJECT
 
 public:
-    ListeningHistoryDialog(ListenHistoryStore *store, ScrobbleDestinationSet destinations,
+    ListeningHistoryPanel(ListenHistoryStore *store, ScrobbleDestinationSet destinations,
                            QWidget *parent = nullptr);
 
-    // Restores the persisted Ctrl+wheel row height (the dialog is recreated per
+    // Restores the persisted Ctrl+wheel row height (the panel is recreated per
     // open, so the owner round-trips it through settings).
     void setRowHeight(int height);
 

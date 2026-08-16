@@ -1,6 +1,6 @@
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ScrobbleDestination.h"
-#include "ui/ListeningHistoryDialog.h"
+#include "ui/ListeningHistoryPanel.h"
 #include "ui/StickyMenu.h"
 
 #include <QAction>
@@ -60,7 +60,7 @@ Track makeTrack(const QString &title)
 
 }   // namespace
 
-class ListeningHistoryDialogTest final : public QObject {
+class ListeningHistoryPanelTest final : public QObject {
     Q_OBJECT
 
 private slots:
@@ -77,13 +77,13 @@ private:
     ScrobbleDestinationSet m_destinations;
     QString m_koitoId;
 
-    std::unique_ptr<ListeningHistoryDialog> makeDialog()
+    std::unique_ptr<ListeningHistoryPanel> makeDialog()
     {
-        return std::make_unique<ListeningHistoryDialog>(m_store.get(), m_destinations, nullptr);
+        return std::make_unique<ListeningHistoryPanel>(m_store.get(), m_destinations, nullptr);
     }
 };
 
-void ListeningHistoryDialogTest::init()
+void ListeningHistoryPanelTest::init()
 {
     m_dir = std::make_unique<QTemporaryDir>();
     m_store = std::make_unique<ListenHistoryStore>(m_dir->filePath(QStringLiteral("history.sqlite")));
@@ -100,7 +100,7 @@ void ListeningHistoryDialogTest::init()
     m_store->markSent(m_koitoId, {first});
 }
 
-void ListeningHistoryDialogTest::offersEveryDestinationAndAnOverview()
+void ListeningHistoryPanelTest::offersEveryDestinationAndAnOverview()
 {
     const auto dialog = makeDialog();
     auto *menu = dialog->findChild<StickyMenu *>();
@@ -121,7 +121,7 @@ void ListeningHistoryDialogTest::offersEveryDestinationAndAnOverview()
     QVERIFY(button(dialog.get(), QStringLiteral("All destinations")) != nullptr);
 }
 
-void ListeningHistoryDialogTest::theOverviewSummarizesAndDisablesMutations()
+void ListeningHistoryPanelTest::theOverviewSummarizesAndDisablesMutations()
 {
     const auto dialog = makeDialog();
 
@@ -136,7 +136,7 @@ void ListeningHistoryDialogTest::theOverviewSummarizesAndDisablesMutations()
     QVERIFY(!button(dialog.get(), QStringLiteral("Scrobble selected"))->isEnabled());
 }
 
-void ListeningHistoryDialogTest::oneDestinationScopesCountsAndActions()
+void ListeningHistoryPanelTest::oneDestinationScopesCountsAndActions()
 {
     const auto dialog = makeDialog();
 
@@ -158,7 +158,7 @@ void ListeningHistoryDialogTest::oneDestinationScopesCountsAndActions()
     QVERIFY(!button(dialog.get(), QStringLiteral("Retry pending"))->isEnabled());
 }
 
-void ListeningHistoryDialogTest::severalDestinationsAreScopedTogether()
+void ListeningHistoryPanelTest::severalDestinationsAreScopedTogether()
 {
     const auto dialog = makeDialog();
 
@@ -175,7 +175,7 @@ void ListeningHistoryDialogTest::severalDestinationsAreScopedTogether()
     QVERIFY(button(dialog.get(), QStringLiteral("2 of 3 destinations")) != nullptr);
 }
 
-void ListeningHistoryDialogTest::togglingADestinationDoesNotDismissTheMenu()
+void ListeningHistoryPanelTest::togglingADestinationDoesNotDismissTheMenu()
 {
     StickyMenu menu;
     QAction *checkable = menu.addAction(QStringLiteral("Koito"));
@@ -208,5 +208,5 @@ void ListeningHistoryDialogTest::togglingADestinationDoesNotDismissTheMenu()
     QVERIFY(acted);
 }
 
-QTEST_MAIN(ListeningHistoryDialogTest)
-#include "test_listening_history_dialog.moc"
+QTEST_MAIN(ListeningHistoryPanelTest)
+#include "test_listening_history_panel.moc"

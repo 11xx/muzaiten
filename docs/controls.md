@@ -75,6 +75,9 @@ and are not restored after restart.
   ([radio.md](radio.md)).
 - `Settings > Track information panel…` — fields shown in the right-side
   info pane. `Settings > Album art resolution…` — cached artwork size.
+Both scrobbling entries open one window with two tabs, `Scrobblers` and
+`Listening history`; the entry you use decides which tab it opens on.
+
 - `History > Scrobblers ▸ > Manage scrobblers…` — every scrobbling
   destination in one list: Last.fm, ListenBrainz, and any number of
   ListenBrainz-compatible servers such as Koito. Each row carries its own

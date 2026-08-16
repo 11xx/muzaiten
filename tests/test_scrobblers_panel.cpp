@@ -1,6 +1,6 @@
 #include "scrobble/ListenBrainzUrl.h"
 #include "scrobble/ScrobbleDestination.h"
-#include "ui/ScrobbleDestinationsDialog.h"
+#include "ui/ScrobblersPanel.h"
 #include "ui/ToggleSwitch.h"
 
 #include <QAbstractButton>
@@ -12,7 +12,7 @@
 
 // The dialog saves as it is edited and applies nothing, so these drive the
 // controls a user drives and assert on what reached the callbacks.
-class ScrobbleDestinationsDialogTest final : public QObject {
+class ScrobblersPanelTest final : public QObject {
     Q_OBJECT
 
 private slots:
@@ -27,11 +27,11 @@ private:
     QHash<QString, QString> m_tokens;
     ScrobbleDestinationSet m_saved;
     int m_saveCount = 0;
-    ScrobbleDestinationsDialog::Callbacks m_callbacks;
+    ScrobblersPanel::Callbacks m_callbacks;
 
-    std::unique_ptr<ScrobbleDestinationsDialog> makeDialog(const ScrobbleDestinationSet &destinations)
+    std::unique_ptr<ScrobblersPanel> makeDialog(const ScrobbleDestinationSet &destinations)
     {
-        auto dialog = std::make_unique<ScrobbleDestinationsDialog>(destinations, nullptr, m_callbacks);
+        auto dialog = std::make_unique<ScrobblersPanel>(destinations, nullptr, m_callbacks);
         dialog->show();
         QCoreApplication::processEvents();
         return dialog;
@@ -58,7 +58,7 @@ private:
     }
 };
 
-void ScrobbleDestinationsDialogTest::init()
+void ScrobblersPanelTest::init()
 {
     m_tokens.clear();
     m_saved = {};
@@ -79,7 +79,7 @@ void ScrobbleDestinationsDialogTest::init()
     m_callbacks.openLastFmSettings = []() {};
 }
 
-void ScrobbleDestinationsDialogTest::aTokenIsWrittenAsSoonAsItIsTyped()
+void ScrobblersPanelTest::aTokenIsWrittenAsSoonAsItIsTyped()
 {
     const QString id = ScrobbleDestinationConfig::listenBrainzId();
     m_tokens.insert(id, QStringLiteral("old-token"));
@@ -97,7 +97,7 @@ void ScrobbleDestinationsDialogTest::aTokenIsWrittenAsSoonAsItIsTyped()
     QCOMPARE(official->apiRoot, ListenBrainzUrl::officialApiRoot());
 }
 
-void ScrobbleDestinationsDialogTest::anAddedServerIsWithheldUntilItHasAnAddress()
+void ScrobblersPanelTest::anAddedServerIsWithheldUntilItHasAnAddress()
 {
     const auto dialog = makeDialog(ScrobbleDestinationConfig::defaults());
     const int before = dialog->destinations().items.size();
@@ -129,7 +129,7 @@ void ScrobbleDestinationsDialogTest::anAddedServerIsWithheldUntilItHasAnAddress(
     QCOMPARE(m_saved.items.size(), before + 1);
 }
 
-void ScrobbleDestinationsDialogTest::aServerWithoutAnAddressCannotBeEnabled()
+void ScrobblersPanelTest::aServerWithoutAnAddressCannotBeEnabled()
 {
     ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
     const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), true);
@@ -151,7 +151,7 @@ void ScrobbleDestinationsDialogTest::aServerWithoutAnAddressCannotBeEnabled()
     QVERIFY(dialog->destinations().find(id) == nullptr);
 }
 
-void ScrobbleDestinationsDialogTest::aTypedUrlIsNormalizedBeforeItIsSaved()
+void ScrobblersPanelTest::aTypedUrlIsNormalizedBeforeItIsSaved()
 {
     ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
     const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
@@ -170,7 +170,7 @@ void ScrobbleDestinationsDialogTest::aTypedUrlIsNormalizedBeforeItIsSaved()
     QCOMPARE(m_saved.find(id)->apiRoot, saved->apiRoot);
 }
 
-void ScrobbleDestinationsDialogTest::enablingADestinationSavesImmediately()
+void ScrobblersPanelTest::enablingADestinationSavesImmediately()
 {
     const QString id = ScrobbleDestinationConfig::listenBrainzId();
     const auto dialog = makeDialog(ScrobbleDestinationConfig::defaults());
@@ -186,5 +186,5 @@ void ScrobbleDestinationsDialogTest::enablingADestinationSavesImmediately()
     QVERIFY(saved->enabled);
 }
 
-QTEST_MAIN(ScrobbleDestinationsDialogTest)
-#include "test_scrobble_destinations_dialog.moc"
+QTEST_MAIN(ScrobblersPanelTest)
+#include "test_scrobblers_panel.moc"

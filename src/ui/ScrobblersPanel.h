@@ -2,10 +2,10 @@
 
 #include "scrobble/ScrobbleDestination.h"
 
-#include <QDialog>
 #include <QHash>
 #include <QList>
 #include <QString>
+#include <QWidget>
 
 #include <functional>
 
@@ -22,15 +22,15 @@ class ToggleSwitch;
 // and the Last.fm API credentials.
 //
 // Editing is stateless: a change is saved the moment it is made, and there is
-// no accept or cancel. What the dialog deliberately does not do is apply the
+// no accept or cancel. What the panel deliberately does not do is apply the
 // result while it is open, so retyping a server URL cannot make the app
-// reconnect on every keystroke; the owner applies once, on close.
+// reconnect on every keystroke; the owner applies once, when the window closes.
 //
 // A destination with no server address cannot deliver, so it cannot be enabled
 // and it is not written to the configuration until it has one. Removal is
 // immediate and cannot be taken back, so it confirms first and says exactly
 // what is being discarded.
-class ScrobbleDestinationsDialog final : public QDialog {
+class ScrobblersPanel final : public QWidget {
     Q_OBJECT
 
 public:
@@ -52,8 +52,8 @@ public:
         std::function<void()> openLastFmSettings;
     };
 
-    ScrobbleDestinationsDialog(ScrobbleDestinationSet destinations, ListenHistoryStore *history,
-                               Callbacks callbacks, QWidget *parent = nullptr);
+    ScrobblersPanel(ScrobbleDestinationSet destinations, ListenHistoryStore *history, Callbacks callbacks,
+                    QWidget *parent = nullptr);
 
     // The saved set, which omits any destination still missing its address.
     ScrobbleDestinationSet destinations() const;

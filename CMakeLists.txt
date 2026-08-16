@@ -138,10 +138,11 @@ set(MUZAITEN_SOURCES
     src/ui/KeybindingsDialog.cpp
     src/ui/GenreCurationDialog.cpp
     src/ui/LinkRootsDialog.cpp
-    src/ui/ListeningHistoryDialog.cpp
+    src/ui/ListeningHistoryPanel.cpp
     src/ui/MainWindow.cpp
     src/ui/ScanController.cpp
-    src/ui/ScrobbleDestinationsDialog.cpp
+    src/ui/ScrobblersPanel.cpp
+    src/ui/ScrobblingDialog.cpp
     src/ui/StickyMenu.cpp
     src/ui/ToggleSwitch.cpp
     src/ui/ScrobbleUploadDispatcher.cpp
@@ -262,7 +263,8 @@ set(MUZAITEN_HEADERS
     src/scrobble/ListenBrainzScrobbler.h
     src/scrobble/ListenBrainzUrl.h
     src/scrobble/ScrobbleDestination.h
-    src/ui/ScrobbleDestinationsDialog.h
+    src/ui/ScrobblersPanel.h
+    src/ui/ScrobblingDialog.h
     src/ui/StickyMenu.h
     src/ui/ToggleSwitch.h
     src/ui/ScrobbleUploadDispatcher.h
@@ -298,7 +300,7 @@ set(MUZAITEN_HEADERS
     src/ui/KeybindingsDialog.h
     src/ui/GenreCurationDialog.h
     src/ui/LinkRootsDialog.h
-    src/ui/ListeningHistoryDialog.h
+    src/ui/ListeningHistoryPanel.h
     src/ui/KeyBindingTypes.h
     src/ui/MainWindow.h
     src/ui/MusicExplorerView.h
