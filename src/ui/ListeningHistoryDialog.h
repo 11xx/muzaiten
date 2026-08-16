@@ -9,7 +9,7 @@
 
 #include <optional>
 
-class QComboBox;
+class QAction;
 class QLabel;
 class QPushButton;
 class QAbstractTableModel;
@@ -38,13 +38,16 @@ protected:
 
 private:
     void reload();
-    void queueSelected(const QString &service);
-    void clearPending(const QString &service);
+    void queueSelected();
+    void retryPending();
+    void clearBacklogs();
     void forgetSelectedBehavior();
     void updateActions();
+    void updateDestinationButton();
     QList<qint64> selectedIds() const;
-    // The chosen destination, or empty for the aggregate view.
-    QString selectedDestinationId() const;
+    // The destinations the view is scoped to. Empty means every destination,
+    // which is the read-only overview.
+    QStringList scopedDestinationIds() const;
     QString destinationName(const QString &destinationId) const;
     std::optional<ListenHistoryStore::HistoryRow> selectedHistoryRow() const;
 
@@ -53,7 +56,8 @@ private:
     QTableView *m_view = nullptr;
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     QLabel *m_summary = nullptr;
-    QComboBox *m_destinationSelector = nullptr;
+    QPushButton *m_destinationButton = nullptr;
+    QList<QAction *> m_destinationActions;
     QPushButton *m_queueSelected = nullptr;
     QPushButton *m_forgetBehavior = nullptr;
     QPushButton *m_retryPending = nullptr;

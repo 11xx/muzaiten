@@ -4,23 +4,32 @@
 
 #include <QDialog>
 #include <QHash>
+#include <QList>
 #include <QString>
 
 #include <functional>
 
+class DestinationRow;
 class ListenHistoryStore;
+class QGridLayout;
 class QLabel;
-class QPushButton;
-class QTableWidget;
+class ToggleSwitch;
 
 // The one place scrobbling destinations are managed: Last.fm, official
 // ListenBrainz, and any number of ListenBrainz-compatible servers, each with
-// its enabled state, credentials, connection status, and pending count.
+// its enabled state, credentials, connection status, and pending count. It also
+// carries the two scrobbling-wide controls that belong with them, offline mode
+// and the Last.fm API credentials.
 //
-// The dialog edits a working copy and hands it back through destinations() when
-// accepted, so cancelling changes nothing. Side effects it cannot take back
-// (deleting a removed destination's delivery rows and token) run only on
-// accept, and only after the user has confirmed what is being discarded.
+// Editing is stateless: a change is saved the moment it is made, and there is
+// no accept or cancel. What the dialog deliberately does not do is apply the
+// result while it is open, so retyping a server URL cannot make the app
+// reconnect on every keystroke; the owner applies once, on close.
+//
+// A destination with no server address cannot deliver, so it cannot be enabled
+// and it is not written to the configuration until it has one. Removal is
+// immediate and cannot be taken back, so it confirms first and says exactly
+// what is being discarded.
 class ScrobbleDestinationsDialog final : public QDialog {
     Q_OBJECT
 
@@ -31,49 +40,45 @@ public:
         std::function<QString(const QString &destinationId)> readToken;
         std::function<void(const QString &destinationId, const QString &token)> writeToken;
         std::function<void(const QString &destinationId)> removeToken;
+        // Persist the set. Called on every change, and never applies it.
+        std::function<void(const ScrobbleDestinationSet &destinations)> saveDestinations;
         // Whether Last.fm has a usable session; it authenticates through its own
         // settings dialog rather than a token field here.
         std::function<bool()> lastFmConfigured;
         // Fire and forget: the result arrives back through reportTestResult.
         std::function<void(const QString &destinationId, const QString &apiRoot, const QString &token)> testDestination;
+        std::function<bool()> readOffline;
+        std::function<void(bool offline)> writeOffline;
+        std::function<void()> openLastFmSettings;
     };
 
     ScrobbleDestinationsDialog(ScrobbleDestinationSet destinations, ListenHistoryStore *history,
                                Callbacks callbacks, QWidget *parent = nullptr);
 
-    ScrobbleDestinationSet destinations() const { return m_destinations; }
+    // The saved set, which omits any destination still missing its address.
+    ScrobbleDestinationSet destinations() const;
 
 public slots:
     // Result of a `testDestination` call, routed back by the owner.
     void reportTestResult(const QString &destinationId, bool valid, const QString &username);
 
 private:
-    void reloadTable();
-    void updateButtons();
-    void updateDuplicateRelayWarning();
-    QString selectedId() const;
+    friend class DestinationRow;
 
+    void appendRow(const ScrobbleDestination &destination);
     void addDestination();
-    void editSelected();
-    void removeSelected();
-    void testSelected();
-    void toggleSelected();
-    void applyRemovals();
+    void removeRow(DestinationRow *row);
+    void save();
+    void updateNotices();
 
-    ScrobbleDestinationSet m_destinations;
     ListenHistoryStore *m_history = nullptr;
     Callbacks m_callbacks;
 
-    // Destinations removed in this session, applied only if the dialog is
-    // accepted; and the tokens typed for each destination, likewise.
-    QStringList m_removedIds;
-    QHash<QString, QString> m_pendingTokens;
-    QHash<QString, QString> m_statusById;
-
-    QTableWidget *m_table = nullptr;
-    QLabel *m_warning = nullptr;
-    QPushButton *m_editButton = nullptr;
-    QPushButton *m_removeButton = nullptr;
-    QPushButton *m_testButton = nullptr;
-    QPushButton *m_toggleButton = nullptr;
+    QList<DestinationRow *> m_rows;
+    QGridLayout *m_grid = nullptr;
+    QWidget *m_rowHost = nullptr;
+    QLabel *m_problem = nullptr;
+    QLabel *m_relayWarning = nullptr;
+    ToggleSwitch *m_offline = nullptr;
+    int m_nextGridRow = 0;
 };

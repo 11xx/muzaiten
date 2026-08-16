@@ -77,13 +77,23 @@ and are not restored after restart.
   info pane. `Settings > Album art resolution…` — cached artwork size.
 - `History > Scrobblers ▸ > Manage scrobblers…` — every scrobbling
   destination in one list: Last.fm, ListenBrainz, and any number of
-  ListenBrainz-compatible servers such as Koito. Add, edit, enable,
-  disable, test, and remove them here. ListenBrainz's token can be replaced
-  here while its built-in identity and URL stay fixed. The same menu holds offline
-  buffering and history backfill; `Last.fm API settings…` accepts your
-  own Last.fm credentials.
-- `History > Listening history…` — pick a destination to see and manage
-  its delivery state, or `All destinations` for a read-only overview.
+  ListenBrainz-compatible servers such as Koito. Each row carries its own
+  switch, name, address, token, status, pending count, and its `Test` and
+  remove buttons. The switch enables a destination in one click, and the
+  fields are edited where they are shown. ListenBrainz's token can be
+  replaced here while its built-in identity and URL stay fixed; a server
+  with no address cannot be enabled. Changes are saved as you make them and
+  applied when the window closes, so there is no OK or Cancel; removing a
+  destination confirms first and cannot be undone. The window also carries
+  offline mode and `Last.fm API settings…`, which accepts your own Last.fm
+  credentials. The Scrobblers menu holds the same two, plus history
+  backfill.
+- `History > Listening history…` — pick one or more destinations to see and
+  manage their delivery state, or pick none for a read-only overview. The
+  destination popup stays open while you toggle entries, so several can be
+  picked in one visit; the `Scrobbled` column, the summary, and the queue,
+  retry and clear actions all apply to exactly what is picked. The choice
+  lasts as long as the window.
 
 ## File explorers
 

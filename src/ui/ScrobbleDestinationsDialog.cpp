@@ -2,400 +2,646 @@
 
 #include "scrobble/ListenBrainzUrl.h"
 #include "scrobble/ListenHistoryStore.h"
+#include "ui/ToggleSwitch.h"
 
+#include <QApplication>
 #include <QDialogButtonBox>
-#include <QFormLayout>
-#include <QHeaderView>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPushButton>
-#include <QTableWidget>
+#include <QScrollArea>
+#include <QStyle>
 #include <QVBoxLayout>
 
 namespace {
 
-enum Column {
-    NameColumn,
-    TypeColumn,
-    UrlColumn,
-    EnabledColumn,
-    StatusColumn,
-    PendingColumn,
-    ColumnCount,
-};
-
-// The table's placeholder for a cell that has no value, matching the rest of
+// The placeholder for a value a destination cannot have, matching the rest of
 // the app's tables.
 const auto kEmptyCell = QStringLiteral("—");
 
-// Collects name, URL, and token for one compatible destination, refusing to
-// accept anything the URL normalizer rejects.
-class CompatibleDestinationDialog final : public QDialog {
-public:
-    CompatibleDestinationDialog(const QString &title, const QString &name, const QString &apiRoot,
-                                const QString &token, bool endpointEditable, QWidget *parent)
-        : QDialog(parent)
-    {
-        setWindowTitle(title);
-
-        m_name = new QLineEdit(name, this);
-        m_name->setPlaceholderText(QStringLiteral("Koito"));
-        m_url = new QLineEdit(apiRoot, this);
-        m_url->setPlaceholderText(QStringLiteral("https://koito.example"));
-        m_token = new QLineEdit(token, this);
-        m_token->setEchoMode(QLineEdit::Password);
-        m_name->setEnabled(endpointEditable);
-        m_url->setEnabled(endpointEditable);
-
-        m_error = new QLabel(this);
-        m_error->setWordWrap(true);
-        m_error->setStyleSheet(QStringLiteral("color: palette(link-visited);"));
-        m_error->hide();
-
-        auto *form = new QFormLayout;
-        form->addRow(QStringLiteral("Name"), m_name);
-        form->addRow(QStringLiteral("Server URL"), m_url);
-        form->addRow(QStringLiteral("User token"), m_token);
-
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-        connect(buttons, &QDialogButtonBox::accepted, this, &CompatibleDestinationDialog::validateAndAccept);
-        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-
-        auto *layout = new QVBoxLayout(this);
-        layout->addWidget(new QLabel(QStringLiteral("Enter the server's address. Both the site root and its /1 API "
-                                                    "root work; muzaiten normalizes them to the same server."),
-                                     this));
-        layout->addLayout(form);
-        layout->addWidget(m_error);
-        layout->addWidget(buttons);
-    }
-
-    QString name() const
-    {
-        const QString typed = m_name->text().trimmed();
-        return typed.isEmpty() ? m_normalized : typed;
-    }
-    QString apiRoot() const { return m_normalized; }
-    QString token() const { return m_token->text().trimmed(); }
-
-private:
-    void validateAndAccept()
-    {
-        const auto result = ListenBrainzUrl::normalizeBase(m_url->text());
-        if (!result.valid) {
-            m_error->setText(result.error);
-            m_error->show();
-            m_url->setFocus();
-            return;
-        }
-        m_normalized = result.apiRoot;
-        accept();
-    }
-
-    QLineEdit *m_name = nullptr;
-    QLineEdit *m_url = nullptr;
-    QLineEdit *m_token = nullptr;
-    QLabel *m_error = nullptr;
-    QString m_normalized;
+enum Column {
+    ToggleColumn,
+    NameColumn,
+    UrlColumn,
+    TokenColumn,
+    StatusColumn,
+    PendingColumn,
+    TestColumn,
+    RemoveColumn,
+    ColumnCount,
 };
+
+// Column headers, the empty-value placeholder, and other secondary text. The
+// source is always the application palette, so tinting a widget twice does not
+// compound.
+void setMuted(QWidget *widget, bool muted)
+{
+    QPalette palette = widget->palette();
+    palette.setColor(QPalette::WindowText,
+                     QApplication::palette().color(muted ? QPalette::PlaceholderText : QPalette::WindowText));
+    widget->setPalette(palette);
+}
+
+// A value, or the placeholder for its absence, which recedes rather than
+// competing with the values around it.
+void setValueOrDash(QLabel *label, const QString &value)
+{
+    label->setText(value.isEmpty() ? kEmptyCell : value);
+    setMuted(label, value.isEmpty());
+}
+
+QString mintCustomId()
+{
+    ScrobbleDestinationSet minted;
+    return minted.addCustom({}, {}, false);
+}
 
 }   // namespace
 
-ScrobbleDestinationsDialog::ScrobbleDestinationsDialog(ScrobbleDestinationSet destinations,
-                                                       ListenHistoryStore *history, Callbacks callbacks,
-                                                       QWidget *parent)
+// How a destination's connection currently stands, which is what colours the
+// dot beside its status text.
+enum class DestinationHealth {
+    Unknown,   // nothing tried yet
+    Good,      // credentials verified
+    Bad,       // credentials rejected, or a value the destination cannot work without
+    Busy,      // a test is in flight
+};
+
+// One destination's controls, laid into a grid shared by every row so the
+// columns line up whatever each row happens to offer. The row owns the working
+// copy of its destination and reports every change back to the dialog, which
+// saves it.
+class DestinationRow final : public QObject {
+public:
+    DestinationRow(ScrobbleDestination destination, ScrobbleDestinationsDialog *dialog, QGridLayout *grid, int gridRow,
+                   QWidget *host)
+        : QObject(host)
+        , m_dialog(dialog)
+        , m_destination(std::move(destination))
+    {
+        const bool compatible = m_destination.type == ScrobbleDestination::Type::ListenBrainzCompatible;
+        const bool reserved = m_destination.isReserved();
+
+        m_toggle = new ToggleSwitch(host);
+        m_toggle->setChecked(m_destination.enabled);
+        connect(m_toggle, &QAbstractButton::toggled, this, [this](bool on) {
+            if (m_destination.enabled == on) {
+                return;
+            }
+            m_destination.enabled = on;
+            refresh();
+            m_dialog->save();
+        });
+
+        m_name = new QLineEdit(m_destination.name, host);
+        m_name->setPlaceholderText(QStringLiteral("Koito"));
+        connect(m_name, &QLineEdit::editingFinished, this, &DestinationRow::commitName);
+
+        m_url = new QLineEdit(m_destination.apiRoot, host);
+        m_url->setPlaceholderText(QStringLiteral("https://koito.example"));
+        m_url->setToolTip(QStringLiteral("Both the site root and its /1 API root work; muzaiten normalizes them to "
+                                         "the same server."));
+        connect(m_url, &QLineEdit::editingFinished, this, &DestinationRow::commitUrl);
+        connect(m_url, &QLineEdit::textChanged, this, [this] {
+            m_status.clear();
+            refresh();
+        });
+
+        m_token = new QLineEdit(compatible ? m_dialog->m_callbacks.readToken(m_destination.id) : QString(), host);
+        m_token->setEchoMode(QLineEdit::Password);
+        m_token->setPlaceholderText(QStringLiteral("user token"));
+        connect(m_token, &QLineEdit::editingFinished, this, &DestinationRow::commitToken);
+        connect(m_token, &QLineEdit::textChanged, this, [this] {
+            m_status.clear();
+            refresh();
+        });
+
+        // A built-in destination is not the user's to rename or repoint, so it
+        // shows the value as text rather than as a field that refuses input.
+        m_fixedName = new QLabel(m_destination.name, host);
+        m_fixedUrl = new QLabel(host);
+        m_fixedUrl->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        setValueOrDash(m_fixedUrl, compatible ? m_destination.apiRoot : QString());
+        m_fixedToken = new QLabel(host);
+        setValueOrDash(m_fixedToken, {});
+        m_fixedToken->setToolTip(QStringLiteral("Last.fm signs in through Last.fm API settings"));
+        // Indented to the text inset of the fields beside them, so a fixed value
+        // and an editable one start at the same x.
+        const int inset = host->style()->pixelMetric(QStyle::PM_DefaultFrameWidth) + 3;
+        for (QLabel *fixed : {m_fixedName, m_fixedUrl, m_fixedToken}) {
+            fixed->setTextFormat(Qt::PlainText);
+            fixed->setIndent(inset);
+        }
+
+        m_dot = new HealthDot(host);
+        m_statusLabel = new QLabel(host);
+        m_pending = new QLabel(host);
+        m_pending->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+        m_test = new QPushButton(QStringLiteral("Test"), host);
+        m_test->setToolTip(QStringLiteral("Check the server and credentials"));
+        connect(m_test, &QPushButton::clicked, this, &DestinationRow::test);
+
+        m_remove = new QPushButton(host);
+        m_remove->setIcon(
+            QIcon::fromTheme(QStringLiteral("user-trash"), host->style()->standardIcon(QStyle::SP_TrashIcon)));
+        m_remove->setToolTip(QStringLiteral("Remove this destination"));
+        connect(m_remove, &QPushButton::clicked, this, [this] { m_dialog->removeRow(this); });
+
+        // Each control is addressable by the destination it belongs to, which is
+        // what lets anything outside this row reach one without counting
+        // children in layout order.
+        m_toggle->setObjectName(m_destination.id + QStringLiteral(".enabled"));
+        m_name->setObjectName(m_destination.id + QStringLiteral(".name"));
+        m_url->setObjectName(m_destination.id + QStringLiteral(".url"));
+        m_token->setObjectName(m_destination.id + QStringLiteral(".token"));
+        m_statusLabel->setObjectName(m_destination.id + QStringLiteral(".status"));
+        m_test->setObjectName(m_destination.id + QStringLiteral(".test"));
+        m_remove->setObjectName(m_destination.id + QStringLiteral(".remove"));
+
+        auto *status = new QHBoxLayout;
+        status->setContentsMargins(0, 0, 0, 0);
+        status->setSpacing(4);
+        status->addWidget(m_dot);
+        status->addWidget(m_statusLabel);
+        status->addStretch();
+
+        grid->addWidget(m_toggle, gridRow, ToggleColumn);
+        grid->addWidget(reserved ? static_cast<QWidget *>(m_fixedName) : m_name, gridRow, NameColumn);
+        grid->addWidget(reserved ? static_cast<QWidget *>(m_fixedUrl) : m_url, gridRow, UrlColumn);
+        grid->addWidget(compatible ? static_cast<QWidget *>(m_token) : m_fixedToken, gridRow, TokenColumn);
+        grid->addLayout(status, gridRow, StatusColumn);
+        grid->addWidget(m_pending, gridRow, PendingColumn);
+        grid->addWidget(m_test, gridRow, TestColumn);
+        grid->addWidget(m_remove, gridRow, RemoveColumn);
+
+        for (QWidget *unused : unusedWidgets()) {
+            unused->hide();
+        }
+        m_test->setVisible(compatible);
+        m_remove->setVisible(!reserved);
+        // A row that offers fewer actions still reserves their space, so the
+        // action columns stay columns.
+        for (QPushButton *button : {m_test, m_remove}) {
+            QSizePolicy policy = button->sizePolicy();
+            policy.setRetainSizeWhenHidden(true);
+            button->setSizePolicy(policy);
+        }
+
+        refresh();
+    }
+
+    const ScrobbleDestination &destination() const { return m_destination; }
+
+    // A ListenBrainz-compatible destination with no address has nowhere to
+    // deliver, which is fatal for that entry rather than a warning about it.
+    bool isDeliverable() const { return !m_destination.apiRoot.isEmpty() || !isCompatible(); }
+
+    QString displayName() const
+    {
+        const QString name = m_destination.name.trimmed();
+        return name.isEmpty() ? QStringLiteral("the new server") : name;
+    }
+
+    void setStatus(const QString &status, DestinationHealth health)
+    {
+        m_status = status;
+        m_health = health;
+        refresh();
+    }
+
+    void focusFirstField() { m_url->setFocus(); }
+
+    void takeOutOf(QGridLayout *grid)
+    {
+        const QList<QWidget *> owned{m_toggle,     m_name, m_url,        m_token,   m_fixedName, m_fixedUrl,
+                                     m_fixedToken, m_dot,  m_statusLabel, m_pending, m_test,      m_remove};
+        for (QWidget *widget : owned) {
+            grid->removeWidget(widget);
+            widget->deleteLater();
+        }
+    }
+
+private:
+    // A dot ahead of the status word, sized to sit on the text's baseline.
+    class HealthDot final : public QWidget {
+    public:
+        explicit HealthDot(QWidget *parent)
+            : QWidget(parent)
+        {
+            setFixedWidth(10);
+        }
+
+        void setHealth(DestinationHealth health)
+        {
+            m_health = health;
+            update();
+        }
+
+    protected:
+        void paintEvent(QPaintEvent *) override
+        {
+            QPainter painter(this);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(color());
+            painter.drawEllipse(QPointF(width() / 2.0, height() / 2.0), 3.5, 3.5);
+        }
+
+    private:
+        QColor color() const
+        {
+            switch (m_health) {
+            case DestinationHealth::Good:
+                return QColor(0x3f, 0xa0, 0x5f);
+            case DestinationHealth::Bad:
+                return QColor(0xc6, 0x4b, 0x4b);
+            case DestinationHealth::Busy:
+                return palette().color(QPalette::Highlight);
+            case DestinationHealth::Unknown:
+                break;
+            }
+            return palette().color(QPalette::PlaceholderText);
+        }
+
+        DestinationHealth m_health = DestinationHealth::Unknown;
+    };
+
+    bool isCompatible() const { return m_destination.type == ScrobbleDestination::Type::ListenBrainzCompatible; }
+
+    QList<QWidget *> unusedWidgets() const
+    {
+        if (m_destination.isReserved()) {
+            return isCompatible() ? QList<QWidget *>{m_name, m_url, m_fixedToken}
+                                  : QList<QWidget *>{m_name, m_url, m_token};
+        }
+        return {m_fixedName, m_fixedUrl, m_fixedToken};
+    }
+
+    void commitName()
+    {
+        const QString typed = m_name->text().trimmed();
+        if (typed == m_destination.name) {
+            return;
+        }
+        m_destination.name = typed;
+        m_dialog->save();
+    }
+
+    void commitUrl()
+    {
+        const QString typed = m_url->text().trimmed();
+        if (typed.isEmpty()) {
+            m_destination.apiRoot.clear();
+            refresh();
+            m_dialog->save();
+            return;
+        }
+
+        const ListenBrainzUrl::Normalized result = ListenBrainzUrl::normalizeBase(typed);
+        if (!result.valid) {
+            setStatus(result.error, DestinationHealth::Bad);
+            return;
+        }
+        if (result.apiRoot == m_destination.apiRoot) {
+            m_url->setText(result.apiRoot);
+            return;
+        }
+
+        const int pending = m_dialog->m_history != nullptr ? m_dialog->m_history->pendingCount(m_destination.id) : 0;
+        if (pending > 0) {
+            // The backlog belongs to the destination, not to the URL, so it
+            // follows the destination to its new address. Say so before it does.
+            const auto answer = QMessageBox::question(
+                m_dialog, QStringLiteral("Change server URL"),
+                QStringLiteral("\"%1\" has %2 listens waiting to be sent. They stay queued and will be delivered to "
+                               "the new address instead. Continue?")
+                    .arg(displayName())
+                    .arg(pending),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (answer != QMessageBox::Yes) {
+                m_url->setText(m_destination.apiRoot);
+                return;
+            }
+        }
+
+        m_destination.apiRoot = result.apiRoot;
+        m_url->setText(result.apiRoot);
+        // The name defaults to the address until the user gives it one of its own.
+        if (m_destination.name.isEmpty()) {
+            m_destination.name = result.apiRoot;
+            m_name->setText(result.apiRoot);
+        }
+        m_status.clear();
+        refresh();
+        m_dialog->save();
+    }
+
+    void commitToken()
+    {
+        if (!isCompatible()) {
+            return;
+        }
+        const QString typed = m_token->text().trimmed();
+        if (typed == m_dialog->m_callbacks.readToken(m_destination.id)) {
+            return;
+        }
+        m_dialog->m_callbacks.writeToken(m_destination.id, typed);
+        refresh();
+    }
+
+    void test()
+    {
+        commitUrl();
+        commitToken();
+        if (!isDeliverable()) {
+            return;
+        }
+        setStatus(QStringLiteral("Testing…"), DestinationHealth::Busy);
+        m_dialog->m_callbacks.testDestination(m_destination.id, m_destination.apiRoot, m_token->text().trimmed());
+    }
+
+    void refresh()
+    {
+        QString text = m_status;
+        DestinationHealth health = m_health;
+        if (!isDeliverable()) {
+            text = QStringLiteral("Server URL required");
+            health = DestinationHealth::Bad;
+        } else if (text.isEmpty()) {
+            if (!isCompatible()) {
+                const bool configured = m_dialog->m_callbacks.lastFmConfigured();
+                text = configured ? QStringLiteral("Signed in") : QStringLiteral("Not signed in");
+                health = configured ? DestinationHealth::Good : DestinationHealth::Bad;
+            } else {
+                const bool hasToken = !m_token->text().trimmed().isEmpty();
+                text = hasToken ? QStringLiteral("Token set") : QStringLiteral("No token");
+                health = hasToken ? DestinationHealth::Unknown : DestinationHealth::Bad;
+            }
+        }
+        m_dot->setHealth(health);
+        m_statusLabel->setText(text);
+
+        const int pending = m_dialog->m_history != nullptr ? m_dialog->m_history->pendingCount(m_destination.id) : 0;
+        setValueOrDash(m_pending, pending > 0 ? QString::number(pending) : QString());
+
+        m_test->setEnabled(isDeliverable());
+        // With no accept button to gate on, an entry that cannot deliver is
+        // instead one that cannot be enabled: it is kept, but never sent to.
+        if (!isDeliverable() && m_toggle->isChecked()) {
+            m_toggle->setChecked(false);   // re-enters here through the toggle
+            return;
+        }
+        m_toggle->setEnabled(isDeliverable());
+        m_toggle->setToolTip(isDeliverable() ? QStringLiteral("Send listens to this destination")
+                                             : QStringLiteral("Give this destination a server address first"));
+        m_dialog->updateNotices();
+    }
+
+    ScrobbleDestinationsDialog *m_dialog = nullptr;
+    ScrobbleDestination m_destination;
+    QString m_status;
+    DestinationHealth m_health = DestinationHealth::Unknown;
+
+    ToggleSwitch *m_toggle = nullptr;
+    QLineEdit *m_name = nullptr;
+    QLineEdit *m_url = nullptr;
+    QLineEdit *m_token = nullptr;
+    QLabel *m_fixedName = nullptr;
+    QLabel *m_fixedUrl = nullptr;
+    QLabel *m_fixedToken = nullptr;
+    HealthDot *m_dot = nullptr;
+    QLabel *m_statusLabel = nullptr;
+    QLabel *m_pending = nullptr;
+    QPushButton *m_test = nullptr;
+    QPushButton *m_remove = nullptr;
+};
+
+ScrobbleDestinationsDialog::ScrobbleDestinationsDialog(ScrobbleDestinationSet destinations, ListenHistoryStore *history,
+                                                       Callbacks callbacks, QWidget *parent)
     : QDialog(parent)
-    , m_destinations(std::move(destinations))
     , m_history(history)
     , m_callbacks(std::move(callbacks))
 {
     setWindowTitle(QStringLiteral("Scrobblers"));
-    resize(760, 380);
-
-    m_table = new QTableWidget(0, ColumnCount, this);
-    m_table->setHorizontalHeaderLabels({QStringLiteral("Name"), QStringLiteral("Type"), QStringLiteral("URL"),
-                                        QStringLiteral("Enabled"), QStringLiteral("Status"),
-                                        QStringLiteral("Pending")});
-    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->verticalHeader()->setVisible(false);
-    m_table->horizontalHeader()->setStretchLastSection(false);
-    m_table->horizontalHeader()->setSectionResizeMode(UrlColumn, QHeaderView::Stretch);
-
-    m_warning = new QLabel(this);
-    m_warning->setWordWrap(true);
-    m_warning->hide();
-
-    auto *addButton = new QPushButton(QStringLiteral("Add server…"), this);
-    m_editButton = new QPushButton(QStringLiteral("Edit…"), this);
-    m_removeButton = new QPushButton(QStringLiteral("Remove"), this);
-    m_testButton = new QPushButton(QStringLiteral("Test"), this);
-    m_toggleButton = new QPushButton(QStringLiteral("Enable"), this);
-
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
-        applyRemovals();
-        for (auto it = m_pendingTokens.constBegin(); it != m_pendingTokens.constEnd(); ++it) {
-            m_callbacks.writeToken(it.key(), it.value());
-        }
-        accept();
-    });
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-
-    connect(addButton, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::addDestination);
-    connect(m_editButton, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::editSelected);
-    connect(m_removeButton, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::removeSelected);
-    connect(m_testButton, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::testSelected);
-    connect(m_toggleButton, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::toggleSelected);
-    connect(m_table, &QTableWidget::itemSelectionChanged, this, &ScrobbleDestinationsDialog::updateButtons);
-    connect(m_table, &QTableWidget::itemDoubleClicked, this, &ScrobbleDestinationsDialog::editSelected);
-
-    auto *actions = new QHBoxLayout;
-    actions->addWidget(addButton);
-    actions->addWidget(m_editButton);
-    actions->addWidget(m_removeButton);
-    actions->addWidget(m_testButton);
-    actions->addWidget(m_toggleButton);
-    actions->addStretch();
+    resize(960, 460);
 
     auto *layout = new QVBoxLayout(this);
-    layout->addWidget(m_table);
-    layout->addWidget(m_warning);
-    layout->addLayout(actions);
-    layout->addWidget(buttons);
+    layout->setSpacing(8);
 
-    reloadTable();
+    m_rowHost = new QWidget(this);
+    m_grid = new QGridLayout(m_rowHost);
+    m_grid->setContentsMargins(0, 0, 0, 0);
+    m_grid->setHorizontalSpacing(10);
+    m_grid->setVerticalSpacing(5);
+
+    const QStringList headers{{},
+                              QStringLiteral("Name"),
+                              QStringLiteral("Server URL"),
+                              QStringLiteral("Token"),
+                              QStringLiteral("Status"),
+                              QStringLiteral("Pending"),
+                              {},
+                              {}};
+    for (int column = 0; column < ColumnCount; ++column) {
+        if (headers.at(column).isEmpty()) {
+            continue;
+        }
+        auto *header = new QLabel(headers.at(column), m_rowHost);
+        setMuted(header, true);
+        header->setAlignment(column == PendingColumn ? Qt::AlignRight | Qt::AlignVCenter
+                                                     : Qt::AlignLeft | Qt::AlignVCenter);
+        m_grid->addWidget(header, 0, column);
+    }
+    auto *rule = new QFrame(m_rowHost);
+    rule->setFrameShape(QFrame::HLine);
+    rule->setFrameShadow(QFrame::Sunken);
+    m_grid->addWidget(rule, 1, 0, 1, ColumnCount);
+    m_grid->setColumnStretch(NameColumn, 2);
+    m_grid->setColumnStretch(UrlColumn, 3);
+    m_nextGridRow = 2;
+
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidget(m_rowHost);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    layout->addWidget(scroll, 1);
+
+    m_problem = new QLabel(this);
+    m_problem->setWordWrap(true);
+    layout->addWidget(m_problem);
+
+    m_relayWarning = new QLabel(this);
+    m_relayWarning->setWordWrap(true);
+    setMuted(m_relayWarning, true);
+    layout->addWidget(m_relayWarning);
+
+    // Add server, offline mode and the Last.fm settings share one row: all three
+    // are controls of the dialog, none of them belonging to a single
+    // destination. Adding sits under the list it adds to; the two that apply to
+    // scrobbling as a whole sit away from it, on the right.
+    auto *misc = new QHBoxLayout;
+    auto *add = new QPushButton(QStringLiteral("Add server…"), this);
+    connect(add, &QPushButton::clicked, this, &ScrobbleDestinationsDialog::addDestination);
+
+    m_offline = new ToggleSwitch(this);
+    m_offline->setChecked(m_callbacks.readOffline ? m_callbacks.readOffline() : false);
+    auto *offlineLabel = new QLabel(QStringLiteral("Offline mode (buffer listens locally)"), this);
+    const auto offlineHint = QStringLiteral("Keep collecting listening history but send nothing; switching it off "
+                                            "uploads the buffered backlog.");
+    m_offline->setToolTip(offlineHint);
+    offlineLabel->setToolTip(offlineHint);
+    connect(m_offline, &QAbstractButton::toggled, this, [this](bool offline) {
+        if (m_callbacks.writeOffline) {
+            m_callbacks.writeOffline(offline);
+        }
+    });
+
+    auto *lastFmSettings = new QPushButton(QStringLiteral("Last.fm API settings…"), this);
+    connect(lastFmSettings, &QPushButton::clicked, this, [this] {
+        if (m_callbacks.openLastFmSettings) {
+            m_callbacks.openLastFmSettings();
+        }
+        updateNotices();
+    });
+
+    misc->addWidget(add);
+    misc->addStretch();
+    misc->addWidget(m_offline);
+    misc->addWidget(offlineLabel);
+    misc->addSpacing(16);
+    misc->addWidget(lastFmSettings);
+    layout->addLayout(misc);
+
+    auto *saveNote = new QLabel(
+        QStringLiteral("Changes are saved as you make them, and take effect when this window closes."), this);
+    setMuted(saveNote, true);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
+    auto *footer = new QHBoxLayout;
+    footer->addWidget(saveNote);
+    footer->addStretch();
+    footer->addWidget(buttons);
+    layout->addLayout(footer);
+
+    for (const ScrobbleDestination &destination : destinations.items) {
+        appendRow(destination);
+    }
+    m_grid->setRowStretch(m_nextGridRow + 64, 1);
+    updateNotices();
 }
 
-void ScrobbleDestinationsDialog::reloadTable()
+void ScrobbleDestinationsDialog::appendRow(const ScrobbleDestination &destination)
 {
-    const QString keepSelected = selectedId();
-
-    m_table->setRowCount(static_cast<int>(m_destinations.items.size()));
-    int row = 0;
-    for (const ScrobbleDestination &destination : m_destinations.items) {
-        const bool compatible = destination.type == ScrobbleDestination::Type::ListenBrainzCompatible;
-
-        QString status = m_statusById.value(destination.id);
-        if (status.isEmpty()) {
-            if (compatible) {
-                const QString token = m_pendingTokens.value(destination.id, m_callbacks.readToken(destination.id));
-                status = token.isEmpty() ? QStringLiteral("No token") : QStringLiteral("Token set");
-            } else {
-                status = m_callbacks.lastFmConfigured() ? QStringLiteral("Signed in")
-                                                        : QStringLiteral("Not signed in");
-            }
-        }
-
-        const int pending = m_history != nullptr ? m_history->pendingCount(destination.id) : 0;
-
-        const QStringList cells = {
-            destination.name,
-            compatible ? QStringLiteral("ListenBrainz") : QStringLiteral("Last.fm"),
-            compatible ? destination.apiRoot : kEmptyCell,
-            destination.enabled ? QStringLiteral("Yes") : QStringLiteral("No"),
-            status,
-            pending > 0 ? QString::number(pending) : kEmptyCell,
-        };
-        for (int column = 0; column < ColumnCount; ++column) {
-            auto *item = new QTableWidgetItem(cells.at(column));
-            if (column == NameColumn) {
-                item->setData(Qt::UserRole, destination.id);
-            }
-            m_table->setItem(row, column, item);
-        }
-        ++row;
-    }
-    m_table->resizeColumnsToContents();
-    m_table->horizontalHeader()->setSectionResizeMode(UrlColumn, QHeaderView::Stretch);
-
-    for (int index = 0; index < m_table->rowCount(); ++index) {
-        if (m_table->item(index, NameColumn)->data(Qt::UserRole).toString() == keepSelected) {
-            m_table->selectRow(index);
-            break;
-        }
-    }
-    if (m_table->currentRow() < 0 && m_table->rowCount() > 0) {
-        m_table->selectRow(0);
-    }
-
-    updateDuplicateRelayWarning();
-    updateButtons();
+    m_rows.push_back(new DestinationRow(destination, this, m_grid, m_nextGridRow, m_rowHost));
+    ++m_nextGridRow;
 }
 
-void ScrobbleDestinationsDialog::updateDuplicateRelayWarning()
+ScrobbleDestinationSet ScrobbleDestinationsDialog::destinations() const
 {
-    int enabledCompatible = 0;
-    for (const ScrobbleDestination &destination : m_destinations.items) {
-        if (destination.enabled && destination.type == ScrobbleDestination::Type::ListenBrainzCompatible) {
-            ++enabledCompatible;
+    ScrobbleDestinationSet set;
+    for (const DestinationRow *row : m_rows) {
+        // An entry still missing its address is not a destination yet, so it is
+        // held in the dialog rather than written to the configuration.
+        if (row->isDeliverable()) {
+            set.items.push_back(row->destination());
         }
     }
-    // Informational, never blocking: relaying to several servers is a
-    // legitimate setup, it just means each listen is submitted more than once.
-    m_warning->setVisible(enabledCompatible > 1);
-    m_warning->setText(QStringLiteral("%1 ListenBrainz-compatible destinations are enabled. Every listen is "
-                                      "submitted to each of them, so any server that relays to another may "
-                                      "receive it twice.")
-                           .arg(enabledCompatible));
+    return set;
 }
 
-QString ScrobbleDestinationsDialog::selectedId() const
+void ScrobbleDestinationsDialog::save()
 {
-    const int row = m_table->currentRow();
-    if (row < 0 || m_table->item(row, NameColumn) == nullptr) {
-        return {};
+    if (m_callbacks.saveDestinations) {
+        m_callbacks.saveDestinations(destinations());
     }
-    return m_table->item(row, NameColumn)->data(Qt::UserRole).toString();
-}
-
-void ScrobbleDestinationsDialog::updateButtons()
-{
-    const ScrobbleDestination *selected = m_destinations.find(selectedId());
-    const bool compatible = selected != nullptr
-        && selected->type == ScrobbleDestination::Type::ListenBrainzCompatible;
-
-    // The reserved destinations are part of the app: their identity and URL are
-    // not the user's to edit, and they cannot be removed.
-    m_editButton->setEnabled(compatible);
-    m_removeButton->setEnabled(selected != nullptr && !selected->isReserved());
-    m_testButton->setEnabled(compatible);
-    m_toggleButton->setEnabled(selected != nullptr);
-    m_toggleButton->setText(selected != nullptr && selected->enabled ? QStringLiteral("Disable")
-                                                                    : QStringLiteral("Enable"));
+    updateNotices();
 }
 
 void ScrobbleDestinationsDialog::addDestination()
 {
-    CompatibleDestinationDialog editor(QStringLiteral("Add scrobbling server"), {}, {}, {}, true, this);
-    if (editor.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    const QString id = m_destinations.addCustom(editor.name(), editor.apiRoot(), true);
-    m_pendingTokens.insert(id, editor.token());
-    reloadTable();
+    ScrobbleDestination destination;
+    destination.id = mintCustomId();
+    destination.type = ScrobbleDestination::Type::ListenBrainzCompatible;
+    appendRow(destination);
+    m_rows.last()->focusFirstField();
+    updateNotices();
 }
 
-void ScrobbleDestinationsDialog::editSelected()
+void ScrobbleDestinationsDialog::removeRow(DestinationRow *row)
 {
-    const QString id = selectedId();
-    const ScrobbleDestination *existing = m_destinations.find(id);
-    if (existing == nullptr || existing->type != ScrobbleDestination::Type::ListenBrainzCompatible) {
-        return;
-    }
-
-    const QString token = m_pendingTokens.value(id, m_callbacks.readToken(id));
-    const bool endpointEditable = !existing->isReserved();
-    CompatibleDestinationDialog editor(endpointEditable ? QStringLiteral("Edit scrobbling server")
-                                                     : QStringLiteral("Set ListenBrainz token"),
-                                       existing->name, existing->apiRoot, token, endpointEditable, this);
-    if (editor.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    const int pending = m_history != nullptr ? m_history->pendingCount(id) : 0;
-    if (endpointEditable && editor.apiRoot() != existing->apiRoot && pending > 0) {
-        // The backlog belongs to the destination, not to the URL, so it follows
-        // the destination to its new address. Say so before it happens.
-        const auto answer = QMessageBox::question(
-            this, QStringLiteral("Change server URL"),
-            QStringLiteral("\"%1\" has %2 listens waiting to be sent. They stay queued and will be "
-                           "delivered to the new address instead. Continue?")
-                .arg(existing->name)
-                .arg(pending),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (answer != QMessageBox::Yes) {
-            return;
-        }
-    }
-
-    for (ScrobbleDestination &destination : m_destinations.items) {
-        if (destination.id == id && endpointEditable) {
-            destination.name = editor.name();
-            destination.apiRoot = editor.apiRoot();
-        }
-    }
-    m_pendingTokens.insert(id, editor.token());
-    m_statusById.remove(id);
-    reloadTable();
-}
-
-void ScrobbleDestinationsDialog::removeSelected()
-{
-    const QString id = selectedId();
-    const ScrobbleDestination *existing = m_destinations.find(id);
-    if (existing == nullptr || existing->isReserved()) {
-        return;
-    }
-
-    const int pending = m_history != nullptr ? m_history->pendingCount(id) : 0;
+    const ScrobbleDestination destination = row->destination();
+    const int pending = m_history != nullptr ? m_history->pendingCount(destination.id) : 0;
     const QString detail = pending > 0
         ? QStringLiteral("\"%1\" has %2 listens waiting to be sent. Removing it discards them.")
-              .arg(existing->name)
+              .arg(row->displayName())
               .arg(pending)
-        : QStringLiteral("Remove \"%1\"?").arg(existing->name);
+        : QStringLiteral("Remove \"%1\"?").arg(row->displayName());
     const auto answer = QMessageBox::question(
         this, QStringLiteral("Remove scrobbler"),
-        detail + QStringLiteral("\n\nYour local listening history is kept; only this destination's "
-                                "delivery records and stored token are deleted."),
+        detail
+            + QStringLiteral("\n\nThis cannot be undone. Your local listening history is kept; only this "
+                             "destination's delivery records and stored token are deleted."),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes) {
         return;
     }
 
-    m_destinations.items.removeIf([&](const ScrobbleDestination &item) { return item.id == id; });
-    m_pendingTokens.remove(id);
-    m_statusById.remove(id);
-    m_removedIds << id;
-    reloadTable();
-}
-
-void ScrobbleDestinationsDialog::applyRemovals()
-{
-    for (const QString &id : std::as_const(m_removedIds)) {
-        if (m_history != nullptr) {
-            m_history->forgetDestination(id);
-        }
-        m_callbacks.removeToken(id);
+    m_rows.removeAll(row);
+    row->takeOutOf(m_grid);
+    row->deleteLater();
+    if (m_history != nullptr) {
+        m_history->forgetDestination(destination.id);
     }
-    m_removedIds.clear();
-}
-
-void ScrobbleDestinationsDialog::testSelected()
-{
-    const QString id = selectedId();
-    const ScrobbleDestination *selected = m_destinations.find(id);
-    if (selected == nullptr || selected->type != ScrobbleDestination::Type::ListenBrainzCompatible) {
-        return;
-    }
-
-    m_statusById.insert(id, QStringLiteral("Testing…"));
-    reloadTable();
-    m_callbacks.testDestination(id, selected->apiRoot,
-                               m_pendingTokens.value(id, m_callbacks.readToken(id)));
+    m_callbacks.removeToken(destination.id);
+    save();
 }
 
 void ScrobbleDestinationsDialog::reportTestResult(const QString &destinationId, bool valid, const QString &username)
 {
-    if (m_destinations.find(destinationId) == nullptr) {
-        return;
-    }
-    m_statusById.insert(destinationId,
-                        valid ? QStringLiteral("Connected as %1").arg(username)
-                              : QStringLiteral("Token rejected"));
-    reloadTable();
-}
-
-void ScrobbleDestinationsDialog::toggleSelected()
-{
-    const QString id = selectedId();
-    for (ScrobbleDestination &destination : m_destinations.items) {
-        if (destination.id == id) {
-            destination.enabled = !destination.enabled;
+    for (DestinationRow *row : std::as_const(m_rows)) {
+        if (row->destination().id == destinationId) {
+            row->setStatus(valid ? QStringLiteral("Connected as %1").arg(username)
+                                 : QStringLiteral("Token rejected"),
+                           valid ? DestinationHealth::Good : DestinationHealth::Bad);
+            return;
         }
     }
-    reloadTable();
+}
+
+void ScrobbleDestinationsDialog::updateNotices()
+{
+    QStringList incomplete;
+    int enabledCompatible = 0;
+    for (const DestinationRow *row : std::as_const(m_rows)) {
+        if (!row->isDeliverable()) {
+            incomplete << row->displayName();
+            continue;
+        }
+        const ScrobbleDestination &destination = row->destination();
+        if (destination.enabled && destination.type == ScrobbleDestination::Type::ListenBrainzCompatible) {
+            ++enabledCompatible;
+        }
+    }
+
+    m_problem->setVisible(!incomplete.isEmpty());
+    m_problem->setText(incomplete.isEmpty()
+                           ? QString()
+                           : QStringLiteral("%1 has no server address, so it cannot be enabled. Give it one or "
+                                            "remove it.")
+                                 .arg(incomplete.join(QStringLiteral(", "))));
+
+    // Informational, never blocking: relaying to several servers is a legitimate
+    // setup, it just means each listen is submitted more than once.
+    m_relayWarning->setVisible(enabledCompatible > 1);
+    m_relayWarning->setText(QStringLiteral("%1 ListenBrainz-compatible destinations are enabled. Every listen is "
+                                           "submitted to each of them, so any server that relays to another may "
+                                           "receive it twice.")
+                                .arg(enabledCompatible));
 }

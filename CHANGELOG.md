@@ -10,6 +10,18 @@
   managed from `History > Scrobblers > Manage scrobblers…`, which shows each
   destination's enabled state, credential or test status, and pending count,
   and supports add, edit, enable/disable, test, and removal.
+- `Manage scrobblers…` is now a list of per-destination rows. Enabling a
+  destination is a single click, its name, address and token are edited where
+  they are shown, and testing and removal are per-row buttons. Editing is
+  saved as you go, with no OK or Cancel; the result is applied when the window
+  closes, so retyping an address does not reconnect on every keystroke.
+  Removal confirms first and cannot be undone. Offline mode and
+  `Last.fm API settings…` are available in the same window as well as in the
+  Scrobblers menu.
+- `Listening history…` can scope to several destinations at once. The
+  destination popup stays open while destinations are toggled, and the counts,
+  the summary, and the queue, retry and clear actions all apply to exactly the
+  destinations picked. The choice lasts as long as the window.
 
 ### Fixed
 
@@ -22,7 +34,15 @@
 - `Listening history…` gained a destination selector. Choosing one scopes the
   delivery column, the pending count, `Scrobble selected`, `Clear backlog`, and
   the retry action to it; `All destinations` is a read-only overview showing
-  how many deliveries have completed.
+  how many deliveries have completed. The column is named `Scrobbled`.
+- A selected row in `Listening history…` stays visibly selected while the
+  destination popup is open. The selection was previously drawn from the
+  inactive palette, which on some themes made it vanish on alternating rows.
+- A ListenBrainz-compatible destination with no server address can no longer be
+  enabled: it has nowhere to deliver, so it is held in the window until it has
+  one rather than being saved as a destination that silently does nothing.
+- Clearing a backlog no longer triggers an upload attempt for the destination
+  whose backlog was just cleared.
 - `Radio > Anchor for new sessions` can keep new seeded and artist sessions
   near the starting song or let them drift with what plays.
 - Track selections can use `Start Radio` (`Start Radio (N)` for a

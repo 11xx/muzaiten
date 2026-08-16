@@ -5329,19 +5329,28 @@ void MainWindow::manageScrobblers()
     callbacks.testDestination = [this](const QString &id, const QString &apiRoot, const QString &token) {
         m_listenBrainzHub->validateToken(id, apiRoot, token);
     };
+    // Saved as edited, but deliberately not applied: reconfiguring here would
+    // make retyping a server URL reconnect on every keystroke.
+    callbacks.saveDestinations = [this](const ScrobbleDestinationSet &destinations) {
+        m_core->setScrobbleDestinations(destinations);
+    };
+    callbacks.readOffline = [this]() { return scrobbleOffline(); };
+    callbacks.writeOffline = [this](bool offline) {
+        setScrobbleOffline(offline);
+        // The same switch lives in the Scrobblers menu; keep the two in step.
+        m_playerBar->setScrobbleOffline(offline);
+    };
+    callbacks.openLastFmSettings = [this]() { showLastFmSettings(); };
 
     ScrobbleDestinationsDialog dialog(m_core->scrobbleDestinations(), m_listenHistory, callbacks, this);
     // Test results come back from the worker thread; route them to the dialog
     // for as long as it is open.
     const auto connection = connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, &dialog,
                                     &ScrobbleDestinationsDialog::reportTestResult);
-    const bool accepted = dialog.exec() == QDialog::Accepted;
+    dialog.exec();
     disconnect(connection);
-    if (!accepted) {
-        return;
-    }
 
-    m_core->setScrobbleDestinations(dialog.destinations());
+    // Editing saved as it went; closing is what applies it.
     configureListenBrainz();
     configureLastFm();
     updateScrobbleBacklogActions();

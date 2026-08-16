@@ -434,6 +434,7 @@ add_executable(test_scrobble_destinations_dialog
     ../src/scrobble/ListenHistoryStore.cpp
     ../src/scrobble/ScrobbleDestination.cpp
     ../src/ui/ScrobbleDestinationsDialog.cpp
+    ../src/ui/ToggleSwitch.cpp
 )
 target_include_directories(test_scrobble_destinations_dialog PRIVATE ../src)
 target_link_libraries(test_scrobble_destinations_dialog PRIVATE Qt6::Core Qt6::Sql Qt6::Widgets Qt6::Test)

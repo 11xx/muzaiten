@@ -5,12 +5,13 @@
 #include "ui/NeighborColumnResizer.h"
 #include "ui/ResponsiveColumnLayout.h"
 #include "ui/RowHeightWheel.h"
+#include "ui/StickyMenu.h"
 
 #include <QAbstractTableModel>
 #include <QAbstractItemView>
+#include <QAction>
 #include <QCheckBox>
 #include <QDateTime>
-#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QEvent>
 #include <QHeaderView>
@@ -40,29 +41,35 @@ enum Column {
     ArtistColumn,
     AlbumColumn,
     DurationColumn,
-    DeliveryColumn,
+    ScrobbledColumn,
     PathColumn,
     ColumnCount,
 };
 
-// The delivery cell for one listen. With a destination selected it reports that
-// destination alone; in aggregate mode it summarizes how many of the
-// destinations owed this listen have received it.
-QString deliveryText(const ListenHistoryStore::HistoryRow &row, const QString &destinationId)
+// The scrobbled cell for one listen, reported over exactly the destinations the
+// view is scoped to. Naming one destination answers for that one; naming
+// several answers for those several, which is what makes the ratio answer the
+// question the user actually asked.
+QString scrobbledText(const ListenHistoryStore::HistoryRow &row, const QStringList &destinationIds)
 {
-    if (destinationId.isEmpty()) {
-        return row.owedCount() == 0 ? kEmptyCell
-                                    : QStringLiteral("%1/%2 sent").arg(row.sentCount()).arg(row.owedCount());
+    int owed = 0;
+    int sent = 0;
+    for (const QString &destinationId : destinationIds) {
+        if (!row.owedTo(destinationId)) {
+            continue;
+        }
+        ++owed;
+        if (row.sentTo(destinationId)) {
+            ++sent;
+        }
     }
-    if (row.sentTo(destinationId)) {
-        return QStringLiteral("Sent");
+    if (owed == 0) {
+        return destinationIds.size() == 1 ? QStringLiteral("Not queued") : kEmptyCell;
     }
-    return row.owedTo(destinationId) ? QStringLiteral("Pending") : QStringLiteral("Not queued");
-}
-
-bool rowQueueableForService(const ListenHistoryStore::HistoryRow &row, const QString &service)
-{
-    return !row.owedTo(service);
+    if (destinationIds.size() == 1) {
+        return sent == 1 ? QStringLiteral("Sent") : QStringLiteral("Pending");
+    }
+    return QStringLiteral("%1/%2 sent").arg(sent).arg(owed);
 }
 
 QVector<ResponsiveColumnSpec> historyResponsiveSpecs()
@@ -73,9 +80,23 @@ QVector<ResponsiveColumnSpec> historyResponsiveSpecs()
         {ArtistColumn, QStringLiteral("artist"), 200, 110, ResponsiveColumnPriority::Keep},
         {AlbumColumn, QStringLiteral("album"), 220, 110, ResponsiveColumnPriority::Normal},
         {DurationColumn, QStringLiteral("duration"), 80, 70, ResponsiveColumnPriority::Normal},
-        {DeliveryColumn, QStringLiteral("delivery"), 120, 100, ResponsiveColumnPriority::Keep},
+        {ScrobbledColumn, QStringLiteral("scrobbled"), 120, 100, ResponsiveColumnPriority::Keep},
         {PathColumn, QStringLiteral("path"), 320, 120, ResponsiveColumnPriority::HideEarly},
     };
+}
+
+// A popup borrows the window's activation, and Qt then resolves the selection
+// colours from the inactive palette group. On themes where that inactive
+// highlight sits close to the alternating-row shade, a selected odd row stops
+// looking selected for as long as the popup is up. Pinning the inactive brushes
+// to the active ones keeps the selection readable throughout.
+void keepSelectionVisibleWhileUnfocused(QAbstractItemView *view)
+{
+    QPalette palette = view->palette();
+    palette.setBrush(QPalette::Inactive, QPalette::Highlight, palette.brush(QPalette::Active, QPalette::Highlight));
+    palette.setBrush(QPalette::Inactive, QPalette::HighlightedText,
+                     palette.brush(QPalette::Active, QPalette::HighlightedText));
+    view->setPalette(palette);
 }
 
 class ListeningHistoryModel final : public QAbstractTableModel {
@@ -118,8 +139,8 @@ public:
             return QStringLiteral("Album");
         case DurationColumn:
             return QStringLiteral("Duration");
-        case DeliveryColumn:
-            return QStringLiteral("Delivery");
+        case ScrobbledColumn:
+            return QStringLiteral("Scrobbled");
         case PathColumn:
             return QStringLiteral("Path");
         }
@@ -150,15 +171,17 @@ public:
             return row.track.albumTitle;
         case DurationColumn:
             return humanquantity::formatClock(row.track.durationMs);
-        case DeliveryColumn:
-            return deliveryText(row, m_destinationId);
+        case ScrobbledColumn:
+            return scrobbledText(row, m_destinationIds);
         case PathColumn:
             return row.track.path;
         }
         return {};
     }
 
-    QList<qint64> idsQueueableForService(const QModelIndexList &indexes, const QString &service) const
+    // Listens among `indexes` that are not yet owed to `destinationId`, which
+    // are the ones marking a backlog would actually change.
+    QList<qint64> idsQueueableFor(const QModelIndexList &indexes, const QString &destinationId) const
     {
         QList<qint64> ids;
         QSet<int> seenRows;
@@ -168,16 +191,18 @@ public:
             }
             seenRows.insert(index.row());
             const ListenHistoryStore::HistoryRow &row = m_rows.at(index.row());
-            if (rowQueueableForService(row, service)) {
+            if (!row.owedTo(destinationId)) {
                 ids.push_back(row.id);
             }
         }
         return ids;
     }
 
-    bool hasQueueableForService(const QModelIndexList &indexes, const QString &service) const
+    bool hasQueueableFor(const QModelIndexList &indexes, const QStringList &destinationIds) const
     {
-        return !idsQueueableForService(indexes, service).isEmpty();
+        return std::any_of(destinationIds.cbegin(), destinationIds.cend(), [this, &indexes](const QString &id) {
+            return !idsQueueableFor(indexes, id).isEmpty();
+        });
     }
 
     std::optional<ListenHistoryStore::HistoryRow> rowAt(int row) const
@@ -188,17 +213,16 @@ public:
         return m_rows.at(row);
     }
 
-    // Empty means the aggregate "All destinations" view.
-    void setDestination(const QString &destinationId)
+    void setDestinations(QStringList destinationIds)
     {
         beginResetModel();
-        m_destinationId = destinationId;
+        m_destinationIds = std::move(destinationIds);
         endResetModel();
     }
 
 private:
     QList<ListenHistoryStore::HistoryRow> m_rows;
-    QString m_destinationId;
+    QStringList m_destinationIds;
 };
 
 } // namespace
@@ -216,14 +240,37 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);
 
-    m_destinationSelector = new QComboBox(this);
-    m_destinationSelector->addItem(QStringLiteral("All destinations"), QString());
+    // Several destinations can be picked in one visit, and the choice lasts as
+    // long as the window: it scopes what is shown and acted on, and is not a
+    // setting worth outliving the question that prompted it.
+    m_destinationButton = new QPushButton(this);
+    auto *destinationMenu = new StickyMenu(m_destinationButton);
+    m_destinationButton->setMenu(destinationMenu);
     for (const ScrobbleDestination &destination : m_destinations.items) {
-        m_destinationSelector->addItem(destination.name, destination.id);
+        QAction *action = destinationMenu->addAction(destination.name);
+        action->setCheckable(true);
+        action->setData(destination.id);
+        connect(action, &QAction::triggered, this, [this]() {
+            static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
+            updateDestinationButton();
+            reload();
+        });
+        m_destinationActions.push_back(action);
     }
+    destinationMenu->addSeparator();
+    QAction *showAll = destinationMenu->addAction(QStringLiteral("Show all destinations"));
+    connect(showAll, &QAction::triggered, this, [this]() {
+        for (QAction *action : std::as_const(m_destinationActions)) {
+            action->setChecked(false);
+        }
+        static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
+        updateDestinationButton();
+        reload();
+    });
+
     auto *selectorRow = new QHBoxLayout;
     selectorRow->addWidget(new QLabel(QStringLiteral("Destination"), this));
-    selectorRow->addWidget(m_destinationSelector);
+    selectorRow->addWidget(m_destinationButton);
     selectorRow->addStretch();
     layout->addLayout(selectorRow);
 
@@ -245,10 +292,16 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
     m_view->horizontalHeader()->setSectionsMovable(false);
     m_view->horizontalHeader()->setStretchLastSection(false);
     m_view->viewport()->installEventFilter(this);
+    keepSelectionVisibleWhileUnfocused(m_view);
     m_columnLayout = new ResponsiveColumnLayout(m_view, historyResponsiveSpecs(), this);
+    const QVector<ResponsiveColumnSpec> specs = historyResponsiveSpecs();
     auto *resizer = NeighborColumnResizer::install(
         m_view->horizontalHeader(),
-        [this](int logical) { return m_columnLayout == nullptr ? 60 : m_columnLayout->columnMinimumWidth(historyResponsiveSpecs().at(logical).key); });
+        [this, specs](int logical) {
+            return m_columnLayout == nullptr || logical < 0 || logical >= specs.size()
+                ? 60
+                : m_columnLayout->columnMinimumWidth(specs.at(logical).key);
+        });
     connect(resizer, qOverload<int, int>(&NeighborColumnResizer::columnResized), this, [this](int left, int right) {
         if (m_columnLayout != nullptr) {
             m_columnLayout->updateBaselineWidthsForResize(left, right);
@@ -275,24 +328,14 @@ ListeningHistoryDialog::ListeningHistoryDialog(ListenHistoryStore *store,
     layout->addWidget(buttons);
 
     connect(refresh, &QPushButton::clicked, this, &ListeningHistoryDialog::reload);
-    connect(m_destinationSelector, &QComboBox::currentIndexChanged, this, [this]() {
-        static_cast<ListeningHistoryModel *>(m_model)->setDestination(selectedDestinationId());
-        reload();
-    });
-    connect(m_queueSelected, &QPushButton::clicked, this, [this]() { queueSelected(selectedDestinationId()); });
+    connect(m_queueSelected, &QPushButton::clicked, this, &ListeningHistoryDialog::queueSelected);
     connect(m_forgetBehavior, &QPushButton::clicked, this, &ListeningHistoryDialog::forgetSelectedBehavior);
-    connect(m_retryPending, &QPushButton::clicked, this, [this]() {
-        const QString destinationId = selectedDestinationId();
-        const int pending = m_store == nullptr ? 0 : m_store->pendingCount(destinationId);
-        emit backlogChanged(destinationId, pending);
-        emit statusMessageRequested(QStringLiteral("Retrying %1 pending listens for %2")
-                                        .arg(pending)
-                                        .arg(destinationName(destinationId)),
-                                    5000);
-    });
-    connect(m_clearBacklog, &QPushButton::clicked, this, [this]() { clearPending(selectedDestinationId()); });
+    connect(m_retryPending, &QPushButton::clicked, this, &ListeningHistoryDialog::retryPending);
+    connect(m_clearBacklog, &QPushButton::clicked, this, &ListeningHistoryDialog::clearBacklogs);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this]() { updateActions(); });
 
+    static_cast<ListeningHistoryModel *>(m_model)->setDestinations(scopedDestinationIds());
+    updateDestinationButton();
     reload();
 }
 
@@ -317,6 +360,30 @@ void ListeningHistoryDialog::setRowHeight(int height)
     m_view->verticalHeader()->setDefaultSectionSize(clamped);
 }
 
+QStringList ListeningHistoryDialog::scopedDestinationIds() const
+{
+    QStringList ids;
+    for (const QAction *action : m_destinationActions) {
+        if (action->isChecked()) {
+            ids << action->data().toString();
+        }
+    }
+    return ids;
+}
+
+void ListeningHistoryDialog::updateDestinationButton()
+{
+    const QStringList ids = scopedDestinationIds();
+    if (ids.isEmpty()) {
+        m_destinationButton->setText(QStringLiteral("All destinations"));
+    } else if (ids.size() == 1) {
+        m_destinationButton->setText(destinationName(ids.first()));
+    } else {
+        m_destinationButton->setText(
+            QStringLiteral("%1 of %2 destinations").arg(ids.size()).arg(m_destinations.items.size()));
+    }
+}
+
 void ListeningHistoryDialog::reload()
 {
     if (m_store == nullptr || !m_store->isOpen()) {
@@ -328,13 +395,13 @@ void ListeningHistoryDialog::reload()
 
     static_cast<ListeningHistoryModel *>(m_model)->setRows(m_store->historyRows(kHistoryLimit));
     const int total = m_store->totalCount();
-    const QString destinationId = selectedDestinationId();
+    const QStringList ids = scopedDestinationIds();
     const QString shown = QStringLiteral("Showing latest %1 of %2 listens.")
                               .arg(std::min(kHistoryLimit, total))
                               .arg(total);
-    if (destinationId.isEmpty()) {
-        // Aggregate mode reports the whole picture and mutates nothing, so it
-        // sums deliveries across destinations instead of naming a backlog.
+    if (ids.isEmpty()) {
+        // The overview reports the whole picture and mutates nothing, so it sums
+        // deliveries across destinations instead of naming a backlog.
         int owed = 0;
         int sent = 0;
         for (const ScrobbleDestination &destination : m_destinations.items) {
@@ -346,11 +413,23 @@ void ListeningHistoryDialog::reload()
                                .arg(sent)
                                .arg(owed)
                                .arg(m_destinations.items.size()));
-    } else {
+    } else if (ids.size() == 1) {
         m_summary->setText(QStringLiteral("%1 %2: %3 pending, %4 sent.")
-                               .arg(shown, destinationName(destinationId))
-                               .arg(m_store->pendingCount(destinationId))
-                               .arg(m_store->sentCount(destinationId)));
+                               .arg(shown, destinationName(ids.first()))
+                               .arg(m_store->pendingCount(ids.first()))
+                               .arg(m_store->sentCount(ids.first())));
+    } else {
+        int pending = 0;
+        int sent = 0;
+        for (const QString &id : ids) {
+            pending += m_store->pendingCount(id);
+            sent += m_store->sentCount(id);
+        }
+        m_summary->setText(QStringLiteral("%1 %2 destinations: %3 pending, %4 sent.")
+                               .arg(shown)
+                               .arg(ids.size())
+                               .arg(pending)
+                               .arg(sent));
     }
     updateActions();
 }
@@ -379,11 +458,6 @@ std::optional<ListenHistoryStore::HistoryRow> ListeningHistoryDialog::selectedHi
     return static_cast<ListeningHistoryModel *>(m_model)->rowAt(rows.first().row());
 }
 
-QString ListeningHistoryDialog::selectedDestinationId() const
-{
-    return m_destinationSelector == nullptr ? QString() : m_destinationSelector->currentData().toString();
-}
-
 QString ListeningHistoryDialog::destinationName(const QString &destinationId) const
 {
     if (const ScrobbleDestination *destination = m_destinations.find(destinationId)) {
@@ -392,32 +466,66 @@ QString ListeningHistoryDialog::destinationName(const QString &destinationId) co
     return destinationId;
 }
 
-void ListeningHistoryDialog::queueSelected(const QString &service)
+void ListeningHistoryDialog::queueSelected()
 {
-    if (m_store == nullptr || service.isEmpty() || m_view == nullptr || m_view->selectionModel() == nullptr) {
+    const QStringList ids = scopedDestinationIds();
+    if (m_store == nullptr || ids.isEmpty() || m_view == nullptr || m_view->selectionModel() == nullptr) {
         return;
     }
-    const QList<qint64> ids = static_cast<ListeningHistoryModel *>(m_model)->idsQueueableForService(m_view->selectionModel()->selectedRows(), service);
-    const int changed = m_store->markOwed(service, ids);
+    auto *model = static_cast<ListeningHistoryModel *>(m_model);
+    const QModelIndexList selected = m_view->selectionModel()->selectedRows();
+
+    int total = 0;
+    for (const QString &destinationId : ids) {
+        const int changed = m_store->markOwed(destinationId, model->idsQueueableFor(selected, destinationId));
+        total += changed;
+        emit backlogChanged(destinationId, changed);
+    }
     reload();
-    emit backlogChanged(service, changed);
     emit statusMessageRequested(QStringLiteral("Marked %1 history listens to scrobble to %2")
-                                    .arg(changed)
-                                    .arg(destinationName(service)),
+                                    .arg(total)
+                                    .arg(ids.size() == 1 ? destinationName(ids.first())
+                                                         : QStringLiteral("%1 destinations").arg(ids.size())),
                                 5000);
 }
 
-void ListeningHistoryDialog::clearPending(const QString &service)
+void ListeningHistoryDialog::retryPending()
 {
-    if (m_store == nullptr || service.isEmpty()) {
+    const QStringList ids = scopedDestinationIds();
+    if (m_store == nullptr || ids.isEmpty()) {
         return;
     }
-    const int cleared = m_store->clearPending(service);
+    int total = 0;
+    for (const QString &destinationId : ids) {
+        const int pending = m_store->pendingCount(destinationId);
+        total += pending;
+        emit backlogChanged(destinationId, pending);
+    }
+    emit statusMessageRequested(QStringLiteral("Retrying %1 pending listens for %2")
+                                    .arg(total)
+                                    .arg(ids.size() == 1 ? destinationName(ids.first())
+                                                         : QStringLiteral("%1 destinations").arg(ids.size())),
+                                5000);
+}
+
+void ListeningHistoryDialog::clearBacklogs()
+{
+    const QStringList ids = scopedDestinationIds();
+    if (m_store == nullptr || ids.isEmpty()) {
+        return;
+    }
+    int total = 0;
+    for (const QString &destinationId : ids) {
+        total += m_store->clearPending(destinationId);
+        // Clearing leaves nothing owed, so the owner is told the backlog moved
+        // without being asked to upload it.
+        emit backlogChanged(destinationId, 0);
+    }
     reload();
-    emit backlogChanged(service, cleared);
-    emit statusMessageRequested(QStringLiteral("Cleared %1 pending %2 scrobbles")
-                                    .arg(cleared)
-                                    .arg(destinationName(service)),
+    emit statusMessageRequested(QStringLiteral("Cleared %1 pending scrobbles for %2")
+                                    .arg(total)
+                                    .arg(ids.size() == 1 ? destinationName(ids.first())
+                                                         : QStringLiteral("%1 destinations").arg(ids.size())),
                                 5000);
 }
 
@@ -451,19 +559,21 @@ void ListeningHistoryDialog::forgetSelectedBehavior()
 
 void ListeningHistoryDialog::updateActions()
 {
-    const bool hasSelection = !selectedIds().isEmpty();
     const std::optional<ListenHistoryStore::HistoryRow> selectedRow = selectedHistoryRow();
-    const QModelIndexList selectedRows = m_view->selectionModel() == nullptr ? QModelIndexList{} : m_view->selectionModel()->selectedRows();
+    const QModelIndexList selectedRows = m_view->selectionModel() == nullptr ? QModelIndexList{}
+                                                                            : m_view->selectionModel()->selectedRows();
     auto *model = static_cast<ListeningHistoryModel *>(m_model);
-    const QString destinationId = selectedDestinationId();
-    // Aggregate mode is a read-only overview: with no destination chosen there
-    // is no single backlog to queue into, clear, or retry.
-    const bool concrete = !destinationId.isEmpty();
-    const int pending = concrete && m_store != nullptr ? m_store->pendingCount(destinationId) : 0;
+    const QStringList ids = scopedDestinationIds();
+    // The overview is read-only: with no destination named there is no backlog
+    // to queue into, clear, or retry.
+    int pending = 0;
+    for (const QString &destinationId : ids) {
+        pending += m_store == nullptr ? 0 : m_store->pendingCount(destinationId);
+    }
 
-    m_queueSelected->setEnabled(concrete && hasSelection
-                                && model->hasQueueableForService(selectedRows, destinationId));
+    m_queueSelected->setEnabled(!ids.isEmpty() && !selectedRows.isEmpty()
+                                && model->hasQueueableFor(selectedRows, ids));
     m_forgetBehavior->setEnabled(selectedRow.has_value() && !selectedRow->track.path.isEmpty());
-    m_clearBacklog->setEnabled(concrete && pending > 0);
-    m_retryPending->setEnabled(concrete && pending > 0);
+    m_clearBacklog->setEnabled(!ids.isEmpty() && pending > 0);
+    m_retryPending->setEnabled(!ids.isEmpty() && pending > 0);
 }
