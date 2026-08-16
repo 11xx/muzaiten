@@ -143,6 +143,7 @@ set(MUZAITEN_SOURCES
     src/ui/ScanController.cpp
     src/ui/ScrobblersPanel.cpp
     src/ui/ScrobblingDialog.cpp
+    src/ui/MenuHighlightStyle.cpp
     src/ui/StickyMenu.cpp
     src/ui/ToggleSwitch.cpp
     src/ui/ScrobbleUploadDispatcher.cpp
@@ -265,6 +266,7 @@ set(MUZAITEN_HEADERS
     src/scrobble/ScrobbleDestination.h
     src/ui/ScrobblersPanel.h
     src/ui/ScrobblingDialog.h
+    src/ui/MenuHighlightStyle.h
     src/ui/StickyMenu.h
     src/ui/ToggleSwitch.h
     src/ui/ScrobbleUploadDispatcher.h

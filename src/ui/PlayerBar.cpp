@@ -1,5 +1,7 @@
 #include "ui/PlayerBar.h"
 
+#include "ui/MenuHighlightStyle.h"
+
 #include "ui/AlbumArtFallback.h"
 #include "ui/AlbumArtView.h"
 #include "ui/PanelBorderStyle.h"
@@ -77,37 +79,21 @@ protected:
     }
 };
 
-class MenuPaddingStyle final : public QProxyStyle {
+// The application menus' own style: the shared highlight, plus a little extra
+// room for the drop-down indicator.
+class MenuPaddingStyle final : public MenuHighlightStyle {
 public:
     MenuPaddingStyle()
-        : QProxyStyle()
+        : MenuHighlightStyle(Emphasis::Solid)
     {
     }
 
     int pixelMetric(PixelMetric metric, const QStyleOption *option = nullptr, const QWidget *widget = nullptr) const override
     {
         if (metric == QStyle::PM_MenuButtonIndicator) {
-            return QProxyStyle::pixelMetric(metric, option, widget) + 10;
+            return MenuHighlightStyle::pixelMetric(metric, option, widget) + 10;
         }
-        return QProxyStyle::pixelMetric(metric, option, widget);
-    }
-
-    void drawControl(ControlElement element, const QStyleOption *option, QPainter *painter, const QWidget *widget = nullptr) const override
-    {
-        if (element == QStyle::CE_MenuItem) {
-            if (const auto *menuItem = qstyleoption_cast<const QStyleOptionMenuItem *>(option);
-                menuItem != nullptr && option->state.testFlag(QStyle::State_Selected)) {
-                painter->fillRect(option->rect, option->palette.highlight());
-                QStyleOptionMenuItem adjusted(*menuItem);
-                adjusted.state &= ~QStyle::State_Selected;
-                adjusted.palette.setColor(QPalette::Text, option->palette.highlightedText().color());
-                adjusted.palette.setColor(QPalette::ButtonText, option->palette.highlightedText().color());
-                adjusted.palette.setColor(QPalette::WindowText, option->palette.highlightedText().color());
-                QProxyStyle::drawControl(element, &adjusted, painter, widget);
-                return;
-            }
-        }
-        QProxyStyle::drawControl(element, option, painter, widget);
+        return MenuHighlightStyle::pixelMetric(metric, option, widget);
     }
 };
 

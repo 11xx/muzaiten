@@ -5,11 +5,18 @@
 
 #include <QAction>
 #include <QLabel>
+#include <QImage>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QStyle>
+#include <QStyleOptionMenuItem>
 #include <QPushButton>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <array>
+#include <cstdlib>
 
 namespace {
 
@@ -75,6 +82,7 @@ private slots:
     void clearingSeveralBacklogsClearsEachOne();
     void adoptingAChangedSetKeepsSurvivingPicks();
     void togglingADestinationDoesNotDismissTheMenu();
+    void theEntryUnderTheCursorIsWashedInTheHighlight();
 
 private:
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -290,6 +298,57 @@ void ListeningHistoryPanelTest::togglingADestinationDoesNotDismissTheMenu()
     click(plain);
     QVERIFY(acted);
     QVERIFY(!menu.isVisible());
+}
+
+// The theme marks the entry under the cursor with a flat grey card of its own,
+// which matches nothing else in the app. Painting the entry through the menu's
+// style must put the palette's highlight there instead.
+void ListeningHistoryPanelTest::theEntryUnderTheCursorIsWashedInTheHighlight()
+{
+    StickyMenu menu;
+    QAction *entry = menu.addAction(QStringLiteral("Koito"));
+    entry->setCheckable(true);
+
+    QStyleOptionMenuItem option;
+    option.rect = QRect(0, 0, 120, 24);
+    option.state = QStyle::State_Enabled | QStyle::State_Selected;
+    option.palette = QApplication::palette(&menu);
+    option.text = entry->text();
+    option.menuItemType = QStyleOptionMenuItem::Normal;
+
+    QImage canvas(option.rect.size(), QImage::Format_ARGB32);
+    canvas.fill(Qt::black);
+    {
+        QPainter painter(&canvas);
+        menu.style()->drawControl(QStyle::CE_MenuItem, &option, &painter, &menu);
+    }
+
+    // The corner is fill, clear of the checkmark and the label.
+    const QColor painted = canvas.pixelColor(2, 2);
+    const QColor window = option.palette.color(QPalette::Window);
+    const QColor accent = option.palette.color(QPalette::Highlight);
+
+    // Checked against the palette rather than against the blend that produced
+    // it: each channel has left the window colour, moved towards the accent,
+    // and stopped short of it. That is what "a wash of the highlight" means,
+    // and it fails for a grey card, for a full-strength fill, and for a blend
+    // computed the wrong way round.
+    const auto channels = [](const QColor &color) {
+        return std::array<int, 3>{color.red(), color.green(), color.blue()};
+    };
+    const std::array<int, 3> from = channels(window);
+    const std::array<int, 3> towards = channels(accent);
+    const std::array<int, 3> got = channels(painted);
+    bool moved = false;
+    for (int index = 0; index < 3; ++index) {
+        QVERIFY(got.at(index) >= std::min(from.at(index), towards.at(index)));
+        QVERIFY(got.at(index) <= std::max(from.at(index), towards.at(index)));
+        if (from.at(index) != towards.at(index)) {
+            QVERIFY(std::abs(got.at(index) - from.at(index)) < std::abs(towards.at(index) - from.at(index)));
+            moved = moved || got.at(index) != from.at(index);
+        }
+    }
+    QVERIFY(moved);
 }
 
 QTEST_MAIN(ListeningHistoryPanelTest)
