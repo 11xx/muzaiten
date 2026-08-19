@@ -28,9 +28,9 @@
 
   <launchable type="desktop-id">org.11xx.muzaiten.desktop</launchable>
 
-  <url type="homepage">https://codeberg.org/11xx/muzaiten</url>
-  <url type="bugtracker">https://codeberg.org/11xx/muzaiten/issues</url>
-  <url type="vcs-browser">https://codeberg.org/11xx/muzaiten</url>
+  <url type="homepage">https://github.com/11xx/muzaiten</url>
+  <url type="bugtracker">https://github.com/11xx/muzaiten/issues</url>
+  <url type="vcs-browser">https://github.com/11xx/muzaiten</url>
 
   <developer id="org.11xx">
     <name>11xx</name>
@@ -39,11 +39,11 @@
   <screenshots>
     <screenshot type="default">
       <caption>Main window (dark)</caption>
-      <image>https://codeberg.org/11xx/muzaiten/raw/branch/master/docs/assets/screenshot-dark.png</image>
+      <image>https://raw.githubusercontent.com/11xx/muzaiten/master/demo-screens/KvGnomeDark/01-library.png</image>
     </screenshot>
     <screenshot>
       <caption>Main window (light)</caption>
-      <image>https://codeberg.org/11xx/muzaiten/raw/branch/master/docs/assets/screenshot-light.png</image>
+      <image>https://raw.githubusercontent.com/11xx/muzaiten/master/demo-screens/KvGnome/01-library.png</image>
     </screenshot>
   </screenshots>
 

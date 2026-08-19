@@ -102,6 +102,10 @@ Practical guidance:
 
 ## Cutting a release
 
+Releases are canonical on GitHub at `https://github.com/11xx/muzaiten`: the
+tags, the release pages, and the binary assets the AUR packages fetch all live
+there, and it is the only remote a release is published to.
+
 ```sh
 # keys come from the environment or a local .env (never committed)
 MUZAITEN_LASTFM_API_KEY=... MUZAITEN_LASTFM_SHARED_SECRET=... ./packaging/build-release.sh
@@ -118,7 +122,7 @@ This produces, under `dist/`:
 `N` is the number of commits made on HEAD's UTC calendar day. The release tag is
 the shorter UTC date, `YYYY.MM.DD`, or the next same-day iteration if that date
 already exists (`YYYY.MM.DD.1`, then `.2`, and so on). Build the artifact from
-the tested, tagged release commit, then upload both files to the Codeberg release
+the tested, tagged release commit, then upload both files to the GitHub release
 attached to that tag. The tarball name still uses `<version>`, not the shorter
 tag name.
 
@@ -209,9 +213,8 @@ repository or GitHub settings.
    metadata. The GitHub workflow repeats the metadata and privacy/archive audits
    on a clean runner.
 
-3. Commit the tested release source and push the same commit to Codeberg and
-   GitHub. Confirm that GitHub's `master` resolves to that commit before
-   dispatching publication.
+3. Commit the tested release source and push it. Confirm that GitHub's
+   `master` resolves to that commit before dispatching publication.
 
 4. Dispatch **Publish CLAP provider** for `testpypi`, always selecting
    `master`. This can be done in the GitHub Actions UI or with an authenticated
@@ -435,7 +438,7 @@ expected; the first successful push creates the package page.
 ### Publish `muzaiten-git`
 
 `muzaiten-git` can be published or updated as soon as the source branch is pushed
-to Codeberg, because its `source=()` pulls the repository directly.
+to GitHub, because its `source=()` pulls the repository directly.
 
 ```sh
 cd "$(git rev-parse --show-toplevel)/packaging/aur/muzaiten-git"
@@ -454,7 +457,7 @@ git push origin master
 ### Publish `muzaiten-bin`
 
 `muzaiten-bin` must not be pushed until the release tarball is uploaded and
-fetchable from Codeberg. AUR users build from the `source=()` URL, so a missing
+fetchable from GitHub. AUR users build from the `source=()` URL, so a missing
 release asset makes the package immediately broken.
 
 1. Cut and push the release tag.
@@ -465,16 +468,17 @@ release asset makes the package immediately broken.
    ./packaging/build-release.sh --dev-pkgbuild
    ```
 
-3. Upload both generated files to the Codeberg release attached to the tag:
+3. Upload both generated files to the GitHub release attached to the tag:
 
-   ```text
-   dist/muzaiten-<version>-<arch>.tar.zst
-   dist/muzaiten-<version>-<arch>.tar.zst.sha256
+   ```sh
+   gh release upload <tag> \
+     dist/muzaiten-<version>-<arch>.tar.zst \
+     dist/muzaiten-<version>-<arch>.tar.zst.sha256
    ```
 
 4. Update `packaging/aur/muzaiten-bin/PKGBUILD`:
 
-   - set `_release_tag` to the Codeberg release tag (`YYYY.MM.DD` or same-day
+   - set `_release_tag` to the GitHub release tag (`YYYY.MM.DD` or same-day
      iteration),
    - set `pkgver` to the artifact `<version>` from `build-release.sh`, and
    - set `sha256sums` to the checksum from the generated `.sha256` file.
@@ -497,7 +501,7 @@ release asset makes the package immediately broken.
    namcap muzaiten-dev-*.pkg.tar.zst
    ```
 
-7. After the Codeberg release asset is live, verify the public download path from
+7. After the GitHub release asset is live, verify the public download path from
    the AUR PKGBUILD:
 
    ```sh
@@ -512,6 +516,6 @@ release asset makes the package immediately broken.
    git push origin master
    ```
 
-`makepkg --verifysource` should download the Codeberg tarball and pass the
-recorded `sha256sums` check. If the URL returns 404, upload or fix the Codeberg
+`makepkg --verifysource` should download the release tarball and pass the
+recorded `sha256sums` check. If the URL returns 404, upload or fix the GitHub
 release asset before pushing the AUR repo.

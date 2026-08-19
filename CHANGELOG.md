@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- The project's canonical home is GitHub (`https://github.com/11xx/muzaiten`).
+  Release tags, release pages, and the binary assets the AUR packages fetch are
+  published there; the package metadata, AppStream URLs, and the provider's
+  project links point there as well. The Codeberg repository is archived and
+  read-only.
+
 ### Added
 
 - Scrobbling destinations are now configurable. Alongside Last.fm and official
@@ -95,8 +103,10 @@
   condition replaces the previous one, and a clickable indicator in the player
   bar cancels it.
 - The library scanner and free-roam file explorer now recognize Ogg media
-  (`.oga` and `.ogx`) plus common AAC, AIFF, MP2, MP4 audiobook/audio,
+  (`.oga` and `.ogx`) plus common AAC, AIFF, MP2, M4A/M4B audiobook/audio,
   Matroska Audio, Musepack, True Audio, and Windows Media Audio extensions.
+  Bare `.mp4` stays out, since nothing downstream tells an audio stream from
+  a video one.
 
 ### Fixed
 

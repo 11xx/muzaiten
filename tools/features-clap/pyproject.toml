@@ -30,9 +30,9 @@ convert = [
 muzaiten-features-clap = "muzaiten_features_clap.cli:main"
 
 [project.urls]
-Homepage = "https://codeberg.org/11xx/muzaiten"
-Documentation = "https://codeberg.org/11xx/muzaiten/src/branch/master/docs/semantic-analysis.md"
-Issues = "https://codeberg.org/11xx/muzaiten/issues"
+Homepage = "https://github.com/11xx/muzaiten"
+Documentation = "https://github.com/11xx/muzaiten/blob/master/docs/semantic-analysis.md"
+Issues = "https://github.com/11xx/muzaiten/issues"
 
 [dependency-groups]
 dev = [

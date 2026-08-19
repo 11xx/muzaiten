@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build an optimized muzaiten binary and package it as a distributable tarball
-# (used for Codeberg release artifacts and the muzaiten-bin AUR package).
+# (used for GitHub release artifacts and the muzaiten-bin AUR package).
 #
 # Last.fm credentials are injected here at build time and never committed.
 # Provide them via the environment or a local .env file:
@@ -16,7 +16,7 @@ set -euo pipefail
 
 # Hidden dev option (intentionally absent from usage below): after building the
 # tarball, also emit a local-file PKGBUILD under dist/aur-dev/muzaiten-dev/ that
-# installs from that tarball instead of a Codeberg release URL. It lets the
+# installs from that tarball instead of a release-download URL. It lets the
 # prebuilt-dist (muzaiten-bin) packaging be test-built with makepkg locally
 # before the artifact is uploaded and the upstream PKGBUILD is bumped. Enable
 # with --dev-pkgbuild or DEV_PKGBUILD=1. See docs/distribution.md.
@@ -27,7 +27,7 @@ usage() {
 Usage: packaging/build-release.sh
 
 Build an optimized muzaiten binary and package it as a distributable tarball
-under dist/ (+ .sha256) for Codeberg releases and the muzaiten-bin AUR package.
+under dist/ (+ .sha256) for GitHub releases and the muzaiten-bin AUR package.
 
 Configuration (environment or a local .env):
   MUZAITEN_LASTFM_API_KEY, MUZAITEN_LASTFM_SHARED_SECRET  embedded Last.fm creds
@@ -69,7 +69,7 @@ pkgver=${version}
 pkgrel=1
 pkgdesc="Native music player for local libraries (local dev build for packaging tests)"
 arch=('${arch}')
-url="https://codeberg.org/11xx/muzaiten"
+url="https://github.com/11xx/muzaiten"
 license=('Unlicense')
 depends=('qt6-base' 'qt6-multimedia' 'taglib' 'chromaprint' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
 optdepends=('gst-plugins-good: extra audio decoders and sinks'
