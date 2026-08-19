@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- A radio batch that chose tracks but resolved none of them no longer leaves an
+  in-flight background batch scoring against constraint state the session has
+  already moved past, and the speculative change now reaches disk instead of
+  waiting for some later save.
 - Radio queue refills no longer stall the window while picks are resolved.
   Working out which files share a pick's content group was a full scan of the
   analysis store's file table, once per pick, so a refill of fifteen could hold

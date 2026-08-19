@@ -240,6 +240,7 @@ private slots:
     void unratedAndUnknownYearYieldNoComponent();
 
     // RadioSession
+    void mutationGenerationMovesEvenWhenNoPickResolves();
     void artistThrottleNeverPicksSameArtistConsecutively();
     void albumCapLimitsTracksPerAlbum();
     void songKeyDedupUsesRecordingMbid();
@@ -1401,6 +1402,32 @@ void RadioTest::unratedAndUnknownYearYieldNoComponent()
 }
 
 // ---- RadioSession ----------------------------------------------------------
+
+void RadioTest::mutationGenerationMovesEvenWhenNoPickResolves()
+{
+    // A batch whose candidates all fail to resolve still consumes anchors,
+    // advances the owned RNG and records what it selected. Whoever decides
+    // whether an in-flight batch's snapshot went stale has to see that; an
+    // empty return is not evidence that nothing happened.
+    QVector<TrackScorer::Candidate> pool{
+        makeCandidate(QStringLiteral("/a.flac"), QStringLiteral("artist-a"), {QStringLiteral("rock")}, 2000),
+        makeCandidate(QStringLiteral("/b.flac"), QStringLiteral("artist-b"), {QStringLiteral("rock")}, 2000),
+        makeCandidate(QStringLiteral("/c.flac"), QStringLiteral("artist-c"), {QStringLiteral("rock")}, 2000),
+    };
+    TrackScorer::Candidate seed = makeCandidate(QStringLiteral("/seed"), QStringLiteral("seed"),
+                                                {QStringLiteral("rock")}, 2000);
+    QRandomGenerator rng(7u);
+    RadioSession session(pool, {}, {}, seed, 30, 1'000'000'000, &rng);
+
+    const quint64 before = session.mutationGeneration();
+    // Every candidate fails to resolve: the file vanished, or every copy is
+    // blocked.
+    const QVector<Track> picks = session.nextTracks(3, {}, [](const QString &) { return Track{}; });
+
+    QVERIFY(picks.isEmpty());
+    QVERIFY2(session.mutationGeneration() != before,
+             "a queue-silent batch still moved the session's constraint state");
+}
 
 void RadioTest::artistThrottleNeverPicksSameArtistConsecutively()
 {

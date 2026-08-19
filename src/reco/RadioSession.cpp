@@ -625,6 +625,7 @@ bool RadioSession::anchorExcluded(const TrackScorer::Candidate &candidate) const
 
 quint64 RadioSession::nextOwnedRandom()
 {
+    ++m_mutationGeneration;
     if (m_ownedRngState == 0) {
         m_ownedRngState = 1;
     }
@@ -691,6 +692,7 @@ void RadioSession::consumeAnchor()
 {
     if (m_anchors.size() > 1 && m_anchorCursor < m_anchorRoundOrder.size()) {
         ++m_anchorCursor;
+        ++m_mutationGeneration;
     }
 }
 
@@ -839,6 +841,7 @@ TrackScorer::SeedContext RadioSession::permanentMultiContext(const TrackScorer::
 void RadioSession::recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
                               const QString &resolvedPath)
 {
+    ++m_mutationGeneration;
     m_usedPaths.insert(candidate.path);
     const QString reasonPath = resolvedPath.isEmpty() ? candidate.path : resolvedPath;
     if (!reasonPath.isEmpty()) {
@@ -1072,6 +1075,7 @@ void RadioSession::aliasResolvedPath(const QString &candidatePath, const QString
     }
     const auto candidate = m_byPath.constFind(candidatePath);
     if (candidate != m_byPath.constEnd() && !m_byPath.contains(resolvedPath)) {
+        ++m_mutationGeneration;
         TrackScorer::Candidate alias = *candidate;
         alias.path = resolvedPath;
         m_byPath.insert(resolvedPath, alias);
@@ -1114,6 +1118,7 @@ bool RadioSession::retainPendingPaths(const QStringList &orderedPaths)
         return false;
     }
     m_pendingPaths = std::move(retained);
+    ++m_mutationGeneration;
     return true;
 }
 
