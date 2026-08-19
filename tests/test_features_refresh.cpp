@@ -36,6 +36,7 @@ private slots:
     void generatedFixtureMatrixWritesSchemaV5Features();
     void groupIdsStayStableWhenLibraryGrows();
     void incrementalRegroupSplitsAndMergesAffectedGroup();
+    void contentGroupLookupIsIndexed();
     void powerOptionsReportEffectiveJobs();
     void cancelPersistsCompletedRowsAndRerunSkipsThem();
     void incrementalRescanPreservesFeatureRows();
@@ -1038,6 +1039,37 @@ void IndexerScanTest::incrementalRegroupSplitsAndMergesAffectedGroup()
         db.close();
         QSqlDatabase::removeDatabase(connectionName);
     }
+}
+
+void IndexerScanTest::contentGroupLookupIsIndexed()
+{
+    // Resolving one radio pick asks which files share its content group. Without
+    // an index that question is a full scan of `files`, which is what made
+    // putting a pick in the queue cost more than choosing it. No audio is
+    // needed: this is about the schema a refresh leaves behind.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
+    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
+    createLibrary(library, {});
+
+    runIndexer({QStringLiteral("refresh"), QStringLiteral("--library"), library,
+                QStringLiteral("--features"), features, QStringLiteral("--progress=jsonl")});
+
+    QString connectionName;
+    {
+        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QVERIFY(db.open());
+        QSqlQuery plan(db);
+        QVERIFY(plan.exec(QStringLiteral(
+            "EXPLAIN QUERY PLAN SELECT path FROM files WHERE content_group_id = 1 ORDER BY path")));
+        QVERIFY(plan.next());
+        const QString detail = plan.value(3).toString();
+        // The planner names the index it chose; a scan says SCAN instead.
+        QVERIFY2(detail.contains(QStringLiteral("idx_files_content_group")), qPrintable(detail));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 void IndexerScanTest::powerOptionsReportEffectiveJobs()
