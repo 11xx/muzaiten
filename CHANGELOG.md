@@ -1,43 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Fixed
-
-- A radio batch that chose tracks but resolved none of them no longer leaves an
-  in-flight background batch scoring against constraint state the session has
-  already moved past, and the speculative change now reaches disk instead of
-  waiting for some later save.
-- Radio queue refills no longer stall the window while picks are resolved.
-  Working out which files share a pick's content group was a full scan of the
-  analysis store's file table, once per pick, so a refill of fifteen could hold
-  the interface for around two seconds on a large library. The lookup is now
-  indexed. The index is created by the next audio analysis run.
-- A file with a supported extension that cannot be read as audio no longer
-  turns up as a radio pick, a library-shuffle pick, or costs the analysis pass
-  a decode attempt. It is still listed, with the reason shown in
-  `Track properties`, since it does exist on disk; it is simply never chosen
-  automatically.
-- `codec:` now reports the actual codec rather than repeating the file
-  extension, so an `.oga` is identified as Vorbis, Opus, or FLAC and an `.m4a`
-  as AAC or ALAC. `ext:` continues to match the name on disk, and the two are
-  now separate filters. ALAC files are ranked as lossless in search results,
-  which they previously were not, and `.dsdiff` files are recognized as DSD.
-- A scrobbling destination removed from the manager now deletes its stored
-  token instead of blanking it, so a credential does not outlive the
-  destination it belonged to in a settings row keyed by a dead identifier.
-- A destination document written by hand or by an older build can no longer
-  load an address that the Add flow would refuse. Addresses are normalized on
-  load and an entry whose address cannot be normalized is discarded, so a
-  token is never delivered somewhere the app would not have let you type.
-
-### Changed
-
-- The project's canonical home is GitHub (`https://github.com/11xx/muzaiten`).
-  Release tags, release pages, and the binary assets the AUR packages fetch are
-  published there; the package metadata, AppStream URLs, and the provider's
-  project links point there as well. Codeberg is no longer a publishing
-  target.
+## [2026.08.19]
 
 ### Added
 
@@ -74,7 +37,59 @@
   the summary, and the queue, retry and clear actions all apply to exactly the
   destinations picked. The choice lasts as long as the window.
 
+### Changed
+
+- The project's canonical home is GitHub (`https://github.com/11xx/muzaiten`).
+  Release tags, release pages, and the binary assets the AUR packages fetch are
+  published there; the package metadata, AppStream URLs, and the provider's
+  project links point there as well. Codeberg is no longer a publishing
+  target.
+
+- The Scrobblers menu no longer carries a per-service scrobbling toggle,
+  ListenBrainz token prompt, or clear-backlog action. Enabling and credentials
+  moved to `Manage scrobblers…`, and clearing a backlog moved to `Listening
+  history…`, where it applies to the destination you have selected.
+- Existing listening history is migrated to the new per-destination delivery
+  records on first launch, once, preserving what each of Last.fm and
+  ListenBrainz was owed and had already received. A previously configured
+  ListenBrainz token and the two services' enabled states carry over unchanged.
+- During an explicit Radio session, ordinary **Add to queue** actions now
+  use play-next ordering and return to appending at the tail when radio stops.
+- `Radio > Customization…` now marks the three genre scoring weights as
+  "(fallback only)" and explains in their tooltips that tracks carrying DSP and
+  CLAP features ignore them. Genre has been a metadata fallback rather than a
+  co-signal since radio scoring was reordered around audio analysis, so for an
+  analyzed library those controls had no effect while still presenting an
+  adjustable value.
+
 ### Fixed
+
+- A radio batch that chose tracks but resolved none of them no longer leaves an
+  in-flight background batch scoring against constraint state the session has
+  already moved past, and the speculative change now reaches disk instead of
+  waiting for some later save.
+- Radio queue refills no longer stall the window while picks are resolved.
+  Working out which files share a pick's content group was a full scan of the
+  analysis store's file table, once per pick, so a refill of fifteen could hold
+  the interface for around two seconds on a large library. The lookup is now
+  indexed. The index is created by the next audio analysis run.
+- A file with a supported extension that cannot be read as audio no longer
+  turns up as a radio pick, a library-shuffle pick, or costs the analysis pass
+  a decode attempt. It is still listed, with the reason shown in
+  `Track properties`, since it does exist on disk; it is simply never chosen
+  automatically.
+- `codec:` now reports the actual codec rather than repeating the file
+  extension, so an `.oga` is identified as Vorbis, Opus, or FLAC and an `.m4a`
+  as AAC or ALAC. `ext:` continues to match the name on disk, and the two are
+  now separate filters. ALAC files are ranked as lossless in search results,
+  which they previously were not, and `.dsdiff` files are recognized as DSD.
+- A scrobbling destination removed from the manager now deletes its stored
+  token instead of blanking it, so a credential does not outlive the
+  destination it belonged to in a settings row keyed by a dead identifier.
+- A destination document written by hand or by an older build can no longer
+  load an address that the Add flow would refuse. Addresses are normalized on
+  load and an entry whose address cannot be normalized is discarded, so a
+  token is never delivered somewhere the app would not have let you type.
 
 - Official ListenBrainz tokens can be set or replaced in `Manage scrobblers…`
   without making its built-in identity or URL editable.
@@ -137,8 +152,6 @@
   Bare `.mp4` stays out, since nothing downstream tells an audio stream from
   a video one.
 
-### Fixed
-
 - Reopening a tray-hidden window now restores the active radio indicator and
   its queue controls while the existing session continues refilling.
 - Failed artist-radio and mix starts no longer invalidate an active radio
@@ -155,25 +168,6 @@
   scrolled sideways.
 - The free-roam file explorer now repairs a missing or unreadable restored directory to a readable home directory or filesystem root, and rejects invalid navigation requests without losing the current location.
 - The file explorer's up action is now an accessible icon button that does not take keyboard focus.
-
-### Changed
-
-- The Scrobblers menu no longer carries a per-service scrobbling toggle,
-  ListenBrainz token prompt, or clear-backlog action. Enabling and credentials
-  moved to `Manage scrobblers…`, and clearing a backlog moved to `Listening
-  history…`, where it applies to the destination you have selected.
-- Existing listening history is migrated to the new per-destination delivery
-  records on first launch, once, preserving what each of Last.fm and
-  ListenBrainz was owed and had already received. A previously configured
-  ListenBrainz token and the two services' enabled states carry over unchanged.
-- During an explicit Radio session, ordinary **Add to queue** actions now
-  use play-next ordering and return to appending at the tail when radio stops.
-- `Radio > Customization…` now marks the three genre scoring weights as
-  "(fallback only)" and explains in their tooltips that tracks carrying DSP and
-  CLAP features ignore them. Genre has been a metadata fallback rather than a
-  co-signal since radio scoring was reordered around audio analysis, so for an
-  analyzed library those controls had no effect while still presenting an
-  adjustable value.
 
 ### Documentation
 
