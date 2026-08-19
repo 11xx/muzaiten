@@ -10,9 +10,15 @@
   the interface for around two seconds on a large library. The lookup is now
   indexed. The index is created by the next audio analysis run.
 - A file with a supported extension that cannot be read as audio no longer
-  turns up as a radio pick or costs the analysis pass a decode attempt. It is
-  still listed, with the reason shown in `Track properties`, since it does
-  exist on disk; it is simply never chosen automatically.
+  turns up as a radio pick, a library-shuffle pick, or costs the analysis pass
+  a decode attempt. It is still listed, with the reason shown in
+  `Track properties`, since it does exist on disk; it is simply never chosen
+  automatically.
+- `codec:` now reports the actual codec rather than repeating the file
+  extension, so an `.oga` is identified as Vorbis, Opus, or FLAC and an `.m4a`
+  as AAC or ALAC. `ext:` continues to match the name on disk, and the two are
+  now separate filters. ALAC files are ranked as lossless in search results,
+  which they previously were not, and `.dsdiff` files are recognized as DSD.
 - A scrobbling destination removed from the manager now deletes its stored
   token instead of blanking it, so a credential does not outlive the
   destination it belonged to in a settings row keyed by a dead identifier.

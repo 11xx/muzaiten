@@ -49,7 +49,8 @@ struct SearchRecord {
     int bitrateKbps = 0;
     int channels = 0;
     int bitDepth = 0;        // not scanned yet (placeholder for a future scan); 0 = unknown
-    QString codec;           // lower-cased extension / codec, e.g. "flac"
+    QString codec;           // lower-cased codec, e.g. "flac", "vorbis", "alac".
+                             // `ext:` reads the filename instead; they differ.
 
     // ---- ordering helpers (used by the ranking layer / MusicSort) ---------
     int trackNumber = 0;

@@ -42,6 +42,16 @@
 
 namespace {
 
+// `ext:` asks about the name on disk, which is no longer the same question as
+// `codec:`: an .oga may carry Vorbis and an .m4a may carry ALAC.
+QString extensionOf(const Track &track)
+{
+    const QString &name = track.filename.isEmpty() ? track.path : track.filename;
+    const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
+    return dot >= 0 ? name.mid(dot + 1).toLower() : QString();
+}
+
+
 constexpr HeaderViewStyle kTableHeaderStyle{
     HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
     false,
@@ -856,6 +866,7 @@ QVector<Search::MatchDocument> TrackTable::searchDocuments() const
                 Search::makeField(Search::MatchFieldRole::Filename, track.filename, 60),
                 Search::makeField(Search::MatchFieldRole::Path, track.path, 60),
                 Search::makeField(Search::MatchFieldRole::Codec, track.codec, 60),
+                Search::makeField(Search::MatchFieldRole::Extension, extensionOf(track), 60),
                 Search::makeField(Search::MatchFieldRole::Free, free, 100),
             },
             numeric,

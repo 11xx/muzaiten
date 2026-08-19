@@ -109,6 +109,7 @@ int fieldWeight(MatchFieldRole role)
     case MatchFieldRole::Path:        return 60;
     case MatchFieldRole::Filename:    return 60;
     case MatchFieldRole::Codec:       return 60;
+    case MatchFieldRole::Extension:   return 60;
     case MatchFieldRole::Free:        return 100;
     }
     return 100;
@@ -143,8 +144,9 @@ bool documentFieldApplies(const MatchField &field, const Term &term)
     case TermKind::FilenameText:
         return field.role == MatchFieldRole::Filename || field.role == MatchFieldRole::Free;
     case TermKind::CodecText:
-    case TermKind::Extension:
         return field.role == MatchFieldRole::Codec || field.role == MatchFieldRole::Free;
+    case TermKind::Extension:
+        return field.role == MatchFieldRole::Extension;
     case TermKind::FreeText:
         return true;
     default:
@@ -291,7 +293,13 @@ bool termMatches(const SearchRecord &rec, const Term &term, bool fuzzyMode, int 
         return m;
     }
     case TermKind::Extension: {
-        const bool m = !rec.codec.isEmpty() && rec.codec == term.text;
+        // The file's own extension, not the codec column: an `.oga` may hold
+        // Vorbis and an `.m4a` may hold ALAC, so the two answer different
+        // questions and `ext:` is the one about the name on disk.
+        const QString name = rec.filename.isEmpty() ? rec.path : rec.filename;
+        const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
+        const QString extension = dot >= 0 ? name.mid(dot + 1).toLower() : QString();
+        const bool m = !extension.isEmpty() && extension == term.text;
         if (m) {
             *score = 80;
         }
