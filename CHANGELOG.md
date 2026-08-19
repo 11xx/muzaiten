@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Radio queue refills no longer stall the window while picks are resolved.
+  Working out which files share a pick's content group was a full scan of the
+  analysis store's file table, once per pick, so a refill of fifteen could hold
+  the interface for around two seconds on a large library. The lookup is now
+  indexed. The index is created by the next audio analysis run.
 - A file with a supported extension that cannot be read as audio no longer
   turns up as a radio pick or costs the analysis pass a decode attempt. It is
   still listed, with the reason shown in `Track properties`, since it does

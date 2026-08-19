@@ -20,6 +20,10 @@ files(
     status TEXT NOT NULL DEFAULT 'ok'
 );
 
+-- Group membership is read per radio pick and in bulk while grouping;
+-- without this the lookup is a full scan of files.
+CREATE INDEX idx_files_content_group ON files(content_group_id);
+
 content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT);
 
 features(

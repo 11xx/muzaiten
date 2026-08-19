@@ -644,6 +644,13 @@ void initSchema(QSqlDatabase &database)
                           " content_group_id INTEGER,"
                           " analyzed_at INTEGER NOT NULL,"
                           " status TEXT NOT NULL DEFAULT 'ok')"));
+    // Resolving a radio pick asks which files share a pick's content group, and
+    // grouping asks the same question in bulk. Without this the lookup is a full
+    // scan of `files`, which at library scale is the dominant cost of putting a
+    // single pick in the queue.
+    execSql(database, QStringLiteral(
+                          "CREATE INDEX IF NOT EXISTS idx_files_content_group"
+                          " ON files(content_group_id)"));
     execSql(database, QStringLiteral(
                           "CREATE TABLE IF NOT EXISTS content_groups(id INTEGER PRIMARY KEY AUTOINCREMENT)"));
 
