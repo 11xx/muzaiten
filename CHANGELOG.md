@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- A scrobbling destination removed from the manager now deletes its stored
+  token instead of blanking it, so a credential does not outlive the
+  destination it belonged to in a settings row keyed by a dead identifier.
+- A destination document written by hand or by an older build can no longer
+  load an address that the Add flow would refuse. Addresses are normalized on
+  load and an entry whose address cannot be normalized is discarded, so a
+  token is never delivered somewhere the app would not have let you type.
+
 ### Changed
 
 - The project's canonical home is GitHub (`https://github.com/11xx/muzaiten`).
