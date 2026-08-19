@@ -123,6 +123,16 @@ public:
     // included: restored pre-restart rows can continue sequencing correctly, but
     // only new picks have freshly computed explanations.
     QJsonObject constraintState() const;
+
+    // Counts every change to state a later batch would be scored against: the
+    // owned RNG, the anchor cursor, recorded picks, resolved-path aliases and
+    // retained pending paths.
+    //
+    // A batch can mutate all of that and still return nothing, when every
+    // candidate it chose fails to resolve. Callers that decide whether an
+    // in-flight batch's snapshot is now stale must compare this rather than
+    // whether picks came back, or a queue-silent mutation goes unnoticed.
+    quint64 mutationGeneration() const { return m_mutationGeneration; }
     void restoreConstraintState(const QJsonObject &state);
 
     // Pure classifier for AppCore's radio re-roll heuristic: true when a play
@@ -166,6 +176,7 @@ private:
     void recordPick(const TrackScorer::Candidate &candidate, const TrackScorer::Scored &scored,
                     const QString &resolvedPath);
 
+    quint64 m_mutationGeneration = 0;
     ContextMode m_contextMode = ContextMode::PermanentAnchor;
     bool m_vectorAnchorSession = false;
     QVector<TrackScorer::Candidate> m_anchors;

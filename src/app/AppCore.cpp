@@ -1843,11 +1843,21 @@ void AppCore::installRadioProvider(bool markPicksAsRadio)
             : QSet<QString>{};
         QSet<QString> blockedPaths = neverRadioPaths;
         blockedPaths.unite(excludePaths);
+        // A batch that resolves nothing can still have advanced the owned RNG,
+        // consumed an anchor, or retained pending paths. Comparing the session's
+        // mutation generation catches that; comparing whether picks came back
+        // does not, and an asynchronous batch already in flight would then be
+        // scored against constraint state that has since moved.
+        const quint64 generationBefore = m_radioSession->mutationGeneration();
         const QVector<Track> picks = m_radioSession->nextTracks(count, excludePaths, [this, blockedPaths](const QString &path) {
             return resolveRadioPick(path, blockedPaths);
         });
-        if (!picks.isEmpty()) {
+        if (!picks.isEmpty() || m_radioSession->mutationGeneration() != generationBefore) {
             ++m_radioSessionRevision;
+            // A speculative mutation would otherwise reach disk only when some
+            // later trigger happened to save, so a restart could resume from
+            // constraint state the session had already left behind.
+            saveRadioSessionState();
         }
         recordRadioPicks(picks);
         if (markPicksAsRadio) {
