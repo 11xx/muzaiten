@@ -122,7 +122,8 @@ track is indistinguishable from an audio one by extension. Playback still
 requires a matching GStreamer decoder plugin.
 
 A file with a recognized extension that cannot be read as audio (the tag reader
-cannot open it, or it carries no audio length) still becomes a library row, and
+cannot open it, or it reports no sample rate and no channels) still becomes a
+library row, and
 `Track properties` shows the reason under **Scan**. It exists on disk, so it is
 not hidden. It is left out of radio candidates and of the audio analysis pass,
 which would otherwise offer it up to be played or spend a decode attempt on it.

@@ -3631,8 +3631,9 @@ void RadioTest::unplayableTracksAreNeverRadioCandidates()
                                QStringLiteral("2004"));
     broken.scanError = QStringLiteral("TagLib could not open file");
 
-    // Scanned before unplayable files carried a reason: no error recorded, but
-    // no audio length either.
+    // Audio whose length TagLib could not work out, which is what a valid FLAC
+    // stream in an Ogg container looks like. It is playable and must be kept:
+    // an unknown length is not evidence of anything.
     Track lengthless = makeDbTrack(dir, QStringLiteral("03.flac"), {QStringLiteral("Rock")},
                                    QStringLiteral("2004"));
     lengthless.durationMs = 0;
@@ -3641,21 +3642,34 @@ void RadioTest::unplayableTracksAreNeverRadioCandidates()
     QVERIFY2(db.upsertTrack(broken), qPrintable(db.lastError()));
     QVERIFY2(db.upsertTrack(lengthless), qPrintable(db.lastError()));
 
-    const QVector<RadioCandidateRow> byGenre =
-        db.radioCandidates({GenreTags::folded(QStringLiteral("Rock"))});
-    QCOMPARE(byGenre.size(), 1);
-    QCOMPARE(byGenre.first().path, good.path);
+    const auto paths = [](const QVector<RadioCandidateRow> &rows) {
+        QStringList out;
+        for (const RadioCandidateRow &row : rows) {
+            out.push_back(row.path);
+        }
+        out.sort();
+        return out;
+    };
+    QStringList kept{good.path, lengthless.path};
+    kept.sort();
 
-    const QVector<RadioCandidateRow> fallback = db.radioFallbackCandidates();
-    QCOMPARE(fallback.size(), 1);
-    QCOMPARE(fallback.first().path, good.path);
+    QCOMPARE(paths(db.radioCandidates({GenreTags::folded(QStringLiteral("Rock"))})), kept);
+    QCOMPARE(paths(db.radioFallbackCandidates()), kept);
 
     // Neighbour augmentation resolves specific paths and must apply the same
     // rule, or an unplayable copy re-enters through that door.
-    const QVector<RadioCandidateRow> byPath =
-        db.radioCandidatesForPaths({good.path, broken.path, lengthless.path});
-    QCOMPARE(byPath.size(), 1);
-    QCOMPARE(byPath.first().path, good.path);
+    QCOMPARE(paths(db.radioCandidatesForPaths({good.path, broken.path, lengthless.path})), kept);
+
+    // Library shuffle is automatic selection too: the user did not ask for that
+    // particular track, so handing them one that cannot play is the same defect
+    // arriving by another door. Playing it deliberately from the library still
+    // works; only the automatic pickers refuse it.
+    QStringList shuffledPaths;
+    for (const Track &track : db.randomTracks(10)) {
+        shuffledPaths.push_back(track.path);
+    }
+    shuffledPaths.sort();
+    QCOMPARE(shuffledPaths, kept);
 }
 
 void RadioTest::neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags()

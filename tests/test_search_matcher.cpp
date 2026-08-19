@@ -48,6 +48,7 @@ private slots:
             field(MatchFieldRole::Path, QStringLiteral("/music/artist/album/song.flac")),
             field(MatchFieldRole::Filename, QStringLiteral("song.flac")),
             field(MatchFieldRole::Codec, QStringLiteral("flac")),
+            field(MatchFieldRole::Extension, QStringLiteral("flac")),
         });
 
         QVERIFY(matches(document, QStringLiteral("title:song")));
@@ -61,6 +62,22 @@ private slots:
         QVERIFY(matches(document, QStringLiteral("codec:fla")));
         QVERIFY(matches(document, QStringLiteral("ext:flac")));
         QVERIFY(!matches(document, QStringLiteral("ext:mp3")));
+    }
+
+    // An Ogg file names its container, not its codec. Each term answers the
+    // question it is named for, and neither answers the other's.
+    void extensionAndCodecAreSeparateQuestions()
+    {
+        const MatchDocument document = doc(0, {
+            field(MatchFieldRole::Filename, QStringLiteral("song.oga")),
+            field(MatchFieldRole::Codec, QStringLiteral("vorbis")),
+            field(MatchFieldRole::Extension, QStringLiteral("oga")),
+        });
+
+        QVERIFY(matches(document, QStringLiteral("ext:oga")));
+        QVERIFY(matches(document, QStringLiteral("codec:vorbis")));
+        QVERIFY(!matches(document, QStringLiteral("ext:vorbis")));
+        QVERIFY(!matches(document, QStringLiteral("codec:oga")));
     }
 
     void allTermsMustMatch()

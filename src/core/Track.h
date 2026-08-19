@@ -48,7 +48,8 @@ struct Track {
     int bitrateKbps = 0;
     int channels = 0;
     int bitDepth = 0;  // lossless sample bit depth; 0 = unknown / lossy
-    QString codec;  // file extension lower-cased, e.g. "flac", "mp3", "opus"
+    QString codec;  // lower-cased codec, e.g. "flac", "vorbis", "alac"; falls
+                    // back to the file extension when it already names the codec
 };
 
 // DSD (Direct Stream Digital) source formats: the .dsf and .dsdiff (.dff)

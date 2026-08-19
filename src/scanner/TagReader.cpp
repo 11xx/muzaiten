@@ -20,7 +20,10 @@
 #include <taglib/dsfproperties.h>
 #include <taglib/flacproperties.h>
 #include <taglib/mp4properties.h>
+#include <taglib/opusproperties.h>
+#include <taglib/speexproperties.h>
 #include <taglib/trueaudioproperties.h>
+#include <taglib/vorbisproperties.h>
 #include <taglib/wavpackproperties.h>
 #include <taglib/wavproperties.h>
 
@@ -61,6 +64,47 @@ int firstTrackPart(const TagLib::PropertyMap &properties, const QStringList &key
     bool ok = false;
     const int parsed = first.toInt(&ok);
     return ok ? parsed : 0;
+}
+
+// The real codec, where the extension does not already name it. An Ogg file
+// may carry Vorbis, FLAC, Opus or Speex and an MP4 file may carry AAC or ALAC,
+// so `.oga` and `.m4a` say nothing about what is inside. TagLib has already
+// identified the stream, so asking costs nothing.
+//
+// Formats whose extension is the codec fall through to the suffix. DSDIFF is
+// reported as `dff` for both of its extensions, because DSD detection tests the
+// codec and `.dsdiff` would otherwise not be recognized as DSD at all.
+QString readCodec(const TagLib::AudioProperties *audio, const QString &suffix)
+{
+    if (audio == nullptr) {
+        return suffix;
+    }
+    if (dynamic_cast<const TagLib::Vorbis::Properties *>(audio) != nullptr) {
+        return QStringLiteral("vorbis");
+    }
+    if (dynamic_cast<const TagLib::Ogg::Opus::Properties *>(audio) != nullptr) {
+        return QStringLiteral("opus");
+    }
+    if (dynamic_cast<const TagLib::Ogg::Speex::Properties *>(audio) != nullptr) {
+        return QStringLiteral("speex");
+    }
+    if (dynamic_cast<const TagLib::FLAC::Properties *>(audio) != nullptr) {
+        return QStringLiteral("flac");
+    }
+    if (const auto *p = dynamic_cast<const TagLib::MP4::Properties *>(audio)) {
+        switch (p->codec()) {
+        case TagLib::MP4::Properties::ALAC:
+            return QStringLiteral("alac");
+        case TagLib::MP4::Properties::AAC:
+            return QStringLiteral("aac");
+        default:
+            return suffix;
+        }
+    }
+    if (dynamic_cast<const TagLib::DSDIFF::Properties *>(audio) != nullptr) {
+        return QStringLiteral("dff");
+    }
+    return suffix;
 }
 
 // Bit depth lives on per-format AudioProperties subclasses, not the base class.
@@ -134,8 +178,13 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
         return track;
     }
 
-    const TagLib::PropertyMap properties = file.file()->properties();
-    if (const TagLib::Tag *tag = file.tag()) {
+    const QString suffix = info.suffix().toLower();
+    const TagLib::AudioProperties *audio = file.audioProperties();
+    const TagLib::Tag *tagSource = file.tag();
+    TagLib::File *propertySource = file.file();
+
+    const TagLib::PropertyMap properties = propertySource->properties();
+    if (const TagLib::Tag *tag = tagSource) {
         track.title = toQString(tag->title());
         track.artistName = toQString(tag->artist());
         track.albumTitle = toQString(tag->album());
@@ -150,11 +199,14 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
     // free. A supported extension that yields no audio properties, or no length,
     // is not playable audio whatever it is named, and saying so here keeps one
     // field the single answer to "may anything use this track?".
-    if (file.audioProperties() == nullptr || file.audioProperties()->lengthInMilliseconds() <= 0) {
+    // Length is not evidence: TagLib reports zero for a valid FLAC stream in an
+    // Ogg container, among others. A sample rate and a channel count are what
+    // actually distinguish audio from a file that merely has the right name.
+    if (audio == nullptr || (audio->sampleRate() <= 0 && audio->channels() <= 0)) {
         track.scanError = QStringLiteral("No audio stream");
     }
 
-    if (const TagLib::AudioProperties *audio = file.audioProperties()) {
+    if (audio != nullptr) {
         const int bitDepth = readBitsPerSample(audio);
         track.durationMs = static_cast<qint64>(audio->lengthInMilliseconds());
         track.bitrateKbps = audio->bitrate();
@@ -169,7 +221,7 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
         }
     }
 
-    track.codec = info.suffix().toLower();
+    track.codec = readCodec(audio, suffix);
     if (fullMetadata != nullptr) {
         for (auto it = properties.begin(); it != properties.end(); ++it) {
             QStringList values;

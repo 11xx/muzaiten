@@ -116,6 +116,19 @@ QString sqlQuote(const QString &value)
 // Empty roots -> "0" (no track matches), matching the old EXISTS semantics when
 // scan_roots exist but none are library-enabled. Paths are SQL- and LIKE-escaped
 // (mirroring trackFingerprints) so arbitrary path characters are handled safely.
+// A track the scanner admitted but nothing can actually play: it could not be
+// opened, or it exposes no audio characteristics at all. It stays in the
+// library, visible with its reason, because it exists on disk and hiding it
+// would hide the problem. What it must not do is get picked automatically.
+//
+// Deliberately not a duration test. TagLib reports no length for a valid FLAC
+// stream in an Ogg container, so excluding zero-duration rows would hide real
+// music.
+QString playablePredicate(const QString &alias)
+{
+    return QStringLiteral("COALESCE(%1.scan_error, '') = ''").arg(alias);
+}
+
 QString enabledLibraryRootPredicate(const QString &trackAlias, const QVector<ScanRoot> &roots)
 {
     if (roots.isEmpty()) {
@@ -2414,7 +2427,8 @@ QVector<Track> Database::randomTracks(int count, const QSet<QString> &excludePat
     // rows; ORDER BY RANDOM() is fine at library scale for an occasional pick.
     const int fetch = count + static_cast<int>(excludePaths.size());
     QSqlQuery query(m_db);
-    QString sql = trackSelectPrefix() + QStringLiteral("WHERE t.missing = 0");
+    QString sql = trackSelectPrefix()
+        + QStringLiteral("WHERE t.missing = 0 AND %1").arg(playablePredicate(QStringLiteral("t")));
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -2430,20 +2444,6 @@ QVector<Track> Database::randomTracks(int count, const QSet<QString> &excludePat
     }
     return tracks;
 }
-
-namespace {
-
-// A track the scanner admitted but nothing can actually play: TagLib could not
-// open it, or it carries no audio length. It stays in the library, visible with
-// its reason, because it exists on disk and hiding it would hide the problem.
-// What it must not do is get picked automatically. The duration half also
-// covers rows scanned before unplayable files carried a reason.
-QString playablePredicate(const QString &alias)
-{
-    return QStringLiteral("COALESCE(%1.scan_error, '') = '' AND COALESCE(%1.duration_ms, 0) > 0").arg(alias);
-}
-
-}   // namespace
 
 QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGenres, int limit) const
 {

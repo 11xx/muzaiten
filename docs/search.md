@@ -54,7 +54,8 @@ file is harmless — it rebuilds on next open.
 | `album:blue` | Match only in album title |
 | `title:what` | Match only in track title |
 | `path:/gak` | Match only in file path |
-| `ext:flac` | Exact extension/codec filter |
+| `ext:flac` | Exact file-extension filter (the name on disk) |
+| `codec:vorbis` | Codec filter; differs from `ext:` for containers, so an `.oga` may be `vorbis`, `opus` or `flac`, and an `.m4a` may be `aac` or `alac` |
 | `khz:>=96` | Sample rate ≥ 96 kHz |
 | `hz:44100` | Sample rate = 44100 Hz |
 | `kbps:>320` | Bitrate > 320 kbps |

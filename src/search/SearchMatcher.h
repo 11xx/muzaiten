@@ -19,6 +19,7 @@ enum class MatchFieldRole {
     Path,
     Filename,
     Codec,
+    Extension,   // the name on disk; `codec:` and `ext:` answer different questions
 };
 
 struct MatchField {
