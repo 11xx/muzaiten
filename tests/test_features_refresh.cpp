@@ -302,6 +302,8 @@ void createLibrary(const QString &path, const QStringList &files)
                                    " path TEXT PRIMARY KEY,"
                                    " file_mtime INTEGER NOT NULL,"
                                    " file_size INTEGER NOT NULL,"
+                                   " duration_ms INTEGER,"
+                                   " scan_error TEXT,"
                                    " missing INTEGER NOT NULL DEFAULT 0)"),
                          &error),
                  qPrintable(error));
@@ -310,7 +312,8 @@ void createLibrary(const QString &path, const QStringList &files)
             const QPair<qint64, qint64> stats = fileStats(file);
             QSqlQuery insert(db);
             insert.prepare(QStringLiteral(
-                "INSERT INTO tracks(path, file_mtime, file_size, missing) VALUES(?, ?, ?, 0)"));
+                "INSERT INTO tracks(path, file_mtime, file_size, duration_ms, missing) "
+                "VALUES(?, ?, ?, 210000, 0)"));
             insert.addBindValue(file);
             insert.addBindValue(stats.first);
             insert.addBindValue(stats.second);
@@ -854,7 +857,8 @@ void IndexerScanTest::groupIdsStayStableWhenLibraryGrows()
             const QPair<qint64, qint64> stats = fileStats(added);
             QSqlQuery insert(db);
             insert.prepare(QStringLiteral(
-                "INSERT INTO tracks(path, file_mtime, file_size, missing) VALUES(?, ?, ?, 0)"));
+                "INSERT INTO tracks(path, file_mtime, file_size, duration_ms, missing) "
+                "VALUES(?, ?, ?, 210000, 0)"));
             insert.addBindValue(added);
             insert.addBindValue(stats.first);
             insert.addBindValue(stats.second);
@@ -1218,7 +1222,8 @@ void IndexerScanTest::incrementalRescanPreservesFeatureRows()
             const QPair<qint64, qint64> stats = fileStats(added);
             QSqlQuery insert(db);
             insert.prepare(QStringLiteral(
-                "INSERT INTO tracks(path, file_mtime, file_size, missing) VALUES(?, ?, ?, 0)"));
+                "INSERT INTO tracks(path, file_mtime, file_size, duration_ms, missing) "
+                "VALUES(?, ?, ?, 210000, 0)"));
             insert.addBindValue(added);
             insert.addBindValue(stats.first);
             insert.addBindValue(stats.second);

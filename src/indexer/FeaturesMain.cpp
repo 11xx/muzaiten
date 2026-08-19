@@ -733,6 +733,10 @@ std::vector<Candidate> loadCandidates(const QString &libraryPath, int limit)
     QString sql = QStringLiteral(
         "SELECT path, file_mtime, file_size FROM tracks "
         "WHERE COALESCE(missing, 0) = 0 AND path IS NOT NULL AND path <> '' "
+        // A file the scanner could not open, or that carries no audio length,
+        // is not worth a decode attempt. The duration half also covers rows
+        // scanned before unplayable files carried a reason.
+        "AND COALESCE(scan_error, '') = '' AND COALESCE(duration_ms, 0) > 0 "
         "ORDER BY path");
     if (limit > 0) {
         sql += QStringLiteral(" LIMIT %1").arg(limit);

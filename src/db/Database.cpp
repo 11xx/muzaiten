@@ -2431,6 +2431,20 @@ QVector<Track> Database::randomTracks(int count, const QSet<QString> &excludePat
     return tracks;
 }
 
+namespace {
+
+// A track the scanner admitted but nothing can actually play: TagLib could not
+// open it, or it carries no audio length. It stays in the library, visible with
+// its reason, because it exists on disk and hiding it would hide the problem.
+// What it must not do is get picked automatically. The duration half also
+// covers rows scanned before unplayable files carried a reason.
+QString playablePredicate(const QString &alias)
+{
+    return QStringLiteral("COALESCE(%1.scan_error, '') = '' AND COALESCE(%1.duration_ms, 0) > 0").arg(alias);
+}
+
+}   // namespace
+
 QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGenres, int limit) const
 {
     QVector<RadioCandidateRow> rows;
@@ -2454,9 +2468,9 @@ QVector<RadioCandidateRow> Database::radioCandidates(const QStringList &foldedGe
         "LEFT JOIN albums a ON a.id = t.album_id "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
+        "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND %2 "
         "AND t.id IN (SELECT track_id FROM track_genres WHERE genre_folded IN (%1))")
-        .arg(SqlUtil::sqlPlaceholders(lookupGenres.size()));
+        .arg(SqlUtil::sqlPlaceholders(lookupGenres.size()), playablePredicate(QStringLiteral("t")));
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -2495,7 +2509,8 @@ QVector<RadioCandidateRow> Database::radioFallbackCandidates(int limit) const
         "LEFT JOIN albums a ON a.id = t.album_id "
         "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
         "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-        "WHERE t.missing = 0 AND t.metadata_scanned = 1");
+        "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND %1")
+                      .arg(playablePredicate(QStringLiteral("t")));
     if (hasScanRoots(m_db)) {
         sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
     }
@@ -2547,8 +2562,8 @@ QVector<RadioCandidateRow> Database::radioCandidatesForPaths(const QStringList &
             "LEFT JOIN albums a ON a.id = t.album_id "
             "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
             "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
-            "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND t.path IN (%1)")
-            .arg(SqlUtil::sqlPlaceholders(count));
+            "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND %2 AND t.path IN (%1)")
+            .arg(SqlUtil::sqlPlaceholders(count), playablePredicate(QStringLiteral("t")));
         if (hasScanRoots(m_db)) {
             sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
         }
