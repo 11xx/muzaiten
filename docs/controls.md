@@ -120,5 +120,11 @@ FLAC, MP2/MP3, M4A/M4B (MP4 audio), Matroska Audio, Musepack, Ogg
 WavPack files. Bare `.mp4` is not scanned, since a video file carrying an audio
 track is indistinguishable from an audio one by extension. Playback still
 requires a matching GStreamer decoder plugin.
+
+A file with a recognized extension that cannot be read as audio (the tag reader
+cannot open it, or it carries no audio length) still becomes a library row, and
+`Track properties` shows the reason under **Scan**. It exists on disk, so it is
+not hidden. It is left out of radio candidates and of the audio analysis pass,
+which would otherwise offer it up to be played or spend a decode attempt on it.
 Unsupported files are hidden by default — enable `View > List unsupported
 files in explorer` while in an explorer view to show them.

@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- A file with a supported extension that cannot be read as audio no longer
+  turns up as a radio pick or costs the analysis pass a decode attempt. It is
+  still listed, with the reason shown in `Track properties`, since it does
+  exist on disk; it is simply never chosen automatically.
 - A scrobbling destination removed from the manager now deletes its stored
   token instead of blanking it, so a credential does not outlive the
   destination it belonged to in a settings row keyed by a dead identifier.

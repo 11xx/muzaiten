@@ -146,6 +146,14 @@ Track TagReader::read(const QString &path, MetadataBlob::FullMetadata *fullMetad
         track.trackNumber = static_cast<int>(tag->track());
     }
 
+    // TagLib has already parsed the file by now, so its own view of the audio is
+    // free. A supported extension that yields no audio properties, or no length,
+    // is not playable audio whatever it is named, and saying so here keeps one
+    // field the single answer to "may anything use this track?".
+    if (file.audioProperties() == nullptr || file.audioProperties()->lengthInMilliseconds() <= 0) {
+        track.scanError = QStringLiteral("No audio stream");
+    }
+
     if (const TagLib::AudioProperties *audio = file.audioProperties()) {
         const int bitDepth = readBitsPerSample(audio);
         track.durationMs = static_cast<qint64>(audio->lengthInMilliseconds());

@@ -297,6 +297,7 @@ private slots:
 
     // Database + ListenHistoryStore round-trips
     void radioCandidatesJoinsGenresAndFallback();
+    void unplayableTracksAreNeverRadioCandidates();
     void neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags();
     void featureStoreV3ScalarsFeedTempoEnergyScoring();
     void genreAliasesExpandCandidatesAndMergeCounts();
@@ -3237,6 +3238,8 @@ Track makeDbTrack(const QTemporaryDir &dir, const QString &filename, const QStri
     track.musicBrainz.releaseGroupId = releaseGroupId;
     track.fileSize = 10;
     track.fileMtime = 20;
+    // A scanned track always has a length; radio candidacy now depends on it.
+    track.durationMs = 210'000;
     if (!genres.isEmpty() || !mediaTags.isEmpty()) {
         MetadataBlob::FullMetadata meta;
         if (!genres.isEmpty()) {
@@ -3610,6 +3613,49 @@ void RadioTest::radioCandidatesJoinsGenresAndFallback()
     // Fallback samples every scanned track regardless of genre.
     const QVector<RadioCandidateRow> fallback = db.radioFallbackCandidates();
     QCOMPARE(fallback.size(), 3);
+}
+
+void RadioTest::unplayableTracksAreNeverRadioCandidates()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Database db(QStringLiteral("radio-unplayable-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(db.open(dir.filePath(QStringLiteral("library.sqlite"))), qPrintable(db.lastError()));
+
+    const Track good = makeDbTrack(dir, QStringLiteral("01.flac"), {QStringLiteral("Rock")},
+                                   QStringLiteral("2004"));
+
+    // TagLib could not open it: the row exists and is visible, but nothing
+    // should offer it up to be played.
+    Track broken = makeDbTrack(dir, QStringLiteral("02.flac"), {QStringLiteral("Rock")},
+                               QStringLiteral("2004"));
+    broken.scanError = QStringLiteral("TagLib could not open file");
+
+    // Scanned before unplayable files carried a reason: no error recorded, but
+    // no audio length either.
+    Track lengthless = makeDbTrack(dir, QStringLiteral("03.flac"), {QStringLiteral("Rock")},
+                                   QStringLiteral("2004"));
+    lengthless.durationMs = 0;
+
+    QVERIFY2(db.upsertTrack(good), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(broken), qPrintable(db.lastError()));
+    QVERIFY2(db.upsertTrack(lengthless), qPrintable(db.lastError()));
+
+    const QVector<RadioCandidateRow> byGenre =
+        db.radioCandidates({GenreTags::folded(QStringLiteral("Rock"))});
+    QCOMPARE(byGenre.size(), 1);
+    QCOMPARE(byGenre.first().path, good.path);
+
+    const QVector<RadioCandidateRow> fallback = db.radioFallbackCandidates();
+    QCOMPARE(fallback.size(), 1);
+    QCOMPARE(fallback.first().path, good.path);
+
+    // Neighbour augmentation resolves specific paths and must apply the same
+    // rule, or an unplayable copy re-enters through that door.
+    const QVector<RadioCandidateRow> byPath =
+        db.radioCandidatesForPaths({good.path, broken.path, lengthless.path});
+    QCOMPARE(byPath.size(), 1);
+    QCOMPARE(byPath.first().path, good.path);
 }
 
 void RadioTest::neighborCandidateRowsAugmentTagPoorPoolAndRespectFlags()
