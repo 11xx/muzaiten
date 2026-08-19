@@ -7,8 +7,8 @@
 - The project's canonical home is GitHub (`https://github.com/11xx/muzaiten`).
   Release tags, release pages, and the binary assets the AUR packages fetch are
   published there; the package metadata, AppStream URLs, and the provider's
-  project links point there as well. The Codeberg repository is archived and
-  read-only.
+  project links point there as well. Codeberg is no longer a publishing
+  target.
 
 ### Added
 
