@@ -5329,10 +5329,20 @@ void MainWindow::showScrobblingDialog(ScrobblingDialog::Tab tab)
         return m_database->setting(ScrobbleDestinationConfig::tokenSettingKey(id));
     };
     callbacks.writeToken = [this](const QString &id, const QString &token) {
-        m_database->setSetting(ScrobbleDestinationConfig::tokenSettingKey(id), token);
+        const QString key = ScrobbleDestinationConfig::tokenSettingKey(id);
+        if (key.isEmpty()) {
+            return;
+        }
+        m_database->setSetting(key, token);
     };
     callbacks.removeToken = [this](const QString &id) {
-        m_database->setSetting(ScrobbleDestinationConfig::tokenSettingKey(id), QString());
+        const QString key = ScrobbleDestinationConfig::tokenSettingKey(id);
+        if (key.isEmpty()) {
+            return;
+        }
+        // Blanking the value would leave a row keyed by a destination that no
+        // longer exists, holding a credential the user asked to be rid of.
+        m_database->removeSetting(key);
     };
     callbacks.lastFmConfigured = [this]() {
         return !m_database->setting(QStringLiteral("lastfm.sessionKey")).isEmpty();

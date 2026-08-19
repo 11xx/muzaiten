@@ -58,8 +58,10 @@ ScrobbleDestinationSet defaults();
 
 // Parse a stored document. Anything malformed degrades to the defaults rather
 // than dropping the user's configuration silently; the reserved destinations are
-// re-inserted if absent, and custom entries with an invalid UUID-style id or URL
-// are discarded.
+// re-inserted if absent, and custom entries with an invalid UUID-style id are
+// discarded. A custom entry's address is normalized on load and the entry is
+// discarded if it cannot be, so a document written by hand or by an older build
+// cannot load an address the Add flow would refuse.
 ScrobbleDestinationSet fromJson(const QString &json);
 QString toJson(const ScrobbleDestinationSet &destinations);
 
@@ -77,6 +79,11 @@ ScrobbleDestinationSet load(const SettingReader &read);
 void save(const SettingWriter &write, const ScrobbleDestinationSet &destinations);
 // Settings key holding one destination's token. The reserved destinations keep
 // their long-standing keys so existing credentials survive untouched.
+//
+// Empty for a destination that stores no token of its own (Last.fm holds a
+// session key instead) and for an unrecognized id. Callers that write must
+// check: an empty key names no row, so writing under it would store a
+// credential where nothing will ever look for it or clear it.
 QString tokenSettingKey(const QString &id);
 
 }   // namespace ScrobbleDestinationConfig

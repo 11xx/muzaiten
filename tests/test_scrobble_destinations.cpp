@@ -32,6 +32,9 @@ private slots:
     void correctsTamperedReservedFields();
     void dropsUnusableCustomEntries();
     void malformedCustomIdsCannotAddressTokenSettings();
+    void storedAddressesAreNormalizedOnLoad();
+    void storedAddressesThatCannotNormalizeAreDiscarded();
+    void lastFmHasNoTokenKeyOfItsOwn();
     void disablingReservedDestinationUpdatesCentralDocument();
     void customCompatibleUploadForwardsItsExactId();
     void degradesToDefaultsOnGarbage_data();
@@ -203,6 +206,54 @@ void ScrobbleDestinationsTest::malformedCustomIdsCannotAddressTokenSettings()
     QVERIFY(set.find(QStringLiteral("A4E26AE7-C361-4797-B457-46A31436934E")) == nullptr);
     QVERIFY(tokenSettingKey(QStringLiteral("custom-9")).isEmpty());
     QVERIFY(tokenSettingKey(QStringLiteral("A4E26AE7-C361-4797-B457-46A31436934E")).isEmpty());
+}
+
+void ScrobbleDestinationsTest::storedAddressesAreNormalizedOnLoad()
+{
+    // Written by an older build or by hand: valid, but not in the canonical
+    // form every other path stores.
+    const QString document = json(QStringLiteral(
+        "{'version':1,'destinations':["
+        "{'id':'6f1c2d81-9a4e-4b77-a0d3-1f2e3c4b5a69','type':'listenbrainz','name':'Bare',"
+        "'apiRoot':'https://koito.example'},"
+        "{'id':'8c2b7f10-3d55-4e91-9a6c-7b8d9e0f1a23','type':'listenbrainz','name':'Slashed',"
+        "'apiRoot':'https://other.example/music/'}]}"));
+
+    const ScrobbleDestinationSet set = fromJson(document);
+    QCOMPARE(set.find(QStringLiteral("6f1c2d81-9a4e-4b77-a0d3-1f2e3c4b5a69"))->apiRoot,
+             QStringLiteral("https://koito.example/1"));
+    QCOMPARE(set.find(QStringLiteral("8c2b7f10-3d55-4e91-9a6c-7b8d9e0f1a23"))->apiRoot,
+             QStringLiteral("https://other.example/music/1"));
+}
+
+void ScrobbleDestinationsTest::storedAddressesThatCannotNormalizeAreDiscarded()
+{
+    // Each of these is refused by the Add flow. Loading one would send a token
+    // somewhere the user was never allowed to type.
+    const QString document = json(QStringLiteral(
+        "{'version':1,'destinations':["
+        "{'id':'11111111-1111-4111-8111-111111111111','type':'listenbrainz','name':'Scheme',"
+        "'apiRoot':'ftp://koito.example/1'},"
+        "{'id':'22222222-2222-4222-8222-222222222222','type':'listenbrainz','name':'Credentials',"
+        "'apiRoot':'https://user:secret@koito.example/1'},"
+        "{'id':'33333333-3333-4333-8333-333333333333','type':'listenbrainz','name':'Query',"
+        "'apiRoot':'https://koito.example/1?to=elsewhere'},"
+        "{'id':'44444444-4444-4444-8444-444444444444','type':'listenbrainz','name':'Fine',"
+        "'apiRoot':'https://koito.example/1'}]}"));
+
+    const ScrobbleDestinationSet set = fromJson(document);
+    QVERIFY(set.find(QStringLiteral("11111111-1111-4111-8111-111111111111")) == nullptr);
+    QVERIFY(set.find(QStringLiteral("22222222-2222-4222-8222-222222222222")) == nullptr);
+    QVERIFY(set.find(QStringLiteral("33333333-3333-4333-8333-333333333333")) == nullptr);
+    QCOMPARE(set.items.size(), 3);   // two reserved plus the one usable custom
+}
+
+void ScrobbleDestinationsTest::lastFmHasNoTokenKeyOfItsOwn()
+{
+    // Last.fm stores a session key, not a token, so it has no token row. A
+    // caller that wrote under this key would put a credential where nothing
+    // reads it and nothing clears it.
+    QVERIFY(tokenSettingKey(lastFmId()).isEmpty());
 }
 
 void ScrobbleDestinationsTest::disablingReservedDestinationUpdatesCentralDocument()

@@ -118,8 +118,17 @@ ScrobbleDestinationSet fromJson(const QString &json)
         }
         // A compatible destination with no URL has nowhere to deliver, so it is
         // not a destination at all. The reserved ones carry their own defaults.
-        if (!destination.isReserved() && destination.apiRoot.isEmpty()) {
-            continue;
+        if (!destination.isReserved()) {
+            // Every other path normalizes before storing, so a document that
+            // reaches here with a non-canonical or unusable address was written
+            // by hand or by an older build. Normalize it rather than trusting
+            // it: an address that cannot be normalized is one that could send a
+            // token somewhere the Add flow would have refused.
+            const ListenBrainzUrl::Normalized normalized = ListenBrainzUrl::normalizeBase(destination.apiRoot);
+            if (!normalized.valid) {
+                continue;
+            }
+            destination.apiRoot = normalized.apiRoot;
         }
         if (destination.name.isEmpty()) {
             destination.name = destination.apiRoot;
