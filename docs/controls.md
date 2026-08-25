@@ -87,7 +87,10 @@ Both scrobbling entries open one window with two tabs, `Scrobblers` and
   replaced here while its built-in identity and URL stay fixed; a server
   with no address cannot be enabled. Changes are saved and take effect as you
   make them, so there is no OK or Cancel; a field commits when you leave it,
-  not as you type. Removing a destination confirms first and cannot be undone. The window also carries
+  not as you type. A destination enabled in the middle of a track announces
+  that track as playing now right away; the listen itself is delivered at the
+  end only if the destination was enabled before the track counted as
+  listened. Removing a destination confirms first and cannot be undone. The window also carries
   offline mode and `Last.fm API settings…`, which accepts your own Last.fm
   credentials. The Scrobblers menu holds the same two, plus history
   backfill.

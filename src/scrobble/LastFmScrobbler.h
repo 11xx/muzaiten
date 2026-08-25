@@ -33,6 +33,12 @@ public slots:
     void configure(bool enabled, bool uploadAllowed, const QString &apiKey, const QString &sharedSecret, const QString &sessionKey, const QString &historyPath);
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
+    // Hand the scrobbler the track that is already playing. Enabled in the
+    // middle of a track it has never heard a trackStarted for it, so without
+    // this it stays silent until the next track. It announces the track only if
+    // it has not already announced that same one, so repeatedly saving settings
+    // costs no requests.
+    void adoptCurrentTrack(const Track &track, bool playing);
     void playbackStateChanged(bool playing);
     // Re-send a rate-limited "now playing" for the current track if it is still
     // playing. Used when uploads are re-enabled (leaving offline mode) so the
@@ -91,6 +97,9 @@ private:
     bool m_playing = false;
     bool m_scrobbleSubmissionInFlight = false;
     qint64 m_lastNowPlayingSecs = 0;
+    // Path of the track last announced as now playing, so an announcement is
+    // made once per track rather than once per settings save.
+    QString m_announcedNowPlayingPath;
     Track m_pendingTrackStartNowPlaying;
     bool m_hasPendingTrackStartNowPlaying = false;
     int m_consecutiveFailures = 0;

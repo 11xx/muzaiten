@@ -85,6 +85,14 @@ void ListenBrainzHub::resumeTrack(const Track &track, qint64 elapsedMs, bool pla
     }
 }
 
+void ListenBrainzHub::adoptCurrentTrack(const Track &track, bool playing)
+{
+    for (ListenBrainzScrobbler *scrobbler : std::as_const(m_scrobblers)) {
+        QMetaObject::invokeMethod(scrobbler, "adoptCurrentTrack", Qt::QueuedConnection, Q_ARG(Track, track),
+                                  Q_ARG(bool, playing));
+    }
+}
+
 void ListenBrainzHub::playbackStateChanged(bool playing)
 {
     for (ListenBrainzScrobbler *scrobbler : std::as_const(m_scrobblers)) {

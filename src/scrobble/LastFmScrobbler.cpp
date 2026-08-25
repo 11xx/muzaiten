@@ -87,6 +87,10 @@ void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString 
     }
     if (!canUpload()) {
         m_retryTimer->stop();
+        // Nothing is being announced any more, so whatever was announced before
+        // is no longer standing on the service: forget it and let a later
+        // re-enable announce the current track again.
+        m_announcedNowPlayingPath.clear();
         return;
     }
 
@@ -105,12 +109,19 @@ void LastFmScrobbler::trackStarted(const Track &track)
 void LastFmScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
 {
     Q_UNUSED(elapsedMs);
+    adoptCurrentTrack(track, playing);
+}
+
+void LastFmScrobbler::adoptCurrentTrack(const Track &track, bool playing)
+{
     m_currentTrack = track;
     m_hasCurrentTrack = true;
     m_playing = playing;
-    if (m_playing) {
-        submitNowPlaying(track);
+    if (!playing || !canUpload() || track.path == m_announcedNowPlayingPath) {
+        return;
     }
+
+    submitNowPlayingForTrackStart(track);
 }
 
 void LastFmScrobbler::playbackStateChanged(bool playing)
@@ -247,6 +258,7 @@ void LastFmScrobbler::submitNowPlaying(const Track &track)
     }
 
     m_lastNowPlayingSecs = QDateTime::currentSecsSinceEpoch();
+    m_announcedNowPlayingPath = track.path;
     LastFmApi::Params params;
     LastFmApi::addParam(params, QStringLiteral("method"), QStringLiteral("track.updateNowPlaying"));
     LastFmApi::addParam(params, QStringLiteral("api_key"), m_apiKey);

@@ -38,6 +38,10 @@ public:
 
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
+    // Tells every destination what is playing right now. Destinations that were
+    // just enabled or added announce it; the rest, having announced it already,
+    // send nothing.
+    void adoptCurrentTrack(const Track &track, bool playing);
     void playbackStateChanged(bool playing);
     void resendNowPlaying();
     void uploadBacklog();

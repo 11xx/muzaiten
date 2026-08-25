@@ -41,6 +41,12 @@ public slots:
                    bool enabled, bool uploadAllowed, const QString &token, const QString &historyPath);
     void trackStarted(const Track &track);
     void resumeTrack(const Track &track, qint64 elapsedMs, bool playing);
+    // Hand a destination the track that is already playing. A destination that
+    // was just enabled, added, or brought back online has never heard a
+    // trackStarted for it, so without this it stays silent until the next
+    // track. It announces the track only if it has not already announced that
+    // same one, so repeatedly saving settings costs no requests.
+    void adoptCurrentTrack(const Track &track, bool playing);
     void playbackStateChanged(bool playing);
     // Re-send a rate-limited "playing now" for the current track if it is still
     // playing. Used when uploads are re-enabled (leaving offline mode) so the
@@ -99,6 +105,9 @@ private:
     bool m_playing = false;
     bool m_listenSubmissionInFlight = false;
     qint64 m_lastPlayingNowSecs = 0;
+    // Path of the track this destination last announced as playing now, so an
+    // announcement is made once per track rather than once per settings save.
+    QString m_announcedPlayingNowPath;
     Track m_pendingTrackStartPlayingNow;
     bool m_hasPendingTrackStartPlayingNow = false;
     int m_consecutiveFailures = 0;

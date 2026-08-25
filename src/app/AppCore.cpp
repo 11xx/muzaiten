@@ -309,11 +309,18 @@ AppCore::AppCore(QObject *parent)
             }
         }
         m_listenHistory->recordListen(track, startedAtSecs, owed);
-        if (owed.contains(ScrobbleDestinationConfig::listenBrainzId())) {
-            m_listenBrainzHub->uploadBacklog();
-        }
-        if (owed.contains(ScrobbleDestinationConfig::lastFmId())) {
-            QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
+        // Poke every destination the listen is owed to, by type rather than by
+        // reserved id: a custom server is owed its delivery as promptly as the
+        // official one, not whenever its retry timer next comes around.
+        for (const ScrobbleDestination &destination : destinations.items) {
+            if (!destination.enabled) {
+                continue;
+            }
+            if (destination.type == ScrobbleDestination::Type::LastFm) {
+                QMetaObject::invokeMethod(m_lastFmScrobbler, "uploadBacklog", Qt::QueuedConnection);
+            } else {
+                m_listenBrainzHub->uploadBacklog(destination.id);
+            }
         }
     });
 

@@ -3,6 +3,9 @@
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ScrobbleDestination.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -28,6 +31,7 @@ public:
     }
 
     int submitCount() const { return m_submitCount; }
+    QList<QByteArray> submittedBodies() const { return m_bodies; }
     void setStatus(int status) { m_status = status; }
 
 protected:
@@ -53,6 +57,7 @@ protected:
 
             if (head.startsWith("POST")) {
                 ++m_submitCount;
+                m_bodies.append(buffer.mid(headerEnd + 4, declared));
             }
             const QByteArray body = m_status == 200 ? QByteArray(R"({"status":"ok","valid":true})")
                                                     : QByteArray(R"({"code":401,"error":"Invalid token"})");
@@ -70,6 +75,7 @@ protected:
 private:
     int m_status = 200;
     int m_submitCount = 0;
+    QList<QByteArray> m_bodies;
     QHash<QTcpSocket *, QByteArray> m_buffers;
 };
 
@@ -93,6 +99,8 @@ private slots:
     void aRejectedTokenDisablesOnlyItsOwnDestination();
     void anUnreachableDestinationDoesNotStallTheOthers();
     void validationReportsPerDestination();
+    void enablingMidTrackAnnouncesWhatIsPlaying();
+    void adoptingTheSameTrackTwiceAnnouncesItOnce();
 };
 
 void ListenBrainzMultiDestinationTest::aRejectedTokenDisablesOnlyItsOwnDestination()
@@ -209,6 +217,65 @@ void ListenBrainzMultiDestinationTest::validationReportsPerDestination()
     QCOMPARE(results.value(rejectedId), false);
     QCOMPARE(requests.value(acceptedId), 1u);
     QCOMPARE(requests.value(rejectedId), 2u);
+}
+
+void ListenBrainzMultiDestinationTest::enablingMidTrackAnnouncesWhatIsPlaying()
+{
+    QTemporaryDir dir;
+    const QString historyPath = dir.filePath(QStringLiteral("history.sqlite"));
+
+    FakeServer server(200);
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    ScrobbleDestinationSet destinations;
+    const QString id = destinations.addCustom(QStringLiteral("Server"), server.apiRoot(), false);
+
+    ListenBrainzHub hub;
+    const auto tokenFor = [](const QString &) { return QStringLiteral("token"); };
+    hub.configure(destinations, tokenFor, true, historyPath);
+
+    // A track starts while the destination is off: nothing is sent.
+    hub.trackStarted(makeTrack(QStringLiteral("One")));
+    QTest::qWait(200);
+    QCOMPARE(server.submitCount(), 0);
+
+    // Turning it on mid-track announces what is already playing instead of
+    // waiting for the next track.
+    QVERIFY(destinations.setEnabled(id, true));
+    hub.configure(destinations, tokenFor, true, historyPath);
+    hub.adoptCurrentTrack(makeTrack(QStringLiteral("One")), true);
+
+    QTRY_COMPARE_WITH_TIMEOUT(server.submitCount(), 1, 10000);
+    const QJsonObject body = QJsonDocument::fromJson(server.submittedBodies().first()).object();
+    QCOMPARE(body.value(QStringLiteral("listen_type")).toString(), QStringLiteral("playing_now"));
+    const QJsonObject metadata = body.value(QStringLiteral("payload")).toArray().first().toObject()
+                                     .value(QStringLiteral("track_metadata")).toObject();
+    QCOMPARE(metadata.value(QStringLiteral("track_name")).toString(), QStringLiteral("One"));
+}
+
+void ListenBrainzMultiDestinationTest::adoptingTheSameTrackTwiceAnnouncesItOnce()
+{
+    QTemporaryDir dir;
+    const QString historyPath = dir.filePath(QStringLiteral("history.sqlite"));
+
+    FakeServer server(200);
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    ScrobbleDestinationSet destinations;
+    destinations.addCustom(QStringLiteral("Server"), server.apiRoot(), true);
+
+    ListenBrainzHub hub;
+    const auto tokenFor = [](const QString &) { return QStringLiteral("token"); };
+    hub.configure(destinations, tokenFor, true, historyPath);
+    hub.adoptCurrentTrack(makeTrack(QStringLiteral("One")), true);
+    QTRY_COMPARE_WITH_TIMEOUT(server.submitCount(), 1, 10000);
+
+    // Saving settings again re-applies the same configuration; a destination
+    // that has already announced this track must not announce it once more.
+    hub.configure(destinations, tokenFor, true, historyPath);
+    hub.adoptCurrentTrack(makeTrack(QStringLiteral("One")), true);
+    QTest::qWait(500);
+    QCOMPARE(server.submitCount(), 1);
 }
 
 QTEST_MAIN(ListenBrainzMultiDestinationTest)

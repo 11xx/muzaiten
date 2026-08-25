@@ -5316,6 +5316,11 @@ void MainWindow::configureListenBrainz()
             return token;
         },
         !scrobbleOffline(), listenHistoryPath());
+    if (const Track track = m_player->currentTrack(); !track.path.isEmpty()) {
+        // Queued behind the configure() above, so a destination that was just
+        // enabled has its credentials before it is told what is playing.
+        m_listenBrainzHub->adoptCurrentTrack(track, m_playback->state() == PlaybackBackend::State::Playing);
+    }
 }
 
 void MainWindow::manageScrobblers() { showScrobblingDialog(ScrobblingDialog::Tab::Scrobblers); }
@@ -5513,20 +5518,11 @@ QString MainWindow::listenHistoryPath() const
 void MainWindow::setScrobbleOffline(bool offline)
 {
     m_database->setSetting(QStringLiteral("scrobble.offline"), offline ? QStringLiteral("true") : QStringLiteral("false"));
-    // Reconfigure both services; leaving offline mode flushes the backlog.
+    // Reconfigure both services; leaving offline mode flushes the backlog and
+    // re-announces the current track, so the services reflect what is playing
+    // now instead of waiting for the next one.
     configureListenBrainz();
     configureLastFm();
-    // Leaving offline mode: eagerly push a "now playing" for the current track,
-    // the same way play/pause does, so the services reflect what is playing now
-    // instead of waiting for the next track. The scrobbler-side rate limiter
-    // keeps a rapid offline/online toggle from spamming the services. Queued so
-    // the configure() above (also queued) applies credentials/uploadAllowed
-    // first.
-    if (!offline && !m_player->currentTrack().path.isEmpty()
-        && m_playback->state() == PlaybackBackend::State::Playing) {
-        m_listenBrainzHub->resendNowPlaying();
-        QMetaObject::invokeMethod(m_lastFmScrobbler, "resendNowPlaying", Qt::QueuedConnection);
-    }
     statusBar()->showMessage(offline ? QStringLiteral("Scrobble uploads paused, listens are buffered locally")
                                      : QStringLiteral("Scrobble uploads resumed, sending buffered listens"),
                              5000);
@@ -5589,6 +5585,10 @@ void MainWindow::configureLastFm()
                               Q_ARG(QString, lastFmSharedSecret()),
                               Q_ARG(QString, sessionKey),
                               Q_ARG(QString, listenHistoryPath()));
+    if (const Track track = m_player->currentTrack(); !track.path.isEmpty()) {
+        QMetaObject::invokeMethod(m_lastFmScrobbler, "adoptCurrentTrack", Qt::QueuedConnection, Q_ARG(Track, track),
+                                  Q_ARG(bool, m_playback->state() == PlaybackBackend::State::Playing));
+    }
 }
 
 

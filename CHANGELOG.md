@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Enabling a scrobbling destination in the middle of a track announces that
+  track as playing now, instead of staying silent on the service until the next
+  track starts. This covers a destination that was just enabled, one that was
+  added while playback was running, and leaving offline mode. Each destination
+  announces a given track once, so saving settings repeatedly costs no
+  requests, and rapid toggling is still coalesced.
+- A listen owed to a custom ListenBrainz-compatible destination is delivered as
+  soon as it is recorded, like the official one, rather than waiting for that
+  destination's next retry sweep when official ListenBrainz is switched off.
+
 ## [2026.08.19]
 
 ### Added

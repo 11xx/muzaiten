@@ -82,6 +82,10 @@ void ListenBrainzScrobbler::configure(const QString &destinationId, const QStrin
     }
     if (!canUpload()) {
         m_retryTimer->stop();
+        // A destination that cannot upload announces nothing, so whatever it
+        // announced before is no longer standing on the server: forget it and
+        // let a later re-enable announce the current track again.
+        m_announcedPlayingNowPath.clear();
         return;
     }
 
@@ -100,12 +104,19 @@ void ListenBrainzScrobbler::trackStarted(const Track &track)
 void ListenBrainzScrobbler::resumeTrack(const Track &track, qint64 elapsedMs, bool playing)
 {
     Q_UNUSED(elapsedMs);
+    adoptCurrentTrack(track, playing);
+}
+
+void ListenBrainzScrobbler::adoptCurrentTrack(const Track &track, bool playing)
+{
     m_currentTrack = track;
     m_hasCurrentTrack = true;
     m_playing = playing;
-    if (m_playing) {
-        submitPlayingNow(track);
+    if (!playing || !canUpload() || track.path == m_announcedPlayingNowPath) {
+        return;
     }
+
+    submitPlayingNowForTrackStart(track);
 }
 
 void ListenBrainzScrobbler::playbackStateChanged(bool playing)
@@ -197,6 +208,7 @@ void ListenBrainzScrobbler::submitPlayingNow(const Track &track)
     }
 
     m_lastPlayingNowSecs = QDateTime::currentSecsSinceEpoch();
+    m_announcedPlayingNowPath = track.path;
     QJsonArray payload;
     QJsonObject nowPlaying;
     nowPlaying.insert(QStringLiteral("track_metadata"), metadataObject(track));
