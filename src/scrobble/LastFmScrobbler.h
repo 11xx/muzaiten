@@ -77,7 +77,10 @@ private:
     void handleAuthTokenResponse(const LastFmApi::Response &response);
     void handleAuthSessionResponse(const LastFmApi::Response &response);
     void handleNowPlayingResponse(const LastFmApi::Response &response, const QString &transportMessage);
-    void handleScrobbleResponse(const LastFmApi::Response &response, bool networkError, const QString &transportMessage, const QList<qint64> &submittedIds);
+    // `answered` is false when the reply carried no HTTP status, meaning the
+    // request never reached Last.fm and nothing it says can be read as a verdict.
+    void handleScrobbleResponse(const LastFmApi::Response &response, bool networkError, bool answered,
+                                const QString &transportMessage, const QList<qint64> &submittedIds);
     void disableScrobbling(const QString &message);
     bool hasCredentials() const;
 

@@ -87,7 +87,10 @@ Both scrobbling entries open one window with two tabs, `Scrobblers` and
   replaced here while its built-in identity and URL stay fixed; a server
   with no address cannot be enabled. Changes are saved and take effect as you
   make them, so there is no OK or Cancel; a field commits when you leave it,
-  not as you type. A destination enabled in the middle of a track announces
+  not as you type. `Test` reports one of three things: the account the token
+  connects as, a token the server refused, or no answer at all, which points
+  at the server or the network rather than the token (hover the status for the
+  detail). A destination enabled in the middle of a track announces
   that track as playing now right away; the listen itself is delivered at the
   end only if the destination was enabled before the track counted as
   listened. Removing a destination confirms first and cannot be undone. The window also carries

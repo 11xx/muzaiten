@@ -76,10 +76,11 @@ QString mintCustomId()
 // How a destination's connection currently stands, which is what colours the
 // dot beside its status text.
 enum class DestinationHealth {
-    Unknown,   // nothing tried yet
-    Good,      // credentials verified
-    Bad,       // credentials rejected, or a value the destination cannot work without
-    Busy,      // a test is in flight
+    Unknown,       // nothing tried yet
+    Good,          // credentials verified
+    Bad,           // credentials rejected, or a value the destination cannot work without
+    Unanswered,    // the server never answered, so the credentials stand unjudged
+    Busy,          // a test is in flight
 };
 
 // One destination's controls, laid into a grid shared by every row so the
@@ -234,10 +235,13 @@ public:
         return name.isEmpty() ? QStringLiteral("the new server") : name;
     }
 
-    void setStatus(const QString &status, DestinationHealth health)
+    // `detail` is the long form of the status, shown on hover when there is
+    // more to say than the column can hold.
+    void setStatus(const QString &status, DestinationHealth health, const QString &detail = {})
     {
         m_status = status;
         m_health = health;
+        m_statusDetail = detail;
         refresh();
     }
 
@@ -309,6 +313,8 @@ private:
                 return QColor(0x3f, 0xa0, 0x5f);
             case DestinationHealth::Bad:
                 return QColor(0xc6, 0x4b, 0x4b);
+            case DestinationHealth::Unanswered:
+                return QColor(0xc9, 0x8a, 0x2b);
             case DestinationHealth::Busy:
                 return palette().color(QPalette::Highlight);
             case DestinationHealth::Unknown:
@@ -469,6 +475,7 @@ private:
         }
         m_dot->setHealth(health);
         m_statusLabel->setText(text);
+        m_statusLabel->setToolTip(m_statusDetail);
 
         refreshPendingCount();
 
@@ -497,6 +504,7 @@ private:
     quint64 m_testRequestId = 0;
     QHBoxLayout *m_statusLayout = nullptr;
     QString m_status;
+    QString m_statusDetail;
     DestinationHealth m_health = DestinationHealth::Unknown;
 
     ToggleSwitch *m_toggle = nullptr;
@@ -692,17 +700,29 @@ quint64 ScrobblersPanel::nextTestRequestId()
     return nextGlobalTestRequestId();
 }
 
-void ScrobblersPanel::reportTestResult(const QString &destinationId, quint64 requestId, bool valid,
-                                       const QString &username)
+void ScrobblersPanel::reportTestResult(const QString &destinationId, quint64 requestId,
+                                       const ScrobbleTestResult &result)
 {
     for (DestinationRow *row : std::as_const(m_rows)) {
         // A result that no longer answers a live test describes an address or a
         // token the row has since moved on from.
         if (row->destination().id == destinationId && row->awaitsTestResult(requestId)) {
             row->testResultConsumed();
-            row->setStatus(valid ? QStringLiteral("Connected as %1").arg(username)
-                                 : QStringLiteral("Token rejected"),
-                           valid ? DestinationHealth::Good : DestinationHealth::Bad);
+            switch (result.outcome) {
+            case ScrobbleTestResult::Outcome::Accepted:
+                row->setStatus(QStringLiteral("Connected as %1").arg(result.userName), DestinationHealth::Good);
+                break;
+            case ScrobbleTestResult::Outcome::Rejected:
+                row->setStatus(QStringLiteral("Token rejected"), DestinationHealth::Bad);
+                break;
+            case ScrobbleTestResult::Outcome::Unanswered:
+                // The token is still whatever it was: the label says what the
+                // test actually established, and the detail rides in the
+                // tooltip rather than stretching the column.
+                row->setStatus(QStringLiteral("No answer from the server"), DestinationHealth::Unanswered,
+                               result.error);
+                break;
+            }
             return;
         }
     }

@@ -99,6 +99,8 @@ private slots:
     void aRejectedTokenDisablesOnlyItsOwnDestination();
     void anUnreachableDestinationDoesNotStallTheOthers();
     void validationReportsPerDestination();
+    void anUnansweredTestIsNotARejection();
+    void repeatedlyUnreachableDoesNotDisableADestination();
     void enablingMidTrackAnnouncesWhatIsPlaying();
     void adoptingTheSameTrackTwiceAnnouncesItOnce();
 };
@@ -186,6 +188,43 @@ void ListenBrainzMultiDestinationTest::anUnreachableDestinationDoesNotStallTheOt
     QCOMPARE(store.pendingCount(downId), 2);
 }
 
+// Three minutes of an unreachable server used to turn a destination off for
+// good, and a destination that is off is not owed the listens that follow. An
+// outage must cost delivery time, never history.
+void ListenBrainzMultiDestinationTest::repeatedlyUnreachableDoesNotDisableADestination()
+{
+    QTemporaryDir dir;
+    const QString historyPath = dir.filePath(QStringLiteral("history.sqlite"));
+
+    FakeServer closed(200);
+    QVERIFY(closed.listen(QHostAddress::LocalHost));
+    const QString closedRoot = closed.apiRoot();
+    closed.close();
+
+    ScrobbleDestinationSet destinations;
+    const QString downId = destinations.addCustom(QStringLiteral("Down"), closedRoot, true);
+    {
+        ListenHistoryStore store(historyPath);
+        store.recordListen(makeTrack(QStringLiteral("One")), 1000, {downId});
+    }
+
+    ListenBrainzHub hub;
+    QSignalSpy failed(&hub, &ListenBrainzHub::submissionFailed);
+    QSignalSpy disabled(&hub, &ListenBrainzHub::disabledAfterFailures);
+    hub.configure(
+        destinations, [](const QString &) { return QStringLiteral("token"); }, true, historyPath);
+
+    // Well past the three answered failures that do disable a destination.
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        QTRY_VERIFY_WITH_TIMEOUT(failed.count() >= attempt + 1, 10000);
+        hub.uploadBacklog(downId);
+    }
+
+    QCOMPARE(disabled.count(), 0);
+    ListenHistoryStore store(historyPath);
+    QCOMPARE(store.pendingCount(downId), 1);
+}
+
 void ListenBrainzMultiDestinationTest::validationReportsPerDestination()
 {
     QTemporaryDir dir;
@@ -207,16 +246,35 @@ void ListenBrainzMultiDestinationTest::validationReportsPerDestination()
     QTRY_COMPARE_WITH_TIMEOUT(validated.count(), 2, 10000);
 
     // Each answer carries back the request it belongs to, alongside its verdict.
-    QHash<QString, bool> results;
+    QHash<QString, ScrobbleTestResult::Outcome> results;
     QHash<QString, quint64> requests;
     for (const QList<QVariant> &call : validated) {
-        results.insert(call.at(0).toString(), call.at(2).toBool());
+        results.insert(call.at(0).toString(), call.at(2).value<ScrobbleTestResult>().outcome);
         requests.insert(call.at(0).toString(), call.at(1).toULongLong());
     }
-    QCOMPARE(results.value(acceptedId), true);
-    QCOMPARE(results.value(rejectedId), false);
+    QCOMPARE(results.value(acceptedId), ScrobbleTestResult::Outcome::Accepted);
+    QCOMPARE(results.value(rejectedId), ScrobbleTestResult::Outcome::Rejected);
     QCOMPARE(requests.value(acceptedId), 1u);
     QCOMPARE(requests.value(rejectedId), 2u);
+}
+
+// A server that never answers is not a server that refused the token: the two
+// call for different fixes, and only one of them is the user's credentials.
+void ListenBrainzMultiDestinationTest::anUnansweredTestIsNotARejection()
+{
+    FakeServer down(200);
+    QVERIFY(down.listen(QHostAddress::LocalHost));
+    const QString downRoot = down.apiRoot();
+    down.close();
+
+    ListenBrainzHub hub;
+    QSignalSpy validated(&hub, &ListenBrainzHub::tokenValidated);
+    hub.validateToken(QStringLiteral("c144daa3-617d-497d-82c4-f22d915aa354"), 1, downRoot, QStringLiteral("token"));
+
+    QTRY_COMPARE_WITH_TIMEOUT(validated.count(), 1, 10000);
+    const ScrobbleTestResult result = validated.first().at(2).value<ScrobbleTestResult>();
+    QCOMPARE(result.outcome, ScrobbleTestResult::Outcome::Unanswered);
+    QVERIFY(!result.error.isEmpty());
 }
 
 void ListenBrainzMultiDestinationTest::enablingMidTrackAnnouncesWhatIsPlaying()

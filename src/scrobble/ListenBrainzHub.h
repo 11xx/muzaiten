@@ -57,7 +57,7 @@ signals:
     void submissionFailed(QString destinationId, QString message);
     void backlogProcessed(QString destinationId, int sentCount, int skippedCount, int remainingCount);
     void disabledAfterFailures(QString destinationId, QString message);
-    void tokenValidated(QString destinationId, quint64 requestId, bool valid, QString username);
+    void tokenValidated(QString destinationId, quint64 requestId, ScrobbleTestResult result);
 
 private:
     ListenBrainzScrobbler *createScrobbler();

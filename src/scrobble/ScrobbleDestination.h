@@ -1,9 +1,30 @@
 #pragma once
 
 #include <QList>
+#include <QMetaType>
 #include <QString>
 
 #include <functional>
+
+// What testing a destination's address and credentials found.
+//
+// A test that never got an answer is its own outcome, not a rejection: nothing
+// about the token can be read from a request that failed to reach the service,
+// and reporting one as the other sends the user hunting for a credential that
+// was never in question.
+struct ScrobbleTestResult {
+    enum class Outcome {
+        Accepted,      // the service answered and accepted the credentials
+        Rejected,      // the service answered and refused them
+        Unanswered,    // no verdict arrived, so the credentials were never judged
+    };
+
+    Outcome outcome = Outcome::Unanswered;
+    QString userName;   // who the credentials belong to, when accepted
+    QString error;      // what stopped the test, when unanswered
+};
+
+Q_DECLARE_METATYPE(ScrobbleTestResult)
 
 // One place a listen can be delivered to. Two destinations are reserved and
 // always present: Last.fm and the official ListenBrainz service. Beyond those,

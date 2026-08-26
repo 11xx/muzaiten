@@ -13,6 +13,17 @@
 - A listen owed to a custom ListenBrainz-compatible destination is delivered as
   soon as it is recorded, like the official one, rather than waiting for that
   destination's next retry sweep when official ListenBrainz is switched off.
+- A destination that cannot be reached is no longer reported as one that
+  rejected your token. `Test` now distinguishes three outcomes: the token was
+  accepted, the server refused it, or no answer arrived at all, in which case
+  the status says so and the underlying error is on hover. A connection
+  failure used to read "Token rejected", pointing at a credential that was
+  never in question.
+- A run of unreachable submissions no longer turns a destination off. Only
+  failures the service actually answered count toward that, for Last.fm as
+  well: a destination that is off is not owed the listens that follow it, so a
+  few minutes of network trouble used to cost history rather than merely delay
+  it.
 
 ## [2026.08.19]
 

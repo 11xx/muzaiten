@@ -31,8 +31,21 @@ private slots:
     void anEarlierTestReplyCannotClaimALaterTest();
     void testIdsAreNotReusedByALaterPanel();
     void everyCompletedEditAsksToBeApplied();
+    void aServerThatNeverAnsweredIsNotReportedAsARejection();
 
 private:
+    static ScrobbleTestResult accepted(const QString &userName)
+    {
+        return {ScrobbleTestResult::Outcome::Accepted, userName, {}};
+    }
+
+    static ScrobbleTestResult rejected() { return {ScrobbleTestResult::Outcome::Rejected, {}, {}}; }
+
+    static ScrobbleTestResult unanswered(const QString &error)
+    {
+        return {ScrobbleTestResult::Outcome::Unanswered, {}, error};
+    }
+
     QHash<QString, QString> m_tokens;
     ScrobbleDestinationSet m_saved;
     int m_saveCount = 0;
@@ -355,13 +368,13 @@ void ScrobblersPanelTest::aTestResultForChangedCredentialsIsIgnored()
     // The token changes while the request is in flight; the reply describes the
     // token that was sent, not the one now on screen.
     type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("second"));
-    panel->reportTestResult(id, issued.last(), true, QStringLiteral("somebody"));
+    panel->reportTestResult(id, issued.last(), accepted(QStringLiteral("somebody")));
     QVERIFY(status->text() != QStringLiteral("Connected as somebody"));
 
     // A reply to a test of what is actually on screen is still this row's.
     panel->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
     QCOMPARE(issued.size(), 2);
-    panel->reportTestResult(id, issued.last(), true, QStringLiteral("lobo"));
+    panel->reportTestResult(id, issued.last(), accepted(QStringLiteral("lobo")));
     QCOMPARE(status->text(), QStringLiteral("Connected as lobo"));
 }
 
@@ -388,11 +401,11 @@ void ScrobblersPanelTest::anEarlierTestReplyCannotClaimALaterTest()
 
     auto *status = panel->findChild<QLabel *>(id + QStringLiteral(".status"));
     // The first request comes back rejected, having met a transient failure.
-    panel->reportTestResult(id, issued.at(0), false, QString());
+    panel->reportTestResult(id, issued.at(0), rejected());
     QCOMPARE(status->text(), QStringLiteral("Testing…"));
 
     // The second is the one the row asked last, and it is what it reports.
-    panel->reportTestResult(id, issued.at(1), true, QStringLiteral("lobo"));
+    panel->reportTestResult(id, issued.at(1), accepted(QStringLiteral("lobo")));
     QCOMPARE(status->text(), QStringLiteral("Connected as lobo"));
 }
 
@@ -420,7 +433,7 @@ void ScrobblersPanelTest::testIdsAreNotReusedByALaterPanel()
 
     // The reply owed to the closed panel cannot answer this one's test.
     auto *status = second->findChild<QLabel *>(id + QStringLiteral(".status"));
-    second->reportTestResult(id, issued.at(0), true, QStringLiteral("somebody"));
+    second->reportTestResult(id, issued.at(0), accepted(QStringLiteral("somebody")));
     QCOMPARE(status->text(), QStringLiteral("Testing…"));
 }
 
@@ -445,6 +458,31 @@ void ScrobblersPanelTest::everyCompletedEditAsksToBeApplied()
     applied = 0;
     panel->findChild<ToggleSwitch *>(id + QStringLiteral(".enabled"))->click();
     QVERIFY(applied > 0);
+}
+
+// A test the server never answered says nothing about the token. Reporting it
+// as a rejection sends the user looking for a credential that was never in
+// question.
+void ScrobblersPanelTest::aServerThatNeverAnsweredIsNotReportedAsARejection()
+{
+    ScrobbleDestinationSet destinations = ScrobbleDestinationConfig::defaults();
+    const QString id = destinations.addCustom(QStringLiteral("Koito"), QStringLiteral("https://koito.example/1"), false);
+
+    QList<quint64> issued;
+    m_callbacks.testDestination = [&issued](const QString &, quint64 requestId, const QString &, const QString &) {
+        issued << requestId;
+    };
+
+    const auto panel = makePanel(destinations);
+    type(panel->findChild<QLineEdit *>(id + QStringLiteral(".token")), QStringLiteral("token"));
+    panel->findChild<QPushButton *>(id + QStringLiteral(".test"))->click();
+    QCOMPARE(issued.size(), 1);
+
+    panel->reportTestResult(id, issued.last(), unanswered(QStringLiteral("Connection refused")));
+
+    auto *status = panel->findChild<QLabel *>(id + QStringLiteral(".status"));
+    QCOMPARE(status->text(), QStringLiteral("No answer from the server"));
+    QVERIFY(status->toolTip().contains(QStringLiteral("Connection refused")));
 }
 
 QTEST_MAIN(ScrobblersPanelTest)

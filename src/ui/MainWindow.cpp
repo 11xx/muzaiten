@@ -987,7 +987,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                 QMessageBox::warning(this, scrobbleDestinationName(destinationId), message);
             });
     connect(m_listenBrainzHub, &ListenBrainzHub::tokenValidated, this,
-            [this](const QString &destinationId, quint64, bool valid, const QString &username) {
+            [this](const QString &destinationId, quint64, const ScrobbleTestResult &result) {
                 // While the panel is open it reports each result on the row it
                 // belongs to, and it alone knows which replies are still
                 // current. Announcing them here as well would put a superseded
@@ -996,9 +996,20 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
                     return;
                 }
                 const QString name = scrobbleDestinationName(destinationId);
-                statusBar()->showMessage(valid ? QStringLiteral("%1 token valid: connected as %2").arg(name, username)
-                                               : QStringLiteral("%1 token is invalid.").arg(name),
-                                         8000);
+                QString message;
+                switch (result.outcome) {
+                case ScrobbleTestResult::Outcome::Accepted:
+                    message = QStringLiteral("%1 token valid: connected as %2").arg(name, result.userName);
+                    break;
+                case ScrobbleTestResult::Outcome::Rejected:
+                    message = QStringLiteral("%1 token is invalid.").arg(name);
+                    break;
+                case ScrobbleTestResult::Outcome::Unanswered:
+                    message = QStringLiteral("%1 did not answer, so its token was not checked. %2")
+                                  .arg(name, result.error);
+                    break;
+                }
+                statusBar()->showMessage(message, 8000);
             });
 
     connect(m_lastFmScrobbler, &LastFmScrobbler::submissionFailed, this, [this](const QString &message) {

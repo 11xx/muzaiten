@@ -323,6 +323,9 @@ void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind ki
     const QString statusText = status > 0 ? QString::number(status) : QStringLiteral("network");
     const QString transportMessage = QStringLiteral("Last.fm request failed (%1): %2").arg(statusText, errorString);
     const bool networkError = reply->error() != QNetworkReply::NoError && !response.parsed;
+    // No HTTP status means the request never reached Last.fm: the connection
+    // failed, timed out, or was closed before an answer.
+    const bool answered = status > 0;
 
     if (kind == RequestKind::Scrobble) {
         m_scrobbleSubmissionInFlight = false;
@@ -341,7 +344,7 @@ void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind ki
         handleNowPlayingResponse(response, transportMessage);
         break;
     case RequestKind::Scrobble:
-        handleScrobbleResponse(response, networkError, transportMessage, submittedIds);
+        handleScrobbleResponse(response, networkError, answered, transportMessage, submittedIds);
         break;
     }
 }
@@ -423,6 +426,7 @@ void LastFmScrobbler::handleNowPlayingResponse(const LastFmApi::Response &respon
 
 void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response,
                                              bool networkError,
+                                             bool answered,
                                              const QString &transportMessage,
                                              const QList<qint64> &submittedIds)
 {
@@ -443,8 +447,15 @@ void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response
 
     switch (action) {
     case LastFmApi::FailureAction::RetryLater:
-        ++m_consecutiveFailures;
         emit submissionFailed(message);
+        // A submission Last.fm never saw says nothing about this scrobbler, so
+        // it does not count toward turning it off. Disabling would leave later
+        // listens unowed to Last.fm, costing history an outage of a few minutes
+        // would otherwise only have delayed.
+        if (!answered) {
+            return;
+        }
+        ++m_consecutiveFailures;
         if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
             disableScrobbling(QStringLiteral("Last.fm submissions failed %1 times. Scrobbling has been disabled.")
                                   .arg(maxConsecutiveSubmissionFailures));

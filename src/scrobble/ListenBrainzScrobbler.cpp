@@ -194,11 +194,35 @@ void ListenBrainzScrobbler::validateToken(const QString &destinationId, quint64 
 
     QNetworkReply *reply = m_network->get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply, destinationId, requestId]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QJsonObject body = QJsonDocument::fromJson(reply->isOpen() ? reply->readAll() : QByteArray()).object();
-        const bool valid = reply->error() == QNetworkReply::NoError && body.value(QStringLiteral("valid")).toBool();
-        emit tokenValidated(destinationId, requestId, valid, body.value(QStringLiteral("user_name")).toString());
+        emit tokenValidated(destinationId, requestId, testResult(status, reply->errorString(), body));
         reply->deleteLater();
     });
+}
+
+ScrobbleTestResult ListenBrainzScrobbler::testResult(int status, const QString &errorString, const QJsonObject &body)
+{
+    ScrobbleTestResult result;
+    // No HTTP status means no answer: the connection failed, timed out, or was
+    // closed before the service said anything. The token was never judged.
+    if (status <= 0) {
+        result.error = QStringLiteral("Could not reach the server: %1").arg(errorString);
+        return result;
+    }
+    if (status == 200 && body.value(QStringLiteral("valid")).toBool()) {
+        result.outcome = ScrobbleTestResult::Outcome::Accepted;
+        result.userName = body.value(QStringLiteral("user_name")).toString();
+        return result;
+    }
+    if (status == 200 || status == 401 || status == 403) {
+        result.outcome = ScrobbleTestResult::Outcome::Rejected;
+        return result;
+    }
+    // The service answered, but not about the token: a 500 or a proxy's error
+    // page says nothing about the credentials either.
+    result.error = QStringLiteral("The server answered %1.").arg(status);
+    return result;
 }
 
 void ListenBrainzScrobbler::submitPlayingNow(const Track &track)
@@ -356,7 +380,12 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
         // 'playing now' updates are best-effort (a transient 429/500 on a
         // throttled ping must never disable scrobbling) — this mirrors
         // LastFmScrobbler, where only scrobble failures touch the counter.
-        if (kind == SubmissionKind::Listen) {
+        //
+        // A submission that never reached the service does not count either.
+        // Turning a destination off leaves later listens unowed to it, so an
+        // outage of a few minutes would cost the user history that the backlog
+        // would otherwise have delivered once the server came back.
+        if (kind == SubmissionKind::Listen && status > 0) {
             ++m_consecutiveFailures;
             if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
                 disableScrobbling(QStringLiteral("%1 submissions failed %2 times. Scrobbling to it has been disabled.")

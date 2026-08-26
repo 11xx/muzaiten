@@ -2,6 +2,7 @@
 
 #include "core/Track.h"
 #include "scrobble/ListenHistoryStore.h"
+#include "scrobble/ScrobbleDestination.h"
 
 #include <QJsonObject>
 #include <QList>
@@ -67,7 +68,7 @@ signals:
     void submissionFailed(QString destinationId, QString message);
     void backlogProcessed(QString destinationId, int sentCount, int skippedCount, int remainingCount);
     void disabledAfterFailures(QString destinationId, QString message);
-    void tokenValidated(QString destinationId, quint64 requestId, bool valid, QString username);
+    void tokenValidated(QString destinationId, quint64 requestId, ScrobbleTestResult result);
 
 private slots:
     void submitPendingTrackStartPlayingNow();
@@ -87,6 +88,9 @@ private:
     QJsonObject additionalInfoObject(const Track &track) const;
     bool hasMinimumMetadata(const Track &track, bool warn = true) const;
     void handleSubmissionFinished(QNetworkReply *reply, SubmissionKind kind, QList<qint64> submittedIds);
+    // Reads a validate-token reply. A status of 0 means no answer arrived, which
+    // is an outcome of its own rather than a verdict on the token.
+    static ScrobbleTestResult testResult(int status, const QString &errorString, const QJsonObject &body);
     void disableScrobbling(const QString &message);
 
     QNetworkAccessManager *m_network = nullptr;

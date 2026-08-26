@@ -81,7 +81,7 @@ signals:
 
 public slots:
     // Result of a `testDestination` call, routed back by the owner.
-    void reportTestResult(const QString &destinationId, quint64 requestId, bool valid, const QString &username);
+    void reportTestResult(const QString &destinationId, quint64 requestId, const ScrobbleTestResult &result);
 
     // A destination's enabled state changed outside this panel, which happens
     // when Last.fm authenticates or disables itself while the window is open.
