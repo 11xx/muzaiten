@@ -1244,10 +1244,10 @@ void PlayerBar::setExplorerOptionsVisible(bool visible)
     }
 }
 
-void PlayerBar::setQueueViewLayoutActive(bool active)
+void PlayerBar::setAlbumArtVisible(bool visible)
 {
     if (m_albumArt != nullptr) {
-        m_albumArt->setVisible(active);
+        m_albumArt->setVisible(visible);
     }
 }
 

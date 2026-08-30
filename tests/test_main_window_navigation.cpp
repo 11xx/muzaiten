@@ -11,6 +11,7 @@
 #include "player/PlayerCore.h"
 #include "reco/RadioSession.h"
 #include "scrobble/PlayEventRecorder.h"
+#include "ui/AlbumArtView.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
 #include "ui/FileExplorerView.h"
@@ -148,6 +149,25 @@ private slots:
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);
+    }
+
+    void playerBarAlbumArtShowsWhereverTheSidebarDoesNot()
+    {
+        // The bar's own artwork is the only artwork a view without the right
+        // sidebar has. isHidden(), not isVisible(): the window is never shown,
+        // so nothing here is visible in the screen sense.
+        AppCore core;
+        MainWindow window(&core);
+
+        for (const MainView view : {MainView::LibraryPanels, MainView::LibraryMusicExplorer}) {
+            window.switchMainView(view);
+            QVERIFY(window.m_playerBar->m_albumArt->isHidden());
+        }
+        for (const MainView view : {MainView::LibraryFileExplorer, MainView::FreeRoamFileExplorer,
+                                    MainView::Search, MainView::Queue, MainView::Playlist}) {
+            window.switchMainView(view);
+            QVERIFY(!window.m_playerBar->m_albumArt->isHidden());
+        }
     }
 
     void radioUiStateSurvivesWindowRebuild()

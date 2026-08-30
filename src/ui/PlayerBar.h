@@ -36,7 +36,10 @@ public:
     void setSemanticAnalysisEnabled(bool enabled);
     void setShowGuessedPlaceholders(bool show);
     void setExplorerOptionsVisible(bool visible);
-    void setQueueViewLayoutActive(bool active);
+    // The small album art sits in the player bar on every screen that does not
+    // already show artwork of its own; the library views show it in the right
+    // sidebar, so the bar leaves it out there.
+    void setAlbumArtVisible(bool visible);
     void setPlaylistViewActionsActive(bool active);
     // Disabled while the queue is mirroring a playlist: merging a saved queue
     // there is almost never intended (it would silently append to the playlist).
