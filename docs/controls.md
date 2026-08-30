@@ -16,6 +16,10 @@
 
 Keybindings are customizable at `Settings > Keybinds…`.
 
+The player bar carries the current track's album art on every view except the
+library ones, where the right sidebar shows it at full width. Right-click the
+art for **Find in library** and **Open containing directory**.
+
 ## Context menus
 
 Every track surface (library table, queue, playlists, search results,

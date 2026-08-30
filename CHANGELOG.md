@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The player bar shows the current track's album art on every view, not only
+  the queue. The library views still leave it out, since the right sidebar
+  already shows the artwork there.
+
 ### Fixed
 
 - Enabling a scrobbling destination in the middle of a track announces that

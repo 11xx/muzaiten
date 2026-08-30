@@ -2815,11 +2815,23 @@ PlaylistView *MainWindow::ensurePlaylistView()
     return m_playlistView;
 }
 
+namespace {
+
+// The library views carry the right sidebar, which shows the current track's
+// artwork at full width. Every other view has none, so the player bar shows
+// its own small copy there.
+bool showsSidebarAlbumArt(MainView view)
+{
+    return view == MainView::LibraryPanels || view == MainView::LibraryMusicExplorer;
+}
+
+}   // namespace
+
 void MainWindow::switchMainView(MainView view)
 {
     m_mainView = view;
     m_playerBar->setExplorerOptionsVisible(view == MainView::LibraryFileExplorer || view == MainView::FreeRoamFileExplorer);
-    m_playerBar->setQueueViewLayoutActive(view == MainView::Queue);
+    m_playerBar->setAlbumArtVisible(!showsSidebarAlbumArt(view));
     m_playerBar->setPlaylistViewActionsActive(view == MainView::Playlist);
     if (view == MainView::LibraryPanels) {
         m_libraryCenterStack->setCurrentWidget(m_centerSplitter);
