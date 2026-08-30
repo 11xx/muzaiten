@@ -1859,12 +1859,9 @@ void AppCore::installRadioProvider(bool markPicksAsRadio)
         const QVector<Track> picks = m_radioSession->nextTracks(count, excludePaths, [this, blockedPaths](const QString &path) {
             return resolveRadioPick(path, blockedPaths);
         });
-        if (!picks.isEmpty() || m_radioSession->mutationGeneration() != generationBefore) {
+        const bool mutated = !picks.isEmpty() || m_radioSession->mutationGeneration() != generationBefore;
+        if (mutated) {
             ++m_radioSessionRevision;
-            // A speculative mutation would otherwise reach disk only when some
-            // later trigger happened to save, so a restart could resume from
-            // constraint state the session had already left behind.
-            saveRadioSessionState();
         }
         recordRadioPicks(picks);
         if (markPicksAsRadio) {
@@ -1873,6 +1870,15 @@ void AppCore::installRadioProvider(bool markPicksAsRadio)
                     m_radioPickPaths.insert(track.path);
                 }
             }
+        }
+        if (mutated) {
+            // After the picks are marked, since the saved document carries the
+            // pick set: saving earlier would persist a set one batch behind and
+            // a restart would not recognize the newest picks as radio's. A
+            // speculative mutation would otherwise reach disk only when some
+            // later trigger happened to save, so a restart could resume from
+            // constraint state the session had already left behind.
+            saveRadioSessionState();
         }
         return picks;
     });

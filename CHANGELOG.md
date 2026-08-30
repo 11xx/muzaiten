@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- A radio batch's picks are recorded in the session state that the same batch
+  saves, instead of the set as it stood one batch earlier. A restart that
+  landed in that window resumed with the newest picks unrecognized as radio's
+  own, treating them as tracks you had queued by hand.
 - Enabling a scrobbling destination in the middle of a track announces that
   track as playing now, instead of staying silent on the service until the next
   track starts. This covers a destination that was just enabled, one that was
