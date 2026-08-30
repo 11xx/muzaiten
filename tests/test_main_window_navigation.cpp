@@ -1373,6 +1373,73 @@ private slots:
         core.stopRadio();
     }
 
+    void persistedRadioStateNamesThePicksTheBatchJustReturned()
+    {
+        // The saved document carries the set of paths radio itself chose, and a
+        // restart recognizes its own picks by nothing else. A save taken before
+        // the batch's picks are marked would name the set as it stood one batch
+        // ago, and the newest picks would come back as if the user had queued
+        // them.
+        QTemporaryDir libraryRoot;
+        QVERIFY(libraryRoot.isValid());
+        const auto makeTrack = [&libraryRoot](const QString &filename, const QString &artist) {
+            Track track;
+            track.path = libraryRoot.filePath(filename);
+            track.parentDir = libraryRoot.path();
+            track.filename = filename;
+            track.title = filename;
+            track.artistName = artist;
+            track.albumArtistName = artist;
+            track.albumTitle = QStringLiteral("Radio album");
+            track.durationMs = 180'000;
+            track.fileSize = 44;
+            track.fileMtime = 1;
+            track.codec = QStringLiteral("wav");
+            return track;
+        };
+        const Track current = makeTrack(QStringLiteral("current.wav"), QStringLiteral("Current"));
+        const Track candidateTrack = makeTrack(QStringLiteral("candidate.wav"), QStringLiteral("Candidate"));
+        QVERIFY(writeSilentWav(current.path));
+        // The pick's file is deliberately absent, so playback of it never
+        // starts and no track-start save follows to paper over the order the
+        // provider itself writes in.
+
+        AppCore core;
+        for (const Track &track : {current, candidateTrack}) {
+            QVERIFY2(core.database()->upsertTrack(track), qPrintable(core.database()->lastError()));
+        }
+        core.player()->resetQueue({current}, 0);
+
+        TrackScorer::Candidate candidate;
+        candidate.path = candidateTrack.path;
+        candidate.songKey = QStringLiteral("song:candidate");
+        candidate.artistFolded = QStringLiteral("candidate");
+        candidate.albumKey = QStringLiteral("candidate-album");
+        core.m_radioSession = std::make_unique<RadioSession>(
+            QVector<TrackScorer::Candidate>{candidate}, QHash<QString, TrackScorer::Affinity>{},
+            QHash<QString, double>{}, 30, QDateTime::currentSecsSinceEpoch());
+        core.m_radioSessionKind = QStringLiteral("seeded");
+        core.m_radioSessionSeedPath = current.path;
+        core.m_radioSessionSeedPaths = {current.path};
+        core.player()->setRadioActive(true);
+        core.installRadioProvider(/*markPicksAsRadio=*/true);
+
+        core.player()->next();
+        QTRY_VERIFY_WITH_TIMEOUT(core.player()->queue().size() == 2, 10000);
+        QCOMPARE(core.player()->queue().last().path, candidateTrack.path);
+
+        const QJsonObject saved = QJsonDocument::fromJson(
+            core.settings()->setting(QStringLiteral("radio.session.state")).toUtf8()).object();
+        QStringList persistedPicks;
+        for (const QJsonValue &value : saved.value(QStringLiteral("radioPickPaths")).toArray()) {
+            persistedPicks.push_back(value.toString());
+        }
+        QVERIFY2(persistedPicks.contains(candidateTrack.path),
+                 qPrintable(QStringLiteral("saved pick set was %1").arg(persistedPicks.join(QLatin1Char(',')))));
+        core.stopRadio();
+        core.player()->stop();
+    }
+
     void radioPickRestoreUsesExplicitIdentity()
     {
         AppCore core;

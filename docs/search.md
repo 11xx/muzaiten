@@ -64,6 +64,11 @@ file is harmless — it rebuilds on next open.
 | `year:>=2000` | Release year ≥ 2000 |
 | `dur:>3:30` | Duration > 3 min 30 sec |
 
+The codec is recorded when a file is scanned. A library scanned before codecs
+were read separately from extensions still stores the extension there, so
+`codec:alac` finds nothing until `Library > Force full rescan` re-reads those
+files.
+
 Combine freely: `miles ext:flac rating:>=80 !live`
 
 ## Ranking and exclusions

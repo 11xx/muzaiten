@@ -51,7 +51,6 @@ QString extensionOf(const Track &track)
     return dot >= 0 ? name.mid(dot + 1).toLower() : QString();
 }
 
-
 constexpr HeaderViewStyle kTableHeaderStyle{
     HeaderLabelStyle{QFont::Normal, true, HeaderLabelTone::Muted, 0.20},
     false,
