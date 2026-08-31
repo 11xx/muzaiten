@@ -101,8 +101,16 @@ configure:
 		-DMUZAITEN_LASTFM_API_KEY="$(MUZAITEN_LASTFM_API_KEY)" \
 		-DMUZAITEN_LASTFM_SHARED_SECRET="$(MUZAITEN_LASTFM_SHARED_SECRET)"
 
+# Configure leaves a marker behind when the compiler or Qt changed under an
+# existing build directory; its objects predate the new headers, so only a
+# from-scratch recompile is trustworthy.
 build: configure
-	$(CMAKE) --build $(BUILD_DIR)
+	@if [ -f "$(BUILD_DIR)/toolchain-changed.stamp" ]; then \
+		rm -f "$(BUILD_DIR)/toolchain-changed.stamp"; \
+		$(CMAKE) --build $(BUILD_DIR) --clean-first; \
+	else \
+		$(CMAKE) --build $(BUILD_DIR); \
+	fi
 
 rebuild: clean build
 

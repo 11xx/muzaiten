@@ -116,6 +116,11 @@ make dev          # build + run against an isolated ./dev-state profile
 ```
 
 Plain CMake works too: `cmake -S . -B build -G Ninja && cmake --build build`.
+After a compiler or Qt upgrade, `make build` recompiles the build directory
+from scratch on its own; driving CMake directly needs
+`cmake --build build --clean-first` instead, since a package manager can
+install new headers that are older than the objects built from the previous
+ones, and a build tool comparing timestamps sees nothing to redo.
 
 ## Quick orientation
 
