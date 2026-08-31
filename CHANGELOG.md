@@ -10,6 +10,12 @@
 
 ### Fixed
 
+- `make build` recompiles the build directory from scratch after a compiler
+  or Qt upgrade. Package managers install headers carrying their upstream
+  build time, so new headers can be older than the objects built from the
+  previous ones; nothing recompiled, the stale objects linked against the new
+  libraries, and the binary crashed on startup inside code that had not
+  changed.
 - A radio batch's picks are recorded in the session state that the same batch
   saves, instead of the set as it stood one batch earlier. A restart that
   landed in that window resumed with the newest picks unrecognized as radio's

@@ -29,6 +29,29 @@ check_pie_supported()
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS Concurrent Core DBus Gui Multimedia Network Widgets Sql Test)
 find_package(PkgConfig REQUIRED)
+
+# Object files carry the ABI of the compiler and the Qt headers they saw, but a
+# build tool decides what to recompile by comparing timestamps, and a package
+# manager restores headers with their upstream build time. Upgrade Qt or the
+# compiler and the new headers can be *older* than the objects built from the
+# previous ones, so nothing recompiles, the stale objects link against the new
+# libraries, and the result crashes inside untouched code. Recording the
+# toolchain each configure turns that into a detectable fact: the marker file
+# tells the build wrapper to recompile from scratch, and CMake reruns here
+# whenever it reconfigures.
+set(MUZAITEN_TOOLCHAIN_ID
+    "${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}-Qt${Qt6_VERSION}")
+set(MUZAITEN_TOOLCHAIN_MARKER "${CMAKE_BINARY_DIR}/toolchain-changed.stamp")
+if(DEFINED CACHE{MUZAITEN_TOOLCHAIN_CONFIGURED}
+   AND NOT "$CACHE{MUZAITEN_TOOLCHAIN_CONFIGURED}" STREQUAL "${MUZAITEN_TOOLCHAIN_ID}")
+    message(STATUS
+        "Toolchain changed ($CACHE{MUZAITEN_TOOLCHAIN_CONFIGURED} -> ${MUZAITEN_TOOLCHAIN_ID}); "
+        "objects in ${CMAKE_BINARY_DIR} are stale and will be rebuilt from scratch.")
+    file(WRITE "${MUZAITEN_TOOLCHAIN_MARKER}" "${MUZAITEN_TOOLCHAIN_ID}\n")
+endif()
+set(MUZAITEN_TOOLCHAIN_CONFIGURED "${MUZAITEN_TOOLCHAIN_ID}" CACHE INTERNAL
+    "Compiler and Qt version the objects in this build directory were compiled against")
+
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 pkg_check_modules(Chromaprint REQUIRED IMPORTED_TARGET libchromaprint)
