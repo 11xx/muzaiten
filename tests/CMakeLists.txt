@@ -205,6 +205,15 @@ target_include_directories(bench_radio_context PRIVATE ../src)
 target_link_libraries(bench_radio_context PRIVATE muzaiten_app muzaiten_ui_app)
 target_compile_features(bench_radio_context PRIVATE cxx_std_26)
 
+# Queue-state save benchmark. Built by default but not registered with CTest:
+# it times persisted-document writes, a product-decision artifact, not a gate.
+add_executable(bench_queue_state
+    bench_queue_state.cpp
+)
+target_include_directories(bench_queue_state PRIVATE ../src)
+target_link_libraries(bench_queue_state PRIVATE muzaiten_app muzaiten_ui_app)
+target_compile_features(bench_queue_state PRIVATE cxx_std_26)
+
 add_executable(test_features_refresh
     test_features_refresh.cpp
 )
