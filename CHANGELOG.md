@@ -4,6 +4,16 @@
 
 ### Changed
 
+- Playlist import matches a line whose artist credit is written differently
+  from the library's. When the artist and title phrases miss together, the
+  title alone anchors the search and a track is kept only if its credited
+  artist shares its names with the line's artist, ignoring join words such
+  as "&", "and", "feat." and "the": `Usher feat. Lil Jon & Ludacris - Yeah!`
+  finds a track tagged `Usher`, and `Simon and Garfunkel` finds `Simon &
+  Garfunkel`, both as confident picks instead of loose free-text guesses.
+  Copies that agree equally are still offered as a choice, a title hit whose
+  artist disagrees is not admitted, and **Exact only** leaves the tolerance
+  off.
 - Test targets link shared application static libraries instead of compiling
   application sources once per target. The target layout requires one
   `make rebuild` after pulling this build-system change.

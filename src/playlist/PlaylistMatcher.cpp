@@ -1,8 +1,10 @@
 #include "playlist/PlaylistMatcher.h"
 
 #include "search/SearchQuery.h"
+#include "search/fold/Fold.h"
 
 #include <QFileInfo>
+#include <QSet>
 #include <QStringList>
 
 #include <algorithm>
@@ -29,18 +31,79 @@ bool isStopWord(const QString &word)
     return stop.contains(word);
 }
 
+// Words that join or decorate an artist credit without naming anyone in it.
+// Symbols such as "&", "+" and "/" fall away as token separators.
+bool isJoinWord(const QString &word)
+{
+    static const QStringList join = {
+        QStringLiteral("and"), QStringLiteral("feat"), QStringLiteral("ft"),
+        QStringLiteral("featuring"), QStringLiteral("vs"), QStringLiteral("x"),
+        QStringLiteral("the"),
+    };
+    return join.contains(word);
+}
+
+// Identifying tokens of a folded artist credit: split at anything that is not a
+// letter or digit, drop join words. A credit made only of join words keeps them,
+// since a band called "The The" or "X" is still a name.
+QSet<QString> artistTokens(const QString &folded)
+{
+    QSet<QString> all;
+    QSet<QString> named;
+    QString token;
+    const auto flush = [&] {
+        if (token.isEmpty()) {
+            return;
+        }
+        all.insert(token);
+        if (!isJoinWord(token)) {
+            named.insert(token);
+        }
+        token.clear();
+    };
+    for (const QChar c : folded) {
+        if (c.isLetterOrNumber()) {
+            token.append(c);
+        } else {
+            flush();
+        }
+    }
+    flush();
+    return named.isEmpty() ? all : named;
+}
+
+// artistCreditsAgree on credits already folded like the index's norm fields.
+bool foldedCreditsAgree(const QString &foldedCredit, const QString &foldedOther)
+{
+    const QSet<QString> a = artistTokens(foldedCredit);
+    const QSet<QString> b = artistTokens(foldedOther);
+    if (a.isEmpty() || b.isEmpty()) {
+        return false;
+    }
+    return a.size() <= b.size() ? b.contains(a) : a.contains(b);
+}
+
+// A title:"…" phrase clause for the entry's title, or empty when there is no
+// title. With `stripNoise`, packaging tags are removed; without it the FULL title
+// is used so a real version discriminator ("(Full Mix)", "(Instrumental)") still
+// distinguishes copies. Quote the raw value and let SearchQuery::parse fold it
+// with the SAME Fold the index uses — folding both sides identically. (Do NOT
+// pre-run normalizeForMatch: it turns punctuation into spaces, so "Static-X"
+// would become "static x" and no longer phrase-match the index's "static-x".)
+QString titleClause(const ImportEntry &entry, bool stripNoise)
+{
+    const QString title = (stripNoise ? stripTitleNoise(entry.title) : entry.title).simplified();
+    if (title.isEmpty()) {
+        return {};
+    }
+    return QStringLiteral("title:%1").arg(Search::quoteFieldValue(title));
+}
+
 // Build a scoped query that matches the artist and title as whole PHRASES
 // (quoted field values), e.g. artist:"suni clay" title:"my hood". Phrase matching
 // is far more precise than AND-ing each word separately, which scatter-matched
 // unrelated tracks and produced spurious MultiMatch. The relaxed per-word fallback
 // (relaxedQueryString) still provides recall when a phrase is too strict.
-// Build a scoped artist+title phrase query. With `stripNoise`, packaging tags are
-// removed from the title; without it the FULL title is used so a real version
-// discriminator ("(Full Mix)", "(Instrumental)") still distinguishes copies.
-// Quote the raw values and let SearchQuery::parse fold them with the SAME Fold the
-// index uses — folding both sides identically. (Do NOT pre-run normalizeForMatch:
-// it turns punctuation into spaces, so "Static-X" would become "static x" and no
-// longer phrase-match the index's "static-x".)
 QString scopedQueryString(const ImportEntry &entry, bool stripNoise)
 {
     QStringList parts;
@@ -48,11 +111,26 @@ QString scopedQueryString(const ImportEntry &entry, bool stripNoise)
     if (!artist.isEmpty()) {
         parts.append(QStringLiteral("artist:%1").arg(Search::quoteFieldValue(artist)));
     }
-    const QString title = (stripNoise ? stripTitleNoise(entry.title) : entry.title).simplified();
+    const QString title = titleClause(entry, stripNoise);
     if (!title.isEmpty()) {
-        parts.append(QStringLiteral("title:%1").arg(Search::quoteFieldValue(title)));
+        parts.append(title);
     }
     return parts.join(QLatin1Char(' '));
+}
+
+// The full title first so a version discriminator like "(Full Mix)" still picks
+// the right copy, then the noise-stripped title to shed packaging junk. Empty
+// clauses are left out; a duplicate (nothing to strip) is listed once.
+QStringList queryVariants(const ImportEntry &entry, QString (*build)(const ImportEntry &, bool))
+{
+    QStringList variants;
+    for (const bool stripNoise : {false, true}) {
+        const QString query = build(entry, stripNoise);
+        if (!query.isEmpty() && !variants.contains(query)) {
+            variants.append(query);
+        }
+    }
+    return variants;
 }
 
 // Relaxed fallback: every word as a free term across the whole haystack.
@@ -93,14 +171,38 @@ QVector<ScoredResult> matchByPath(const SearchIndex &index, const QString &needl
     return index.match(query, /*fuzzyMode=*/false);
 }
 
-// Fraction of a candidate's title+artist length the query plausibly explains.
-// Used to reject fuzzy "magnet" candidates whose long fields dwarf a short query.
-double coverageRatio(const ScoredResult &hit, const ImportEntry &entry)
+// How a result list was found: its base confidence and which guards apply.
+struct Tier {
+    int confidence;   // base confidence for a hit found this way
+    bool fuzzy;       // fuzzy hits pass the magnet guard; exact-substring hits are trusted
+    bool titleOnly;   // the query addressed the title alone, so coverage judges the title alone
+};
+
+Tier scopedTier(bool fuzzy)
 {
-    const QString querySignal =
-        normalizeForMatch(entry.artist + QLatin1Char(' ') + stripTitleNoise(entry.title))
-            .remove(QLatin1Char(' '));
-    const qsizetype candSignal = hit.rec.normTitle.size() + hit.rec.normArtist.size();
+    return {fuzzy ? kConfidenceScopedFuzzy : kConfidenceScopedExact, fuzzy, /*titleOnly=*/false};
+}
+
+Tier titleAnchoredTier(bool fuzzy)
+{
+    return {fuzzy ? kConfidenceTitleAnchoredFuzzy : kConfidenceTitleAnchoredExact, fuzzy,
+            /*titleOnly=*/true};
+}
+
+constexpr Tier kRelaxedTier{kConfidenceRelaxed, /*fuzzy=*/true, /*titleOnly=*/false};
+
+// Fraction of the candidate's queried-field length the query plausibly explains.
+// Used to reject fuzzy "magnet" candidates whose long fields dwarf a short query.
+// Only the fields the query addressed count: a title-only query is judged against
+// the title, so a long artist credit that was verified separately cannot sink it.
+double coverageRatio(const ScoredResult &hit, const ImportEntry &entry, bool titleOnly)
+{
+    const QString queryText = titleOnly
+        ? stripTitleNoise(entry.title)
+        : entry.artist + QLatin1Char(' ') + stripTitleNoise(entry.title);
+    const QString querySignal = normalizeForMatch(queryText).remove(QLatin1Char(' '));
+    const qsizetype candSignal =
+        hit.rec.normTitle.size() + (titleOnly ? 0 : hit.rec.normArtist.size());
     if (querySignal.isEmpty() || candSignal <= 0) {
         return 1.0;  // nothing to judge → don't penalise
     }
@@ -168,21 +270,23 @@ Outcome single(const ScoredResult &hit, const ImportEntry &entry, int base, bool
     return outcome;
 }
 
-// Decide from a scored result list. `base` is the match-tier confidence; `entry`
-// supplies album/duration tiebreakers.
+// Decide from a scored result list. `tier` says how the results were found;
+// `entry` supplies album/duration tiebreakers.
 Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
-               const QString &queryUsed, int base)
+               const QString &queryUsed, const Tier &tier)
 {
     Outcome outcome;
     outcome.queryUsed = queryUsed;
+    const int base = tier.confidence;
 
-    // Magnet guard on the fuzzy/relaxed tiers: drop candidates whose title+artist
-    // dwarf the query (a long field fuzzily "contains" almost any short query).
+    // Magnet guard on the fuzzy tiers: drop candidates whose queried fields dwarf
+    // the query (a long field fuzzily "contains" almost any short query).
     // Exact-substring tiers are reliable and keep every hit.
     QVector<ScoredResult> kept;
-    if (base <= kConfidenceScopedFuzzy) {
+    if (tier.fuzzy) {
         for (const ScoredResult &r : results) {
-            if (coverageRatio(r, entry) >= kMinFuzzyCoverage && titleWordOverlaps(r, entry)) {
+            if (coverageRatio(r, entry, tier.titleOnly) >= kMinFuzzyCoverage
+                && titleWordOverlaps(r, entry)) {
                 kept.append(r);
             }
         }
@@ -259,6 +363,11 @@ Outcome decide(const QVector<ScoredResult> &results, const ImportEntry &entry,
 
 } // namespace
 
+bool artistCreditsAgree(const QString &credit, const QString &other)
+{
+    return foldedCreditsAgree(Search::Fold::foldText(credit), Search::Fold::foldText(other));
+}
+
 Outcome match(const SearchIndex &index, const ImportEntry &entry, bool exactOnly)
 {
     // 1. Direct path resolution (m3u/csv exports). Exact full path, then
@@ -275,43 +384,61 @@ Outcome match(const SearchIndex &index, const ImportEntry &entry, bool exactOnly
         }
     }
 
-    // 2. Field-scoped artist:/title: phrase. Try the FULL title first so a version
-    //    discriminator like "(Full Mix)" still picks the right copy; then the
-    //    noise-stripped title to shed packaging junk. Exact mode for both before
-    //    fuzzy, so a precise hit always beats a loose one.
-    const QString full = scopedQueryString(entry, /*stripNoise=*/false);
+    // 2. Field-scoped artist:/title: phrase, full title before the noise-stripped
+    //    one. Exact mode for both before fuzzy, so a precise hit always beats a
+    //    loose one.
+    const QStringList scopedQueries = queryVariants(entry, scopedQueryString);
     const QString stripped = scopedQueryString(entry, /*stripNoise=*/true);
-    QStringList scopedQueries{full};
-    if (stripped != full) {
-        scopedQueries.append(stripped);
-    }
     QVector<bool> modes{false};
     if (!exactOnly) {
         modes.append(true);  // fuzzy pass only when not restricted to exact
     }
     for (const bool fuzzy : modes) {
         for (const QString &scoped : scopedQueries) {
-            if (scoped.isEmpty()) {
-                continue;
-            }
             const QVector<ScoredResult> results = run(index, scoped, fuzzy);
             if (!results.isEmpty()) {
-                return decide(results, entry, scoped,
-                              fuzzy ? kConfidenceScopedFuzzy : kConfidenceScopedExact);
+                return decide(results, entry, scoped, scopedTier(fuzzy));
             }
         }
     }
 
     if (exactOnly) {
         Outcome pending;
-        pending.queryUsed = stripped.isEmpty() ? full : stripped;
-        return pending;  // strict mode: no fuzzy/relaxed guessing
+        pending.queryUsed = stripped.isEmpty() ? scopedQueries.value(0) : stripped;
+        return pending;  // strict mode: no title-anchored, fuzzy, or relaxed guessing
     }
 
-    // 3. Relaxed free-text fallback (whole haystack, fuzzy) — least certain tier.
+    // 3. Title-anchored: the title phrase alone, same variants and modes as the
+    //    scoped tier, keeping only hits whose credited artist (track or album
+    //    artist) agrees with the artist guess by token subset. This is where a
+    //    credit written differently on each side lands: "Usher feat. Lil Jon &
+    //    Ludacris" for a track tagged "Usher", "Simon and Garfunkel" for "Simon &
+    //    Garfunkel". The title hit carries the confidence; agreement lifts it out
+    //    of the relaxed tier and never admits a hit on its own, so an entry with
+    //    no artist guess skips straight to the relaxed fallback.
+    const QString artistGuess = Search::Fold::foldText(entry.artist);
+    if (!artistTokens(artistGuess).isEmpty()) {
+        const QStringList titleQueries = queryVariants(entry, titleClause);
+        for (const bool fuzzy : {false, true}) {
+            for (const QString &titleQuery : titleQueries) {
+                QVector<ScoredResult> agreeing;
+                for (const ScoredResult &r : run(index, titleQuery, fuzzy)) {
+                    if (foldedCreditsAgree(artistGuess, r.rec.normArtist)
+                        || foldedCreditsAgree(artistGuess, r.rec.normAlbumArtist)) {
+                        agreeing.append(r);
+                    }
+                }
+                if (!agreeing.isEmpty()) {
+                    return decide(agreeing, entry, titleQuery, titleAnchoredTier(fuzzy));
+                }
+            }
+        }
+    }
+
+    // 4. Relaxed free-text fallback (whole haystack, fuzzy) — least certain tier.
     const QString relaxed = relaxedQueryString(entry);
     QVector<ScoredResult> results = run(index, relaxed, /*fuzzy=*/true);
-    Outcome outcome = decide(results, entry, relaxed.isEmpty() ? stripped : relaxed, kConfidenceRelaxed);
+    Outcome outcome = decide(results, entry, relaxed.isEmpty() ? stripped : relaxed, kRelaxedTier);
     if (outcome.decision == Decision::Pending && outcome.queryUsed.isEmpty()) {
         // Keep something re-runnable on the pending item for the edit modal.
         outcome.queryUsed = stripped.isEmpty() ? relaxed : stripped;
