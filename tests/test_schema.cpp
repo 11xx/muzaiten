@@ -36,6 +36,7 @@ private slots:
     void userAlbumRatingOverridesAverageRating();
     void pendingTrackRatingAffectsAlbumAverage();
     void appSettingRoundTrips();
+    void settingKeysUseLiteralPrefixes();
     void linkRootRoundTrips();
     void sourceRootRoundTrips();
     void sourceRootVisibilityFiltersLocalLibrary();
@@ -612,6 +613,40 @@ void SchemaTest::appSettingRoundTrips()
     QCOMPARE(database.setting(QStringLiteral("missing"), QStringLiteral("fallback")), QStringLiteral("fallback"));
     QVERIFY2(database.setSetting(QStringLiteral("trackTable.view"), QStringLiteral("{\"rowHeight\":24}")), qPrintable(database.lastError()));
     QCOMPARE(database.setting(QStringLiteral("trackTable.view")), QStringLiteral("{\"rowHeight\":24}"));
+}
+
+void SchemaTest::settingKeysUseLiteralPrefixes()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+
+    Database database(QStringLiteral("schema-setting-keys-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+
+    QVERIFY2(database.setSetting(QStringLiteral("scrobble.destination.a.token"), QStringLiteral("a")),
+             qPrintable(database.lastError()));
+    QVERIFY2(database.setSetting(QStringLiteral("scrobble.destination.b.token"), QStringLiteral("b")),
+             qPrintable(database.lastError()));
+    QVERIFY2(database.setSetting(QStringLiteral("scrobble.destinations"), QStringLiteral("document")),
+             qPrintable(database.lastError()));
+    QVERIFY2(database.setSetting(QStringLiteral("scrobble.destination_x.token"), QStringLiteral("underscore")),
+             qPrintable(database.lastError()));
+
+    QCOMPARE(database.settingKeys(QStringLiteral("scrobble.destination.")),
+             QStringList({QStringLiteral("scrobble.destination.a.token"),
+                          QStringLiteral("scrobble.destination.b.token")}));
+
+    QVERIFY2(database.setSetting(QStringLiteral("percent_%_token"), QStringLiteral("literal")),
+             qPrintable(database.lastError()));
+    QVERIFY2(database.setSetting(QStringLiteral("percent_X_token"), QStringLiteral("wildcard")),
+             qPrintable(database.lastError()));
+    QCOMPARE(database.settingKeys(QStringLiteral("percent_%")), QStringList{QStringLiteral("percent_%_token")});
+
+    QVERIFY2(database.setSetting(QStringLiteral("under__token"), QStringLiteral("literal")),
+             qPrintable(database.lastError()));
+    QVERIFY2(database.setSetting(QStringLiteral("underX_token"), QStringLiteral("wildcard")),
+             qPrintable(database.lastError()));
+    QCOMPARE(database.settingKeys(QStringLiteral("under_")), QStringList{QStringLiteral("under__token")});
 }
 
 void SchemaTest::linkRootRoundTrips()

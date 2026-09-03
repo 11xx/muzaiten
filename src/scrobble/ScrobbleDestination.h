@@ -3,6 +3,7 @@
 #include <QList>
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 
@@ -88,6 +89,13 @@ QString toJson(const ScrobbleDestinationSet &destinations);
 
 // Settings key holding the destination document.
 QString documentSettingKey();
+
+// Prefix for token rows owned by custom destinations.
+QString customTokenSettingPrefix();
+
+// Returns keys for custom token rows whose embedded destination id is absent
+// from the loaded destination set.
+QStringList orphanTokenKeys(const QStringList &tokenKeys, const ScrobbleDestinationSet &loaded);
 
 using SettingReader = std::function<QString(const QString &key)>;
 using SettingWriter = std::function<void(const QString &key, const QString &value)>;

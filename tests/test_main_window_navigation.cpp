@@ -11,6 +11,7 @@
 #include "player/PlayerCore.h"
 #include "reco/RadioSession.h"
 #include "scrobble/PlayEventRecorder.h"
+#include "scrobble/ScrobbleDestination.h"
 #include "ui/AlbumArtView.h"
 #include "ui/AlbumGrid.h"
 #include "ui/ArtistSidebar.h"
@@ -31,6 +32,7 @@
 #include <QDataStream>
 #include <algorithm>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetrics>
@@ -56,6 +58,7 @@
 #include <QTreeWidget>
 #include <QTimer>
 #include <QToolButton>
+#include <QUuid>
 #include <QtTest/QtTest>
 
 namespace {
@@ -150,6 +153,76 @@ private slots:
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);
+    }
+
+    void appCoreSweepsOrphanScrobbleTokenRows()
+    {
+        const QString validId = QStringLiteral("77777777-7777-4777-8777-777777777777");
+        const QString discardedId = QStringLiteral("88888888-8888-4888-8888-888888888888");
+        const QString validKey = ScrobbleDestinationConfig::tokenSettingKey(validId);
+        const QString discardedKey = ScrobbleDestinationConfig::tokenSettingKey(discardedId);
+        const QJsonObject document{
+            {QStringLiteral("version"), 1},
+            {QStringLiteral("destinations"), QJsonArray{
+                QJsonObject{
+                    {QStringLiteral("id"), validId},
+                    {QStringLiteral("type"), QStringLiteral("listenbrainz")},
+                    {QStringLiteral("name"), QStringLiteral("Valid")},
+                    {QStringLiteral("apiRoot"), QStringLiteral("https://valid.example/1")},
+                },
+                QJsonObject{
+                    {QStringLiteral("id"), discardedId},
+                    {QStringLiteral("type"), QStringLiteral("listenbrainz")},
+                    {QStringLiteral("name"), QStringLiteral("Discarded")},
+                    {QStringLiteral("apiRoot"), QStringLiteral("ftp://discarded.example/1")},
+                },
+            }},
+        };
+        const QString databasePath = QDir(m_stateRoot.filePath(QString::fromLatin1(QTest::currentTestFunction())))
+                                         .filePath(QStringLiteral("data/library.sqlite"));
+        {
+            Database seed(QStringLiteral("appcore-scrobble-seed-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY2(seed.open(databasePath), qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(ScrobbleDestinationConfig::documentSettingKey(),
+                                     QString::fromUtf8(QJsonDocument(document).toJson(QJsonDocument::Compact))),
+                     qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(validKey, QStringLiteral("valid-token")), qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(discardedKey, QStringLiteral("discarded-token")), qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(QStringLiteral("listenbrainz.token"), QStringLiteral("official-token")),
+                     qPrintable(seed.lastError()));
+        }
+
+        AppCore core;
+        const ScrobbleDestinationSet loaded = core.scrobbleDestinations();
+        QVERIFY(loaded.find(validId) != nullptr);
+        QVERIFY(loaded.find(discardedId) == nullptr);
+        QCOMPARE(core.database()->setting(validKey), QStringLiteral("valid-token"));
+        QCOMPARE(core.database()->setting(discardedKey), QString());
+        QCOMPARE(core.database()->setting(QStringLiteral("listenbrainz.token")), QStringLiteral("official-token"));
+    }
+
+    void appCorePreservesScrobbleTokensForUnparseableDocument()
+    {
+        const QString firstId = QStringLiteral("99999999-9999-4999-8999-999999999999");
+        const QString secondId = QStringLiteral("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        const QString firstKey = ScrobbleDestinationConfig::tokenSettingKey(firstId);
+        const QString secondKey = ScrobbleDestinationConfig::tokenSettingKey(secondId);
+        const QString databasePath = QDir(m_stateRoot.filePath(QString::fromLatin1(QTest::currentTestFunction())))
+                                         .filePath(QStringLiteral("data/library.sqlite"));
+        {
+            Database seed(QStringLiteral("appcore-scrobble-malformed-seed-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY2(seed.open(databasePath), qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(ScrobbleDestinationConfig::documentSettingKey(), QStringLiteral("not json")),
+                     qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(firstKey, QStringLiteral("first-token")), qPrintable(seed.lastError()));
+            QVERIFY2(seed.setSetting(secondKey, QStringLiteral("second-token")), qPrintable(seed.lastError()));
+        }
+
+        AppCore core;
+        const ScrobbleDestinationSet loaded = core.scrobbleDestinations();
+        QCOMPARE(loaded.items.size(), 2);
+        QCOMPARE(core.database()->setting(firstKey), QStringLiteral("first-token"));
+        QCOMPARE(core.database()->setting(secondKey), QStringLiteral("second-token"));
     }
 
     void playerBarAlbumArtShowsWhereverTheSidebarDoesNot()

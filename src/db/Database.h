@@ -188,6 +188,7 @@ public:
     bool setContentGroupPin(qint64 groupId, const QString &path);
     bool removeContentGroupPin(qint64 groupId);
     QString setting(const QString &key, const QString &fallback = {}) const;
+    QStringList settingKeys(const QString &prefix) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);
     QVector<LinkRoot> linkRoots() const;

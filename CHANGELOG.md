@@ -17,6 +17,10 @@
   TagLib, GStreamer, GLib, GObject, zstd, and chromaprint. Their full package
   versions join the compiler and Qt fingerprint, so a header upgrade triggers
   the same clean-first rebuild instead of leaving stale objects to link.
+- Custom token rows whose IDs are absent from a valid destinations document are
+  swept, including tokens for entries discarded because their addresses cannot
+  be normalized. Missing or malformed documents leave token rows untouched so
+  their owners remain recoverable by hand.
 - `make build` recompiles the build directory from scratch after a compiler
   or Qt upgrade. Package managers install headers carrying their upstream
   build time, so new headers can be older than the objects built from the
