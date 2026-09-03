@@ -99,6 +99,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QCloseEvent>
+#include <QCryptographicHash>
 #include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
@@ -309,8 +310,42 @@ Track trackFromJson(const QJsonObject &root)
 
 QueueSnapshotStore::QueueSnapshotStore(MainWindow &window) : QObject(&window), m_window(window) {}
 
+// The persisted queue lives in two settings. `queue.state` holds the tracks and
+// the queue identity and is rewritten only when this fingerprint changes;
+// `queue.cursor` holds the index and play-next boundary, tagged with the queue
+// id, and is written on every save. The fingerprint covers what the structure
+// document carries and the load side cannot recover from the library database:
+// the identity fields, the track order, and the per-track fields that change in
+// place (ratings, the missing flag).
+QByteArray QueueSnapshotStore::currentQueueStructureFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const auto addString = [&hash](QStringView value) {
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(value.utf16()),
+                                    value.size() * static_cast<qsizetype>(sizeof(char16_t))));
+        hash.addData(QByteArrayView("\0", 1));
+    };
+    const auto addInt = [&hash](qint64 value) {
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(&value), sizeof(value)));
+    };
+    addString(m_window.m_queueId);
+    addString(m_window.m_queueSourceKind);
+    addInt(m_window.m_queueSourcePlaylistId);
+    addString(m_window.m_queueSourceName);
+    const QVector<Track> &queue = m_window.m_player->queue();
+    addInt(queue.size());
+    for (const Track &track : queue) {
+        addString(track.path);
+        addInt(track.rating0To100);
+        addInt(track.effectiveRating0To100);
+        addInt((track.hasUserRating ? 2 : 0) | (track.missing ? 1 : 0));
+    }
+    return hash.result();
+}
+
 void QueueSnapshotStore::loadQueueState()
 {
+    m_savedStructureFingerprint.clear();
     const QJsonObject root = QJsonDocument::fromJson(m_window.m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
     const QJsonArray trackValues = root.value(QStringLiteral("tracks")).toArray();
     QVector<Track> tracks;
@@ -326,10 +361,17 @@ void QueueSnapshotStore::loadQueueState()
         }
     }
 
-    const int savedIndex = root.value(QStringLiteral("index")).toInt(-1);
+    // The cursor comes from `queue.cursor` when it belongs to this queue, else
+    // from the cursor fields a structure document may carry. resetQueue() clamps
+    // both fields to the loaded track count.
+    const QString queueId = root.value(QStringLiteral("queueId")).toString();
+    const QJsonObject cursor = QJsonDocument::fromJson(m_window.m_state->setting(QStringLiteral("queue.cursor")).toUtf8()).object();
+    const bool cursorMatches = !queueId.isEmpty() && cursor.value(QStringLiteral("queueId")).toString() == queueId;
+    const QJsonObject &cursorSource = cursorMatches ? cursor : root;
+    const int savedIndex = cursorSource.value(QStringLiteral("index")).toInt(-1);
     m_window.m_player->resetQueue(tracks, savedIndex,
-                         root.value(QStringLiteral("playNextInsertIndex")).toInt(savedIndex + 1));
-    m_window.m_queueId = root.value(QStringLiteral("queueId")).toString();
+                         cursorSource.value(QStringLiteral("playNextInsertIndex")).toInt(savedIndex + 1));
+    m_window.m_queueId = queueId;
     m_window.m_queueSourceKind = normalizedQueueSourceKind(root.value(QStringLiteral("queueSourceKind")).toString(QStringLiteral("queue")));
     m_window.m_queueSourcePlaylistId = root.value(QStringLiteral("queueSourcePlaylistId")).toString().toLongLong();
     if (m_window.m_queueSourcePlaylistId <= 0) {
@@ -364,20 +406,31 @@ void QueueSnapshotStore::saveQueueState()
     if (!m_window.m_player->queue().isEmpty()) {
         ensureCurrentQueueIdentity();
     }
-    QJsonArray tracks;
-    for (const Track &track : m_window.m_player->queue()) {
-        tracks.append(trackToJson(track));
+    // The structure is written before the cursor: a crash between the two
+    // leaves a cursor at most one save stale, and the load side clamps it.
+    const QByteArray fingerprint = currentQueueStructureFingerprint();
+    if (fingerprint != m_savedStructureFingerprint) {
+        QJsonArray tracks;
+        for (const Track &track : m_window.m_player->queue()) {
+            tracks.append(trackToJson(track));
+        }
+        QJsonObject root;
+        root.insert(QStringLiteral("tracks"), tracks);
+        root.insert(QStringLiteral("queueId"), m_window.m_queueId);
+        root.insert(QStringLiteral("queueSourceKind"), m_window.m_queueSourceKind);
+        root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_window.m_queueSourcePlaylistId));
+        root.insert(QStringLiteral("queueSourceName"), m_window.m_queueSourceName);
+        if (m_window.m_state->setSetting(QStringLiteral("queue.state"),
+                                         QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)))) {
+            m_savedStructureFingerprint = fingerprint;
+        }
     }
 
-    QJsonObject root;
-    root.insert(QStringLiteral("tracks"), tracks);
-    root.insert(QStringLiteral("index"), m_window.m_player->queueIndex());
-    root.insert(QStringLiteral("playNextInsertIndex"), m_window.m_player->playNextInsertIndex());
-    root.insert(QStringLiteral("queueId"), m_window.m_queueId);
-    root.insert(QStringLiteral("queueSourceKind"), m_window.m_queueSourceKind);
-    root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_window.m_queueSourcePlaylistId));
-    root.insert(QStringLiteral("queueSourceName"), m_window.m_queueSourceName);
-    m_window.m_state->setSetting(QStringLiteral("queue.state"), QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    QJsonObject cursor;
+    cursor.insert(QStringLiteral("queueId"), m_window.m_queueId);
+    cursor.insert(QStringLiteral("index"), m_window.m_player->queueIndex());
+    cursor.insert(QStringLiteral("playNextInsertIndex"), m_window.m_player->playNextInsertIndex());
+    m_window.m_state->setSetting(QStringLiteral("queue.cursor"), QString::fromUtf8(QJsonDocument(cursor).toJson(QJsonDocument::Compact)));
 }
 
 void QueueSnapshotStore::scheduleQueueStateSave(bool immediate)
