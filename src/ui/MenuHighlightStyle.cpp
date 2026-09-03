@@ -2,13 +2,32 @@
 
 #include "ui/SelectionColors.h"
 
+#include <QApplication>
+#include <QDebug>
 #include <QPainter>
+#include <QStyleFactory>
 #include <QStyleOptionMenuItem>
 
 MenuHighlightStyle::MenuHighlightStyle(Emphasis emphasis)
     : QProxyStyle()
     , m_emphasis(emphasis)
 {
+}
+
+void MenuHighlightStyle::installAsApplicationStyle(Emphasis emphasis)
+{
+    QStyle *current = QApplication::style();
+    if (current == nullptr) {
+        return;
+    }
+    QStyle *base = QStyleFactory::create(current->name());
+    if (base == nullptr) {
+        qWarning().noquote() << "Could not recreate the platform style for menu highlighting:" << current->name();
+        return;
+    }
+    auto *style = new MenuHighlightStyle(emphasis);
+    style->setBaseStyle(base);
+    QApplication::setStyle(style);
 }
 
 void MenuHighlightStyle::drawControl(ControlElement element, const QStyleOption *option, QPainter *painter,

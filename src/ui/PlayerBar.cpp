@@ -79,12 +79,12 @@ protected:
     }
 };
 
-// The application menus' own style: the shared highlight, plus a little extra
-// room for the drop-down indicator.
+// The application menus' shared hover treatment, plus extra room for the
+// drop-down indicator.
 class MenuPaddingStyle final : public MenuHighlightStyle {
 public:
     MenuPaddingStyle()
-        : MenuHighlightStyle(Emphasis::Solid)
+        : MenuHighlightStyle(Emphasis::Soft)
     {
     }
 

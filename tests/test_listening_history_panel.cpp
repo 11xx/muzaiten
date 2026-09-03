@@ -1,9 +1,11 @@
 #include "scrobble/ListenHistoryStore.h"
 #include "scrobble/ScrobbleDestination.h"
 #include "ui/ListeningHistoryPanel.h"
+#include "ui/MenuHighlightStyle.h"
 #include "ui/StickyMenu.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QLabel>
 #include <QImage>
 #include <QMouseEvent>
@@ -351,5 +353,13 @@ void ListeningHistoryPanelTest::theEntryUnderTheCursorIsWashedInTheHighlight()
     QVERIFY(moved);
 }
 
-QTEST_MAIN(ListeningHistoryPanelTest)
+// The menus take their hover treatment from the application style, installed
+// here exactly as the application installs it.
+int main(int argc, char **argv)
+{
+    QApplication application(argc, argv);
+    MenuHighlightStyle::installAsApplicationStyle(MenuHighlightStyle::Emphasis::Soft);
+    ListeningHistoryPanelTest test;
+    return QTest::qExec(&test, argc, argv);
+}
 #include "test_listening_history_panel.moc"

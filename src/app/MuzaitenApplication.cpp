@@ -6,6 +6,7 @@
 #include "core/Track.h"
 #include "ipc/IpcSocket.h"
 #include "scanner/TagReader.h"
+#include "ui/MenuHighlightStyle.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -85,6 +86,7 @@ QStringList parseDemoThemes(const QStringList &values)
 MuzaitenApplication::MuzaitenApplication(int &argc, char **argv)
     : QApplication(argc, argv)
 {
+    MenuHighlightStyle::installAsApplicationStyle(MenuHighlightStyle::Emphasis::Soft);
     QCoreApplication::setApplicationName(QStringLiteral(MUZAITEN_APP_NAME));
     QCoreApplication::setApplicationVersion(QStringLiteral(MUZAITEN_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("11xx"));

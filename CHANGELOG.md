@@ -9,6 +9,10 @@
   already shows the artwork there.
 - Search folding handles half-width kana, full-width forms, and Japanese
   iteration marks; the search cache rebuilds once when this fold version changes.
+- Menu entries use a soft wash of the palette highlight while hovered. The
+  application menu, context menu, and scrobbling destination popup share this
+  treatment while retaining the platform style's metrics, checkmarks, submenu
+  arrows, and disabled rendering.
 
 ### Fixed
 
