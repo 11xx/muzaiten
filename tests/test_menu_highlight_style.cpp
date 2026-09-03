@@ -1,13 +1,17 @@
 #include "ui/MenuHighlightStyle.h"
 #include "ui/SelectionColors.h"
 
+#include <QAction>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QImage>
+#include <QMenu>
 #include <QPainter>
 #include <QProxyStyle>
 #include <QStyleOptionMenuItem>
 #include <QTest>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 
@@ -88,6 +92,7 @@ class MenuHighlightStyleTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void applicationStyleSoftensAHoveredMenuEntry();
     void solidFillsWithTheHighlightItself();
     void softStopsShortOfTheHighlight();
     void aPressedEntryIsMarkedLikeAPointedAtOne();
@@ -95,8 +100,33 @@ private slots:
     void bothMarksAreClearedBeforeTheThemeDraws();
 };
 
-// The application menus have always marked the entry under the cursor with the
-// palette's highlight at full strength.
+// A plain QMenu inherits the application style, so its real hovered fill is
+// the same soft colour as every other menu entry.
+void MenuHighlightStyleTest::applicationStyleSoftensAHoveredMenuEntry()
+{
+    QMenu menu;
+    QAction *entry = menu.addAction(QStringLiteral("Track context action"));
+    menu.setFixedWidth(320);
+    menu.show();
+    QCoreApplication::processEvents();
+    menu.setActiveAction(entry);
+    QCoreApplication::processEvents();
+
+    const QRect entryRect = menu.actionGeometry(entry);
+    QVERIFY(!entryRect.isEmpty());
+    const QImage capture = menu.grab().toImage();
+    const QPalette palette = menu.palette();
+    const QColor painted = capture.pixelColor(entryRect.center());
+    const QColor expected = SelectionColors::dimmedHighlight(
+        palette.color(QPalette::Active, QPalette::Window),
+        palette.color(QPalette::Active, QPalette::Highlight),
+        SelectionColors::kSoftHighlightAlpha);
+
+    QCOMPARE(painted, expected);
+    QVERIFY(painted != palette.color(QPalette::Active, QPalette::Highlight));
+}
+
+// Explicit Solid emphasis paints the palette's highlight at full strength.
 void MenuHighlightStyleTest::solidFillsWithTheHighlightItself()
 {
     const QColor painted = fillFor(MenuHighlightStyle::Emphasis::Solid,
@@ -177,5 +207,16 @@ void MenuHighlightStyleTest::bothMarksAreClearedBeforeTheThemeDraws()
     QCOMPARE(delegatedStateFor(MenuHighlightStyle::Emphasis::Soft, disabled), disabled);
 }
 
-QTEST_MAIN(MenuHighlightStyleTest)
+int main(int argc, char **argv)
+{
+    qputenv("QT_QPA_PLATFORMTHEME", "generic");
+    char applicationName[] = "test_menu_highlight_style";
+    char *applicationArguments[] = {applicationName, nullptr};
+    int applicationArgumentCount = 1;
+    QApplication application(applicationArgumentCount, applicationArguments);
+    MenuHighlightStyle::installAsApplicationStyle(MenuHighlightStyle::Emphasis::Soft);
+    MenuHighlightStyleTest test;
+    return QTest::qExec(&test, argc, argv);
+}
+
 #include "test_menu_highlight_style.moc"
