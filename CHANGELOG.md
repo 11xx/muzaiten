@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Test targets link shared application static libraries instead of compiling
+  application sources once per target. The target layout requires one
+  `make rebuild` after pulling this build-system change.
 - The player bar shows the current track's album art on every view, not only
   the queue. The library views still leave it out, since the right sidebar
   already shows the artwork there.

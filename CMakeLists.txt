@@ -381,81 +381,526 @@ set(MUZAITEN_HEADERS
     src/ui/trackinfo/TrackInfoSettingsDialog.h
 )
 
-set(MUZAITEN_APP_SOURCES ${MUZAITEN_SOURCES})
-list(REMOVE_ITEM MUZAITEN_APP_SOURCES src/app/main.cpp)
-
-add_library(muzaiten_app_objects OBJECT ${MUZAITEN_APP_SOURCES} ${MUZAITEN_HEADERS})
-
-target_include_directories(muzaiten_app_objects PUBLIC
-    src
-    ${CMAKE_CURRENT_BINARY_DIR}/generated
-)
-
-target_compile_definitions(muzaiten_app_objects PUBLIC
-    MUZAITEN_LASTFM_API_KEY="${MUZAITEN_LASTFM_API_KEY}"
-    MUZAITEN_LASTFM_SHARED_SECRET="${MUZAITEN_LASTFM_SHARED_SECRET}"
-)
-
-target_link_libraries(muzaiten_app_objects PUBLIC
-    Qt6::Concurrent
-    Qt6::Core
-    Qt6::DBus
-    Qt6::Network
-    Qt6::Multimedia
-    Qt6::Widgets
-    Qt6::Sql
-    PkgConfig::TAGLIB
-    PkgConfig::GSTREAMER
-    PkgConfig::ZSTD
-)
-
-target_compile_options(muzaiten_app_objects PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
-)
-
-add_executable(muzaiten src/app/main.cpp $<TARGET_OBJECTS:muzaiten_app_objects>)
-target_link_libraries(muzaiten PRIVATE muzaiten_app_objects)
-target_compile_options(muzaiten PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
-)
-
-# Command-line client. Shares the state-path resolution (AppPaths) so it always
-# finds the instance matching its environment. `search` runs standalone — it
-# opens the library DB and the folded-index cache directly (no running instance
-# needed), so the binary links the DB + search engine alongside the IPC socket.
-add_executable(muzaitenctl
-    src/cli/MuzaitenCtl.cpp
-    src/cli/SearchCli.cpp
+set(MUZAITEN_CORE_SOURCES
     src/app/AppPaths.cpp
-    src/ipc/IpcSocket.cpp
+    src/core/GenreTags.cpp
+    src/core/HumanQuantity.cpp
+    src/core/MetadataBlob.cpp
+    src/core/MusicSort.cpp
+    src/core/Rating.cpp
+    src/core/TrackDisplay.cpp
+    src/fs/MediaProbe.cpp
+    src/fs/PathResolver.cpp
+)
+
+set(MUZAITEN_SEARCH_SOURCES
+    src/search/Exclusion.cpp
+    src/search/fold/Fold.cpp
+    src/search/FuzzyMatch.cpp
+    src/search/IndexCache.cpp
+    src/search/RankConfig.cpp
+    src/search/ResultRanker.cpp
+    src/search/SearchIndex.cpp
+    src/search/SearchMatcher.cpp
+    src/search/SearchQuery.cpp
+    src/search/SearchWorker.cpp
+)
+
+set(MUZAITEN_DB_SOURCES
     src/db/Database.cpp
+    src/db/PlaylistDatabase.cpp
+    src/db/SettingsStore.cpp
     src/db/SqlUtil.cpp
+)
+
+set(MUZAITEN_FEATURES_SOURCES
     src/features/FeatureStore.cpp
+    src/features/ProviderClient.cpp
     src/features/QualityRank.cpp
     src/features/QueryEmbedding.cpp
     src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
-    src/core/GenreTags.cpp
-    src/core/MetadataBlob.cpp
-    src/core/Rating.cpp
-    src/fs/PathResolver.cpp
+)
+
+set(MUZAITEN_RECO_SOURCES
+    src/reco/AffinityPool.cpp
+    src/reco/ArtistRadio.cpp
     src/reco/GenreCuration.cpp
+    src/reco/RadioFilters.cpp
+    src/reco/RadioMix.cpp
     src/reco/RadioProfile.cpp
+    src/reco/RadioSession.cpp
+    src/reco/ReasonText.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp
-    src/search/Exclusion.cpp
-    src/search/FuzzyMatch.cpp
-    src/search/IndexCache.cpp
-    src/search/SearchIndex.cpp
-    src/search/SearchMatcher.cpp
-    src/search/SearchQuery.cpp
-    src/search/fold/Fold.cpp
 )
-target_include_directories(muzaitenctl PRIVATE src)
-target_link_libraries(muzaitenctl PRIVATE Qt6::Core Qt6::Network Qt6::Sql PkgConfig::ZSTD)
-target_compile_options(muzaitenctl PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+
+set(MUZAITEN_SCROBBLE_SOURCES
+    src/scrobble/BackfillParse.cpp
+    src/scrobble/LastFmApi.cpp
+    src/scrobble/LastFmScrobbler.cpp
+    src/scrobble/ListenBrainzHub.cpp
+    src/scrobble/ListenBrainzScrobbler.cpp
+    src/scrobble/ListenBrainzUrl.cpp
+    src/scrobble/ListenHistoryStore.cpp
+    src/scrobble/ListenTracker.cpp
+    src/scrobble/PlayEventRecorder.cpp
+    src/scrobble/ScrobbleBackfill.cpp
+    src/scrobble/ScrobbleDestination.cpp
+)
+
+set(MUZAITEN_PLAYLIST_SOURCES
+    src/playlist/PlaylistDropImportWorker.cpp
+    src/playlist/PlaylistImport.cpp
+    src/playlist/PlaylistImportWorker.cpp
+    src/playlist/PlaylistMatchIndex.cpp
+    src/playlist/PlaylistMatcher.cpp
+    src/playlist/import/YouTubeImport.cpp
+)
+
+set(MUZAITEN_PLAYER_SOURCES
+    src/player/PlayerCore.cpp
+)
+
+set(MUZAITEN_PLAYBACK_SOURCES
+    src/playback/AudioDeviceControl.cpp
+    src/playback/GStreamerPlaybackBackend.cpp
+    src/playback/PlaybackBackend.h
+    src/playback/QtPlaybackBackend.cpp
+)
+
+set(MUZAITEN_SCANNER_SOURCES
+    src/scanner/ArtworkCache.cpp
+    src/scanner/DirectoryWalker.cpp
+    src/scanner/LibraryScanner.cpp
+    src/scanner/PathMetadataGuesser.cpp
+    src/scanner/RatingTagSyncWorker.cpp
+    src/scanner/ScanPipeline.cpp
+    src/scanner/TagRating.cpp
+    src/scanner/TagRatingWriter.cpp
+    src/scanner/TagReader.cpp
+)
+
+set(MUZAITEN_IPC_SOURCES
+    src/ipc/IpcServer.cpp
+    src/ipc/IpcSocket.cpp
+)
+
+set(MUZAITEN_MPD_SOURCES
+    src/mpd/MpdClient.cpp
+    src/mpd/MpdConfig.cpp
+    src/mpd/MpdImportWorker.cpp
+)
+
+set(MUZAITEN_MPRIS_SOURCES
+    src/mpris/MprisService.cpp
+)
+
+# These sources have narrow, reusable UI dependencies. Keeping them separate
+# lets widget tests link delegates, navigation helpers, and data adapters
+# without pulling in the application's view hierarchy.
+set(MUZAITEN_UI_SUPPORT_SOURCES
+    src/ui/AlbumArtFallback.cpp
+    src/ui/ConditionEditor.cpp
+    src/ui/DenseTableDelegate.cpp
+    src/ui/FileExplorerKeybindings.cpp
+    src/ui/IdleReleaseController.cpp
+    src/ui/MainPanelKeybindings.cpp
+    src/ui/MenuHighlightStyle.cpp
+    src/ui/NavigableTableView.cpp
+    src/ui/NeighborColumnResizer.cpp
+    src/ui/OverlayScrollBar.cpp
+    src/ui/QueueKeybindings.cpp
+    src/ui/ReorderableTableWidget.cpp
+    src/ui/ResponsiveColumnLayout.cpp
+    src/ui/ResponsiveColumnOptionsDialog.cpp
+    src/ui/RowReorderSupport.cpp
+    src/ui/ScrobbleUploadDispatcher.cpp
+    src/ui/SemanticSearchData.cpp
+    src/ui/SettingsDialogSupport.cpp
+    src/ui/StarRating.cpp
+    src/ui/StarRatingDelegate.cpp
+    src/ui/StickyMenu.cpp
+    src/ui/TableViewState.cpp
+    src/ui/ToggleSwitch.cpp
+    src/ui/trackinfo/TrackInfoSettings.cpp
+    src/ui/trackinfo/TrackInfoSettingsDialog.cpp
+    src/ui/TrackMenuSections.cpp
+)
+
+set(MUZAITEN_UI_DATA_SOURCES
+    src/ui/AudioAnalysisData.cpp
+)
+
+set(MUZAITEN_UI_LIBRARY_SOURCES
+    src/ui/AlbumGrid.cpp
+    src/ui/AlbumGridDelegate.cpp
+    src/ui/MusicExplorerView.cpp
+)
+
+set(MUZAITEN_UI_TABLE_SOURCES
+    src/ui/PlaylistView.cpp
+    src/ui/QueueScreen.cpp
+    src/ui/QueueStore.cpp
+    src/ui/QueueTable.cpp
+    src/ui/TrackTable.cpp
+)
+
+set(MUZAITEN_UI_SEARCH_SOURCES
+    src/ui/PanelSearchBar.cpp
+    src/ui/PanelSearchController.cpp
+    src/ui/SearchResultDelegate.cpp
+    src/ui/SearchResultsModel.cpp
+    src/ui/SearchView.cpp
+)
+
+set(MUZAITEN_UI_SCROBBLE_SOURCES
+    src/ui/ListeningHistoryPanel.cpp
+    src/ui/ScrobblersPanel.cpp
+    src/ui/ScrobblingDialog.cpp
+)
+
+set(MUZAITEN_UI_DIALOG_SOURCES
+    src/ui/AudioAnalysisDialogs.cpp
+    src/ui/GenreCurationDialog.cpp
+    src/ui/KeybindingsDialog.cpp
+    src/ui/LinkRootsDialog.cpp
+    src/ui/PanelOrderDialog.cpp
+    src/ui/PlaybackProfileDialog.cpp
+    src/ui/PlaybackResumeDialog.cpp
+    src/ui/PlaylistAddDialog.cpp
+    src/ui/PlaylistImportDialog.cpp
+    src/ui/RankingDialog.cpp
+    src/ui/SemanticSearchDialog.cpp
+    src/ui/SourceDirectoriesDialog.cpp
+    src/ui/StopAfterDialog.cpp
+    src/ui/TrackPropertiesDialog.cpp
+    src/ui/ViewKeyReferences.cpp
+    src/ui/trackinfo/TrackInfoPanel.cpp
+)
+
+set(MUZAITEN_UI_SOURCES)
+set(MUZAITEN_UI_APP_SOURCES
+    src/ui/AlbumArtView.cpp
+    src/ui/ArtistSidebar.cpp
+    src/ui/FileExplorerView.cpp
+    src/ui/MainWindow.cpp
+    src/ui/PlayerBar.cpp
+    src/ui/QueueSnapshotStore.cpp
+    src/ui/RadioCustomizationDialog.cpp
+    src/ui/RatingSyncController.cpp
+    src/ui/RightSidebar.cpp
+    src/ui/ScanController.cpp
+    src/ui/ViewStatePersistence.cpp
+)
+foreach(_source IN LISTS MUZAITEN_SOURCES)
+    if(_source MATCHES "^src/ui/.*\\.cpp$")
+        list(APPEND MUZAITEN_UI_SOURCES "${_source}")
+    endif()
+endforeach()
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_SUPPORT_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_DATA_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_LIBRARY_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_TABLE_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_SEARCH_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_SCROBBLE_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_DIALOG_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UI_SOURCES ${MUZAITEN_UI_APP_SOURCES})
+if(MUZAITEN_UI_SOURCES)
+    message(FATAL_ERROR "UI sources have no library owner: ${MUZAITEN_UI_SOURCES}")
+endif()
+
+set(MUZAITEN_APPLICATION_SOURCES
+    src/app/AppCore.cpp
+    src/app/DemoScreens.cpp
+    src/app/MuzaitenApplication.cpp
+)
+
+set(MUZAITEN_UNASSIGNED_SOURCES ${MUZAITEN_SOURCES})
+list(REMOVE_ITEM MUZAITEN_UNASSIGNED_SOURCES
+    src/app/main.cpp
+    resources/resources.qrc
+    ${MUZAITEN_CORE_SOURCES}
+    ${MUZAITEN_SEARCH_SOURCES}
+    ${MUZAITEN_DB_SOURCES}
+    ${MUZAITEN_FEATURES_SOURCES}
+    ${MUZAITEN_RECO_SOURCES}
+    ${MUZAITEN_SCROBBLE_SOURCES}
+    ${MUZAITEN_PLAYLIST_SOURCES}
+    ${MUZAITEN_PLAYER_SOURCES}
+    ${MUZAITEN_PLAYBACK_SOURCES}
+    ${MUZAITEN_SCANNER_SOURCES}
+    ${MUZAITEN_IPC_SOURCES}
+    ${MUZAITEN_MPD_SOURCES}
+    ${MUZAITEN_MPRIS_SOURCES}
+    ${MUZAITEN_UI_SUPPORT_SOURCES}
+    ${MUZAITEN_UI_DATA_SOURCES}
+    ${MUZAITEN_UI_LIBRARY_SOURCES}
+    ${MUZAITEN_UI_TABLE_SOURCES}
+    ${MUZAITEN_UI_SEARCH_SOURCES}
+    ${MUZAITEN_UI_SCROBBLE_SOURCES}
+    ${MUZAITEN_UI_DIALOG_SOURCES}
+    ${MUZAITEN_UI_APP_SOURCES}
+    ${MUZAITEN_APPLICATION_SOURCES}
+)
+if(MUZAITEN_UNASSIGNED_SOURCES)
+    message(FATAL_ERROR "Application sources have no library owner: ${MUZAITEN_UNASSIGNED_SOURCES}")
+endif()
+
+function(muzaiten_configure_library target)
+    target_include_directories(${target} PUBLIC
+        src
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+    )
+    target_compile_definitions(${target} PUBLIC
+        MUZAITEN_LASTFM_API_KEY="${MUZAITEN_LASTFM_API_KEY}"
+        MUZAITEN_LASTFM_SHARED_SECRET="${MUZAITEN_LASTFM_SHARED_SECRET}"
+    )
+    target_compile_features(${target} PUBLIC cxx_std_26)
+    target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+    )
+endfunction()
+
+function(muzaiten_configure_executable target)
+    target_include_directories(${target} PRIVATE
+        src
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+    )
+    target_compile_features(${target} PRIVATE cxx_std_26)
+    target_compile_options(${target} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+    )
+endfunction()
+
+add_library(muzaiten_core STATIC ${MUZAITEN_CORE_SOURCES})
+muzaiten_configure_library(muzaiten_core)
+target_link_libraries(muzaiten_core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD)
+
+add_library(muzaiten_search STATIC ${MUZAITEN_SEARCH_SOURCES})
+muzaiten_configure_library(muzaiten_search)
+target_link_libraries(muzaiten_search PUBLIC muzaiten_core Qt6::Core PRIVATE Qt6::Sql)
+
+add_library(muzaiten_db STATIC ${MUZAITEN_DB_SOURCES})
+muzaiten_configure_library(muzaiten_db)
+target_link_libraries(muzaiten_db PUBLIC muzaiten_core muzaiten_search Qt6::Core Qt6::Sql)
+
+add_library(muzaiten_features STATIC ${MUZAITEN_FEATURES_SOURCES})
+muzaiten_configure_library(muzaiten_features)
+target_link_libraries(muzaiten_features PUBLIC muzaiten_core Qt6::Core Qt6::Sql)
+
+add_library(muzaiten_reco STATIC ${MUZAITEN_RECO_SOURCES})
+muzaiten_configure_library(muzaiten_reco)
+target_link_libraries(muzaiten_reco PUBLIC muzaiten_core Qt6::Core PRIVATE muzaiten_db Qt6::Sql)
+
+add_library(muzaiten_scrobble STATIC ${MUZAITEN_SCROBBLE_SOURCES})
+muzaiten_configure_library(muzaiten_scrobble)
+target_link_libraries(muzaiten_scrobble PUBLIC muzaiten_core Qt6::Core Qt6::Network Qt6::Sql)
+
+add_library(muzaiten_playlist STATIC ${MUZAITEN_PLAYLIST_SOURCES})
+muzaiten_configure_library(muzaiten_playlist)
+target_link_libraries(muzaiten_playlist PUBLIC
+    muzaiten_core
+    muzaiten_search
+    muzaiten_db
+    Qt6::Core
+    Qt6::Network
+)
+
+add_library(muzaiten_player STATIC ${MUZAITEN_PLAYER_SOURCES})
+muzaiten_configure_library(muzaiten_player)
+target_link_libraries(muzaiten_player PUBLIC muzaiten_core Qt6::Core)
+
+add_library(muzaiten_playback STATIC ${MUZAITEN_PLAYBACK_SOURCES})
+muzaiten_configure_library(muzaiten_playback)
+target_link_libraries(muzaiten_playback PUBLIC Qt6::Core PRIVATE Qt6::Multimedia PkgConfig::GSTREAMER)
+
+add_library(muzaiten_scanner STATIC ${MUZAITEN_SCANNER_SOURCES})
+muzaiten_configure_library(muzaiten_scanner)
+target_link_libraries(muzaiten_scanner PUBLIC
+    muzaiten_core
+    muzaiten_db
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Sql
+    PRIVATE PkgConfig::TAGLIB
+)
+
+add_library(muzaiten_ipc STATIC ${MUZAITEN_IPC_SOURCES})
+muzaiten_configure_library(muzaiten_ipc)
+target_link_libraries(muzaiten_ipc PUBLIC muzaiten_core Qt6::Core Qt6::Network)
+
+add_library(muzaiten_mpd STATIC ${MUZAITEN_MPD_SOURCES})
+muzaiten_configure_library(muzaiten_mpd)
+target_link_libraries(muzaiten_mpd PUBLIC muzaiten_core Qt6::Core Qt6::Network PRIVATE muzaiten_db)
+
+add_library(muzaiten_mpris STATIC ${MUZAITEN_MPRIS_SOURCES})
+muzaiten_configure_library(muzaiten_mpris)
+target_link_libraries(muzaiten_mpris PUBLIC muzaiten_core muzaiten_player Qt6::Core Qt6::DBus PRIVATE muzaiten_db)
+
+add_library(muzaiten_ui_support STATIC ${MUZAITEN_UI_SUPPORT_SOURCES})
+muzaiten_configure_library(muzaiten_ui_support)
+target_link_libraries(muzaiten_ui_support PUBLIC
+    muzaiten_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+
+add_library(muzaiten_ui_data STATIC ${MUZAITEN_UI_DATA_SOURCES})
+muzaiten_configure_library(muzaiten_ui_data)
+target_link_libraries(muzaiten_ui_data PUBLIC
+    muzaiten_core
+    muzaiten_features
+    Qt6::Core
+    Qt6::Sql
+    PRIVATE muzaiten_db
+)
+
+add_library(muzaiten_ui_search STATIC ${MUZAITEN_UI_SEARCH_SOURCES})
+muzaiten_configure_library(muzaiten_ui_search)
+target_link_libraries(muzaiten_ui_search PUBLIC
+    muzaiten_ui_support
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    PRIVATE muzaiten_db muzaiten_search
+)
+
+add_library(muzaiten_ui_tables STATIC ${MUZAITEN_UI_TABLE_SOURCES})
+muzaiten_configure_library(muzaiten_ui_tables)
+target_link_libraries(muzaiten_ui_tables PUBLIC
+    muzaiten_ui_support
+    muzaiten_ui_search
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Sql
+    Qt6::Widgets
+    PRIVATE muzaiten_db
+)
+
+add_library(muzaiten_ui_library STATIC ${MUZAITEN_UI_LIBRARY_SOURCES})
+muzaiten_configure_library(muzaiten_ui_library)
+target_link_libraries(muzaiten_ui_library PUBLIC
+    muzaiten_ui_support
+    muzaiten_ui_tables
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+
+add_library(muzaiten_ui_scrobble STATIC ${MUZAITEN_UI_SCROBBLE_SOURCES})
+muzaiten_configure_library(muzaiten_ui_scrobble)
+target_link_libraries(muzaiten_ui_scrobble PUBLIC
+    muzaiten_ui_support
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    PRIVATE muzaiten_scrobble
+)
+
+add_library(muzaiten_ui_dialogs STATIC ${MUZAITEN_UI_DIALOG_SOURCES})
+muzaiten_configure_library(muzaiten_ui_dialogs)
+target_link_libraries(muzaiten_ui_dialogs PUBLIC
+    muzaiten_ui_support
+    muzaiten_ui_tables
+    muzaiten_ui_search
+    muzaiten_ui_data
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    PRIVATE
+        muzaiten_db
+        muzaiten_features
+        muzaiten_playback
+        muzaiten_playlist
+)
+
+add_library(muzaiten_ui_app STATIC ${MUZAITEN_UI_APP_SOURCES})
+muzaiten_configure_library(muzaiten_ui_app)
+target_link_libraries(muzaiten_ui_app PUBLIC
+    muzaiten_ui_library
+    muzaiten_ui_tables
+    muzaiten_ui_search
+    muzaiten_ui_scrobble
+    muzaiten_ui_dialogs
+    muzaiten_ui_data
+    Qt6::Core
+    Qt6::DBus
+    Qt6::Gui
+    Qt6::Multimedia
+    Qt6::Network
+    Qt6::Sql
+    Qt6::Widgets
+    PRIVATE
+        muzaiten_core
+        muzaiten_db
+        muzaiten_features
+        muzaiten_ipc
+        muzaiten_mpd
+        muzaiten_mpris
+        muzaiten_player
+        muzaiten_playback
+        muzaiten_playlist
+        muzaiten_reco
+        muzaiten_scanner
+        muzaiten_scrobble
+        muzaiten_search
+)
+
+add_library(muzaiten_app STATIC ${MUZAITEN_APPLICATION_SOURCES})
+muzaiten_configure_library(muzaiten_app)
+target_link_libraries(muzaiten_app PUBLIC
+    muzaiten_core
+    muzaiten_db
+    muzaiten_features
+    muzaiten_ipc
+    muzaiten_mpd
+    muzaiten_mpris
+    muzaiten_player
+    muzaiten_playback
+    muzaiten_playlist
+    muzaiten_reco
+    muzaiten_scanner
+    muzaiten_scrobble
+    muzaiten_search
+    Qt6::Concurrent
+    Qt6::Core
+    Qt6::DBus
+    Qt6::Gui
+    Qt6::Multimedia
+    Qt6::Network
+    Qt6::Sql
+    Qt6::Widgets
+    PkgConfig::GSTREAMER
+    PkgConfig::TAGLIB
+    PkgConfig::ZSTD
+)
+
+add_executable(muzaiten src/app/main.cpp resources/resources.qrc)
+muzaiten_configure_executable(muzaiten)
+target_link_libraries(muzaiten PRIVATE muzaiten_app muzaiten_ui_app)
+
+# Command-line client. Shares the state-path resolution (AppPaths) so it always
+# finds the instance matching its environment. `search` runs standalone: it
+# opens the library DB and the folded-index cache directly (no running instance
+# needed), so the binary links the DB and search engine alongside the IPC socket.
+add_library(muzaiten_cli STATIC src/cli/SearchCli.cpp)
+muzaiten_configure_library(muzaiten_cli)
+target_link_libraries(muzaiten_cli PUBLIC muzaiten_core muzaiten_db muzaiten_search Qt6::Core)
+
+add_executable(muzaitenctl src/cli/MuzaitenCtl.cpp)
+muzaiten_configure_executable(muzaitenctl)
+target_link_libraries(muzaitenctl PRIVATE
+    muzaiten_cli
+    muzaiten_features
+    muzaiten_ipc
+    muzaiten_reco
+    muzaiten_scrobble
+    Qt6::Core
+    Qt6::Network
+    Qt6::Sql
 )
 
 # The scalar analyzer is its own target so every consumer (indexer, tests,
@@ -476,16 +921,15 @@ target_compile_options(muzaiten_dsp PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:GNU,Clang>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>
 )
 
-add_executable(muzaiten-features
-    src/indexer/FeaturesMain.cpp
-    src/app/AppPaths.cpp
-    src/features/ProviderClient.cpp
-    src/fs/MediaProbe.cpp
-)
-target_include_directories(muzaiten-features PRIVATE src)
-target_link_libraries(muzaiten-features PRIVATE muzaiten_dsp Qt6::Core Qt6::Sql PkgConfig::Chromaprint)
-target_compile_options(muzaiten-features PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+add_executable(muzaiten-features src/indexer/FeaturesMain.cpp)
+muzaiten_configure_executable(muzaiten-features)
+target_link_libraries(muzaiten-features PRIVATE
+    muzaiten_core
+    muzaiten_dsp
+    muzaiten_features
+    Qt6::Core
+    Qt6::Sql
+    PkgConfig::Chromaprint
 )
 
 # Installation (freedesktop integration). Lets distro packaging and `make dev`
