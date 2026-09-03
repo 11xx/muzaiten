@@ -34,6 +34,7 @@ private slots:
     void malformedCustomIdsCannotAddressTokenSettings();
     void storedAddressesAreNormalizedOnLoad();
     void storedAddressesThatCannotNormalizeAreDiscarded();
+    void orphanTokenKeysExcludeLoadedDestinations();
     void lastFmHasNoTokenKeyOfItsOwn();
     void disablingReservedDestinationUpdatesCentralDocument();
     void customCompatibleUploadForwardsItsExactId();
@@ -246,6 +247,27 @@ void ScrobbleDestinationsTest::storedAddressesThatCannotNormalizeAreDiscarded()
     QVERIFY(set.find(QStringLiteral("22222222-2222-4222-8222-222222222222")) == nullptr);
     QVERIFY(set.find(QStringLiteral("33333333-3333-4333-8333-333333333333")) == nullptr);
     QCOMPARE(set.items.size(), 3);   // two reserved plus the one usable custom
+}
+
+void ScrobbleDestinationsTest::orphanTokenKeysExcludeLoadedDestinations()
+{
+    const QString validId = QStringLiteral("55555555-5555-4555-8555-555555555555");
+    const QString discardedId = QStringLiteral("66666666-6666-4666-8666-666666666666");
+    const QString document = json(QStringLiteral(
+        "{'version':1,'destinations':["
+        "{'id':'55555555-5555-4555-8555-555555555555','type':'listenbrainz','name':'Valid',"
+        "'apiRoot':'https://valid.example/1'},"
+        "{'id':'66666666-6666-4666-8666-666666666666','type':'listenbrainz','name':'Discarded',"
+        "'apiRoot':'ftp://discarded.example/1'}]}"));
+
+    const ScrobbleDestinationSet loaded = fromJson(document);
+    QVERIFY(loaded.find(validId) != nullptr);
+    QVERIFY(loaded.find(discardedId) == nullptr);
+
+    const QString validKey = tokenSettingKey(validId);
+    const QString discardedKey = tokenSettingKey(discardedId);
+    QCOMPARE(orphanTokenKeys({validKey, discardedKey, QStringLiteral("listenbrainz.token")}, loaded),
+             QStringList{discardedKey});
 }
 
 void ScrobbleDestinationsTest::lastFmHasNoTokenKeyOfItsOwn()

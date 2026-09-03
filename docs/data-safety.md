@@ -49,6 +49,11 @@ The destructive-looking actions are deliberately narrow:
 - **Editing a destination's URL** keeps its identity and its backlog: pending
   listens follow it to the new address rather than being dropped.
 
+When the destinations document is a valid object with a `destinations` array,
+only loaded destination IDs own custom token rows. Rows for absent IDs are
+removed; a missing or malformed document leaves those rows untouched so their
+owners remain recoverable by hand.
+
 Identifiers minted for custom destinations are never reused, so a removed
 destination's records can never be inherited by a later one.
 

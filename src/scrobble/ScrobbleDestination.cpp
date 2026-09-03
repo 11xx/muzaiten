@@ -183,6 +183,35 @@ QString toJson(const ScrobbleDestinationSet &destinations)
 
 QString documentSettingKey() { return QStringLiteral("scrobble.destinations"); }
 
+QString customTokenSettingPrefix() { return QStringLiteral("scrobble.destination."); }
+
+QStringList orphanTokenKeys(const QStringList &tokenKeys, const ScrobbleDestinationSet &loaded)
+{
+    QSet<QString> loadedIds;
+    loadedIds.reserve(loaded.items.size());
+    for (const ScrobbleDestination &destination : loaded.items) {
+        loadedIds.insert(destination.id);
+    }
+
+    const QString prefix = customTokenSettingPrefix();
+    const QString suffix = QStringLiteral(".token");
+    QStringList orphans;
+    for (const QString &key : tokenKeys) {
+        if (!key.startsWith(prefix) || !key.endsWith(suffix)) {
+            continue;
+        }
+        const qsizetype idLength = key.size() - prefix.size() - suffix.size();
+        if (idLength <= 0) {
+            continue;
+        }
+        const QString id = key.sliced(prefix.size(), idLength);
+        if (!loadedIds.contains(id)) {
+            orphans.push_back(key);
+        }
+    }
+    return orphans;
+}
+
 ScrobbleDestinationSet load(const SettingReader &read)
 {
     const QString document = read(documentSettingKey());
@@ -225,7 +254,7 @@ QString tokenSettingKey(const QString &id)
     if (!isCustomId(id)) {
         return {};
     }
-    return QStringLiteral("scrobble.destination.%1.token").arg(id);
+    return customTokenSettingPrefix() + id + QStringLiteral(".token");
 }
 
 }   // namespace ScrobbleDestinationConfig

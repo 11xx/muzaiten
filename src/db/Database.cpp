@@ -2177,6 +2177,27 @@ QString Database::setting(const QString &key, const QString &fallback) const
     return query.value(0).toString();
 }
 
+QStringList Database::settingKeys(const QString &prefix) const
+{
+    QString escapedPrefix = prefix;
+    escapedPrefix.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    escapedPrefix.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+    escapedPrefix.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT key FROM app_settings WHERE key LIKE ? ESCAPE '\\' ORDER BY key"));
+    query.addBindValue(escapedPrefix + QLatin1Char('%'));
+    if (!query.exec()) {
+        return {};
+    }
+
+    QStringList keys;
+    while (query.next()) {
+        keys.push_back(query.value(0).toString());
+    }
+    return keys;
+}
+
 bool Database::setSetting(const QString &key, const QString &value)
 {
     QSqlQuery query(m_db);

@@ -76,6 +76,9 @@ public:
 
     // The configured scrobbling destinations, read from the library settings.
     ScrobbleDestinationSet scrobbleDestinations() const;
+    // Removes token rows whose destination id is absent from a parseable
+    // destinations document; runs once at startup, before anything reads them.
+    void sweepOrphanScrobbleTokens();
     void setScrobbleDestinations(const ScrobbleDestinationSet &destinations);
 
     // Start a rule-based radio session seeded from one or more library tracks.

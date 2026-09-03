@@ -257,6 +257,7 @@ AppCore::AppCore(QObject *parent)
     if (!m_database->open(databasePath())) {
         qWarning("AppCore: failed to open database: %s", qPrintable(m_database->lastError()));
     }
+    sweepOrphanScrobbleTokens();
     m_radioBatchSize = std::clamp(
         m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
         1, 100);
@@ -492,6 +493,29 @@ ScrobbleDestinationSet AppCore::scrobbleDestinations() const
 {
     return ScrobbleDestinationConfig::load(
         [this](const QString &key) { return m_database->setting(key); });
+}
+
+void AppCore::sweepOrphanScrobbleTokens()
+{
+    const QString document = m_database->setting(ScrobbleDestinationConfig::documentSettingKey());
+    QJsonParseError parseError;
+    const QJsonDocument parsed = QJsonDocument::fromJson(document.toUtf8(), &parseError);
+    // Only a document that names its destinations can say which token rows
+    // have no owner. A missing or malformed document sweeps nothing: the
+    // owners of its tokens may still be recoverable by hand, and a deleted
+    // token is not.
+    const bool authoritative = parseError.error == QJsonParseError::NoError && parsed.isObject()
+        && parsed.object().value(QStringLiteral("destinations")).isArray();
+    if (!authoritative) {
+        return;
+    }
+    const ScrobbleDestinationSet loaded = ScrobbleDestinationConfig::fromJson(document);
+    const QStringList tokenKeys = m_database->settingKeys(ScrobbleDestinationConfig::customTokenSettingPrefix());
+    for (const QString &key : ScrobbleDestinationConfig::orphanTokenKeys(tokenKeys, loaded)) {
+        if (!m_database->removeSetting(key)) {
+            qWarning("AppCore: failed to remove orphan scrobble token setting: %s", qPrintable(key));
+        }
+    }
 }
 
 void AppCore::setScrobbleDestinations(const ScrobbleDestinationSet &destinations)
