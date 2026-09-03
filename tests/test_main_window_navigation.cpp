@@ -19,6 +19,7 @@
 #include "ui/MusicExplorerView.h"
 #include "ui/PanelSearchController.h"
 #include "ui/PlaylistView.h"
+#include "ui/QueueSnapshotStore.h"
 #include "ui/SelectionColors.h"
 #include "ui/StopAfterDialog.h"
 #include "ui/TrackTable.h"
@@ -99,6 +100,24 @@ QStringList trackPaths(const QVector<Track> &tracks)
         paths.push_back(track.path);
     }
     return paths;
+}
+
+QVector<Track> syntheticQueueTracks(int count)
+{
+    QVector<Track> tracks;
+    tracks.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        Track track;
+        track.path = QStringLiteral("/temporary/queue-state/%1.flac").arg(i);
+        track.title = QStringLiteral("Queue state %1").arg(i);
+        tracks.push_back(track);
+    }
+    return tracks;
+}
+
+QJsonObject storedJsonObject(const SettingsStore &store, const QString &key)
+{
+    return QJsonDocument::fromJson(store.setting(key).toUtf8()).object();
 }
 
 } // namespace
@@ -817,6 +836,125 @@ private slots:
         const QJsonObject playback = QJsonDocument::fromJson(
             window.m_state->setting(QStringLiteral("playback.state")).toUtf8()).object();
         QVERIFY(!playback.contains(QStringLiteral("stopAfter")));
+    }
+
+    void cursorOnlySaveLeavesQueueStructureUntouched()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        const QVector<Track> tracks = syntheticQueueTracks(3);
+        window.m_player->resetQueue(tracks, 0);
+        window.saveQueueState();
+
+        const QJsonObject structure = storedJsonObject(*window.m_state, QStringLiteral("queue.state"));
+        QCOMPARE(structure.value(QStringLiteral("tracks")).toArray().size(), 3);
+        QVERIFY(!structure.contains(QStringLiteral("index")));
+        QVERIFY(!structure.contains(QStringLiteral("playNextInsertIndex")));
+        const QString queueId = structure.value(QStringLiteral("queueId")).toString();
+        QVERIFY(!queueId.isEmpty());
+        QJsonObject cursor = storedJsonObject(*window.m_state, QStringLiteral("queue.cursor"));
+        QCOMPARE(cursor.value(QStringLiteral("queueId")).toString(), queueId);
+        QCOMPARE(cursor.value(QStringLiteral("index")).toInt(-1), 0);
+        QCOMPARE(cursor.value(QStringLiteral("playNextInsertIndex")).toInt(-1), 1);
+
+        // A sentinel in place of the stored structure exposes any rewrite of it,
+        // which an identical re-serialization would otherwise hide.
+        const QString sentinel = QStringLiteral("{\"sentinel\":true}");
+        QVERIFY(window.m_state->setSetting(QStringLiteral("queue.state"), sentinel));
+        window.m_player->resetQueue(tracks, 2, 3);
+        window.saveQueueState();
+        QCOMPARE(window.m_state->setting(QStringLiteral("queue.state")), sentinel);
+        cursor = storedJsonObject(*window.m_state, QStringLiteral("queue.cursor"));
+        QCOMPARE(cursor.value(QStringLiteral("queueId")).toString(), queueId);
+        QCOMPARE(cursor.value(QStringLiteral("index")).toInt(-1), 2);
+        QCOMPARE(cursor.value(QStringLiteral("playNextInsertIndex")).toInt(-1), 3);
+    }
+
+    void structuralQueueChangesRewriteQueueState()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        const QVector<Track> tracks = syntheticQueueTracks(3);
+        window.m_player->resetQueue(tracks, 0);
+        window.saveQueueState();
+        const QString queueId = window.m_queueId;
+        const QString sentinel = QStringLiteral("{\"sentinel\":true}");
+
+        QVERIFY(window.m_state->setSetting(QStringLiteral("queue.state"), sentinel));
+        window.m_player->appendTracks(syntheticQueueTracks(4).mid(3));
+        window.saveQueueState();
+        QJsonObject structure = storedJsonObject(*window.m_state, QStringLiteral("queue.state"));
+        QCOMPARE(structure.value(QStringLiteral("tracks")).toArray().size(), 4);
+        QCOMPARE(structure.value(QStringLiteral("queueId")).toString(), queueId);
+
+        QVERIFY(window.m_state->setSetting(QStringLiteral("queue.state"), sentinel));
+        window.m_player->updateTrackRating(tracks.at(1).path, 80, true);
+        window.saveQueueState();
+        structure = storedJsonObject(*window.m_state, QStringLiteral("queue.state"));
+        const QJsonObject rated = structure.value(QStringLiteral("tracks")).toArray().at(1).toObject();
+        QCOMPARE(rated.value(QStringLiteral("path")).toString(), tracks.at(1).path);
+        QCOMPARE(rated.value(QStringLiteral("effectiveRating0To100")).toInt(-1), 80);
+        QVERIFY(rated.value(QStringLiteral("hasUserRating")).toBool(false));
+
+        QVERIFY(window.m_state->setSetting(QStringLiteral("queue.state"), sentinel));
+        window.m_queueSnapshotStore->markQueueAsSpontaneous();
+        window.saveQueueState();
+        structure = storedJsonObject(*window.m_state, QStringLiteral("queue.state"));
+        QCOMPARE(structure.value(QStringLiteral("tracks")).toArray().size(), 4);
+        QVERIFY(structure.value(QStringLiteral("queueId")).toString() != queueId);
+        QCOMPARE(storedJsonObject(*window.m_state, QStringLiteral("queue.cursor")).value(QStringLiteral("queueId")).toString(),
+                 structure.value(QStringLiteral("queueId")).toString());
+    }
+
+    void restartRestoresQueueCursor()
+    {
+        const QVector<Track> tracks = syntheticQueueTracks(4);
+        QString queueId;
+        {
+            AppCore core;
+            MainWindow window(&core);
+            window.m_player->resetQueue(tracks, 1, 3);
+            window.saveQueueState();
+            queueId = window.m_queueId;
+            QVERIFY(!queueId.isEmpty());
+        }
+        {
+            AppCore core;
+            MainWindow window(&core);
+            QCOMPARE(trackPaths(window.m_player->queue()), trackPaths(tracks));
+            QCOMPARE(window.m_queueId, queueId);
+            QCOMPARE(window.m_player->queueIndex(), 1);
+            QCOMPARE(window.m_player->playNextInsertIndex(), 3);
+        }
+        {
+            // A cursor that belongs to another queue is ignored; the cursor
+            // fields inside queue.state (as older documents carry them) win.
+            AppCore core;
+            QJsonObject structure = storedJsonObject(*core.settings(), QStringLiteral("queue.state"));
+            structure.insert(QStringLiteral("index"), 2);
+            structure.insert(QStringLiteral("playNextInsertIndex"), 4);
+            QVERIFY(core.settings()->setSetting(QStringLiteral("queue.state"),
+                                                QString::fromUtf8(QJsonDocument(structure).toJson(QJsonDocument::Compact))));
+            const QJsonObject foreignCursor{{QStringLiteral("queueId"), QStringLiteral("queue:other")},
+                                            {QStringLiteral("index"), 0},
+                                            {QStringLiteral("playNextInsertIndex"), 1}};
+            QVERIFY(core.settings()->setSetting(QStringLiteral("queue.cursor"),
+                                                QString::fromUtf8(QJsonDocument(foreignCursor).toJson(QJsonDocument::Compact))));
+            MainWindow window(&core);
+            QCOMPARE(window.m_player->queueIndex(), 2);
+            QCOMPARE(window.m_player->playNextInsertIndex(), 4);
+        }
+        {
+            AppCore core;
+            const QJsonObject staleCursor{{QStringLiteral("queueId"), queueId},
+                                          {QStringLiteral("index"), 40},
+                                          {QStringLiteral("playNextInsertIndex"), 41}};
+            QVERIFY(core.settings()->setSetting(QStringLiteral("queue.cursor"),
+                                                QString::fromUtf8(QJsonDocument(staleCursor).toJson(QJsonDocument::Compact))));
+            MainWindow window(&core);
+            QCOMPARE(window.m_player->queueIndex(), 3);
+            QCOMPARE(window.m_player->playNextInsertIndex(), 4);
+        }
     }
 
     void restoredRadioShuffleUsesCurrentTrackContext()

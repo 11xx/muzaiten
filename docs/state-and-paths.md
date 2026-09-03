@@ -18,6 +18,19 @@ home directory is not browsable, while preserving the other window settings.
 Stop after conditions are process-local. They are never persisted and are not
 restored after restart.
 
+## Queue state
+
+The queue survives a restart through two keys in `state.sqlite`. `queue.state`
+holds the tracks and the queue's identity (its id, source kind, source
+playlist, and name) and is rewritten only when one of those changes.
+`queue.cursor` holds the current index and the play-next boundary, tagged with
+the id of the queue they belong to, and is written on every save, so stepping
+through a long queue costs a few bytes per track change. On load, a cursor
+whose id matches the saved queue wins; otherwise the cursor fields that
+`queue.state` may carry are used, and the index is clamped to the saved track
+count either way. Saved and automatic queue snapshots live under
+`queue.snapshots`.
+
 ## Overrides
 
 CLI flags:

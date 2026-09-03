@@ -1,4 +1,5 @@
 #pragma once
+#include <QByteArray>
 #include <QObject>
 #include <QJsonObject>
 class MainWindow;
@@ -24,5 +25,11 @@ public:
     void snapshotCurrentQueueAsPrevious(const QString & = {});
     void markQueueAsSpontaneous(const QString & = {});
 private:
+    QByteArray currentQueueStructureFingerprint() const;
+
     MainWindow &m_window;
+    // Fingerprint of the queue structure this store last wrote to `queue.state`;
+    // empty until the first structural save of the process, so that save always
+    // writes the document.
+    QByteArray m_savedStructureFingerprint;
 };

@@ -31,6 +31,14 @@
   regression, and the command reports how many picks were labeled from plays
   and how many from unheard removals (`play_samples`, `removal_samples`, and
   `removal_weight` in JSON output).
+- The saved queue is persisted as two settings. `queue.state` holds the tracks
+  and the queue's identity and is rewritten only when one of them changes;
+  `queue.cursor` holds the current index and the play-next boundary and is
+  written on every save. Stepping through a long queue costs a small cursor
+  write per track change instead of a rewrite of the whole document. A restart
+  takes the cursor from `queue.cursor` when it belongs to the loaded queue,
+  falls back to the cursor fields inside `queue.state` otherwise, and clamps the
+  index to the loaded track count.
 - Test targets link shared application static libraries instead of compiling
   application sources once per target. The target layout requires one
   `make rebuild` after pulling this build-system change.
