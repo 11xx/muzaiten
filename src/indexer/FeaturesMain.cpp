@@ -3,18 +3,21 @@
 #include "fs/MediaProbe.h"
 #include "indexer/DecodeGate.h"
 #include "indexer/Dsp.h"
+#include "indexer/StagingBuffer.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLockFile>
 #include <QProcess>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -39,6 +42,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -58,6 +62,10 @@ namespace {
 
 constexpr int kSchemaVersion = 5;
 constexpr int kProcessTimeoutMs = 10 * 60 * 1000;
+// Reader threads that stage compressed bytes ahead of the decode slots. A few
+// concurrent sequential reads saturate a network link; the byte budget, not
+// this count, bounds how far they run ahead.
+constexpr std::size_t kStagingReaders = 4;
 constexpr int kProviderStatusTimeoutMs = 30'000;
 constexpr double kChromaprintBerThreshold = 0.15;
 constexpr int kChromaprintOffsetFrames = 3;
@@ -94,6 +102,9 @@ struct RefreshOptions {
     int limit = -1;
     int jobs = 0;
     std::optional<int> semanticDecodeWorkers;
+    // Byte budget for staging compressed files ahead of decode; 0 disables
+    // staging. Unset means the state setting decides.
+    std::optional<qint64> stagingBytes;
     bool json = false;
     bool progress = false;
     bool verbose = false;
@@ -143,6 +154,9 @@ struct DecodedAudio {
 };
 
 struct StageTimings {
+    // Time the decode slot waited for the file's staged bytes; 0 when the
+    // file is read from its path.
+    qint64 stageWaitMs = 0;
     qint64 decodeMs = 0;
     qint64 hashMs = 0;
     qint64 dspMs = 0;
@@ -150,6 +164,7 @@ struct StageTimings {
 };
 
 struct TimingAccumulator {
+    std::vector<qint64> stageWait;
     std::vector<qint64> decode;
     std::vector<qint64> hash;
     std::vector<qint64> dsp;
@@ -157,6 +172,7 @@ struct TimingAccumulator {
 
     void reserve(std::size_t count)
     {
+        stageWait.reserve(count);
         decode.reserve(count);
         hash.reserve(count);
         dsp.reserve(count);
@@ -165,6 +181,7 @@ struct TimingAccumulator {
 
     void add(const StageTimings &timings)
     {
+        stageWait.push_back(timings.stageWaitMs);
         decode.push_back(timings.decodeMs);
         hash.push_back(timings.hashMs);
         dsp.push_back(timings.dspMs);
@@ -180,6 +197,9 @@ struct FileAnalysis {
     std::optional<Dsp::ScalarFeatures> scalars;
     QString status = QStringLiteral("decode_failed");
     StageTimings timings;
+    // Where ffmpeg read the file from: "path", "pipe" (staged bytes), or
+    // "fallback" (staged bytes failed, path succeeded).
+    QString decodeInput = QStringLiteral("path");
 };
 
 struct GroupRow {
@@ -818,7 +838,12 @@ QString compactProcessError(QProcess &process)
 // only the identity path needs it (decode_hash is defined over those bytes).
 // Callers that just analyze should drop it — for an hour-long track the byte
 // copy alone is ~320 MB per worker.
-DecodedAudio decodeCanonical(const QString &path, bool keepRawPcm = true)
+//
+// staged, when given, holds the file's compressed bytes and ffmpeg reads them
+// from its stdin instead of opening the path. Formats that need a seekable
+// input (an mp4 whose moov atom trails the samples) fail on the pipe; the
+// caller decides whether to retry from the path.
+DecodedAudio decodeCanonical(const QString &path, bool keepRawPcm = true, const QByteArray *staged = nullptr)
 {
     QProcess process;
     process.start(QStringLiteral("ffmpeg"), {
@@ -826,7 +851,7 @@ DecodedAudio decodeCanonical(const QString &path, bool keepRawPcm = true)
         QStringLiteral("-loglevel"),
         QStringLiteral("error"),
         QStringLiteral("-i"),
-        path,
+        staged != nullptr ? QStringLiteral("pipe:0") : path,
         QStringLiteral("-vn"),
         QStringLiteral("-f"),
         QStringLiteral("f32le"),
@@ -838,6 +863,12 @@ DecodedAudio decodeCanonical(const QString &path, bool keepRawPcm = true)
     });
     if (!process.waitForStarted(5000)) {
         fail(QStringLiteral("spawning ffmpeg for %1").arg(path));
+    }
+    if (staged != nullptr) {
+        // waitForFinished drains stdout while it flushes this write, so a
+        // file larger than the pipe never deadlocks against ffmpeg's output.
+        process.write(*staged);
+        process.closeWriteChannel();
     }
     if (!process.waitForFinished(kProcessTimeoutMs)) {
         process.kill();
@@ -943,13 +974,153 @@ QByteArray chromaprintFingerprint(const std::vector<float> &samples, int sampleR
     return encoded;
 }
 
-FileAnalysis analyzeCandidate(const Candidate &candidate)
+// Extensions whose staged decode failed while a path decode of the same file
+// succeeded: formats that need a seekable input. Decode slots record them,
+// readers skip them, and the scan JSON reports them.
+class StagingFallbacks final
+{
+public:
+    bool contains(const QString &extension) const
+    {
+        std::lock_guard lock(m_mutex);
+        return m_extensions.contains(extension);
+    }
+
+    void add(const QString &extension)
+    {
+        std::lock_guard lock(m_mutex);
+        m_extensions.insert(extension);
+    }
+
+    QStringList sorted() const
+    {
+        std::lock_guard lock(m_mutex);
+        QStringList list(m_extensions.cbegin(), m_extensions.cend());
+        list.sort();
+        return list;
+    }
+
+private:
+    mutable std::mutex m_mutex;
+    QSet<QString> m_extensions;
+};
+
+struct StagedInput {
+    QByteArray bytes; // compressed file bytes; empty when ffmpeg opens the path
+    qint64 granted = 0; // budget held for these bytes
+    bool ready = false; // the reader is done with this candidate
+};
+
+// One scan's staging state: the byte budget, one input per pending
+// candidate, and the formats that fell back to the path.
+struct Staging {
+    Staging(qint64 budgetBytes, std::size_t count)
+        : buffer(budgetBytes)
+        , inputs(count)
+    {
+    }
+
+    StagingBuffer buffer;
+    std::vector<StagedInput> inputs;
+    StagingFallbacks fallbacks;
+    std::mutex mutex;
+    std::condition_variable ready;
+
+    void markReady(std::size_t index)
+    {
+        {
+            std::lock_guard lock(mutex);
+            inputs[index].ready = true;
+        }
+        ready.notify_all();
+    }
+
+    // Returns the input once its reader is done, or nullptr on a stop
+    // request. A reader blocked on the budget has nothing to notify with, so
+    // the wait polls the stop flag instead of relying on a wakeup.
+    StagedInput *waitFor(std::size_t index)
+    {
+        std::unique_lock lock(mutex);
+        while (!inputs[index].ready) {
+            if (stopRequested()) {
+                return nullptr;
+            }
+            ready.wait_for(lock, std::chrono::milliseconds(200));
+        }
+        return &inputs[index];
+    }
+
+    // Frees the staged bytes and their budget. Called as soon as ffmpeg is
+    // done with them, before DSP, so readers refill while the slot computes.
+    void consume(StagedInput &input)
+    {
+        input.bytes = QByteArray();
+        if (input.granted > 0) {
+            buffer.release(input.granted);
+            input.granted = 0;
+        }
+    }
+};
+
+QString fileExtension(const QString &path)
+{
+    return QFileInfo(path).suffix().toLower();
+}
+
+// Reader loop for one staging thread. Candidates are claimed in order and
+// each one is marked ready whether or not its bytes were staged, so a decode
+// slot never waits on a file the readers decided to leave on its path.
+void stageCandidates(const std::vector<Candidate> &pending, std::atomic_size_t &nextIndex, Staging &staging)
+{
+    while (!stopRequested()) {
+        const std::size_t index = nextIndex.fetch_add(1, std::memory_order_relaxed);
+        if (index >= pending.size()) {
+            break;
+        }
+        const Candidate &candidate = pending[index];
+        StagedInput &input = staging.inputs[index];
+        QFile file(candidate.path);
+        const bool readable = !staging.fallbacks.contains(fileExtension(candidate.path))
+            && file.open(QIODevice::ReadOnly);
+        const qint64 size = readable ? file.size() : 0;
+        if (!staging.buffer.acquire(index, size)) {
+            break;
+        }
+        if (readable) {
+            input.bytes = file.readAll();
+            input.granted = size;
+            if (input.bytes.isEmpty()) {
+                staging.consume(input);
+            }
+        }
+        staging.markReady(index);
+    }
+}
+
+FileAnalysis analyzeCandidate(const Candidate &candidate, Staging *staging, StagedInput *staged)
 {
     FileAnalysis analysis;
     analysis.candidate = candidate;
     try {
         const auto decodeStarted = std::chrono::steady_clock::now();
-        DecodedAudio decoded = decodeCanonical(candidate.path);
+        DecodedAudio decoded;
+        if (staged != nullptr && !staged->bytes.isEmpty()) {
+            try {
+                decoded = decodeCanonical(candidate.path, true, &staged->bytes);
+                analysis.decodeInput = QStringLiteral("pipe");
+            } catch (const std::exception &) {
+                staging->consume(*staged);
+                // The extension is recorded only when the path decode
+                // succeeds: a corrupt file must not disable staging for
+                // every other file of its format.
+                decoded = decodeCanonical(candidate.path);
+                analysis.decodeInput = QStringLiteral("fallback");
+                staging->fallbacks.add(fileExtension(candidate.path));
+            }
+            staging->consume(*staged);
+        } else {
+            decoded = decodeCanonical(candidate.path);
+        }
         analysis.timings.decodeMs = elapsedMs(decodeStarted);
         analysis.durationMs = decoded.durationMs;
 
@@ -978,7 +1149,9 @@ FileAnalysis analyzeCandidate(const Candidate &candidate)
     return analysis;
 }
 
-void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate &gate,
+// staging, when given, runs a reader pool ahead of the decode workers; each
+// worker then waits for its candidate's bytes and feeds them to ffmpeg.
+void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate &gate, Staging *staging,
                     const std::function<void(FileAnalysis &&, int, int)> &completion)
 {
     if (pending.empty()) {
@@ -997,6 +1170,16 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate 
     const auto workExhausted = [&]() {
         return nextIndex.load(std::memory_order_relaxed) >= pending.size();
     };
+
+    std::atomic_size_t nextStaged = 0;
+    std::vector<std::thread> readers;
+    if (staging != nullptr) {
+        const std::size_t readerCount = std::min(kStagingReaders, boundedWorkers);
+        readers.reserve(readerCount);
+        for (std::size_t reader = 0; reader < readerCount; ++reader) {
+            readers.emplace_back([&]() { stageCandidates(pending, nextStaged, *staging); });
+        }
+    }
 
     std::vector<std::thread> workers;
     workers.reserve(boundedWorkers);
@@ -1021,7 +1204,18 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate 
                 if (index >= pending.size()) {
                     break;
                 }
-                FileAnalysis analysis = analyzeCandidate(pending[index]);
+                StagedInput *staged = nullptr;
+                qint64 stageWaitMs = 0;
+                if (staging != nullptr) {
+                    const auto waitStarted = std::chrono::steady_clock::now();
+                    staged = staging->waitFor(index);
+                    stageWaitMs = elapsedMs(waitStarted);
+                    if (staged == nullptr) {
+                        break;
+                    }
+                }
+                FileAnalysis analysis = analyzeCandidate(pending[index], staging, staged);
+                analysis.timings.stageWaitMs = stageWaitMs;
                 {
                     std::lock_guard lock(mutex);
                     completed.push_back(std::move(analysis));
@@ -1061,6 +1255,14 @@ void analyzePending(const std::vector<Candidate> &pending, int jobs, DecodeGate 
 
     for (std::thread &worker : workers) {
         worker.join();
+    }
+    if (staging != nullptr) {
+        // After a stop, a reader blocked on the budget has no decode slot
+        // left to release it; closing the buffer is what wakes it.
+        staging->buffer.close();
+        for (std::thread &reader : readers) {
+            reader.join();
+        }
     }
 }
 
@@ -2179,6 +2381,7 @@ QJsonObject timingStatsJson(std::vector<qint64> values)
 QJsonObject timingsJson(const TimingAccumulator &timings)
 {
     return QJsonObject{
+        {QStringLiteral("stage_wait"), timingStatsJson(timings.stageWait)},
         {QStringLiteral("decode"), timingStatsJson(timings.decode)},
         {QStringLiteral("hash"), timingStatsJson(timings.hash)},
         {QStringLiteral("dsp"), timingStatsJson(timings.dsp)},
@@ -2306,10 +2509,12 @@ void emitVerboseFile(const FileAnalysis &analysis)
     QTextStream err(stderr);
     err.setEncoding(QStringConverter::Utf8);
     err << "file " << analysis.status
+        << " stage_wait=" << analysis.timings.stageWaitMs
         << " decode=" << analysis.timings.decodeMs
         << " hash=" << analysis.timings.hashMs
         << " dsp=" << analysis.timings.dspMs
         << " fp=" << analysis.timings.fpMs
+        << " input=" << analysis.decodeInput
         << ' ' << analysis.candidate.path << '\n';
     err.flush();
 }
@@ -2417,6 +2622,10 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         applyPowerPriority(effective.power);
     }
     const QString effectivePowerName = powerName(effective.power);
+    const qint64 stagingBytes = options.stagingBytes.value_or(
+        parseByteSize(readStateSetting(options.statePath, QStringLiteral("analysis.stagingBytes"),
+                                       QStringLiteral("0")))
+            .value_or(0));
 
     const auto scanStarted = std::chrono::steady_clock::now();
     SqlConnection connection;
@@ -2565,12 +2774,23 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
         ? MediaProbe::Class::Fast
         : MediaProbe::classify(pending.front().path);
     DecodeGate gate(effective.jobs, 1, effective.jobs);
-    analyzePending(pending, effective.jobs, gate, completion);
+    std::unique_ptr<Staging> staging;
+    if (stagingBytes > 0) {
+        staging = std::make_unique<Staging>(stagingBytes, pending.size());
+    }
+    analyzePending(pending, effective.jobs, gate, staging.get(), completion);
     const auto decodeAdaptationJson = [&]() {
         return QJsonObject{
             {QStringLiteral("media_class"), MediaProbe::name(mediaClass)},
             {QStringLiteral("initial"), gate.initialTarget()},
             {QStringLiteral("final"), gate.target()},
+        };
+    };
+    const auto stagingJson = [&]() {
+        return QJsonObject{
+            {QStringLiteral("budget_bytes"), static_cast<double>(stagingBytes)},
+            {QStringLiteral("fallback_extensions"),
+             QJsonArray::fromStringList(staging ? staging->fallbacks.sorted() : QStringList())},
         };
     };
     commitIfNeeded(true);
@@ -2586,6 +2806,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
                      effectivePowerName,
                      effective.jobs);
         payload.insert(QStringLiteral("decode_adaptation"), decodeAdaptationJson());
+        payload.insert(QStringLiteral("staging"), stagingJson());
         return payload;
     }
 
@@ -2619,6 +2840,7 @@ QJsonObject runNativeRefresh(const RefreshOptions &options)
                  effective.jobs,
                  fillPtr);
     payload.insert(QStringLiteral("decode_adaptation"), decodeAdaptationJson());
+    payload.insert(QStringLiteral("staging"), stagingJson());
     return payload;
 }
 
@@ -2940,7 +3162,8 @@ void printUsage()
         "Usage: muzaiten-features <refresh|status|doctor|model download|query|neighbors> [options]\n"
         "\n"
         "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
-        "        [--limit N] [--jobs N] [--semantic-decode-workers N] [--power background|balanced|turbo] [--json|--progress=jsonl] [--verbose]\n"
+        "        [--limit N] [--jobs N] [--staging-bytes N] [--semantic-decode-workers N] [--power background|balanced|turbo]\n"
+        "        [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "model download [--components full|audio] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
@@ -3020,6 +3243,17 @@ RefreshOptions parseRefresh(QStringList arguments)
             if (!ok || options.jobs <= 0) {
                 failWithCode(2, QStringLiteral("refresh --jobs needs a positive integer"));
             }
+        } else if (word == QLatin1String("--staging-bytes")) {
+            const QString message = QStringLiteral(
+                "refresh --staging-bytes needs a byte count such as 256M (0 disables staging)");
+            if (index + 1 >= arguments.size()) {
+                failWithCode(2, message);
+            }
+            const std::optional<qint64> bytes = parseByteSize(arguments.at(++index));
+            if (!bytes) {
+                failWithCode(2, message);
+            }
+            options.stagingBytes = *bytes;
         } else if (word == QLatin1String("--semantic-decode-workers")) {
             if (index + 1 >= arguments.size()) {
                 failWithCode(2, QStringLiteral("refresh --semantic-decode-workers needs a positive integer"));

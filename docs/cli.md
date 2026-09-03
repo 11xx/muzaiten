@@ -103,6 +103,18 @@ per-file diagnostics to stderr. `--progress=jsonl` writes versioned phase,
 progress, and one terminal result event to stdout; stderr remains diagnostic.
 `--semantic-decode-workers N` sets the optional CLAP provider's concurrent
 audio decodes for that refresh; omit it to use the provider default.
+`--staging-bytes N` (suffixes `K`, `M`, `G`; `0`, the default, disables it)
+lets a small reader pool stage upcoming files' compressed bytes in memory,
+up to `N` bytes ahead of the decoders, which then feed ffmpeg from that buffer
+instead of reading the medium themselves. It helps when the library sits on a
+network mount, where reading the file is most of what a decode slot waits
+for; on local storage it changes little. When the flag is absent the
+`analysis.stagingBytes` setting in `state.sqlite` supplies the value. A
+format that needs a seekable input (an m4a whose index trails the audio)
+fails on the pipe, is decoded from its path once, and that extension is read
+from the path for the rest of the run; the scan JSON lists such extensions
+under `staging.fallback_extensions`, and its `timings.stage_wait` aggregate
+shows how long decode slots waited for staged bytes.
 After the scalar-feature phase, counters describe stale representative groups,
 not files. Provider embedding and neighbor events use the same JSONL stream.
 When a representative has a fresh persisted per-file scalar row, the indexer
