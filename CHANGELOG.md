@@ -14,6 +14,13 @@
   Copies that agree equally are still offered as a choice, a title hit whose
   artist disagrees is not admitted, and **Exact only** leaves the tolerance
   off.
+- `radio-learn` learns from radio picks removed from the queue before they
+  played. Such a removal labels the pick as a rejection at half the weight of
+  an early skip; a pick that both was removed and played within the join
+  window is labeled by the play alone. The fit is a weighted logistic
+  regression, and the command reports how many picks were labeled from plays
+  and how many from unheard removals (`play_samples`, `removal_samples`, and
+  `removal_weight` in JSON output).
 - Test targets link shared application static libraries instead of compiling
   application sources once per target. The target layout requires one
   `make rebuild` after pulling this build-system change.

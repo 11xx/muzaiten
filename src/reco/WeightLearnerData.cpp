@@ -50,6 +50,87 @@ bool isEarlySkip(const QString &outcome, qint64 playedMs, qint64 durationMs)
     return playedMs < threshold;
 }
 
+namespace {
+
+// The play join: a pick's first radio play event inside the window.
+constexpr const char *kPlayJoinSql =
+    "SELECT rp.weights_json, rp.components_json, pe.outcome, pe.played_ms, pe.duration_ms "
+    "FROM radio_picks rp "
+    "JOIN play_events pe ON pe.id = ("
+    " SELECT pe2.id FROM play_events pe2 "
+    " WHERE pe2.source = 'radio' "
+    "   AND pe2.track_path = rp.track_path "
+    "   AND pe2.started_at >= rp.occurred_at "
+    "   AND pe2.started_at <= rp.occurred_at + ? "
+    " ORDER BY pe2.started_at ASC, pe2.id ASC "
+    " LIMIT 1"
+    ") "
+    "ORDER BY rp.occurred_at ASC, rp.id ASC";
+
+// The removal join: a pick removed from the queue unheard inside the window
+// and matched by no radio play event there, so each pick yields at most one
+// sample and a play always wins over a removal.
+constexpr const char *kRemovalJoinSql =
+    "SELECT rp.weights_json, rp.components_json "
+    "FROM radio_picks rp "
+    "WHERE EXISTS ("
+    " SELECT 1 FROM queue_removals qr "
+    " WHERE qr.was_radio_pick = 1 "
+    "   AND qr.was_unheard = 1 "
+    "   AND qr.track_path = rp.track_path "
+    "   AND qr.occurred_at >= rp.occurred_at "
+    "   AND qr.occurred_at <= rp.occurred_at + ?"
+    ") AND NOT EXISTS ("
+    " SELECT 1 FROM play_events pe "
+    " WHERE pe.source = 'radio' "
+    "   AND pe.track_path = rp.track_path "
+    "   AND pe.started_at >= rp.occurred_at "
+    "   AND pe.started_at <= rp.occurred_at + ?"
+    ") "
+    "ORDER BY rp.occurred_at ASC, rp.id ASC";
+
+// Turns a pick's recorded weights and components into the learner's feature
+// vector: each component's contribution divided by the weight that produced
+// it. Returns false, counting the reason in `result`, when the row cannot
+// feed the fit.
+bool appendSample(const QString &weightsJson,
+                  const QString &componentsJson,
+                  bool earlySkip,
+                  double weight,
+                  LoadResult &result)
+{
+    QString parseError;
+    const TrackScorer::Weights rowWeights = TrackScorer::weightsFromJson(weightsJson.toUtf8(), &parseError);
+    if (!parseError.isEmpty()) {
+        ++result.skippedInvalidWeights;
+        return false;
+    }
+
+    WeightLearner::Sample sample;
+    sample.earlySkip = earlySkip;
+    sample.weight = weight;
+    const QVector<TrackScorer::Component> components = componentsFromJson(componentsJson.toUtf8());
+    for (const TrackScorer::Component &component : components) {
+        double componentWeight = 0.0;
+        if (!WeightLearner::componentWeight(rowWeights, component.name, &componentWeight)
+            || componentWeight == 0.0) {
+            continue;
+        }
+        const double signal = component.value / componentWeight;
+        if (std::isfinite(signal)) {
+            sample.features.insert(component.name, signal);
+        }
+    }
+    if (sample.features.isEmpty()) {
+        ++result.skippedNoSignals;
+        return false;
+    }
+    result.samples.push_back(std::move(sample));
+    return true;
+}
+
+} // namespace
+
 LoadResult loadSamples(const QSqlDatabase &history)
 {
     LoadResult result;
@@ -58,56 +139,34 @@ LoadResult loadSamples(const QSqlDatabase &history)
         return result;
     }
 
-    QSqlQuery query(history);
-    query.prepare(QStringLiteral(
-        "SELECT rp.weights_json, rp.components_json, pe.outcome, pe.played_ms, pe.duration_ms "
-        "FROM radio_picks rp "
-        "JOIN play_events pe ON pe.id = ("
-        " SELECT pe2.id FROM play_events pe2 "
-        " WHERE pe2.source = 'radio' "
-        "   AND pe2.track_path = rp.track_path "
-        "   AND pe2.started_at >= rp.occurred_at "
-        "   AND pe2.started_at <= rp.occurred_at + ? "
-        " ORDER BY pe2.started_at ASC, pe2.id ASC "
-        " LIMIT 1"
-        ") "
-        "ORDER BY rp.occurred_at ASC, rp.id ASC"));
-    query.addBindValue(kJoinWindowSecs);
-    if (!query.exec()) {
-        result.error = query.lastError().text();
+    QSqlQuery plays(history);
+    plays.prepare(QString::fromLatin1(kPlayJoinSql));
+    plays.addBindValue(kJoinWindowSecs);
+    if (!plays.exec()) {
+        result.error = plays.lastError().text();
         return result;
     }
+    while (plays.next()) {
+        const bool earlySkip = isEarlySkip(plays.value(2).toString(),
+                                           plays.value(3).toLongLong(),
+                                           plays.value(4).toLongLong());
+        if (appendSample(plays.value(0).toString(), plays.value(1).toString(), earlySkip, 1.0, result)) {
+            ++result.playSamples;
+        }
+    }
 
-    while (query.next()) {
-        QString parseError;
-        const TrackScorer::Weights rowWeights =
-            TrackScorer::weightsFromJson(query.value(0).toString().toUtf8(), &parseError);
-        if (!parseError.isEmpty()) {
-            ++result.skippedInvalidWeights;
-            continue;
+    QSqlQuery removals(history);
+    removals.prepare(QString::fromLatin1(kRemovalJoinSql));
+    removals.addBindValue(kJoinWindowSecs);
+    removals.addBindValue(kJoinWindowSecs);
+    if (!removals.exec()) {
+        result.error = removals.lastError().text();
+        return result;
+    }
+    while (removals.next()) {
+        if (appendSample(removals.value(0).toString(), removals.value(1).toString(), true, kRemovalWeight, result)) {
+            ++result.removalSamples;
         }
-
-        WeightLearner::Sample sample;
-        sample.earlySkip = isEarlySkip(query.value(2).toString(),
-                                       query.value(3).toLongLong(),
-                                       query.value(4).toLongLong());
-        const QVector<TrackScorer::Component> components =
-            componentsFromJson(query.value(1).toString().toUtf8());
-        for (const TrackScorer::Component &component : components) {
-            double weight = 0.0;
-            if (!WeightLearner::componentWeight(rowWeights, component.name, &weight) || weight == 0.0) {
-                continue;
-            }
-            const double signal = component.value / weight;
-            if (std::isfinite(signal)) {
-                sample.features.insert(component.name, signal);
-            }
-        }
-        if (sample.features.isEmpty()) {
-            ++result.skippedNoSignals;
-            continue;
-        }
-        result.samples.push_back(std::move(sample));
     }
     return result;
 }

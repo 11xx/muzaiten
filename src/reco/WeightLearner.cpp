@@ -21,6 +21,11 @@ double sigmoid(double value)
     return z / (1.0 + z);
 }
 
+double sampleWeight(const WeightLearner::Sample &sample)
+{
+    return std::isfinite(sample.weight) ? std::max(0.0, sample.weight) : 0.0;
+}
+
 double clampedMultiplier(double coefficient, double defaultWeight)
 {
     if (defaultWeight == 0.0) {
@@ -152,9 +157,22 @@ Result learn(const QVector<Sample> &samples, Options options)
     QVector<double> coefficients(specs.size(), 0.0);
     QVector<int> nonZeroSamples(specs.size(), 0);
 
-    const double positive = static_cast<double>(result.positiveLabels);
-    const double negative = static_cast<double>(result.sampleCount - result.positiveLabels);
-    double intercept = std::log(positive / std::max(1.0, negative));
+    // Weighted logistic regression: every per-sample term (the error, the
+    // class balance behind the intercept, and the normalizer) is scaled by
+    // the sample's weight, so a sample at weight w counts exactly like w
+    // copies of a full sample.
+    double positive = 0.0;
+    double negative = 0.0;
+    for (const Sample &sample : samples) {
+        const double weight = sampleWeight(sample);
+        (sample.earlySkip ? positive : negative) += weight;
+    }
+    const double n = positive + negative;
+    if (n <= 0.0) {
+        result.error = QStringLiteral("listening data carries no weight");
+        return result;
+    }
+    double intercept = std::log(std::max(1e-6, positive) / std::max(1.0, negative));
 
     QVector<double> gradients(specs.size(), 0.0);
     for (int iteration = 0; iteration < options.iterations; ++iteration) {
@@ -168,14 +186,13 @@ Result learn(const QVector<Sample> &samples, Options options)
             }
 
             const double prediction = sigmoid(z);
-            const double error = prediction - (sample.earlySkip ? 1.0 : 0.0);
+            const double error = sampleWeight(sample) * (prediction - (sample.earlySkip ? 1.0 : 0.0));
             interceptGradient += error;
             for (qsizetype i = 0; i < specs.size(); ++i) {
                 gradients[i] += error * sample.features.value(specs[i].componentName, 0.0);
             }
         }
 
-        const double n = static_cast<double>(result.sampleCount);
         intercept -= options.learningRate * interceptGradient / n;
         for (qsizetype i = 0; i < specs.size(); ++i) {
             const double regularized = gradients[i] / n + (options.l2Lambda * coefficients[i]) / n;

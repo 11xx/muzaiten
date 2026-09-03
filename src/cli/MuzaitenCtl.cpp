@@ -815,6 +815,8 @@ void printRadioLearnPlain(const WeightLearner::Result &learned,
     out.setEncoding(QStringConverter::Utf8);
     out << "radio-learn: " << learned.sampleCount << " labeled picks ("
         << learned.positiveLabels << " early skips)\n";
+    out << "samples: " << load.playSamples << " from plays, " << load.removalSamples
+        << " from unheard queue removals (label weight " << WeightLearnerData::kRemovalWeight << ")\n";
     out << "join window: " << WeightLearnerData::kJoinWindowSecs << " seconds\n";
     if (load.skippedInvalidWeights > 0 || load.skippedNoSignals > 0) {
         out << "skipped rows: " << load.skippedInvalidWeights << " invalid weights, "
@@ -926,6 +928,9 @@ int runRadioLearn(QStringList arguments, bool json)
                                                               : QJsonValue(profileName)},
             {QStringLiteral("sample_count"), learned.sampleCount},
             {QStringLiteral("positive_labels"), learned.positiveLabels},
+            {QStringLiteral("play_samples"), load.playSamples},
+            {QStringLiteral("removal_samples"), load.removalSamples},
+            {QStringLiteral("removal_weight"), WeightLearnerData::kRemovalWeight},
             {QStringLiteral("min_samples"), options.minSamples},
             {QStringLiteral("min_positive_labels"), options.minPositiveLabels},
             {QStringLiteral("join_window_seconds"), WeightLearnerData::kJoinWindowSecs},
