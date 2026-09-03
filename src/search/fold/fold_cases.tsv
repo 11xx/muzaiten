@@ -1,0 +1,19 @@
+# input<TAB>expected folded text
+ジ	ji
+っか	kka
+きゃ	kya
+ß	ss
+ｶ	ka
+ｶﾞ	ga
+ﾊﾟ	pa
+ＡＢＣ	abc
+Привет мир	privet mir
+γειά σου	geia soy
+Crème brûlée	creme brulee
+花々	hanahana
+こゝろ	kokoro
+つゞく	tsuzuku
+カヽ	kaka
+カヾ	kaga
+# Unknown kanji remains unchanged when no seed reading exists.
+阿	阿

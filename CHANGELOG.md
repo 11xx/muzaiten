@@ -7,6 +7,8 @@
 - The player bar shows the current track's album art on every view, not only
   the queue. The library views still leave it out, since the right sidebar
   already shows the artwork there.
+- Search folding handles half-width kana, full-width forms, and Japanese
+  iteration marks; the search cache rebuilds once when this fold version changes.
 
 ### Fixed
 

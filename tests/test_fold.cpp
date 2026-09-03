@@ -1,4 +1,5 @@
 #include <QTest>
+#include <QFile>
 #include <QString>
 
 #include "search/fold/Fold.h"
@@ -9,6 +10,47 @@ class TestFold : public QObject {
     Q_OBJECT
 
 private slots:
+    void tableDataLoaded()
+    {
+        const Fold::TableStats stats = Fold::tableStats();
+        QVERIFY(stats.transliterationEntries > 0);
+        QVERIFY(stats.kanaEntries > 0);
+        QVERIFY(stats.yoonPrefixEntries > 0);
+        QVERIFY(stats.smallVowelEntries > 0);
+        QVERIFY(stats.dictionaryEntries > 0);
+        QVERIFY(stats.dictionaryMaxKeyLen > 0);
+        QCOMPARE(stats.dictionaryMaxKeyLen, stats.dictionaryLongestKeyLen);
+    }
+
+    void goldenCorpus_data()
+    {
+        QTest::addColumn<QString>("input");
+        QTest::addColumn<QString>("expected");
+
+        QFile file(QStringLiteral(FOLD_CASES_PATH));
+        QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
+        const QString contents = QString::fromUtf8(file.readAll());
+        for (QString line : contents.split(QChar('\n'))) {
+            if (line.endsWith(QChar('\r'))) line.chop(1);
+            const QString trimmed = line.trimmed();
+            if (trimmed.isEmpty() || trimmed.startsWith(QChar('#'))) continue;
+
+            const qsizetype tab = line.indexOf(QChar('\t'));
+            QVERIFY2(tab >= 0, qPrintable(QStringLiteral("corpus row has no tab: %1").arg(line)));
+            const QString input = line.left(tab);
+            const QString expected = line.mid(tab + 1);
+            const QByteArray rowName = input.toUtf8();
+            QTest::newRow(rowName.constData()) << input << expected;
+        }
+    }
+
+    void goldenCorpus()
+    {
+        QFETCH(QString, input);
+        QFETCH(QString, expected);
+        QCOMPARE(Fold::foldText(input), expected);
+    }
+
     void asciiPassthroughAndLowercase()
     {
         QCOMPARE(Fold::foldText(QStringLiteral("Hello World")), QStringLiteral("hello world"));
@@ -118,6 +160,28 @@ private slots:
         const Fold::FoldResult ext = Fold::fold(QStringLiteral("a") + astral + QStringLiteral("b"));
         QCOMPARE(ext.text.size(), 4);
         QCOMPARE(ext.srcIndex, (QVector<int>{0, 1, 2, 3}));
+    }
+
+    void sourceIndexMappingForCompatibilityForms()
+    {
+        const Fold::FoldResult result = Fold::fold(QString::fromUtf8("AｶﾞBﾊﾟC"));
+        QCOMPARE(result.text, QStringLiteral("agabpac"));
+        QCOMPARE(result.srcIndex, (QVector<int>{0, 1, 1, 3, 4, 4, 6}));
+    }
+
+    void iterationMarksUseTheirSourcePosition()
+    {
+        const Fold::FoldResult kanji = Fold::fold(QString::fromUtf8("阿々"));
+        QCOMPARE(kanji.text, QString::fromUtf8("阿阿"));
+        QCOMPARE(kanji.srcIndex, (QVector<int>{0, 1}));
+
+        const Fold::FoldResult kana = Fold::fold(QString::fromUtf8("こゝ"));
+        QCOMPARE(kana.text, QStringLiteral("koko"));
+        QCOMPARE(kana.srcIndex, (QVector<int>{0, 0, 1, 1}));
+
+        const Fold::FoldResult voiced = Fold::fold(QString::fromUtf8("つゞ"));
+        QCOMPARE(voiced.text, QStringLiteral("tsuzu"));
+        QCOMPARE(voiced.srcIndex, (QVector<int>{0, 0, 0, 1, 1}));
     }
 
     void foldTextMatchesFoldText()

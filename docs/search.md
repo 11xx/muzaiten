@@ -12,6 +12,31 @@ matches by romaji — kana and common kanji romanize (`sanshin no hana` or
 tags filling in proper-noun readings (`utada` → 宇多田ヒカル). Typing the
 original script still matches too.
 
+### Fold data and conformance corpus
+
+NFKC runs before folding, so half-width kana and full-width compatibility forms
+share the same search representation, while Japanese iteration marks expand to
+their repeated kana or kanji reading.
+
+The shared fold resource is `src/search/fold/fold_tables.json`. Its top-level
+keys are:
+
+- `transliteration`: single-character script mappings for Latin, Greek, and
+  Cyrillic characters that need explicit readings. Keys and values are strings.
+- `kana`: hiragana character to Hepburn-romaji mappings.
+- `yoon_prefix`: hiragana syllable to consonant-prefix mappings used with
+  small `ゃ`, `ゅ`, and `ょ`.
+- `small_vowel`: small yōon kana to the vowel appended to a yōon prefix.
+- `kanji`: surface text to hiragana reading mappings for the seed dictionary.
+
+The C++ fold compiles the file into its own object and parses it once at first
+use. The Python fold can read the same UTF-8 file with its standard JSON
+library. The conformance file
+`src/search/fold/fold_cases.tsv` uses one UTF-8 case per line in the form
+`input<TAB>expected`. Blank lines and lines beginning with `#` are comments;
+the expected field is the complete folded output. An unmapped kanji remains in
+the expected output so the original-script search path stays covered.
+
 The result list always keeps a highlighted cursor you move with the arrow or
 `Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style.
 `Esc`/`Ctrl+G` first clears the query, then (when already empty) releases the
