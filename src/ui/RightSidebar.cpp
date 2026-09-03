@@ -87,6 +87,9 @@ RightSidebar::RightSidebar(QWidget *parent)
     m_splitter->setSizes(kRightSidebarDefaultSizes);
     m_userSplitterSizes = kRightSidebarDefaultSizes;
     setTrackInfo({});
+    // The pane shows the fallback artwork until a track supplies its own; a
+    // theme change re-applies it for the new palette.
+    setAlbumArt(QString());
 
     connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
         // Only a real drag updates the persisted sizes, and only when the live

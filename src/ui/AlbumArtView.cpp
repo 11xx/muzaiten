@@ -61,7 +61,10 @@ void AlbumArtView::updateScaledPixmap()
     }
 
     if (m_sourcePath.isEmpty()) {
-        setPixmap({});
+        // Without a source there is nothing to scale. Setting an empty pixmap
+        // here would also discard any placeholder text the owner put on the
+        // label, since QLabel holds one or the other, so the label is left as
+        // the owner last set it.
         return;
     }
 
