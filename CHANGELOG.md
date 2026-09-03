@@ -13,6 +13,10 @@
 - The player bar's album art box and the right sidebar's artwork pane show
   the fallback artwork while nothing is playing, instead of an empty gap. The
   gap appeared on every view once the bar carried art everywhere.
+- `make build` detects upgrades to the packaged dependency headers used by
+  TagLib, GStreamer, GLib, GObject, zstd, and chromaprint. Their full package
+  versions join the compiler and Qt fingerprint, so a header upgrade triggers
+  the same clean-first rebuild instead of leaving stale objects to link.
 - `make build` recompiles the build directory from scratch after a compiler
   or Qt upgrade. Package managers install headers carrying their upstream
   build time, so new headers can be older than the objects built from the
