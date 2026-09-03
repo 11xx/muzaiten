@@ -219,8 +219,13 @@ do not change.
 - `power`: effective analysis power (`background`, `balanced`, or `turbo`).
 - `jobs`: effective worker count after `--power` and `--jobs` resolution.
 - `canceled`: true when SIGTERM/SIGINT requested a cooperative stop.
-- `timings`: per-stage `decode`, `hash`, `dsp`, and `fp` aggregates with
-  `total_ms`, `mean_ms`, `p50_ms`, and `p95_ms`.
+- `timings`: per-stage `stage_wait`, `decode`, `hash`, `dsp`, and `fp`
+  aggregates with `total_ms`, `mean_ms`, `p50_ms`, and `p95_ms`. `stage_wait`
+  is the time a decode slot spent waiting for its file's staged bytes; it is
+  zero throughout when `--staging-bytes` is off.
+- `staging`: `budget_bytes` (the effective `--staging-bytes` value, 0 when
+  off) and `fallback_extensions`, the lowercase extensions whose staged decode
+  failed and were read from their path for the rest of the run.
 
 NULL means the extractor could not report that value for the representative.
 Near-silence has NULL loudness and energy; a flat or empty onset envelope

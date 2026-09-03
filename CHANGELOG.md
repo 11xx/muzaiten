@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- `muzaiten-features refresh --staging-bytes N` (or the `analysis.stagingBytes`
+  state setting) stages upcoming files' compressed bytes in memory ahead of
+  the decoders, bounded by that byte budget, and feeds ffmpeg over stdin so a
+  slow read on a network library stalls a reader instead of a decode slot.
+  Formats that need a seekable input fall back to a path decode once per
+  extension. The scan JSON gains a `staging` object and a `stage_wait` timing
+  aggregate, and `--verbose` file lines carry `stage_wait=` and `input=`.
+
 ### Changed
 
 - Playlist import matches a line whose artist credit is written differently
