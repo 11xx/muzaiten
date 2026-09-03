@@ -94,10 +94,13 @@ bool hasComponent(const QList<TrackScorer::Component> &components, const QString
     return false;
 }
 
-WeightLearner::Sample learnerSample(bool earlySkip, std::initializer_list<QPair<QString, double>> features)
+WeightLearner::Sample learnerSample(bool earlySkip,
+                                    std::initializer_list<QPair<QString, double>> features,
+                                    double weight = 1.0)
 {
     WeightLearner::Sample sample;
     sample.earlySkip = earlySkip;
+    sample.weight = weight;
     for (const QPair<QString, double> &feature : features) {
         sample.features.insert(feature.first, feature.second);
     }
@@ -222,6 +225,7 @@ private slots:
     void weightLearnerIsDeterministic();
     void weightLearnerClampsExtremeSuggestions();
     void weightLearnerRefusesSparseData();
+    void weightLearnerScalesSamplesByWeight();
     void eraDecaysWithYearGap();
     void tempoAndEnergyUseSonicProximity();
     void unknownTempoOrEnergyYieldsNoComponent();
@@ -1033,6 +1037,54 @@ void RadioTest::weightLearnerRefusesSparseData()
     const WeightLearner::Result noSkips = WeightLearner::learn(samples);
     QVERIFY(!noSkips.ok);
     QVERIFY(noSkips.error.contains(QStringLiteral("have 0, need 20")));
+}
+
+void RadioTest::weightLearnerScalesSamplesByWeight()
+{
+    // Baseline: skips carried a genre signal, listens did not.
+    QVector<WeightLearner::Sample> baseline;
+    for (int i = 0; i < 40; ++i) {
+        baseline.push_back(learnerSample(true, {{QStringLiteral("genre"), 1.0}}));
+    }
+    for (int i = 0; i < 200; ++i) {
+        baseline.push_back(learnerSample(false, {{QStringLiteral("genre"), 0.0}}));
+    }
+    const WeightLearner::Result alone = WeightLearner::learn(baseline);
+    QVERIFY2(alone.ok, qPrintable(alone.error));
+
+    // Mirror every sample with the opposite label; the mirrors contradict the
+    // baseline exactly, so at full weight they cancel the genre signal.
+    auto mirrored = [&baseline](double weight) {
+        QVector<WeightLearner::Sample> samples = baseline;
+        for (const WeightLearner::Sample &sample : baseline) {
+            WeightLearner::Sample mirror = sample;
+            mirror.earlySkip = !sample.earlySkip;
+            mirror.weight = weight;
+            samples.push_back(mirror);
+        }
+        return samples;
+    };
+
+    // Weightless mirrors leave the fit exactly as it was, even though they
+    // are counted as samples and as positive labels.
+    const WeightLearner::Result ignored = WeightLearner::learn(mirrored(0.0));
+    QVERIFY2(ignored.ok, qPrintable(ignored.error));
+    QCOMPARE(ignored.sampleCount, 480);
+    QCOMPARE(ignored.positiveLabels, 240);
+    QCOMPARE(ignored.suggestedWeightsJson, alone.suggestedWeightsJson);
+
+    // Full-weight mirrors cancel the signal; half-weight mirrors only dilute it.
+    const WeightLearner::Result cancelled = WeightLearner::learn(mirrored(1.0));
+    const WeightLearner::Result diluted = WeightLearner::learn(mirrored(0.5));
+    QVERIFY2(cancelled.ok, qPrintable(cancelled.error));
+    QVERIFY2(diluted.ok, qPrintable(diluted.error));
+    const double aloneGenre = learnedMultiplier(alone, QStringLiteral("genre"));
+    const double dilutedGenre = learnedMultiplier(diluted, QStringLiteral("genre"));
+    const double cancelledGenre = learnedMultiplier(cancelled, QStringLiteral("genre"));
+    QVERIFY(aloneGenre < 1.0);
+    QVERIFY(std::abs(cancelledGenre - 1.0) < 0.01);
+    QVERIFY(aloneGenre < dilutedGenre);
+    QVERIFY(dilutedGenre < cancelledGenre);
 }
 
 void RadioTest::eraDecaysWithYearGap()

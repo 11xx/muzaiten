@@ -15,9 +15,14 @@ struct ComponentSpec {
     double defaultWeight = 0.0;
 };
 
+// One labeled radio pick. `weight` scales how much the label counts in the
+// fit: 1.0 is a full observation, smaller values carry less evidence (a
+// rejection inferred without a play), 0.0 leaves the fit untouched. Sample
+// and positive-label thresholds count samples regardless of weight.
 struct Sample {
     QHash<QString, double> features;
     bool earlySkip = false;
+    double weight = 1.0;
 };
 
 struct Options {

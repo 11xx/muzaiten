@@ -270,6 +270,21 @@ void recordRadioPick(ListenHistoryStore &store,
     QVERIFY(store.recordRadioPick(pick));
 }
 
+void recordQueueRemoval(ListenHistoryStore &store,
+                        const Track &track,
+                        qint64 occurredAtSecs,
+                        bool wasRadioPick,
+                        bool wasUnheard)
+{
+    ListenHistoryStore::QueueRemovalEvent removal;
+    removal.occurredAtSecs = occurredAtSecs;
+    removal.track = track;
+    removal.wasRadioPick = wasRadioPick;
+    removal.wasUnheard = wasUnheard;
+    removal.radioActive = true;
+    QVERIFY(store.recordQueueRemoval(removal));
+}
+
 void recordPlayEvent(ListenHistoryStore &store,
                      const Track &track,
                      qint64 startedAtSecs,
@@ -325,6 +340,10 @@ void createRadioLearnFixture(const QString &dataDir)
     recordRadioPick(store, unmatched, 4000, pickComponents(QStringLiteral("genre"), 3.0));
     recordPlayEvent(store, unmatched, 4000 + 12 * 60 * 60 + 1,
                     QStringLiteral("radio"), QStringLiteral("skipped"), 1000, 240000);
+
+    const Track removed = radioLearnTrack(dataDir + QStringLiteral("/removed.flac"));
+    recordRadioPick(store, removed, 5000, pickComponents(QStringLiteral("genre"), 3.0));
+    recordQueueRemoval(store, removed, 5100, true, true);
 }
 
 } // namespace
@@ -544,6 +563,66 @@ private slots:
                     .contains(QStringLiteral("semantic search requires a ready CLAP provider")));
     }
 
+    void radioLearnLoaderJoinsUnheardQueueRemovals()
+    {
+        const QString historyPath = m_temp.path() + QStringLiteral("/removals-history.sqlite");
+        {
+            ListenHistoryStore store(historyPath);
+            QVERIFY(store.isOpen());
+            const QString root = m_temp.path() + QStringLiteral("/removals");
+
+            // A pick that played and was skipped early: the play label.
+            const Track skipped = radioLearnTrack(root + QStringLiteral("/skipped.flac"));
+            recordRadioPick(store, skipped, 1000, pickComponents(QStringLiteral("genre"), 3.0));
+            recordPlayEvent(store, skipped, 1010, QStringLiteral("radio"), QStringLiteral("skipped"), 30000, 240000);
+
+            // A pick removed from the queue unheard: the removal label.
+            const Track removed = radioLearnTrack(root + QStringLiteral("/removed.flac"));
+            recordRadioPick(store, removed, 2000, pickComponents(QStringLiteral("rating"), 1.5));
+            recordQueueRemoval(store, removed, 2100, true, true);
+
+            // Removed and then played in the window: the play wins outright.
+            const Track replayed = radioLearnTrack(root + QStringLiteral("/replayed.flac"));
+            recordRadioPick(store, replayed, 3000, pickComponents(QStringLiteral("genre"), 3.0));
+            recordQueueRemoval(store, replayed, 3050, true, true);
+            recordPlayEvent(store, replayed, 3100, QStringLiteral("radio"), QStringLiteral("finished"), 240000, 240000);
+
+            // Removals that say nothing about the pick: not radio's own row,
+            // already heard, outside the window, or before the pick.
+            const Track manual = radioLearnTrack(root + QStringLiteral("/manual.flac"));
+            recordRadioPick(store, manual, 4000, pickComponents(QStringLiteral("genre"), 3.0));
+            recordQueueRemoval(store, manual, 4100, false, true);
+            const Track heard = radioLearnTrack(root + QStringLiteral("/heard.flac"));
+            recordRadioPick(store, heard, 5000, pickComponents(QStringLiteral("genre"), 3.0));
+            recordQueueRemoval(store, heard, 5100, true, false);
+            const Track late = radioLearnTrack(root + QStringLiteral("/late.flac"));
+            recordRadioPick(store, late, 6000, pickComponents(QStringLiteral("genre"), 3.0));
+            recordQueueRemoval(store, late, 6000 + WeightLearnerData::kJoinWindowSecs + 1, true, true);
+            const Track before = radioLearnTrack(root + QStringLiteral("/before.flac"));
+            recordRadioPick(store, before, 7000, pickComponents(QStringLiteral("genre"), 3.0));
+            recordQueueRemoval(store, before, 6990, true, true);
+        }
+
+        const WeightLearnerData::LoadResult load = WeightLearnerData::loadSamplesFromPath(historyPath);
+        QVERIFY2(load.error.isEmpty(), qPrintable(load.error));
+        QCOMPARE(load.playSamples, 2);
+        QCOMPARE(load.removalSamples, 1);
+        QCOMPARE(load.samples.size(), qsizetype(3));
+        QCOMPARE(load.skippedInvalidWeights, 0);
+        QCOMPARE(load.skippedNoSignals, 0);
+
+        // Play samples come first, in pick order; removal samples follow.
+        QVERIFY(load.samples.at(0).earlySkip);
+        QCOMPARE(load.samples.at(0).weight, 1.0);
+        QVERIFY(load.samples.at(0).features.contains(QStringLiteral("genre")));
+        QVERIFY(!load.samples.at(1).earlySkip);
+        QCOMPARE(load.samples.at(1).weight, 1.0);
+        QVERIFY(load.samples.at(2).earlySkip);
+        QCOMPARE(load.samples.at(2).weight, WeightLearnerData::kRemovalWeight);
+        QCOMPARE(WeightLearnerData::kRemovalWeight, 0.5);
+        QVERIFY(load.samples.at(2).features.contains(QStringLiteral("rating")));
+    }
+
     void radioLearnDryRunAndSaveUseJoinedTelemetry()
     {
         const QString dataDir = qEnvironmentVariable("MUZAITEN_DATA_DIR");
@@ -552,7 +631,9 @@ private slots:
         const WeightLearnerData::LoadResult load =
             WeightLearnerData::loadSamplesFromPath(QDir(dataDir).filePath(QStringLiteral("history.sqlite")));
         QVERIFY2(load.error.isEmpty(), qPrintable(load.error));
-        QCOMPARE(load.samples.size(), qsizetype(3));
+        QCOMPARE(load.samples.size(), qsizetype(4));
+        QCOMPARE(load.playSamples, 3);
+        QCOMPARE(load.removalSamples, 1);
         QCOMPARE(WeightLearnerData::kJoinWindowSecs, 12 * 60 * 60);
         int earlySkips = 0;
         for (const WeightLearner::Sample &sample : load.samples) {
@@ -560,7 +641,7 @@ private slots:
                 ++earlySkips;
             }
         }
-        QCOMPARE(earlySkips, 1);
+        QCOMPARE(earlySkips, 2);
 
         const QString ctlPath = muzaitenCtlPath();
         QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
@@ -584,8 +665,11 @@ private slots:
         QVERIFY2(parseError.error == QJsonParseError::NoError, qPrintable(parseError.errorString()));
         const QJsonObject dry = dryDocument.object();
         QVERIFY(dry.value(QStringLiteral("dry_run")).toBool());
-        QCOMPARE(dry.value(QStringLiteral("sample_count")).toInt(), 3);
-        QCOMPARE(dry.value(QStringLiteral("positive_labels")).toInt(), 1);
+        QCOMPARE(dry.value(QStringLiteral("sample_count")).toInt(), 4);
+        QCOMPARE(dry.value(QStringLiteral("positive_labels")).toInt(), 2);
+        QCOMPARE(dry.value(QStringLiteral("play_samples")).toInt(), 3);
+        QCOMPARE(dry.value(QStringLiteral("removal_samples")).toInt(), 1);
+        QCOMPARE(dry.value(QStringLiteral("removal_weight")).toDouble(), WeightLearnerData::kRemovalWeight);
         QCOMPARE(dry.value(QStringLiteral("join_window_seconds")).toInt(), 12 * 60 * 60);
         QVERIFY(dry.value(QStringLiteral("components")).toArray().size() > 0);
 
@@ -609,8 +693,9 @@ private slots:
         const QJsonObject saved = saveDocument.object();
         QVERIFY(!saved.value(QStringLiteral("dry_run")).toBool());
         QVERIFY(saved.value(QStringLiteral("profile")).toString().startsWith(QStringLiteral("learned-")));
-        QCOMPARE(saved.value(QStringLiteral("sample_count")).toInt(), 3);
-        QCOMPARE(saved.value(QStringLiteral("positive_labels")).toInt(), 1);
+        QCOMPARE(saved.value(QStringLiteral("sample_count")).toInt(), 4);
+        QCOMPARE(saved.value(QStringLiteral("positive_labels")).toInt(), 2);
+        QCOMPARE(saved.value(QStringLiteral("removal_samples")).toInt(), 1);
 
         RadioProfileStore profiles;
         QVERIFY(profiles.load());

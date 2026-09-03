@@ -122,6 +122,13 @@ cannot delete Default. `radio-learn` creates or updates a suggestion-only
 suggestions in the dialog. GUI profile changes take effect for the next
 generated pick.
 
+`radio-learn` labels each recorded pick by what happened to it within the
+following twelve hours. A pick that started playing is labeled by its play:
+an early skip is a rejection, anything else is not. A pick removed from the
+queue before it played is a rejection too, at half the weight of a skip, since
+you turned the track down without hearing it. The command reports how many
+picks were labeled from plays and how many from unheard removals.
+
 ## Genre curation
 
 Scanned genre tags are matched through a folded, alias-canonicalized
@@ -191,8 +198,8 @@ with units and caveats — is documented in
 
 ## Telemetry and privacy
 
-The engine records its own picks and your play/skip outcomes into the local
-history database purely as training data for the weight suggestions above.
-Previous and direct queue-row selections are recorded as navigation, not as
-rejections; Next remains a skip. Live scoring never reads that telemetry;
-nothing is transmitted anywhere.
+The engine records its own picks, your play/skip outcomes, and queue removals
+into the local history database purely as training data for the weight
+suggestions above. Previous and direct queue-row selections are recorded as
+navigation, not as rejections; Next remains a skip. Live scoring never reads
+that telemetry; nothing is transmitted anywhere.
