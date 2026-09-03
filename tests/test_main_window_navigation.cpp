@@ -25,6 +25,7 @@
 #define private public
 #include "ui/MainWindow.h"
 #include "ui/PlayerBar.h"
+#include "ui/RightSidebar.h"
 #undef private
 
 #include <QDataStream>
@@ -168,6 +169,29 @@ private slots:
             window.switchMainView(view);
             QVERIFY(!window.m_playerBar->m_albumArt->isHidden());
         }
+    }
+
+    void albumArtBoxesShowTheFallbackBeforeAnyTrackPlays()
+    {
+        // With no track, the player bar's box and the sidebar's pane carry the
+        // fallback artwork from the first paint. A label with no pixmap and no
+        // text is a bare gap in the bar, which is what an owner that only sets
+        // art on track changes leaves behind: the first resize of a sourceless
+        // AlbumArtView must not wipe the placeholder either.
+        AppCore core;
+        MainWindow window(&core);
+        window.resize(1440, 900);
+        window.show();
+        QCoreApplication::processEvents();
+
+        QVERIFY(!window.m_playerBar->m_albumArt->pixmap().isNull());
+        QVERIFY(!window.m_rightSidebar->m_albumArt->pixmap().isNull());
+
+        AlbumArtView bare;
+        bare.setText(QStringLiteral("placeholder"));
+        bare.resize(40, 40);
+        QCoreApplication::processEvents();
+        QCOMPARE(bare.text(), QStringLiteral("placeholder"));
     }
 
     void radioUiStateSurvivesWindowRebuild()

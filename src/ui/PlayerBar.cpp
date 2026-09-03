@@ -838,6 +838,9 @@ PlayerBar::PlayerBar(QWidget *parent)
     m_albumArt->setText(QStringLiteral("Album art"));
     m_albumArt->setVisible(false);
     m_albumArt->setContextMenuPolicy(Qt::CustomContextMenu);
+    // The box shows the fallback artwork until a track supplies its own; a
+    // theme change re-applies it for the new palette.
+    setAlbumArt(QString());
     connect(m_albumArt, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
         if (!m_hasTrack) {
             return;
