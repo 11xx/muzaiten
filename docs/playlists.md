@@ -33,9 +33,18 @@ Add to an existing playlist or create a new one from:
 
 Each line is resolved against the library by the same sound/shape matcher
 used by search ([search.md](search.md)), so `Artist - Title` lines match
-regardless of script or accents. Matches **stream into the preview live**
-as they resolve. An **Exact only** toggle disables fuzzy/relaxed guessing
-for stricter imports. Rows that resolve to several candidates (or to a
+regardless of script or accents. A line is tried in tiers, most precise
+first: its file path when it carries one; the artist and title together
+as exact phrases, then fuzzily; the title alone, keeping only tracks whose
+credited artist shares its names with the line's artist (join words such
+as "&", "and", "feat." and "the" are ignored, so `Usher feat. Lil Jon &
+Ludacris - Yeah!` still finds a track tagged `Usher`, and `Simon and
+Garfunkel` finds `Simon & Garfunkel`); and finally every word as loose
+free text. A title-only hit is never admitted on the title alone: the
+credited artist has to agree. Matches **stream into the preview live**
+as they resolve. An **Exact only** toggle keeps just the path and
+exact-phrase tiers, so nothing is guessed. Rows that resolve to several
+candidates (or to a
 low-confidence best guess) are flagged for a quick triage pick — leave
 as-is, choose one of the close candidates, or clear the match — before
 committing. The original import text is preserved verbatim, so a row can

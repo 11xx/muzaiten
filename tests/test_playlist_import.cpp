@@ -90,6 +90,29 @@ private slots:
         records.append(makeRecord(QStringLiteral("The Sound of Silence"),
                                   QStringLiteral("Simon & Garfunkel"), QStringLiteral("Sounds of Silence"),
                                   QStringLiteral("/music/simon/01 sound of silence.flac"), 3 * 60000));
+        // Credits written differently on each side: a terse library tag against a
+        // feature-laden source credit, and the same title under an unrelated artist.
+        records.append(makeRecord(QStringLiteral("Yeah!"), QStringLiteral("Usher"),
+                                  QStringLiteral("Confessions"),
+                                  QStringLiteral("/music/usher/confessions/02 yeah.flac"), 4 * 60000 + 10000));
+        records.append(makeRecord(QStringLiteral("Get Low"),
+                                  QStringLiteral("Lil Jon & The East Side Boyz"),
+                                  QStringLiteral("Kings of Crunk"),
+                                  QStringLiteral("/music/liljon/kings-of-crunk/12 get low.flac"),
+                                  5 * 60000 + 34000));
+        records.append(makeRecord(QStringLiteral("Get Low"), QStringLiteral("Flo Rida"),
+                                  QStringLiteral("Wild Ones"),
+                                  QStringLiteral("/music/florida/wild-ones/05 get low.flac"),
+                                  3 * 60000 + 33000));
+        // Two copies whose credits both agree with a reordered source credit.
+        records.append(makeRecord(QStringLiteral("Turn Down for What"),
+                                  QStringLiteral("DJ Snake & Lil Jon"), QStringLiteral("Encore"),
+                                  QStringLiteral("/music/djsnake/encore/03 turn down for what.flac"),
+                                  3 * 60000 + 33000));
+        records.append(makeRecord(QStringLiteral("Turn Down for What"),
+                                  QStringLiteral("Lil Jon feat. DJ Snake"), QStringLiteral("Singles"),
+                                  QStringLiteral("/music/liljon/singles/turn down for what.mp3"),
+                                  3 * 60000 + 33000));
         m_index.build(records);
     }
 
@@ -392,6 +415,93 @@ private slots:
             parseLine(QStringLiteral("Simon and Garfunkel - The Sound of Silence")));
         QVERIFY(outcome.decision != PlaylistMatcher::Decision::Pending);
         QCOMPARE(outcome.best.path, QStringLiteral("/music/simon/01 sound of silence.flac"));
+    }
+
+    void match_titleAnchoredArtistSubsetIsMatched()
+    {
+        // The source credits every feature; the library tags the lead alone. The
+        // artist phrase misses, but the title anchors the hit and the credits agree
+        // by token subset, so it resolves as a single pick at the tier's confidence.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Usher feat. Lil Jon & Ludacris - Yeah!")));
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Matched);
+        QCOMPARE(outcome.best.path, QStringLiteral("/music/usher/confessions/02 yeah.flac"));
+        QCOMPARE(outcome.confidence0To100,
+                 PlaylistMatcher::kConfidenceTitleAnchoredExact + PlaylistMatcher::kConfidenceUncontested);
+    }
+
+    void match_shorterCreditResolvesAtScopedTier()
+    {
+        // A terse source credit against a longer library credit is a phrase
+        // substring, so the scoped tier resolves it before title anchoring runs.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Lil Jon - Get Low")));
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Matched);
+        QCOMPARE(outcome.best.path, QStringLiteral("/music/liljon/kings-of-crunk/12 get low.flac"));
+        QVERIFY(outcome.confidence0To100 > PlaylistMatcher::kConfidenceScopedExact);
+    }
+
+    void match_titleAnchoredDisjointArtistNotAdmitted()
+    {
+        // Same title under two unrelated artists, and the source names a third:
+        // the title anchors both copies but neither credit agrees, so the tier
+        // admits nothing and no copy is auto-picked.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Ying Yang Twins - Get Low")));
+        QVERIFY(outcome.decision != PlaylistMatcher::Decision::Matched);
+        QVERIFY(outcome.decision != PlaylistMatcher::Decision::Approximate);
+        QVERIFY(!outcome.candidatePaths.contains(
+            QStringLiteral("/music/liljon/kings-of-crunk/12 get low.flac")));
+    }
+
+    void match_titleAnchoredCloseCopiesStayMulti()
+    {
+        // Both copies agree with the reordered source credit; neither is a phrase
+        // match. The tier must present both, not pick the first title hit blindly.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Lil Jon and DJ Snake - Turn Down for What")));
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::MultiMatch);
+        QCOMPARE(outcome.candidatePaths.size(), 2);
+        QVERIFY(outcome.candidatePaths.contains(
+            QStringLiteral("/music/djsnake/encore/03 turn down for what.flac")));
+        QVERIFY(outcome.candidatePaths.contains(
+            QStringLiteral("/music/liljon/singles/turn down for what.mp3")));
+    }
+
+    void match_titleAnchoredSkippedInExactOnly()
+    {
+        // Exact only means both artist and title match exactly: the token-subset
+        // tolerance is a guess and stays off.
+        const auto outcome = PlaylistMatcher::match(m_index,
+            parseLine(QStringLiteral("Usher feat. Lil Jon & Ludacris - Yeah!")), /*exactOnly=*/true);
+        QCOMPARE(outcome.decision, PlaylistMatcher::Decision::Pending);
+    }
+
+    void artistCreditsAgree_tokenSubset()
+    {
+        using PlaylistMatcher::artistCreditsAgree;
+        // Subset in either direction, order-free, join words ignored.
+        QVERIFY(artistCreditsAgree(QStringLiteral("Lil Jon"),
+                                   QStringLiteral("Lil Jon & The East Side Boyz")));
+        QVERIFY(artistCreditsAgree(QStringLiteral("Lil Jon & The East Side Boyz"),
+                                   QStringLiteral("Lil Jon")));
+        QVERIFY(artistCreditsAgree(QStringLiteral("Simon and Garfunkel"),
+                                   QStringLiteral("Simon & Garfunkel")));
+        QVERIFY(artistCreditsAgree(QStringLiteral("Lil Jon feat. Ying Yang Twins"),
+                                   QStringLiteral("Lil Jon")));
+        QVERIFY(artistCreditsAgree(QStringLiteral("The Beatles"), QStringLiteral("Beatles")));
+        QVERIFY(artistCreditsAgree(QStringLiteral("Beyoncé"), QStringLiteral("Beyonce")));
+        // Each side names someone the other does not: a feature credit is not a
+        // subset of a different collaboration, whatever the lead they share.
+        QVERIFY(!artistCreditsAgree(QStringLiteral("Lil Jon feat. Ying Yang Twins"),
+                                    QStringLiteral("Lil Jon & The East Side Boyz")));
+        QVERIFY(!artistCreditsAgree(QStringLiteral("Ying Yang Twins"),
+                                    QStringLiteral("Lil Jon & The East Side Boyz")));
+        // A name made only of join words is still a name, and never a wildcard.
+        QVERIFY(artistCreditsAgree(QStringLiteral("The The"), QStringLiteral("The The")));
+        QVERIFY(!artistCreditsAgree(QStringLiteral("The The"), QStringLiteral("The Beatles")));
+        QVERIFY(!artistCreditsAgree(QStringLiteral("X"), QStringLiteral("Static-X")));
+        QVERIFY(!artistCreditsAgree(QString(), QStringLiteral("Lil Jon")));
     }
 
     void match_directPathWins()
