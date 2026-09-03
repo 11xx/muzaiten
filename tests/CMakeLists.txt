@@ -478,6 +478,9 @@ add_executable(test_fold
 target_include_directories(test_fold PRIVATE ../src)
 target_link_libraries(test_fold PRIVATE Qt6::Core Qt6::Test)
 target_compile_features(test_fold PRIVATE cxx_std_26)
+target_compile_definitions(test_fold PRIVATE
+    FOLD_CASES_PATH="${CMAKE_SOURCE_DIR}/src/search/fold/fold_cases.tsv"
+)
 add_test(NAME test_fold COMMAND test_fold)
 
 add_executable(test_search_index

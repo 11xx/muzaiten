@@ -9,23 +9,22 @@
 // with the same function and the existing matcher (orderless AND, fzf fuzzy,
 // anchors, exclusions) works on folded text with no further changes.
 //
-// Pipeline (per source code point, ASCII fast-pathed):
-//   1. lowercase
-//   2. Unicode NFD (canonical) decomposition
-//   3. strip combining diacritical marks            (é→e, ã→a, ş→s, ğ→g, ö→o)
+// Pipeline (per source character, with ASCII fast-pathing):
+//   1. Unicode NFKC compatibility normalization
+//   2. lowercase, NFD decomposition, and combining-mark stripping
+//   3. Japanese iteration-mark expansion and seed dictionary readings
 //   4. script transliteration table                 (ß→ss, ı→i, θ→th, ж→zh)
 //   5. kana → romaji                                 (さ→sa, きゃ→kya, っか→kka)
-// Kanji (and any unmapped code point) passes through verbatim so typing the
-// original character still matches; word-level kanji readings are a later slice
-// (bundled dict files + per-track reading tags) that plugs in ahead of step 5.
+// Kanji with a seed dictionary reading is romanized; an unmapped code point
+// passes through verbatim so typing the original character still matches.
 //
 // NOTE: unlike a slug generator, folding deliberately preserves spaces and
 // punctuation — the matcher relies on word boundaries for its fzf bonuses and
 // on substring semantics, so we transliterate but never collapse to separators.
 //
-// To extend coverage, add rows to the tables in Fold.cpp (one section per
-// script); the design intent is that another contributor — or an LLM — can drop
-// in a language table without touching the pipeline.
+// The transliteration, kana, yōon, small-vowel, and seed-dictionary rows live in
+// fold_tables.json, compiled into Fold.cpp, so other fold implementations can
+// consume the same data.
 
 #include <QString>
 #include <QVector>
@@ -33,11 +32,10 @@
 
 namespace Search::Fold {
 
-// Bumped whenever the fold pipeline or its tables (transliteration, kanji dict,
-// kana romaji) change in a way that alters output. The on-disk search cache
-// stores folded norms, so a mismatch here must invalidate it even when the
-// library itself is unchanged.
-inline constexpr quint32 kVersion = 1;
+// Version 2 guards the on-disk search-cache signature against changes to the
+// fold pipeline or its transliteration, kana, and kanji-reading data. The cache
+// stores folded norms, so a mismatch here must invalidate it.
+inline constexpr quint32 kVersion = 2;
 
 // Folded text plus a map from each folded character back to the index of the
 // source character it derived from.  Used by highlighting to project match
@@ -51,6 +49,20 @@ struct FoldResult {
     QString      text;
     QVector<int> srcIndex;
 };
+
+// Counts for the embedded tables and the dictionary's longest UTF-16 key. The
+// values provide a cheap integrity check for the shared data resource.
+struct TableStats {
+    int transliterationEntries = 0;
+    int kanaEntries = 0;
+    int yoonPrefixEntries = 0;
+    int smallVowelEntries = 0;
+    int dictionaryEntries = 0;
+    int dictionaryMaxKeyLen = 0;
+    int dictionaryLongestKeyLen = 0;
+};
+
+TableStats tableStats();
 
 // `romanizeCjk` gates the two expensive, CJK-specific stages (kanji dictionary
 // and kana→romaji). With it off you get the cheap "basic" fold — lowercase,

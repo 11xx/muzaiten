@@ -1,7 +1,13 @@
 #include "search/fold/Fold.h"
 
+#include <QByteArray>
 #include <QChar>
 #include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonValue>
+#include <QString>
 
 #include <algorithm>
 
@@ -22,76 +28,74 @@ bool isCombiningMark(char16_t u)
         || (u >= 0xFE20 && u <= 0xFE2F);  // Combining Half Marks
 }
 
-// ---- step 4: single code-point transliteration ----------------------------
-// Keyed by the *lowercase, post-NFD-strip* code point, so only lowercase forms
-// are listed. Entries are limited to letters NFD alone does not reduce to ASCII
-// (decomposable accents like é/ş/ö are already handled by steps 2–3). An empty
-// mapping deletes the character (Cyrillic hard/soft signs).
-//
-// One section per script — extend by adding rows here.
-const QHash<char16_t, QString> &transliterationTable()
+using CharTable = QHash<char16_t, QString>;
+
+struct JapaneseDict {
+    QHash<QString, QString> map;
+    int maxKeyLen = 0;
+};
+
+struct FoldTables {
+    CharTable transliteration;
+    CharTable kana;
+    CharTable yoonPrefix;
+    CharTable smallVowel;
+    JapaneseDict dictionary;
+};
+
+CharTable charTableFromJson(const QJsonValue &value)
 {
-    static const QHash<char16_t, QString> table = [] {
-        QHash<char16_t, QString> t;
-
-        // Latin special letters / ligatures (incl. Turkish dotless ı).
-        t[u'ß'] = QStringLiteral("ss");
-        t[u'æ'] = QStringLiteral("ae");
-        t[u'œ'] = QStringLiteral("oe");
-        t[u'ø'] = QStringLiteral("o");
-        t[u'å'] = QStringLiteral("a");
-        t[u'þ'] = QStringLiteral("th");
-        t[u'ð'] = QStringLiteral("d");
-        t[u'đ'] = QStringLiteral("d");
-        t[u'ł'] = QStringLiteral("l");
-        t[u'ħ'] = QStringLiteral("h");
-        t[u'ŧ'] = QStringLiteral("t");
-        t[u'ŋ'] = QStringLiteral("ng");
-        t[u'ĳ'] = QStringLiteral("ij");
-        t[u'ŉ'] = QStringLiteral("n");
-        t[u'ſ'] = QStringLiteral("s");
-        t[u'ƒ'] = QStringLiteral("f");
-        t[u'ĸ'] = QStringLiteral("k");
-        t[u'ı'] = QStringLiteral("i");   // Turkish dotless i (İ→i+dot is handled by NFD)
-        t[u'ə'] = QStringLiteral("e");
-
-        // Greek lowercase.
-        t[u'α'] = QStringLiteral("a");  t[u'β'] = QStringLiteral("b");
-        t[u'γ'] = QStringLiteral("g");  t[u'δ'] = QStringLiteral("d");
-        t[u'ε'] = QStringLiteral("e");  t[u'ζ'] = QStringLiteral("z");
-        t[u'η'] = QStringLiteral("e");  t[u'θ'] = QStringLiteral("th");
-        t[u'ι'] = QStringLiteral("i");  t[u'κ'] = QStringLiteral("k");
-        t[u'λ'] = QStringLiteral("l");  t[u'μ'] = QStringLiteral("m");
-        t[u'ν'] = QStringLiteral("n");  t[u'ξ'] = QStringLiteral("x");
-        t[u'ο'] = QStringLiteral("o");  t[u'π'] = QStringLiteral("p");
-        t[u'ρ'] = QStringLiteral("r");  t[u'σ'] = QStringLiteral("s");
-        t[u'ς'] = QStringLiteral("s");  t[u'τ'] = QStringLiteral("t");
-        t[u'υ'] = QStringLiteral("y");  t[u'φ'] = QStringLiteral("ph");
-        t[u'χ'] = QStringLiteral("ch"); t[u'ψ'] = QStringLiteral("ps");
-        t[u'ω'] = QStringLiteral("o");
-
-        // Cyrillic lowercase.
-        t[u'а'] = QStringLiteral("a");   t[u'б'] = QStringLiteral("b");
-        t[u'в'] = QStringLiteral("v");   t[u'г'] = QStringLiteral("g");
-        t[u'д'] = QStringLiteral("d");   t[u'е'] = QStringLiteral("e");
-        t[u'ё'] = QStringLiteral("e");   t[u'ж'] = QStringLiteral("zh");
-        t[u'з'] = QStringLiteral("z");   t[u'и'] = QStringLiteral("i");
-        t[u'й'] = QStringLiteral("i");   t[u'к'] = QStringLiteral("k");
-        t[u'л'] = QStringLiteral("l");   t[u'м'] = QStringLiteral("m");
-        t[u'н'] = QStringLiteral("n");   t[u'о'] = QStringLiteral("o");
-        t[u'п'] = QStringLiteral("p");   t[u'р'] = QStringLiteral("r");
-        t[u'с'] = QStringLiteral("s");   t[u'т'] = QStringLiteral("t");
-        t[u'у'] = QStringLiteral("u");   t[u'ф'] = QStringLiteral("f");
-        t[u'х'] = QStringLiteral("kh");  t[u'ц'] = QStringLiteral("ts");
-        t[u'ч'] = QStringLiteral("ch");  t[u'ш'] = QStringLiteral("sh");
-        t[u'щ'] = QStringLiteral("shch");
-        t[u'ъ'] = QString();             t[u'ь'] = QString();
-        t[u'ы'] = QStringLiteral("y");   t[u'э'] = QStringLiteral("e");
-        t[u'ю'] = QStringLiteral("yu");  t[u'я'] = QStringLiteral("ya");
-
-        return t;
-    }();
+    CharTable table;
+    const QJsonObject object = value.toObject();
+    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+        if (!it.value().isString() || it.key().size() != 1) continue;
+        table.insert(static_cast<char16_t>(it.key().at(0).unicode()), it.value().toString());
+    }
     return table;
+}
+
+// The tables travel inside this translation unit, so every binary that
+// compiles Fold.cpp carries them and nothing has to register a resource.
+constexpr unsigned char kFoldTablesJson[] = {
+#embed "fold_tables.json"
+};
+
+FoldTables loadFoldTables()
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(
+        QByteArray::fromRawData(reinterpret_cast<const char *>(kFoldTablesJson), sizeof kFoldTablesJson),
+        &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        qFatal("fold_tables.json is not a JSON object: %s", qPrintable(parseError.errorString()));
+    }
+
+    FoldTables tables;
+    const QJsonObject root = document.object();
+    tables.transliteration = charTableFromJson(root.value(QStringLiteral("transliteration")));
+    tables.kana = charTableFromJson(root.value(QStringLiteral("kana")));
+    tables.yoonPrefix = charTableFromJson(root.value(QStringLiteral("yoon_prefix")));
+    tables.smallVowel = charTableFromJson(root.value(QStringLiteral("small_vowel")));
+
+    const QJsonObject dictionary = root.value(QStringLiteral("kanji")).toObject();
+    for (auto it = dictionary.constBegin(); it != dictionary.constEnd(); ++it) {
+        if (it.key().isEmpty() || !it.value().isString()) continue;
+        tables.dictionary.map.insert(it.key(), it.value().toString());
+        tables.dictionary.maxKeyLen = std::max(
+            tables.dictionary.maxKeyLen, static_cast<int>(it.key().size()));
+    }
+    return tables;
+}
+
+const FoldTables &foldTables()
+{
+    static const FoldTables tables = loadFoldTables();
+    return tables;
+}
+
+const CharTable &transliterationTable()
+{
+    return foldTables().transliteration;
 }
 
 // ---- step 5: kana → romaji -------------------------------------------------
@@ -100,78 +104,51 @@ const QHash<char16_t, QString> &transliterationTable()
 // driver with one character of look-ahead.
 
 constexpr char16_t kHiraSokuon   = 0x3063; // っ
-constexpr char16_t kHiraSmallYa  = 0x3083; // ゃ
-constexpr char16_t kHiraSmallYu  = 0x3085; // ゅ
-constexpr char16_t kHiraSmallYo  = 0x3087; // ょ
 constexpr char16_t kHiraLow      = 0x3041;
 constexpr char16_t kHiraHigh     = 0x3096;
 constexpr char16_t kKataLow      = 0x30A1;
 constexpr char16_t kKataHigh     = 0x30F6;
 constexpr char16_t kProlonged    = 0x30FC; // ー (shared by both kana)
+constexpr char16_t kKanjiIteration       = 0x3005; // 々
+constexpr char16_t kHiraIteration        = 0x309D; // ゝ
+constexpr char16_t kHiraVoicedIteration  = 0x309E; // ゞ
+constexpr char16_t kKataIteration        = 0x30FD; // ヽ
+constexpr char16_t kKataVoicedIteration  = 0x30FE; // ヾ
 
-bool isSmallYa(char16_t u) { return u == kHiraSmallYa || u == kHiraSmallYu || u == kHiraSmallYo; }
+bool isSmallYa(char16_t u) { return foldTables().smallVowel.contains(u); }
 
-const QHash<char16_t, QString> &hiraganaTable()
+bool isKanaCharacter(char16_t u)
 {
-    static const QHash<char16_t, QString> t = [] {
-        QHash<char16_t, QString> m;
-        auto add = [&](char16_t base, std::initializer_list<const char *> romaji) {
-            char16_t c = base;
-            for (const char *r : romaji) m[c++] = QString::fromLatin1(r);
-        };
-        // Small standalone vowels ぁぃぅぇぉ then あいうえお share readings.
-        add(0x3041, {"a", "a", "i", "i", "u", "u", "e", "e", "o", "o"});
-        add(0x304B, {"ka", "ga", "ki", "gi", "ku", "gu", "ke", "ge", "ko", "go"});
-        add(0x3055, {"sa", "za", "shi", "ji", "su", "zu", "se", "ze", "so", "zo"});
-        add(0x305F, {"ta", "da", "chi", "ji", "tsu", "tsu", "zu", "te", "de", "to", "do"});
-        add(0x306A, {"na", "ni", "nu", "ne", "no"});
-        add(0x306F, {"ha", "ba", "pa", "hi", "bi", "pi", "fu", "bu", "pu",
-                     "he", "be", "pe", "ho", "bo", "po"});
-        add(0x307E, {"ma", "mi", "mu", "me", "mo"});
-        // や-row is non-contiguous (small kana interleave) — set explicitly.
-        m[0x3083] = QStringLiteral("ya");  m[0x3084] = QStringLiteral("ya"); // ゃ や
-        m[0x3085] = QStringLiteral("yu");  m[0x3086] = QStringLiteral("yu"); // ゅ ゆ
-        m[0x3087] = QStringLiteral("yo");  m[0x3088] = QStringLiteral("yo"); // ょ よ
-        add(0x3089, {"ra", "ri", "ru", "re", "ro"});
-        m[0x308E] = QStringLiteral("wa");           // ゎ
-        m[0x308F] = QStringLiteral("wa");           // わ
-        m[0x3092] = QStringLiteral("wo");           // を
-        m[0x3093] = QStringLiteral("n");            // ん
-        m[0x3094] = QStringLiteral("vu");           // ゔ
-        return m;
-    }();
-    return t;
+    return (u >= kHiraLow && u <= kHiraHigh)
+        || (u >= kKataLow && u <= kKataHigh);
+}
+
+QString voicedKana(char16_t c)
+{
+    const QString composed = (QString(QChar(c)) + QChar(0x3099))
+                                 .normalized(QString::NormalizationForm_C);
+    return composed.size() == 1 && isKanaCharacter(composed.at(0).unicode())
+        ? composed
+        : QString(QChar(c));
+}
+
+const CharTable &hiraganaTable()
+{
+    return foldTables().kana;
 }
 
 // Consonant prefix used to build yōon (palatalized) syllables; combined with the
 // small vowel's a/u/o. Hepburn digraphs: し→sh, ち→ch, じ/ぢ→j.
 QString yoonPrefix(char16_t c)
 {
-    switch (c) {
-    case 0x304D: return QStringLiteral("ky");  // き
-    case 0x304E: return QStringLiteral("gy");  // ぎ
-    case 0x3057: return QStringLiteral("sh");  // し
-    case 0x3058: return QStringLiteral("j");   // じ
-    case 0x3061: return QStringLiteral("ch");  // ち
-    case 0x3062: return QStringLiteral("j");   // ぢ
-    case 0x306B: return QStringLiteral("ny");  // に
-    case 0x3072: return QStringLiteral("hy");  // ひ
-    case 0x3073: return QStringLiteral("by");  // び
-    case 0x3074: return QStringLiteral("py");  // ぴ
-    case 0x307F: return QStringLiteral("my");  // み
-    case 0x308A: return QStringLiteral("ry");  // り
-    default:     return QString();
-    }
+    const auto it = foldTables().yoonPrefix.constFind(c);
+    return it == foldTables().yoonPrefix.constEnd() ? QString() : it.value();
 }
 
 QString smallVowel(char16_t u)
 {
-    switch (u) {
-    case kHiraSmallYa: return QStringLiteral("a");
-    case kHiraSmallYu: return QStringLiteral("u");
-    case kHiraSmallYo: return QStringLiteral("o");
-    default:           return QString();
-    }
+    const auto it = foldTables().smallVowel.constFind(u);
+    return it == foldTables().smallVowel.constEnd() ? QString() : it.value();
 }
 
 // Apply sokuon gemination to a freshly produced syllable romaji.
@@ -193,42 +170,49 @@ QString geminate(const QString &romaji)
 // This is a seed, expected to grow over time. Single-kanji entries pick the most
 // common standalone reading — a heuristic that favors recall; a longer word
 // entry always takes precedence. Per-track reading tags (a later slice) cover
-// what the table misses. To extend: add rows below.
+// what the table misses. Rows are kept in fold_tables.json.
 bool isKanji(char16_t u)
 {
     return (u >= 0x3400 && u <= 0x9FFF)    // CJK Unified Ideographs (+ Ext A)
         || (u >= 0xF900 && u <= 0xFAFF);   // CJK Compatibility Ideographs
 }
 
-struct JapaneseDict {
-    QHash<QString, QString> map;
-    int maxKeyLen = 0;
-};
+// Expand Japanese iteration marks before dictionary lookup and kana
+// romanization. A repeated unit inherits the mark's source position so a
+// match in the expansion highlights the mark that supplied it.
+void expandIterationMarks(const QString &base, const QVector<int> &baseSrc,
+                          QString &out, QVector<int> &outSrc)
+{
+    const int n = static_cast<int>(base.size());
+    out.reserve(n);
+    outSrc.reserve(n);
+    for (int j = 0; j < n; ++j) {
+        const char16_t c = base.at(j).unicode();
+        const int srcIdx = baseSrc.at(j);
+        if (c == kKanjiIteration && j > 0 && isKanji(base.at(j - 1).unicode())) {
+            out += base.at(j - 1);
+            outSrc.append(srcIdx);
+            continue;
+        }
+
+        const bool voiced = c == kHiraVoicedIteration || c == kKataVoicedIteration;
+        const bool plain = c == kHiraIteration || c == kKataIteration;
+        if ((plain || voiced) && j > 0 && isKanaCharacter(base.at(j - 1).unicode())) {
+            const QString repeated = voiced ? voicedKana(base.at(j - 1).unicode())
+                                            : QString(base.at(j - 1));
+            out += repeated;
+            for (qsizetype k = 0; k < repeated.size(); ++k) outSrc.append(srcIdx);
+            continue;
+        }
+
+        out += base.at(j);
+        outSrc.append(srcIdx);
+    }
+}
 
 const JapaneseDict &japaneseDict()
 {
-    static const JapaneseDict dict = [] {
-        JapaneseDict d;
-        auto add = [&](const char *surface, const char *reading) {
-            const QString s = QString::fromUtf8(surface);
-            d.map.insert(s, QString::fromUtf8(reading));
-            d.maxKeyLen = std::max(d.maxKeyLen, static_cast<int>(s.size()));
-        };
-        // Multi-character words (checked first via longest-match).
-        add("三線", "さんしん");  add("言葉", "ことば");  add("世界", "せかい");
-        add("未来", "みらい");    add("物語", "ものがたり"); add("東京", "とうきょう");
-        add("京都", "きょうと");  add("音楽", "おんがく");  add("時間", "じかん");
-        add("約束", "やくそく");  add("季節", "きせつ");    add("記憶", "きおく");
-        // Common single kanji — most-common standalone reading.
-        add("花", "はな");  add("名", "な");    add("君", "きみ");  add("海", "うみ");
-        add("空", "そら");  add("心", "こころ"); add("恋", "こい");  add("愛", "あい");
-        add("夢", "ゆめ");  add("道", "みち");  add("風", "かぜ");  add("月", "つき");
-        add("雨", "あめ");  add("桜", "さくら"); add("涙", "なみだ"); add("声", "こえ");
-        add("光", "ひかり"); add("時", "とき");  add("歌", "うた");  add("星", "ほし");
-        add("雪", "ゆき");  add("夜", "よる");  add("朝", "あさ");  add("色", "いろ");
-        return d;
-    }();
-    return dict;
+    return foldTables().dictionary;
 }
 
 // ---- driver ----------------------------------------------------------------
@@ -252,8 +236,49 @@ struct Builder {
     }
 };
 
-// Stage A: NFD-decompose + lowercase + strip combining marks, per source code
-// point, recording the originating source index for each surviving char.
+bool isKanaBlock(char16_t u)
+{
+    return u >= 0x3040 && u <= 0x30FF;
+}
+
+bool isHalfWidthKanaBase(char16_t u)
+{
+    return u >= 0xFF61 && u <= 0xFF9D;
+}
+
+bool isHalfWidthVoicedMark(char16_t u)
+{
+    return u == 0xFF9E || u == 0xFF9F;
+}
+
+void appendPostNfkc(const QString &normalized, int srcIndex,
+                    QString &base, QVector<int> &baseSrc)
+{
+    for (const QChar ch : normalized) {
+        if (isKanaBlock(ch.unicode())) {
+            base += ch;
+            baseSrc.append(srcIndex);
+            continue;
+        }
+        const QString dec = QString(ch).normalized(QString::NormalizationForm_D).toLower();
+        for (const QChar d : dec) {
+            if (isCombiningMark(d.unicode())) continue;
+            base += d;
+            baseSrc.append(srcIndex);
+        }
+    }
+}
+
+void appendNfkcUnit(const QString &unit, int srcIndex,
+                   QString &base, QVector<int> &baseSrc)
+{
+    appendPostNfkc(unit.normalized(QString::NormalizationForm_KC).toLower(),
+                   srcIndex, base, baseSrc);
+}
+
+// Stage A: NFKC compatibility normalization, then NFD decomposition, lowercase,
+// and combining-mark stripping, per source unit. Every surviving char records
+// the source index of the unit that produced it.
 void decomposeFold(const QString &src, QString &base, QVector<int> &baseSrc)
 {
     const int n = static_cast<int>(src.size());
@@ -269,28 +294,30 @@ void decomposeFold(const QString &src, QString &base, QVector<int> &baseSrc)
             continue;
         }
         if (ch.isHighSurrogate() && i + 1 < n && src.at(i + 1).isLowSurrogate()) {
-            // Astral code point (e.g. CJK Ext-B kanji): pass both UTF-16 units
-            // through, each mapped to its own source index so a match flags the
-            // whole surrogate pair — otherwise the delegate bolds half a glyph.
-            base += ch;            baseSrc.append(i);
-            base += src.at(i + 1); baseSrc.append(i + 1);
+            // Astral code point (e.g. CJK Ext-B kanji): preserve the UTF-16
+            // mapping so a match flags the whole surrogate pair.
+            const QString unit = src.mid(i, 2);
+            const QString normalized = unit.normalized(QString::NormalizationForm_KC).toLower();
+            if (normalized == unit) {
+                base += normalized.at(0); baseSrc.append(i);
+                base += normalized.at(1); baseSrc.append(i + 1);
+            } else {
+                appendPostNfkc(normalized, i, base, baseSrc);
+            }
             ++i;
             continue;
         }
-        // Skip NFD for the kana blocks: it would split voiced kana (が→か+゙)
-        // and the combining voiced mark is meaningful here, not a strippable
-        // diacritic. Kana are romanized whole in the transliteration stage.
-        if (u >= 0x3040 && u <= 0x30FF) {
-            base += ch;
-            baseSrc.append(i);
+
+        // U+FF9E/U+FF9F compose with the preceding half-width kana only when
+        // normalized as one unit. Consuming the pair prevents a bare voiced
+        // mark from being mistaken for a separate kana.
+        if (isHalfWidthKanaBase(u) && i + 1 < n
+            && isHalfWidthVoicedMark(src.at(i + 1).unicode())) {
+            appendNfkcUnit(src.mid(i, 2), i, base, baseSrc);
+            ++i;
             continue;
         }
-        const QString dec = QString(ch).normalized(QString::NormalizationForm_D).toLower();
-        for (const QChar d : dec) {
-            if (isCombiningMark(d.unicode())) continue;
-            base += d;
-            baseSrc.append(i);
-        }
+        appendNfkcUnit(QString(ch), i, base, baseSrc);
     }
 }
 
@@ -333,6 +360,25 @@ void applyDictionary(const QString &base, const QVector<int> &baseSrc,
 
 } // namespace
 
+TableStats tableStats()
+{
+    const FoldTables &tables = foldTables();
+    int longestKeyLen = 0;
+    for (auto it = tables.dictionary.map.constBegin();
+         it != tables.dictionary.map.constEnd(); ++it) {
+        longestKeyLen = std::max(longestKeyLen, static_cast<int>(it.key().size()));
+    }
+    return {
+        static_cast<int>(tables.transliteration.size()),
+        static_cast<int>(tables.kana.size()),
+        static_cast<int>(tables.yoonPrefix.size()),
+        static_cast<int>(tables.smallVowel.size()),
+        static_cast<int>(tables.dictionary.map.size()),
+        tables.dictionary.maxKeyLen,
+        longestKeyLen,
+    };
+}
+
 static FoldResult foldImpl(const QString &src, bool withIndex, bool romanizeCjk)
 {
     QString base;
@@ -342,6 +388,12 @@ static FoldResult foldImpl(const QString &src, bool withIndex, bool romanizeCjk)
     // Substitute kanji/word readings before romanizing the resulting kana. Both
     // are skipped for the cheap "basic" fold (kana/kanji then pass through).
     if (romanizeCjk) {
+        QString expanded;
+        QVector<int> expandedSrc;
+        expandIterationMarks(base, baseSrc, expanded, expandedSrc);
+        base = std::move(expanded);
+        baseSrc = std::move(expandedSrc);
+
         QString db;
         QVector<int> dbSrc;
         applyDictionary(base, baseSrc, db, dbSrc);
