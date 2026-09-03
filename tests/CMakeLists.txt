@@ -113,6 +113,15 @@ target_compile_features(test_decode_gate PRIVATE cxx_std_26)
 add_test(NAME test_decode_gate COMMAND test_decode_gate)
 set_tests_properties(test_decode_gate PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_staging_buffer
+    test_staging_buffer.cpp
+)
+target_include_directories(test_staging_buffer PRIVATE ../src)
+target_link_libraries(test_staging_buffer PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_staging_buffer PRIVATE cxx_std_26)
+add_test(NAME test_staging_buffer COMMAND test_staging_buffer)
+set_tests_properties(test_staging_buffer PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_query_vector_cache
     test_query_vector_cache.cpp
 )
