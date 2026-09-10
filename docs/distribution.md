@@ -111,6 +111,10 @@ there, and it is the only remote a release is published to.
 MUZAITEN_LASTFM_API_KEY=... MUZAITEN_LASTFM_SHARED_SECRET=... ./packaging/build-release.sh
 ```
 
+The release builder honors the compiler/dependency fingerprint's clean-rebuild
+marker. Temporary install trees are staged under `dist/` on the repository's
+filesystem and removed after packaging.
+
 This produces, under `dist/`:
 
 - `muzaiten-<version>-<arch>.tar.zst` — a prefixed tree containing `muzaiten`,

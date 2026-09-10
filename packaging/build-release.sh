@@ -137,7 +137,12 @@ cmake -S . -B "$BUILD_DIR" -G Ninja \
     -DMUZAITEN_LASTFM_SHARED_SECRET="$MUZAITEN_LASTFM_SHARED_SECRET"
 
 echo ">> Building"
-cmake --build "$BUILD_DIR" -j "$JOBS"
+build_options=()
+if [[ -f "$BUILD_DIR/toolchain-changed.stamp" ]]; then
+    build_options+=(--clean-first)
+fi
+cmake --build "$BUILD_DIR" -j "$JOBS" "${build_options[@]}"
+rm -f -- "$BUILD_DIR/toolchain-changed.stamp"
 
 # Version derived the same way as cmake/MuzaitenVersion.cmake.
 day="$(TZ=UTC0 git show -s --date=format-local:%Y-%m-%d --format=%cd HEAD)"
@@ -145,7 +150,8 @@ n="$(TZ=UTC0 git rev-list --count --since="${day}T00:00:00" --until="${day}T23:5
 version="${day//-/.}.${n}.g$(git rev-parse --short HEAD)"
 arch="$(uname -m)"
 
-stage="$(mktemp -d)"
+mkdir -p dist
+stage="$(mktemp -d "$repo_root/dist/.stage.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 
 DESTDIR="$stage" cmake --install "$BUILD_DIR" --prefix "$PREFIX" >/dev/null

@@ -16,6 +16,7 @@ import pytest
 from muzaiten_features_clap import cli, db
 from muzaiten_features_clap.cli import main
 from muzaiten_features_clap import model
+from muzaiten_features_clap import install
 from muzaiten_features_clap.model import (
     ARTIFACT_FORMAT_VERSION,
     AUDIO_MODEL_FILENAME,
@@ -39,6 +40,27 @@ from muzaiten_features_clap.model import (
     resolve_device,
 )
 from muzaiten_features_clap.ops import neighbors, query_embedding, scan, status
+
+
+def test_failed_model_install_restores_previous_directory(tmp_path, monkeypatch):
+    target = tmp_path / "installed"
+    staging = tmp_path / "staged"
+    target.mkdir()
+    staging.mkdir()
+    (target / "model").write_text("previous")
+    (staging / "model").write_text("replacement")
+    replace = install.os.replace
+
+    def fail_publication(source, destination):
+        if source == staging:
+            raise OSError("publication failed")
+        return replace(source, destination)
+
+    monkeypatch.setattr(install.os, "replace", fail_publication)
+    with pytest.raises(OSError, match="publication failed"):
+        install.install_directory(staging, target)
+    assert (target / "model").read_text() == "previous"
+    assert not list(tmp_path.glob(".installed-backup-*"))
 
 
 @dataclass

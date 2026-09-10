@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import sys
 import tempfile
@@ -12,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import __version__
+from .install import install_directory
 from .model import (
     ARTIFACT_DIRNAME,
     ARTIFACT_FORMAT_VERSION,
@@ -85,9 +85,7 @@ def convert_checkpoint(
             raise RuntimeError("converted CLAP artifacts failed manifest verification")
         _emit_progress(progress, 5)
 
-        if target.exists():
-            shutil.rmtree(target)
-        os.replace(staging, target)
+        install_directory(staging, target)
         return ConversionResult(target, converted=True)
     finally:
         if staging.exists():

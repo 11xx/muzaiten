@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .db import normalize_vector
+from .install import install_directory
 
 MODEL_NAME = "laion-clap-music-audioset"
 MODEL_VERSION = "music_audioset_epoch_15_esc_90.14.pt"
@@ -297,9 +298,7 @@ def download_artifacts(
             handle.write("\n")
         if not artifact_status(path=staging, required=components).valid:
             raise RuntimeError("downloaded CLAP artifacts failed manifest verification")
-        if target.exists():
-            shutil.rmtree(target)
-        os.replace(staging, target)
+        install_directory(staging, target)
         return ArtifactDownload(target, downloaded=True)
     finally:
         if staging.exists():

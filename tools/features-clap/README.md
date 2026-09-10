@@ -17,6 +17,10 @@ JSON request on stdin and emits JSONL events on stdout. Supported operations are
 Diagnostics go to stderr. `muzaiten-features` owns provider discovery,
 orchestration, locking, progress presentation, and cancellation.
 
+Artifact replacement retains a backup until installation succeeds. A failed
+installation restores the backup; if restoration also fails, the backup remains
+on disk for recovery.
+
 Model download is always explicit. `scan` and `query` never fetch weights; they
 return `model_missing` until the checkpoint has been converted into verified
 ONNX artifacts. The one-time conversion uses the reference LAION-CLAP package
