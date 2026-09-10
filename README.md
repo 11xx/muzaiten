@@ -47,6 +47,16 @@ development — see [CHANGELOG.md](CHANGELOG.md) for the detailed record.
       <br><sub><b>Playlists</b> — import &amp; match, drag-drop batch import</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/05-file-explorer-library.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/05-file-explorer-library.png">
+        <img alt="Library file explorer" src="demo-screens/KvGnome/05-file-explorer-library.png" width="760">
+      </picture>
+      <br><sub><b>File explorer</b> — browse library folders, search metadata, queue tracks</sub>
+    </td>
+  </tr>
 </table>
 
 ## What it does
