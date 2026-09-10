@@ -13,25 +13,37 @@ development — see [CHANGELOG.md](CHANGELOG.md) for the detailed record.
 <table>
   <tr>
     <td align="center" width="50%">
-      <img alt="Library browser" src="demo-screens/KvGnome/01-library.png#gh-light-mode-only" width="380">
-      <img alt="Library browser" src="demo-screens/KvGnomeDark/01-library.png#gh-dark-mode-only" width="380">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/01-library.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/01-library.png">
+        <img alt="Library browser" src="demo-screens/KvGnome/01-library.png" width="380">
+      </picture>
       <br><sub><b>Library</b> — artist sidebar, album grid, track table</sub>
     </td>
     <td align="center" width="50%">
-      <img alt="Search demo" src="demo-screens/KvGnome/02-search.png#gh-light-mode-only" width="380">
-      <img alt="Search demo" src="demo-screens/KvGnomeDark/02-search.png#gh-dark-mode-only" width="380">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/02-search.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/02-search.png">
+        <img alt="Search demo" src="demo-screens/KvGnome/02-search.png" width="380">
+      </picture>
       <br><sub><b>Search</b> — fzf-style, romaji ↔ kana/kanji, live results</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img alt="Playback queue" src="demo-screens/KvGnome/03-queue.png#gh-light-mode-only" width="380">
-      <img alt="Playback queue" src="demo-screens/KvGnomeDark/03-queue.png#gh-dark-mode-only" width="380">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/03-queue.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/03-queue.png">
+        <img alt="Playback queue" src="demo-screens/KvGnome/03-queue.png" width="380">
+      </picture>
       <br><sub><b>Queue</b> — reorderable, play-next priority, missing-track marks</sub>
     </td>
     <td align="center" width="50%">
-      <img alt="Playlists" src="demo-screens/KvGnome/04-playlists.png#gh-light-mode-only" width="380">
-      <img alt="Playlists" src="demo-screens/KvGnomeDark/04-playlists.png#gh-dark-mode-only" width="380">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/04-playlists.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/04-playlists.png">
+        <img alt="Playlists" src="demo-screens/KvGnome/04-playlists.png" width="380">
+      </picture>
       <br><sub><b>Playlists</b> — import &amp; match, drag-drop batch import</sub>
     </td>
   </tr>
