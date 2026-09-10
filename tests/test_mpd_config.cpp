@@ -14,10 +14,10 @@ private slots:
 void MpdConfigTest::parsesCommonPaths()
 {
     const QString text = QStringLiteral(R"(
-music_directory        "/gak/music"
-playlist_directory      "/home/lobo/.local/share/mpd/playlists"
-db_file                "/home/lobo/.local/share/mpd/database"
-sticker_file           "/home/lobo/.local/share/mpd/sticker.sql"
+music_directory        "/srv/music"
+playlist_directory      "/home/example/.local/share/mpd/playlists"
+db_file                "/home/example/.local/share/mpd/database"
+sticker_file           "/home/example/.local/share/mpd/sticker.sql"
 metadata_to_use        "artist,album,title,musicbrainz_trackid"
 
 audio_output {
@@ -28,10 +28,10 @@ audio_output {
 
     const MpdConfig config = MpdConfigParser::parseText(text, QStringLiteral("/tmp/mpd.conf"));
     QCOMPARE(config.path, QStringLiteral("/tmp/mpd.conf"));
-    QCOMPARE(config.musicDirectory, QStringLiteral("/gak/music"));
-    QCOMPARE(config.playlistDirectory, QStringLiteral("/home/lobo/.local/share/mpd/playlists"));
-    QCOMPARE(config.dbFile, QStringLiteral("/home/lobo/.local/share/mpd/database"));
-    QCOMPARE(config.stickerFile, QStringLiteral("/home/lobo/.local/share/mpd/sticker.sql"));
+    QCOMPARE(config.musicDirectory, QStringLiteral("/srv/music"));
+    QCOMPARE(config.playlistDirectory, QStringLiteral("/home/example/.local/share/mpd/playlists"));
+    QCOMPARE(config.dbFile, QStringLiteral("/home/example/.local/share/mpd/database"));
+    QCOMPARE(config.stickerFile, QStringLiteral("/home/example/.local/share/mpd/sticker.sql"));
     QCOMPARE(config.metadataToUse, QStringLiteral("artist,album,title,musicbrainz_trackid"));
 }
 
