@@ -1,5 +1,7 @@
 #include "features/QueryEmbedding.h"
 
+#include <QElapsedTimer>
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -118,9 +120,13 @@ QVector<float> parseVectorJson(const QByteArray &json, QString *error)
     return vectorFromJsonArray(vectorValue.toArray(), error);
 }
 
-Result viaFeatures(const QString &text, int timeoutMs)
+Result viaFeatures(const QString &text, int timeoutMs, const std::function<bool()> &canceled)
 {
     Result result;
+    if (canceled && canceled()) {
+        result.error = QStringLiteral("semantic search canceled");
+        return result;
+    }
     const QString sibling = QDir(QCoreApplication::applicationDirPath())
                                 .filePath(QStringLiteral("muzaiten-features"));
     const QString executable = QFileInfo(sibling).isExecutable()
@@ -137,11 +143,21 @@ Result viaFeatures(const QString &text, int timeoutMs)
         result.error = QStringLiteral("semantic search could not start muzaiten-features");
         return result;
     }
-    if (!process.waitForFinished(timeoutMs)) {
-        process.kill();
-        process.waitForFinished(1000);
-        result.error = QStringLiteral("semantic search query through muzaiten-features timed out");
-        return result;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (process.state() != QProcess::NotRunning) {
+        process.waitForFinished(100);
+        const bool cancelRequested = canceled && canceled();
+        if (cancelRequested || (timeoutMs >= 0 && elapsed.elapsed() >= timeoutMs)) {
+            process.terminate();
+            if (!process.waitForFinished(6000)) {
+                process.kill();
+                process.waitForFinished(1000);
+            }
+            result.error = cancelRequested ? QStringLiteral("semantic search canceled")
+                : QStringLiteral("semantic search query through muzaiten-features timed out");
+            return result;
+        }
     }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         QString detail = QString::fromUtf8(process.readAllStandardError()).trimmed();

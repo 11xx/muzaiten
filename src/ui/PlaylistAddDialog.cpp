@@ -206,6 +206,8 @@ void PlaylistAddDialog::submitQuery()
         return;
     }
     const QString text = m_box->text().trimmed();
+    ++m_queryId;
+    m_worker->submitQuery(m_queryId, text, false);
     if (text.isEmpty()) {
         m_matchCount = 0;
         m_delegate->setQuery(Search::SearchQuery{}, false);
@@ -214,9 +216,6 @@ void PlaylistAddDialog::submitQuery()
         return;
     }
     m_delegate->setQuery(Search::SearchQuery::parse(text), false);
-    ++m_queryId;
-    QMetaObject::invokeMethod(m_worker, "runQuery", Qt::QueuedConnection,
-                              Q_ARG(quint64, m_queryId), Q_ARG(QString, text), Q_ARG(bool, false));
 }
 
 void PlaylistAddDialog::onIndexReady(int count)

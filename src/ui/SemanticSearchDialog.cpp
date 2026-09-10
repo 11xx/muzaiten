@@ -138,7 +138,7 @@ void SemanticSearchDialog::submitQuery()
         FeatureStore features(featuresPath);
         if (!features.isOpen()) {
             outcome.error = tr("No analyzed features found. Enable semantic analysis and run "
-                               "Library > Analyze library audio first.");
+                               "Library > Audio analysis > Analyze library audio first.");
             QMetaObject::invokeMethod(this, [this, generation, outcome]() {
                 presentOutcome(generation, outcome);
             }, Qt::QueuedConnection);
@@ -163,7 +163,8 @@ void SemanticSearchDialog::submitQuery()
             fromCache = !queryVector.isEmpty();
         }
         if (queryVector.isEmpty()) {
-            const QueryEmbedding::Result embedded = QueryEmbedding::viaFeatures(text, kProviderTimeoutMs);
+            const QueryEmbedding::Result embedded = QueryEmbedding::viaFeatures(text, kProviderTimeoutMs,
+                [this, generation] { return m_generation.load() != generation; });
             if (!embedded.ok()) {
                 outcome.error = embedded.error;
                 QMetaObject::invokeMethod(this, [this, generation, outcome]() {

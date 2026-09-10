@@ -382,7 +382,7 @@ void SearchView::invalidateIndex(const QString &dbPath)
     m_totalIndexed = 0;
     m_spinnerTimer->start();
     updateStatusLabel();
-    QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(m_worker, "rebuildIndex", Qt::QueuedConnection);
 }
 
 void SearchView::forceRefresh()
@@ -484,6 +484,8 @@ void SearchView::submitQuery()
 {
     if (!m_worker || !m_indexLoaded) return;
     const QString text = m_searchBox->text().trimmed();
+    ++m_queryId;
+    m_worker->submitQuery(m_queryId, text, m_fuzzyMode);
     if (text.isEmpty()) {
         m_matchCount = 0;
         m_delegate->setQuery(Search::SearchQuery{}, m_fuzzyMode);
@@ -493,11 +495,6 @@ void SearchView::submitQuery()
     }
     // Give the delegate the parsed query so it can highlight on-screen rows.
     m_delegate->setQuery(Search::SearchQuery::parse(text), m_fuzzyMode);
-    ++m_queryId;
-    QMetaObject::invokeMethod(m_worker, "runQuery", Qt::QueuedConnection,
-                              Q_ARG(quint64, m_queryId),
-                              Q_ARG(QString, text),
-                              Q_ARG(bool, m_fuzzyMode));
 }
 
 void SearchView::onIndexGrew(int count)

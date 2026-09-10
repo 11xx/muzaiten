@@ -934,10 +934,11 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
                 break;
             }
 
-            std::sort(scored.begin(), scored.end(), [](const auto &left, const auto &right) {
-                return left.first.score > right.first.score;
-            });
             const int topN = std::min<int>(kTopK, static_cast<int>(scored.size()));
+            std::partial_sort(scored.begin(), scored.begin() + topN, scored.end(), [](const auto &left, const auto &right) {
+                return left.first.score != right.first.score ? left.first.score > right.first.score
+                    : left.second->path < right.second->path;
+            });
 
             // Weighted-random draw among the top N. Scores can be negative, so shift
             // by the batch minimum plus a floor to keep every weight positive while
@@ -1021,10 +1022,11 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
                 break;
             }
 
-            std::sort(scored.begin(), scored.end(), [](const auto &left, const auto &right) {
-                return left.first.score > right.first.score;
-            });
             const int topN = std::min<int>(kTopK, static_cast<int>(scored.size()));
+            std::partial_sort(scored.begin(), scored.begin() + topN, scored.end(), [](const auto &left, const auto &right) {
+                return left.first.score != right.first.score ? left.first.score > right.first.score
+                    : left.second->path < right.second->path;
+            });
             double minScore = scored.front().first.score;
             for (int i = 0; i < topN; ++i) {
                 minScore = std::min(minScore, scored.at(i).first.score);

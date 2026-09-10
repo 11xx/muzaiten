@@ -27,12 +27,15 @@ class SearchWorker : public QObject {
 public:
     explicit SearchWorker(const QString &dbPath, QObject *parent = nullptr);
     ~SearchWorker() override;
+    // Thread-safe submission: queued queries superseded before execution are skipped.
+    void submitQuery(quint64 queryId, const QString &queryString, bool fuzzyMode);
 
 public slots:
     // Rebuild the index from the database. Opens a streaming cursor and pumps
     // it in chunks (see readChunk), so the index fills incrementally and queries
     // can run against a partial index as records arrive — fzf-from-a-pipe style.
     void buildIndex();
+    void rebuildIndex();
 
     // Internal: pull one batch from the streaming cursor and feed it to the
     // build in progress, then re-post itself until the cursor is drained.
@@ -70,6 +73,7 @@ private:
     enum class BuildMode { Foreground, Background };
 
     void finishBuild(quint64 generation);
+    void startBuild(bool forceRefresh);
 
     QString   m_dbPath;
     SearchIndex m_index;       // live, queryable index

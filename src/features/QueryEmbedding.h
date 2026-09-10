@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QVector>
+#include <functional>
 
 // Text -> CLAP query vector through the muzaiten-features orchestrator.
 // Shared by muzaitenctl and the GUI so both speak the same discovery,
@@ -23,6 +24,6 @@ QVector<float> parseVectorJson(const QByteArray &json, QString *error);
 
 // Spawns `muzaiten-features query <text> --json` (sibling binary first,
 // then PATH) and parses its terminal JSON.
-Result viaFeatures(const QString &text, int timeoutMs);
+Result viaFeatures(const QString &text, int timeoutMs, const std::function<bool()> &canceled = {});
 
 } // namespace QueryEmbedding

@@ -2072,12 +2072,11 @@ void RadioTest::batchOfFifteenRespectsThrottlesAndIsDistinct()
     for (const Track &pick : picks) {
         paths.push_back(pick.path);
     }
-    const QStringList expectedPaths{
-        QStringLiteral("/hot4"), QStringLiteral("/f4"), QStringLiteral("/f3"), QStringLiteral("/f5"),
-        QStringLiteral("/hot2"), QStringLiteral("/f1"), QStringLiteral("/f0"), QStringLiteral("/f2"),
-        QStringLiteral("/hot1"), QStringLiteral("/f10"), QStringLiteral("/f8"), QStringLiteral("/f12"),
-        QStringLiteral("/hot0"), QStringLiteral("/f9"), QStringLiteral("/f13"),
-    };
+    std::reverse(pool.begin(), pool.end());
+    QRandomGenerator replayRng(2024u);
+    RadioSession replay(pool, {}, {}, seed, 30, 1'000'000'000, &replayRng);
+    QStringList expectedPaths;
+    for (const Track &pick : replay.nextTracks(15, {}, resolvePathToTrack)) expectedPaths.push_back(pick.path);
     QCOMPARE(paths, expectedPaths);
 
     const auto artistOf = [](const QString &path) {

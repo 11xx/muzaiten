@@ -16,10 +16,21 @@ SearchWorker::SearchWorker(const QString &dbPath, QObject *parent)
 
 SearchWorker::~SearchWorker()
 {
+    m_cursor.reset();
     delete m_db;
 }
 
 void SearchWorker::buildIndex()
+{
+    startBuild(false);
+}
+
+void SearchWorker::rebuildIndex()
+{
+    startBuild(true);
+}
+
+void SearchWorker::startBuild(bool forceRefresh)
 {
     // Open (or reuse) a DB connection on this worker thread.
     if (!m_db) {
@@ -38,7 +49,7 @@ void SearchWorker::buildIndex()
     const CacheSignature current = IndexCache::currentSignature(*m_db);
     IndexCache::Loaded cached = IndexCache::read(IndexCache::defaultPath());
 
-    if (cached.ok && cached.signature == current) {
+    if (!forceRefresh && cached.ok && cached.signature == current) {
         // Warm + fresh: load the cache and we're done — no DB read, no fold.
         ++m_buildGeneration; // cancel any in-flight stream
         m_cursor.reset();
@@ -121,12 +132,16 @@ void SearchWorker::setExclusions(QVector<Search::ExcludeRule> rules)
     m_excludes = compileExcludes(rules);
 }
 
+void SearchWorker::submitQuery(quint64 queryId, const QString &queryString, bool fuzzyMode)
+{
+    m_latestQueryId.store(queryId);
+    QMetaObject::invokeMethod(this, [this, queryId, queryString, fuzzyMode]() {
+        if (m_latestQueryId.load() == queryId) runQuery(queryId, queryString, fuzzyMode);
+    }, Qt::QueuedConnection);
+}
+
 void SearchWorker::runQuery(quint64 queryId, const QString &queryString, bool fuzzyMode)
 {
-    // Record the latest query id; if a newer one arrives while we're computing,
-    // we don't need to emit results for this one.
-    m_latestQueryId.store(queryId);
-
     if (m_index.isEmpty()) {
         emit resultsReady(queryId, {}, 0);
         return;

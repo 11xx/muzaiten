@@ -48,6 +48,10 @@ file is harmless — it rebuilds on next open.
 
 ## Keybindings
 
+An explicit rebuild bypasses the saved cache and reads the database, including
+metadata changes that leave the file count and maximum modification time unchanged.
+Rapidly superseded queries are coalesced before scanning the index.
+
 | Key | Action |
 |-----|--------|
 | `Enter` | Add selected (or cursor) results to queue |

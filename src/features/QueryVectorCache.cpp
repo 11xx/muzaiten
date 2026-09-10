@@ -34,7 +34,7 @@ QByteArray blobFromVector(const QVector<float> &vector)
 
 QVector<float> vectorFromBlob(const QByteArray &blob, int dim)
 {
-    if (dim <= 0 || blob.size() != dim * static_cast<int>(sizeof(float))) {
+    if (dim <= 0 || blob.size() != static_cast<qsizetype>(dim) * static_cast<qsizetype>(sizeof(float))) {
         return {};
     }
     QVector<float> vector;

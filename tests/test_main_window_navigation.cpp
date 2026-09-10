@@ -27,6 +27,9 @@
 #include "ui/SelectionColors.h"
 #include "ui/StopAfterDialog.h"
 #include "ui/TrackTable.h"
+#include "ui/SearchView.h"
+#include "search/IndexCache.h"
+#include "search/SearchWorker.h"
 
 #define private public
 #include "ui/MainWindow.h"
@@ -130,6 +133,37 @@ class MainWindowNavigationTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void searchSubmissionCoalescesObsoleteQueries()
+    {
+        Search::SearchWorker worker(QStringLiteral("unused"));
+        QSignalSpy results(&worker, &Search::SearchWorker::resultsReady);
+        worker.submitQuery(1, QStringLiteral("first"), false);
+        worker.submitQuery(2, QString(), false);
+        QTRY_COMPARE(results.count(), 1);
+        QCOMPARE(results.first().first().toULongLong(), quint64(2));
+    }
+
+    void forcedSearchRefreshReadsChangedRowsWithSameSignature()
+    {
+        AppCore core;
+        Track track;
+        track.path = QStringLiteral("/review/example.flac");
+        track.parentDir = QStringLiteral("/review");
+        track.filename = QStringLiteral("example.flac");
+        track.title = QStringLiteral("Original");
+        track.artistName = track.albumArtistName = QStringLiteral("Artist");
+        track.albumTitle = QStringLiteral("Album");
+        QVERIFY(core.database()->upsertTrack(track));
+        MainWindow window(&core);
+        window.switchMainView(MainView::Search);
+        const QString cache = Search::IndexCache::defaultPath();
+        QTRY_COMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Original"));
+        track.title = QStringLiteral("Changed");
+        QVERIFY(core.database()->upsertTrack(track));
+        window.m_searchView->forceRefresh();
+        QTRY_COMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Changed"));
+    }
+
     void coreOwnsItsWindowUntilDestruction()
     {
         QPointer<MainWindow> window;
