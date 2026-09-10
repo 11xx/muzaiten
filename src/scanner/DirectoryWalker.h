@@ -23,6 +23,7 @@ public:
         int threads = 4;
         bool lowPriority = true;
         const std::atomic_bool *cancel = nullptr;
+        std::atomic_bool *incomplete = nullptr;
     };
 
     explicit DirectoryWalker(Config config);

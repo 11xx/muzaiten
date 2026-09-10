@@ -954,6 +954,8 @@ bool Database::beginTransaction()
 
 bool Database::rollbackTransaction()
 {
+    m_artistIdCache.clear();
+    m_albumIdCache.clear();
     if (!m_db.rollback()) {
         m_lastError = m_db.lastError().text();
         return false;
@@ -1958,11 +1960,36 @@ bool Database::setPendingTrackRatingWrite(const QString &trackPath, int rating0T
     return true;
 }
 
-bool Database::clearPendingTrackRatingWrite(const QString &trackPath)
+bool Database::clearPendingTrackRatingWrite(const QString &trackPath, int expectedRating)
 {
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("DELETE FROM pending_track_rating_writes WHERE track_path = ?"));
+    query.prepare(QStringLiteral("DELETE FROM pending_track_rating_writes WHERE track_path = ? AND (? < 0 OR rating_0_100 = ?)"));
     query.addBindValue(trackPath);
+    query.addBindValue(expectedRating);
+    query.addBindValue(expectedRating);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::recordRatingWriteFailure(const QString &trackPath, int expectedRating,
+                                      const QString &status, const QString &error)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "INSERT INTO pending_track_rating_writes(track_path, rating_0_100, status, last_error, updated_at) "
+        "SELECT ?, ?, ?, ?, datetime('now') WHERE EXISTS ("
+        "SELECT 1 FROM user_track_ratings WHERE track_path = ? AND rating_0_100 = ?) "
+        "ON CONFLICT(track_path) DO UPDATE SET status=excluded.status, last_error=excluded.last_error, updated_at=excluded.updated_at "
+        "WHERE pending_track_rating_writes.rating_0_100 = excluded.rating_0_100"));
+    query.addBindValue(trackPath);
+    query.addBindValue(expectedRating);
+    query.addBindValue(status);
+    query.addBindValue(error);
+    query.addBindValue(trackPath);
+    query.addBindValue(expectedRating);
     if (!query.exec()) {
         m_lastError = query.lastError().text();
         return false;

@@ -37,4 +37,5 @@ public:
     void markScannedTracksMissing(const QStringList &paths);
 private:
     MainWindow &m_window;
+    bool m_enumerationIncomplete = false;
 };

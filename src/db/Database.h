@@ -153,7 +153,9 @@ public:
     bool trackFlag(const QString &trackPath, TrackFlag flag) const;
     QSet<QString> flaggedPaths(TrackFlag flag) const;
     bool setPendingTrackRatingWrite(const QString &trackPath, int rating0To100, const QString &status, const QString &lastError = {});
-    bool clearPendingTrackRatingWrite(const QString &trackPath);
+    bool clearPendingTrackRatingWrite(const QString &trackPath, int expectedRating = -1);
+    bool recordRatingWriteFailure(const QString &trackPath, int expectedRating,
+                                 const QString &status, const QString &error);
     QVector<Track> tracksWithUserRatings() const;
     QVector<Track> tracksWithPendingRatingWrites() const;
     bool updateScannedTrackRating(const QString &trackPath, int rating0To100, Rating::Source source, qint64 fileSize, qint64 fileMtime);

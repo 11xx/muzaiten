@@ -45,10 +45,15 @@ void RatingTagSyncWorker::run()
         if (desired < 0) {
             continue;
         }
+        const auto current = database.trackRatingSnapshot(track.path);
+        if (!current.found || (current.hasUserRating && current.userRating0To100 != desired)
+            || (!current.hasUserRating && m_request.scope == RatingTagSyncRequest::Scope::PendingWrites)) {
+            continue;
+        }
 
         const PathResolution writePath = resolver.resolveLocalPath(track.path, PathUse::Write);
         if (writePath.preferredPath.isEmpty()) {
-            database.setPendingTrackRatingWrite(track.path, desired, QStringLiteral("blocked_no_writable_path"), writePath.failureReason);
+            database.recordRatingWriteFailure(track.path, desired, QStringLiteral("blocked_no_writable_path"), writePath.failureReason);
             ++summary.noWritablePath;
             continue;
         }
@@ -56,8 +61,11 @@ void RatingTagSyncWorker::run()
         const TagRatingWriteResult write = writer.writeRating(writePath.preferredPath, desired);
         if (write.ok) {
             const Track reread = reader.read(writePath.preferredPath);
-            database.updateScannedTrackRating(track.path, reread.rating0To100, reread.ratingSource, reread.fileSize, reread.fileMtime);
-            database.clearPendingTrackRatingWrite(track.path);
+            if (!database.updateScannedTrackRating(track.path, reread.rating0To100, reread.ratingSource, reread.fileSize, reread.fileMtime)
+                || !database.clearPendingTrackRatingWrite(track.path, desired)) {
+                ++summary.failed;
+                continue;
+            }
             ++summary.written;
             // The user rating is now persisted in the file and reconciled in the
             // DB, so the effective rating equals the just-written value. Report it
@@ -66,7 +74,7 @@ void RatingTagSyncWorker::run()
             continue;
         }
 
-        database.setPendingTrackRatingWrite(track.path, desired, QStringLiteral("failed"), write.error);
+        database.recordRatingWriteFailure(track.path, desired, QStringLiteral("failed"), write.error);
         ++summary.failed;
     }
 

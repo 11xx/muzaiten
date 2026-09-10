@@ -61,6 +61,19 @@
 
 ### Fixed
 
+- Search-index rebuilds read the current database even when its coarse cache
+  signature is unchanged. Superseded queries are coalesced and clearing a query
+  invalidates its pending results. Closing semantic search cancels a pending
+  query subprocess before joining its worker.
+- Rating-write completions preserve newer pending edits. Unreadable directories
+  do not turn their known tracks into missing files.
+- Scrobblers remain enabled through transient server errors and rate limiting.
+  The IPC request-size limit applies to complete newline-terminated requests too.
+- YouTube playlist detection rejects lookalike hosts and non-HTTP URLs. Model
+  artifact installation restores the previous directory if publication fails.
+- Release builds honor toolchain-change rebuild markers and stage archives on
+  disk. The safety guide describes background rating-tag writes accurately.
+
 - Shutdown closes the owned window before its stores and joins scanner, rating
   and import workers before destroying their owners. Failed scan batches roll
   back, and interrupted MPD imports preserve the previous catalog.
@@ -151,6 +164,9 @@
   destinations picked. The choice lasts as long as the window.
 
 ### Changed
+
+- Radio selects its top five candidates without sorting the entire pool;
+  equal scores are ordered by path for deterministic tie handling.
 
 - The project's canonical home is GitHub (`https://github.com/11xx/muzaiten`).
   Release tags, release pages, and the binary assets the AUR packages fetch are

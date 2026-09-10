@@ -465,6 +465,16 @@ void SchemaTest::pendingRatingWritesRoundTrip()
     QCOMPARE(tracks.first().path, track.path);
     QCOMPARE(tracks.first().effectiveRating0To100, 70);
 
+    QVERIFY(database.setUserTrackRating(track.path, 90));
+    QVERIFY(database.setPendingTrackRatingWrite(track.path, 90, QStringLiteral("pending")));
+    QVERIFY(database.clearPendingTrackRatingWrite(track.path, 70));
+    QVERIFY(database.recordRatingWriteFailure(track.path, 70, QStringLiteral("failed"), QStringLiteral("old attempt")));
+    QCOMPARE(database.tracksWithPendingRatingWrites().first().effectiveRating0To100, 90);
+    QVERIFY(database.clearUserTrackRating(track.path));
+    QVERIFY(database.clearPendingTrackRatingWrite(track.path));
+    QVERIFY(database.recordRatingWriteFailure(track.path, 90, QStringLiteral("failed"), QStringLiteral("canceled attempt")));
+    QVERIFY(database.tracksWithPendingRatingWrites().isEmpty());
+
     QVERIFY2(database.clearPendingTrackRatingWrite(track.path), qPrintable(database.lastError()));
     tracks = database.tracksWithPendingRatingWrites();
     QCOMPARE(tracks.size(), 0);

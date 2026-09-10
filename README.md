@@ -90,8 +90,8 @@ MPD metadata import · bit-perfect DSD (`.dsf`) to direct ALSA devices ·
 persistent UI state throughout.
 
 **Your library is safe.** muzaiten never moves, renames, deletes, or writes
-artwork into your music. The one deliberate exception — opt-in rating tag
-writes — is narrow, verified, and documented in
+artwork into your music. Setting a local track's rating queues a narrow,
+verified background write to its rating tag. The write and retry behavior is in
 [docs/data-safety.md](docs/data-safety.md).
 
 ## Install

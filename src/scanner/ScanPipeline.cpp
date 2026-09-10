@@ -101,6 +101,7 @@ void ScanPipeline::runScan()
 {
     const QFileInfo root(m_rootPath);
     if (!root.isDir() || root.isSymLink()) {
+        emit enumerationIncomplete();
         emit finished(0, 0, 0, false);
         return;
     }
@@ -108,7 +109,8 @@ void ScanPipeline::runScan()
     emit progress(0, 0, 0, QStringLiteral("enumerating"));
 
     const ThreadCounts threads = resolveThreads(m_rootPath, m_options);
-    DirectoryWalker walker({threads.walkers, m_options.lowPriority, &m_cancel});
+    std::atomic_bool incomplete = false;
+    DirectoryWalker walker({threads.walkers, m_options.lowPriority, &m_cancel, &incomplete});
     const std::vector<DirectoryWalker::Found> found = walker.enumerate(root.absoluteFilePath().toStdString());
     const qint64 enumerated = static_cast<qint64>(found.size());
 
@@ -174,7 +176,7 @@ void ScanPipeline::runScan()
     emit progress(enumerated, static_cast<qint64>(toRead.size()), 0, QStringLiteral("reading"));
     const qint64 indexed = processPaths(toRead, enumerated, QStringLiteral("reading"));
 
-    if (!m_cancel) {
+    if (!m_cancel && !incomplete) {
         QStringList missing;
         for (auto it = m_fingerprints.constBegin(); it != m_fingerprints.constEnd(); ++it) {
             if (!seenPaths.contains(it.key())) {
@@ -186,6 +188,10 @@ void ScanPipeline::runScan()
         }
     }
 
+    if (incomplete) {
+        qCWarning(scanPipelineLog) << "Directory enumeration was incomplete; missing-file detection was skipped";
+        emit enumerationIncomplete();
+    }
     emit finished(enumerated, indexed, skipped, m_cancel);
 }
 

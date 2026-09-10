@@ -3,6 +3,7 @@
 #include "scanner/LibraryScanner.h"
 
 #include <condition_variable>
+#include <cerrno>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -72,6 +73,9 @@ std::vector<DirectoryWalker::Found> DirectoryWalker::enumerate(const std::string
     const auto cancelled = [this]() {
         return m_config.cancel != nullptr && m_config.cancel->load();
     };
+    const auto incomplete = [this]() {
+        if (m_config.incomplete != nullptr) m_config.incomplete->store(true);
+    };
 
     const auto worker = [&](int index) {
         if (m_config.lowPriority) {
@@ -94,7 +98,13 @@ std::vector<DirectoryWalker::Found> DirectoryWalker::enumerate(const std::string
             if (!cancelled()) {
                 DIR *dir = opendir(dirPath.c_str());
                 if (dir != nullptr) {
-                    while (struct dirent *entry = readdir(dir)) {
+                    for (;;) {
+                        errno = 0;
+                        struct dirent *entry = readdir(dir);
+                        if (entry == nullptr) {
+                            if (errno != 0) incomplete();
+                            break;
+                        }
                         if (cancelled()) {
                             break;
                         }
@@ -111,6 +121,7 @@ std::vector<DirectoryWalker::Found> DirectoryWalker::enumerate(const std::string
                         if (type == DT_UNKNOWN) {
                             struct stat st {};
                             if (lstat(childPath.c_str(), &st) != 0) {
+                                incomplete();
                                 continue;
                             }
                             if (S_ISLNK(st.st_mode)) {
@@ -132,6 +143,7 @@ std::vector<DirectoryWalker::Found> DirectoryWalker::enumerate(const std::string
                             }
                             struct stat st {};
                             if (lstat(childPath.c_str(), &st) != 0) {
+                                incomplete();
                                 continue;
                             }
                             Found found;
@@ -143,6 +155,8 @@ std::vector<DirectoryWalker::Found> DirectoryWalker::enumerate(const std::string
                         // DT_LNK and other types are skipped.
                     }
                     closedir(dir);
+                } else {
+                    incomplete();
                 }
             }
 

@@ -56,6 +56,7 @@ void ScanController::startScan(const QString &rootPath, int scanRootId)
     }
 
     qCInfo(uiLog) << "starting scan" << rootPath;
+    m_enumerationIncomplete = false;
     m_window.m_activeScanRootId = scanRootId;
     m_window.m_activeScanRootPath = cleanDirectoryPath(rootPath);
     m_window.statusBar()->showMessage(QStringLiteral("Scanning %1").arg(m_window.m_activeScanRootPath));
@@ -96,6 +97,7 @@ void ScanController::startScan(const QString &rootPath, int scanRootId)
                 }
             });
     connect(m_window.m_scanPipeline, &ScanPipeline::missingReady, this, &ScanController::markScannedTracksMissing);
+    connect(m_window.m_scanPipeline, &ScanPipeline::enumerationIncomplete, this, [this] { m_enumerationIncomplete = true; });
     connect(m_window.m_scanPipeline, &ScanPipeline::finished, this, &ScanController::finishScan);
     connect(m_window.m_scanPipeline, &ScanPipeline::finished, m_window.m_scanThread, &QThread::quit);
     connect(m_window.m_scanThread, &QThread::finished, m_window.m_scanPipeline, &QObject::deleteLater);
@@ -401,8 +403,10 @@ void ScanController::finishScan(qint64 enumerated, qint64 indexed, qint64 skippe
                             << (canceled ? " (canceled)" : "");
     const bool sourceScan = m_window.m_activeScanRootId > 0;
     const QString finishedRootPath = m_window.m_activeScanRootPath;
+    const QString incompleteMessage = QStringLiteral("Some directories could not be read; missing-file detection was skipped");
     if (sourceScan) {
-        m_window.m_database->setScanRootLastScanned(m_window.m_activeScanRootId, canceled ? QStringLiteral("Canceled") : QString());
+        m_window.m_database->setScanRootLastScanned(m_window.m_activeScanRootId,
+            canceled ? QStringLiteral("Canceled") : m_enumerationIncomplete ? incompleteMessage : QString());
     }
     m_window.m_activeScanRootId = 0;
     m_window.m_activeScanRootPath.clear();
@@ -425,7 +429,9 @@ void ScanController::finishScan(qint64 enumerated, qint64 indexed, qint64 skippe
     if (!canceled && m_window.m_searchView != nullptr) {
         m_window.m_searchView->invalidateIndex(m_window.databasePath());
     }
-    if (!canceled && !m_window.m_pendingScanRoots.isEmpty()) {
+    if (m_enumerationIncomplete) {
+        m_window.statusBar()->showMessage(incompleteMessage, 10000);
+    } else if (!canceled && !m_window.m_pendingScanRoots.isEmpty()) {
         m_window.statusBar()->showMessage(QStringLiteral("Source scan complete: %1").arg(finishedRootPath), 3000);
     } else if (sourceScan && !canceled) {
         m_window.statusBar()->showMessage(QStringLiteral("Source scans complete"), 10000);

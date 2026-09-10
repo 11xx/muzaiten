@@ -62,6 +62,7 @@ signals:
     void batchReady(QVector<Track> tracks);
     void progress(qint64 enumerated, qint64 toProcess, qint64 processed, QString phase);
     void missingReady(QStringList paths);
+    void enumerationIncomplete();
     void finished(qint64 enumerated, qint64 indexed, qint64 skipped, bool canceled);
 
 private:

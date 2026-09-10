@@ -13,11 +13,12 @@ muzaiten never moves, renames, or deletes files in the music library, and it
 never writes artwork into album folders. Scans do not traverse symlinks, and no
 automatic metadata lookup ever changes files on disk.
 
-The single, deliberate exception is **rating tag writes**, which are off by
-default and only happen when you ask for them:
+The single, deliberate exception is **rating tag writes**:
 
-- They are opt-in: triggered explicitly through `File > Rating tags`, or through
-  the pending-write path after you change a rating with tag sync enabled.
+- Setting a local track rating queues its background tag write. There is no
+  separate tag-sync enable switch. `Library > Rating tags` also offers explicit
+  sync and retry actions. Clearing an application rating removes its override
+  and pending write; it does not erase an existing rating tag from the file.
 - They are narrow: only the rating field is touched. No other tag, no file
   structure, no artwork.
 - They are verified: every write is confirmed by re-reading the file, and a
@@ -26,15 +27,22 @@ default and only happen when you ask for them:
 
 Rating edits always land in the application database first, so the database — not
 your files — is the source of truth. Tag writes only ever mirror that state back
-out when you opt in.
+out following a rating edit or explicit sync action. A write that finishes after
+a newer edit cannot remove that edit's pending write or overwrite its UI value.
 
 Missing files are marked missing rather than deleted from the database until you
-explicitly choose `File > Remove missing tracks`.
+explicitly choose `Library > Remove missing tracks`. An incomplete directory
+enumeration skips missing-file detection so an unreadable subtree is not treated
+as deleted.
 
 ## Listening history and scrobbling
 
 Local listening history is permanent and independent of every scrobbling
 service. Nothing a scrobbler does removes a listen from it.
+
+Network outages, server-side failures and rate limits delay delivery without
+disabling collection. Permanent credential or configuration rejections can disable
+a destination. Compatible-server rate-limit delays are capped at one day.
 
 Delivery is tracked separately, one record per listen and destination. A record
 exists only for destinations that were enabled when the listen happened, so

@@ -116,19 +116,20 @@ void RatingSyncController::startRatingTagSync(const QVector<Track> &tracks, int 
                                          .arg(summary.failed),
                                      10000);
         }
-        // Patch only the rows the worker actually wrote, in place — no full table
-        // reload and no per-queued-track DB requery (the old N+1 main-thread freeze
-        // the user felt "when the tag is written"). The DB is already reconciled by
-        // the worker; the effective rating equals the just-written value.
+        // Reconcile only written rows against current intent. A rating edited
+        // while the file was being written must keep its pending overlay.
         bool currentTrackChanged = false;
         for (const RatingTagSyncUpdate &update : summary.updates) {
-            const int effective = update.effectiveRating0To100;
-            const bool hasUserRating = effective >= 0;
+            const auto current = m_window.m_database->trackRatingSnapshot(update.path);
+            if (!current.found) continue;
+            const int effective = current.effectiveRating0To100;
+            const bool hasUserRating = current.hasUserRating;
             m_window.m_trackTable->updateTrackRating(update.path, effective, hasUserRating);
             if (m_window.m_playlistView != nullptr) {
                 m_window.m_playlistView->updateTrackRating(update.path, effective);
             }
-            currentTrackChanged = m_window.m_player->applyRatingSync(update.path, effective) || currentTrackChanged;
+            currentTrackChanged = m_window.m_player->applyRatingSync(update.path, update.effectiveRating0To100) || currentTrackChanged;
+            m_window.m_player->updateTrackRating(update.path, effective, hasUserRating);
         }
         if (!summary.updates.isEmpty() && m_window.m_musicExplorerView != nullptr) {
             m_window.m_musicExplorerView->refreshExpandedTracks();

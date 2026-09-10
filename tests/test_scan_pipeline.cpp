@@ -7,6 +7,9 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QScopeGuard>
+#include <QSignalSpy>
+#include <unistd.h>
 #include <QUuid>
 
 // Integration test for the fast-first-pass scan: a real ScanPipeline drives a
@@ -20,6 +23,7 @@ private slots:
     void fastFirstPassDefersThenFills();
     void turboFillReadsEveryFile();
     void audioExtensionsAreSupported();
+    void unreadableDirectoryDoesNotMarkTracksMissing();
 
 private:
     static void writeWav(const QString &path, int sampleRate, int bitsPerSample, int channels, int frames);
@@ -99,6 +103,22 @@ void ScanPipelineTest::writeWav(const QString &path, int sampleRate, int bitsPer
     QVERIFY(file.open(QIODevice::WriteOnly));
     QCOMPARE(file.write(wav), static_cast<qint64>(wav.size()));
     file.close();
+}
+
+void ScanPipelineTest::unreadableDirectoryDoesNotMarkTracksMissing()
+{
+    if (geteuid() == 0) QSKIP("Root bypasses directory permissions");
+    QTemporaryDir root;
+    const QString blocked = root.filePath(QStringLiteral("unreadable"));
+    QVERIFY(QDir().mkpath(blocked));
+    const auto restore = qScopeGuard([&] { QFile::setPermissions(blocked, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner); });
+    QVERIFY(QFile::setPermissions(blocked, {}));
+    QHash<QString, TrackFingerprint> fingerprints;
+    fingerprints.insert(blocked + QStringLiteral("/known.flac"), {});
+    ScanPipeline pipeline(root.path(), 0, fingerprints, {});
+    QSignalSpy missing(&pipeline, &ScanPipeline::missingReady);
+    pipeline.run();
+    QCOMPARE(missing.count(), 0);
 }
 
 void ScanPipelineTest::fastFirstPassDefersThenFills()
