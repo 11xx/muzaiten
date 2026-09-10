@@ -93,6 +93,11 @@ void QueueScreen::revealCurrentPlaying()
     m_table->revealCurrentPlaying();
 }
 
+void QueueScreen::selectForDemo(const QString &query)
+{
+    m_table->selectForDemo(query);
+}
+
 void QueueScreen::setQueueIsPlaylistSourced(bool sourced)
 {
     m_table->setQueueIsPlaylistSourced(sourced);

@@ -16,8 +16,10 @@ make demo-screens \
     DEMO_SIZE=1440x900 \
     DEMO_LIBRARY_ARTIST="OVERWERK" \
     DEMO_LIBRARY_ALBUM="State" \
+    DEMO_LIBRARY_TRACK="overwerk need" \
+    DEMO_QUEUE_TRACK="nightwish greatest show" \
     DEMO_PLAYLIST_NAME="Favorites" \
-    DEMO_PLAYLIST_TRACK="Stargazer" \
+    DEMO_PLAYLIST_TRACK="rainbow stargazer" \
     DEMO_FILE_EXPLORER_LIBRARY_PATH="/srv/music/Rainbow/Rising" \
     DEMO_FILE_EXPLORER_LIBRARY_TRACK="Stargazer" \
     DEMO_FILE_EXPLORER_SYSTEM_PATH="/srv/music" \
@@ -31,13 +33,29 @@ make demo-screens \
 `DEMO_LIBRARY_ARTIST` selects the artist sidebar; `DEMO_LIBRARY_ALBUM`
 highlights the middle album grid. `DEMO_ARTIST` and `DEMO_ALBUM` remain aliases;
 an explicitly supplied view-prefixed variable takes precedence.
-Playlist names match case-insensitively. Playlist track selectors accept a full
-path or a case-insensitive substring of title, artist or album. File explorer
-track selectors accept a full path or a substring of the displayed filename.
-Omitted or unmatched selections fall back to the first available row. Invalid
+`DEMO_LIBRARY_TRACK` selects within the highlighted album's tracklist.
+`DEMO_QUEUE_TRACK` selects a queue row independently of playback; when omitted
+or unmatched, it reveals the now-playing row, then retains an available selection
+or selects the first row.
+
+Playlist names match case-insensitively. Track selectors use the panel search
+parser and matcher: words can match across fields in any order, with the same
+folding and query syntax as `/`. For example, `the asteroids galaxy tour hurricane`
+matches an artist and title stored in separate columns. The first matching row
+in display order is selected; selection does not filter the screenshot's rows.
+File explorer selectors search the displayed name/title, artist and album only,
+not hidden paths or on-disk filenames when a metadata title is displayed.
+Use `Stargazer (rough mix)`, not `5. Stargazer (rough mix).flac`, for a tagged track.
+Library, playlist and explorer selections fall back to the first available row
+when omitted or unmatched; the queue uses the priority described above. Invalid
 library directories fall back to library roots; invalid system directories
 retain the copied explorer location, with its normal missing-directory recovery.
 Empty collections produce empty views.
+
+File explorers show the full filename including its extension for an untagged
+track, and muted em dashes for empty artist/album cells. Stored metadata is not
+rewritten by this display fallback. Trailing slashes on explorer directories
+are normalized before lookup.
 
 `DEMO_NOW_PLAYING` accepts a library path or search terms. A match absent from
 the queue is appended to the disposable queue and made current, without playing

@@ -91,6 +91,8 @@ public:
     bool showDemoAlbum(const QString &artistName, const QString &albumTitle, QString *error = nullptr);
     bool showDemoNowPlaying(const QString &query, bool playing, double positionRatio, QString *error = nullptr);
     void showDemoPlaylist(const QString &name, const QString &trackQuery);
+    void showDemoLibraryTrack(const QString &query);
+    void showDemoQueue(const QString &query);
     void showDemoFileExplorer(bool library, const QString &path, const QString &trackQuery);
     // AppCore keeps the widget tree alive while it owns a PipeWire takeover, so
     // the release timers can restore the card even when the window is tray-hidden.

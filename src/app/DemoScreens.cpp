@@ -365,6 +365,7 @@ bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &
     }
 
     if (!window->showDemoAlbum(options.artistName, options.albumTitle, error)) return false;
+    window->showDemoLibraryTrack(options.libraryTrack);
     waitForEvents(1800);
     if (!saveWindow(*window, dir, QStringLiteral("01-library.png"), error)) return false;
 
@@ -383,8 +384,7 @@ bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &
         if (!saveWindow(*window, dir, QStringLiteral("02-search.png"), error)) return false;
     }
 
-    activateDigitShortcut(*window, Qt::Key_1);
-    activateDigitShortcut(*window, Qt::Key_1);
+    window->showDemoQueue(options.queueTrack);
     if (!saveWindow(*window, dir, QStringLiteral("03-queue.png"), error)) return false;
 
     window->showDemoPlaylist(options.playlistName, options.playlistTrack);

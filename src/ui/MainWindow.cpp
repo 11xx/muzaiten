@@ -2992,10 +2992,27 @@ void MainWindow::showDemoPlaylist(const QString &name, const QString &trackQuery
     m_playlistView->selectForDemo(name, trackQuery);
 }
 
+void MainWindow::showDemoLibraryTrack(const QString &query)
+{
+    const QString album = m_albumGrid->currentAlbumTitle();
+    m_selectedAlbumTitles = album.isEmpty() ? QStringList() : QStringList{album};
+    m_selectedAlbumTitle = album;
+    showArtist(m_currentArtist, true, false);
+    m_albumGrid->selectAlbumTitleForDemo(album);
+    m_trackTable->setCurrentRow(std::max(0, Search::firstPanelMatchRow(m_trackTable->searchDocuments(), query)));
+    if (m_panelSearch != nullptr) m_panelSearch->setActivePanel(MainPanelId::Tracks, true);
+}
+
+void MainWindow::showDemoQueue(const QString &query)
+{
+    switchMainView(MainView::Queue);
+    m_queueScreen->selectForDemo(query);
+}
+
 void MainWindow::showDemoFileExplorer(bool library, const QString &path, const QString &trackQuery)
 {
     if (library) {
-        m_libraryExplorerDirectory = path;
+        m_libraryExplorerDirectory = path.trimmed().isEmpty() ? QString() : cleanDirectoryPath(path);
         switchMainView(MainView::LibraryFileExplorer);
         m_libraryFileExplorer->selectTrackForDemo(trackQuery);
     } else {

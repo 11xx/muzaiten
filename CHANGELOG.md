@@ -61,6 +61,12 @@
 
 ### Fixed
 
+- Demo track selectors use panel-search matching across artist/title fields.
+  Library and queue track highlights can be chosen independently; library tracks
+  are scoped to the selected album. Inactive playlist selections retain readable
+  text in light-theme captures. File explorer search follows displayed metadata,
+  with full filenames for untagged tracks and muted empty artist/album cells.
+
 - The player bar's album art box and the right sidebar's artwork pane show
   the fallback artwork while nothing is playing, instead of an empty gap. The
   gap appeared on every view once the bar carried art everywhere.

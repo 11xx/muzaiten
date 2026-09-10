@@ -261,21 +261,16 @@ QVector<Search::MatchDocument> FileExplorerView::searchDocuments() const
             continue;
         }
         const QString name = item->text(0);
-        const QString path = item->data(0, PathRole).toString();
         QVector<Search::MatchField> fields;
         if (item->data(0, TypeRole).toInt() == TrackItem) {
-            const Track track = item->data(0, TrackRole).value<Track>();
             fields = {
-                Search::makeField(Search::MatchFieldRole::Filename, name, 300),
-                Search::makeField(Search::MatchFieldRole::Artist, track.artistName, 200),
-                Search::makeField(Search::MatchFieldRole::AlbumArtist, track.albumArtistName, 200),
-                Search::makeField(Search::MatchFieldRole::Album, track.albumTitle, 150),
-                Search::makeField(Search::MatchFieldRole::Path, path, 60),
+                Search::makeField(Search::MatchFieldRole::Title, name, 300),
+                Search::makeField(Search::MatchFieldRole::Artist, item->text(ArtistColumn) == QStringLiteral("—") ? QString() : item->text(ArtistColumn), 200),
+                Search::makeField(Search::MatchFieldRole::Album, item->text(AlbumColumn) == QStringLiteral("—") ? QString() : item->text(AlbumColumn), 150),
             };
         } else {
             fields = {
                 Search::makeField(Search::MatchFieldRole::Filename, name, 300),
-                Search::makeField(Search::MatchFieldRole::Path, path, 60),
             };
         }
         docs.push_back({row, fields, {}});
@@ -291,15 +286,8 @@ int FileExplorerView::currentTopLevelRow() const
 
 void FileExplorerView::selectTrackForDemo(const QString &query)
 {
-    int selected = 0;
-    for (int row = 0; row < m_tree->topLevelItemCount() && !query.isEmpty(); ++row) {
-        const auto *item = m_tree->topLevelItem(row);
-        if (item->data(0, PathRole).toString() == query
-            || item->text(NameColumn).contains(query, Qt::CaseInsensitive)) {
-            selected = row;
-            break;
-        }
-    }
+    while (!m_pendingMetadata.isEmpty()) processNextMetadata();
+    const int selected = std::max(0, Search::firstPanelMatchRow(searchDocuments(), query));
     selectTopLevelRow(selected);
     m_tree->setFocus(Qt::OtherFocusReason);
 }
@@ -690,6 +678,16 @@ void FileExplorerView::changeEvent(QEvent *event)
         || event->type() == QEvent::ApplicationPaletteChange
         || event->type() == QEvent::StyleChange) {
         applyHintBarPalette();
+        if (m_tree != nullptr) {
+            for (int row = 0; row < m_tree->topLevelItemCount(); ++row) {
+                auto *item = m_tree->topLevelItem(row);
+                for (int column : {ArtistColumn, AlbumColumn}) {
+                    if (item->text(column) == QStringLiteral("—")) {
+                        item->setForeground(column, palette().brush(QPalette::Disabled, QPalette::Text));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -820,9 +818,19 @@ void FileExplorerView::addDirectoryItem(const QString &path)
 
 void FileExplorerView::applyTrackToItem(QTreeWidgetItem *item, const Track &track)
 {
-    item->setText(NameColumn, track.title.trimmed().isEmpty() ? track.filename : track.title);
-    item->setText(ArtistColumn, track.artistName);
-    item->setText(AlbumColumn, track.albumTitle);
+    const auto absent = [](const QString &value) {
+        return value.trimmed().isEmpty() || value == QStringLiteral("[unknown artist]")
+            || value == QStringLiteral("[unknown album]") || value == QStringLiteral("[unknown]");
+    };
+    const QFileInfo file(track.path);
+    const bool filenameTitle = track.title == file.completeBaseName()
+        && absent(track.artistName) && absent(track.albumTitle);
+    item->setText(NameColumn, absent(track.title) || filenameTitle
+        ? (track.filename.isEmpty() ? file.fileName() : track.filename) : track.title);
+    for (const auto &[column, value] : {std::pair{ArtistColumn, track.artistName}, std::pair{AlbumColumn, track.albumTitle}}) {
+        item->setText(column, absent(value) ? QStringLiteral("—") : value);
+        item->setForeground(column, absent(value) ? palette().brush(QPalette::Disabled, QPalette::Text) : QBrush());
+    }
     item->setText(DurationColumn, humanquantity::formatDuration(track.durationMs));
     item->setText(RatingColumn, ratingStars(displayRating(track)));
     item->setText(SizeColumn, formatSize(track.fileSize));
@@ -842,7 +850,7 @@ void FileExplorerView::addTrackItem(const Track &track)
 void FileExplorerView::addPendingTrackItem(const QFileInfo &info)
 {
     auto *item = new QTreeWidgetItem(m_tree);
-    item->setText(NameColumn, info.completeBaseName());
+    item->setText(NameColumn, info.fileName());
     item->setText(SizeColumn, formatSize(info.size()));
     item->setIcon(0, QIcon::fromTheme(QStringLiteral("audio-x-generic"), style()->standardIcon(QStyle::SP_MediaPlay)));
     item->setData(0, TypeRole, TrackItem);

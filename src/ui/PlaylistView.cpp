@@ -423,7 +423,7 @@ public:
         const bool activePane = index.data(PlaylistListActiveRole).toBool();
         if (selected) {
             if (activePane) {
-                painter->fillRect(opt.rect, SelectionColors::selectedFill(opt));
+                painter->fillRect(opt.rect, opt.palette.color(QPalette::Highlight));
             } else {
                 const QColor dim = SelectionColors::dimmedHighlight(opt.palette.color(QPalette::Base),
                                                                     opt.palette.color(QPalette::Highlight));
@@ -447,7 +447,7 @@ public:
         Q_UNUSED(createdAt);
         const QString detail = meta;
 
-        const QColor primary = selected ? SelectionColors::selectedText(option) : option.palette.color(QPalette::Text);
+        const QColor primary = option.palette.color(selected && activePane ? QPalette::HighlightedText : QPalette::Text);
         const QColor secondary = selected ? primary : option.palette.color(QPalette::Disabled, QPalette::Text);
         const bool importing = index.data(PlaylistImportingRole).toBool();
         const int countWidth = option.fontMetrics.horizontalAdvance(count) + 8;
@@ -1283,16 +1283,7 @@ void PlaylistView::selectForDemo(const QString &name, const QString &trackQuery)
     if (selected < 0) return;
     m_playlistList->setCurrentRow(selected);
     m_playlistList->scrollToItem(m_playlistList->item(selected));
-    int trackRow = 0;
-    for (int row = 0; row < m_itemModel->rowCount() && !trackQuery.isEmpty(); ++row) {
-        const PlaylistItem *item = itemForDisplayRow(row);
-        if (item != nullptr && (item->trackPath == trackQuery
-            || QStringLiteral("%1 %2 %3").arg(item->titleSnapshot, item->artistSnapshot, item->albumSnapshot)
-                   .contains(trackQuery, Qt::CaseInsensitive))) {
-            trackRow = row;
-            break;
-        }
-    }
+    const int trackRow = std::max(0, Search::firstPanelMatchRow(searchDocuments(), trackQuery));
     if (m_itemModel->rowCount() > 0) {
         setCurrentItemRow(trackRow);
         m_itemTable->setFocus(Qt::OtherFocusReason);

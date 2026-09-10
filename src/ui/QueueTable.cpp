@@ -919,6 +919,18 @@ void QueueTable::activateCurrentRow()
     }
 }
 
+void QueueTable::selectForDemo(const QString &query)
+{
+    if (m_store == nullptr) return;
+    int row = Search::firstPanelMatchRow(m_store->searchDocuments(), query);
+    if (row < 0) row = m_store->currentIndex();
+    if (row < 0) row = m_pendingRestoreRow >= 0 ? m_pendingRestoreRow : std::max(0, currentRow());
+    m_pendingRestoreRow = row;
+    m_restoreScrollPending = true;
+    setCurrentRow(row);
+    scheduleRestoreScrollToCurrentRow();
+}
+
 void QueueTable::revealCurrentPlaying()
 {
     const int row = m_store == nullptr ? -1 : m_store->currentIndex();
