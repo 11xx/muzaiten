@@ -130,6 +130,18 @@ class MainWindowNavigationTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void coreOwnsItsWindowUntilDestruction()
+    {
+        QPointer<MainWindow> window;
+        {
+            AppCore core;
+            core.showWindow();
+            window = core.window();
+            QVERIFY(!window.isNull());
+        }
+        QVERIFY2(window.isNull(), "The window must not outlive the stores owned by AppCore");
+    }
+
     void init()
     {
         QVERIFY(m_stateRoot.isValid());

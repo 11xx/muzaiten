@@ -6,6 +6,7 @@
 #include "scanner/TagReader.h"
 
 #include <QUuid>
+#include <QThread>
 
 RatingTagSyncWorker::RatingTagSyncWorker(QString databasePath, RatingTagSyncRequest request)
     : m_databasePath(std::move(databasePath))
@@ -33,7 +34,7 @@ void RatingTagSyncWorker::run()
     const TagReader reader;
 
     for (const Track &track : std::as_const(m_request.tracks)) {
-        if (m_cancel) {
+        if (m_cancel || QThread::currentThread()->isInterruptionRequested()) {
             break;
         }
 

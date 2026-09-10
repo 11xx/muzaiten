@@ -50,6 +50,10 @@ void MpdImportWorker::run()
         return;
     }
 
+    if (!database.beginTransaction()) {
+        emit finished(0, database.lastError());
+        return;
+    }
     const qint64 sourceId = database.upsertMediaSource(QStringLiteral("mpd"),
                                                        QStringLiteral("local"),
                                                        m_musicDirectory,
@@ -62,18 +66,13 @@ void MpdImportWorker::run()
         emit finished(0, database.lastError());
         return;
     }
-    if (!database.beginTransaction()) {
-        emit finished(0, database.lastError());
-        return;
-    }
-
     const int totalTracks = static_cast<int>(std::min<qsizetype>(tracks.size(), std::numeric_limits<int>::max()));
     int imported = 0;
     for (const MpdTrack &track : tracks) {
         if (m_cancel.load()) {
             // Leave the transaction uncommitted; the local Database rolls it
             // back when it goes out of scope, so a cancelled import is discarded.
-            emit finished(imported, {});
+            emit finished(0, {});
             return;
         }
         if (!database.upsertMpdTrack(sourceId, track)) {

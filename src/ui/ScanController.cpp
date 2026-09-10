@@ -179,12 +179,16 @@ void ScanController::ingestScanBatch(const QVector<Track> &tracks)
     }
     for (const Track &track : tracks) {
         if (!m_window.m_database->upsertTrack(track)) {
-            QMessageBox::warning(&m_window, QStringLiteral("Scanner"), m_window.m_database->lastError());
-            break;
+            const QString error = m_window.m_database->lastError();
+            m_window.m_database->rollbackTransaction();
+            QMessageBox::warning(&m_window, QStringLiteral("Scanner"), error);
+            return;
         }
     }
     if (!m_window.m_database->commitTransaction()) {
-        QMessageBox::warning(&m_window, QStringLiteral("Scanner"), m_window.m_database->lastError());
+        const QString error = m_window.m_database->lastError();
+        m_window.m_database->rollbackTransaction();
+        QMessageBox::warning(&m_window, QStringLiteral("Scanner"), error);
         return;
     }
 
@@ -437,7 +441,10 @@ void ScanController::markScannedTracksMissing(const QStringList &paths)
         return;
     }
     const int marked = m_window.m_database->markTracksMissing(paths);
-    m_window.m_database->commitTransaction();
+    if (!m_window.m_database->commitTransaction()) {
+        m_window.m_database->rollbackTransaction();
+        return;
+    }
     if (marked > 0) {
         m_window.m_player->markTracksMissing(paths);
         if (m_window.m_playlistDb != nullptr && m_window.m_playlistDb->markItemsMissing(paths) > 0 && m_window.m_playlistView != nullptr) {

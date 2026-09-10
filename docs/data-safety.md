@@ -1,5 +1,10 @@
 # Data Safety
 
+Shutdown stops and joins in-flight workers before destroying their owners or
+stores. A slow filesystem operation can delay exit until the operation returns.
+Scan batches commit as units; a failed batch rolls back. MPD catalog replacement
+keeps the previous catalog if the replacement fails or is interrupted.
+
 muzaiten must assume the user's music library is irreplaceable.
 
 ## Library contract

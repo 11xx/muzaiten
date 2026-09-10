@@ -1628,14 +1628,14 @@ MainWindow::~MainWindow()
     }
     if (m_scanThread != nullptr) {
         m_scanThread->quit();
-        m_scanThread->wait(3000);
+        m_scanThread->wait();
     }
     if (m_fillPipeline != nullptr) {
         m_fillPipeline->cancel();
     }
     if (m_fillThread != nullptr) {
         m_fillThread->quit();
-        m_fillThread->wait(3000);
+        m_fillThread->wait();
     }
     if (m_audioAnalysisProcess != nullptr) {
         m_audioAnalysisProcess->terminate();

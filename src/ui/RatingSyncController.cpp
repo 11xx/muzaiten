@@ -18,6 +18,15 @@
 
 RatingSyncController::RatingSyncController(MainWindow &window) : QObject(&window), m_window(window) {}
 
+RatingSyncController::~RatingSyncController()
+{
+    if (m_thread != nullptr) {
+        m_thread->requestInterruption();
+        m_thread->quit();
+        m_thread->wait();
+    }
+}
+
 void RatingSyncController::applyTrackRating(const Track &track, int rating0To100, const QString &sourceSurface)
 {
     const auto oldRating = m_window.m_database->trackRatingSnapshot(track.path);
@@ -87,6 +96,7 @@ void RatingSyncController::startRatingTagSync(const QVector<Track> &tracks, int 
     request.linkRoots = m_window.m_database->linkRoots();
 
     auto *thread = new QThread(this);
+    m_thread = thread;
     auto *worker = new RatingTagSyncWorker(m_window.databasePath(), request);
     m_window.m_ratingTagSyncRunning = true;
     worker->moveToThread(thread);
@@ -94,7 +104,9 @@ void RatingSyncController::startRatingTagSync(const QVector<Track> &tracks, int 
     connect(worker, &RatingTagSyncWorker::progress, this, [this](int checked, int total, const QString &) {
         m_window.statusBar()->showMessage(QStringLiteral("Rating tag sync: %1 / %2 checked").arg(checked).arg(total));
     });
-    connect(worker, &RatingTagSyncWorker::finished, this, [this, thread, worker](const RatingTagSyncSummary &summary, const QString &error) {
+    connect(worker, &RatingTagSyncWorker::finished, thread, &QThread::quit, Qt::DirectConnection);
+    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(worker, &RatingTagSyncWorker::finished, this, [this](const RatingTagSyncSummary &summary, const QString &error) {
         if (!error.isEmpty()) {
             QMessageBox::warning(&m_window, QStringLiteral("Rating tag sync"), error);
         } else {
@@ -131,11 +143,12 @@ void RatingSyncController::startRatingTagSync(const QVector<Track> &tracks, int 
             m_window.refreshPlayNextRange();
             m_window.scheduleQueueStateSave();
         }
+    });
+    connect(thread, &QThread::finished, this, [this]() {
+        m_thread = nullptr;
         m_window.m_ratingTagSyncRunning = false;
         const bool runPendingAgain = m_window.m_ratingTagSyncPending;
         m_window.m_ratingTagSyncPending = false;
-        worker->deleteLater();
-        thread->quit();
         if (runPendingAgain) {
             QTimer::singleShot(0, this, [this]() {
                 startRatingTagSync(m_window.m_database->tracksWithPendingRatingWrites(), static_cast<int>(RatingTagSyncRequest::Scope::PendingWrites));

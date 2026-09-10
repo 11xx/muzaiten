@@ -115,6 +115,7 @@ public:
 
     bool beginTransaction();
     bool commitTransaction();
+    bool rollbackTransaction();
     // Brackets a scan/ingest run so upsertTrack can memoize artist/album ids
     // (append-only during a scan) instead of re-querying them per track. The
     // caches are cleared on begin and end; outside a session no caching happens.

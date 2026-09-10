@@ -19,7 +19,7 @@ ListenBrainzHub::~ListenBrainzHub()
     // it. Quitting first lets each finish its current reply handler; the
     // deleteLater connections in createScrobbler then run as the loop exits.
     m_thread->quit();
-    m_thread->wait(3000);
+    m_thread->wait();
 }
 
 ListenBrainzScrobbler *ListenBrainzHub::createScrobbler()

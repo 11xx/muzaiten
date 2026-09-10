@@ -4,6 +4,7 @@
 #include "playlist/PlaylistMatchIndex.h"
 
 #include <QUuid>
+#include <QThread>
 
 PlaylistImportWorker::PlaylistImportWorker(QString dbPath, QObject *parent)
     : QObject(parent)
@@ -46,6 +47,7 @@ void PlaylistImportWorker::matchEntries(QVector<PlaylistImport::ImportEntry> ent
     const int total = static_cast<int>(entries.size());
     int done = 0;
     for (const PlaylistImport::ImportEntry &entry : entries) {
+        if (QThread::currentThread()->isInterruptionRequested()) break;
         PlaylistImportMatch match;
         match.entry = entry;
         match.outcome = PlaylistMatcher::match(m_index, entry, exactOnly);

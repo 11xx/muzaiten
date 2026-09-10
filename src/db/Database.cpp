@@ -952,6 +952,15 @@ bool Database::beginTransaction()
     return true;
 }
 
+bool Database::rollbackTransaction()
+{
+    if (!m_db.rollback()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 bool Database::commitTransaction()
 {
     if (!m_db.commit()) {

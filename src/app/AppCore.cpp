@@ -460,6 +460,12 @@ AppCore::AppCore(QObject *parent)
 
 AppCore::~AppCore()
 {
+    m_quitting = true;
+    if (m_window != nullptr) {
+        m_window->close();
+        delete m_window;
+        m_window = nullptr;
+    }
     saveRadioSessionState();
     // Finalize any in-flight play event before teardown, defensively: the
     // aboutToQuit signal may not fire on every exit path.
@@ -468,11 +474,11 @@ AppCore::~AppCore()
     }
     if (m_lastFmThread != nullptr) {
         m_lastFmThread->quit();
-        m_lastFmThread->wait(3000);
+        m_lastFmThread->wait();
     }
     if (m_scrobbleBackfillThread != nullptr) {
         m_scrobbleBackfillThread->quit();
-        m_scrobbleBackfillThread->wait(3000);
+        m_scrobbleBackfillThread->wait();
     }
 }
 

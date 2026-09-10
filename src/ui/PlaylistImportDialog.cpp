@@ -131,7 +131,8 @@ PlaylistImportDialog::~PlaylistImportDialog()
 {
     if (m_workerThread != nullptr) {
         m_workerThread->quit();
-        m_workerThread->wait(3000);
+        m_workerThread->requestInterruption();
+        m_workerThread->wait();
         m_workerThread = nullptr;
         m_worker = nullptr;  // deleteLater on thread finish
     }

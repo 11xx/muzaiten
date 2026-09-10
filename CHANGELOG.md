@@ -61,6 +61,10 @@
 
 ### Fixed
 
+- Shutdown closes the owned window before its stores and joins scanner, rating
+  and import workers before destroying their owners. Failed scan batches roll
+  back, and interrupted MPD imports preserve the previous catalog.
+
 - Demo track selectors use panel-search matching across artist/title fields.
   Library and queue track highlights can be chosen independently; library tracks
   are scoped to the selected album. Inactive playlist selections retain readable
