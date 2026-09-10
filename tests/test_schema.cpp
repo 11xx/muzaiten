@@ -774,7 +774,7 @@ void SchemaTest::mpdTracksRoundTrip()
     const qint64 sourceId = database.upsertMediaSource(QStringLiteral("mpd"),
                                                        QStringLiteral("local"),
                                                        QStringLiteral("/gak/music"),
-                                                       QStringLiteral("/home/lobo/.config/mpd/mpd.conf"));
+                                                       QStringLiteral("/home/example/.config/mpd/mpd.conf"));
     QVERIFY2(sourceId > 0, qPrintable(database.lastError()));
 
     MpdTrack track;
