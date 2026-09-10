@@ -4,6 +4,13 @@
 
 ### Added
 
+- Startup storage health checks for library, playlists, state and listening
+  history, with Retry/Close in the GUI and structured failures for headless runs.
+  `muzaiten --check-storage` reports path and format readiness as JSON. Required
+  store failures stop dependent services; optional cache failures degrade with
+  warnings. Store initialization validates supported versions and rolls back
+  failed schema changes.
+
 - `muzaiten-features refresh --staging-bytes N` (or the `analysis.stagingBytes`
   state setting) stages upcoming files' compressed bytes in memory ahead of
   the decoders, bounded by that byte budget, and feeds ffmpeg over stdin so a

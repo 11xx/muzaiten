@@ -69,6 +69,7 @@ public:
     MprisService        *mpris() const;
     IpcServer           *ipc() const;
     MainWindow          *window() const;
+    QStringList storageWarnings() const { return m_storageWarnings; }
 
     ListenBrainzHub       *listenBrainzHub() const;
     LastFmScrobbler       *lastFmScrobbler() const;
@@ -191,6 +192,7 @@ public slots:
     void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
 
 private:
+    QStringList m_storageWarnings;
     // ~20s after construction, eagerly resume an interrupted ListenBrainz
     // import if one is pending (see startBackfill's cancel-vs-interrupt rule).
     void maybeAutoResumeListenBrainzBackfill();

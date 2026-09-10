@@ -1,4 +1,6 @@
 #include "scrobble/ListenHistoryStore.h"
+#include "db/SqlUtil.h"
+#include <QSqlError>
 
 #include <QDir>
 #include <QFileInfo>
@@ -13,7 +15,6 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 8;
 
 // Marks the one-time move from the fixed owed_*/sent_* columns to row-based
 // delivery state. Its own key rather than the schema version, because the
@@ -172,6 +173,7 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
     m_db.setDatabaseName(path);
     if (!m_db.open()) {
+        m_lastError = m_db.lastError().text();
         return;
     }
 
@@ -180,14 +182,11 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     pragma.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
 
-    // The schema defined below is the only supported revision. No migration of
-    // databases written by earlier revisions is performed or intended: a
-    // pre-existing table is left untouched by CREATE TABLE IF NOT EXISTS, and the
-    // schemaVersion row is overwritten unconditionally. Earlier schema revisions
-    // are therefore silently skipped or overridden; backward compatibility is not
-    // a goal of this store.
+    if (!SqlUtil::validateSchemaVersion(m_db, QStringLiteral("meta"), QStringLiteral("schemaVersion"), currentSchemaVersion, &m_lastError)) return;
+    SqlUtil::Savepoint migration(m_db, &m_lastError);
+    if (!migration.active()) return;
     QSqlQuery create(m_db);
-    create.exec(QStringLiteral(
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS listens ("
         " id INTEGER PRIMARY KEY,"
         " listened_at INTEGER NOT NULL,"  // epoch secs, the second the track started playing
@@ -201,7 +200,10 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " sent_lastfm INTEGER NOT NULL DEFAULT 0,"
         " owed_listenbrainz INTEGER NOT NULL DEFAULT 0,"
         " sent_listenbrainz INTEGER NOT NULL DEFAULT 0,"
-        " UNIQUE(listened_at, artist, title))"));
+        " UNIQUE(listened_at, artist, title))"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
     // Delivery state, one row per (listen, destination) obligation. The row
     // existing means the listen is owed there; `sent` means it arrived. This is
     // what makes the destination set open-ended: adding one adds rows, removing
@@ -210,19 +212,28 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
     // The legacy owed_*/sent_* columns above are deliberately left in place but
     // no longer written. Dropping them would mean rewriting the `listens` table,
     // and they cost nothing where they sit.
-    create.exec(QStringLiteral(
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS listen_deliveries ("
         " listen_id INTEGER NOT NULL,"
         " destination_id TEXT NOT NULL,"
         " sent INTEGER NOT NULL DEFAULT 0,"
-        " PRIMARY KEY(listen_id, destination_id)) WITHOUT ROWID"));
+        " PRIMARY KEY(listen_id, destination_id)) WITHOUT ROWID"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
     // Draining a backlog is always "oldest pending listen for this destination".
-    create.exec(QStringLiteral(
+    if (!create.exec(QStringLiteral(
         "CREATE INDEX IF NOT EXISTS idx_listen_deliveries_pending "
-        "ON listen_deliveries(destination_id, listen_id) WHERE sent = 0"));
-    create.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_listen_deliveries_listen ON listen_deliveries(listen_id)"));
-    create.exec(QStringLiteral(
+        "ON listen_deliveries(destination_id, listen_id) WHERE sent = 0"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_listen_deliveries_listen ON listen_deliveries(listen_id)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS play_events ("
         " id INTEGER PRIMARY KEY,"
         " started_at INTEGER NOT NULL,"        // epoch secs the track started
@@ -238,12 +249,21 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " mb_recording_id TEXT,"
         " previous_track_path TEXT,"
         " session_id TEXT NOT NULL,"
-        " track_json TEXT NOT NULL)"));
-    create.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_play_events_track ON play_events(track_path, started_at)"));
-    create.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_play_events_session ON play_events(session_id)"));
-    create.exec(QStringLiteral(
+        " track_json TEXT NOT NULL)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_play_events_track ON play_events(track_path, started_at)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_play_events_session ON play_events(session_id)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS rating_events ("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " occurred_at INTEGER NOT NULL,"
@@ -256,8 +276,11 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " playing_track_path TEXT,"
         " playing_source TEXT,"
         " radio_active INTEGER NOT NULL DEFAULT 0,"
-        " track_json TEXT)"));
-    create.exec(QStringLiteral(
+        " track_json TEXT)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS queue_removals ("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " occurred_at INTEGER NOT NULL,"
@@ -265,8 +288,11 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " mb_recording_id TEXT,"
         " was_radio_pick INTEGER NOT NULL,"
         " was_unheard INTEGER NOT NULL,"
-        " radio_active INTEGER NOT NULL)"));
-    create.exec(QStringLiteral(
+        " radio_active INTEGER NOT NULL)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS radio_picks ("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " occurred_at INTEGER NOT NULL,"
@@ -276,15 +302,21 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " exploration INTEGER NOT NULL,"
         " weights_json TEXT NOT NULL,"
         " components_json TEXT NOT NULL,"
-        " score REAL NOT NULL)"));
-    create.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
+        " score REAL NOT NULL)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
 
     // Scrobbler backfill (Stage 0b). Historical listens pulled from a service
     // (ListenBrainz full export, Last.fm import) land here, NOT in `listens`.
     // Being a separate table is load-bearing: these rows have no `owed_*`/
     // `sent_*` flags, so the scrobble-backlog drain can never pick them up and
     // re-scrobble history muzaiten only mirrored back from the service.
-    create.exec(QStringLiteral(
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS imported_listens ("
         " id INTEGER PRIMARY KEY,"
         " source TEXT NOT NULL,"              // 'listenbrainz' | 'lastfm'
@@ -294,12 +326,18 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " album TEXT,"
         " mb_recording_id TEXT,"
         " matched_track_path TEXT,"           // resolved library track; NULL when unmatched
-        " UNIQUE(source, listened_at, artist, title))"));
-    create.exec(QStringLiteral(
-        "CREATE INDEX IF NOT EXISTS idx_imported_listens_track ON imported_listens(matched_track_path, listened_at)"));
+        " UNIQUE(source, listened_at, artist, title))"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
+    if (!create.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS idx_imported_listens_track ON imported_listens(matched_track_path, listened_at)"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
     // Per-service, per-track playcount snapshots (MusicBee-style count sync).
     // artist/title are the service-side identity, kept verbatim for re-matching.
-    create.exec(QStringLiteral(
+    if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS playcount_baselines ("
         " source TEXT NOT NULL,"
         " artist TEXT NOT NULL,"              // service-side identity, verbatim
@@ -308,29 +346,36 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         " matched_track_path TEXT,"
         " count INTEGER NOT NULL,"
         " synced_at INTEGER NOT NULL,"
-        " PRIMARY KEY(source, artist, title))"));
+        " PRIMARY KEY(source, artist, title))"))) {
+        m_lastError = create.lastError().text();
+        return;
+    }
 
     QSqlQuery version(m_db);
     version.prepare(QStringLiteral(
         "INSERT INTO meta(key, value) VALUES('schemaVersion', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
-    version.addBindValue(QString::number(kSchemaVersion));
-    version.exec();
-
-    migrateLegacyDeliveries();
+    version.addBindValue(QString::number(currentSchemaVersion));
+    if (!version.exec()) {
+        m_lastError = version.lastError().text();
+        return;
+    }
+    if (!migrateLegacyDeliveries()) return;
+    m_ready = migration.commit();
 }
 
-void ListenHistoryStore::migrateLegacyDeliveries()
+bool ListenHistoryStore::migrateLegacyDeliveries()
 {
     if (!m_db.isOpen() || metaValue(QString::fromLatin1(kDeliveryMigrationKey)) == QLatin1String("1")) {
-        return;
+        return m_db.isOpen();
     }
 
     // One transaction covering both services and the marker, so an interrupted
     // run leaves the store either fully converted or wholly untouched. Rerunning
     // is a no-op regardless: the marker short-circuits, and the inserts below
     // ignore rows that already exist.
-    m_db.transaction();
+    SqlUtil::Savepoint migration(m_db, &m_lastError);
+    if (!migration.active()) return false;
 
     const auto convert = [this](const QString &owedColumn, const QString &sentColumn, const QString &destinationId) {
         QSqlQuery query(m_db);
@@ -338,15 +383,18 @@ void ListenHistoryStore::migrateLegacyDeliveries()
                                      "SELECT id, ?, %1 FROM listens WHERE %2 = 1")
                           .arg(sentColumn, owedColumn));
         query.addBindValue(destinationId);
-        return query.exec();
+        if (!query.exec()) {
+            m_lastError = query.lastError().text();
+            return false;
+        }
+        return true;
     };
 
     const bool converted =
         convert(QStringLiteral("owed_lastfm"), QStringLiteral("sent_lastfm"), LastFm)
         && convert(QStringLiteral("owed_listenbrainz"), QStringLiteral("sent_listenbrainz"), ListenBrainz);
     if (!converted) {
-        m_db.rollback();
-        return;
+        return false;
     }
 
     QSqlQuery marker(m_db);
@@ -354,10 +402,10 @@ void ListenHistoryStore::migrateLegacyDeliveries()
                                   "ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
     marker.addBindValue(QString::fromLatin1(kDeliveryMigrationKey));
     if (!marker.exec()) {
-        m_db.rollback();
-        return;
+        m_lastError = marker.lastError().text();
+        return false;
     }
-    m_db.commit();
+    return migration.commit();
 }
 
 ListenHistoryStore::~ListenHistoryStore()
@@ -371,7 +419,7 @@ ListenHistoryStore::~ListenHistoryStore()
 
 bool ListenHistoryStore::isOpen() const
 {
-    return m_db.isOpen();
+    return m_ready && m_db.isOpen();
 }
 
 void ListenHistoryStore::releaseCacheMemory()

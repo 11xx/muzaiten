@@ -10,6 +10,7 @@
 
 class FeatureStore final {
 public:
+    static constexpr int maximumSchemaVersion = 5;
     struct Scalars {
         double tempoBpm = -1.0;
         double loudness = 0.0;

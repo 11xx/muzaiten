@@ -2,6 +2,7 @@
 
 #include "Version.h"
 #include "app/AppCore.h"
+#include "app/StartupStorage.h"
 #include "app/DemoScreens.h"
 #include "core/Track.h"
 #include "ipc/IpcSocket.h"
@@ -20,6 +21,8 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QMessageBox>
+#include <QTextStream>
 
 #include <taglib/tdebuglistener.h>
 
@@ -126,6 +129,30 @@ bool MuzaitenApplication::raiseRunningInstance()
 
 int MuzaitenApplication::run()
 {
+    if (property("muzaiten.checkStorage").toBool()) {
+        const auto health = StartupStorage::inspect();
+        QTextStream(stdout) << QJsonDocument(health.json()).toJson(QJsonDocument::Compact) << '\n';
+        return health.ok() ? 0 : 2;
+    }
+    const auto createCore = [this]() -> std::unique_ptr<AppCore> {
+        for (;;) {
+            try {
+                auto core = std::make_unique<AppCore>();
+                for (const auto &warning : core->storageWarnings()) QTextStream(stderr) << "storage warning: " << warning << '\n';
+                return core;
+            } catch (const StartupStorage::Failure &failure) {
+                QTextStream(stderr) << QJsonDocument(failure.report.json()).toJson(QJsonDocument::Compact) << '\n';
+                if (platformName() == QStringLiteral("offscreen") || platformName() == QStringLiteral("minimal")
+                    || !property("muzaiten.demoScreensDir").toString().isEmpty()) return {};
+                QMessageBox dialog(QMessageBox::Critical, QStringLiteral("Storage unavailable"),
+                    failure.report.summary(), QMessageBox::Retry | QMessageBox::Close);
+                dialog.setTextFormat(Qt::PlainText);
+                dialog.setDefaultButton(QMessageBox::Close);
+                const auto answer = dialog.exec();
+                if (answer != QMessageBox::Retry) return {};
+            }
+        }
+    };
     const QString demoScreensDir = property("muzaiten.demoScreensDir").toString().trimmed();
     if (!demoScreensDir.isEmpty()) {
         const bool isolatedState = !property("muzaiten.stateRoot").toString().trimmed().isEmpty()
@@ -143,7 +170,9 @@ int MuzaitenApplication::run()
         // live desktop doesn't pop up as a phantom stream in the user's mixer.
         qputenv("MUZAITEN_DEMO_SILENT_AUDIO", "1");
 
-        AppCore core;
+        auto ownedCore = createCore();
+        if (!ownedCore) return 2;
+        AppCore &core = *ownedCore;
         core.showWindow();
         QTimer::singleShot(0, this, [this, &core, demoScreensDir]() {
             QString error;
@@ -182,8 +211,9 @@ int MuzaitenApplication::run()
         qInfo("muzaiten is already running against this state root; raised its window instead.");
         return 0;
     }
-    AppCore core;
-    core.showWindow();
+    auto core = createCore();
+    if (!core) return 2;
+    core->showWindow();
     return exec();
 }
 
@@ -192,6 +222,8 @@ void MuzaitenApplication::configureCommandLine()
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Native Linux music player"));
     parser.addHelpOption();
+    QCommandLineOption checkStorage(QStringLiteral("check-storage"), QStringLiteral("Inspect storage paths and formats as JSON, without starting services."));
+    parser.addOption(checkStorage);
     parser.addVersionOption();
 
     QStringList verboseNames;
@@ -291,6 +323,7 @@ void MuzaitenApplication::configureCommandLine()
     setDirProperty(cacheDirOption, "muzaiten.cacheDir");
     setDirProperty(configDirOption, "muzaiten.configDir");
 
+    setProperty("muzaiten.checkStorage", parser.isSet(checkStorage));
     const QString demoScreensDir = parser.value(demoScreensOption).trimmed();
     if (!demoScreensDir.isEmpty()) {
         setProperty("muzaiten.demoScreensDir", QDir(demoScreensDir).absolutePath());

@@ -21,6 +21,7 @@
 // instance; SQLite WAL + busy_timeout arbitrate concurrent access.
 class ListenHistoryStore final {
 public:
+    static constexpr int currentSchemaVersion = 8;
     struct Listen {
         qint64 id = 0;
         qint64 listenedAtSecs = 0;
@@ -165,6 +166,7 @@ public:
     ListenHistoryStore &operator=(const ListenHistoryStore &) = delete;
 
     bool isOpen() const;
+    QString lastError() const { return m_lastError; }
     void releaseCacheMemory();
 
     // Records a completed listen. Duplicate (timestamp, artist, title) rows are
@@ -240,9 +242,11 @@ public:
 private:
     // Converts the legacy fixed owed_*/sent_* columns into delivery rows for the
     // two reserved destinations, once, under its own idempotence marker.
-    void migrateLegacyDeliveries();
+    bool migrateLegacyDeliveries();
     int deliveryCount(const QString &destinationId, bool sent) const;
 
     QString m_connectionName;
     QSqlDatabase m_db;
+    bool m_ready = false;
+    QString m_lastError;
 };

@@ -7,9 +7,10 @@ By default, muzaiten uses XDG paths:
 - cache: `$XDG_CACHE_HOME/muzaiten` or `~/.cache/muzaiten`
 - config: `$XDG_CONFIG_HOME/muzaiten` or `~/.config/muzaiten`
 
-The data directory holds the library (`library.sqlite`), playlists, and
-audio-analysis results (`features.sqlite`); state holds listening history
-and UI state; cache holds artwork and the search index. The restored free-roam
+The data directory holds the library (`library.sqlite`), playlists
+(`playlists.sqlite`), listening history (`history.sqlite`), and audio-analysis
+results (`features.sqlite`). State holds UI and queue state (`state.sqlite`);
+cache holds artwork and the search index. The restored free-roam
 file-explorer directory must be a nonempty, existing, readable directory. If
 that saved directory is no longer browsable, Muzaiten immediately repairs only
 that setting to the cleaned home directory, or to the filesystem root when the
@@ -71,6 +72,24 @@ On first run, muzaiten writes a commented template at
 precedence over the config file.
 
 ## Diagnostics
+
+`muzaiten --check-storage` prints a `muzaiten-storage-health/1` JSON report and
+exits without starting services or creating database files. It honors the same
+path overrides and can create their parent directories. Exit 0 means preflight
+passed (`ready` or `degraded` for optional-store warnings); exit 2 means a
+required store failed. This checks paths, access and recognized schema versions,
+not every database page or a dry run of all migrations.
+
+Library, playlists, UI/queue state and listening history are required for normal
+startup. Errors identify the store, resolved path and cause. The GUI offers
+Retry and Close before playback, scanning or delivery starts. Offscreen/minimal
+and demo runs instead print the structured failure on stderr and exit 2. The
+report's `phase` distinguishes preflight from initialization failure.
+
+Migrations commit atomically per store; a failed migration rolls back its logical
+changes. No store is reset, replaced or redirected automatically. Newer required
+schemas are rejected. Artwork cache and analysis-feature failures produce
+warnings and allow degraded operation; an unavailable artwork cache is bypassed.
 
 ```sh
 muzaiten --verbose

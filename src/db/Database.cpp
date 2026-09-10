@@ -390,16 +390,11 @@ void Database::restoreCacheMemory()
 
 bool Database::rebuildTrackGenres(bool clearFirst, QString *error)
 {
-    if (!m_db.transaction()) {
-        if (error != nullptr) {
-            *error = m_db.lastError().text();
-        }
-        return false;
-    }
+    SqlUtil::Savepoint transaction(m_db, error);
+    if (!transaction.active()) return false;
 
     QSqlQuery query(m_db);
     if (clearFirst && !execSql(query, QStringLiteral("DELETE FROM track_genres"), error)) {
-        m_db.rollback();
         return false;
     }
 
@@ -410,7 +405,6 @@ bool Database::rebuildTrackGenres(bool clearFirst, QString *error)
         if (error != nullptr) {
             *error = bfQuery.lastError().text();
         }
-        m_db.rollback();
         return false;
     }
 
@@ -430,23 +424,19 @@ bool Database::rebuildTrackGenres(bool clearFirst, QString *error)
                 if (error != nullptr) {
                     *error = ins.lastError().text();
                 }
-                m_db.rollback();
                 return false;
             }
         }
     }
 
-    if (!m_db.commit()) {
-        if (error != nullptr) {
-            *error = m_db.lastError().text();
-        }
-        return false;
-    }
-    return true;
+    return transaction.commit();
 }
 
 bool Database::migrate()
 {
+    if (!SqlUtil::validateSchemaVersion(m_db, QStringLiteral("schema_migrations"), {}, Schema::currentVersion, &m_lastError)) return false;
+    SqlUtil::Savepoint migration(m_db, &m_lastError);
+    if (!migration.active()) return false;
     QSqlQuery query(m_db);
     const QStringList statements = {
         QStringLiteral("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"),
@@ -772,10 +762,6 @@ bool Database::migrate()
             return false;
         }
         if (!versionCheck.next()) {
-            if (!m_db.transaction()) {
-                m_lastError = m_db.lastError().text();
-                return false;
-            }
             const QStringList v17Statements = {
                 QStringLiteral(
                     "UPDATE albums SET album_artist_id = ("
@@ -816,13 +802,8 @@ bool Database::migrate()
             };
             for (const QString &statement : v17Statements) {
                 if (!execSql(query, statement, &m_lastError)) {
-                    m_db.rollback();
                     return false;
                 }
-            }
-            if (!m_db.commit()) {
-                m_lastError = m_db.lastError().text();
-                return false;
             }
         }
     }
@@ -848,13 +829,8 @@ bool Database::migrate()
         rebuildSongIdentityKeys = keyVersionQuery.value(0).toInt() != kTrackSongIdentityKeyVersion;
     }
     keyVersionQuery.finish();
-    if (!m_db.transaction()) {
-        m_lastError = m_db.lastError().text();
-        return false;
-    }
     if (rebuildSongIdentityKeys
         && !execSql(query, QStringLiteral("DELETE FROM track_song_identity_keys"), &m_lastError)) {
-        m_db.rollback();
         return false;
     }
     QSqlQuery missingKeys(m_db);
@@ -863,7 +839,6 @@ bool Database::migrate()
             "LEFT JOIN track_song_identity_keys i ON i.track_id = t.id "
             "WHERE i.track_id IS NULL"))) {
         m_lastError = missingKeys.lastError().text();
-        m_db.rollback();
         return false;
     }
     QList<std::tuple<qint64, QString, QString>> missingKeyRows;
@@ -875,7 +850,6 @@ bool Database::migrate()
     missingKeys.finish();
     for (const auto &[trackId, artist, title] : missingKeyRows) {
         if (!updateTrackSongIdentityKey(trackId, artist, title)) {
-            m_db.rollback();
             return false;
         }
     }
@@ -886,11 +860,6 @@ bool Database::migrate()
     recordKeyVersion.addBindValue(kTrackSongIdentityKeyVersion);
     if (!recordKeyVersion.exec()) {
         m_lastError = recordKeyVersion.lastError().text();
-        m_db.rollback();
-        return false;
-    }
-    if (!m_db.commit()) {
-        m_lastError = m_db.lastError().text();
         return false;
     }
 
@@ -904,23 +873,14 @@ bool Database::migrate()
             return false;
         }
         if (!versionCheck.next()) {
-            if (!m_db.transaction()) {
-                m_lastError = m_db.lastError().text();
-                return false;
-            }
             const QStringList v18Statements = {
                 QStringLiteral("UPDATE tracks SET date = NULL WHERE date = '0'"),
                 QStringLiteral("INSERT INTO schema_migrations(version, applied_at) VALUES(18, datetime('now'))"),
             };
             for (const QString &statement : v18Statements) {
                 if (!execSql(query, statement, &m_lastError)) {
-                    m_db.rollback();
                     return false;
                 }
-            }
-            if (!m_db.commit()) {
-                m_lastError = m_db.lastError().text();
-                return false;
             }
         }
     }
@@ -935,7 +895,7 @@ bool Database::migrate()
         }
     }
 
-    return Schema::currentVersion == 18;
+    return migration.commit();
 }
 
 QString Database::lastError() const

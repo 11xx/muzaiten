@@ -6,9 +6,11 @@
 // A minimal key/value SQLite store for persistent UI/view + session state, kept
 // separate from the library database so it lives under XDG_STATE_HOME and can be
 // reset (or let go) independently of the music library data. Carries its own
-// schema version in a `meta` table; deleting the file safely resets to defaults.
+// schema version in a `meta` table; initialization validates supported versions
+// and commits schema changes atomically.
 class SettingsStore final {
 public:
+    static constexpr int currentSchemaVersion = 1;
     explicit SettingsStore(const QString &path);
     ~SettingsStore();
 
@@ -16,12 +18,15 @@ public:
     SettingsStore &operator=(const SettingsStore &) = delete;
 
     bool isOpen() const;
+    QString lastError() const { return m_lastError; }
     void releaseCacheMemory();
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
     bool removeSetting(const QString &key);
 
 private:
+    bool m_ready = false;
+    QString m_lastError;
     QString m_connectionName;
     QSqlDatabase m_db;
 };

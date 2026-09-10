@@ -32,8 +32,10 @@ public:
     // Thread-safe. Changes the cached cover resolution. The size is part of each
     // cache key, so existing blobs at other sizes are simply re-rendered lazily.
     void setArtSize(int artSize);
+    Q_INVOKABLE void reportStatus();
 
 signals:
+    void cacheUnavailable(QString path, QString error);
     void artworkReady(QString token, QImage image, quint64 generation);
     void artworkMissing(QString token, quint64 generation);
 
@@ -51,5 +53,6 @@ private:
     QString m_connectionName;
     QThread *m_thread = nullptr;
     QSqlDatabase m_db;
+    QString m_error;
     std::atomic<int> m_artSize;
 };

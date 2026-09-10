@@ -17,6 +17,7 @@ class SchemaTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void failedMigrationRollsBackCreatedTables();
     void migratesFreshDatabase();
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
     void guessedPlaceholdersFollowVisibilitySetting();
@@ -73,6 +74,33 @@ Track makeTrack(const QTemporaryDir &temp, const QString &filename, int rating)
 }
 
 } // namespace
+
+void SchemaTest::failedMigrationRollsBackCreatedTables()
+{
+    QTemporaryDir temporary;
+    const QString path = temporary.filePath(QStringLiteral("library.sqlite"));
+    const QString seedName = QUuid::createUuid().toString();
+    {
+        auto seed = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), seedName);
+        seed.setDatabaseName(path);
+        QVERIFY(seed.open());
+        QSqlQuery query(seed);
+        QVERIFY(query.exec(QStringLiteral("CREATE TABLE artists(id INTEGER, marker TEXT)")));
+        QVERIFY(query.exec(QStringLiteral("INSERT INTO artists VALUES(42, 'preserve')")));
+    }
+    QSqlDatabase::removeDatabase(seedName);
+    const QString connection = QUuid::createUuid().toString();
+    Database db(connection);
+    QVERIFY(!db.open(path));
+    QSqlQuery query(QSqlDatabase::database(connection));
+    QVERIFY(query.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type='table'")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QStringLiteral("artists"));
+    QVERIFY(!query.next());
+    QVERIFY(query.exec(QStringLiteral("SELECT marker FROM artists WHERE id=42")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QStringLiteral("preserve"));
+}
 
 void SchemaTest::migratesFreshDatabase()
 {

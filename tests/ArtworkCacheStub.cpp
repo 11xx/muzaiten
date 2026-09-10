@@ -24,6 +24,10 @@ void ArtworkCache::initialize()
 {
 }
 
+void ArtworkCache::reportStatus()
+{
+}
+
 void ArtworkCache::shutdown()
 {
 }

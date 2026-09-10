@@ -116,6 +116,9 @@ void PlaylistDatabase::releaseCacheMemory()
 
 bool PlaylistDatabase::migrate()
 {
+    if (!SqlUtil::validateSchemaVersion(m_db, QStringLiteral("schema_migrations"), {}, currentSchemaVersion, &m_lastError)) return false;
+    SqlUtil::Savepoint migration(m_db, &m_lastError);
+    if (!migration.active()) return false;
     QSqlQuery query(m_db);
     const QStringList statements = {
         QStringLiteral("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"),
@@ -188,7 +191,12 @@ bool PlaylistDatabase::migrate()
         m_lastError = query.lastError().text();
         return false;
     }
-    return true;
+    if (!query.exec(QStringLiteral("SELECT id, name, comment, created_at, updated_at FROM playlists LIMIT 0"))) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    query.finish();
+    return migration.commit();
 }
 
 void PlaylistDatabase::touchPlaylist(qint64 playlistId)

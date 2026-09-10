@@ -16,7 +16,7 @@
 namespace {
 
 constexpr int kMinSupportedSchemaVersion = 1;
-constexpr int kMaxSupportedSchemaVersion = 5;
+constexpr int kMaxSupportedSchemaVersion = FeatureStore::maximumSchemaVersion;
 constexpr qsizetype kMaxSqlBindings = 500;
 
 bool isSupportedSchemaVersion(int version)

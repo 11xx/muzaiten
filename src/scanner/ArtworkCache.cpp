@@ -282,12 +282,14 @@ void ArtworkCache::shutdown()
 
 void ArtworkCache::initialize()
 {
+    if (m_dbPath.isEmpty()) return;
     QFileInfo info(m_dbPath);
     QDir().mkpath(info.absolutePath());
 
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
     m_db.setDatabaseName(m_dbPath);
     if (!m_db.open()) {
+        m_error = m_db.lastError().text();
         return;
     }
 
@@ -295,9 +297,16 @@ void ArtworkCache::initialize()
     query.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
     query.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     query.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
-    query.exec(QStringLiteral(
+    if (!query.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS artwork_blobs (cache_key TEXT PRIMARY KEY, source INTEGER NOT NULL, "
-        "width INTEGER, height INTEGER, format INTEGER NOT NULL DEFAULT 0, data BLOB NOT NULL, updated_at TEXT NOT NULL)"));
+        "width INTEGER, height INTEGER, format INTEGER NOT NULL DEFAULT 0, data BLOB NOT NULL, updated_at TEXT NOT NULL)"))) {
+        m_error = query.lastError().text();
+    }
+}
+
+void ArtworkCache::reportStatus()
+{
+    if (!m_error.isEmpty()) emit cacheUnavailable(m_dbPath, m_error);
 }
 
 void ArtworkCache::releaseCacheMemory()

@@ -1,4 +1,7 @@
 #include "app/AppCore.h"
+#include "app/StartupStorage.h"
+#include <QStatusBar>
+#include <QTextStream>
 
 #include "app/AppPaths.h"
 #include "core/FoldKey.h"
@@ -253,11 +256,15 @@ QJsonArray reasonComponentsJson(const QList<TrackScorer::Component> &components)
 AppCore::AppCore(QObject *parent)
     : QObject(parent)
 {
+    const auto health = StartupStorage::inspect();
+    if (!health.ok()) throw StartupStorage::Failure(health);
+    for (const auto &issue : health.issues) {
+        m_storageWarnings.append(QStringLiteral("%1: %2 (%3)").arg(issue.store, issue.error, issue.path));
+    }
     m_database = std::make_unique<Database>(QStringLiteral("main-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_database->open(databasePath())) {
-        qWarning("AppCore: failed to open database: %s", qPrintable(m_database->lastError()));
+        StartupStorage::fail(QStringLiteral("library"), databasePath(), m_database->lastError());
     }
-    sweepOrphanScrobbleTokens();
     m_radioBatchSize = std::clamp(
         m_database->setting(QStringLiteral("radio.batchSize"), QString::number(kDefaultRadioBatchSize)).toInt(),
         1, 100);
@@ -268,19 +275,33 @@ AppCore::AppCore(QObject *parent)
 
     m_playlistDb = std::make_unique<PlaylistDatabase>(QStringLiteral("playlists-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
     if (!m_playlistDb->open(playlistDatabasePath())) {
-        qWarning("AppCore: failed to open playlist database: %s", qPrintable(m_playlistDb->lastError()));
+        StartupStorage::fail(QStringLiteral("playlists"), playlistDatabasePath(), m_playlistDb->lastError());
     }
 
     m_state = std::make_unique<SettingsStore>(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
+    if (!m_state->isOpen()) StartupStorage::fail(QStringLiteral("state"), QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")), m_state->lastError());
+    m_listenHistory = std::make_unique<ListenHistoryStore>(listenHistoryPath());
+    if (!m_listenHistory->isOpen()) StartupStorage::fail(QStringLiteral("history"), listenHistoryPath(), m_listenHistory->lastError());
+    sweepOrphanScrobbleTokens();
     AppPaths::writeDefaultConfigIfMissing();
     m_radioProfileStore.load(m_database->setting(QStringLiteral("radio.scoringWeights")).toUtf8());
 
     const int artworkSize = std::clamp(m_state->setting(QStringLiteral("artwork.size"), QStringLiteral("1024")).toInt(), 128, 4096);
-    m_artworkCache = std::make_unique<ArtworkCache>(QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
+    const bool artworkUnavailable = std::ranges::any_of(health.issues, [](const auto &issue) { return issue.store == QStringLiteral("artwork"); });
+    m_artworkCache = std::make_unique<ArtworkCache>(artworkUnavailable ? QString()
+        : QDir(AppPaths::cacheDir()).filePath(QStringLiteral("artwork.sqlite")), artworkSize);
+    connect(m_artworkCache.get(), &ArtworkCache::cacheUnavailable, this, [this](const QString &path, const QString &error) {
+        const QString warning = QStringLiteral("Artwork cache unavailable: %1 (%2)").arg(error, path);
+        m_storageWarnings.append(warning);
+        QTextStream(stderr) << "storage warning: " << warning << '\n';
+        if (m_window != nullptr) m_window->statusBar()->showMessage(warning, 15000);
+    });
+    QMetaObject::invokeMethod(m_artworkCache.get(), "reportStatus", Qt::QueuedConnection);
 
     m_features = std::make_unique<FeatureStore>(featuresPath());
-    m_listenHistory = std::make_unique<ListenHistoryStore>(listenHistoryPath());
-
+    if (QFileInfo::exists(featuresPath()) && !m_features->isOpen()) {
+        m_storageWarnings.append(QStringLiteral("Analysis features unavailable: %1").arg(featuresPath()));
+    }
     m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
     m_playback = m_player->backend();
     m_player->setPathResolver([this](const Track &track) {
@@ -595,6 +616,7 @@ void AppCore::showWindow()
     m_window->show();
     m_window->raise();
     m_window->activateWindow();
+    if (!m_storageWarnings.isEmpty()) m_window->statusBar()->showMessage(m_storageWarnings.join(QStringLiteral("; ")), 15000);
     if (m_tray && !m_trayAlwaysVisible) {
         m_tray->hide();
     }

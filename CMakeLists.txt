@@ -84,6 +84,7 @@ configure_file(
 set(MUZAITEN_SOURCES
     src/app/main.cpp
     src/app/AppCore.cpp
+    src/app/StartupStorage.cpp
     src/app/AppPaths.cpp
     src/app/DemoScreens.cpp
     src/app/MuzaitenApplication.cpp
@@ -410,8 +411,9 @@ set(MUZAITEN_DB_SOURCES
     src/db/Database.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
-    src/db/SqlUtil.cpp
 )
+
+set(MUZAITEN_SQL_SOURCES src/db/SqlUtil.cpp)
 
 set(MUZAITEN_FEATURES_SOURCES
     src/features/FeatureStore.cpp
@@ -613,6 +615,7 @@ endif()
 
 set(MUZAITEN_APPLICATION_SOURCES
     src/app/AppCore.cpp
+    src/app/StartupStorage.cpp
     src/app/DemoScreens.cpp
     src/app/MuzaitenApplication.cpp
 )
@@ -624,6 +627,7 @@ list(REMOVE_ITEM MUZAITEN_UNASSIGNED_SOURCES
     ${MUZAITEN_CORE_SOURCES}
     ${MUZAITEN_SEARCH_SOURCES}
     ${MUZAITEN_DB_SOURCES}
+    ${MUZAITEN_SQL_SOURCES}
     ${MUZAITEN_FEATURES_SOURCES}
     ${MUZAITEN_RECO_SOURCES}
     ${MUZAITEN_SCROBBLE_SOURCES}
@@ -682,9 +686,13 @@ add_library(muzaiten_search STATIC ${MUZAITEN_SEARCH_SOURCES})
 muzaiten_configure_library(muzaiten_search)
 target_link_libraries(muzaiten_search PUBLIC muzaiten_core Qt6::Core PRIVATE Qt6::Sql)
 
+add_library(muzaiten_sql STATIC ${MUZAITEN_SQL_SOURCES})
+muzaiten_configure_library(muzaiten_sql)
+target_link_libraries(muzaiten_sql PUBLIC Qt6::Core Qt6::Sql)
+
 add_library(muzaiten_db STATIC ${MUZAITEN_DB_SOURCES})
 muzaiten_configure_library(muzaiten_db)
-target_link_libraries(muzaiten_db PUBLIC muzaiten_core muzaiten_search Qt6::Core Qt6::Sql)
+target_link_libraries(muzaiten_db PUBLIC muzaiten_core muzaiten_search muzaiten_sql Qt6::Core Qt6::Sql)
 
 add_library(muzaiten_features STATIC ${MUZAITEN_FEATURES_SOURCES})
 muzaiten_configure_library(muzaiten_features)
@@ -696,7 +704,7 @@ target_link_libraries(muzaiten_reco PUBLIC muzaiten_core Qt6::Core PRIVATE muzai
 
 add_library(muzaiten_scrobble STATIC ${MUZAITEN_SCROBBLE_SOURCES})
 muzaiten_configure_library(muzaiten_scrobble)
-target_link_libraries(muzaiten_scrobble PUBLIC muzaiten_core Qt6::Core Qt6::Network Qt6::Sql)
+target_link_libraries(muzaiten_scrobble PUBLIC muzaiten_core muzaiten_sql Qt6::Core Qt6::Network Qt6::Sql)
 
 add_library(muzaiten_playlist STATIC ${MUZAITEN_PLAYLIST_SOURCES})
 muzaiten_configure_library(muzaiten_playlist)
