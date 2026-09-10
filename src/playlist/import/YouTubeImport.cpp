@@ -78,11 +78,11 @@ bool YouTubePlaylistFetcher::toolAvailable()
 bool YouTubePlaylistFetcher::looksLikePlaylistUrl(const QString &url)
 {
     const QUrl parsed(url.trimmed());
-    if (!parsed.isValid()) {
+    if (!parsed.isValid() || (parsed.scheme() != QStringLiteral("https") && parsed.scheme() != QStringLiteral("http"))) {
         return false;
     }
     const QString host = parsed.host().toLower();
-    if (!host.endsWith(QStringLiteral("youtube.com")) && host != QStringLiteral("youtu.be")) {
+    if (host != QStringLiteral("youtube.com") && !host.endsWith(QStringLiteral(".youtube.com")) && host != QStringLiteral("youtu.be")) {
         return false;
     }
     return QUrlQuery(parsed).hasQueryItem(QStringLiteral("list"))

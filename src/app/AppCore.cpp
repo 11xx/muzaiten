@@ -426,7 +426,7 @@ AppCore::AppCore(QObject *parent)
                 m_backfillStatus.service = source;
                 m_backfillStatus.running = false;
                 m_backfillStatus.lastMessage = message;
-                qWarning("scrobble-backfill[%s]: failed — %s", qPrintable(source), qPrintable(message));
+                qWarning("scrobble-backfill[%s]: failed: %s", qPrintable(source), qPrintable(message));
                 emit backfillStatusChanged();
                 // Transient service trouble (ListenBrainz's deep-history pages
                 // are flaky) heals itself: try again later, exactly like the

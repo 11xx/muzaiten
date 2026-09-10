@@ -541,6 +541,8 @@ private slots:
 
     void youtube_urlDetection()
     {
+        QVERIFY(!YouTubePlaylistFetcher::looksLikePlaylistUrl(QStringLiteral("https://notyoutube.com/playlist?list=abc")));
+        QVERIFY(!YouTubePlaylistFetcher::looksLikePlaylistUrl(QStringLiteral("file://youtube.com/playlist?list=abc")));
         QVERIFY(YouTubePlaylistFetcher::looksLikePlaylistUrl(
             QStringLiteral("https://music.youtube.com/playlist?list=PLabc")));
         QVERIFY(YouTubePlaylistFetcher::looksLikePlaylistUrl(

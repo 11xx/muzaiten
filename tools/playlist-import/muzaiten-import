@@ -633,7 +633,7 @@ def ytdlp_json(target: str, flat: bool = False, cookies: list[str] | None = None
     cmd.extend(cookies or [])
     if flat:
         cmd.append("--flat-playlist")
-    cmd.append(target)
+    cmd.extend(["--", target])
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except FileNotFoundError:
@@ -677,7 +677,9 @@ def looks_like_playlist(token: str) -> bool:
     except ValueError:
         return False
     host = (parsed.hostname or "").lower()
-    if not (host.endswith("youtube.com") or host == "youtu.be"):
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if not (host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be"):
         return False
     return "list" in parse_qs(parsed.query) or parsed.path.startswith("/playlist")
 

@@ -89,6 +89,7 @@ QString IpcServer::lastError() const
 void IpcServer::onNewConnection()
 {
     while (QLocalSocket *socket = m_server->nextPendingConnection()) {
+        socket->setReadBufferSize(maxRequestBytes + 1);
         m_buffers.insert(socket, {});
         connect(socket, &QLocalSocket::readyRead, this, [this, socket]() { onReadyRead(socket); });
         connect(socket, &QLocalSocket::disconnected, this, [this, socket]() {
@@ -111,6 +112,12 @@ void IpcServer::onReadyRead(QLocalSocket *socket)
     QPointer<QLocalSocket> guard(socket);
     qsizetype newline = -1;
     while (m_buffers.contains(socket) && (newline = m_buffers[socket].indexOf('\n')) >= 0) {
+        if (newline > maxRequestBytes) {
+            socket->write(encodeReply(errorPayload(QStringLiteral("request too large"))));
+            m_buffers.remove(socket);
+            socket->disconnectFromServer();
+            return;
+        }
         const QByteArray line = m_buffers[socket].left(newline).trimmed();
         m_buffers[socket].remove(0, newline + 1);
         if (line.isEmpty()) {

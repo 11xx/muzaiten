@@ -53,6 +53,7 @@ private slots:
     void rejectsMalformedRequests();
     void handlesMultipleRequestsPerConnection();
     void secondServerCannotStealLiveSocket();
+    void rejectsOversizedCompleteRequest();
 
 private:
     QJsonObject roundTrip(const QByteArray &line);
@@ -105,6 +106,14 @@ QJsonObject IpcServerTest::roundTrip(const QByteArray &line)
         return {};
     }
     return QJsonDocument::fromJson(reply.left(reply.indexOf('\n'))).object();
+}
+
+void IpcServerTest::rejectsOversizedCompleteRequest()
+{
+    const QByteArray request = QByteArray("{\"command\":\"echo\",\"args\":{\"value\":\"")
+        + QByteArray(70 * 1024, 'x') + "\"}}";
+    const auto reply = roundTrip(request);
+    QCOMPARE(reply.value("error").toString(), QStringLiteral("request too large"));
 }
 
 void IpcServerTest::repliesToHandlerResult()

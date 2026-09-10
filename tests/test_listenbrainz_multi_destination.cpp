@@ -100,7 +100,8 @@ private slots:
     void anUnreachableDestinationDoesNotStallTheOthers();
     void validationReportsPerDestination();
     void anUnansweredTestIsNotARejection();
-    void repeatedlyUnreachableDoesNotDisableADestination();
+    void transientFailuresDoNotDisableADestination_data();
+    void transientFailuresDoNotDisableADestination();
     void enablingMidTrackAnnouncesWhatIsPlaying();
     void adoptingTheSameTrackTwiceAnnouncesItOnce();
 };
@@ -188,18 +189,23 @@ void ListenBrainzMultiDestinationTest::anUnreachableDestinationDoesNotStallTheOt
     QCOMPARE(store.pendingCount(downId), 2);
 }
 
-// Three minutes of an unreachable server used to turn a destination off for
-// good, and a destination that is off is not owed the listens that follow. An
-// outage must cost delivery time, never history.
-void ListenBrainzMultiDestinationTest::repeatedlyUnreachableDoesNotDisableADestination()
+void ListenBrainzMultiDestinationTest::transientFailuresDoNotDisableADestination_data()
 {
+    QTest::addColumn<int>("status");
+    QTest::newRow("unreachable") << 0;
+    QTest::newRow("server-unavailable") << 503;
+}
+
+void ListenBrainzMultiDestinationTest::transientFailuresDoNotDisableADestination()
+{
+    QFETCH(int, status);
     QTemporaryDir dir;
     const QString historyPath = dir.filePath(QStringLiteral("history.sqlite"));
 
-    FakeServer closed(200);
+    FakeServer closed(status);
     QVERIFY(closed.listen(QHostAddress::LocalHost));
     const QString closedRoot = closed.apiRoot();
-    closed.close();
+    if (status == 0) closed.close();
 
     ScrobbleDestinationSet destinations;
     const QString downId = destinations.addCustom(QStringLiteral("Down"), closedRoot, true);
@@ -214,7 +220,7 @@ void ListenBrainzMultiDestinationTest::repeatedlyUnreachableDoesNotDisableADesti
     hub.configure(
         destinations, [](const QString &) { return QStringLiteral("token"); }, true, historyPath);
 
-    // Well past the three answered failures that do disable a destination.
+    // Repeated transient failures must preserve delivery obligations.
     for (int attempt = 0; attempt < 5; ++attempt) {
         QTRY_VERIFY_WITH_TIMEOUT(failed.count() >= attempt + 1, 10000);
         hub.uploadBacklog(downId);

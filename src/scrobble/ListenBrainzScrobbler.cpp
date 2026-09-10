@@ -371,8 +371,9 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
             // Rate limited: back off for the window the server reports
             // (X-RateLimit-Reset-In, seconds) and don't count it as a failure.
             bool parsedResetIn = false;
-            const int resetInSecs = reply->rawHeader("X-RateLimit-Reset-In").toInt(&parsedResetIn);
-            m_retryTimer->start(parsedResetIn && resetInSecs > 0 ? (resetInSecs + 1) * 1000 : 60000);
+            const qint64 resetInSecs = reply->rawHeader("X-RateLimit-Reset-In").toLongLong(&parsedResetIn);
+            m_retryTimer->start(parsedResetIn && resetInSecs > 0
+                ? static_cast<int>((std::min<qint64>(resetInSecs, 86400) + 1) * 1000) : 60000);
             return;
         }
         emit submissionFailed(m_destinationId, message);
@@ -385,7 +386,7 @@ void ListenBrainzScrobbler::handleSubmissionFinished(QNetworkReply *reply, Submi
         // Turning a destination off leaves later listens unowed to it, so an
         // outage of a few minutes would cost the user history that the backlog
         // would otherwise have delivered once the server came back.
-        if (kind == SubmissionKind::Listen && status > 0) {
+        if (kind == SubmissionKind::Listen && status >= 400 && status < 500) {
             ++m_consecutiveFailures;
             if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
                 disableScrobbling(QStringLiteral("%1 submissions failed %2 times. Scrobbling to it has been disabled.")

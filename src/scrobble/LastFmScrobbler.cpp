@@ -15,7 +15,6 @@ Q_LOGGING_CATEGORY(lastFmLog, "muzaiten.lastfm")
 namespace {
 
 constexpr int maxScrobblesPerBatch = 50;
-constexpr int maxConsecutiveSubmissionFailures = 3;
 constexpr int authPollIntervalMs = 3000;
 constexpr int maxAuthPollAttempts = 60;
 // Minimum seconds between "now playing" resubmissions on play/resume, to
@@ -80,7 +79,6 @@ void LastFmScrobbler::configure(bool enabled, bool uploadAllowed, const QString 
     m_apiKey = apiKey.trimmed();
     m_sharedSecret = sharedSecret.trimmed();
     m_sessionKey = sessionKey.trimmed();
-    m_consecutiveFailures = 0;
     if (m_historyPath != historyPath) {
         m_historyPath = historyPath;
         m_history = historyPath.isEmpty() ? nullptr : std::make_unique<ListenHistoryStore>(historyPath);
@@ -323,9 +321,6 @@ void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind ki
     const QString statusText = status > 0 ? QString::number(status) : QStringLiteral("network");
     const QString transportMessage = QStringLiteral("Last.fm request failed (%1): %2").arg(statusText, errorString);
     const bool networkError = reply->error() != QNetworkReply::NoError && !response.parsed;
-    // No HTTP status means the request never reached Last.fm: the connection
-    // failed, timed out, or was closed before an answer.
-    const bool answered = status > 0;
 
     if (kind == RequestKind::Scrobble) {
         m_scrobbleSubmissionInFlight = false;
@@ -344,7 +339,7 @@ void LastFmScrobbler::handleRequestFinished(QNetworkReply *reply, RequestKind ki
         handleNowPlayingResponse(response, transportMessage);
         break;
     case RequestKind::Scrobble:
-        handleScrobbleResponse(response, networkError, answered, transportMessage, submittedIds);
+        handleScrobbleResponse(response, networkError, transportMessage, submittedIds);
         break;
     }
 }
@@ -426,12 +421,10 @@ void LastFmScrobbler::handleNowPlayingResponse(const LastFmApi::Response &respon
 
 void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response,
                                              bool networkError,
-                                             bool answered,
                                              const QString &transportMessage,
                                              const QList<qint64> &submittedIds)
 {
     if (response.parsed && response.ok) {
-        m_consecutiveFailures = 0;
         if (m_history != nullptr) {
             m_history->markSent(ListenHistoryStore::LastFm, submittedIds);
             emit backlogProcessed(static_cast<int>(submittedIds.size()), 0, m_history->pendingCount(ListenHistoryStore::LastFm));
@@ -448,21 +441,9 @@ void LastFmScrobbler::handleScrobbleResponse(const LastFmApi::Response &response
     switch (action) {
     case LastFmApi::FailureAction::RetryLater:
         emit submissionFailed(message);
-        // A submission Last.fm never saw says nothing about this scrobbler, so
-        // it does not count toward turning it off. Disabling would leave later
-        // listens unowed to Last.fm, costing history an outage of a few minutes
-        // would otherwise only have delayed.
-        if (!answered) {
-            return;
-        }
-        ++m_consecutiveFailures;
-        if (m_consecutiveFailures >= maxConsecutiveSubmissionFailures) {
-            disableScrobbling(QStringLiteral("Last.fm submissions failed %1 times. Scrobbling has been disabled.")
-                                  .arg(maxConsecutiveSubmissionFailures));
-        }
+        // Transient server failures and rate limits delay delivery, not collection.
         return;
     case LastFmApi::FailureAction::DropSubmitted:
-        m_consecutiveFailures = 0;
         if (m_history != nullptr) {
             m_history->markSent(ListenHistoryStore::LastFm, submittedIds);
         }
