@@ -495,6 +495,9 @@ target_compile_features(test_playlist_import PRIVATE cxx_std_26)
 add_test(NAME test_playlist_import COMMAND test_playlist_import)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME test_demo_screens
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_demo_screens.py
+)
 add_test(NAME test_playlist_converter
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_playlist_converter.py
             ${CMAKE_SOURCE_DIR}/tools/playlist-import/muzaiten-import)

@@ -152,6 +152,12 @@ int MuzaitenApplication::run()
             options.searchQuery = property("muzaiten.demoSearch").toString();
             options.artistName = property("muzaiten.demoArtist").toString();
             options.albumTitle = property("muzaiten.demoAlbum").toString();
+            options.playlistName = property("muzaiten.demoPlaylistName").toString();
+            options.playlistTrack = property("muzaiten.demoPlaylistTrack").toString();
+            options.fileExplorerLibraryPath = property("muzaiten.demoFileExplorerLibraryPath").toString();
+            options.fileExplorerLibraryTrack = property("muzaiten.demoFileExplorerLibraryTrack").toString();
+            options.fileExplorerSystemPath = property("muzaiten.demoFileExplorerSystemPath").toString();
+            options.fileExplorerSystemTrack = property("muzaiten.demoFileExplorerSystemTrack").toString();
             options.nowPlayingQuery = property("muzaiten.demoNowPlaying").toString();
             options.colorSchemes = property("muzaiten.demoThemes").toStringList();
             options.windowSize = property("muzaiten.demoSize").toSize();
@@ -206,10 +212,19 @@ void MuzaitenApplication::configureCommandLine()
     demoSearchVideoOption.setFlags(QCommandLineOption::HiddenFromHelp);
     QCommandLineOption demoSearchDelayOption(QStringLiteral("demo-search-delay-ms"), QStringLiteral("Hidden: per-key search video delay in milliseconds."), QStringLiteral("ms"));
     demoSearchDelayOption.setFlags(QCommandLineOption::HiddenFromHelp);
-    QCommandLineOption demoArtistOption(QStringLiteral("demo-artist"), QStringLiteral("Hidden: select an album artist before the library screenshot."), QStringLiteral("name"));
+    QCommandLineOption demoArtistOption(QStringList{QStringLiteral("demo-library-artist"), QStringLiteral("demo-artist")}, QStringLiteral("Hidden: select an album artist before the library screenshot."), QStringLiteral("name"));
     demoArtistOption.setFlags(QCommandLineOption::HiddenFromHelp);
-    QCommandLineOption demoAlbumOption(QStringLiteral("demo-album"), QStringLiteral("Hidden: highlight an album before the library screenshot."), QStringLiteral("title"));
+    QCommandLineOption demoAlbumOption(QStringList{QStringLiteral("demo-library-album"), QStringLiteral("demo-album")}, QStringLiteral("Hidden: highlight an album before the library screenshot."), QStringLiteral("title"));
     demoAlbumOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    QCommandLineOption demoPlaylistNameOption(QStringLiteral("demo-playlist-name"), QStringLiteral("Hidden: select a demo playlist."), QStringLiteral("name"));
+    QCommandLineOption demoPlaylistTrackOption(QStringLiteral("demo-playlist-track"), QStringLiteral("Hidden: highlight a demo playlist track."), QStringLiteral("query"));
+    QCommandLineOption demoFileExplorerLibraryPathOption(QStringLiteral("demo-file-explorer-library-path"), QStringLiteral("Hidden: open a library explorer directory."), QStringLiteral("path"));
+    QCommandLineOption demoFileExplorerLibraryTrackOption(QStringLiteral("demo-file-explorer-library-track"), QStringLiteral("Hidden: highlight a library explorer track."), QStringLiteral("query"));
+    QCommandLineOption demoFileExplorerSystemPathOption(QStringLiteral("demo-file-explorer-system-path"), QStringLiteral("Hidden: open a system explorer directory."), QStringLiteral("path"));
+    QCommandLineOption demoFileExplorerSystemTrackOption(QStringLiteral("demo-file-explorer-system-track"), QStringLiteral("Hidden: highlight a system explorer track."), QStringLiteral("query"));
+    for (auto *option : {&demoPlaylistNameOption, &demoPlaylistTrackOption, &demoFileExplorerLibraryPathOption, &demoFileExplorerLibraryTrackOption, &demoFileExplorerSystemPathOption, &demoFileExplorerSystemTrackOption}) {
+        option->setFlags(QCommandLineOption::HiddenFromHelp);
+    }
     QCommandLineOption demoThemeOption(QStringLiteral("demo-theme"), QStringLiteral("Hidden: capture a color scheme: light, dark, or both. Repeatable."), QStringLiteral("theme"));
     demoThemeOption.setFlags(QCommandLineOption::HiddenFromHelp);
     QCommandLineOption demoSizeOption(QStringLiteral("demo-size"), QStringLiteral("Hidden: screenshot window size, for example 1440x900."), QStringLiteral("size"));
@@ -233,6 +248,12 @@ void MuzaitenApplication::configureCommandLine()
     parser.addOption(demoSearchDelayOption);
     parser.addOption(demoArtistOption);
     parser.addOption(demoAlbumOption);
+    parser.addOption(demoPlaylistNameOption);
+    parser.addOption(demoPlaylistTrackOption);
+    parser.addOption(demoFileExplorerLibraryPathOption);
+    parser.addOption(demoFileExplorerLibraryTrackOption);
+    parser.addOption(demoFileExplorerSystemPathOption);
+    parser.addOption(demoFileExplorerSystemTrackOption);
     parser.addOption(demoThemeOption);
     parser.addOption(demoSizeOption);
     parser.addOption(demoNowPlayingOption);
@@ -275,6 +296,12 @@ void MuzaitenApplication::configureCommandLine()
     const int searchDelay = parser.value(demoSearchDelayOption).toInt(&delayOk);
     setProperty("muzaiten.demoSearchDelayMs", delayOk ? searchDelay : 120);
     const QString demoArtist = parser.value(demoArtistOption).trimmed();
+    setProperty("muzaiten.demoPlaylistName", parser.value(demoPlaylistNameOption).trimmed());
+    setProperty("muzaiten.demoPlaylistTrack", parser.value(demoPlaylistTrackOption).trimmed());
+    setProperty("muzaiten.demoFileExplorerLibraryPath", parser.value(demoFileExplorerLibraryPathOption).trimmed());
+    setProperty("muzaiten.demoFileExplorerLibraryTrack", parser.value(demoFileExplorerLibraryTrackOption).trimmed());
+    setProperty("muzaiten.demoFileExplorerSystemPath", parser.value(demoFileExplorerSystemPathOption).trimmed());
+    setProperty("muzaiten.demoFileExplorerSystemTrack", parser.value(demoFileExplorerSystemTrackOption).trimmed());
     if (!demoArtist.isEmpty()) {
         setProperty("muzaiten.demoArtist", demoArtist);
     }

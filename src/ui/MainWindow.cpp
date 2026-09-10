@@ -1,5 +1,7 @@
 #include "ui/MainWindow.h"
 
+#include <limits>
+
 #include "Version.h"
 #include "app/AppCore.h"
 #include "app/AppPaths.h"
@@ -2898,14 +2900,12 @@ void MainWindow::switchMainView(MainView view)
 
 bool MainWindow::showDemoArtist(const QString &artistName)
 {
-    if (artistName.trimmed().isEmpty()) {
-        return false;
-    }
     switchMainView(MainView::LibraryPanels);
     if (!m_artistSidebar->selectArtist(artistName)) {
-        return false;
+        if (m_artistSidebar->rowCount() == 0) return true;
+        m_artistSidebar->setCurrentRow(0);
     }
-    showArtist(artistName, /*forceReload=*/true, /*clearAlbumSelectionOnArtistChange=*/true);
+    showArtist(m_artistSidebar->currentArtistName(), /*forceReload=*/true, /*clearAlbumSelectionOnArtistChange=*/true);
     return true;
 }
 
@@ -2919,10 +2919,7 @@ bool MainWindow::showDemoAlbum(const QString &artistName, const QString &albumTi
     }
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
     if (!m_albumGrid->selectAlbumTitleForDemo(albumTitle)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("album not found for demo capture: %1 - %2").arg(artistName, albumTitle);
-        }
-        return false;
+        m_albumGrid->setCurrentRow(0);
     }
     m_trackTable->setFocus(Qt::OtherFocusReason);
     return true;
@@ -2930,10 +2927,8 @@ bool MainWindow::showDemoAlbum(const QString &artistName, const QString &albumTi
 
 bool MainWindow::showDemoNowPlaying(const QString &query, bool playing, double positionRatio, QString *error)
 {
+    Q_UNUSED(error);
     const QString needle = query.trimmed();
-    if (needle.isEmpty()) {
-        return true;
-    }
 
     Track track = m_database->trackForPath(needle);
     if (track.path.isEmpty()) {
@@ -2945,7 +2940,7 @@ bool MainWindow::showDemoNowPlaying(const QString &query, bool playing, double p
     if (track.path.isEmpty()) {
         const QStringList terms = needle.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
         if (!terms.isEmpty()) {
-            const QVector<Track> candidates = m_database->searchTracksLike(terms.first(), 100);
+            const QVector<Track> candidates = m_database->searchTracksLike(terms.first(), std::numeric_limits<int>::max());
             for (const Track &candidate : candidates) {
                 const QString haystack = QStringLiteral("%1 %2 %3 %4")
                                              .arg(candidate.title,
@@ -2964,11 +2959,24 @@ bool MainWindow::showDemoNowPlaying(const QString &query, bool playing, double p
         }
     }
     if (track.path.isEmpty()) {
-        if (error != nullptr) {
-            *error = QStringLiteral("track not found for demo now-playing query: %1").arg(query);
+        if (!m_player->queue().isEmpty()) {
+            track = m_player->queue().first();
+        } else {
+            const auto artists = m_database->albumArtists();
+            if (!artists.isEmpty()) {
+                const auto tracks = m_database->tracksForArtist(artists.first().name);
+                if (!tracks.isEmpty()) track = tracks.first();
+            }
         }
-        return false;
     }
+    if (track.path.isEmpty()) return true;
+
+    QVector<Track> queue = m_player->queue();
+    auto found = std::ranges::find(queue, track.path, &Track::path);
+    int index = static_cast<int>(std::distance(queue.begin(), found));
+    if (found == queue.end()) queue.push_back(track);
+    m_player->resetQueue(queue, index, index + 1);
+    syncQueueState();
 
     m_player->presentTrack(track);
     const qint64 durationMs = std::max<qint64>(0, track.durationMs);
@@ -2976,6 +2984,25 @@ bool MainWindow::showDemoNowPlaying(const QString &query, bool playing, double p
     m_playerBar->setPosition(static_cast<qint64>(std::llround(static_cast<double>(durationMs) * safeRatio)), durationMs);
     m_playerBar->setPlaying(playing);
     return true;
+}
+
+void MainWindow::showDemoPlaylist(const QString &name, const QString &trackQuery)
+{
+    switchMainView(MainView::Playlist);
+    m_playlistView->selectForDemo(name, trackQuery);
+}
+
+void MainWindow::showDemoFileExplorer(bool library, const QString &path, const QString &trackQuery)
+{
+    if (library) {
+        m_libraryExplorerDirectory = path;
+        switchMainView(MainView::LibraryFileExplorer);
+        m_libraryFileExplorer->selectTrackForDemo(trackQuery);
+    } else {
+        if (QFileInfo(path).isDir()) m_freeRoamDirectory = QFileInfo(path).absoluteFilePath();
+        switchMainView(MainView::FreeRoamFileExplorer);
+        m_freeRoamFileExplorer->selectTrackForDemo(trackQuery);
+    }
 }
 
 void MainWindow::toggleFileExplorerView()
@@ -5528,7 +5555,7 @@ void MainWindow::updateBackfillStatusDisplay()
 
 bool MainWindow::scrobbleOffline() const
 {
-    return m_database->setting(QStringLiteral("scrobble.offline"), QStringLiteral("false")) == QStringLiteral("true");
+    return m_core->scrobbleOffline();
 }
 
 QString MainWindow::listenHistoryPath() const

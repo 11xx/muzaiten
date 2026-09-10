@@ -35,6 +35,14 @@ DEMO_SEARCH_VIDEO          ?= 1
 DEMO_SEARCH_DELAY_MS       ?= 120
 DEMO_ARTIST                ?=
 DEMO_ALBUM                 ?=
+DEMO_LIBRARY_ARTIST        ?= $(DEMO_ARTIST)
+DEMO_LIBRARY_ALBUM         ?= $(DEMO_ALBUM)
+DEMO_PLAYLIST_NAME         ?=
+DEMO_PLAYLIST_TRACK        ?=
+DEMO_FILE_EXPLORER_LIBRARY_PATH  ?=
+DEMO_FILE_EXPLORER_LIBRARY_TRACK ?=
+DEMO_FILE_EXPLORER_SYSTEM_PATH   ?=
+DEMO_FILE_EXPLORER_SYSTEM_TRACK  ?=
 DEMO_NOW_PLAYING           ?=
 DEMO_NOW_PLAYING_STATE     ?= paused
 DEMO_NOW_PLAYING_POSITION  ?= 0.6667
@@ -71,8 +79,14 @@ help:
 		'  DEMO_SEARCH="artist:example"' \
 		'  DEMO_SEARCH_VIDEO=1' \
 		'  DEMO_SEARCH_DELAY_MS=120' \
-		'  DEMO_ARTIST="Rainbow"' \
-		'  DEMO_ALBUM="Rising"' \
+		'  DEMO_LIBRARY_ARTIST="Rainbow" (DEMO_ARTIST alias)' \
+		'  DEMO_LIBRARY_ALBUM="Rising" (DEMO_ALBUM alias)' \
+		'  DEMO_PLAYLIST_NAME="Favorites"' \
+		'  DEMO_PLAYLIST_TRACK="Stargazer"' \
+		'  DEMO_FILE_EXPLORER_LIBRARY_PATH="/path/to/library/album"' \
+		'  DEMO_FILE_EXPLORER_LIBRARY_TRACK="01.flac"' \
+		'  DEMO_FILE_EXPLORER_SYSTEM_PATH="/path/to/music"' \
+		'  DEMO_FILE_EXPLORER_SYSTEM_TRACK="01.flac"' \
 		'  DEMO_NOW_PLAYING="stargazer rainbow"' \
 		'  DEMO_NOW_PLAYING_STATE=paused' \
 		'  DEMO_NOW_PLAYING_POSITION=0.6667' \
@@ -133,63 +147,24 @@ dev: build
 	MUZAITEN_DEV_STATE=1 ./$(APP) --verbose
 
 # Captures still PNGs plus an animated PNG (02-search.png, an APNG) for the search
-# demo. The PNG optimizers run only on static images: the `grep -aLZ acTL` filter
-# drops any file carrying an APNG animation-control chunk, since pngquant (and older
-# oxipng) would silently flatten it to its first frame.
+# demo. The runner detects APNG chunks and optimizes only static images, since
+# still-image optimizers can flatten animations to their first frame.
 demo-screens: build
-	@set -eu; \
-	data_home="$${XDG_DATA_HOME:-$$HOME/.local/share}"; \
-	state_home="$${XDG_STATE_HOME:-$$HOME/.local/state}"; \
-	cache_home="$${XDG_CACHE_HOME:-$$HOME/.cache}"; \
-	library="$$data_home/muzaiten/library.sqlite"; \
-	if [ ! -f "$$library" ]; then \
-		printf '%s\n' \
-			"Could not find $$library" \
-			"make demo-screens only auto-copies from XDG data/state/cache homes." \
-			"Run the demo manually with an explicit isolated state root instead:" \
-			"  mkdir -p /tmp/muzdir/data /tmp/muzdir/state /tmp/muzdir/cache" \
-			"  cp /path/to/library.sqlite /tmp/muzdir/data/" \
-			"  env QT_QPA_PLATFORM=offscreen MUZAITEN_STATE_ROOT=/tmp/muzdir ./$(APP) --demo-screens '$(DEMO_SCREEN_DIR)'"; \
-		exit 1; \
-	fi; \
-	tmp_state=$$(mktemp -d "$${TMPDIR:-/tmp}/muzaiten-demo-state.XXXXXX"); \
-	trap 'rm -rf "$$tmp_state"' EXIT INT TERM; \
-	mkdir -p "$$tmp_state/data" "$$tmp_state/state" "$$tmp_state/cache"; \
-	cp "$$library" "$$tmp_state/data/"; \
-	if [ -f "$$data_home/muzaiten/playlists.sqlite" ]; then cp "$$data_home/muzaiten/playlists.sqlite" "$$tmp_state/data/"; fi; \
-	if [ -f "$$data_home/muzaiten/history.sqlite" ]; then cp "$$data_home/muzaiten/history.sqlite" "$$tmp_state/data/"; fi; \
-	if [ -f "$$state_home/muzaiten/state.sqlite" ]; then cp "$$state_home/muzaiten/state.sqlite" "$$tmp_state/state/"; fi; \
-	if [ -f "$$cache_home/muzaiten/artwork.sqlite" ]; then cp "$$cache_home/muzaiten/artwork.sqlite" "$$tmp_state/cache/"; fi; \
-	mkdir -p "$(DEMO_SCREEN_DIR)"; \
-	env "QT_QPA_PLATFORM=offscreen" "MUZAITEN_STATE_ROOT=$$tmp_state" "MUZAITEN_DEMO_THEMES=$(DEMO_THEMES)" \
-		./$(APP) --demo-screens "$(DEMO_SCREEN_DIR)" \
-		--demo-size "$(DEMO_SIZE)" \
-		$(if $(DEMO_SEARCH),--demo-search "$(DEMO_SEARCH)") \
+	@env MUZAITEN_DEMO_THEMES="$(DEMO_THEMES)" \
+		DEMO_OPTIMIZE_PNG="$(DEMO_OPTIMIZE_PNG)" DEMO_PNG_LOSSY="$(DEMO_PNG_LOSSY)" \
+		DEMO_PNG_QUANTIZER="$(DEMO_PNG_QUANTIZER)" DEMO_PNG_QUANTIZER_FLAGS="$(DEMO_PNG_QUANTIZER_FLAGS)" \
+		DEMO_PNG_OPTIMIZER="$(DEMO_PNG_OPTIMIZER)" DEMO_PNG_OPTIMIZER_FLAGS="$(DEMO_PNG_OPTIMIZER_FLAGS)" \
+		python3 tools/demo-screens.py --app "$(APP)" --output "$(DEMO_SCREEN_DIR)" \
+		--demo-size "$(DEMO_SIZE)" --demo-search "$(DEMO_SEARCH)" \
 		$(if $(filter-out 0 false no,$(DEMO_SEARCH_VIDEO)),--demo-search-video) \
 		--demo-search-delay-ms "$(DEMO_SEARCH_DELAY_MS)" \
-		$(if $(DEMO_ARTIST),--demo-artist "$(DEMO_ARTIST)") \
-		$(if $(DEMO_ALBUM),--demo-album "$(DEMO_ALBUM)") \
-		$(if $(DEMO_NOW_PLAYING),--demo-now-playing "$(DEMO_NOW_PLAYING)") \
+		--demo-library-artist "$(DEMO_LIBRARY_ARTIST)" --demo-library-album "$(DEMO_LIBRARY_ALBUM)" \
+		--demo-playlist-name "$(DEMO_PLAYLIST_NAME)" --demo-playlist-track "$(DEMO_PLAYLIST_TRACK)" \
+		--demo-file-explorer-library-path "$(DEMO_FILE_EXPLORER_LIBRARY_PATH)" --demo-file-explorer-library-track "$(DEMO_FILE_EXPLORER_LIBRARY_TRACK)" \
+		--demo-file-explorer-system-path "$(DEMO_FILE_EXPLORER_SYSTEM_PATH)" --demo-file-explorer-system-track "$(DEMO_FILE_EXPLORER_SYSTEM_TRACK)" \
+		--demo-now-playing "$(DEMO_NOW_PLAYING)" \
 		--demo-now-playing-state "$(DEMO_NOW_PLAYING_STATE)" \
-		--demo-now-playing-position "$(DEMO_NOW_PLAYING_POSITION)"; \
-		if [ "$(DEMO_OPTIMIZE_PNG)" != "0" ] && [ "$(DEMO_OPTIMIZE_PNG)" != "false" ] && [ "$(DEMO_OPTIMIZE_PNG)" != "no" ]; then \
-			if [ "$(DEMO_PNG_LOSSY)" != "0" ] && [ "$(DEMO_PNG_LOSSY)" != "false" ] && [ "$(DEMO_PNG_LOSSY)" != "no" ]; then \
-				if command -v "$(DEMO_PNG_QUANTIZER)" >/dev/null 2>&1; then \
-					find "$(DEMO_SCREEN_DIR)" -type f -name '*.png' -print0 \
-						| xargs -0 -r grep -aLZ acTL \
-						| xargs -0 -r "$(DEMO_PNG_QUANTIZER)" $(DEMO_PNG_QUANTIZER_FLAGS) --; \
-				else \
-					printf '%s\n' "warning: $(DEMO_PNG_QUANTIZER) not found; skipping lossy demo PNG optimization" >&2; \
-				fi; \
-			fi; \
-			if command -v "$(DEMO_PNG_OPTIMIZER)" >/dev/null 2>&1; then \
-				find "$(DEMO_SCREEN_DIR)" -type f -name '*.png' -print0 \
-					| xargs -0 -r grep -aLZ acTL \
-					| xargs -0 -r "$(DEMO_PNG_OPTIMIZER)" $(DEMO_PNG_OPTIMIZER_FLAGS); \
-			else \
-				printf '%s\n' "warning: $(DEMO_PNG_OPTIMIZER) not found; leaving demo PNGs unoptimized" >&2; \
-			fi; \
-		fi
+		--demo-now-playing-position "$(DEMO_NOW_PLAYING_POSITION)"
 
 # Installs the existing build. Run `make build` (optionally with
 # CMAKE_BUILD_TYPE=Release) first. Defaults to the user-space ~/.local prefix

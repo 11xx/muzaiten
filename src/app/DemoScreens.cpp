@@ -285,8 +285,8 @@ bool writeSearchVideo(MainWindow &window,
     }
 
     // Encode an animated PNG straight from the frames: one self-contained, loss-
-    // less, infinitely-looping file that animates inline in browsers/READMEs and
-    // (unlike a video) follows the page's light/dark theme via its alpha channel.
+    // less, infinitely-looping file that animates inline in browsers/READMEs.
+    // Theme-aware README markup selects the matching animation.
     // The input framerate is the real average capture rate (frames / real span),
     // so playback duration matches the recording.
     const double fps = 1000.0 * static_cast<double>(frame) / static_cast<double>(elapsedMs);
@@ -357,24 +357,14 @@ bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &
     window->show();
     waitForEvents(900);
 
-    if (!options.nowPlayingQuery.trimmed().isEmpty()
-        && !window->showDemoNowPlaying(options.nowPlayingQuery,
-                                       options.nowPlaying,
-                                       options.nowPlayingPositionRatio,
-                                       error)) {
+    if (!window->showDemoNowPlaying(options.nowPlayingQuery,
+                                    options.nowPlaying,
+                                    options.nowPlayingPositionRatio,
+                                    error)) {
         return false;
     }
 
-    if (!options.albumTitle.trimmed().isEmpty()) {
-        if (!window->showDemoAlbum(options.artistName, options.albumTitle, error)) {
-            return false;
-        }
-    } else if (!options.artistName.trimmed().isEmpty() && !window->showDemoArtist(options.artistName)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("artist not found for demo capture: %1").arg(options.artistName);
-        }
-        return false;
-    }
+    if (!window->showDemoAlbum(options.artistName, options.albumTitle, error)) return false;
     waitForEvents(1800);
     if (!saveWindow(*window, dir, QStringLiteral("01-library.png"), error)) return false;
 
@@ -394,13 +384,16 @@ bool captureOne(AppCore &core, const DemoScreens::Options &options, const QDir &
     }
 
     activateDigitShortcut(*window, Qt::Key_1);
+    activateDigitShortcut(*window, Qt::Key_1);
     if (!saveWindow(*window, dir, QStringLiteral("03-queue.png"), error)) return false;
 
-    activateDigitShortcut(*window, Qt::Key_5);
+    window->showDemoPlaylist(options.playlistName, options.playlistTrack);
     if (!saveWindow(*window, dir, QStringLiteral("04-playlists.png"), error)) return false;
 
-    activateDigitShortcut(*window, Qt::Key_3);
-    if (!saveWindow(*window, dir, QStringLiteral("05-explorer.png"), error)) return false;
+    window->showDemoFileExplorer(true, options.fileExplorerLibraryPath, options.fileExplorerLibraryTrack);
+    if (!saveWindow(*window, dir, QStringLiteral("05-file-explorer-library.png"), error)) return false;
+    window->showDemoFileExplorer(false, options.fileExplorerSystemPath, options.fileExplorerSystemTrack);
+    if (!saveWindow(*window, dir, QStringLiteral("06-file-explorer-system.png"), error)) return false;
 
     return true;
 }
@@ -423,7 +416,11 @@ bool capture(AppCore &core, const Options &options, QString *error)
     if (schemes.isEmpty()) {
         return captureOne(core, options, dir, error);
     }
-    const QString restoreScheme = currentPlasmaColorScheme();
+    const bool usesPlasmaScheme = std::ranges::any_of(schemes, [](const QString &scheme) {
+        return scheme.compare(QStringLiteral("light"), Qt::CaseInsensitive) != 0
+            && scheme.compare(QStringLiteral("dark"), Qt::CaseInsensitive) != 0;
+    });
+    const QString restoreScheme = usesPlasmaScheme ? currentPlasmaColorScheme() : QString();
     for (const QString &scheme : schemes) {
         if (!applyColorScheme(scheme, error)) {
             return false;

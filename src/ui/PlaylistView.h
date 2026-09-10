@@ -70,6 +70,7 @@ public:
     // modal so keyboard focus stays on the row that was just edited). No-op if the
     // id is not in the current display.
     void selectItemById(qint64 itemId);
+    void selectForDemo(const QString &name, const QString &trackQuery);
     // Mirrors the queue's now-playing state into the tracklist: when the queue is
     // sourced from a playlist (`sourcePlaylistId` > 0) and that playlist is the one
     // on screen, the row backing `trackPath` is tinted like the queue's

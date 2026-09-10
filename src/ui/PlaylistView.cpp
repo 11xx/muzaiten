@@ -1266,6 +1266,39 @@ void PlaylistView::selectPlaylist(qint64 playlistId)
     }
 }
 
+void PlaylistView::selectForDemo(const QString &name, const QString &trackQuery)
+{
+    int selected = -1;
+    for (int row = 0; row < m_playlistList->count(); ++row) {
+        const auto *item = m_playlistList->item(row);
+        if (item->isHidden() || !(item->flags() & Qt::ItemIsSelectable)) {
+            continue;
+        }
+        if (selected < 0) selected = row;
+        if (!name.isEmpty() && item->data(PlaylistNameRole).toString().compare(name, Qt::CaseInsensitive) == 0) {
+            selected = row;
+            break;
+        }
+    }
+    if (selected < 0) return;
+    m_playlistList->setCurrentRow(selected);
+    m_playlistList->scrollToItem(m_playlistList->item(selected));
+    int trackRow = 0;
+    for (int row = 0; row < m_itemModel->rowCount() && !trackQuery.isEmpty(); ++row) {
+        const PlaylistItem *item = itemForDisplayRow(row);
+        if (item != nullptr && (item->trackPath == trackQuery
+            || QStringLiteral("%1 %2 %3").arg(item->titleSnapshot, item->artistSnapshot, item->albumSnapshot)
+                   .contains(trackQuery, Qt::CaseInsensitive))) {
+            trackRow = row;
+            break;
+        }
+    }
+    if (m_itemModel->rowCount() > 0) {
+        setCurrentItemRow(trackRow);
+        m_itemTable->setFocus(Qt::OtherFocusReason);
+    }
+}
+
 void PlaylistView::selectItemById(qint64 itemId)
 {
     if (itemId <= 0) {

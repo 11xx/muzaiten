@@ -160,6 +160,7 @@ scrobble backfill. Full reference: [docs/cli.md](docs/cli.md).
 | [docs/features-schema.md](docs/features-schema.md) | `features.sqlite` layout (analysis data) |
 | [docs/semantic-analysis.md](docs/semantic-analysis.md) | Optional CLAP provider, model consent, provenance |
 | [docs/distribution.md](docs/distribution.md) | Packaging, releases, credential model |
+| [docs/demo-screens.md](docs/demo-screens.md) | Reproducible showcase captures and view selections |
 
 ## Notes
 

@@ -289,6 +289,21 @@ int FileExplorerView::currentTopLevelRow() const
     return current != nullptr ? m_tree->indexOfTopLevelItem(current) : 0;
 }
 
+void FileExplorerView::selectTrackForDemo(const QString &query)
+{
+    int selected = 0;
+    for (int row = 0; row < m_tree->topLevelItemCount() && !query.isEmpty(); ++row) {
+        const auto *item = m_tree->topLevelItem(row);
+        if (item->data(0, PathRole).toString() == query
+            || item->text(NameColumn).contains(query, Qt::CaseInsensitive)) {
+            selected = row;
+            break;
+        }
+    }
+    selectTopLevelRow(selected);
+    m_tree->setFocus(Qt::OtherFocusReason);
+}
+
 void FileExplorerView::selectTopLevelRow(int row)
 {
     if (row < 0 || row >= m_tree->topLevelItemCount()) {

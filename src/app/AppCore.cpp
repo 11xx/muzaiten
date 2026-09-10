@@ -551,6 +551,7 @@ QString AppCore::listenHistoryPath() const
 
 bool AppCore::scrobbleOffline() const
 {
+    if (!qApp->property("muzaiten.demoScreensDir").toString().isEmpty()) return true;
     return m_database->setting(QStringLiteral("scrobble.offline"), QStringLiteral("false")) == QStringLiteral("true");
 }
 
@@ -580,8 +581,10 @@ void AppCore::showWindow()
         m_window = new MainWindow(this);
         // First window of the process: its constructor loaded the saved queue,
         // so the player now has tracks to resume into. Guarded to run once.
-        restoreSavedPlayback();
-        maybeRestoreRadioSession();
+        if (qApp->property("muzaiten.demoScreensDir").toString().isEmpty()) {
+            restoreSavedPlayback();
+            maybeRestoreRadioSession();
+        }
     }
     m_window->show();
     m_window->raise();
@@ -2764,6 +2767,7 @@ QString AppCore::resetBackfill(const QString &service)
 
 void AppCore::maybeAutoResumeListenBrainzBackfill()
 {
+    if (!qApp->property("muzaiten.demoScreensDir").toString().isEmpty()) return;
     if (m_backfillRunning || m_listenHistory == nullptr || !m_listenHistory->isOpen()) {
         return;
     }
