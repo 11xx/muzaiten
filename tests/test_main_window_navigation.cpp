@@ -22,6 +22,8 @@
 #include "ui/PlaylistView.h"
 #include "ui/QueueSnapshotStore.h"
 #include "ui/QueueStore.h"
+#include "ui/QueueScreen.h"
+#include "ui/QueueTable.h"
 #include "ui/SelectionColors.h"
 #include "ui/StopAfterDialog.h"
 #include "ui/TrackTable.h"
@@ -200,6 +202,19 @@ private slots:
         QCOMPARE(window.m_queueStore->tracks().size(), 2);
         QCOMPARE(window.m_queueStore->currentIndex(), 1);
         QCOMPARE(core.player()->currentTrack().path, second.path);
+        window.showDemoQueue(QStringLiteral("artist first"));
+        auto *queueTable = window.m_queueScreen->findChild<QueueTable *>();
+        QVERIFY(queueTable != nullptr);
+        QCOMPARE(queueTable->currentRow(), 0);
+        QCOMPARE(core.player()->currentTrack().path, second.path);
+        window.showDemoQueue(QStringLiteral("no such selection"));
+        QCOMPARE(queueTable->currentRow(), 1);
+        queueTable->applyViewSettingsJson(QStringLiteral("{\"currentRow\":0}"));
+        window.showDemoQueue(QStringLiteral("artist second"));
+        window.resize(900, 600);
+        window.show();
+        QCoreApplication::processEvents();
+        QCOMPARE(queueTable->currentRow(), 1);
         QVERIFY(window.showDemoNowPlaying(second.path, false, 0.5));
         QCOMPARE(core.player()->queue().size(), 2);
         QVERIFY(window.showDemoNowPlaying(QStringLiteral("no such song"), false, 0.5));
@@ -211,7 +226,11 @@ private slots:
         QVERIFY(window.showDemoAlbum(QStringLiteral("absent artist"), QStringLiteral("absent album")));
         QCOMPARE(window.m_artistSidebar->currentArtistName(), QStringLiteral("Artist"));
         QCOMPARE(window.m_albumGrid->currentAlbumTitle(), QStringLiteral("Album"));
-        window.showDemoFileExplorer(true, QStringLiteral("/demo"), QStringLiteral("second"));
+        window.showDemoLibraryTrack(QStringLiteral("artist second"));
+        QCOMPARE(window.m_trackTable->rowCount(), 2);
+        QCOMPARE(window.m_trackTable->searchDocuments().at(window.m_trackTable->currentRow()).fields.first().text,
+                 QStringLiteral("Second"));
+        window.showDemoFileExplorer(true, QStringLiteral("/demo/"), QStringLiteral("second artist"));
         QCOMPARE(window.m_libraryFileExplorer->currentDirectory(), QStringLiteral("/demo"));
         auto *tree = window.m_libraryFileExplorer->findChild<QTreeWidget *>();
         QVERIFY(tree != nullptr && tree->currentItem() != nullptr);
@@ -263,6 +282,48 @@ private slots:
         QVERIFY(core.scrobbleOffline());
         QVERIFY(core.window()->scrobbleOffline());
         QVERIFY(!core.m_resumeDone);
+    }
+
+    void explorerSearchUsesDisplayedMetadataAndQuietMissingValues()
+    {
+        Track first;
+        first.path = QStringLiteral("/library/first.flac");
+        first.filename = QStringLiteral("first.flac");
+        first.title = QStringLiteral("First");
+        first.artistName = QStringLiteral("Other artist");
+        first.albumTitle = QStringLiteral("Album");
+        Track target = first;
+        target.path = QStringLiteral("/private-token/rare-filename.flac");
+        target.filename = QStringLiteral("rare-filename.flac");
+        target.title = QStringLiteral("Stargazer (rough mix)");
+        target.artistName = QStringLiteral("Rainbow");
+        target.albumTitle = QStringLiteral("Rising");
+        FileExplorerView view;
+        view.setMode(FileExplorerMode::Library);
+        view.setLibraryEntries({}, {first, target});
+        auto *tree = view.findChild<QTreeWidget *>();
+        QVERIFY(tree != nullptr);
+        view.selectTrackForDemo(QStringLiteral("rainbow stargazer rough"));
+        QCOMPARE(tree->currentItem()->text(0), target.title);
+        view.selectTrackForDemo(QStringLiteral("rare-filename.flac"));
+        QCOMPARE(tree->currentItem()->text(0), first.title);
+        view.selectTrackForDemo(QStringLiteral("private-token"));
+        QCOMPARE(tree->currentItem()->text(0), first.title);
+        Track empty;
+        empty.path = QStringLiteral("/library/05. Untagged.flac");
+        empty.filename = QStringLiteral("05. Untagged.flac");
+        empty.title = QStringLiteral("05. Untagged");
+        empty.artistName = QStringLiteral("[unknown artist]");
+        empty.albumTitle = QStringLiteral("[unknown album]");
+        view.setLibraryEntries({}, {empty});
+        view.selectTrackForDemo(QStringLiteral("untagged"));
+        QCOMPARE(tree->currentItem()->text(0), empty.filename);
+        QCOMPARE(tree->currentItem()->text(1), QStringLiteral("—"));
+        QCOMPARE(tree->currentItem()->text(2), QStringLiteral("—"));
+        QPalette palette = view.palette();
+        palette.setColor(QPalette::Disabled, QPalette::Text, QColor(120, 130, 140));
+        view.setPalette(palette);
+        QCOMPARE(tree->currentItem()->foreground(1).color(), QColor(120, 130, 140));
     }
 
     void appCoreSweepsOrphanScrobbleTokenRows()

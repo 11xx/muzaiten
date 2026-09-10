@@ -110,6 +110,12 @@ Both scrobbling entries open one window with two tabs, `Scrobblers` and
 
 ## File explorers
 
+Panel search (`/`) matches the displayed name/title, artist and album fields.
+It does not match hidden parent paths or a tagged track's on-disk filename.
+Untagged tracks show their complete filename, including extension; absent artist
+and album values appear as muted em dashes. These are display fallbacks and do
+not change the tags or stored metadata.
+
 Selectable keybinding profiles from the explorer context menu:
 
 - **Vim-style**: `j/k/h/l` move, `Space` play, `a` add, `p` play next,

@@ -45,6 +45,7 @@ public:
     void moveCurrentRow(int delta);
     void activateCurrentRow();
     void revealCurrentPlaying();
+    void selectForDemo(const QString &query);
     void setNavigationScrollPadding(int rows);
     void setKeyBindingProfileName(const QString &name);
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }

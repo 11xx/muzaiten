@@ -12,6 +12,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QPainter>
+#include <QStyledItemDelegate>
+#include <QStyleOptionViewItem>
 #include <QListWidget>
 #include <QMenu>
 #include <QMetaObject>
@@ -116,6 +119,66 @@ class PlaylistViewTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void demoTrackMatchesArtistAndTitleAcrossFields()
+    {
+        QTemporaryDir temporary;
+        PlaylistDatabase db(QStringLiteral("demo-match"));
+        QVERIFY(db.open(temporary.filePath(QStringLiteral("playlists.sqlite"))));
+        const auto id = db.createPlaylist(QStringLiteral("Forza"));
+        PlaylistItem item;
+        item.titleSnapshot = QStringLiteral("Hurricane");
+        item.artistSnapshot = QStringLiteral("Another Artist");
+        QVERIFY(db.addItem(id, item) > 0);
+        item.artistSnapshot = QStringLiteral("The Asteroids Galaxy Tour");
+        QVERIFY(db.addItem(id, item) > 0);
+        PlaylistView view;
+        view.setDatabase(&db);
+        view.selectForDemo(QStringLiteral("Forza"), QStringLiteral("the asteroids galaxy tour hurricane"));
+        QCOMPARE(itemTable(view)->currentIndex().row(), 1);
+    }
+
+    void inactivePlaylistSelectionUsesReadableText()
+    {
+        QTemporaryDir temporary;
+        PlaylistDatabase db(QStringLiteral("demo-selection-colors"));
+        QVERIFY(db.open(temporary.filePath(QStringLiteral("playlists.sqlite"))));
+        const auto id = db.createPlaylist(QStringLiteral("Selected playlist"));
+        PlaylistItem item;
+        item.titleSnapshot = QStringLiteral("Track");
+        QVERIFY(db.addItem(id, item) > 0);
+        PlaylistView view;
+        view.setDatabase(&db);
+        view.resize(800, 400);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        view.selectForDemo(QStringLiteral("Selected playlist"), QStringLiteral("Track"));
+        QCoreApplication::processEvents();
+        auto *list = view.findChild<QListWidget *>(QStringLiteral("PlaylistList"));
+        QVERIFY(list != nullptr);
+        QVERIFY(itemTable(view)->hasFocus());
+        QStyleOptionViewItem option;
+        option.initFrom(list);
+        option.widget = list;
+        option.rect = QRect(0, 0, 240, 44);
+        option.state |= QStyle::State_Selected;
+        option.palette.setColor(QPalette::Base, Qt::white);
+        option.palette.setColor(QPalette::Text, Qt::black);
+        option.palette.setColor(QPalette::Highlight, QColor(40, 100, 200));
+        option.palette.setColor(QPalette::HighlightedText, Qt::white);
+        QImage rendered(option.rect.size(), QImage::Format_ARGB32_Premultiplied);
+        rendered.fill(Qt::white);
+        QPainter painter(&rendered);
+        list->itemDelegate()->paint(&painter, option, list->model()->index(0, 0));
+        painter.end();
+        int darkPixels = 0;
+        for (int y = 0; y < rendered.height(); ++y) {
+            for (int x = 0; x < rendered.width(); ++x) {
+                if (rendered.pixelColor(x, y).lightness() < 80) ++darkPixels;
+            }
+        }
+        QVERIFY2(darkPixels > 20, "Inactive playlist names must use dark text on the pale selected fill");
+    }
+
     void splitterSizesRoundTripThroughViewSettings()
     {
         PlaylistView first;

@@ -13,6 +13,8 @@ struct Options {
     QString searchQuery;
     QString artistName;
     QString albumTitle;
+    QString libraryTrack;
+    QString queueTrack;
     QString playlistName;
     QString playlistTrack;
     QString fileExplorerLibraryPath;

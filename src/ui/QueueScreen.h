@@ -26,6 +26,7 @@ public:
     QString keyBindingProfileName() const;
     void focusQueue();
     void revealCurrentPlaying();
+    void selectForDemo(const QString &query);
     void setQueueIsPlaylistSourced(bool sourced);
     void setRadioActive(bool active);
 

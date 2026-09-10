@@ -37,6 +37,8 @@ DEMO_ARTIST                ?=
 DEMO_ALBUM                 ?=
 DEMO_LIBRARY_ARTIST        ?= $(DEMO_ARTIST)
 DEMO_LIBRARY_ALBUM         ?= $(DEMO_ALBUM)
+DEMO_LIBRARY_TRACK         ?=
+DEMO_QUEUE_TRACK           ?=
 DEMO_PLAYLIST_NAME         ?=
 DEMO_PLAYLIST_TRACK        ?=
 DEMO_FILE_EXPLORER_LIBRARY_PATH  ?=
@@ -81,12 +83,14 @@ help:
 		'  DEMO_SEARCH_DELAY_MS=120' \
 		'  DEMO_LIBRARY_ARTIST="Rainbow" (DEMO_ARTIST alias)' \
 		'  DEMO_LIBRARY_ALBUM="Rising" (DEMO_ALBUM alias)' \
+		'  DEMO_LIBRARY_TRACK="rainbow stargazer"' \
+		'  DEMO_QUEUE_TRACK="nightwish greatest show"' \
 		'  DEMO_PLAYLIST_NAME="Favorites"' \
 		'  DEMO_PLAYLIST_TRACK="Stargazer"' \
 		'  DEMO_FILE_EXPLORER_LIBRARY_PATH="/path/to/library/album"' \
-		'  DEMO_FILE_EXPLORER_LIBRARY_TRACK="01.flac"' \
+		'  DEMO_FILE_EXPLORER_LIBRARY_TRACK="rainbow stargazer"' \
 		'  DEMO_FILE_EXPLORER_SYSTEM_PATH="/path/to/music"' \
-		'  DEMO_FILE_EXPLORER_SYSTEM_TRACK="01.flac"' \
+		'  DEMO_FILE_EXPLORER_SYSTEM_TRACK="rainbow stargazer"' \
 		'  DEMO_NOW_PLAYING="stargazer rainbow"' \
 		'  DEMO_NOW_PLAYING_STATE=paused' \
 		'  DEMO_NOW_PLAYING_POSITION=0.6667' \
@@ -159,6 +163,7 @@ demo-screens: build
 		$(if $(filter-out 0 false no,$(DEMO_SEARCH_VIDEO)),--demo-search-video) \
 		--demo-search-delay-ms "$(DEMO_SEARCH_DELAY_MS)" \
 		--demo-library-artist "$(DEMO_LIBRARY_ARTIST)" --demo-library-album "$(DEMO_LIBRARY_ALBUM)" \
+		--demo-library-track "$(DEMO_LIBRARY_TRACK)" --demo-queue-track "$(DEMO_QUEUE_TRACK)" \
 		--demo-playlist-name "$(DEMO_PLAYLIST_NAME)" --demo-playlist-track "$(DEMO_PLAYLIST_TRACK)" \
 		--demo-file-explorer-library-path "$(DEMO_FILE_EXPLORER_LIBRARY_PATH)" --demo-file-explorer-library-track "$(DEMO_FILE_EXPLORER_LIBRARY_TRACK)" \
 		--demo-file-explorer-system-path "$(DEMO_FILE_EXPLORER_SYSTEM_PATH)" --demo-file-explorer-system-track "$(DEMO_FILE_EXPLORER_SYSTEM_TRACK)" \

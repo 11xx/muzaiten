@@ -58,6 +58,13 @@ QVector<PanelMatch> matchDocumentsInDisplayOrder(const QVector<MatchDocument> &d
                                                   const SearchQuery &query,
                                                   bool fuzzyMode);
 
+inline int firstPanelMatchRow(const QVector<MatchDocument> &docs, const QString &text)
+{
+    if (text.trimmed().isEmpty()) return -1;
+    const auto matches = matchDocumentsInDisplayOrder(docs, SearchQuery::parse(text), false);
+    return matches.isEmpty() ? -1 : matches.first().row;
+}
+
 // Hot-path matcher for the library index. This keeps SearchIndex from building
 // per-record document vectors while sharing the same term/scoring rules.
 int matchSearchRecord(const SearchRecord &rec, const SearchQuery &query, bool fuzzyMode);
