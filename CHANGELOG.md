@@ -14,6 +14,13 @@
 
 ### Changed
 
+- Demo generation snapshots committed SQLite WAL state on every run and replaces
+  generated images after capture and optimization succeed. PNG optimization
+  skips do not fail the target. View-specific controls select library albums,
+  playlists and tracks, and both library and system file explorers; missing
+  selections fall back gracefully. Demo now-playing tracks join the disposable
+  queue when absent, and scrobbling stays offline during capture.
+
 - Playlist import matches a line whose artist credit is written differently
   from the library's. When the artist and title phrases miss together, the
   title alone anchors the search and a track is kept only if its credited

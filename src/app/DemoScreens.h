@@ -13,6 +13,12 @@ struct Options {
     QString searchQuery;
     QString artistName;
     QString albumTitle;
+    QString playlistName;
+    QString playlistTrack;
+    QString fileExplorerLibraryPath;
+    QString fileExplorerLibraryTrack;
+    QString fileExplorerSystemPath;
+    QString fileExplorerSystemTrack;
     QString nowPlayingQuery;
     QStringList colorSchemes;
     QSize windowSize = QSize(1440, 900);

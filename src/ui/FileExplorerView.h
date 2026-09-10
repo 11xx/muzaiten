@@ -58,6 +58,7 @@ public:
     // Navigates to the file's directory and selects it (no-op if the directory
     // can't be reached). Works for both library and free-roam modes.
     void revealFile(const QString &filePath);
+    void selectTrackForDemo(const QString &query);
 
     // When true, the context menu also offers "(don't save to playlist)" queue
     // adds (the queue is mirroring a playlist).

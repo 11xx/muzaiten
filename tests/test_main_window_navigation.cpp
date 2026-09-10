@@ -6,6 +6,7 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "db/SettingsStore.h"
+#include "db/PlaylistDatabase.h"
 #include "ipc/IpcServer.h"
 #include "mpris/MprisService.h"
 #include "player/PlayerCore.h"
@@ -20,6 +21,7 @@
 #include "ui/PanelSearchController.h"
 #include "ui/PlaylistView.h"
 #include "ui/QueueSnapshotStore.h"
+#include "ui/QueueStore.h"
 #include "ui/SelectionColors.h"
 #include "ui/StopAfterDialog.h"
 #include "ui/TrackTable.h"
@@ -172,6 +174,95 @@ private slots:
         QVERIFY(window.m_searchView != nullptr);
         QVERIFY(window.m_queueScreen != nullptr);
         QVERIFY(window.m_playlistView != nullptr);
+    }
+
+    void demoNowPlayingJoinsQueueAndFallsBackWithoutPlayback()
+    {
+        AppCore core;
+        Track first;
+        first.path = QStringLiteral("/demo/first.flac");
+        first.parentDir = QStringLiteral("/demo");
+        first.filename = QStringLiteral("first.flac");
+        first.title = QStringLiteral("First");
+        first.artistName = first.albumArtistName = QStringLiteral("Artist");
+        first.albumTitle = QStringLiteral("Album");
+        Track second = first;
+        second.path = QStringLiteral("/demo/second.flac");
+        second.filename = QStringLiteral("second.flac");
+        second.title = QStringLiteral("Second");
+        QVERIFY2(core.database()->upsertTrack(first), qPrintable(core.database()->lastError()));
+        QVERIFY2(core.database()->upsertTrack(second), qPrintable(core.database()->lastError()));
+        MainWindow window(&core);
+        core.player()->resetQueue({first}, 0, 1);
+        QVERIFY(window.showDemoNowPlaying(second.path, true, 0.5));
+        QCOMPARE(core.player()->queue().size(), 2);
+        QCOMPARE(core.player()->queueIndex(), 1);
+        QCOMPARE(window.m_queueStore->tracks().size(), 2);
+        QCOMPARE(window.m_queueStore->currentIndex(), 1);
+        QCOMPARE(core.player()->currentTrack().path, second.path);
+        QVERIFY(window.showDemoNowPlaying(second.path, false, 0.5));
+        QCOMPARE(core.player()->queue().size(), 2);
+        QVERIFY(window.showDemoNowPlaying(QStringLiteral("no such song"), false, 0.5));
+        QCOMPARE(core.player()->currentTrack().path, first.path);
+        core.player()->resetQueue({});
+        QVERIFY(window.showDemoNowPlaying(QStringLiteral("no such song"), false, 0.5));
+        QVERIFY(!core.player()->currentTrack().path.isEmpty());
+        QCOMPARE(core.player()->queue().size(), 1);
+        QVERIFY(window.showDemoAlbum(QStringLiteral("absent artist"), QStringLiteral("absent album")));
+        QCOMPARE(window.m_artistSidebar->currentArtistName(), QStringLiteral("Artist"));
+        QCOMPARE(window.m_albumGrid->currentAlbumTitle(), QStringLiteral("Album"));
+        window.showDemoFileExplorer(true, QStringLiteral("/demo"), QStringLiteral("second"));
+        QCOMPARE(window.m_libraryFileExplorer->currentDirectory(), QStringLiteral("/demo"));
+        auto *tree = window.m_libraryFileExplorer->findChild<QTreeWidget *>();
+        QVERIFY(tree != nullptr && tree->currentItem() != nullptr);
+        QVERIFY(tree->currentItem()->text(0).contains(QStringLiteral("Second"), Qt::CaseInsensitive));
+    }
+
+    void demoSelectsPlaylistAndBothFileExplorers()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        const qint64 one = window.m_playlistDb->createPlaylist(QStringLiteral("One"));
+        const qint64 two = window.m_playlistDb->createPlaylist(QStringLiteral("Two"));
+        QVERIFY(one > 0 && two > 0);
+        PlaylistItem item;
+        item.titleSnapshot = QStringLiteral("First song");
+        item.trackPath = QStringLiteral("/demo/first.flac");
+        QVERIFY(window.m_playlistDb->addItem(two, item) > 0);
+        item.titleSnapshot = QStringLiteral("Selected song");
+        item.trackPath = QStringLiteral("/demo/selected.flac");
+        QVERIFY(window.m_playlistDb->addItem(two, item) > 0);
+        window.showDemoPlaylist(QStringLiteral("two"), QStringLiteral("Selected"));
+        QCOMPARE(window.m_mainView, MainView::Playlist);
+        QCOMPARE(window.m_playlistView->currentPlaylistId(), two);
+        auto *table = window.m_playlistView->findChild<QTableView *>(QStringLiteral("PlaylistItemTable"));
+        QVERIFY(table != nullptr);
+        QCOMPARE(table->currentIndex().row(), 1);
+        window.showDemoPlaylist(QStringLiteral("absent"), QStringLiteral("absent"));
+        QCOMPARE(window.m_playlistView->currentPlaylistId(), window.m_playlistDb->playlists().first().id);
+        window.showDemoFileExplorer(true, QStringLiteral("/does-not-exist"), QStringLiteral("absent"));
+        QCOMPARE(window.m_mainView, MainView::LibraryFileExplorer);
+        QCOMPARE(window.m_libraryFileExplorer->currentDirectory(), QString());
+        window.showDemoFileExplorer(false, m_stateRoot.path(), QStringLiteral("absent"));
+        QCOMPARE(window.m_mainView, MainView::FreeRoamFileExplorer);
+        QCOMPARE(window.m_freeRoamFileExplorer->currentDirectory(), m_stateRoot.path());
+        QVERIFY(window.showDemoAlbum(QStringLiteral("absent"), QStringLiteral("absent")));
+        QCOMPARE(window.m_mainView, MainView::LibraryPanels);
+    }
+
+    void demoProfileSuppressesPlaybackRestoreAndScrobbling()
+    {
+        qApp->setProperty("muzaiten.demoScreensDir", QStringLiteral("isolated-demo"));
+        const auto restore = qScopeGuard([] { qApp->setProperty("muzaiten.demoScreensDir", QVariant()); });
+        AppCore core;
+        const auto closeWindow = qScopeGuard([&core] {
+            delete core.m_window;
+            core.m_window = nullptr;
+        });
+        core.showWindow();
+        QVERIFY(core.scrobbleOffline());
+        QVERIFY(core.window()->scrobbleOffline());
+        QVERIFY(!core.m_resumeDone);
     }
 
     void appCoreSweepsOrphanScrobbleTokenRows()
