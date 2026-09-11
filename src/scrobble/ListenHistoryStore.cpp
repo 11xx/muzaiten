@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QMetaType>
 #include <QSet>
+#include <QScopeGuard>
 #include <QSqlQuery>
 #include <QStringList>
 #include <QVariant>
@@ -182,9 +183,14 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
     pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     pragma.exec(QStringLiteral("PRAGMA busy_timeout=5000"));
 
+    // Reserve the writer before inspecting schema: concurrent opens must wait,
+    // not attempt to upgrade an obsolete WAL read snapshot.
+    if (!pragma.exec(QStringLiteral("BEGIN IMMEDIATE"))) {
+        m_lastError = pragma.lastError().text();
+        return;
+    }
+    const auto rollback = qScopeGuard([this] { if (!m_ready) m_db.rollback(); });
     if (!SqlUtil::validateSchemaVersion(m_db, QStringLiteral("meta"), QStringLiteral("schemaVersion"), currentSchemaVersion, &m_lastError)) return;
-    SqlUtil::Savepoint migration(m_db, &m_lastError);
-    if (!migration.active()) return;
     QSqlQuery create(m_db);
     if (!create.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS listens ("
@@ -361,7 +367,8 @@ ListenHistoryStore::ListenHistoryStore(const QString &path)
         return;
     }
     if (!migrateLegacyDeliveries()) return;
-    m_ready = migration.commit();
+    m_ready = m_db.commit();
+    if (!m_ready) m_lastError = m_db.lastError().text();
 }
 
 bool ListenHistoryStore::migrateLegacyDeliveries()

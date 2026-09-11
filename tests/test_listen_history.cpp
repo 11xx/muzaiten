@@ -9,11 +9,14 @@
 #include <QtTest>
 
 #include <array>
+#include <barrier>
+#include <thread>
 
 class TestListenHistory final : public QObject {
     Q_OBJECT
 
 private slots:
+    void concurrentConnectionsInitialize();
     void recordAndQueryUnsent();
     void recordOnlyOwesEnabledServices();
     void recordWithNoServicesKeepsHistoryOnly();
@@ -110,6 +113,27 @@ private:
         return track;
     }
 };
+
+void TestListenHistory::concurrentConnectionsInitialize()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("history.sqlite"));
+    { ListenHistoryStore seed(path); QVERIFY2(seed.isOpen(), qPrintable(seed.lastError())); }
+    std::barrier start(4);
+    std::array<QString, 4> errors;
+    std::array<std::jthread, 4> workers;
+    for (size_t i = 0; i < workers.size(); ++i) {
+        workers[i] = std::jthread([&, i] {
+            for (int round = 0; round < 20; ++round) {
+                start.arrive_and_wait();
+                ListenHistoryStore store(path);
+                if (!store.isOpen()) errors[i] = store.lastError();
+            }
+        });
+    }
+    for (auto &worker : workers) worker.join();
+    for (const auto &error : errors) QVERIFY2(error.isEmpty(), qPrintable(error));
+}
 
 void TestListenHistory::recordAndQueryUnsent()
 {
