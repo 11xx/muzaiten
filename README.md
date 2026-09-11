@@ -14,11 +14,11 @@ development — see [CHANGELOG.md](CHANGELOG.md) for the detailed record.
   <tr>
     <td align="center" width="50%">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/01-library.png">
-        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/01-library.png">
-        <img alt="Library browser" src="demo-screens/KvGnome/01-library.png" width="380">
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/05-file-explorer-library.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/05-file-explorer-library.png">
+        <img alt="Library file explorer" src="demo-screens/KvGnome/05-file-explorer-library.png" width="380">
       </picture>
-      <br><sub><b>Library</b> — artist sidebar, album grid, track table</sub>
+      <br><sub><b>File explorer</b> — browse library folders, search metadata, queue tracks</sub>
     </td>
     <td align="center" width="50%">
       <picture>
@@ -50,11 +50,11 @@ development — see [CHANGELOG.md](CHANGELOG.md) for the detailed record.
   <tr>
     <td align="center" colspan="2">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/05-file-explorer-library.png">
-        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/05-file-explorer-library.png">
-        <img alt="Library file explorer" src="demo-screens/KvGnome/05-file-explorer-library.png" width="760">
+        <source media="(prefers-color-scheme: dark)" srcset="demo-screens/KvGnomeDark/01-library.png">
+        <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/01-library.png">
+        <img alt="Library browser" src="demo-screens/KvGnome/01-library.png" width="760">
       </picture>
-      <br><sub><b>File explorer</b> — browse library folders, search metadata, queue tracks</sub>
+      <br><sub><b>Library</b> — artist sidebar, album grid, track table</sub>
     </td>
   </tr>
 </table>
