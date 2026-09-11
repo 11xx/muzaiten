@@ -107,6 +107,10 @@ PKGBUILD
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+version_options=()
+[[ "$DEV_PKGBUILD" == 1 ]] || version_options+=(--release)
+version="$(python3 tools/version.py "${version_options[@]}")"
+
 # Load .env (KEY=VALUE lines) if present, without echoing secrets.
 if [[ -f .env ]]; then
     set -a
@@ -144,10 +148,6 @@ fi
 cmake --build "$BUILD_DIR" -j "$JOBS" "${build_options[@]}"
 rm -f -- "$BUILD_DIR/toolchain-changed.stamp"
 
-# Version derived the same way as cmake/MuzaitenVersion.cmake.
-day="$(TZ=UTC0 git show -s --date=format-local:%Y-%m-%d --format=%cd HEAD)"
-n="$(TZ=UTC0 git rev-list --count --since="${day}T00:00:00" --until="${day}T23:59:59" HEAD)"
-version="${day//-/.}.${n}.g$(git rev-parse --short HEAD)"
 arch="$(uname -m)"
 
 mkdir -p dist

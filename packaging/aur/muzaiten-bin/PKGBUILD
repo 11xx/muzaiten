@@ -1,6 +1,6 @@
 # Maintainer: Lucas Gabriel <g at 11xx dot org>
 pkgname=muzaiten-bin
-# Date-based, matching the release artifact (YYYY.MM.DD.N.g<sha>).
+# PEP 440 version, matching the release tag and artifact.
 # Bump this, _release_tag, and sha256sums for every published release.
 pkgver=2026.08.19.15.g5d28378
 _release_tag=2026.08.19

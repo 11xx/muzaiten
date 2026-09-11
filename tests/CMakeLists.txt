@@ -495,6 +495,9 @@ target_compile_features(test_playlist_import PRIVATE cxx_std_26)
 add_test(NAME test_playlist_import COMMAND test_playlist_import)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME test_version
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_version.py
+)
 add_test(NAME test_startup_storage
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_startup_storage.py $<TARGET_FILE:muzaiten>
 )

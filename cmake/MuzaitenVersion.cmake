@@ -1,56 +1,12 @@
-set(MUZAITEN_PROJECT_VERSION "0.0.0")
-set(MUZAITEN_VERSION_FALLBACK "0.0.0.unknown")
-set(MUZAITEN_VERSION "${MUZAITEN_VERSION_FALLBACK}")
-
-find_package(Git QUIET)
-if(Git_FOUND)
-    # HEAD's commit day in UTC (TZ=UTC0 forces UTC; format-local honors TZ).
-    execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env TZ=UTC0
-                "${GIT_EXECUTABLE}" show -s --date=format-local:%Y-%m-%d --format=%cd HEAD
-        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-        RESULT_VARIABLE MUZAITEN_GIT_DAY_RESULT
-        OUTPUT_VARIABLE MUZAITEN_GIT_DAY_DASH
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    # Iteration N: commits on HEAD's UTC calendar day (resets to 1 each new day).
-    execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env TZ=UTC0
-                "${GIT_EXECUTABLE}" rev-list --count
-                "--since=${MUZAITEN_GIT_DAY_DASH}T00:00:00"
-                "--until=${MUZAITEN_GIT_DAY_DASH}T23:59:59" HEAD
-        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-        RESULT_VARIABLE MUZAITEN_GIT_N_RESULT
-        OUTPUT_VARIABLE MUZAITEN_GIT_N
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
-        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-        RESULT_VARIABLE MUZAITEN_GIT_SHA_RESULT
-        OUTPUT_VARIABLE MUZAITEN_GIT_SHA
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" diff-index --quiet HEAD --
-        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-        RESULT_VARIABLE MUZAITEN_GIT_MODIFIED_RESULT
-        OUTPUT_QUIET
-        ERROR_QUIET
-    )
-
-    if(MUZAITEN_GIT_DAY_RESULT EQUAL 0 AND MUZAITEN_GIT_N_RESULT EQUAL 0
-       AND MUZAITEN_GIT_SHA_RESULT EQUAL 0
-       AND NOT MUZAITEN_GIT_DAY_DASH STREQUAL "" AND NOT MUZAITEN_GIT_N STREQUAL ""
-       AND NOT MUZAITEN_GIT_SHA STREQUAL "")
-        string(REPLACE "-" "." MUZAITEN_GIT_DAY "${MUZAITEN_GIT_DAY_DASH}")
-        set(MUZAITEN_PROJECT_VERSION "${MUZAITEN_GIT_DAY}.${MUZAITEN_GIT_N}")
-        set(MUZAITEN_VERSION "${MUZAITEN_PROJECT_VERSION}.g${MUZAITEN_GIT_SHA}")
-        if(MUZAITEN_GIT_MODIFIED_RESULT EQUAL 1)
-            string(APPEND MUZAITEN_VERSION "+modified")
-        endif()
-    endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../tools/version.py" --json
+    RESULT_VARIABLE version_result
+    OUTPUT_VARIABLE version_json
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT version_result EQUAL 0)
+    message(FATAL_ERROR "Could not determine the application version")
 endif()
+string(JSON MUZAITEN_PROJECT_VERSION GET "${version_json}" project_version)
+string(JSON MUZAITEN_VERSION GET "${version_json}" version)

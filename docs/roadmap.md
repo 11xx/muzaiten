@@ -1,7 +1,8 @@
 # Roadmap
 
-Versions are date-based (`YYYY.MM.DD.N.g<sha>`), derived from the committed
-HEAD. There is no separate semantic version.
+Versions are date-based PEP 440 identifiers, derived from Git by
+`tools/version.py`. Releases use unpadded UTC dates such as `2026.9.11`;
+development builds include a `.devN` suffix and local Git identity.
 
 ## Shipped
 

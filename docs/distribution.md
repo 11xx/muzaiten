@@ -124,13 +124,23 @@ This produces, under `dist/`:
   helper, plus the desktop entry, icon, metainfo, and license; and
 - `muzaiten-<version>-<arch>.tar.zst.sha256`.
 
-`<version>` is the date-based `YYYY.MM.DD.N.g<sha>` derived from `HEAD`, where
-`N` is the number of commits made on HEAD's UTC calendar day. The release tag is
-the shorter UTC date, `YYYY.MM.DD`, or the next same-day iteration if that date
-already exists (`YYYY.MM.DD.1`, then `.2`, and so on). Build the artifact from
-the tested, tagged release commit, then upload both files to the GitHub release
-attached to that tag. The tarball name still uses `<version>`, not the shorter
-tag name.
+`tools/version.py` supplies the same PEP 440 version to CMake, native archives
+and the VCS package. Clean tagged releases use an unpadded UTC date such as
+`2026.9.11`, with `.1`, `.2`, etc. for additional releases on that date. The tag,
+binary version and release archive version match exactly. Published historical
+tags and download URLs retain their original spelling.
+
+Untagged builds use the commit's UTC date and `a0.devN+g<sha>`. After a same-day
+release, they target the next release iteration: `2026.9.11.1a0.dev3+gabc1234`.
+`N` counts commits that day before its first release, or commits since the
+preceding same-day release. The `a0` component keeps development versions below
+their final release under both PEP 440 and Arch's version comparator. Dirty
+worktrees append `.dirty` to the local identifier; a source tree without Git
+metadata reports `0.0.0+unknown`. Ignored build output does not mark a tree dirty.
+
+Normal packaging requires a clean date-tagged commit. `--dev-pkgbuild` permits
+development versions for local rehearsal. Build from the tested release commit
+and upload the archive and checksum to its matching signed tag.
 
 ### Publishing the optional Python provider
 
@@ -147,9 +157,8 @@ confined to the one-time `[convert]` extra. Installing or inspecting the base
 package must not download a model checkpoint or converted artifact.
 
 When the provider does ship as part of a coordinated Muzaiten release, use the
-same UTC release date. Python package indexes normalize out leading zeroes under
-PEP 440, so native tag `2026.07.11` corresponds to provider version
-`2026.7.11`; same-day release iterations append the same final numeric
+same unpadded UTC release version: native tag `2026.9.11` corresponds to provider
+version `2026.9.11`; same-day release iterations append the same final numeric
 component. Package version and `feature_revision` are deliberately independent:
 a package-only or protocol-version bump does not invalidate stored embeddings
 unless the model input, preprocessing, or vector semantics actually changed.
@@ -483,7 +492,7 @@ release asset makes the package immediately broken.
 
 4. Update `packaging/aur/muzaiten-bin/PKGBUILD`:
 
-   - set `_release_tag` to the GitHub release tag (`YYYY.MM.DD` or same-day
+   - set `_release_tag` to the GitHub release tag (`YYYY.M.D` or same-day
      iteration),
    - set `pkgver` to the artifact `<version>` from `build-release.sh`, and
    - set `sha256sums` to the checksum from the generated `.sha256` file.

@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [2026.09.11]
+## [2026.9.11]
 
 ### Added
 
@@ -30,6 +30,9 @@
 
 ### Changed
 
+- Native builds, release tags and packages use normalized PEP 440 versions.
+  Tagged releases share a date version such as `2026.9.11`; development builds
+  use `a0.devN` and a `+g<sha>` local identifier, with `.dirty` for worktree edits.
 - README showcases five application views in both light and dark themes, using
   GitHub-compatible theme-aware images. Project and provider package links point
   to GitHub as the canonical home.

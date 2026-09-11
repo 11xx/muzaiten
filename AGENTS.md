@@ -16,10 +16,12 @@
 - Check whether README already describes a released behavior; update it only
   when its user-facing documentation is stale or incomplete.
 - Create an annotated tag only on the clean, tested release commit. Use the UTC
-  date as `YYYY.MM.DD`; for another release on that date, inspect existing tags
-  and use the next iteration (`YYYY.MM.DD.1`, then `.2`, and so on). This
+  date as unpadded PEP 440 `YYYY.M.D`; for another release on that date, inspect existing tags
+  and use the next iteration (`YYYY.M.D.1`, then `.2`, and so on). This
   suffix is a release iteration, never a commit count; do not derive release
-  tags from the application's `YYYY.MM.DD.N.g<sha>` development identifier.
+  tags from the application's `a0.devN+g<sha>` development identifier. Native
+  builds and packaging share `tools/version.py`. Preserve published historical
+  tags and references.
 
 # Documentation
 
