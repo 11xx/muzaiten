@@ -103,6 +103,8 @@
 - YouTube playlist detection rejects lookalike hosts and non-HTTP URLs.
 - The CLAP provider preserves the previous model artifact directory if installing
   its replacement fails, for both downloaded bundles and local conversions.
+- Provider source builds accept uv_build 0.12 as well as 0.11, including the
+  build backend supplied by Arch Linux.
 - Release builds honor toolchain-change rebuild markers and stage archives on
   disk. The safety guide describes background rating-tag writes accurately.
 
