@@ -60,13 +60,15 @@ QByteArray zstdDecompress(const QByteArray &blob, quint64 rawSize)
 void writeSignature(QDataStream &s, const CacheSignature &sig)
 {
     s << sig.formatVersion << sig.foldVersion << sig.schemaVersion
-      << sig.localCount << sig.localMaxMtime << sig.mpdCount << sig.rootsHash;
+      << sig.databaseId << sig.databasePath << sig.contentRevision;
 }
 
-void readSignature(QDataStream &s, CacheSignature &sig)
+bool readSignature(QDataStream &s, CacheSignature &sig)
 {
-    s >> sig.formatVersion >> sig.foldVersion >> sig.schemaVersion
-      >> sig.localCount >> sig.localMaxMtime >> sig.mpdCount >> sig.rootsHash;
+    s >> sig.formatVersion;
+    if (sig.formatVersion != kFormatVersion) return false;
+    s >> sig.foldVersion >> sig.schemaVersion >> sig.databaseId >> sig.databasePath >> sig.contentRevision;
+    return s.status() == QDataStream::Ok && sig.valid();
 }
 
 void writeRecord(QDataStream &s, const SearchRecord &r)
@@ -143,20 +145,33 @@ QString defaultPath()
 
 CacheSignature currentSignature(const Database &db)
 {
-    const Database::SearchRowSummary summary = db.searchRowSummary();
+    const auto state = db.searchContentState();
     CacheSignature sig;
     sig.formatVersion  = kFormatVersion;
     sig.foldVersion    = Fold::kVersion;
     sig.schemaVersion  = Schema::currentVersion;
-    sig.localCount     = summary.localCount;
-    sig.localMaxMtime  = summary.localMaxMtime;
-    sig.mpdCount       = summary.mpdCount;
-    sig.rootsHash      = summary.rootsHash;
+    sig.databaseId = state.databaseId;
+    sig.databasePath = state.databasePath;
+    sig.contentRevision = state.revision;
     return sig;
+}
+
+QString mismatchReason(const CacheSignature &cached, const CacheSignature &current)
+{
+    if (!current.valid()) return QStringLiteral("invalid-source");
+    if (!cached.valid()) return QStringLiteral("invalid-cache");
+    if (cached.formatVersion != current.formatVersion) return QStringLiteral("format-version");
+    if (cached.foldVersion != current.foldVersion) return QStringLiteral("fold-version");
+    if (cached.schemaVersion != current.schemaVersion) return QStringLiteral("schema-version");
+    if (cached.databaseId != current.databaseId) return QStringLiteral("database-identity");
+    if (cached.databasePath != current.databasePath) return QStringLiteral("database-path");
+    if (cached.contentRevision != current.contentRevision) return QStringLiteral("content-revision");
+    return QStringLiteral("hit");
 }
 
 bool write(const QString &path, const CacheSignature &signature, const QVector<SearchRecord> &records)
 {
+    if (!signature.valid() || signature.formatVersion != kFormatVersion) return false;
     // Serialize the records, then compress that payload.
     QByteArray payload;
     {
@@ -190,7 +205,7 @@ bool write(const QString &path, const CacheSignature &signature, const QVector<S
 }
 
 bool forEachRecord(const QString &path, CacheSignature *outSignature,
-                   const std::function<void(SearchRecord)> &sink)
+                   const std::function<void(SearchRecord)> &sink, const CacheSignature *expected)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -205,7 +220,9 @@ bool forEachRecord(const QString &path, CacheSignature *outSignature,
         return false;
     }
     CacheSignature signature;
-    readSignature(s, signature);
+    const bool valid = readSignature(s, signature);
+    if (outSignature != nullptr) *outSignature = signature;
+    if (!valid || (expected != nullptr && signature != *expected)) return false;
     quint64 rawSize = 0;
     QByteArray compressed;
     s >> rawSize >> compressed;
@@ -222,7 +239,7 @@ bool forEachRecord(const QString &path, CacheSignature *outSignature,
     ps.setVersion(kDataStreamVersion);
     quint64 count = 0;
     ps >> count;
-    if (count > kMaxDecodedBytes) { // sanity vs a corrupt count
+    if (ps.status() != QDataStream::Ok || count > kMaxDecodedBytes) {
         return false;
     }
     QHash<QString, QString> pool;
@@ -234,6 +251,7 @@ bool forEachRecord(const QString &path, CacheSignature *outSignature,
         sink(std::move(rec));
     }
 
+    if (ps.status() != QDataStream::Ok || !ps.atEnd()) return false;
     if (outSignature) {
         *outSignature = signature;
     }

@@ -38,7 +38,7 @@ public:
     // a delayed release after the view is hidden — see the cleanup timer).
     void ensureIndexLoaded(const QString &dbPath);
     // Force a rebuild of the index (after a scan/import, or manual F5 / re-press 3).
-    void invalidateIndex(const QString &dbPath);
+    void invalidateIndex(const QString &dbPath, bool forceRefresh = false);
     void forceRefresh();
 
     // Give keyboard focus to the search box ("input mode").

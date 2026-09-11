@@ -9,10 +9,9 @@
 // the builder (and the cold-start fallback); this is the fast path the GUI and
 // muzaitenctl both load.
 //
-// Freshness is a signature comparison, not a timestamp: the cache stamps a
-// CacheSignature, and on load the caller recomputes the current signature from
-// the DB and compares. A mismatch (tracks added/removed/retagged, roots
-// changed, or the format/fold logic bumped) means rebuild.
+// Freshness uses a trigger-maintained source revision, database identity/path,
+// and format/fold/schema versions. Signature reads do not scan library rows.
+// Builders read the signature and records under one SQLite read snapshot.
 
 #include "search/SearchRecord.h"
 
@@ -30,10 +29,11 @@ struct CacheSignature {
     quint32 formatVersion = 0;   // on-disk record layout (IndexCache::kFormatVersion)
     quint32 foldVersion = 0;     // fold pipeline/tables (Fold::kVersion)
     qint32  schemaVersion = 0;   // library DB schema (Schema::currentVersion)
-    qint64  localCount = 0;
-    qint64  localMaxMtime = 0;
-    qint64  mpdCount = 0;
-    quint64 rootsHash = 0;
+    QString databaseId;
+    QString databasePath;
+    qint64 contentRevision = -1;
+
+    bool valid() const { return !databaseId.isEmpty() && !databasePath.isEmpty() && contentRevision >= 0; }
 
     bool operator==(const CacheSignature &other) const = default;
 };
@@ -41,13 +41,14 @@ struct CacheSignature {
 namespace IndexCache {
 
 // Layout version of the serialized record stream; bump on any field change.
-inline constexpr quint32 kFormatVersion = 1;
+inline constexpr quint32 kFormatVersion = 2;
 
 // Default cache file under AppPaths::cacheDir().
 QString defaultPath();
 
 // The signature describing the DB's search row set as it stands now.
 CacheSignature currentSignature(const Database &db);
+QString mismatchReason(const CacheSignature &cached, const CacheSignature &current);
 
 // Atomically write the folded records + signature, zstd-compressed. Returns
 // false on any I/O or encoding error (caller falls back to a live build).
@@ -68,9 +69,11 @@ Loaded read(const QString &path);
 // consumer (e.g. the fzf picker) can start using rows immediately instead of
 // waiting for the whole file. Returns false if the file is absent/corrupt
 // (some records may already have been sunk on a mid-stream failure). When
-// `outSignature` is non-null it receives the stored signature.
+// `outSignature` is non-null it receives the stored signature. `expected`, when
+// provided, is checked on the same open file before any records are emitted.
 bool forEachRecord(const QString &path, CacheSignature *outSignature,
-                   const std::function<void(SearchRecord)> &sink);
+                   const std::function<void(SearchRecord)> &sink,
+                   const CacheSignature *expected = nullptr);
 
 } // namespace IndexCache
 } // namespace Search

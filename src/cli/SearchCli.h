@@ -30,22 +30,22 @@ bool clearCache(QString *path = nullptr);
 struct LoadResult {
     bool    ok = false;       // index is populated and queryable
     QString error;            // populated when ok == false
-    bool    usedCache = false;// loaded (at least partly) from the cache
-    bool    wasStale = false; // a cache was used whose signature no longer matches the DB
+    bool    usedCache = false;// accepted a matching cache
+    bool    wasStale = false; // encountered a cache with a different source signature
     bool    rebuilt = false;  // built fresh from the DB and (re)wrote the cache
     int     trackCount = 0;
+    QString cacheReason;
+    qint64 sourceRevision = -1;
 };
 
-// Populate `index`. With a fresh cache, loads it instantly. With a stale cache
-// it is still used (wasStale=true) unless forceRefresh is set. A missing/corrupt
-// cache or forceRefresh triggers a full build from the DB, which also rewrites
-// the cache.
+// Populate `index` from a matching cache or a consistent database read snapshot.
+// Stale/missing/corrupt caches and forceRefresh trigger a rebuild.
 LoadResult loadIndex(Search::SearchIndex &index, bool forceRefresh);
 
 // Like loadIndex, but streams each record to `sink` as it becomes available
 // instead of materializing a SearchIndex — so the fzf picker can show rows
-// immediately. From the cache it streams during deserialization; on a miss /
-// forceRefresh it streams from the DB build and writes the cache afterward.
+// immediately. From a matching cache it streams during deserialization; on a
+// miss, stale cache or forceRefresh it streams a database snapshot instead.
 LoadResult streamRecords(const std::function<void(const Search::SearchRecord &)> &sink, bool forceRefresh);
 
 } // namespace SearchCli

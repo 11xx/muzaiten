@@ -46,6 +46,19 @@ cold or stale cache streams results in as it builds (and refreshes quietly in
 the background, shown by a small "updating index" note). Deleting the cache
 file is harmless — it rebuilds on next open.
 
+Freshness is tracked by a persisted database identity and search-content revision.
+SQLite triggers advance that revision for searchable track metadata, rating
+overlays, MPD rows and library-root visibility; rollback also rolls back the
+revision. Playback settings and scan bookkeeping do not invalidate the cache.
+An unchanged warm load reads this small revision record rather than scanning
+all tracks for counts or timestamps. Cache format 2 and library schema 19 carry
+the identity/revision contract; older caches are rebuilt automatically.
+
+Cache builders read local and MPD records under one database snapshot. Canceled
+or failed builds do not publish a partial cache. A GUI build whose source changed
+while it was working schedules another refresh. The status label's tooltip
+reports its cache decision and source revision.
+
 ## Keybindings
 
 An explicit rebuild bypasses the saved cache and reads the database, including
@@ -136,13 +149,23 @@ muzaitenctl search --plain utada      # human-readable blocks
 muzaitenctl search --limit 5 --json jazz
 muzaitenctl search --fuzzy nhuage     # fuzzy instead of exact substring
 muzaitenctl search --refresh          # rebuild the cache; --clear-cache to drop it
+muzaitenctl search --cache-info       # JSON decision, source revision and record count
 ```
 
 With no query in a terminal (and `fzf` installed) it launches an **fzf
 picker** over the whole library — multi-line rows, romaji matches kanji,
 `Enter` queues the selection and `Alt+Enter` plays it. Piped or without fzf,
 a bare `search` dumps the whole library as TSV. First run builds the cache
-(a few seconds); later runs are instant.
+(a few seconds); later runs reuse a fresh cache. Stale caches are rebuilt for
+normal CLI searches and the picker without requiring `--refresh`.
+
+`--cache-info` resolves the cache without displaying library contents. Its
+`muzaiten-search-cache/1` report includes `reason`, `used_cache`, `rebuilt`,
+`source_revision` and `track_count`. Reasons include `hit`, `content-revision`,
+`database-identity`, `database-path`, `schema-version`, `fold-version`,
+`missing-cache`, `invalid-cache` and `forced-refresh`. An invalid cache detected
+after streaming has already emitted rows fails rather than mixing a second
+database stream into those rows; retry with `--refresh` in that case.
 
 For free-text *meaning* search ("melancholic shoegaze") press `Ctrl+S`
 inside the Search view: a semantic search dialog embeds the description

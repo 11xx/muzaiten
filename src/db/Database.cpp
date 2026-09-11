@@ -435,6 +435,17 @@ bool Database::rebuildTrackGenres(bool clearFirst, QString *error)
 bool Database::migrate()
 {
     if (!SqlUtil::validateSchemaVersion(m_db, QStringLiteral("schema_migrations"), {}, Schema::currentVersion, &m_lastError)) return false;
+    QSqlQuery current(m_db);
+    const bool latest = current.exec(QStringLiteral("SELECT MAX(version), COUNT(*) FROM schema_migrations WHERE version > 0"))
+        && current.next() && current.value(0).toInt() == Schema::currentVersion
+        && current.value(1).toInt() == Schema::currentVersion;
+    current.finish();
+    if (latest && current.exec(QStringLiteral("SELECT key_version FROM track_song_identity_meta WHERE slot=1"))
+        && current.next() && current.value(0).toInt() == kTrackSongIdentityKeyVersion) {
+        current.finish();
+        return ensureSearchRevision();
+    }
+    current.finish();
     SqlUtil::Savepoint migration(m_db, &m_lastError);
     if (!migration.active()) return false;
     QSqlQuery query(m_db);
@@ -895,6 +906,8 @@ bool Database::migrate()
         }
     }
 
+    if (!ensureSearchRevision()) return false;
+    if (!execSql(query, QStringLiteral("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(19, datetime('now'))"), &m_lastError)) return false;
     return migration.commit();
 }
 
@@ -2915,38 +2928,6 @@ QVector<Search::SearchRecord> Database::allMpdTracksForSearch() const
     return records;
 }
 
-Database::SearchRowSummary Database::searchRowSummary() const
-{
-    SearchRowSummary summary;
-    {
-        QString sql = QStringLiteral(
-            "SELECT COUNT(*), COALESCE(MAX(file_mtime), 0) FROM tracks t "
-            "WHERE t.missing = 0 AND t.metadata_scanned = 1");
-        if (hasScanRoots(m_db)) {
-            sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
-        }
-        QSqlQuery query(m_db);
-        if (query.exec(sql) && query.next()) {
-            summary.localCount    = query.value(0).toLongLong();
-            summary.localMaxMtime = query.value(1).toLongLong();
-        }
-    }
-    {
-        QSqlQuery query(m_db);
-        if (query.exec(QStringLiteral("SELECT COUNT(*) FROM mpd_tracks")) && query.next()) {
-            summary.mpdCount = query.value(0).toLongLong();
-        }
-    }
-    // Enabled roots change which local tracks the predicate admits, so fold them
-    // into the signature. Sort first so the hash is order-independent.
-    QStringList rootPaths;
-    for (const ScanRoot &root : enabledLibraryRoots()) {
-        rootPaths.append(root.path);
-    }
-    rootPaths.sort();
-    summary.rootsHash = static_cast<quint64>(qHash(rootPaths.join(QLatin1Char('\n'))));
-    return summary;
-}
 
 std::unique_ptr<TrackSearchCursor> Database::beginTrackSearchStream() const
 {
@@ -2983,9 +2964,14 @@ bool TrackSearchCursor::nextBatch(int maxRows, QVector<Search::SearchRecord> &ou
     while (out.size() < maxRows && m_phase != Phase::Done) {
         if (!m_execed) {
             const QString &sql = (m_phase == Phase::Local) ? m_localSql : m_mpdSql;
-            if (sql.isEmpty() || !m_query.exec(sql)) {
+            if (sql.isEmpty()) {
                 advancePhase();
                 continue;
+            }
+            if (!m_query.exec(sql)) {
+                m_error = m_query.lastError().text();
+                m_phase = Phase::Done;
+                return false;
             }
             m_execed = true;
         }
@@ -2994,6 +2980,11 @@ bool TrackSearchCursor::nextBatch(int maxRows, QVector<Search::SearchRecord> &ou
                               ? localRowToRecord(m_query, m_pool)
                               : mpdRowToRecord(m_query, m_pool));
         } else {
+            if (m_query.lastError().isValid()) {
+                m_error = m_query.lastError().text();
+                m_phase = Phase::Done;
+                return false;
+            }
             advancePhase(); // this phase drained; fall through to the next one
         }
     }

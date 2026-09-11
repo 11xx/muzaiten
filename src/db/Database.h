@@ -59,8 +59,10 @@ public:
     TrackSearchCursor &operator=(const TrackSearchCursor &) = delete;
 
     // Pull up to `maxRows` more folded records into `out` (cleared first).
-    // Returns false once the stream is fully drained (with `out` then empty).
+    // Returns false when drained or on error; inspect lastError before publishing
+    // the accumulated records as a complete index.
     bool nextBatch(int maxRows, QVector<Search::SearchRecord> &out);
+    QString lastError() const { return m_error; }
 
 private:
     friend class Database;
@@ -73,6 +75,7 @@ private:
     QString   m_mpdSql;
     Phase     m_phase = Phase::Local;
     bool      m_execed = false;
+    QString m_error;
     // Intern pool for the high-repetition fields, shared across both phases so
     // dedup spans the whole library.
     QHash<QString, QString> m_pool;
@@ -261,20 +264,15 @@ public:
     // can be filled incrementally instead of in one blocking read.
     std::unique_ptr<TrackSearchCursor> beginTrackSearchStream() const;
 
-    // Cheap aggregates that summarize the search row set, for the on-disk search
-    // cache's staleness check (recomputed on each load and compared to what the
-    // cache stored). Coarse by design: catches added/removed/retagged tracks and
-    // root changes, not rating-only edits (the GUI's background refresh covers
-    // those). One COUNT/MAX per source plus the enabled-roots hash.
-    struct SearchRowSummary {
-        qint64  localCount = 0;
-        qint64  localMaxMtime = 0;
-        qint64  mpdCount = 0;
-        quint64 rootsHash = 0;
+    struct SearchContentState {
+        QString databaseId;
+        QString databasePath;
+        qint64 revision = -1;
     };
-    SearchRowSummary searchRowSummary() const;
+    SearchContentState searchContentState() const;
 
 private:
+    bool ensureSearchRevision();
     bool rebuildTrackGenres(bool clearFirst, QString *error);
     qint64 upsertArtist(const QString &name, const QString &sortName = {});
     qint64 upsertAlbum(const Track &track, qint64 albumArtistId);

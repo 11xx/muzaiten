@@ -59,6 +59,7 @@ public slots:
     void setExclusions(QVector<Search::ExcludeRule> rules);
 
 signals:
+    void cacheDecision(QString reason, qint64 revision);
     void indexGrew(int trackCount);   // a cold-build batch landed — queries can run on the partial index
     void indexLoaded(int trackCount); // index queryable: cold build done, or a (possibly stale) cache loaded
     void indexRefreshing();           // a quiet background cache-refresh build has begun
@@ -74,6 +75,8 @@ private:
 
     void finishBuild(quint64 generation);
     void startBuild(bool forceRefresh);
+    void closeSnapshot();
+    bool m_snapshotOpen = false;
 
     QString   m_dbPath;
     SearchIndex m_index;       // live, queryable index

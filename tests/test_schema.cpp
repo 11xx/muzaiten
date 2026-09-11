@@ -18,6 +18,9 @@ class SchemaTest final : public QObject {
 
 private slots:
     void failedMigrationRollsBackCreatedTables();
+    void searchRevisionTracksRelevantFields();
+    void searchRevisionSnapshotsAndRollback();
+    void missingSearchTriggerInvalidatesIdentity();
     void migratesFreshDatabase();
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
     void guessedPlaceholdersFollowVisibilitySetting();
@@ -944,6 +947,98 @@ void SchemaTest::guessedPlaceholdersFollowVisibilitySetting()
     // Back off: hidden again.
     database.setGuessedPlaceholdersVisible(false);
     QVERIFY(database.albumArtists().isEmpty());
+}
+
+void SchemaTest::searchRevisionTracksRelevantFields()
+{
+    QTemporaryDir temp;
+    Database db(QUuid::createUuid().toString());
+    QVERIFY(db.open(temp.filePath(QStringLiteral("library.sqlite"))));
+    auto track = makeTrack(temp, QStringLiteral("one.flac"), 80);
+    QVERIFY(db.upsertTrack(track));
+    auto previous = db.searchContentState().revision;
+    QVERIFY(previous > 0);
+    QVERIFY(db.setSetting(QStringLiteral("playback.volume"), QStringLiteral("0.5")));
+    QVERIFY(db.upsertTrack(track));
+    QCOMPARE(db.searchContentState().revision, previous);
+    track.title = QStringLiteral("Changed without changing mtime");
+    QVERIFY(db.upsertTrack(track));
+    QVERIFY(db.searchContentState().revision > previous);
+    previous = db.searchContentState().revision;
+    QVERIFY(db.setUserTrackRating(track.path, 30));
+    QVERIFY(db.setPendingTrackRatingWrite(track.path, 30, QStringLiteral("pending")));
+    QVERIFY(db.searchContentState().revision > previous);
+    previous = db.searchContentState().revision;
+    QVERIFY(db.setPendingTrackRatingWrite(track.path, 30, QStringLiteral("pending"), QStringLiteral("bookkeeping")));
+    QCOMPARE(db.searchContentState().revision, previous);
+    ScanRoot root;
+    root.path = temp.path();
+    QVERIFY(db.saveScanRoot(root));
+    root = db.scanRoots().first();
+    previous = db.searchContentState().revision;
+    root.name = QStringLiteral("Renamed");
+    root.scanEnabled = !root.scanEnabled;
+    QVERIFY(db.saveScanRoot(root));
+    QCOMPARE(db.searchContentState().revision, previous);
+    root.libraryEnabled = !root.libraryEnabled;
+    QVERIFY(db.saveScanRoot(root));
+    QVERIFY(db.searchContentState().revision > previous);
+}
+
+void SchemaTest::searchRevisionSnapshotsAndRollback()
+{
+    QTemporaryDir temp;
+    const QString path = temp.filePath(QStringLiteral("library.sqlite"));
+    Database writer(QUuid::createUuid().toString()), reader(QUuid::createUuid().toString());
+    QVERIFY(writer.open(path));
+    auto track = makeTrack(temp, QStringLiteral("one.flac"), 80);
+    track.title = QStringLiteral("Original");
+    QVERIFY(writer.upsertTrack(track));
+    const auto source = writer.upsertMediaSource(QStringLiteral("mpd"), QStringLiteral("fixture"), {}, {});
+    MpdTrack mpd;
+    mpd.uri = QStringLiteral("remote.flac");
+    mpd.title = QStringLiteral("Remote original");
+    QVERIFY(writer.upsertMpdTrack(source, mpd));
+    QVERIFY(reader.open(path));
+    QVERIFY(reader.beginTransaction());
+    const auto original = Search::IndexCache::currentSignature(reader);
+    QVERIFY(writer.beginTransaction());
+    track.title = QStringLiteral("Changed");
+    QVERIFY(writer.upsertTrack(track));
+    QVERIFY(writer.rollbackTransaction());
+    QVERIFY(Search::IndexCache::currentSignature(writer) == original);
+    QVERIFY(writer.beginTransaction());
+    QVERIFY(writer.upsertTrack(track));
+    mpd.title = QStringLiteral("Remote changed");
+    QVERIFY(writer.upsertMpdTrack(source, mpd));
+    QVERIFY(writer.commitTransaction());
+    QVERIFY(Search::IndexCache::currentSignature(reader) == original);
+    auto cursor = reader.beginTrackSearchStream();
+    QVector<Search::SearchRecord> batch;
+    QStringList titles;
+    while (cursor->nextBatch(1, batch)) for (const auto &record : batch) titles.append(record.title);
+    QVERIFY(cursor->lastError().isEmpty());
+    QCOMPARE(titles, QStringList({QStringLiteral("Original"), QStringLiteral("Remote original")}));
+    cursor.reset();
+    QVERIFY(reader.rollbackTransaction());
+    QVERIFY(Search::IndexCache::currentSignature(reader) != original);
+    QCOMPARE(reader.mpdTrackCount(source), 1);
+}
+
+void SchemaTest::missingSearchTriggerInvalidatesIdentity()
+{
+    QTemporaryDir temp;
+    const QString path = temp.filePath(QStringLiteral("library.sqlite"));
+    const QString connection = QUuid::createUuid().toString();
+    Database db(connection);
+    QVERIFY(db.open(path));
+    const auto identity = db.searchContentState().databaseId;
+    QSqlQuery query(QSqlDatabase::database(connection));
+    QVERIFY(query.exec(QStringLiteral("DROP TRIGGER search_revision_tracks_update")));
+    query.finish();
+    Database reopened(QUuid::createUuid().toString());
+    QVERIFY(reopened.open(path));
+    QVERIFY(reopened.searchContentState().databaseId != identity);
 }
 
 void SchemaTest::searchCacheRoundTrips()

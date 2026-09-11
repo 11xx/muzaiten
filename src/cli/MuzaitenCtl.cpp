@@ -75,6 +75,7 @@ void printUsage()
         "  queue                   list the queue (current row marked with >)\n"
         "  queue <index> | jump <index>  play the given queue row\n"
         "  search [opts] [text]    fold-aware library search (TSV; works offline)\n"
+        "  search --cache-info    resolve the search cache and report its decision as JSON\n"
         "                            with no text on a terminal: fzf picker; piped: full dump\n"
         "      --plain               human-readable block instead of TSV\n"
         "      --limit N             cap the number of results\n"
@@ -1236,7 +1237,7 @@ int runPicker(const QString &fzfPath, bool fuzzy, bool refresh)
 // an array.
 int runSearch(QStringList arguments, bool json)
 {
-    bool refresh = false, plain = false, fuzzy = false, clearCache = false;
+    bool refresh = false, plain = false, fuzzy = false, clearCache = false, cacheInfo = false;
     int limit = 0;
     QStringList queryWords;
     for (int i = 0; i < arguments.size(); ++i) {
@@ -1248,6 +1249,8 @@ int runSearch(QStringList arguments, bool json)
             }
         } else if (w == QLatin1String("--refresh")) {
             refresh = true;
+        } else if (w == QLatin1String("--cache-info")) {
+            cacheInfo = true;
         } else if (w == QLatin1String("--plain")) {
             plain = true;
         } else if (w == QLatin1String("--fuzzy")) {
@@ -1270,7 +1273,8 @@ int runSearch(QStringList arguments, bool json)
 
     // No query on a terminal with fzf → interactive picker. It loads (and streams)
     // its own data, so we dispatch before the blocking loadIndex below.
-    if (queryWords.isEmpty()) {
+    if (cacheInfo && !queryWords.isEmpty()) return fail(QStringLiteral("search --cache-info takes no query"));
+    if (queryWords.isEmpty() && !cacheInfo) {
         const bool isTty = ::isatty(fileno(stdout)) != 0;
         const QString fzf = QStandardPaths::findExecutable(QStringLiteral("fzf"));
         if (isTty && !fzf.isEmpty() && !plain && !json) {
@@ -1288,9 +1292,13 @@ int runSearch(QStringList arguments, bool json)
     if (!load.ok) {
         return fail(load.error);
     }
-    if (load.wasStale) {
-        std::fprintf(stderr, "muzaitenctl: note: search cache is stale; "
-                             "run 'muzaitenctl search --refresh' to update\n");
+    if (cacheInfo) {
+        const QJsonObject info{{QStringLiteral("schema"), QStringLiteral("muzaiten-search-cache/1")},
+            {QStringLiteral("reason"), load.cacheReason}, {QStringLiteral("used_cache"), load.usedCache},
+            {QStringLiteral("rebuilt"), load.rebuilt}, {QStringLiteral("source_revision"), load.sourceRevision},
+            {QStringLiteral("track_count"), load.trackCount}};
+        QTextStream(stdout) << QJsonDocument(info).toJson(QJsonDocument::Compact) << '\n';
+        return 0;
     }
 
     // Select which records to emit: the matched set, or the whole library (dump).

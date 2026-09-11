@@ -133,6 +133,37 @@ class MainWindowNavigationTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void normalSearchReopenRefreshesRetaggedRows()
+    {
+        AppCore core;
+        Track track;
+        track.path = QStringLiteral("/cache/example.flac");
+        track.parentDir = QStringLiteral("/cache");
+        track.filename = QStringLiteral("example.flac");
+        track.title = QStringLiteral("Original");
+        track.artistName = track.albumArtistName = QStringLiteral("Artist");
+        track.albumTitle = QStringLiteral("Album");
+        QVERIFY(core.database()->upsertTrack(track));
+        const QString cache = Search::IndexCache::defaultPath();
+        {
+            MainWindow window(&core);
+            window.switchMainView(MainView::Search);
+            QTRY_COMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Original"));
+        }
+        track.title = QStringLiteral("Retagged");
+        QVERIFY(core.database()->upsertTrack(track));
+        {
+            Search::SearchWorker worker(core.databasePath());
+            worker.rebuildIndex();
+            worker.clearIndex();
+            QCoreApplication::processEvents();
+            QCOMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Original"));
+        }
+        MainWindow reopened(&core);
+        reopened.switchMainView(MainView::Search);
+        QTRY_COMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Retagged"));
+    }
+
     void searchSubmissionCoalescesObsoleteQueries()
     {
         Search::SearchWorker worker(QStringLiteral("unused"));

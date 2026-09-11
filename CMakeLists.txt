@@ -95,6 +95,7 @@ set(MUZAITEN_SOURCES
     src/core/Rating.cpp
     src/core/TrackDisplay.cpp
     src/db/Database.cpp
+    src/db/SearchRevision.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
     src/db/SqlUtil.cpp
@@ -409,6 +410,7 @@ set(MUZAITEN_SEARCH_SOURCES
 
 set(MUZAITEN_DB_SOURCES
     src/db/Database.cpp
+    src/db/SearchRevision.cpp
     src/db/PlaylistDatabase.cpp
     src/db/SettingsStore.cpp
 )

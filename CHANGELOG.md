@@ -4,6 +4,13 @@
 
 ### Added
 
+- Automatic search-cache freshness based on transactional content revisions.
+  Metadata, rating, MPD and visibility changes invalidate caches without manual
+  refresh, while unrelated settings retain warm cache hits. CLI search and the
+  picker rebuild stale caches; `search --cache-info` reports the decision as JSON.
+  Library schema 19 and cache format 2 track database identity and revision, with
+  consistent read snapshots and canceled/failed-build protection.
+
 - Startup storage health checks for library, playlists, state and listening
   history, with Retry/Close in the GUI and structured failures for headless runs.
   `muzaiten --check-storage` reports path and format readiness as JSON. Required

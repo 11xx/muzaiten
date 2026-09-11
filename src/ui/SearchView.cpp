@@ -372,7 +372,7 @@ void SearchView::ensureIndexLoaded(const QString &dbPath)
     QMetaObject::invokeMethod(m_worker, "buildIndex", Qt::QueuedConnection);
 }
 
-void SearchView::invalidateIndex(const QString &dbPath)
+void SearchView::invalidateIndex(const QString &dbPath, bool forceRefresh)
 {
     m_dbPath = dbPath;
     if (!m_worker) return;
@@ -382,14 +382,14 @@ void SearchView::invalidateIndex(const QString &dbPath)
     m_totalIndexed = 0;
     m_spinnerTimer->start();
     updateStatusLabel();
-    QMetaObject::invokeMethod(m_worker, "rebuildIndex", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(m_worker, forceRefresh ? "rebuildIndex" : "buildIndex", Qt::QueuedConnection);
 }
 
 void SearchView::forceRefresh()
 {
     if (m_dbPath.isEmpty()) return;
     m_statusLabel->setText(QStringLiteral("Refreshing…"));
-    invalidateIndex(m_dbPath);
+    invalidateIndex(m_dbPath, true);
 }
 
 void SearchView::setRankConfig(const Search::RankConfig &config)
@@ -432,6 +432,9 @@ void SearchView::setupWorker(const QString &dbPath)
             this, &SearchView::onIndexRefreshed, Qt::QueuedConnection);
     connect(m_worker, &Search::SearchWorker::indexError,
             this, &SearchView::onIndexError, Qt::QueuedConnection);
+    connect(m_worker, &Search::SearchWorker::cacheDecision, this, [this](const QString &reason, qint64 revision) {
+        m_statusLabel->setToolTip(QStringLiteral("Search cache: %1. Source revision: %2").arg(reason).arg(revision));
+    });
     connect(m_worker, &Search::SearchWorker::resultsReady,
             this, &SearchView::onResultsReady, Qt::QueuedConnection);
 

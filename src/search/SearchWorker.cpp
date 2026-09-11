@@ -5,6 +5,7 @@
 #include "search/SearchRecord.h"
 
 #include <QUuid>
+#include <QFileInfo>
 
 namespace Search {
 
@@ -16,8 +17,17 @@ SearchWorker::SearchWorker(const QString &dbPath, QObject *parent)
 
 SearchWorker::~SearchWorker()
 {
-    m_cursor.reset();
+    closeSnapshot();
     delete m_db;
+}
+
+void SearchWorker::closeSnapshot()
+{
+    m_cursor.reset();
+    if (m_snapshotOpen) {
+        m_db->rollbackTransaction();
+        m_snapshotOpen = false;
+    }
 }
 
 void SearchWorker::buildIndex()
@@ -32,6 +42,9 @@ void SearchWorker::rebuildIndex()
 
 void SearchWorker::startBuild(bool forceRefresh)
 {
+    ++m_buildGeneration;
+    closeSnapshot();
+    m_staging.clear();
     // Open (or reuse) a DB connection on this worker thread.
     if (!m_db) {
         const QString connName = QStringLiteral("search-worker-%1")
@@ -46,22 +59,43 @@ void SearchWorker::startBuild(bool forceRefresh)
         }
     }
 
+    if (!m_db->beginTransaction()) {
+        emit indexError(m_db->lastError());
+        return;
+    }
+    m_snapshotOpen = true;
     const CacheSignature current = IndexCache::currentSignature(*m_db);
+    if (!current.valid()) {
+        closeSnapshot();
+        emit indexError(QStringLiteral("Search content revision is unavailable"));
+        return;
+    }
     IndexCache::Loaded cached = IndexCache::read(IndexCache::defaultPath());
+    const QString reason = forceRefresh ? QStringLiteral("forced-refresh") : cached.ok
+        ? IndexCache::mismatchReason(cached.signature, current)
+        : QFileInfo::exists(IndexCache::defaultPath()) ? QStringLiteral("invalid-cache") : QStringLiteral("missing-cache");
+    emit cacheDecision(reason, current.contentRevision);
 
     if (!forceRefresh && cached.ok && cached.signature == current) {
         // Warm + fresh: load the cache and we're done — no DB read, no fold.
-        ++m_buildGeneration; // cancel any in-flight stream
-        m_cursor.reset();
+        closeSnapshot();
         m_index.build(std::move(cached.records));
         emit indexLoaded(m_index.size());
+        if (IndexCache::currentSignature(*m_db) != current) {
+            const auto generation = m_buildGeneration;
+            QMetaObject::invokeMethod(this, [this, generation] {
+                if (m_buildGeneration == generation) buildIndex();
+            }, Qt::QueuedConnection);
+        }
         return;
     }
 
     // Either show the (stale but usable) cache immediately and refresh quietly
     // in the background, or — with no usable cache — stream a cold build into
     // the live index so results appear as the data loads.
-    const bool haveStaleCache = cached.ok;
+    const bool haveStaleCache = cached.ok && cached.signature.databaseId == current.databaseId
+        && cached.signature.databasePath == current.databasePath && cached.signature.foldVersion == current.foldVersion
+        && cached.signature.schemaVersion == current.schemaVersion;
     if (haveStaleCache) {
         m_index.build(std::move(cached.records));
         emit indexLoaded(m_index.size());
@@ -87,6 +121,13 @@ void SearchWorker::readChunk(quint64 generation)
     constexpr int kChunk = 3000; // bounds per-batch work so queries stay snappy
     QVector<SearchRecord> batch;
     const bool more = m_cursor->nextBatch(kChunk, batch);
+    if (!m_cursor->lastError().isEmpty()) {
+        const QString error = m_cursor->lastError();
+        closeSnapshot();
+        m_staging.clear();
+        emit indexError(error);
+        return;
+    }
     if (!batch.isEmpty()) {
         if (m_buildMode == BuildMode::Foreground) {
             m_index.append(std::move(batch));
@@ -104,7 +145,7 @@ void SearchWorker::readChunk(quint64 generation)
 
 void SearchWorker::finishBuild(quint64 generation)
 {
-    m_cursor.reset();
+    closeSnapshot();
     if (m_buildMode == BuildMode::Background) {
         m_index = std::move(m_staging); // atomic swap (worker is single-threaded)
         m_staging.clear();
@@ -115,14 +156,23 @@ void SearchWorker::finishBuild(quint64 generation)
     // Seed/refresh the on-disk cache (best-effort; a failure just means the next
     // start rebuilds). Generation-guarded so a superseded build doesn't write.
     if (generation == m_buildGeneration) {
-        IndexCache::write(IndexCache::defaultPath(), m_pendingSignature, m_index.records());
+        const auto live = IndexCache::currentSignature(*m_db);
+        if (!live.valid()) {
+            emit indexError(QStringLiteral("Search content revision is unavailable"));
+        } else if (live == m_pendingSignature) {
+            IndexCache::write(IndexCache::defaultPath(), m_pendingSignature, m_index.records());
+        } else {
+            QMetaObject::invokeMethod(this, [this, generation] {
+                if (m_buildGeneration == generation) buildIndex();
+            }, Qt::QueuedConnection);
+        }
     }
 }
 
 void SearchWorker::clearIndex()
 {
     ++m_buildGeneration; // abort any in-flight stream
-    m_cursor.reset();
+    closeSnapshot();
     m_staging.clear();
     m_index.clear();
 }

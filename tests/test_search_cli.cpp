@@ -401,7 +401,17 @@ private slots:
         QVERIFY(!warm.rebuilt);
         QCOMPARE(idx2.size(), 2);
 
-        // Add a track → cache is stale but still used (shows the old 2).
+        {
+            Database db(QStringLiteral("cli-retag-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY(db.open(dbPath));
+            QVERIFY(db.upsertTrack(makeTrack(m_temp.path(), QStringLiteral("02.flac"), QStringLiteral("Changed"), 60)));
+        }
+        Search::SearchIndex retagged;
+        const auto automatic = SearchCli::loadIndex(retagged, false);
+        QVERIFY(automatic.rebuilt);
+        QCOMPARE(retagged.match(Search::SearchQuery::parse(QStringLiteral("Changed")), false, {}).size(), 1);
+
+        // Adding a track refreshes the cache automatically.
         {
             Database db(QStringLiteral("cli-add-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
             QVERIFY2(db.open(dbPath), qPrintable(db.lastError()));
@@ -410,9 +420,9 @@ private slots:
         }
         Search::SearchIndex idx3;
         const SearchCli::LoadResult stale = SearchCli::loadIndex(idx3, false);
-        QVERIFY(stale.usedCache);
+        QVERIFY(stale.rebuilt);
         QVERIFY(stale.wasStale);
-        QCOMPARE(idx3.size(), 2);
+        QCOMPARE(idx3.size(), 3);
 
         // --refresh rebuilds from the DB and clears staleness.
         Search::SearchIndex idx4;
