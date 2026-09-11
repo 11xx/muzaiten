@@ -113,7 +113,9 @@ MUZAITEN_LASTFM_API_KEY=... MUZAITEN_LASTFM_SHARED_SECRET=... ./packaging/build-
 
 The release builder honors the compiler/dependency fingerprint's clean-rebuild
 marker. Temporary install trees are staged under `dist/` on the repository's
-filesystem and removed after packaging.
+filesystem and removed after packaging. Archives normalize ownership to root
+and grant all users read/traverse access, without inherited setgid or
+group-write bits from the build directory.
 
 This produces, under `dist/`:
 

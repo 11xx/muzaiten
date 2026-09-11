@@ -164,7 +164,8 @@ install -Dm644 UNLICENSE "$stage/$PREFIX/share/licenses/muzaiten/UNLICENSE"
 
 mkdir -p dist
 tarball="dist/muzaiten-${version}-${arch}.tar.zst"
-tar --zstd --owner=0 --group=0 --numeric-owner -C "$stage" -cf "$tarball" "${PREFIX#/}"
+tar --zstd --owner=0 --group=0 --numeric-owner --mode='u+rwX,go+rX,go-w,a-s' \
+    -C "$stage" -cf "$tarball" "${PREFIX#/}"
 ( cd dist && sha256sum "$(basename "$tarball")" > "$(basename "$tarball").sha256" )
 
 echo ">> Wrote $tarball"

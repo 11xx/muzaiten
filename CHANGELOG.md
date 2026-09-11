@@ -83,6 +83,9 @@
 
 ### Fixed
 
+- Native release archives normalize directory permissions and ownership so
+  restrictive build-directory ACLs do not prevent other users from launching
+  the installed application.
 - Concurrent listening-history connections serialize schema initialization,
   preventing SQLite lock failures from leaving a scrobbling destination unable
   to deliver its backlog.
