@@ -372,13 +372,11 @@ keeping the one irreversible decision visibly human.
 
 See GitHub's [manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 and PyPI's [Trusted Publishing security model](https://docs.pypi.org/trusted-publishers/security-model/).
-The core AUR packages do not list `muzaiten-features-clap` while that package is
-unavailable from Arch/AUR. Advertising an unresolved optional dependency makes
-the package page imply an installation route that does not exist. Restore it in
-the same publication slice that creates the real provider package; until then,
-the supported provider is the PyPI tool installed with uv. The deterministic
-distro gate and eventual package order are recorded in
-`packaging/features-clap/README.md`.
+The core AUR packages list `muzaiten-features-clap` as an optional dependency.
+Its canonical recipe lives in `packaging/aur/muzaiten-features-clap/` and tracks
+the published PyPI sdist. The PyPI tool installed with uv remains supported.
+The deterministic distro gate and package validation requirements are recorded
+in `packaging/features-clap/README.md`.
 
 ### Dry-running the prebuilt-dist packaging (dev)
 
@@ -449,7 +447,8 @@ cd "$(git rev-parse --show-toplevel)/packaging/aur/muzaiten-git"
 makepkg --printsrcinfo > .SRCINFO
 namcap PKGBUILD
 
-workdir="$(mktemp -d)"
+mkdir -p "$HOME/.worktrees"
+workdir="$(mktemp -d "$HOME/.worktrees/muzaiten-aur.XXXXXX")"
 git clone ssh://aur@aur.archlinux.org/muzaiten-git.git "$workdir/muzaiten-git"
 cp PKGBUILD .SRCINFO "$workdir/muzaiten-git/"
 cd "$workdir/muzaiten-git"
@@ -510,7 +509,8 @@ release asset makes the package immediately broken.
 
    ```sh
    cd "$(git rev-parse --show-toplevel)/packaging/aur/muzaiten-bin"
-   workdir="$(mktemp -d)"
+   mkdir -p "$HOME/.worktrees"
+   workdir="$(mktemp -d "$HOME/.worktrees/muzaiten-aur.XXXXXX")"
    git clone ssh://aur@aur.archlinux.org/muzaiten-bin.git "$workdir/muzaiten-bin"
    cp PKGBUILD .SRCINFO "$workdir/muzaiten-bin/"
    cd "$workdir/muzaiten-bin"
