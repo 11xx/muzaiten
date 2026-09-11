@@ -138,6 +138,10 @@ their final release under both PEP 440 and Arch's version comparator. Dirty
 worktrees append `.dirty` to the local identifier; a source tree without Git
 metadata reports `0.0.0+unknown`. Ignored build output does not mark a tree dirty.
 
+The `muzaiten-git` recipe carries Arch package epoch 1 so installed timestamp-based
+VCS packages upgrade to the PEP 440 scheme even on the same UTC date. This is
+package-manager metadata, not part of the application version or release tag.
+
 Normal packaging requires a clean date-tagged commit. `--dev-pkgbuild` permits
 development versions for local rehearsal. Build from the tested release commit
 and upload the archive and checksum to its matching signed tag.

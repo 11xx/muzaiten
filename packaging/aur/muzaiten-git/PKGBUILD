@@ -2,6 +2,8 @@
 pkgname=muzaiten-git
 pkgver=0.0.0
 pkgrel=4
+# Preserve upgrade ordering from the timestamp-based VCS package versions.
+epoch=1
 pkgdesc="Native music player for local libraries, with ratings and scrobbling"
 arch=('x86_64')
 url="https://github.com/11xx/muzaiten"
