@@ -28,6 +28,12 @@
 
 ### Changed
 
+- README showcases five application views in both light and dark themes, using
+  GitHub-compatible theme-aware images. Project and provider package links point
+  to GitHub as the canonical home.
+- Radio candidate ranking selects only the top five entries needed for each
+  pick instead of sorting the entire pool, with deterministic path tie-breaking.
+
 - Demo generation snapshots committed SQLite WAL state on every run and replaces
   generated images after capture and optimization succeed. PNG optimization
   skips do not fail the target. View-specific controls select library albums,
@@ -75,6 +81,9 @@
 
 ### Fixed
 
+- Concurrent listening-history connections serialize schema initialization,
+  preventing SQLite lock failures from leaving a scrobbling destination unable
+  to deliver its backlog.
 - Search-index rebuilds read the current database even when its coarse cache
   signature is unchanged. Superseded queries are coalesced and clearing a query
   invalidates its pending results. Closing semantic search cancels a pending
@@ -83,8 +92,9 @@
   do not turn their known tracks into missing files.
 - Scrobblers remain enabled through transient server errors and rate limiting.
   The IPC request-size limit applies to complete newline-terminated requests too.
-- YouTube playlist detection rejects lookalike hosts and non-HTTP URLs. Model
-  artifact installation restores the previous directory if publication fails.
+- YouTube playlist detection rejects lookalike hosts and non-HTTP URLs.
+- The CLAP provider preserves the previous model artifact directory if installing
+  its replacement fails, for both downloaded bundles and local conversions.
 - Release builds honor toolchain-change rebuild markers and stage archives on
   disk. The safety guide describes background rating-tag writes accurately.
 
