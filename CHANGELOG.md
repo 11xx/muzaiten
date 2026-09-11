@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.09.11]
+
 ### Added
 
 - Automatic search-cache freshness based on transactional content revisions.
