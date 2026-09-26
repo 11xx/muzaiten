@@ -145,12 +145,12 @@ Boundary spokenBoundary(int final, int initial, int vowel)
         if (vowel == kVowelI && onset == T) onset = CH;
         return {l.kept ? codaOfFinal(l.kept) : CodaNone, onset};
     }
+    if (c == CodaL && initial == N) return {CodaL, Lateral};  // 설날 seollal
     if (initial == N || initial == M) return {isObstruent(c) ? nasalized(c) : c, initial};
     if (initial == R) {
-        if (c == CodaL || c == CodaN) return {CodaL, Lateral};
+        if (c == CodaL || c == CodaN) return {CodaL, Lateral};  // 신라 silla
         return {nasalized(c), N};
     }
-    if (c == CodaL && initial == N) return {CodaL, Lateral};
     return {c, initial};
 }
 
