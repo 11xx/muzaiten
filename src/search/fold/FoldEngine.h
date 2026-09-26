@@ -170,6 +170,8 @@ extern const TibetanChar kTibetanChars[0x100];
 extern const std::uint32_t kComposableBmp[0x10000 / 32];
 extern const char32_t kComposableAstral[];
 extern const std::size_t kComposableAstralCount;
+extern const char32_t kJoiningStarters[];
+extern const std::size_t kJoiningStarterCount;
 extern const AbjadBlock kAbjadBlocks[];
 extern const std::size_t kAbjadBlockCount;
 extern const AbjadChar kAbjadChars[];
@@ -213,6 +215,12 @@ QStringView decompOf(char32_t cp);
 // final, the second half of an Indic two-part vowel), or NFC replaces it (an
 // excluded composition such as U+0344, a singleton).
 bool normalizes(char32_t cp);
+
+// NFC may merge `cp`, a starter (combining class 0), into the base and marks
+// before it: a Hangul vowel or final, the second half of an Indic two-part
+// vowel, a Tibetan vowel sign whose decomposition begins with a mark. Marks
+// always belong to the sequence before them.
+bool joinsPrevious(char32_t cp);
 
 // The rule for `first` followed by `second` (0 for a single letter) in `range`.
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second);

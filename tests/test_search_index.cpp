@@ -370,6 +370,12 @@ private slots:
             Search::HighlightField::Title, false);
         QCOMPARE(strasse, (QVector<int>{0, 1, 2, 3, 4, 5}));
 
+        // A character normalization replaces highlights itself (Kelvin sign).
+        const QVector<int> kelvin = Search::highlightPositions(
+            QString::fromUcs4(U"A\u212A"), SearchQuery::parse(QStringLiteral("k")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(kelvin, (QVector<int>{1}));
+
         // Romaji query highlights the underlying kana it romanizes.
         const QVector<int> kana = Search::highlightPositions(
             QString::fromUtf8("さんしん"), SearchQuery::parse(QStringLiteral("shin")),

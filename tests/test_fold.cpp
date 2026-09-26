@@ -268,6 +268,18 @@ private slots:
         for (const int i : reordered.srcIndex) QVERIFY(i >= 0 && i < 4);
     }
 
+    void normalizedCharactersKeepTheirOwnSourceIndex()
+    {
+        // A character NFC replaces on its own (Kelvin sign, a compatibility
+        // ideograph) maps to itself, not to the letter before it; a composed
+        // accent maps to its base.
+        QCOMPARE(Fold::fold(QString::fromUcs4(U"A\u212A")).srcIndex, (QVector<int>{0, 1}));
+        QCOMPARE(Fold::fold(QString::fromUcs4(U"A\uF902")).srcIndex, (QVector<int>{0, 1}));
+        const Fold::FoldResult cafe = Fold::fold(QString::fromUcs4(U"Cafe\u0301\u212A"));
+        QCOMPARE(cafe.text, QStringLiteral("cafek"));
+        QCOMPARE(cafe.srcIndex, (QVector<int>{0, 1, 2, 3, 5}));
+    }
+
     void iterationMarksUseTheirSourcePosition()
     {
         // The primary fold keeps iteration marks as written, like a query that

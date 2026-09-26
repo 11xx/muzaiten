@@ -210,9 +210,8 @@ Composed compose(const QString &src)
         while (j < n) {
             const auto [next, width] = decode(s, n, j);
             const int cls = QChar::combiningClass(next);
-            const bool composes = normalizes(next);
-            if (!composes && cls == 0) break;
-            composable = composable || composes || (cls != 0 && previousClass > cls);
+            if (cls == 0 && !joinsPrevious(next)) break;
+            composable = composable || normalizes(next) || (cls != 0 && previousClass > cls);
             previousClass = cls;
             j += width;
         }

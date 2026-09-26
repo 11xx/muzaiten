@@ -28,6 +28,11 @@ bool normalizes(char32_t cp)
     return std::binary_search(kComposableAstral, kComposableAstral + kComposableAstralCount, cp);
 }
 
+bool joinsPrevious(char32_t cp)
+{
+    return std::binary_search(kJoiningStarters, kJoiningStarters + kJoiningStarterCount, cp);
+}
+
 QStringView decompOf(char32_t cp)
 {
     const Decomp *end = kDecomp + kDecompCount;

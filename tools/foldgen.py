@@ -1051,6 +1051,23 @@ class Generator:
         # Hangul composes algorithmically: an LV syllable takes a final jamo.
         for cp in range(0x11A8, 0x11C3):
             composable_bmp[cp // 32] |= 1 << (cp % 32)
+        # Starters (combining class 0) that NFC may merge into the sequence
+        # before them: the second half of a composition, or a character whose
+        # decomposition begins with a mark (U+0F73). Every other starter,
+        # including one NFC replaces on its own (the Kelvin sign), begins a
+        # sequence of its own.
+        def composes_second(cp: int) -> bool:
+            return (cp < 0x10000 and bool(composable_bmp[cp // 32] >> (cp % 32) & 1)) or cp in composable_astral
+
+        joining: list[int] = []
+        for cp in range(0x110000):
+            if 0xD800 <= cp <= 0xDFFF or unicodedata.combining(chr(cp)):
+                continue
+            head = ord(unicodedata.normalize("NFD", chr(cp))[0])
+            if unicodedata.combining(chr(head)):
+                joining.append(cp)
+            elif head == cp and composes_second(cp) and unicodedata.normalize("NFC", chr(cp)) == chr(cp):
+                joining.append(cp)
 
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
@@ -1061,7 +1078,7 @@ class Generator:
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
                             abjad_block_rows, abjad_constants, tibetan_rows, composable_bmp,
-                            composable_astral)).encode())
+                            composable_astral, joining)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -1131,6 +1148,8 @@ class Generator:
         w(f"const char32_t kComposableAstral[{len(composable_astral)}] = {{"
           + ", ".join(f"0x{cp:X}" for cp in composable_astral) + "};")
         w(f"const std::size_t kComposableAstralCount = {len(composable_astral)};")
+        w(f"const char32_t kJoiningStarters[{len(joining)}] = {{" + ", ".join(f"0x{cp:X}" for cp in joining) + "};")
+        w(f"const std::size_t kJoiningStarterCount = {len(joining)};")
         w("")
         w("const TibetanChar kTibetanChars[0x100] = {")
         out.extend(tibetan_rows)
