@@ -252,7 +252,10 @@ void foldHebrew(const Unit *u, qsizetype n, int style, Out &out)
             break;
         case AbjadRole::He:
             if (!next && !l.dagesh && vowel.isEmpty()) {
-                out.put(kHebrewFinalHe[s], l.src);
+                // A word-final he marks a vowel: after a pointed one it adds
+                // nothing (תּוֹרָה tora, torah), otherwise it spells the a itself.
+                if (!endsWithVowel(out, start)) out.put(kHebrewFinalHe[s], l.src);
+                else if (style == 2) out.put(u'h', l.src);
             } else {
                 out.put(u'h', l.src);
                 if (!vowel.isEmpty()) out.put(vowel, l.src);
