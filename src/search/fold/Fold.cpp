@@ -162,6 +162,68 @@ bool foldAscii(const QString &src, QString &folded)
     return true;
 }
 
+// Canonically equivalent text folds alike: a base followed by marks that
+// compose with it (decomposed file names, NFD input) is composed first.
+// Composed carries the composed text and, for each of its units, the
+// source index of the sequence it came from.
+struct Composed {
+    QString text;
+    QVector<int> map;
+};
+
+bool needsComposition(const QString &src)
+{
+    const char16_t *s = reinterpret_cast<const char16_t *>(src.utf16());
+    const qsizetype n = src.size();
+    for (qsizetype i = 1; i < n; ++i) {
+        const char16_t c = s[i];
+        if (c < 0x0300) continue;
+        if (QChar::isLowSurrogate(c) && QChar::isHighSurrogate(s[i - 1])) {
+            if (composesWithPrevious(QChar::surrogateToUcs4(s[i - 1], c))) return true;
+            continue;
+        }
+        if (composesWithPrevious(c)) return true;
+    }
+    return false;
+}
+
+Composed compose(const QString &src)
+{
+    const char16_t *s = reinterpret_cast<const char16_t *>(src.utf16());
+    const qsizetype n = src.size();
+    Composed out;
+    out.text.reserve(n);
+    out.map.reserve(n);
+    qsizetype i = 0;
+    while (i < n) {
+        qsizetype j = i + decode(s, n, i).width;
+        bool composable = false;
+        while (j < n) {
+            const auto [next, width] = decode(s, n, j);
+            const bool composes = composesWithPrevious(next);
+            if (!composes && QChar::combiningClass(next) == 0) break;
+            composable = composable || composes;
+            j += width;
+        }
+        const QStringView sequence(s + i, j - i);
+        if (composable) {
+            const QString nfc = sequence.toString().normalized(QString::NormalizationForm_C);
+            out.text += nfc;
+            out.map.insert(out.map.size(), nfc.size(), int(i));
+        } else {
+            out.text += sequence;
+            for (qsizetype k = i; k < j; ++k) out.map.append(int(k));
+        }
+        i = j;
+    }
+    return out;
+}
+
+void remap(QVector<int> &index, const QVector<int> &map)
+{
+    for (int &k : index) k = map.at(k);
+}
+
 QVector<int> identityIndex(qsizetype n)
 {
     QVector<int> index(n);
@@ -412,6 +474,12 @@ FoldResult fold(const QString &src)
 {
     if (QString ascii; foldAscii(src, ascii)) return {std::move(ascii), identityIndex(src.size())};
     std::uint32_t mask = 0;
+    if (needsComposition(src)) {
+        const Composed composed = compose(src);
+        Folded primary = foldPass(composed.text, 0, true, mask, 0);
+        remap(primary.index, composed.map);
+        return {std::move(primary.text), std::move(primary.index)};
+    }
     Folded primary = foldPass(src, 0, true, mask, 0);
     return {std::move(primary.text), std::move(primary.index)};
 }
@@ -420,13 +488,13 @@ QString foldText(const QString &src)
 {
     if (QString ascii; foldAscii(src, ascii)) return ascii;
     std::uint32_t mask = 0;
-    return foldPass(src, 0, false, mask, 0).text;
+    return foldPass(needsComposition(src) ? compose(src).text : src, 0, false, mask, 0).text;
 }
 
 QString foldSegments(const QString &src)
 {
     if (QString ascii; foldAscii(src, ascii)) return ascii;
-    const QVector<FoldResult> folds = allFolds(src, false);
+    const QVector<FoldResult> folds = allFolds(needsComposition(src) ? compose(src).text : src, false);
     if (folds.size() == 1) return folds.first().text;
     QString joined = folds.first().text;
     for (qsizetype k = 1; k < folds.size(); ++k) {
@@ -439,7 +507,11 @@ QString foldSegments(const QString &src)
 QVector<FoldResult> foldAll(const QString &src)
 {
     if (QString ascii; foldAscii(src, ascii)) return {{std::move(ascii), identityIndex(src.size())}};
-    return allFolds(src, true);
+    if (!needsComposition(src)) return allFolds(src, true);
+    const Composed composed = compose(src);
+    QVector<FoldResult> folds = allFolds(composed.text, true);
+    for (FoldResult &f : folds) remap(f.srcIndex, composed.map);
+    return folds;
 }
 
 quint32 cacheSignature()

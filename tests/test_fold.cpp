@@ -213,6 +213,19 @@ private slots:
 
     void decomposedInputFoldsLikeComposed()
     {
+        // Every fold, not just the primary one, and the reading styles that
+        // depend on which letters a string contains.
+        for (const QString &s : {QString::fromUtf8("Їхав Київ"), QString::fromUtf8("Müller"),
+                                 QString::fromUtf8("ヷ"), QString::fromUtf8("Ευχαριστώ"),
+                                 QString::fromUtf8("한국어"), QString::fromUtf8("বোন")}) {
+            const QString nfd = s.normalized(QString::NormalizationForm_D);
+            QVERIFY2(nfd != s || s == QString::fromUtf8("ヷ"), qPrintable(s));
+            QCOMPARE(segments(nfd), segments(s));
+            for (const Fold::FoldResult &f : Fold::foldAll(nfd)) {
+                QCOMPARE(f.srcIndex.size(), f.text.size());
+                for (const int i : f.srcIndex) QVERIFY(i >= 0 && i < nfd.size());
+            }
+        }
         // File names written by macOS are NFD: kana carry combining voicing
         // marks and Hangul arrives as conjoining jamo.
         const QString deco = QString::fromUtf8("テ") + QChar(0x3099) + QString::fromUtf8("スコ");
@@ -298,6 +311,9 @@ private slots:
             }
             const QVector<Fold::FoldResult> all = Fold::foldAll(s);
             QVERIFY(!all.isEmpty());
+            // Canonically equivalent spellings fold alike.
+            QCOMPARE(segments(s.normalized(QString::NormalizationForm_D)),
+                     segments(s.normalized(QString::NormalizationForm_C)));
             QCOMPARE(all.first().text, Fold::foldText(s));
             QCOMPARE(Fold::fold(s).text, Fold::foldText(s));
             QVERIFY(Fold::foldSegments(s).startsWith(Fold::foldText(s)));

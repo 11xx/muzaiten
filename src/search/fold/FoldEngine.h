@@ -166,6 +166,9 @@ extern const std::size_t kChineseWordCount;
 extern const int kChineseLongest;
 extern const GreekStyle kGreekStyles[];
 extern const TibetanChar kTibetanChars[0x100];
+extern const std::uint32_t kComposableBmp[0x10000 / 32];
+extern const char32_t kComposableAstral[];
+extern const std::size_t kComposableAstralCount;
 extern const AbjadBlock kAbjadBlocks[];
 extern const std::size_t kAbjadBlockCount;
 extern const AbjadChar kAbjadChars[];
@@ -203,6 +206,11 @@ inline std::uint32_t entryFor(char32_t cp) { return cp < 0x10000 ? kBmp[cp] : as
 
 // The code points a handler reads for `cp`, when its entry has the decomp bit.
 QStringView decompOf(char32_t cp);
+
+// `cp` composes canonically with the code point before it (a combining accent,
+// a kana voicing mark, a Hangul vowel or final, the second half of an Indic
+// two-part vowel).
+bool composesWithPrevious(char32_t cp);
 
 // The rule for `first` followed by `second` (0 for a single letter) in `range`.
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second);

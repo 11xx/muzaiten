@@ -1023,6 +1023,27 @@ class Generator:
             role, sound = self.tibetan_info(cp)
             tibetan_rows.append(f"    {{TibetanRole::{role}, {pool.ref(sound)}}},")
 
+        # Code points that compose canonically with the one before them (the
+        # second half of an NFC composition), so the runtime composes only
+        # text that needs it.
+        composable_bmp = [0] * (0x10000 // 32)
+        composable_astral: list[int] = []
+        for cp in range(0x110000):
+            decomposition = unicodedata.decomposition(chr(cp))
+            if not decomposition or decomposition.startswith("<"):
+                continue
+            parts = [int(x, 16) for x in decomposition.split()]
+            if len(parts) != 2 or unicodedata.normalize("NFC", unicodedata.normalize("NFD", chr(cp))) != chr(cp):
+                continue
+            if parts[1] < 0x10000:
+                composable_bmp[parts[1] // 32] |= 1 << (parts[1] % 32)
+            elif parts[1] not in composable_astral:
+                composable_astral.append(parts[1])
+        composable_astral.sort()
+        # Hangul composes algorithmically: an LV syllable takes a final jamo.
+        for cp in range(0x11A8, 0x11C3):
+            composable_bmp[cp // 32] |= 1 << (cp % 32)
+
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
 
@@ -1031,7 +1052,8 @@ class Generator:
                             bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
-                            abjad_block_rows, abjad_constants, tibetan_rows)).encode())
+                            abjad_block_rows, abjad_constants, tibetan_rows, composable_bmp,
+                            composable_astral)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -1093,6 +1115,14 @@ class Generator:
         w(f"const GreekStyle kGreekStyles[{len(greek_styles)}] = {{")
         out.extend(greek_styles)
         w("};")
+        w("")
+        w("const std::uint32_t kComposableBmp[0x10000 / 32] = {")
+        for i in range(0, len(composable_bmp), 8):
+            w("    " + " ".join(f"0x{v:08X}u," for v in composable_bmp[i:i + 8]))
+        w("};")
+        w(f"const char32_t kComposableAstral[{len(composable_astral)}] = {{"
+          + ", ".join(f"0x{cp:X}" for cp in composable_astral) + "};")
+        w(f"const std::size_t kComposableAstralCount = {len(composable_astral)};")
         w("")
         w("const TibetanChar kTibetanChars[0x100] = {")
         out.extend(tibetan_rows)
