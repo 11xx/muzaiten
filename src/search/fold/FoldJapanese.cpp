@@ -1,7 +1,7 @@
 // Kana and CJK ideographs.
 //
 // The primary fold reads every kana on its own (ティ tei, きゃ kiya), keeps
-// iteration marks as written, doubles the consonant after a sokuon and drops
+// iteration marks as written (katakana ヽ ヾ as hiragana ゝ ゞ), doubles the consonant after a sokuon and drops
 // ー. It is compositional, so a kana query folds to a substring of the fold
 // of any text containing it (テ in ティ, ゃく in きゃく). Two alternates read
 // as searchers spell: style 1 is wapuro, where a syllable and a following
@@ -10,7 +10,7 @@
 // (とうきょう toukyou); style 2 is Hepburn with long vowels collapsed (tokyo).
 //
 // Ideographs keep their surface form in the primary fold (traditional forms
-// folded to simplified, compiled into the entry; 々 as written). Alternate
+// folded to simplified, compiled into the entry; 々 and 〻 as 々). Alternate
 // readings expand 々 and give the Japanese seed dictionary's readings in
 // wapuro (style 1) and Hepburn (style 2), romanized as kana, and toneless
 // pinyin with word readings for polyphones (style 3: 音乐 yinyue, 快乐 kuaile).
@@ -117,7 +117,9 @@ void foldKana(const Unit *u, qsizetype n, int style, Out &out)
         case KanaKind::Iteration:
         case KanaKind::VoicedIteration:
             if (style == 0) {
-                emitPrimary(u[k], out);  // as written, like the query that types it
+                // As written, like the query that types it, in one form for
+                // hiragana and katakana (ヽ as ゝ).
+                out.put(info->hira, u[k].src);
                 lastVowel = 0;
                 continue;
             }
@@ -221,7 +223,10 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
     const QStringView keyView(keys.data(), n);
 
     if (style == 0) {
-        for (qsizetype k = 0; k < n; ++k) emitSurface(cps[k], u[k].src, out);
+        for (qsizetype k = 0; k < n; ++k) {
+            if (isIterationMark(cps[k])) out.put(u'々', u[k].src);  // 〻 as 々
+            else emitSurface(cps[k], u[k].src, out);
+        }
         return;
     }
     if (style == 3) {

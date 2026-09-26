@@ -298,6 +298,9 @@ private slots:
             {QString::fromUtf8("東京の夜"), QString::fromUtf8("京の")},
             {QString::fromUtf8("สวัสดี"), QString::fromUtf8("วัส")},
             {QString::fromUtf8("Їхав Київ"), QString::fromUtf8("иїв")},
+            {QString::fromUtf8("こゝろ"), QString::fromUtf8("コヽロ")},
+            {QString::fromUtf8("つゞく"), QString::fromUtf8("ツヾク")},
+            {QString::fromUtf8("木々"), QString::fromUtf8("木〻")},
         };
         for (const auto &[text, query] : cases) {
             SearchRecord r = makeRecord(text, QStringLiteral("Artist"), QStringLiteral("Album"));
