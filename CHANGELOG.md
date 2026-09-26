@@ -19,6 +19,11 @@
   `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
   `jai`); Lao in its standard and French-style spellings (`viangchan`,
   `wiangjan`).
+- Search matches Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil,
+  Telugu, Kannada, Malayalam, Sinhala, Myanmar and Khmer by romanization:
+  the common spelling with the inherent vowel dropped where Hindi drops it
+  (`kamla`, `zindagi`, `kabhi khushi kabhi gham`), every inherent vowel kept
+  (`kamala`), and the ee/oo spelling of film titles (`deewana`, `dilwale`).
 - Armenian, Georgian, Kazakh and other Cyrillic letters, Ethiopic, Cherokee,
   Canadian syllabics, Yi, Bopomofo and Mongolian romanize for search.
   Look-alike punctuation that tag editors and file-name sanitizers substitute

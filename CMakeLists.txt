@@ -149,6 +149,7 @@ set(MUZAITEN_SOURCES
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
     src/search/fold/FoldAlphabets.cpp
+    src/search/fold/FoldBrahmic.cpp
     src/search/fold/FoldData.cpp
     src/search/fold/FoldJapanese.cpp
     src/search/fold/FoldKorean.cpp
@@ -404,6 +405,7 @@ set(MUZAITEN_SEARCH_SOURCES
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
     src/search/fold/FoldAlphabets.cpp
+    src/search/fold/FoldBrahmic.cpp
     src/search/fold/FoldData.cpp
     src/search/fold/FoldJapanese.cpp
     src/search/fold/FoldKorean.cpp

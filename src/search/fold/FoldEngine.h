@@ -111,6 +111,19 @@ enum class ThaiVowel : std::uint8_t {
 // behaves like, and its [style 1, style 2] spellings.
 struct ThaiChar { ThaiRole role; ThaiVowel vowel; char16_t thai; Str initial[2]; Str final[2]; };
 
+enum class BrahmicRole : std::uint8_t {
+    None, Consonant, Vowel, Sign, Virama, Anusvara, Candrabindu, Visarga, Nukta, Medial, Final, Geminate,
+};
+// A Brahmic code point: its role, a consonant's inherent vowel, its spelling
+// (a consonant without its vowel, or a vowel), an alternate spelling (a
+// consonant in the ee/oo reading, a medial in the full one), and a
+// consonant's spelling with a nukta.
+struct BrahmicChar { BrahmicRole role; char16_t inherent; Str roman; Str alt; Str nukta; };
+// How a script treats the inherent vowel and the anusvara (see brahmic.json).
+enum class BrahmicReading : std::uint8_t { Plain, North, Bengali, South, Khmer };
+struct BrahmicBlock { char32_t first; char32_t last; std::uint32_t offset; BrahmicReading reading; };
+struct BrahmicPair { char32_t first; char32_t second; Str roman; };
+
 struct AlphaRule { char32_t first; char32_t second; Str initial; Str medial; };
 struct AlphaRange { std::uint32_t begin; std::uint32_t count; };
 struct CyrillicStyle { AlphaRange map; AlphaRange uk; AlphaRange be; AlphaRange sr; };
@@ -137,6 +150,13 @@ extern const Word kChineseWords[];
 extern const std::size_t kChineseWordCount;
 extern const int kChineseLongest;
 extern const GreekStyle kGreekStyles[];
+extern const BrahmicBlock kBrahmicBlocks[];
+extern const std::size_t kBrahmicBlockCount;
+extern const BrahmicChar kBrahmicChars[];
+extern const BrahmicPair kBrahmicMerges[];
+extern const std::size_t kBrahmicMergeCount;
+extern const BrahmicPair kBrahmicClusters[];
+extern const std::size_t kBrahmicClusterCount;
 extern const ThaiChar kThaiChars[128];
 extern const ThaiChar kLaoChars[128];
 extern const Str kThaiVowels[][2];
@@ -235,5 +255,6 @@ void foldCyrillic(const Unit *units, qsizetype n, int style, const Context &ctx,
 void foldArmenian(const Unit *units, qsizetype n, int style, Out &out);
 void foldGerman(const Unit *units, qsizetype n, Out &out);
 void foldThai(const Unit *units, qsizetype n, int style, Out &out);
+void foldBrahmic(const Unit *units, qsizetype n, int style, Out &out);
 
 } // namespace Search::Fold::Engine

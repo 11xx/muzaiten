@@ -1,0 +1,65 @@
+{
+  "_doc": "Brahmic scripts: consonants carry an inherent vowel that a vowel sign replaces and a virama cancels. The text keeps its surface in the primary fold; readings are alternates. Letters are read from their Unicode names: `consonants` spells a consonant name without its inherent vowel (KHA reads kh), `vowels` spells vowel letters and signs, and `qualifiers` are words to drop from a name. `blocks` lists the scripts read and how each reads: `north` drops the inherent vowel where Hindi does (kamla, not kamala), `bengali` also reads the anusvara ng (bangla), `south` reads a word-final anusvara m (malayalam), `khmer` drops the inherent vowel of a word's last consonant (khmer), `plain` keeps every inherent vowel. `vowel_letters` are the letter names that name a vowel. Sinhala names do not spell sounds, so `sinhala` lists its letters. `clusters` respells a consonant pair joined by a virama.",
+  "blocks": {
+    "DEVANAGARI": {"first": "0900", "last": "097F", "reading": "north"},
+    "BENGALI": {"first": "0980", "last": "09FF", "reading": "bengali"},
+    "GURMUKHI": {"first": "0A00", "last": "0A7F", "reading": "north"},
+    "GUJARATI": {"first": "0A80", "last": "0AFF", "reading": "north"},
+    "ORIYA": {"first": "0B00", "last": "0B7F", "reading": "north"},
+    "TAMIL": {"first": "0B80", "last": "0BFF", "reading": "south"},
+    "TELUGU": {"first": "0C00", "last": "0C7F", "reading": "south"},
+    "KANNADA": {"first": "0C80", "last": "0CFF", "reading": "south"},
+    "MALAYALAM": {"first": "0D00", "last": "0D7F", "reading": "south"},
+    "SINHALA": {"first": "0D80", "last": "0DFF", "reading": "south"},
+    "MYANMAR": {"first": "1000", "last": "109F", "reading": "plain"},
+    "KHMER": {"first": "1780", "last": "17FF", "reading": "khmer"}
+  },
+  "consonants": {
+    "K": "k", "KH": "kh", "G": "g", "GH": "gh", "NG": "ng", "C": "ch", "CH": "chh", "J": "j", "JH": "jh",
+    "NY": "ny", "NNY": "ny", "TT": "t", "TTH": "th", "DD": "d", "DDH": "dh", "NN": "n", "T": "t", "TH": "th",
+    "D": "d", "DH": "dh", "N": "n", "NNN": "n", "P": "p", "PH": "ph", "B": "b", "BH": "bh", "M": "m",
+    "Y": "y", "YY": "y", "R": "r", "RR": "r", "RRR": "r", "L": "l", "LL": "l", "LLL": "zh", "V": "v",
+    "W": "w", "SH": "sh", "SS": "sh", "S": "s", "H": "h", "Q": "q", "KHH": "kh", "GHH": "gh", "Z": "z",
+    "ZH": "zh", "DDD": "d", "DDDH": "r", "RH": "rh", "F": "f", "JJ": "j", "GG": "g", "BB": "b",
+    "TTT": "t", "TS": "ts", "DZ": "dz", "GHW": "ghw", "YW": "yw", "PW": "pw", "GREAT S": "ss",
+    "HEAVY Y": "y", "GLOTTAL STOP": "", "NY_KHMER": "nh", "Q_KHMER": ""
+  },
+  "vowels": {
+    "A": "a", "AA": "aa", "I": "i", "II": "ii", "U": "u", "UU": "uu", "VOCALIC R": "ri", "VOCALIC RR": "ri",
+    "VOCALIC L": "li", "VOCALIC LL": "li", "E": "e", "EE": "ee", "AI": "ai", "O": "o", "OO": "oo", "AU": "au",
+    "CANDRA A": "a", "CANDRA E": "e", "CANDRA O": "o", "CANDRA LONG E": "e", "SHORT A": "a", "SHORT E": "e",
+    "SHORT O": "o", "OE": "oe", "OOE": "oe", "UE": "ue", "UUE": "ue", "AW": "aw", "ARCHAIC II": "ii",
+    "PRISHTHAMATRA E": "e", "TALL AA": "aa", "E ABOVE": "e", "AE": "ae", "IE": "ie", "UA": "ua",
+    "YA": "ya", "Y": "eu", "YY": "eu", "EU": "eu", "FINAL Y": "y", "QI": "i", "QII": "ii", "QU": "u",
+    "QUK": "uk", "QUU": "uu", "QUUV": "uv", "RY": "ri", "RYY": "rii", "LY": "li", "LYY": "lii", "QE": "e",
+    "QAI": "ai", "QOO": "o", "QAU": "au", "QAQ": "a", "QAA": "aa", "OM": "om"
+  },
+  "vowel_letters": [
+    "A", "AA", "I", "II", "U", "UU", "VOCALIC R", "VOCALIC RR", "VOCALIC L", "VOCALIC LL", "E", "EE", "AI",
+    "O", "OO", "AU", "CANDRA A", "CANDRA E", "CANDRA O", "SHORT A", "SHORT E", "SHORT O", "OE", "OOE", "UE",
+    "UUE", "AW", "ARCHAIC II", "AE"
+  ],
+  "qualifiers": [
+    "MON", "SHAN", "SGAW", "KAREN", "WESTERN", "EASTERN", "PWO", "GEBA", "KAYAH", "RUMAI", "PALAUNG",
+    "AITON", "KHAMTI", "TAI", "LAING", "MARWARI", "TYPE", "ONE", "TWO"
+  ],
+  "medials": {"YA": ["y", "y"], "RA": ["y", "r"], "WA": ["w", "w"], "HA": ["h", "h"]},
+  "clusters": {"ज्ञ": "gy", "জ্ঞ": "gy"},
+  "sinhala": {
+    "consonants": {
+      "ක": "k", "ඛ": "kh", "ග": "g", "ඝ": "gh", "ඞ": "ng", "ඟ": "ng", "ච": "ch", "ඡ": "chh", "ජ": "j",
+      "ඣ": "jh", "ඤ": "ny", "ඥ": "gny", "ඦ": "nj", "ට": "t", "ඨ": "th", "ඩ": "d", "ඪ": "dh", "ණ": "n",
+      "ඬ": "nd", "ත": "t", "ථ": "th", "ද": "d", "ධ": "dh", "න": "n", "ඳ": "nd", "ප": "p", "ඵ": "ph",
+      "බ": "b", "භ": "bh", "ම": "m", "ඹ": "mb", "ය": "y", "ර": "r", "ල": "l", "ව": "v", "ශ": "sh",
+      "ෂ": "sh", "ස": "s", "හ": "h", "ළ": "l", "ෆ": "f"
+    },
+    "vowels": {
+      "අ": "a", "ආ": "aa", "ඇ": "ae", "ඈ": "ae", "ඉ": "i", "ඊ": "ii", "උ": "u", "ඌ": "uu", "ඍ": "ri",
+      "ඎ": "ri", "ඏ": "li", "ඐ": "li", "එ": "e", "ඒ": "ee", "ඓ": "ai", "ඔ": "o", "ඕ": "oo", "ඖ": "au"
+    },
+    "signs": {
+      "ා": "aa", "ැ": "ae", "ෑ": "ae", "ි": "i", "ී": "ii", "ු": "u", "ූ": "uu", "ෘ": "ru", "ෲ": "ru",
+      "ෟ": "lu", "ෳ": "lu", "ෙ": "e", "ේ": "ee", "ෛ": "ai", "ො": "o", "ෝ": "oo", "ෞ": "au"
+    }
+  }
+}

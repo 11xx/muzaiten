@@ -172,6 +172,9 @@ class Generator:
         self.han = load_json(tables / "han.json")
         self.other = load_json(tables / "other.json")
         self.thai = load_json(tables / "thai.json")
+        self.brahmic = load_json(tables / "brahmic.json")
+        self.brahmic_blocks = [(name, int(b["first"], 16), int(b["last"], 16), b["reading"])
+                               for name, b in self.brahmic["blocks"].items()]
 
         self.german = without_doc(self.latin["german"])
         self.cyrillic_letters = self.cyrillic["letters"]
@@ -391,7 +394,7 @@ class Generator:
     def script_of(self, ch: str) -> int:
         """Script id recorded in an entry: which alternate reading applies to it."""
         cp = ord(ch)
-        if in_ranges(cp, GENERIC_MARK_RANGES):
+        if in_ranges(cp, GENERIC_MARK_RANGES) or cp in (0x200C, 0x200D):
             return S["Inherited"]
         nfkc = unicodedata.normalize("NFKC", ch)
         first = nfkc[0] if nfkc else ch
@@ -401,6 +404,8 @@ class Generator:
             for script, (lo, hi) in (("Thai", (0x0E00, 0x0E7F)), ("Lao", (0x0E80, 0x0EFF))):
                 if lo <= ord(first) <= hi:
                     return S[script]
+            if self.brahmic_block(ord(ch)) is not None:
+                return S["Brahmic"]
         low = first.lower()
         composed = unicodedata.normalize("NFC", low)
         if composed in self.german:
@@ -481,6 +486,90 @@ class Generator:
             low = unicodedata.normalize("NFC", ch.lower())
             return pack(SCRIPT, script, decomp=low != ch), (low if low != ch else None)
         raise AssertionError(ch)
+
+    # -- Brahmic -----------------------------------------------------------------
+
+    def brahmic_block(self, cp: int):
+        for block in self.brahmic_blocks:
+            if block[1] <= cp <= block[2]:
+                return block
+        return None
+
+    def strip_qualifiers(self, words: list[str]) -> list[str]:
+        qualifiers = set(self.brahmic["qualifiers"])
+        return [w for w in words if w not in qualifiers]
+
+    def brahmic_vowel(self, stem: str) -> Optional[str]:
+        stem = " ".join(self.strip_qualifiers(stem.split()))
+        return self.brahmic["vowels"].get(stem)
+
+    def brahmic_info(self, cp: int) -> tuple[str, str, str, str]:
+        """(role, inherent vowel, spelling, alternate spelling) of a Brahmic code point."""
+        ch = chr(cp)
+        block = self.brahmic_block(cp)
+        script = block[0]
+        if unicodedata.category(ch)[0] not in "LM":
+            return "None", "", "", ""
+        if script == "SINHALA":
+            table = self.brahmic["sinhala"]
+            if ch in table["consonants"]:
+                return "Consonant", "a", table["consonants"][ch], table["consonants"][ch]
+            if ch in table["vowels"]:
+                return "Vowel", "", table["vowels"][ch], ""
+            if ch in table["signs"]:
+                return "Sign", "", table["signs"][ch], ""
+        n = name(ch)
+        rest = n[len(script) + 1:]
+        if rest.startswith("LETTER "):
+            stem = rest[len("LETTER "):]
+            if stem.startswith("CHILLU "):
+                sound = self.brahmic["consonants"].get(stem[len("CHILLU "):], stem[len("CHILLU "):].lower())
+                return "Final", "", sound, sound
+            if stem in ("KHANDA TA", "DOT REPH"):
+                sound = "t" if stem == "KHANDA TA" else "r"
+                return "Final", "", sound, sound
+            if script == "MYANMAR" and stem == "A":
+                return "Consonant", "a", "", ""
+            if script == "KHMER" and stem == "QA":
+                return "Consonant", "a", self.brahmic["consonants"]["Q_KHMER"], ""
+            if " ".join(self.strip_qualifiers(stem.split())) in self.brahmic["vowel_letters"]:
+                return "Vowel", "", self.brahmic_vowel(stem), ""
+            words = self.strip_qualifiers(stem.split())
+            stem = " ".join(words)
+            inherent = "a"
+            if script == "KHMER" and stem.endswith("O"):
+                base, inherent = stem[:-1], "o"
+            elif stem.endswith("A"):
+                base = stem[:-1]
+            else:
+                base = stem
+            if script == "KHMER" and base == "NY":
+                base = "NY_KHMER"
+            sound = self.brahmic["consonants"].get(base.strip(), base.strip().lower().replace(" ", ""))
+            alt = "w" if sound == "v" and block[3] in ("north", "bengali") else sound
+            return "Consonant", inherent, sound, alt
+        if rest.startswith("VOWEL SIGN "):
+            vowel = self.brahmic_vowel(rest[len("VOWEL SIGN "):])
+            return ("Sign", "", vowel, "") if vowel is not None else ("None", "", "", "")
+        if rest.startswith("INDEPENDENT VOWEL "):
+            vowel = self.brahmic_vowel(rest[len("INDEPENDENT VOWEL "):])
+            return ("Vowel", "", vowel, "") if vowel is not None else ("None", "", "", "")
+        if rest.startswith("CONSONANT SIGN MEDIAL "):
+            spelled = self.brahmic["medials"].get(rest.split()[-1])
+            return ("Medial", "", spelled[0], spelled[1]) if spelled else ("None", "", "", "")
+        roles = {
+            "SIGN VIRAMA": "Virama", "SIGN ASAT": "Virama", "SIGN COENG": "Virama", "SIGN AL-LAKUNA": "Virama",
+            "SIGN VIRIAM": "Virama", "SIGN ANUSVARA": "Anusvara", "SIGN NIKAHIT": "Anusvara",
+            "SIGN BINDI": "Anusvara", "TIPPI": "Anusvara", "SIGN ANUSVARAYA": "Anusvara",
+            "SIGN CANDRABINDU": "Candrabindu", "SIGN VISARGA": "Visarga", "SIGN REAHMUK": "Visarga",
+            "SIGN VISARGAYA": "Visarga", "SIGN NUKTA": "Nukta", "ADDAK": "Geminate",
+        }
+        role = roles.get(rest, "None")
+        if script == "MYANMAR" and role == "Visarga":
+            role = "None"  # a tone mark in Burmese
+        if rest == "OM":
+            return "Vowel", "", "om", ""
+        return role, "", "", ""
 
     # -- kana ------------------------------------------------------------------
 
@@ -761,13 +850,45 @@ class Generator:
         thai_rows = thai_block(self.thai["thai"], 0x0E00, False)
         lao_rows = thai_block(self.thai["lao"], 0x0E80, True)
 
+        # Brahmic
+        brahmic_rows: list[str] = []
+        brahmic_block_rows: list[str] = []
+        merges: list[str] = []
+        nukta_of: dict[int, str] = {}
+        for _, first, last, _ in self.brahmic_blocks:
+            for cp in range(first, last + 1):
+                decomposed = unicodedata.normalize("NFD", chr(cp))
+                if len(decomposed) == 2 and name(decomposed[1]).endswith("SIGN NUKTA"):
+                    role, _, sound, _ = self.brahmic_info(cp)
+                    if role == "Consonant":
+                        nukta_of[ord(decomposed[0])] = sound
+        readings = {"plain": "Plain", "north": "North", "bengali": "Bengali", "south": "South", "khmer": "Khmer"}
+        for block_name, first, last, reading in self.brahmic_blocks:
+            brahmic_block_rows.append(
+                f"    {{0x{first:X}, 0x{last:X}, {len(brahmic_rows)}, BrahmicReading::{readings[reading]}}},")
+            for cp in range(first, last + 1):
+                role, inherent, sound, alt = self.brahmic_info(cp)
+                inherent_literal = f"u'{inherent}'" if inherent else "0"
+                brahmic_rows.append(
+                    f"    {{BrahmicRole::{role}, {inherent_literal}, {pool.ref(sound)}, {pool.ref(alt)}, "
+                    f"{pool.ref(nukta_of.get(cp, sound))}}},")
+                decomposed = unicodedata.normalize("NFD", chr(cp))
+                if role == "Sign" and len(decomposed) == 2:
+                    merges.append((ord(decomposed[0]), ord(decomposed[1]), sound))
+        merge_rows = [f"    {{0x{a:X}, 0x{b:X}, {pool.ref(s)}}}," for a, b, s in sorted(merges)]
+        cluster_rows = []
+        for key, sound in sorted(self.brahmic["clusters"].items()):
+            cluster_rows.append(f"    {{0x{ord(key[0]):X}, 0x{ord(key[2]):X}, {pool.ref(sound)}}},")
+        cluster_rows.sort()
+
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
 
         digest = hashlib.sha256()
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
                             bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
-                            greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows)).encode())
+                            greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
+                            brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -829,6 +950,22 @@ class Generator:
         w(f"const GreekStyle kGreekStyles[{len(greek_styles)}] = {{")
         out.extend(greek_styles)
         w("};")
+        w("")
+        w(f"const BrahmicBlock kBrahmicBlocks[{len(brahmic_block_rows)}] = {{")
+        out.extend(brahmic_block_rows)
+        w("};")
+        w(f"const std::size_t kBrahmicBlockCount = {len(brahmic_block_rows)};")
+        w(f"const BrahmicChar kBrahmicChars[{len(brahmic_rows)}] = {{")
+        out.extend(brahmic_rows)
+        w("};")
+        w(f"const BrahmicPair kBrahmicMerges[{max(1, len(merge_rows))}] = {{")
+        out.extend(merge_rows)
+        w("};")
+        w(f"const std::size_t kBrahmicMergeCount = {len(merge_rows)};")
+        w(f"const BrahmicPair kBrahmicClusters[{max(1, len(cluster_rows))}] = {{")
+        out.extend(cluster_rows)
+        w("};")
+        w(f"const std::size_t kBrahmicClusterCount = {len(cluster_rows)};")
         w("")
         w("const ThaiChar kThaiChars[128] = {")
         out.extend(thai_rows)
