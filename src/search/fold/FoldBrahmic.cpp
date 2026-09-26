@@ -95,8 +95,16 @@ void spellVowel(QStringView v, int style, Spelling &out)
     }
 }
 
-// Drops the inherent vowel where Hindi speech drops it: word-finally after
-// a single consonant, and between a vowel-consonant and a consonant-vowel.
+bool isSemivowel(const Spelling &consonant)
+{
+    return consonant.size() == 1
+        && (consonant[0] == u'y' || consonant[0] == u'r' || consonant[0] == u'l' || consonant[0] == u'v'
+            || consonant[0] == u'w');
+}
+
+// Drops the inherent vowel where Hindi speech drops it: at the end of a word
+// (दर्द dard, धर्म dharm), except after a cluster ending in a semivowel (मित्र
+// mitra, सूर्य surya), and between a vowel-consonant and a consonant-vowel.
 void deleteSchwas(QVarLengthArray<Syllable, 16> &syl)
 {
     const qsizetype n = syl.size();
@@ -105,8 +113,9 @@ void deleteSchwas(QVarLengthArray<Syllable, 16> &syl)
         return k >= 0 && k < n && syl[k].kind != VowelKind::None && !syl[k].deleted;
     };
     Syllable &last = syl[n - 1];
-    if (last.kind == VowelKind::Inherent && last.hasConsonant && syl[n - 2].kind != VowelKind::None
-        && !last.hasCoda()) {
+    const bool afterCluster = syl[n - 2].kind == VowelKind::None;
+    if (last.kind == VowelKind::Inherent && last.hasConsonant && !last.hasCoda()
+        && !(afterCluster && isSemivowel(last.consonant))) {
         last.deleted = true;
     }
     for (qsizetype k = n - 2; k >= 1; --k) {
