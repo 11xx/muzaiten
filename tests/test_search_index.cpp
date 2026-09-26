@@ -272,6 +272,15 @@ private slots:
         QCOMPARE(titleOf(QStringLiteral("dongjing")), QString::fromUtf8("東京の夜"));
         QCOMPARE(titleOf(QString::fromUtf8("東")), QString::fromUtf8("東京の夜"));
         QCOMPARE(titleOf(QStringLiteral("^title:tokyo")), QString::fromUtf8("東京の夜"));
+
+        SearchRecord mixed = makeRecord(QString::fromUtf8("한국어Müller"), QStringLiteral("Artist"), QStringLiteral("Album"));
+        foldRecordNorms(mixed);
+        SearchIndex mixedIndex;
+        mixedIndex.build({mixed});
+        for (const QString &query : {QString::fromUtf8("hangugeoMüller"), QStringLiteral("hangugeomueller"),
+                                     QString::fromUtf8("한국어mueller")}) {
+            QVERIFY2(mixedIndex.match(SearchQuery::parse(query), false).size() == 1, qPrintable(query));
+        }
     }
 
     void queriesInTheirOwnScriptFindTextContainingThem()

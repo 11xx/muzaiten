@@ -5,6 +5,7 @@
 #include <QVarLengthArray>
 
 #include <algorithm>
+#include <array>
 
 namespace Search::Fold {
 
@@ -261,9 +262,14 @@ qsizetype collectRun(const char16_t *s, qsizetype n, qsizetype i, Script family,
     return i;
 }
 
-void dispatch(Script family, const Units &units, int pass, const Context &ctx, Out &out)
+// The reading style of each script family in one pass (0 everywhere is the
+// primary fold).
+using Styles = std::array<std::uint8_t, 32>;
+constexpr Styles kPrimary{};
+
+void dispatch(Script family, const Units &units, const Styles &styles, const Context &ctx, Out &out)
 {
-    const int style = pass < styleCount(family) ? pass : 0;
+    const int style = styles[unsigned(family)];
     const Unit *u = units.data();
     const qsizetype n = units.size();
     switch (family) {
@@ -344,7 +350,7 @@ void dispatch(Script family, const Units &units, int pass, const Context &ctx, O
 // unit to one source index (a compatibility expansion folds in place of the
 // character it came from). `mask` collects the scripts seen; `fullMask` is the
 // whole string's, which language-dependent readings consult.
-void runPass(const char16_t *s, qsizetype n, int pass, int srcOverride, std::uint32_t &mask,
+void runPass(const char16_t *s, qsizetype n, const Styles &styles, int srcOverride, std::uint32_t &mask,
              std::uint32_t fullMask, Out &out)
 {
     qsizetype i = 0;
@@ -361,7 +367,7 @@ void runPass(const char16_t *s, qsizetype n, int pass, int srcOverride, std::uin
         const Script script = scriptOf(e);
         const Kind kind = kindOf(e);
         const Script family = familyOf(script);
-        if (kind == Kind::Script || (pass > 0 && pass < styleCount(family))) {
+        if (kind == Kind::Script || styles[unsigned(family)] > 0) {
             Units units;
             Context ctx;
             ctx.mask = fullMask | mask;
@@ -371,7 +377,7 @@ void runPass(const char16_t *s, qsizetype n, int pass, int srcOverride, std::uin
                 i += width;
                 continue;
             }
-            dispatch(family, units, pass, ctx, out);
+            dispatch(family, units, styles, ctx, out);
             i = end;
             continue;
         }
@@ -389,7 +395,7 @@ void runPass(const char16_t *s, qsizetype n, int pass, int srcOverride, std::uin
             out.put(QStringView(kPool + payloadOf(e), qsizetype(lengthOf(e))), src);
             break;
         case Kind::Expand:
-            runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), pass, src, mask, fullMask, out);
+            runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), styles, src, mask, fullMask, out);
             break;
         case Kind::Drop:
         case Kind::Script:
@@ -399,13 +405,80 @@ void runPass(const char16_t *s, qsizetype n, int pass, int srcOverride, std::uin
     }
 }
 
-int passCount(std::uint32_t mask)
+// Kana and ideographs choose their styles together: Japanese readings of
+// kanji pair with the kana spelling of the same pass.
+Script groupOf(Script family)
 {
-    int count = 1;
+    return family == Script::Kana ? Script::Han : family;
+}
+
+void assign(Styles &styles, Script group, int style)
+{
+    const auto set = [&](Script family) {
+        styles[unsigned(family)] = std::uint8_t(style < styleCount(family) ? style : 0);
+    };
+    set(group);
+    if (group == Script::Han) set(Script::Kana);
+}
+
+// The alternate passes for a string whose scripts are `mask`. Each script
+// group reads independently: with several groups, the passes cover every
+// combination of their styles (up to 16 passes), so a word mixing scripts
+// matches whichever reading each part is typed in. Beyond that, each group
+// varies alone besides the passes that move every group together.
+QVarLengthArray<Styles, 16> alternateStyles(std::uint32_t mask)
+{
+    struct Group {
+        Script group;
+        int count;
+    };
+    QVarLengthArray<Group, 8> groups;
+    int widest = 1;
     for (unsigned s = 0; s < 32; ++s) {
-        if (mask & (1u << s)) count = std::max(count, styleCount(familyOf(Script(s))));
+        if (!(mask & (1u << s))) continue;
+        const Script group = groupOf(familyOf(Script(s)));
+        const int count = group == Script::Han ? std::max(styleCount(Script::Han), styleCount(Script::Kana))
+                                               : styleCount(group);
+        if (count < 2 || std::any_of(groups.cbegin(), groups.cend(), [&](const Group &g) { return g.group == group; })) {
+            continue;
+        }
+        groups.append({group, count});
+        widest = std::max(widest, count);
     }
-    return count;
+    QVarLengthArray<Styles, 16> passes;
+    const auto add = [&](const Styles &styles) {
+        if (styles != kPrimary && std::find(passes.cbegin(), passes.cend(), styles) == passes.cend()) {
+            passes.append(styles);
+        }
+    };
+    for (int k = 1; k < widest; ++k) {
+        Styles styles{};
+        for (const Group &g : groups) assign(styles, g.group, k < g.count ? k : 0);
+        add(styles);
+    }
+    if (groups.size() < 2) return passes;
+    int combinations = 1;
+    for (const Group &g : groups) combinations = std::min(combinations * g.count, 17);
+    if (combinations <= 16) {
+        for (int index = 1; index < combinations; ++index) {
+            Styles styles{};
+            int rest = index;
+            for (const Group &g : groups) {
+                assign(styles, g.group, rest % g.count);
+                rest /= g.count;
+            }
+            add(styles);
+        }
+        return passes;
+    }
+    for (const Group &g : groups) {
+        for (int k = 1; k < g.count; ++k) {
+            Styles styles{};
+            assign(styles, g.group, k);
+            add(styles);
+        }
+    }
+    return passes;
 }
 
 struct Folded {
@@ -413,10 +486,11 @@ struct Folded {
     QVector<int> index;
 };
 
-Folded foldPass(const QString &src, int pass, bool withIndex, std::uint32_t &mask, std::uint32_t fullMask)
+Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::uint32_t &mask,
+                std::uint32_t fullMask)
 {
     Out out(withIndex, src.size() + 8);
-    runPass(reinterpret_cast<const char16_t *>(src.utf16()), src.size(), pass, -1, mask, fullMask, out);
+    runPass(reinterpret_cast<const char16_t *>(src.utf16()), src.size(), styles, -1, mask, fullMask, out);
     QVector<int> index = out.takeIndex();
     return {out.takeText(), std::move(index)};
 }
@@ -425,13 +499,12 @@ Folded foldPass(const QString &src, int pass, bool withIndex, std::uint32_t &mas
 QVector<FoldResult> allFolds(const QString &src, bool withIndex)
 {
     std::uint32_t mask = 0;
-    Folded primary = foldPass(src, 0, withIndex, mask, 0);
+    Folded primary = foldPass(src, kPrimary, withIndex, mask, 0);
     QVector<FoldResult> folds;
     folds.append({std::move(primary.text), std::move(primary.index)});
-    const int passes = passCount(mask);
-    for (int pass = 1; pass < passes; ++pass) {
+    for (const Styles &styles : alternateStyles(mask)) {
         std::uint32_t seen = 0;
-        Folded alt = foldPass(src, pass, withIndex, seen, mask);
+        Folded alt = foldPass(src, styles, withIndex, seen, mask);
         const bool duplicate = std::any_of(folds.cbegin(), folds.cend(),
                                            [&](const FoldResult &f) { return f.text == alt.text; });
         if (!duplicate) folds.append({std::move(alt.text), std::move(alt.index)});
@@ -459,7 +532,7 @@ void emitPrimary(const Unit &unit, Out &out)
         return;
     case Kind::Expand: {
         std::uint32_t mask = 0;
-        runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), 0, unit.src, mask, 0, out);
+        runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), kPrimary, unit.src, mask, 0, out);
         return;
     }
     case Kind::Drop:
@@ -475,11 +548,11 @@ FoldResult fold(const QString &src)
     std::uint32_t mask = 0;
     if (needsComposition(src)) {
         const Composed composed = compose(src);
-        Folded primary = foldPass(composed.text, 0, true, mask, 0);
+        Folded primary = foldPass(composed.text, kPrimary, true, mask, 0);
         remap(primary.index, composed.map);
         return {std::move(primary.text), std::move(primary.index)};
     }
-    Folded primary = foldPass(src, 0, true, mask, 0);
+    Folded primary = foldPass(src, kPrimary, true, mask, 0);
     return {std::move(primary.text), std::move(primary.index)};
 }
 
@@ -487,7 +560,7 @@ QString foldText(const QString &src)
 {
     if (QString ascii; foldAscii(src, ascii)) return ascii;
     std::uint32_t mask = 0;
-    return foldPass(needsComposition(src) ? compose(src).text : src, 0, false, mask, 0).text;
+    return foldPass(needsComposition(src) ? compose(src).text : src, kPrimary, false, mask, 0).text;
 }
 
 QString foldSegments(const QString &src)

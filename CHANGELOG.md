@@ -53,8 +53,9 @@
 ### Fixed
 
 - Katakana loanword spellings romanize as one sound (`ティ` ti, `ファ` fa,
-  `シェ` she) instead of letter by letter (`tei`, `fua`), and kana in file names
-  written by macOS (with separate voicing marks) fold like typed kana.
+  `シェ` she) instead of letter by letter (`tei`, `fua`), and text written
+  decomposed, as in file names from macOS (separate accents, kana voicing
+  marks, Hangul jamo), folds like composed text.
 
 - Anchored search terms (`^wall`, `the wall$`), fuzzy matching and exclusion
   globs now check a field's display text and its sort name separately, so a

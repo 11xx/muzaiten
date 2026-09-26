@@ -155,6 +155,20 @@ private slots:
         QCOMPARE(Fold::foldText(once), once);
     }
 
+    void scriptsChooseTheirReadingsIndependently()
+    {
+        // Each script's readings combine with every reading of the others.
+        const QStringList mixed = segments(QString::fromUtf8("한국어Müller"));
+        for (const QString &expected : {QStringLiteral("hangukeomuller"), QStringLiteral("hangugeomuller"),
+                                        QStringLiteral("hangukeomueller"), QStringLiteral("hangugeomiller"),
+                                        QStringLiteral("hangugomueller")}) {
+            QVERIFY2(mixed.contains(expected), qPrintable(expected));
+        }
+        // Kana and kanji still read as one Japanese spelling per fold.
+        QVERIFY(segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoyoru")));
+        QVERIFY(!segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoye")));
+    }
+
     void segmentsJoinDistinctFolds()
     {
         QCOMPARE(Fold::foldSegments(QStringLiteral("Plain Text")), QStringLiteral("plain text"));
