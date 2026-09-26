@@ -111,6 +111,16 @@ enum class ThaiVowel : std::uint8_t {
 // behaves like, and its [style 1, style 2] spellings.
 struct ThaiChar { ThaiRole role; ThaiVowel vowel; char16_t thai; Str initial[2]; Str final[2]; };
 
+enum class AbjadRole : std::uint8_t {
+    None, Consonant, Alef, Ain, Waw, Yeh, Maksura, Marbuta, Hamza, VowelLetter, He, Shin,
+    Vowel, Shadda, Sukun, Dagesh, ShinDot, SinDot, Rafe, Geresh, Sheva,
+};
+// An Arabic, Hebrew, Syriac or Thaana code point: its role and its spelling in
+// reading styles 1-3, with a Hebrew letter's spelling without a hardening dot
+// and after a geresh.
+struct AbjadChar { AbjadRole role; Str value[3]; Str soft; Str geresh; };
+struct AbjadBlock { char32_t first; char32_t last; std::uint32_t offset; };
+
 enum class BrahmicRole : std::uint8_t {
     None, Consonant, Vowel, Sign, Virama, Anusvara, Candrabindu, Visarga, Nukta, Medial, Final, Geminate,
 };
@@ -150,6 +160,14 @@ extern const Word kChineseWords[];
 extern const std::size_t kChineseWordCount;
 extern const int kChineseLongest;
 extern const GreekStyle kGreekStyles[];
+extern const AbjadBlock kAbjadBlocks[];
+extern const std::size_t kAbjadBlockCount;
+extern const AbjadChar kAbjadChars[];
+extern const Str kArabicArticle[3];
+extern const Str kArabicWaw[3];
+extern const Str kArabicYeh[3];
+extern const Str kArabicMarbuta[3];
+extern const Str kHebrewFinalHe[2];
 extern const BrahmicBlock kBrahmicBlocks[];
 extern const std::size_t kBrahmicBlockCount;
 extern const BrahmicChar kBrahmicChars[];
@@ -256,5 +274,9 @@ void foldArmenian(const Unit *units, qsizetype n, int style, Out &out);
 void foldGerman(const Unit *units, qsizetype n, Out &out);
 void foldThai(const Unit *units, qsizetype n, int style, Out &out);
 void foldBrahmic(const Unit *units, qsizetype n, int style, Out &out);
+void foldArabic(const Unit *units, qsizetype n, int style, Out &out);
+void foldHebrew(const Unit *units, qsizetype n, int style, Out &out);
+void foldSyriac(const Unit *units, qsizetype n, Out &out);
+void foldThaana(const Unit *units, qsizetype n, Out &out);
 
 } // namespace Search::Fold::Engine

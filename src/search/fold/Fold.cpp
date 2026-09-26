@@ -85,7 +85,13 @@ int styleCount(Script family)
     switch (family) {
     case Script::Han:
     case Script::Brahmic:
+    case Script::Arabic:
         return 4;
+    case Script::Hebrew:
+        return 3;
+    case Script::Syriac:
+    case Script::Thaana:
+        return 2;
     case Script::Greek:
     case Script::Cyrillic:
     case Script::Hangul:
@@ -221,6 +227,30 @@ void dispatch(Script family, const Units &units, int pass, const Context &ctx, O
     case Script::Brahmic:
         if (style > 0) {
             foldBrahmic(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Arabic:
+        if (style > 0) {
+            foldArabic(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Hebrew:
+        if (style > 0) {
+            foldHebrew(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Syriac:
+        if (style > 0) {
+            foldSyriac(u, n, out);
+            return;
+        }
+        break;
+    case Script::Thaana:
+        if (style > 0) {
+            foldThaana(u, n, out);
             return;
         }
         break;

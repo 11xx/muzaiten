@@ -130,3 +130,22 @@ Björk	bjork	bjoerk
 ලංකාව	ලංකාව	lankava
 မြန်မာ	မြန်မာ	myanma	mranma
 ភ្នំពេញ	ភ្នំពេញ	phnompenh	phnompenho
+# Arabic keeps a normalized surface (no harakat or tatweel, one alef, one
+# yeh); readings: al- with u/i, then the first-syllable a, then el-/ou/ee/ah.
+مُحَمَّد	محمد	muhammad
+حبيبي	حبيبي	hbibi	habibi	habeebi
+نور	نور	nur	nour
+سلام	سلام	slam	salam
+فرح قلبي الجديد	فرح قلبي الجديد	frh qlbi aljdid	farh qalbi aljadid	farh qalbi eljadeed
+أم كلثوم	ام كلثوم	am klthum	am kalthum	am kalthoum
+پاکستان	پاكستان	pakstan
+ﷲ	الله	allh	allah	ellah
+# Hebrew keeps its letters without points or final forms; readings are
+# soft ב כ פ with ch and ts, then hard ones with h, tz and a first a.
+יִשְׂרָאֵל	ישראל	yisrael
+בְּרֵאשִׁית	בראשית	bereshit
+שלום	שלומ	shlom	shalom
+תורה	תורה	tora	torah
+חיים	חיימ	chaym	haim
+ג׳ורג׳	ג'ורג'	jorj
+ދިވެހި	ދިވެހި	dhivehi

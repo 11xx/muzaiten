@@ -148,6 +148,7 @@ set(MUZAITEN_SOURCES
     src/scrobble/ScrobbleDestination.cpp
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
+    src/search/fold/FoldAbjad.cpp
     src/search/fold/FoldAlphabets.cpp
     src/search/fold/FoldBrahmic.cpp
     src/search/fold/FoldData.cpp
@@ -404,6 +405,7 @@ set(MUZAITEN_CORE_SOURCES
 set(MUZAITEN_SEARCH_SOURCES
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
+    src/search/fold/FoldAbjad.cpp
     src/search/fold/FoldAlphabets.cpp
     src/search/fold/FoldBrahmic.cpp
     src/search/fold/FoldData.cpp

@@ -173,6 +173,7 @@ class Generator:
         self.other = load_json(tables / "other.json")
         self.thai = load_json(tables / "thai.json")
         self.brahmic = load_json(tables / "brahmic.json")
+        self.abjad = load_json(tables / "abjad.json")
         self.brahmic_blocks = [(name, int(b["first"], 16), int(b["last"], 16), b["reading"])
                                for name, b in self.brahmic["blocks"].items()]
 
@@ -189,10 +190,12 @@ class Generator:
 
         # Plain letter tables consulted by transliterate(), after NFKC,
         # lowercasing and NFD have run.
+        surfaces = [self.abjad[s].get("surface", {}) for s in ("arabic", "hebrew", "syriac")]
+        drops = [{ch: "" for ch in self.abjad[s].get("drop", "")} for s in ("arabic", "hebrew", "syriac")]
         self.letters: dict[str, str] = {}
         for table in (without_doc(self.latin["letters"]), self.punct, self.greek["letters"],
                       self.cyrillic_letters, self.georgian["letters"], self.armenian["punctuation"],
-                      self.other["ol_chiki"]):
+                      self.other["ol_chiki"], *surfaces, *drops):
             for key, value in table.items():
                 if key in self.letters and self.letters[key] != value:
                     sys.exit(f"conflicting readings for {key!r}")
@@ -406,6 +409,11 @@ class Generator:
                     return S[script]
             if self.brahmic_block(ord(ch)) is not None:
                 return S["Brahmic"]
+            abjad = self.abjad_script(ord(first))
+            if abjad is not None:
+                return S[abjad]
+        if ord(first) == 0x05F3:
+            return S["Hebrew"]
         low = first.lower()
         composed = unicodedata.normalize("NFC", low)
         if composed in self.german:
@@ -430,6 +438,8 @@ class Generator:
         if script == S["Han"]:
             return unicodedata.normalize("NFKC", ch)
         if script == S["Lao"] and ord(ch) in (0x0EDC, 0x0EDD):
+            return unicodedata.normalize("NFKC", ch)
+        if script in (S["Arabic"], S["Hebrew"]) and ord(ch) >= 0xFB1D:
             return unicodedata.normalize("NFKC", ch)
         return ch
 
@@ -459,7 +469,7 @@ class Generator:
             return pack(EXPAND, S["None"], off, length), None
         form = None
         if script in (S["Greek"], S["Cyrillic"], S["CyrillicUk"], S["CyrillicBe"], S["CyrillicSr"],
-                      S["LatinAlt"], S["Han"], S["Lao"]):
+                      S["LatinAlt"], S["Han"], S["Lao"], S["Arabic"], S["Hebrew"]):
             candidate = self.handler_form(ch, script)
             if candidate != ch:
                 form = candidate
@@ -486,6 +496,69 @@ class Generator:
             low = unicodedata.normalize("NFC", ch.lower())
             return pack(SCRIPT, script, decomp=low != ch), (low if low != ch else None)
         raise AssertionError(ch)
+
+    # -- abjads ------------------------------------------------------------------
+
+    ABJAD_BLOCKS = [
+        ("Arabic", 0x0600, 0x06FF), ("Arabic", 0x0750, 0x077F), ("Arabic", 0x08A0, 0x08FF),
+        ("Arabic", 0xFB50, 0xFDFF), ("Arabic", 0xFE70, 0xFEFF), ("Hebrew", 0x0590, 0x05FF),
+        ("Hebrew", 0xFB1D, 0xFB4F), ("Syriac", 0x0700, 0x074F), ("Syriac", 0x0860, 0x086F),
+        ("Thaana", 0x0780, 0x07BF),
+    ]
+    ABJAD_READER_BLOCKS = [("Arabic", 0x0600, 0x06FF), ("Arabic", 0x0750, 0x077F), ("Arabic", 0x08A0, 0x08FF),
+                           ("Hebrew", 0x0590, 0x05FF), ("Syriac", 0x0700, 0x074F), ("Syriac", 0x0860, 0x086F),
+                           ("Thaana", 0x0780, 0x07BF)]
+
+    def abjad_script(self, cp: int) -> Optional[str]:
+        for script, lo, hi in self.ABJAD_BLOCKS:
+            if lo <= cp <= hi:
+                return script
+        return None
+
+    ABJAD_ROLES = {"alef": "Alef", "ain": "Ain", "waw": "Waw", "yeh": "Yeh", "maksura": "Maksura",
+                   "marbuta": "Marbuta", "hamza": "Hamza", "vowel": "VowelLetter", "vav": "Waw", "yod": "Yeh",
+                   "he": "He", "shin": "Shin"}
+    ABJAD_MARKS = {"shadda": "Shadda", "sukun": "Sukun", "dagesh": "Dagesh", "shin": "ShinDot", "sin": "SinDot",
+                   "rafe": "Rafe", "geresh": "Geresh", "sheva": "Sheva"}
+
+    def abjad_info(self, script: str, cp: int) -> tuple[str, list[str], str, str]:
+        """(role, [style 1-3 spellings], soft spelling, geresh spelling) of an abjad code point."""
+        table = self.abjad[script.lower()]
+        ch = chr(cp)
+
+        def styles(value) -> list[str]:
+            values = [value] if isinstance(value, str) else list(value)
+            while len(values) < 3:
+                values.append(values[-1])
+            return values
+
+        soft = self.abjad["hebrew"]["soft"].get(ch, "") if script == "Hebrew" else ""
+        geresh = self.abjad["hebrew"]["geresh"].get(ch, "") if script == "Hebrew" else ""
+        roles = table.get("roles", {})
+        if ch in roles:
+            role = roles[ch]
+            kind, value = (role, "") if isinstance(role, str) else (role[0], role[1])
+            spelled = styles(value)
+            if kind == "alef" and isinstance(role, str):
+                spelled = styles("a")
+            if script == "Hebrew" and kind == "shin":
+                spelled = styles("sh")
+            return self.ABJAD_ROLES[kind], spelled, soft, geresh
+        if ch in table.get("letters", {}):
+            return "Consonant", styles(table["letters"][ch]), soft, geresh
+        marks = table.get("marks", {})
+        if ch in marks:
+            mark = marks[ch]
+            if mark in self.ABJAD_MARKS:
+                return self.ABJAD_MARKS[mark], styles(""), "", ""
+            return "Vowel", styles(mark), "", ""
+        n = name(ch)
+        if script == "Arabic" and n.startswith("ARABIC LETTER "):
+            stem = n[len("ARABIC LETTER "):].split(" WITH ")[0]
+            for words in (stem, stem.split()[-1]):
+                if words in table["names"]:
+                    return "Consonant", styles(table["names"][words]), "", ""
+        return "None", styles(""), "", ""
 
     # -- Brahmic -----------------------------------------------------------------
 
@@ -881,6 +954,25 @@ class Generator:
             cluster_rows.append(f"    {{0x{ord(key[0]):X}, 0x{ord(key[2]):X}, {pool.ref(sound)}}},")
         cluster_rows.sort()
 
+        # Abjads
+        abjad_rows: list[str] = []
+        abjad_block_rows: list[str] = []
+        for script, first, last in self.ABJAD_READER_BLOCKS:
+            abjad_block_rows.append(f"    {{0x{first:X}, 0x{last:X}, {len(abjad_rows)}}},")
+            for cp in range(first, last + 1):
+                role, spelled, soft, geresh = self.abjad_info(script, cp)
+                abjad_rows.append(
+                    f"    {{AbjadRole::{role}, {{{', '.join(pool.ref(v) for v in spelled[:3])}}}, "
+                    f"{pool.ref(soft)}, {pool.ref(geresh)}}},")
+        arabic = self.abjad["arabic"]
+        abjad_constants = [
+            f"const Str kArabicArticle[3] = {str_array(arabic['article'])};",
+            f"const Str kArabicWaw[3] = {str_array(arabic['long']['waw'])};",
+            f"const Str kArabicYeh[3] = {str_array(arabic['long']['yeh'])};",
+            f"const Str kArabicMarbuta[3] = {str_array(arabic['long']['marbuta'])};",
+            f"const Str kHebrewFinalHe[2] = {str_array(self.abjad['hebrew']['final_he'])};",
+        ]
+
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
 
@@ -888,7 +980,8 @@ class Generator:
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
                             bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
-                            brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows)).encode())
+                            brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
+                            abjad_block_rows, abjad_constants)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -950,6 +1043,15 @@ class Generator:
         w(f"const GreekStyle kGreekStyles[{len(greek_styles)}] = {{")
         out.extend(greek_styles)
         w("};")
+        w("")
+        w(f"const AbjadBlock kAbjadBlocks[{len(abjad_block_rows)}] = {{")
+        out.extend(abjad_block_rows)
+        w("};")
+        w(f"const std::size_t kAbjadBlockCount = {len(abjad_block_rows)};")
+        w(f"const AbjadChar kAbjadChars[{len(abjad_rows)}] = {{")
+        out.extend(abjad_rows)
+        w("};")
+        out.extend(abjad_constants)
         w("")
         w(f"const BrahmicBlock kBrahmicBlocks[{len(brahmic_block_rows)}] = {{")
         out.extend(brahmic_block_rows)

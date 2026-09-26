@@ -24,6 +24,12 @@
   the common spelling with the inherent vowel dropped where Hindi drops it
   (`kamla`, `zindagi`, `kabhi khushi kabhi gham`), every inherent vowel kept
   (`kamala`), and the ee/oo spelling of film titles (`deewana`, `dilwale`).
+- Search matches Arabic (with Persian, Urdu, Kurdish and Pashto letters),
+  Hebrew and Yiddish, Syriac and Thaana by romanization. Vowel marks give the
+  vowels where written; unvocalized words read their vowel letters in
+  context, with a guessed first-syllable a (`habibi`, `salam`, `shalom`) and
+  el-/ou/ee spellings (`nour`, `eljadeed`). Typed Arabic and Hebrew match
+  regardless of vowel marks, tatweel, alef and yeh variants and final forms.
 - Armenian, Georgian, Kazakh and other Cyrillic letters, Ethiopic, Cherokee,
   Canadian syllabics, Yi, Bopomofo and Mongolian romanize for search.
   Look-alike punctuation that tag editors and file-name sanitizers substitute
