@@ -12,9 +12,8 @@
   beside `toukyou`), toneless Chinese pinyin with word readings for common
   polyphones, modern and phonetic Greek (`efcharisto`, `yiorgos`), common and
   Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
-  their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i` (`miller` finds
-  `Müller`). Results
-  highlight whichever reading matched.
+  their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i`
+  (`miller` finds `Müller`). Results highlight whichever reading matched.
 - Search matches Thai and Lao by romanization, read syllable by syllable
   with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,
   `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
@@ -56,7 +55,6 @@
   `シェ` she) instead of letter by letter (`tei`, `fua`), and text written
   decomposed, as in file names from macOS (separate accents, kana voicing
   marks, Hangul jamo), folds like composed text.
-
 - Anchored search terms (`^wall`, `the wall$`), fuzzy matching and exclusion
   globs now check a field's display text and its sort name separately, so a
   sort name no longer stops an anchored term from matching. Invisible
