@@ -1148,7 +1148,7 @@ QByteArray pickerRecord(const Search::SearchRecord &r)
 
     if (hasNonAscii(title + artist + album)) {
         const QString norm = oneLine(r.normTitle + QLatin1Char(' ') + r.normArtist + QLatin1Char(' ')
-                                     + r.normAlbum);
+                                     + r.normAlbum).replace(Search::Fold::kSegmentSeparator, QLatin1Char(' '));
         if (!norm.trimmed().isEmpty()) {
             block += QStringLiteral("\n\033[90m   %1\033[0m").arg(norm);      // dim romaji reading, aligned
         }

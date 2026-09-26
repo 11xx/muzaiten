@@ -31,10 +31,11 @@ struct MatchField {
 
 // Build a MatchField whose normalized form comes from the shared fold engine, so
 // the in-panel document filter matches by the same diacritic/script/romaji rules
-// as the library index. `text` keeps its original casing for display.
+// and alternate readings as the library index. `text` keeps its original casing
+// for display.
 inline MatchField makeField(MatchFieldRole role, const QString &text, int weight)
 {
-    return {role, text, Fold::foldText(text), weight};
+    return {role, text, Fold::foldSegments(text), weight};
 }
 
 struct MatchNumeric {

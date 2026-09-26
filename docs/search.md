@@ -4,38 +4,68 @@ Press `4` to open the search view. Type to filter interactively; all terms
 AND together in any order.
 
 Matching is by **sound/shape, not encoding**: both the query and the library
-are folded to a lowercase ASCII-leaning form before matching, so accents and
-scripts don't get in the way. `cafe` finds `Café`, `bjork` finds `Björk`,
-Greek/Cyrillic/Turkish transliterate (`σωκρατης` ↔ `sokrates`), and Japanese
-matches by romaji — kana and common kanji romanize (`sanshin no hana` or
-`san shin no ha na` → `三線の花`), with Picard/MusicBrainz `*sort` reading
-tags filling in proper-noun readings (`utada` → 宇多田ヒカル). Typing the
-original script still matches too.
+are folded to a lowercase ASCII-leaning form before matching, so accents,
+scripts and look-alike punctuation don't get in the way. `cafe` finds `Café`,
+`11:11` finds `11∶11`, `don't` finds `don’t`, Greek and Cyrillic transliterate
+(`σωκρατης` ↔ `sokrates`), Korean matches by romanization (`ak dan chil` →
+`악단광칠`), Japanese by romaji (`sanshin no hana` → `三線の花`), and Chinese by
+pinyin (`yinyue` → `音乐`). Picard/MusicBrainz `*sort` reading tags fill in
+proper-noun readings (`utada` → 宇多田ヒカル). Typing the original script still
+matches too, and a kanji or hanzi matches the words that contain it. Scripts
+whose reading depends on the surrounding letters (CJK ideographs, Thai, Lao,
+the Indic scripts, Sinhala, Myanmar, Khmer, Arabic, Hebrew, Syriac, Thaana,
+Tibetan)
+match as written when typed in their own script, ignoring Arabic and Hebrew
+vowel marks and letter variants.
+
+Many scripts are romanized more than one way, so the library side keeps every
+common reading and a query matches any of them:
+
+| Script | Readings a query can use |
+|--------|--------------------------|
+| Latin | `muller`, `mueller` and `miller` for `Müller`; `bjork`, `bjoerk` |
+| Greek | letter by letter (`eycharisto`), modern (`efcharisto`), phonetic (`efharisto`, `yiorgos`) |
+| Cyrillic | `khrushchev`, `hruschyov`, `hruscev`; Ukrainian, Belarusian and Serbian spellings when the text uses their letters |
+| Armenian | Eastern (`yerevan`, `hayastan`) and Western (`hayasdan`) |
+| Korean | syllable by syllable (`hangukeo`), as pronounced (`hangugeo`), McCune-Reischauer (`pochonbo` for `보천보`) |
+| Japanese | wapuro (`toukyou`), Hepburn (`tokyo`); common kanji through a seed dictionary |
+| Chinese | toneless pinyin, with word readings for common polyphones (`yinyue` for `音乐`, `changcheng` for `长城`) |
+| Thai | RTGS (`sawatdi`, `khopkhun`) and the common spelling (`sawasdee`, `khobkhun`, `jai`); words spelling rules misread come from a word table (`ching` for `จริง`) |
+| Lao | standard (`viangchan`) and French-style (`wiangjan`) |
+| Arabic, Persian, Urdu | vowel marks when written; otherwise the consonants with ا و ي as vowels (`mhmud`), with a first-syllable a (`habibi`, `salam`), and in el-/ou/ee spelling (`nour`, `eljadeed`) |
+| Hebrew, Yiddish | points when written (`bereshit`); otherwise soft (`tora`) and hard spellings with a first a (`shalom`, `torah`) |
+| Syriac, Thaana | their vowel marks (`dhivehi`) |
+| Tibetan | Wylie, syllables joined (`smonlam`, `lhasa`, `bka'`), and without the a-chung apostrophe (`bka`) |
+| Indic, Sinhala, Myanmar, Khmer | common (`kamla`, `zindagi`, `dilvale`), with every inherent vowel (`kamala`), and the ee/oo spelling of film titles (`deewana`, `phool`, `dilwale`) |
+
+Traditional and simplified Chinese characters match each other. Half-width
+and full-width forms, styled "fancy text" letters (`𝓗𝓮𝓵𝓵𝓸`, `🅲🅻🅴🅰🅽`), macOS
+decomposed file names, and digits of every script fold like their plain
+counterparts.
 
 ### Fold data and conformance corpus
 
-NFKC runs before folding, so half-width kana and full-width compatibility forms
-share the same search representation, while Japanese iteration marks expand to
-their repeated kana or kanji reading.
+The fold is compiled at build time: `tools/foldgen.py` reads the tables and
+Unicode's character database and writes one entry per code point, so folding
+is a table lookup per character. The hand-authored tables live in
+`src/search/fold/tables/`, one JSON file per script family (`latin`,
+`punctuation`, `greek`, `cyrillic`, `armenian`, `georgian`, `kana`, `han`,
+`hangul`, `thai`, `brahmic`, `abjad`, `other`); each file's `_doc` key
+describes its fields. Letters the
+tables don't list are derived from their Unicode names where the name spells
+the sound (`LATIN SMALL LETTER D WITH HOOK` reads `d`, Ethiopic, Cherokee and
+Canadian syllabics read their syllable names).
 
-The shared fold resource is `src/search/fold/fold_tables.json`. Its top-level
-keys are:
+Per-character pinyin and traditional-to-simplified forms come from Unicode
+CLDR via ICU: `tools/fold-han-data.py` regenerates `han_pinyin.tsv` and
+`han_simplified.tsv` (Unicode License v3, see `UNICODE-LICENSE.txt` beside
+them). Word-level readings and overrides are in `tables/han.json`.
 
-- `transliteration`: single-character script mappings for Latin, Greek, and
-  Cyrillic characters that need explicit readings. Keys and values are strings.
-- `kana`: hiragana character to Hepburn-romaji mappings.
-- `yoon_prefix`: hiragana syllable to consonant-prefix mappings used with
-  small `ゃ`, `ゅ`, and `ょ`.
-- `small_vowel`: small yōon kana to the vowel appended to a yōon prefix.
-- `kanji`: surface text to hiragana reading mappings for the seed dictionary.
-
-The C++ fold compiles the file into its own object and parses it once at first
-use. The Python fold can read the same UTF-8 file with its standard JSON
-library. The conformance file
-`src/search/fold/fold_cases.tsv` uses one UTF-8 case per line in the form
-`input<TAB>expected`. Blank lines and lines beginning with `#` are comments;
-the expected field is the complete folded output. An unmapped kanji remains in
-the expected output so the original-script search path stays covered.
+The conformance file `src/search/fold/fold_cases.tsv` holds one UTF-8 case per
+line: `input<TAB>primary fold`, optionally followed by `<TAB>`-separated
+alternate readings. A row with one expected field checks the primary fold; a
+row with more checks every distinct fold, in order. Blank lines and lines
+beginning with `#` are comments.
 
 The result list always keeps a highlighted cursor you move with the arrow or
 `Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style.
@@ -112,6 +142,11 @@ were read separately from extensions still stores the extension there, so
 files.
 
 Combine freely: `miles ext:flac rating:>=80 !live`
+
+A field can have more than one folded form: its display text and its sort
+name (`The Wall` and `Wall, The`). Anchors and fuzzy matching check each form
+on its own, so `^wall` and `the wall$` both find that title. Exclusion globs
+with a leading or trailing `*` behave the same way.
 
 ## Ranking and exclusions
 

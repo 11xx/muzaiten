@@ -1,0 +1,41 @@
+{
+  "_doc": "Cyrillic. `letters` is the primary reading; a letter missing here takes the reading of the base letter its Unicode name modifies (KA WITH DESCENDER reads as KA). Each style is an alternate reading: `map` overrides the primary letters, and `languages` further overrides them when the string contains a letter from that language's `language_letters`. A value [initial, medial] depends on the letter starting a word.",
+  "letters": {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh", "з": "z",
+    "и": "i", "й": "i", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    "і": "i", "ї": "yi", "є": "ye", "ґ": "g", "ў": "u",
+    "ђ": "dj", "ћ": "c", "џ": "dz", "љ": "lj", "њ": "nj", "ј": "j", "ѓ": "gj", "ќ": "kj", "ѕ": "dz",
+    "ә": "a", "ғ": "gh", "қ": "q", "ң": "ng", "ө": "o", "ұ": "u", "ү": "u", "һ": "h", "җ": "zh",
+    "ҙ": "dh", "ҫ": "th", "ҡ": "q", "ҳ": "h", "ҷ": "j", "ҝ": "g", "ҹ": "j", "ӏ": "", "ҥ": "ng",
+    "ӈ": "ng", "ӊ": "ng", "ӄ": "q", "ҕ": "gh", "ӷ": "gh", "ӻ": "gh", "ҵ": "ts", "ҽ": "ch", "ҿ": "ch",
+    "ѣ": "e", "ѳ": "f", "ѵ": "i", "ѫ": "u", "ѧ": "ya", "ѯ": "ks", "ѱ": "ps", "ѡ": "o", "ѿ": "ot",
+    "ѹ": "u", "ꙋ": "u", "ѥ": "ye", "ѩ": "ye", "ѭ": "yu", "ꙗ": "ya", "ꙑ": "y", "ꙁ": "z", "ꙃ": "dz"
+  },
+  "language_letters": {
+    "be": "ў",
+    "sr": "ђћџљњјѓќѕ",
+    "uk": "іїєґ"
+  },
+  "styles": [
+    {
+      "name": "common",
+      "map": {"х": "h", "й": "y", "ё": "yo", "щ": "sch", "ы": "y", "ц": "ts"},
+      "languages": {
+        "uk": {"г": "h", "и": "y", "й": ["y", "i"], "є": ["ye", "ie"], "ї": ["yi", "i"], "ю": ["yu", "iu"],
+               "я": ["ya", "ia"], "х": "kh", "щ": "shch", "ґ": "g", "ь": ""},
+        "be": {"г": "h", "ў": "w", "ё": ["yo", "io"], "е": ["ye", "ie"], "ю": ["yu", "iu"], "я": ["ya", "ia"],
+               "х": "kh"},
+        "sr": {"ђ": "dj", "ћ": "c", "ч": "c", "џ": "dz", "ж": "z", "ш": "s", "х": "h", "ц": "c", "љ": "lj",
+               "њ": "nj", "ј": "j", "ѓ": "gj", "ќ": "kj", "ѕ": "dz"}
+      }
+    },
+    {
+      "name": "slavic",
+      "map": {"ж": "z", "х": "h", "ц": "c", "ч": "c", "ш": "s", "щ": "sc", "й": "j", "ё": "e", "ю": "ju",
+              "я": "ja", "є": "je", "ї": "ji", "ђ": "d", "ћ": "c", "џ": "d", "э": "e"},
+      "languages": {}
+    }
+  ]
+}

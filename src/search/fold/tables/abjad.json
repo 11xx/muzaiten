@@ -1,0 +1,89 @@
+{
+  "_doc": "Scripts that write consonants and leave short vowels to optional marks: Arabic (with Persian, Urdu, Kurdish and Pashto letters), Hebrew (with Yiddish), Syriac and Thaana. `surface` maps a character onto the form the primary fold keeps (alef variants onto alef, final Hebrew letters onto their plain form); `drop` lists marks the primary fold removes. Readings are alternates. `letters` spells consonants, a value [a, b] giving the reading-2 spelling second; `roles` names letters the readers treat specially (the vowel letters, the article, the Hebrew letters a dot hardens); `marks` spells vowel marks and names the others. Arabic letters missing from `letters` read as the letter their Unicode name modifies (`names`).",
+  "arabic": {
+    "surface": {
+      "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ٲ": "ا", "ٳ": "ا", "ى": "ي", "ی": "ي", "ې": "ي", "ۍ": "ي",
+      "ک": "ك", "ڪ": "ك", "ة": "ه", "ۀ": "ه", "ہ": "ه", "ھ": "ه", "ۃ": "ه", "ؤ": "و", "ئ": "ي",
+      "٪": "%", "،": ",", "؛": ";", "؟": "?", "۔": ".", "٭": "*"
+    },
+    "drop": "ًٌٍَُِّْٰٕٓٔٗ٘ٙٚٛٝٞٓـؘؙؚۣ۪ۭۖۗۘۙۚۛۜ۟۠ۡۢۤۧۨ۫۬ؐؑؒؓؔؕؖؗ",
+    "letters": {
+      "ب": "b", "ت": "t", "ث": "th", "ج": "j", "ح": "h", "خ": "kh", "د": "d", "ذ": "dh", "ر": "r", "ز": "z",
+      "س": "s", "ش": "sh", "ص": "s", "ض": "d", "ط": "t", "ظ": "z", "غ": "gh", "ف": "f", "ق": "q", "ك": "k",
+      "ل": "l", "م": "m", "ن": "n", "ه": "h", "پ": "p", "چ": "ch", "ژ": "zh", "گ": "g", "ک": "k", "ٹ": "t",
+      "ڈ": "d", "ڑ": "r", "ں": "n", "ھ": "h", "ہ": "h", "ڤ": "v", "ڭ": "ng", "ۋ": "v", "ڕ": "r", "ڵ": "l",
+      "ځ": "dz", "څ": "ts", "ډ": "d", "ړ": "r", "ږ": "zh", "ښ": "sh", "ګ": "g", "ڼ": "n", "ۀ": "h",
+      "ڃ": "ny", "ڄ": "dy", "ڇ": "chh", "ڍ": "d", "ڊ": "d", "ڏ": "d", "ڙ": "zh", "ڳ": "g", "ڱ": "ng",
+      "ڻ": "n", "ڦ": "ph", "ۃ": "h", "ڪ": "k"
+    },
+    "roles": {
+      "ا": "alef", "أ": ["alef", "a"], "إ": ["alef", "i"], "آ": ["alef", "a"], "ٱ": ["alef", ""],
+      "و": "waw", "ۆ": ["vowel", "o"], "ۇ": ["vowel", "u"], "ۈ": ["vowel", "u"], "ۉ": ["vowel", "u"],
+      "ي": "yeh", "ی": "yeh", "ې": ["vowel", "e"], "ێ": ["vowel", "e"], "ى": "maksura", "ے": ["vowel", "e"],
+      "ۓ": ["vowel", "e"], "ە": ["vowel", "e"], "ۍ": ["vowel", "ai"],
+      "ة": "marbuta", "ۃ": "marbuta", "ء": "hamza", "ؤ": "hamza", "ئ": "hamza", "ع": "ain"
+    },
+    "marks": {
+      "َ": "a", "ِ": "i", "ُ": "u", "ً": "an", "ٍ": "in", "ٌ": "un", "ٰ": "a", "ٖ": "i", "ٗ": "u",
+      "ّ": "shadda", "ْ": "sukun", "ۡ": "sukun"
+    },
+    "names": {
+      "ALEF": "a", "BEH": "b", "TEH": "t", "THEH": "th", "JEEM": "j", "HAH": "h", "KHAH": "kh", "DAL": "d",
+      "THAL": "dh", "REH": "r", "ZAIN": "z", "SEEN": "s", "SHEEN": "sh", "SAD": "s", "DAD": "d", "TAH": "t",
+      "ZAH": "z", "AIN": "", "GHAIN": "gh", "FEH": "f", "QAF": "q", "KAF": "k", "LAM": "l", "MEEM": "m",
+      "NOON": "n", "HEH": "h", "WAW": "w", "YEH": "y", "PEH": "p", "TCHEH": "ch", "JEH": "zh", "GAF": "g",
+      "KEHEH": "k", "VEH": "v", "TTEH": "t", "DDAL": "d", "RREH": "r", "NG": "ng", "GUEH": "g", "DYEH": "dy",
+      "NYEH": "ny", "TEHEH": "th", "DAHAL": "d", "DUL": "d", "DDAHAL": "d", "TCHEHEH": "chh", "BEEH": "b",
+      "PEHEH": "ph", "NOON GHUNNA": "n", "HEH DOACHASHMEE": "h", "HEH GOAL": "h",
+      "SWASH KAF": "k", "LETTER": ""
+    },
+    "article": ["al", "al", "el"],
+    "long": {"waw": ["u", "u", "ou"], "yeh": ["i", "i", "ee"], "marbuta": ["a", "a", "ah"]}
+  },
+  "hebrew": {
+    "surface": {"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ", "־": "-", "׳": "'", "״": "\"", "׀": "|", "׃": ":"},
+    "drop": "ְֱֲֳִֵֶַָׇֹֺֻּֽֿׁׂׅ֑֖֛֢֣֤֥֦֧֪֚֭֮ׄ֒֓֔֕֗֘֙֜֝֞֟֠֡֨֩֫֬֯",
+    "letters": {
+      "ב": "b", "ג": "g", "ד": "d", "ז": "z", "ח": ["ch", "h"], "ט": "t", "כ": "k", "ך": "kh", "ל": "l",
+      "מ": "m", "ם": "m", "נ": "n", "ן": "n", "ס": "s", "פ": "p", "ף": "f", "צ": ["ts", "tz"],
+      "ץ": ["ts", "tz"], "ק": "k", "ר": "r", "ש": "sh", "ת": "t", "װ": "v", "ױ": "oy", "ײ": "ey"
+    },
+    "soft": {"ב": "v", "כ": "kh", "פ": "f"},
+    "geresh": {"ג": "j", "ז": "zh", "צ": "ch", "ץ": "ch", "ת": "th"},
+    "roles": {"א": "alef", "ע": "ain", "ו": "vav", "י": "yod", "ה": "he", "ש": "shin"},
+    "marks": {
+      "ְ": "sheva", "ֱ": "e", "ֲ": "a", "ֳ": "o", "ִ": "i", "ֵ": "e", "ֶ": "e", "ַ": "a", "ָ": "a",
+      "ֹ": "o", "ֺ": "o", "ֻ": "u", "ׇ": "o", "ּ": "dagesh", "ׁ": "shin", "ׂ": "sin", "ֿ": "rafe",
+      "׳": "geresh"
+    },
+    "final_he": ["a", "ah"]
+  },
+  "syriac": {
+    "surface": {},
+    "drop": "ܱܴܷܸܹܻܼܾ݂݄݆݈ܰܲܳܵܶܺܽܿ݀݁݃݅݇݉݊",
+    "letters": {
+      "ܒ": "b", "ܓ": "g", "ܔ": "j", "ܕ": "d", "ܖ": "d", "ܗ": "h", "ܙ": "z", "ܚ": "kh", "ܛ": "t", "ܜ": "t",
+      "ܞ": "yh", "ܟ": "k", "ܠ": "l", "ܡ": "m", "ܢ": "n", "ܣ": "s", "ܤ": "s", "ܦ": "p", "ܧ": "p", "ܨ": "s",
+      "ܩ": "q", "ܪ": "r", "ܫ": "sh", "ܬ": "t", "ݍ": "zh", "ݎ": "k", "ݏ": "f"
+    },
+    "roles": {"ܐ": "alef", "ܥ": "ain", "ܘ": "waw", "ܝ": "yeh"},
+    "marks": {
+      "ܰ": "a", "ܱ": "a", "ܲ": "a", "ܳ": "o", "ܴ": "o", "ܵ": "o", "ܶ": "e", "ܷ": "e", "ܸ": "e", "ܹ": "e",
+      "ܺ": "i", "ܻ": "i", "ܼ": "i", "ܽ": "u", "ܾ": "u", "ܿ": "u", "݀": "a", "݁": "o", "݂": "e", "݃": "o",
+      "݄": "o"
+    }
+  },
+  "thaana": {
+    "letters": {
+      "ހ": "h", "ށ": "sh", "ނ": "n", "ރ": "r", "ބ": "b", "ޅ": "lh", "ކ": "k", "ވ": "v", "މ": "m", "ފ": "f",
+      "ދ": "dh", "ތ": "th", "ލ": "l", "ގ": "g", "ޏ": "gn", "ސ": "s", "ޑ": "d", "ޒ": "z", "ޓ": "t", "ޔ": "y",
+      "ޕ": "p", "ޖ": "j", "ޗ": "ch", "ޘ": "th", "ޙ": "h", "ޚ": "kh", "ޛ": "dh", "ޜ": "z", "ޝ": "sh",
+      "ޞ": "s", "ޟ": "d", "ޠ": "t", "ޡ": "z", "ޢ": "", "ޣ": "gh", "ޤ": "q", "ޥ": "w", "ޱ": "n"
+    },
+    "roles": {"އ": "alef"},
+    "marks": {
+      "ަ": "a", "ާ": "aa", "ި": "i", "ީ": "ee", "ު": "u", "ޫ": "oo", "ެ": "e", "ޭ": "ey", "ޮ": "o",
+      "ޯ": "oa", "ް": "sukun"
+    }
+  }
+}

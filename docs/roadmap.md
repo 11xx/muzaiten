@@ -16,8 +16,10 @@ development builds include a `.devN` suffix and local Git identity.
   configurable output: PipeWire / PulseAudio / ALSA sinks and an exclusive
   bit-perfect ALSA mode, plus resume behavior.
 - fzf-style library search across the whole library (including MPD tracks) that
-  matches by sound/shape — diacritics, Greek/Cyrillic/Turkish, and Japanese
-  romaji↔kana/kanji (with MusicBrainz reading tags) — backed by an on-disk folded
+  matches by sound/shape — diacritics and look-alike punctuation, Greek,
+  Cyrillic, Armenian, Georgian, Korean, Japanese romaji↔kana/kanji and Chinese
+  pinyin, each under its common romanizations (with MusicBrainz reading tags) —
+  backed by an on-disk folded
   cache, exposed in-app and through the `muzaitenctl` CLI (with an fzf picker).
 - Scrobbling to both ListenBrainz and Last.fm (now-playing + completed listens).
 - Optional MPD bridge for browsing MPD libraries alongside local sources.
@@ -28,7 +30,6 @@ development builds include a `.devN` suffix and local Git identity.
 - MusicBrainz network lookup (IDs are already read from tags when present).
 - Bit-depth-aware audio-quality scoring in search ranking.
 - Broader playlist import/export.
-- More search-fold scripts (Korean Hangul, Chinese pinyin, Arabic, Hebrew, Indic),
-  sourced from CLDR/Unihan rather than hand-authored.
+- Dictionary readings for Japanese kanji compounds in search folding.
 - Shared persisted settings with a `muzaitenctl config` command (e.g. a default
   fuzzy/exact mode for the CLI picker).

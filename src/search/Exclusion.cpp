@@ -63,9 +63,18 @@ bool ExcludeMatcher::matchField(const QString &normField) const
     if (normField.isEmpty()) return false;
     switch (m_kind) {
     case Kind::Substring: return normField.contains(m_needle);
-    case Kind::Prefix:    return normField.startsWith(m_needle);
-    case Kind::Suffix:    return normField.endsWith(m_needle);
-    case Kind::Regex:     return m_regex.match(normField).hasMatch();
+    case Kind::Prefix:
+    case Kind::Suffix:
+    case Kind::Regex:
+        // A norm holds one segment per folded form; a glob matches a form, never
+        // a span across two of them.
+        for (const QStringView segment : QStringView(normField).tokenize(Fold::kSegmentSeparator)) {
+            const bool hit = m_kind == Kind::Prefix ? segment.startsWith(m_needle)
+                           : m_kind == Kind::Suffix ? segment.endsWith(m_needle)
+                                                    : m_regex.matchView(segment).hasMatch();
+            if (hit) return true;
+        }
+        return false;
     }
     return false;
 }

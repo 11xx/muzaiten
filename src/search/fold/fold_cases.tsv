@@ -1,19 +1,202 @@
-# input<TAB>expected folded text
+# input<TAB>primary fold[<TAB>alternate reading...]
+# One expected field checks the primary fold only; more fields list every
+# distinct fold in order, primary first.
 ジ	ji
 っか	kka
-きゃ	kya
+きゃ	kiya	kya
 ß	ss
 ｶ	ka
 ｶﾞ	ga
 ﾊﾟ	pa
 ＡＢＣ	abc
 Привет мир	privet mir
-γειά σου	geia soy
 Crème brûlée	creme brulee
-花々	hanahana
-こゝろ	kokoro
-つゞく	tsuzuku
-カヽ	kaka
-カヾ	kaga
-# Unknown kanji remains unchanged when no seed reading exists.
+# Punctuation look-alikes fold onto what a searcher types.
+11∶11	11:11
+don’t stop	don't stop
+A × B	a x b
+【MV】	[mv]
+# Letters styled with Unicode "fonts" read as the letters.
+𝓗𝓮𝓵𝓵𝓸	hello
+🅲🅻🅴🅰🅽	clean
+ᴀʙᴄ	abc
+# Digits of every script read as ASCII digits.
+١٢٣	123
+๑๒๓	123
+# German-style digraphs are an alternate spelling, and ü also reads i.
+Müller	muller	mueller	miller
+Björk	bjork	bjoerk
+Motörhead	motorhead	motoerhead
+# Greek: letter by letter, then modern (ELOT 743), then phonetic.
+γειά σου	geia soy	geia sou	yia su
+Ευχαριστώ	eycharisto	efcharisto	efharisto
+μπουζούκι	mpoyzoyki	bouzouki	buzuki
+Γιώργος	giorgos	yiorgos
+Αϊ	ai
+# Cyrillic: primary, common (with the string's language), Slavic Latin.
+Їхав Івась на коні	yikhav ivas na koni	jihav ivas na koni
+Хрущёв	khrushchev	hruschyov	hruscev
+Чайковский	chaikovskii	chaykovskiy	cajkovskij
+Ђорђе Балашевић	djordje balashevic	djordje balasevic	dorde balasevic
+Беларусь Ў	belarus u	bielarus w
+Қазақстан	qazaqstan
+# Armenian: letter by letter, then Eastern and Western as read.
+Երևան	erevan	yerevan
+Հայաստան	hayastan	hayasdan
+Ուրախ	ovrakh	urakh
+ոսկի	oski	voski	vosgi
+ქართული	kartuli
+# Kana: each kana on its own (iteration marks as written), then wapuro,
+# then Hepburn with long vowels collapsed.
+ティ	tei	ti
+ティーンエイジャー	teineijiya	tineija
+ファンタジー	fuantaji	fantaji
+ディスコ	deisuko	disuko
+シェフ	shiefu	shefu
+ヴァイオリン	vuaiorin	vaiorin
+くゎ	kuwa	kwa
+ウィンドウ	uindou	windou	windo
+とうきょう	toukiyou	toukyou	tokyo
+りゅういち	riyuuichi	ryuuichi	ryuichi
+まゐご	mawigo	maigo
+こゝろ	koゝro	kokoro
+つゞく	tsuゞku	tsuzuku
+カヽ	kaゝ	kaka
+カヾ	kaゞ	kaga
+ドリームレス・ドリームス	dorimuresu dorimusu
+# Ideographs keep their (simplified) surface; readings are alternates:
+# Japanese seed words in wapuro, then in Hepburn, then pinyin.
+花々	花々	hanahana	huahua
+東京の夜	东京no夜	toukyounoyoru	tokyonoyoru	dongjingnoye
+傳達給你	传达给你	chuandageini
+音乐	音乐	yinyue
+长城	长城	changcheng
+快乐	快乐	kuaile
+湮没之音	湮没之音	yanmozhiyin
+# An unknown kanji keeps its surface.
 阿	阿
+# Hangul: syllable by syllable, as pronounced, McCune-Reischauer.
+악단광칠	akdangwangchil	aktangwangchil
+한국어	hangukeo	hangugeo	hangugo
+별의 시	byeolui si	byeorui si	pyorui si
+좋아	jota	joa	choa
+신라	sinra	silla
+설날	seolnal	seollal	sollal
+별내	byeolnae	byeollae	pyollae
+독립	dokrip	dongnip	tongnip
+같이	gati	gachi	kachi
+보천보	bocheonbo	pochonbo
+ㅋㅋㅋ	kkk
+# Syllabaries read by their Unicode names.
+ኢትዮጵያ	ityophya
+ᏣᎳᎩ	tsalagi
+ㄐㄧㄝ	jie
+# Thai keeps its surface; readings are RTGS, then the common spelling.
+สวัสดี	สวัสดี	sawatdi	sawasdee
+ขอบคุณ	ขอบคุณ	khopkhun	khobkhun
+ใจ	ใจ	chai	jai
+กรุงเทพมหานคร	กรุงเทพมหานคร	krungthepmahanakhon
+กันยายน	กันยายน	kanyayon
+สายฝน	สายฝน	saifon
+กลัวความห่างไกล	กลัวความห่างไกล	kluakhwamhangklai
+แค่บอกว่ารัก	แค่บอกว่ารัก	khaebokwarak
+ที่รอคอย	ที่รอคอย	thirokhoi	theerokhoi
+ประกอบละคร	ประกอบละคร	prakoplakhon	prakoblakhon
+ถนน	ถนน	thanon
+กลม	กลม	klom
+เด็กๆ	เด็กๆ	dekdek
+นาน ๆ	นาน ๆ	nan nan
+จันทร์	จันทร์	chan	jan
+ปราโมทย์	ปราโมทย์	pramot
+ศักดิ์สิทธิ์	ศักดิ์สิทธิ์	saksit
+ฤดู	ฤดู	ruedu	ruedoo
+ไทย	ไทย	thai
+เครื่องบิน	เครื่องบิน	khrueangbin
+กรรม	กรรม	kam
+ขวด	ขวด	khuat	khuad
+ทราย	ทราย	sai
+ความจริง	ความจริง	khwamching	khwamjing
+ตัวจริง	ตัวจริง	tuaching	tuajing
+จริต	จริต	charit	jarit
+คนธรรมดา	คนธรรมดา	khonthammada
+พ่อภูมิพล	พ่อภูมิพล	phophumiphon
+ภูมิใจ	ภูมิใจ	phumchai	phumjai
+เสมอ	เสมอ	samoe	semo
+แสดง	แสดง	sadaeng	saedong
+แมลง	แมลง	malaeng	maelong
+เจริญ	เจริญ	charoen	jerin
+เวลา	เวลา	wela
+เพลง	เพลง	phleng
+เขต	เขต	khet
+เมตตา	เมตตา	metta
+# Lao reads through the same parser: standard, then French-style.
+ວຽງຈັນ	ວຽງຈັນ	viangchan	wiangjan
+ຫຼວງພະບາງ	ຫຼວງພະບາງ	luangphabang
+ສະບາຍດີ	ສະບາຍດີ	sabaidi	sabaidee
+# Brahmic scripts keep their surface; readings are common (the inherent
+# vowel dropped where Hindi drops it), full, and ee/oo.
+नमस्ते	नमस्ते	namaste
+कमला	कमला	kamla	kamala
+दिलवाले	दिलवाले	dilvale	dilavale	dilwale
+समझ	समझ	samajh	samajha
+ज़िंदगी	ज़िंदगी	zindagi	zindagee
+दीवाना	दीवाना	divana	deewana
+फूल	फूल	phul	phula	phool
+ज्ञान	ज्ञान	gyan	gyana
+मित्र	मित्र	mitr	mitra
+दर्द है	दर्द है	dard hai	darda hai
+धर्म	धर्म	dharm	dharma
+सूर्य	सूर्य	sury	surya	soorya
+उम्र भर	उम्र भर	umr bhar	umra bhara	umra bhar
+कभी खुशी कभी ग़म	कभी खुशी कभी ग़म	kabhi khushi kabhi gham	kabhi khushi kabhi ghama	kabhee khushee kabhee gham
+বাংলা	বাংলা	bangla
+রবীন্দ্রনাথ	রবীন্দ্রনাথ	rabindranath	rabindranatha	rabeendranath
+ਪੰਜਾਬੀ	ਪੰਜਾਬੀ	panjabi	panjabee
+வணக்கம்	வணக்கம்	vanakkam
+தமிழ்	தமிழ்	tamizh
+మలయాళం	మలయాళం	malayalam
+മലയാളം	മലയാളം	malayalam
+ಕನ್ನಡ	ಕನ್ನಡ	kannada
+ලංකාව	ලංකාව	lankava
+မြန်မာ	မြန်မာ	myanma	mranma
+ភ្នំពេញ	ភ្នំពេញ	phnompenh	phnompenho
+# Arabic keeps a normalized surface (no harakat or tatweel, one alef, one
+# yeh); readings: al- with u/i, then the first-syllable a, then el-/ou/ee/ah.
+مُحَمَّد	محمد	muhammad
+نُور	نور	nur
+حَبِيب	حبيب	habib
+بَيْت	بيت	bayt
+حبيبي	حبيبي	hbibi	habibi	habeebi
+نور	نور	nur	nour
+سلام	سلام	slam	salam
+فرح قلبي الجديد	فرح قلبي الجديد	frh qlbi aljdid	farh qalbi aljadid	farh qalbi eljadeed
+أم كلثوم	ام كلثوم	am klthum	am kalthum	am kalthoum
+پاکستان	پاكستان	pakstan
+ﷲ	الله	allh	allah	ellah
+# Hebrew keeps its letters without points or final forms; readings are
+# soft ב כ פ with ch and ts, then hard ones with h, tz and a first a.
+יִשְׂרָאֵל	ישראל	yisrael
+בְּרֵאשִׁית	בראשית	bereshit
+שלום	שלומ	shlom	shalom
+תורה	תורה	tora	torah
+תּוֹרָה	תורה	tora	torah
+חיים	חיימ	chaym	haim
+ג׳ורג׳	ג'ורג'	jorj
+ދިވެހި	ދިވެހި	dhivehi
+# Tibetan keeps its surface; readings are Wylie with syllables joined.
+སྨོན་ལམ་	སྨོན་ལམ་	smonlam
+བོད་སྐད་	བོད་སྐད་	bodskad
+ལྷ་ས་	ལྷ་ས་	lhasa
+རྒྱ་མཚོ་	རྒྱ་མཚོ་	rgyamtsho
+བསྒྲུབས་	བསྒྲུབས་	bsgrubs
+ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ	ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ	ommanipadmehum
+# The root follows legal spelling; the silent འ is an apostrophe, then omitted.
+གངས་	གངས་	gangs
+མངས་	མངས་	mangs
+དགའ་	དགའ་	dga'	dga
+བགས་	བགས་	bags
+དམས་	དམས་	dmas
+དགས་	དགས་	dgas
+འགས་	འགས་	'gas	gas
+བཀའ་	བཀའ་	bka'	bka
+འོད་	འོད་	'od	od

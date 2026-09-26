@@ -26,7 +26,7 @@ development — see [CHANGELOG.md](CHANGELOG.md) for the detailed record.
         <source media="(prefers-color-scheme: light)" srcset="demo-screens/KvGnome/02-search.png">
         <img alt="Search demo" src="demo-screens/KvGnome/02-search.png" width="380">
       </picture>
-      <br><sub><b>Search</b> — fzf-style, romaji ↔ kana/kanji, live results</sub>
+      <br><sub><b>Search</b> — fzf-style, any script by romanization, live results</sub>
     </td>
   </tr>
   <tr>
@@ -62,8 +62,9 @@ development — see [CHANGELOG.md](CHANGELOG.md) for the detailed record.
 ## What it does
 
 **Search that ignores encoding.** Queries match by sound/shape across
-scripts: `cafe` finds `Café`, `sanshin no hana` finds `三線の花`,
-`σωκρατης` finds `sokrates`. fzf-style in-app, and from the terminal via
+scripts, under each script's common romanizations: `cafe` finds `Café`,
+`sanshin no hana` finds `三線の花`, `ak dan chil` finds `악단광칠`, `sawasdee`
+finds `สวัสดี`. fzf-style in-app, and from the terminal via
 `muzaitenctl search` (with an actual fzf picker). Field filters, quality
 filters, configurable ranking. → [docs/search.md](docs/search.md)
 

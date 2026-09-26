@@ -1,0 +1,15 @@
+{
+  "_doc": "Armenian. `letters` is Eastern Armenian, the primary reading; [initial, medial] depends on the letter starting a word (ե is ye at the start, e inside). `pairs` read two letters as one sound (ու is u). The `western` style overrides letters for Western Armenian, where the voiced and voiceless stops swap (Hakob / Hagop). `punctuation` maps Armenian marks onto ASCII.",
+  "letters": {
+    "ա": "a", "բ": "b", "գ": "g", "դ": "d", "ե": ["ye", "e"], "զ": "z", "է": "e", "ը": "y", "թ": "t",
+    "ժ": "zh", "ի": "i", "լ": "l", "խ": "kh", "ծ": "ts", "կ": "k", "հ": "h", "ձ": "dz", "ղ": "gh",
+    "ճ": "ch", "մ": "m", "յ": "y", "ն": "n", "շ": "sh", "ո": ["vo", "o"], "չ": "ch", "պ": "p",
+    "ջ": "j", "ռ": "r", "ս": "s", "վ": "v", "տ": "t", "ր": "r", "ց": "ts", "ւ": "v", "փ": "p",
+    "ք": "k", "և": ["yev", "ev"], "օ": "o", "ֆ": "f", "ՠ": "", "ֈ": ""
+  },
+  "pairs": {"ու": "u"},
+  "western": {
+    "բ": "p", "գ": "k", "դ": "t", "ջ": "ch", "ճ": "j", "ծ": "dz", "ձ": "ts", "կ": "g", "պ": "b", "տ": "d"
+  },
+  "punctuation": {"՚": "'", "՛": "", "՜": "!", "՝": ",", "՞": "?", "՟": "", "։": ".", "֊": "-"}
+}

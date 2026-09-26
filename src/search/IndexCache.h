@@ -27,7 +27,7 @@ namespace Search {
 
 struct CacheSignature {
     quint32 formatVersion = 0;   // on-disk record layout (IndexCache::kFormatVersion)
-    quint32 foldVersion = 0;     // fold pipeline/tables (Fold::kVersion)
+    quint32 foldVersion = 0;     // fold pipeline and tables (Fold::cacheSignature())
     qint32  schemaVersion = 0;   // library DB schema (Schema::currentVersion)
     QString databaseId;
     QString databasePath;

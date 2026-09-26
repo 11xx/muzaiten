@@ -2,43 +2,68 @@
 
 // Search folding — the "phonetic / ASCII-ish" normalization engine.
 //
-// This is a small, self-contained, dependency-free library that maps arbitrary
-// Unicode text toward a lowercase, ASCII-leaning form so that search matches by
-// *sound/shape* rather than by encoding.  It is the single normalization point
-// shared by the index (haystack) and the query parser (needle): fold both sides
-// with the same function and the existing matcher (orderless AND, fzf fuzzy,
-// anchors, exclusions) works on folded text with no further changes.
+// Maps arbitrary Unicode text toward a lowercase, ASCII-leaning form so that
+// search matches by *sound/shape* rather than by encoding. It is the single
+// normalization point shared by the index (haystack) and the query parser
+// (needle): fold both sides with the same function and the matcher (orderless
+// AND, fzf fuzzy, anchors, exclusions) works on folded text unchanged.
 //
-// Pipeline (per source character, with ASCII fast-pathing):
-//   1. Unicode NFKC compatibility normalization
-//   2. lowercase, NFD decomposition, and combining-mark stripping
-//   3. Japanese iteration-mark expansion and seed dictionary readings
-//   4. script transliteration table                 (ß→ss, ı→i, θ→th, ж→zh)
-//   5. kana → romaji                                 (さ→sa, きゃ→kya, っか→kka)
-// Kanji with a seed dictionary reading is romanized; an unmapped code point
-// passes through verbatim so typing the original character still matches.
+// A string has one primary fold and, for scripts read more than one way, a
+// few alternate readings:
 //
-// NOTE: unlike a slug generator, folding deliberately preserves spaces and
-// punctuation — the matcher relies on word boundaries for its fzf bonuses and
-// on substring semantics, so we transliterate but never collapse to separators.
+// - The primary fold is deterministic and compositional, so a query typed in
+//   any script folds to a substring of the fold of text containing it. It
+//   drops control and format characters, applies NFKC, lowercases, strips
+//   diacritics, folds look-alike punctuation onto ASCII, composes canonically
+//   equivalent sequences, and romanizes letter by letter: Latin, Greek,
+//   Cyrillic, Georgian, Armenian (ե→e), kana (each on its own: きゃ→kiya,
+//   っか→kka; iteration marks as written) and Hangul (Revised Romanization,
+//   syllable by syllable: 악단광칠→akdangwangchil). Scripts whose reading
+//   depends on the surrounding letters keep a normalized surface: CJK
+//   ideographs (folded to simplified Chinese), Thai, Lao, the Brahmic
+//   scripts, Tibetan, and Arabic, Hebrew and Syriac without their vowel
+//   marks and letter variants.
+// - Alternate readings are what a searcher might type instead: German
+//   ae/oe/ue and ü as i, modern and phonetic Greek, common and Slavic
+//   Cyrillic spellings with Ukrainian, Belarusian and Serbian letters,
+//   Eastern and Western Armenian as read (Երևան→yerevan), wapuro romaji
+//   (きゃ→kya, ティ→ti) and Hepburn with long vowels collapsed (tokyo),
+//   Japanese kanji readings from a seed dictionary, Chinese pinyin, Korean
+//   as pronounced (한국어→hangugeo)
+//   and in McCune-Reischauer (보천보→pochonbo), Thai RTGS and common
+//   spellings, Indic with and without Hindi schwa deletion, Arabic and Hebrew
+//   with their vowel letters read in context, and Tibetan Wylie.
 //
-// The transliteration, kana, yōon, small-vowel, and seed-dictionary rows live in
-// fold_tables.json, compiled into Fold.cpp, so other fold implementations can
-// consume the same data.
+// The index stores foldSegments(): the primary fold followed by each distinct
+// alternate, separated by kSegmentSeparator. A query folds to the primary
+// form only. The folding tables are compiled from src/search/fold/tables by
+// tools/foldgen.py; see docs/search.md.
+//
+// Folding preserves spaces and punctuation: the matcher relies on word
+// boundaries for its fzf bonuses and on substring semantics.
 
+#include <QChar>
 #include <QString>
 #include <QVector>
 #include <QtTypes>
 
 namespace Search::Fold {
 
-// Version 2 guards the on-disk search-cache signature against changes to the
-// fold pipeline or its transliteration, kana, and kanji-reading data. The cache
-// stores folded norms, so a mismatch here must invalidate it.
-inline constexpr quint32 kVersion = 2;
+// Revision of the fold pipeline. cacheSignature() mixes it with a digest of
+// the compiled tables; the on-disk search cache stores folded norms, so a
+// change to either must invalidate it.
+inline constexpr quint32 kVersion = 4;
+
+// Separates the alternative folded forms of one field inside a search norm
+// (the display text's fold, its alternate readings, then a sort name's).
+// Anchored and fuzzy matching score each segment on its own, so `^the
+// beatles$` still matches a norm that also carries "beatles, the". The fold
+// drops control characters, so no folded needle can contain the separator and
+// a plain substring never spans segments.
+inline constexpr QChar kSegmentSeparator = QChar(0x1F);
 
 // Folded text plus a map from each folded character back to the index of the
-// source character it derived from.  Used by highlighting to project match
+// source character it derived from. Used by highlighting to project match
 // positions (computed in folded space) onto the original display string.
 //
 //   srcIndex[i] = index into the original `src` of the source char that
@@ -50,32 +75,22 @@ struct FoldResult {
     QVector<int> srcIndex;
 };
 
-// Counts for the embedded tables and the dictionary's longest UTF-16 key. The
-// values provide a cheap integrity check for the shared data resource.
-struct TableStats {
-    int transliterationEntries = 0;
-    int kanaEntries = 0;
-    int yoonPrefixEntries = 0;
-    int smallVowelEntries = 0;
-    int dictionaryEntries = 0;
-    int dictionaryMaxKeyLen = 0;
-    int dictionaryLongestKeyLen = 0;
-};
+// The primary fold with the source-index map.
+FoldResult fold(const QString &src);
 
-TableStats tableStats();
+// The primary fold without the index map: the query-side hot path. Produces
+// text identical to fold(src).text.
+QString foldText(const QString &src);
 
-// `romanizeCjk` gates the two expensive, CJK-specific stages (kanji dictionary
-// and kana→romaji). With it off you get the cheap "basic" fold — lowercase,
-// diacritic stripping, and Greek/Cyrillic/Turkish transliteration — while kana
-// and kanji pass through unchanged. The search index uses this to become
-// queryable immediately (basic) and upgrade to full romaji in the background.
+// The primary fold followed by each distinct alternate reading, joined by
+// kSegmentSeparator: the index-side form of a field.
+QString foldSegments(const QString &src);
 
-// Full fold with the source-index map.  Used on the (few) visible rows when
-// computing highlight positions.
-FoldResult fold(const QString &src, bool romanizeCjk = true);
+// Every distinct fold with its index map, primary first, in the order
+// foldSegments() joins them.
+QVector<FoldResult> foldAll(const QString &src);
 
-// Full fold without the index map — the hot path used to build the index and to
-// normalize query terms.  Produces text identical to fold(src).text.
-QString foldText(const QString &src, bool romanizeCjk = true);
+// Identifies the fold's output for cache invalidation.
+quint32 cacheSignature();
 
 } // namespace Search::Fold

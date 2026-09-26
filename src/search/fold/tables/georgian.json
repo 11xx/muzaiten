@@ -1,0 +1,11 @@
+{
+  "_doc": "Georgian, national system with the ejective apostrophes dropped. Mkhedruli letters; Mtavruli capitals lowercase onto them, and Nuskhuri letters read as the Mkhedruli letter of the same name.",
+  "letters": {
+    "ა": "a", "ბ": "b", "გ": "g", "დ": "d", "ე": "e", "ვ": "v", "ზ": "z", "თ": "t", "ი": "i",
+    "კ": "k", "ლ": "l", "მ": "m", "ნ": "n", "ო": "o", "პ": "p", "ჟ": "zh", "რ": "r", "ს": "s",
+    "ტ": "t", "უ": "u", "ფ": "p", "ქ": "k", "ღ": "gh", "ყ": "q", "შ": "sh", "ჩ": "ch", "ც": "ts",
+    "ძ": "dz", "წ": "ts", "ჭ": "ch", "ხ": "kh", "ჯ": "j", "ჰ": "h",
+    "ჱ": "e", "ჲ": "y", "ჳ": "w", "ჴ": "q", "ჵ": "o", "ჶ": "f", "ჷ": "y", "ჸ": "", "ჹ": "gh",
+    "ჺ": "", "ჼ": "n", "ჽ": "ae", "ჾ": "", "ჿ": ""
+  }
+}

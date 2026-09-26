@@ -1,0 +1,71 @@
+{
+  "_doc": "Thai and Lao. Thai text keeps its surface in the primary fold; its readings are alternates parsed syllable by syllable (leading vowels, unwritten vowels, final-consonant values). `consonants` gives [RTGS initial, RTGS final, common initial, common final]; the common reading is how names are usually spelled (jai, sawasdee, khob khun). `vowels` spells each vowel pattern [RTGS, common]. `marks` gives each vowel sign or mark its role (pre: written before the consonant; above: a sign on the consonant, with the vowel it spells; post: after it; tone; silencer; repeat; letter: a vowel letter). Lao `consonants` add the Thai letter they behave like, and Lao readings are [standard initial, final, French-style initial, final] (Vientiane, Xieng). `words` spells Thai words that spelling rules misread (a silent letter, a letter read twice), [RTGS, common] or one reading for both; the longest word matches first, inside compounds too.",
+  "vowels": {
+    "A": ["a", "a"], "I": ["i", "i"], "II": ["i", "ee"], "UE": ["ue", "ue"], "UEE": ["ue", "ue"],
+    "U": ["u", "u"], "UU": ["u", "oo"], "E": ["e", "e"], "AE": ["ae", "ae"], "O": ["o", "o"],
+    "OO": ["o", "o"], "IA": ["ia", "ia"], "UEA": ["uea", "uea"], "UA": ["ua", "ua"], "OE": ["oe", "oe"],
+    "OEI": ["oei", "oei"], "AI": ["ai", "ai"], "AO": ["ao", "ao"], "AM": ["am", "am"],
+    "IMPLICIT_A": ["a", "a"], "IMPLICIT_O": ["o", "o"], "RUE": ["rue", "rue"], "LUE": ["lue", "lue"],
+    "RI": ["ri", "ri"]
+  },
+  "words": {
+    "จริง": ["ching", "jing"], "ธรรมดา": "thammada", "ธรรมชาติ": "thammachat", "วัฒนธรรม": "watthanatham",
+    "เหตุ": "het", "เหตุผล": "hetphon", "สามารถ": "samat", "บริษัท": "borisat", "กรุณา": "karuna",
+    "ภรรยา": "phanraya", "ศาสนา": "satsana", "ประวัติศาสตร์": "prawattisat", "วิทยาลัย": "witthayalai",
+    "มหาวิทยาลัย": "mahawitthayalai", "ราชการ": "ratchakan", "จักรยาน": "chakkrayan", "ปรัชญา": "pratchaya",
+    "คุณภาพ": "khunnaphap", "ธนาคาร": "thanakhan", "ชาติ": "chat", "ญาติ": "yat", "สมุทร": "samut",
+    "พรหม": "phrom", "กษัตริย์": "kasat", "เพชร": "phet", "บัตร": "bat", "อาทิตย์": "athit", "พุทธ": "phut",
+    "ภูมิ": "phum", "ภูมิพล": "phumiphon", "ภูมิภาค": "phumiphak", "ภูมิศาสตร์": "phumisat", "เกียรติ": "kiat"
+  },
+  "thai": {
+    "consonants": {
+      "ก": ["k", "k", "k", "k"], "ข": ["kh", "k", "kh", "k"], "ฃ": ["kh", "k", "kh", "k"],
+      "ค": ["kh", "k", "kh", "k"], "ฅ": ["kh", "k", "kh", "k"], "ฆ": ["kh", "k", "kh", "k"],
+      "ง": ["ng", "ng", "ng", "ng"], "จ": ["ch", "t", "j", "t"], "ฉ": ["ch", "t", "ch", "t"],
+      "ช": ["ch", "t", "ch", "t"], "ซ": ["s", "t", "s", "s"], "ฌ": ["ch", "t", "ch", "t"],
+      "ญ": ["y", "n", "y", "n"], "ฎ": ["d", "t", "d", "d"], "ฏ": ["t", "t", "t", "t"],
+      "ฐ": ["th", "t", "th", "t"], "ฑ": ["th", "t", "th", "t"], "ฒ": ["th", "t", "th", "t"],
+      "ณ": ["n", "n", "n", "n"], "ด": ["d", "t", "d", "d"], "ต": ["t", "t", "t", "t"],
+      "ถ": ["th", "t", "th", "t"], "ท": ["th", "t", "th", "t"], "ธ": ["th", "t", "th", "t"],
+      "น": ["n", "n", "n", "n"], "บ": ["b", "p", "b", "b"], "ป": ["p", "p", "p", "p"],
+      "ผ": ["ph", "p", "ph", "p"], "ฝ": ["f", "p", "f", "f"], "พ": ["ph", "p", "ph", "p"],
+      "ฟ": ["f", "p", "f", "f"], "ภ": ["ph", "p", "ph", "p"], "ม": ["m", "m", "m", "m"],
+      "ย": ["y", "i", "y", "i"], "ร": ["r", "n", "r", "n"], "ล": ["l", "n", "l", "n"],
+      "ว": ["w", "o", "w", "o"], "ศ": ["s", "t", "s", "s"], "ษ": ["s", "t", "s", "s"],
+      "ส": ["s", "t", "s", "s"], "ห": ["h", "", "h", ""], "ฬ": ["l", "n", "l", "n"],
+      "อ": ["", "", "", ""], "ฮ": ["h", "", "h", ""]
+    },
+    "marks": {
+      "เ": "pre", "แ": "pre", "โ": "pre", "ใ": "pre", "ไ": "pre",
+      "ั": ["above", "A"], "ิ": ["above", "I"], "ี": ["above", "II"], "ึ": ["above", "UE"],
+      "ื": ["above", "UEE"], "ุ": ["above", "U"], "ู": ["above", "UU"], "็": ["above", "O"],
+      "ะ": "post", "า": "post", "ำ": "post", "ๅ": "tone", "ํ": "tone",
+      "่": "tone", "้": "tone", "๊": "tone", "๋": "tone", "ฺ": "tone", "๎": "tone",
+      "์": "silencer", "ๆ": "repeat", "ฯ": "tone",
+      "ฤ": ["letter", "RUE"], "ฦ": ["letter", "LUE"]
+    }
+  },
+  "lao": {
+    "consonants": {
+      "ກ": ["ก", "k", "k", "k", "k"], "ຂ": ["ข", "kh", "k", "kh", "k"], "ຄ": ["ค", "kh", "k", "kh", "k"],
+      "ງ": ["ง", "ng", "ng", "ng", "ng"], "ຈ": ["จ", "ch", "t", "j", "t"], "ສ": ["ส", "s", "t", "s", "t"],
+      "ຊ": ["ซ", "s", "t", "x", "t"], "ຍ": ["ย", "ny", "i", "gn", "i"], "ດ": ["ด", "d", "t", "d", "t"],
+      "ຕ": ["ต", "t", "t", "t", "t"], "ຖ": ["ถ", "th", "t", "th", "t"], "ທ": ["ท", "th", "t", "th", "t"],
+      "ນ": ["น", "n", "n", "n", "n"], "ບ": ["บ", "b", "p", "b", "p"], "ປ": ["ป", "p", "p", "p", "p"],
+      "ຜ": ["ผ", "ph", "p", "ph", "p"], "ຝ": ["ฝ", "f", "p", "f", "p"], "ພ": ["พ", "ph", "p", "ph", "p"],
+      "ຟ": ["ฟ", "f", "p", "f", "p"], "ມ": ["ม", "m", "m", "m", "m"], "ຢ": ["ย", "y", "i", "y", "i"],
+      "ຣ": ["ร", "r", "n", "r", "n"], "ລ": ["ล", "l", "n", "l", "n"], "ວ": ["ว", "v", "o", "w", "o"],
+      "ຫ": ["ห", "h", "", "h", ""], "ອ": ["อ", "", "", "", ""], "ຮ": ["ฮ", "h", "", "h", ""],
+      "ຼ": ["ล", "l", "n", "l", "n"], "ຨ": ["ศ", "s", "t", "s", "t"], "ຩ": ["ษ", "s", "t", "s", "t"],
+      "ຬ": ["ฬ", "l", "n", "l", "n"]
+    },
+    "marks": {
+      "ເ": ["pre", "เ"], "ແ": ["pre", "แ"], "ໂ": ["pre", "โ"], "ໃ": ["pre", "ใ"], "ໄ": ["pre", "ไ"],
+      "ັ": ["above", "A"], "ິ": ["above", "I"], "ີ": ["above", "II"], "ຶ": ["above", "UE"],
+      "ື": ["above", "UEE"], "ຸ": ["above", "U"], "ູ": ["above", "UU"], "ົ": ["above", "O"],
+      "ຽ": ["above", "IA"], "ໍ": ["above", "OO"],
+      "ະ": ["post", "ะ"], "າ": ["post", "า"], "ຳ": ["post", "ำ"],
+      "່": "tone", "້": "tone", "໊": "tone", "໋": "tone", "໌": "silencer", "ໆ": "repeat", "ຯ": "tone"
+    }
+  }
+}

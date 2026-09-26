@@ -251,6 +251,95 @@ private slots:
         QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 1);
     }
 
+    void romanizedQueriesFindNonLatinArtists()
+    {
+        SearchRecord korean = makeRecord(QStringLiteral("Song"), QString::fromUtf8("악단광칠"), QStringLiteral("Album"));
+        SearchRecord pronounced = makeRecord(QString::fromUtf8("한국어"), QStringLiteral("Artist"), QStringLiteral("Album"));
+        SearchRecord japanese = makeRecord(QString::fromUtf8("東京の夜"), QStringLiteral("Artist"), QStringLiteral("Album"));
+        for (SearchRecord *r : {&korean, &pronounced, &japanese}) foldRecordNorms(*r);
+
+        SearchIndex idx;
+        idx.build({korean, pronounced, japanese});
+        const auto titleOf = [&](const QString &query) {
+            const auto results = idx.match(SearchQuery::parse(query), false);
+            return results.size() == 1 ? results.first().rec.title : QString();
+        };
+        QCOMPARE(titleOf(QStringLiteral("ak dan chil")), QStringLiteral("Song"));
+        QCOMPARE(titleOf(QString::fromUtf8("악단")), QStringLiteral("Song"));
+        QCOMPARE(titleOf(QStringLiteral("hangugeo")), QString::fromUtf8("한국어"));
+        QCOMPARE(titleOf(QStringLiteral("hangukeo")), QString::fromUtf8("한국어"));
+        QCOMPARE(titleOf(QStringLiteral("tokyo")), QString::fromUtf8("東京の夜"));
+        QCOMPARE(titleOf(QStringLiteral("dongjing")), QString::fromUtf8("東京の夜"));
+        QCOMPARE(titleOf(QString::fromUtf8("東")), QString::fromUtf8("東京の夜"));
+        QCOMPARE(titleOf(QStringLiteral("^title:tokyo")), QString::fromUtf8("東京の夜"));
+
+        SearchRecord mixed = makeRecord(QString::fromUtf8("한국어Müller"), QStringLiteral("Artist"), QStringLiteral("Album"));
+        foldRecordNorms(mixed);
+        SearchIndex mixedIndex;
+        mixedIndex.build({mixed});
+        for (const QString &query : {QString::fromUtf8("hangugeoMüller"), QStringLiteral("hangugeomueller"),
+                                     QString::fromUtf8("한국어mueller")}) {
+            QVERIFY2(mixedIndex.match(SearchQuery::parse(query), false).size() == 1, qPrintable(query));
+        }
+    }
+
+    void queriesInTheirOwnScriptFindTextContainingThem()
+    {
+        // A query typed in a script folds to its primary form, which must
+        // occur in some fold of any text containing the query.
+        const QList<QPair<QString, QString>> cases = {
+            {QString::fromUtf8("パーティー"), QString::fromUtf8("テ")},
+            {QString::fromUtf8("パーティー"), QString::fromUtf8("ティ")},
+            {QString::fromUtf8("きゃく"), QString::fromUtf8("き")},
+            {QString::fromUtf8("きゃく"), QString::fromUtf8("ゃく")},
+            {QString::fromUtf8("հետ"), QString::fromUtf8("ետ")},
+            {QString::fromUtf8("Ուրախ"), QString::fromUtf8("րախ")},
+            {QString::fromUtf8("한국어"), QString::fromUtf8("국어")},
+            {QString::fromUtf8("東京の夜"), QString::fromUtf8("京の")},
+            {QString::fromUtf8("สวัสดี"), QString::fromUtf8("วัส")},
+            {QString::fromUtf8("Їхав Київ"), QString::fromUtf8("иїв")},
+            {QString::fromUtf8("こゝろ"), QString::fromUtf8("コヽロ")},
+            {QString::fromUtf8("つゞく"), QString::fromUtf8("ツヾク")},
+            {QString::fromUtf8("木々"), QString::fromUtf8("木〻")},
+        };
+        for (const auto &[text, query] : cases) {
+            SearchRecord r = makeRecord(text, QStringLiteral("Artist"), QStringLiteral("Album"));
+            foldRecordNorms(r);
+            SearchIndex idx;
+            idx.build({r});
+            QVERIFY2(idx.match(SearchQuery::parse(query), false).size() == 1,
+                     qPrintable(query + QStringLiteral(" in ") + text));
+        }
+    }
+
+    void highlightFollowsAlternateReadings()
+    {
+        // "hangugeo" matches only the pronounced reading; its letters still
+        // map back onto the three syllables.
+        const QVector<int> pos = Search::highlightPositions(
+            QString::fromUtf8("한국어 노래"), SearchQuery::parse(QStringLiteral("hangugeo")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(pos, (QVector<int>{0, 1, 2}));
+    }
+
+    void anchorsApplyToEachFoldedForm()
+    {
+        // The norm carries the display fold and the sort-name fold; an anchor
+        // answers against either one, never against their concatenation.
+        SearchRecord r = makeRecord(QStringLiteral("The Wall"), QStringLiteral("Pink Floyd"), QStringLiteral("The Wall"));
+        r.titleSort = QStringLiteral("Wall, The");
+        foldRecordNorms(r);
+
+        SearchIndex idx;
+        idx.build({r});
+        for (const QString &query : {QStringLiteral("title:wall$"), QStringLiteral("^title:wall"),
+                                     QStringLiteral("^title:the"), QStringLiteral("title:the$")}) {
+            QVERIFY2(idx.match(SearchQuery::parse(query), false).size() == 1, qPrintable(query));
+            QVERIFY2(idx.match(SearchQuery::parse(query), true).size() == 1, qPrintable(query));
+        }
+        QVERIFY(idx.match(SearchQuery::parse(QStringLiteral("^title:floyd")), false).isEmpty());
+    }
+
     void appendGrowsIndexIncrementally()
     {
         // Streaming build: append() must extend the index without disturbing the
@@ -280,6 +369,16 @@ private slots:
             QString::fromUtf8("Straße"), SearchQuery::parse(QStringLiteral("strasse")),
             Search::HighlightField::Title, false);
         QCOMPARE(strasse, (QVector<int>{0, 1, 2, 3, 4, 5}));
+
+        // A character normalization replaces highlights itself (Kelvin sign).
+        const QVector<int> kelvin = Search::highlightPositions(
+            QString::fromUcs4(U"A\u212A"), SearchQuery::parse(QStringLiteral("k")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(kelvin, (QVector<int>{1}));
+        const QVector<int> vowel = Search::highlightPositions(
+            QString::fromUcs4(U"A\u1169"), SearchQuery::parse(QStringLiteral("o")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(vowel, (QVector<int>{1}));
 
         // Romaji query highlights the underlying kana it romanizes.
         const QVector<int> kana = Search::highlightPositions(

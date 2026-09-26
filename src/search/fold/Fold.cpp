@@ -1,479 +1,632 @@
 #include "search/fold/Fold.h"
 
-#include <QByteArray>
-#include <QChar>
-#include <QHash>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonParseError>
-#include <QJsonValue>
-#include <QString>
+#include "search/fold/FoldEngine.h"
+
+#include <QVarLengthArray>
 
 #include <algorithm>
+#include <array>
 
 namespace Search::Fold {
 
+namespace Engine {
+
+Out::Out(bool withIndex, qsizetype hint)
+    : m_withIndex(withIndex)
+{
+    if (hint > 0) grow(hint);
+    if (withIndex) m_src.reserve(hint);
+}
+
+void Out::grow(qsizetype extra)
+{
+    const qsizetype cap = std::max(m_len + extra, m_cap * 2 + 16);
+    m_text.resize(cap);
+    m_data = reinterpret_cast<char16_t *>(m_text.data());
+    m_cap = cap;
+}
+
 namespace {
 
-// ---- step 3: combining diacritical marks ----------------------------------
-// The same ranges the reference slug helper uses. After NFD decomposition many
-// accented letters become base + combining mark(s); dropping the marks yields
-// the plain base (é→e, ã→a, ş→s, ğ→g, ö→o, й→и, ά→α).
-bool isCombiningMark(char16_t u)
+inline bool isDroppedAscii(char16_t c)
 {
-    return (u >= 0x0300 && u <= 0x036F)   // Combining Diacritical Marks
-        || (u >= 0x1AB0 && u <= 0x1AFF)   // ... Extended
-        || (u >= 0x1DC0 && u <= 0x1DFF)   // ... Supplement
-        || (u >= 0x20D0 && u <= 0x20FF)   // ... for Symbols
-        || (u >= 0xFE20 && u <= 0xFE2F);  // Combining Half Marks
+    return (c < 0x20 && (c < 0x09 || c > 0x0D)) || c == 0x7F;
 }
 
-using CharTable = QHash<char16_t, QString>;
-
-struct JapaneseDict {
-    QHash<QString, QString> map;
-    int maxKeyLen = 0;
-};
-
-struct FoldTables {
-    CharTable transliteration;
-    CharTable kana;
-    CharTable yoonPrefix;
-    CharTable smallVowel;
-    JapaneseDict dictionary;
-};
-
-CharTable charTableFromJson(const QJsonValue &value)
+inline char16_t lowerAscii(char16_t c)
 {
-    CharTable table;
-    const QJsonObject object = value.toObject();
-    for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
-        if (!it.value().isString() || it.key().size() != 1) continue;
-        table.insert(static_cast<char16_t>(it.key().at(0).unicode()), it.value().toString());
-    }
-    return table;
-}
-
-// The tables travel inside this translation unit, so every binary that
-// compiles Fold.cpp carries them and nothing has to register a resource.
-constexpr unsigned char kFoldTablesJson[] = {
-#embed "fold_tables.json"
-};
-
-FoldTables loadFoldTables()
-{
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(
-        QByteArray::fromRawData(reinterpret_cast<const char *>(kFoldTablesJson), sizeof kFoldTablesJson),
-        &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        qFatal("fold_tables.json is not a JSON object: %s", qPrintable(parseError.errorString()));
-    }
-
-    FoldTables tables;
-    const QJsonObject root = document.object();
-    tables.transliteration = charTableFromJson(root.value(QStringLiteral("transliteration")));
-    tables.kana = charTableFromJson(root.value(QStringLiteral("kana")));
-    tables.yoonPrefix = charTableFromJson(root.value(QStringLiteral("yoon_prefix")));
-    tables.smallVowel = charTableFromJson(root.value(QStringLiteral("small_vowel")));
-
-    const QJsonObject dictionary = root.value(QStringLiteral("kanji")).toObject();
-    for (auto it = dictionary.constBegin(); it != dictionary.constEnd(); ++it) {
-        if (it.key().isEmpty() || !it.value().isString()) continue;
-        tables.dictionary.map.insert(it.key(), it.value().toString());
-        tables.dictionary.maxKeyLen = std::max(
-            tables.dictionary.maxKeyLen, static_cast<int>(it.key().size()));
-    }
-    return tables;
-}
-
-const FoldTables &foldTables()
-{
-    static const FoldTables tables = loadFoldTables();
-    return tables;
-}
-
-const CharTable &transliterationTable()
-{
-    return foldTables().transliteration;
-}
-
-// ---- step 5: kana → romaji -------------------------------------------------
-// Katakana is mapped onto hiragana code points first, so only hiragana is
-// tabulated here. Yōon (きゃ→kya) and sokuon (っか→kka) are handled by the
-// driver with one character of look-ahead.
-
-constexpr char16_t kHiraSokuon   = 0x3063; // っ
-constexpr char16_t kHiraLow      = 0x3041;
-constexpr char16_t kHiraHigh     = 0x3096;
-constexpr char16_t kKataLow      = 0x30A1;
-constexpr char16_t kKataHigh     = 0x30F6;
-constexpr char16_t kProlonged    = 0x30FC; // ー (shared by both kana)
-constexpr char16_t kKanjiIteration       = 0x3005; // 々
-constexpr char16_t kHiraIteration        = 0x309D; // ゝ
-constexpr char16_t kHiraVoicedIteration  = 0x309E; // ゞ
-constexpr char16_t kKataIteration        = 0x30FD; // ヽ
-constexpr char16_t kKataVoicedIteration  = 0x30FE; // ヾ
-
-bool isSmallYa(char16_t u) { return foldTables().smallVowel.contains(u); }
-
-bool isKanaCharacter(char16_t u)
-{
-    return (u >= kHiraLow && u <= kHiraHigh)
-        || (u >= kKataLow && u <= kKataHigh);
-}
-
-QString voicedKana(char16_t c)
-{
-    const QString composed = (QString(QChar(c)) + QChar(0x3099))
-                                 .normalized(QString::NormalizationForm_C);
-    return composed.size() == 1 && isKanaCharacter(composed.at(0).unicode())
-        ? composed
-        : QString(QChar(c));
-}
-
-const CharTable &hiraganaTable()
-{
-    return foldTables().kana;
-}
-
-// Consonant prefix used to build yōon (palatalized) syllables; combined with the
-// small vowel's a/u/o. Hepburn digraphs: し→sh, ち→ch, じ/ぢ→j.
-QString yoonPrefix(char16_t c)
-{
-    const auto it = foldTables().yoonPrefix.constFind(c);
-    return it == foldTables().yoonPrefix.constEnd() ? QString() : it.value();
-}
-
-QString smallVowel(char16_t u)
-{
-    const auto it = foldTables().smallVowel.constFind(u);
-    return it == foldTables().smallVowel.constEnd() ? QString() : it.value();
-}
-
-// Apply sokuon gemination to a freshly produced syllable romaji.
-QString geminate(const QString &romaji)
-{
-    if (romaji.isEmpty()) return romaji;
-    if (romaji.startsWith(QLatin1String("ch"))) return QLatin1Char('t') + romaji; // っち→tchi
-    return romaji.at(0) + romaji;                                                  // っか→kka
-}
-
-// ---- step 5b: kanji/word reading dictionary --------------------------------
-// Kanji readings are word-level, not derivable per character (三線 reads
-// "sanshin", a fixed word reading), so they need a lookup. This is the bundled,
-// hand-tuned starter table: surface (kanji/mixed) → hiragana reading. The
-// dictionary pass runs *before* kana→romaji, so readings here are written in
-// kana and romanized by the existing stage. Longest surface wins, so multi-kanji
-// words override single-kanji fallbacks (三線 beats 三+線).
-//
-// This is a seed, expected to grow over time. Single-kanji entries pick the most
-// common standalone reading — a heuristic that favors recall; a longer word
-// entry always takes precedence. Per-track reading tags (a later slice) cover
-// what the table misses. Rows are kept in fold_tables.json.
-bool isKanji(char16_t u)
-{
-    return (u >= 0x3400 && u <= 0x9FFF)    // CJK Unified Ideographs (+ Ext A)
-        || (u >= 0xF900 && u <= 0xFAFF);   // CJK Compatibility Ideographs
-}
-
-// Expand Japanese iteration marks before dictionary lookup and kana
-// romanization. A repeated unit inherits the mark's source position so a
-// match in the expansion highlights the mark that supplied it.
-void expandIterationMarks(const QString &base, const QVector<int> &baseSrc,
-                          QString &out, QVector<int> &outSrc)
-{
-    const int n = static_cast<int>(base.size());
-    out.reserve(n);
-    outSrc.reserve(n);
-    for (int j = 0; j < n; ++j) {
-        const char16_t c = base.at(j).unicode();
-        const int srcIdx = baseSrc.at(j);
-        if (c == kKanjiIteration && j > 0 && isKanji(base.at(j - 1).unicode())) {
-            out += base.at(j - 1);
-            outSrc.append(srcIdx);
-            continue;
-        }
-
-        const bool voiced = c == kHiraVoicedIteration || c == kKataVoicedIteration;
-        const bool plain = c == kHiraIteration || c == kKataIteration;
-        if ((plain || voiced) && j > 0 && isKanaCharacter(base.at(j - 1).unicode())) {
-            const QString repeated = voiced ? voicedKana(base.at(j - 1).unicode())
-                                            : QString(base.at(j - 1));
-            out += repeated;
-            for (qsizetype k = 0; k < repeated.size(); ++k) outSrc.append(srcIdx);
-            continue;
-        }
-
-        out += base.at(j);
-        outSrc.append(srcIdx);
-    }
-}
-
-const JapaneseDict &japaneseDict()
-{
-    return foldTables().dictionary;
-}
-
-// ---- driver ----------------------------------------------------------------
-
-struct Builder {
-    QString text;
-    QVector<int> srcIndex;
-    bool withIndex = false;
-
-    void push(const QString &s, int src)
-    {
-        text += s;
-        if (withIndex) {
-            for (qsizetype k = 0; k < s.size(); ++k) srcIndex.append(src);
-        }
-    }
-    void push(QChar c, int src)
-    {
-        text += c;
-        if (withIndex) srcIndex.append(src);
-    }
-};
-
-bool isKanaBlock(char16_t u)
-{
-    return u >= 0x3040 && u <= 0x30FF;
-}
-
-bool isHalfWidthKanaBase(char16_t u)
-{
-    return u >= 0xFF61 && u <= 0xFF9D;
-}
-
-bool isHalfWidthVoicedMark(char16_t u)
-{
-    return u == 0xFF9E || u == 0xFF9F;
-}
-
-void appendPostNfkc(const QString &normalized, int srcIndex,
-                    QString &base, QVector<int> &baseSrc)
-{
-    for (const QChar ch : normalized) {
-        if (isKanaBlock(ch.unicode())) {
-            base += ch;
-            baseSrc.append(srcIndex);
-            continue;
-        }
-        const QString dec = QString(ch).normalized(QString::NormalizationForm_D).toLower();
-        for (const QChar d : dec) {
-            if (isCombiningMark(d.unicode())) continue;
-            base += d;
-            baseSrc.append(srcIndex);
-        }
-    }
-}
-
-void appendNfkcUnit(const QString &unit, int srcIndex,
-                   QString &base, QVector<int> &baseSrc)
-{
-    appendPostNfkc(unit.normalized(QString::NormalizationForm_KC).toLower(),
-                   srcIndex, base, baseSrc);
-}
-
-// Stage A: NFKC compatibility normalization, then NFD decomposition, lowercase,
-// and combining-mark stripping, per source unit. Every surviving char records
-// the source index of the unit that produced it.
-void decomposeFold(const QString &src, QString &base, QVector<int> &baseSrc)
-{
-    const int n = static_cast<int>(src.size());
-    base.reserve(n);
-    baseSrc.reserve(n);
-    for (int i = 0; i < n; ++i) {
-        const QChar ch = src.at(i);
-        const char16_t u = ch.unicode();
-
-        if (u < 0x80) {                              // ASCII fast path
-            base += (u >= 'A' && u <= 'Z') ? QChar(u + 0x20) : ch;
-            baseSrc.append(i);
-            continue;
-        }
-        if (ch.isHighSurrogate() && i + 1 < n && src.at(i + 1).isLowSurrogate()) {
-            // Astral code point (e.g. CJK Ext-B kanji): preserve the UTF-16
-            // mapping so a match flags the whole surrogate pair.
-            const QString unit = src.mid(i, 2);
-            const QString normalized = unit.normalized(QString::NormalizationForm_KC).toLower();
-            if (normalized == unit) {
-                base += normalized.at(0); baseSrc.append(i);
-                base += normalized.at(1); baseSrc.append(i + 1);
-            } else {
-                appendPostNfkc(normalized, i, base, baseSrc);
-            }
-            ++i;
-            continue;
-        }
-
-        // U+FF9E/U+FF9F compose with the preceding half-width kana only when
-        // normalized as one unit. Consuming the pair prevents a bare voiced
-        // mark from being mistaken for a separate kana.
-        if (isHalfWidthKanaBase(u) && i + 1 < n
-            && isHalfWidthVoicedMark(src.at(i + 1).unicode())) {
-            appendNfkcUnit(src.mid(i, 2), i, base, baseSrc);
-            ++i;
-            continue;
-        }
-        appendNfkcUnit(QString(ch), i, base, baseSrc);
-    }
-}
-
-// Stage A.5: replace dictionary surface forms (kanji words) with their kana
-// reading, longest-match-first. Only a kanji start triggers a lookup, so non-CJK
-// text is copied through untouched. Reading characters are spread evenly across
-// the surface's source span so a romaji match highlights the underlying kanji
-// (e.g. matching "sanshin" lights 三線, "san" lights 三).
-void applyDictionary(const QString &base, const QVector<int> &baseSrc,
-                     QString &out, QVector<int> &outSrc)
-{
-    const JapaneseDict &dict = japaneseDict();
-    const int n = static_cast<int>(base.size());
-    out.reserve(n);
-    outSrc.reserve(n);
-    for (int j = 0; j < n;) {
-        if (isKanji(base.at(j).unicode())) {
-            const int maxL = std::min(dict.maxKeyLen, n - j);
-            QString reading;
-            int matchedLen = 0;
-            for (int L = maxL; L >= 1; --L) {
-                const auto it = dict.map.constFind(base.mid(j, L));
-                if (it != dict.map.constEnd()) { reading = it.value(); matchedLen = L; break; }
-            }
-            if (matchedLen > 0) {
-                const int K = static_cast<int>(reading.size());
-                for (int k = 0; k < K; ++k) {
-                    out += reading.at(k);
-                    outSrc.append(baseSrc.at(j + (k * matchedLen) / K));
-                }
-                j += matchedLen;
-                continue;
-            }
-        }
-        out += base.at(j);
-        outSrc.append(baseSrc.at(j));
-        ++j;
-    }
+    return (c >= u'A' && c <= u'Z') ? char16_t(c + 0x20) : c;
 }
 
 } // namespace
 
-TableStats tableStats()
+void Out::putAscii(const char16_t *s, qsizetype n, int src, bool sequential)
 {
-    const FoldTables &tables = foldTables();
-    int longestKeyLen = 0;
-    for (auto it = tables.dictionary.map.constBegin();
-         it != tables.dictionary.map.constEnd(); ++it) {
-        longestKeyLen = std::max(longestKeyLen, static_cast<int>(it.key().size()));
+    if (m_len + n > m_cap) grow(n);
+    char16_t *d = m_data + m_len;
+    bool dropped = false;
+    for (qsizetype k = 0; k < n; ++k) dropped |= isDroppedAscii(s[k]);
+    if (!dropped) {
+        for (qsizetype k = 0; k < n; ++k) d[k] = lowerAscii(s[k]);
+        m_len += n;
+        if (m_withIndex) {
+            for (qsizetype k = 0; k < n; ++k) m_src.append(sequential ? src + int(k) : src);
+        }
+        return;
     }
-    return {
-        static_cast<int>(tables.transliteration.size()),
-        static_cast<int>(tables.kana.size()),
-        static_cast<int>(tables.yoonPrefix.size()),
-        static_cast<int>(tables.smallVowel.size()),
-        static_cast<int>(tables.dictionary.map.size()),
-        tables.dictionary.maxKeyLen,
-        longestKeyLen,
-    };
+    qsizetype written = 0;
+    for (qsizetype k = 0; k < n; ++k) {
+        if (isDroppedAscii(s[k])) continue;
+        d[written++] = lowerAscii(s[k]);
+        if (m_withIndex) m_src.append(sequential ? src + int(k) : src);
+    }
+    m_len += written;
 }
 
-static FoldResult foldImpl(const QString &src, bool withIndex, bool romanizeCjk)
+void Out::putCodePoint(char32_t cp, int src)
 {
-    QString base;
-    QVector<int> baseSrc;
-    decomposeFold(src, base, baseSrc);
-
-    // Substitute kanji/word readings before romanizing the resulting kana. Both
-    // are skipped for the cheap "basic" fold (kana/kanji then pass through).
-    if (romanizeCjk) {
-        QString expanded;
-        QVector<int> expandedSrc;
-        expandIterationMarks(base, baseSrc, expanded, expandedSrc);
-        base = std::move(expanded);
-        baseSrc = std::move(expandedSrc);
-
-        QString db;
-        QVector<int> dbSrc;
-        applyDictionary(base, baseSrc, db, dbSrc);
-        base = std::move(db);
-        baseSrc = std::move(dbSrc);
+    if (cp < 0x10000) {
+        put(char16_t(cp), src);
+        return;
     }
+    put(QChar::highSurrogate(cp), src);
+    put(QChar::lowSurrogate(cp), src);
+}
 
-    Builder out;
-    out.withIndex = withIndex;
-    out.text.reserve(base.size());
+QString Out::takeText()
+{
+    m_text.truncate(m_len);
+    m_data = nullptr;
+    m_len = m_cap = 0;
+    return std::move(m_text);
+}
 
-    const QHash<char16_t, QString> &table = transliterationTable();
-    const QHash<char16_t, QString> &kana = hiraganaTable();
+int styleCount(Script family)
+{
+    switch (family) {
+    case Script::Han:
+    case Script::Brahmic:
+    case Script::Arabic:
+        return 4;
+    case Script::Hebrew:
+        return 3;
+    case Script::Syriac:
+    case Script::Thaana:
+        return 2;
+    case Script::Greek:
+    case Script::Cyrillic:
+    case Script::Hangul:
+    case Script::Thai:
+    case Script::Lao:
+    case Script::LatinAlt:
+    case Script::Tibetan:
+    case Script::Kana:
+    case Script::Armenian:
+        return 3;
+    default:
+        return 1;
+    }
+}
 
-    bool pendingGemination = false;
-    const int n = static_cast<int>(base.size());
-    for (int j = 0; j < n; ++j) {
-        char16_t c = base.at(j).unicode();
-        const int srcIdx = baseSrc.at(j);
+} // namespace Engine
 
-        // Normalize katakana onto hiragana code points (ア→あ, ヴ→ゔ).
-        if (romanizeCjk && c >= kKataLow && c <= kKataHigh) {
-            c -= 0x60;
-        } else if (romanizeCjk && c == kProlonged) {
-            continue; // long-vowel mark: drop
-        }
+namespace {
 
-        const bool isKana = romanizeCjk && c >= kHiraLow && c <= kHiraHigh;
-        if (isKana) {
-            if (c == kHiraSokuon) {            // っ — geminate the next syllable
-                pendingGemination = true;
-                continue;
-            }
-            QString romaji;
-            // Yōon: -i syllable followed by a small ya/yu/yo.
-            if (j + 1 < n) {
-                const char16_t next0 = base.at(j + 1).unicode();
-                const char16_t next = (next0 >= kKataLow && next0 <= kKataHigh) ? char16_t(next0 - 0x60) : next0;
-                if (isSmallYa(next)) {
-                    const QString prefix = yoonPrefix(c);
-                    if (!prefix.isEmpty()) {
-                        romaji = prefix + smallVowel(next);
-                        ++j; // consume the small kana
-                    }
-                }
-            }
-            if (romaji.isEmpty()) {
-                const auto it = kana.constFind(c);
-                romaji = (it != kana.constEnd()) ? it.value() : QString(QChar(c));
-            }
-            if (pendingGemination) {
-                romaji = geminate(romaji);
-                pendingGemination = false;
-            }
-            out.push(romaji, srcIdx);
+using namespace Engine;
+
+struct Decoded {
+    char32_t cp;
+    int width;
+};
+
+inline Decoded decode(const char16_t *s, qsizetype n, qsizetype i)
+{
+    const char16_t c = s[i];
+    if (QChar::isHighSurrogate(c) && i + 1 < n && QChar::isLowSurrogate(s[i + 1])) {
+        return {QChar::surrogateToUcs4(c, s[i + 1]), 2};
+    }
+    return {c, 1};
+}
+
+inline char32_t previousCodePoint(const char16_t *s, qsizetype i)
+{
+    if (i <= 0) return 0;
+    const char16_t c = s[i - 1];
+    if (QChar::isLowSurrogate(c) && i >= 2 && QChar::isHighSurrogate(s[i - 2])) {
+        return QChar::surrogateToUcs4(s[i - 2], c);
+    }
+    return c;
+}
+
+// Printable ASCII and whitespace fold to a lowercase copy, which is `src`
+// itself when it has no capitals. Returns false for anything else.
+bool foldAscii(const QString &src, QString &folded)
+{
+    const qsizetype n = src.size();
+    const char16_t *s = reinterpret_cast<const char16_t *>(src.utf16());
+    bool other = false;
+    bool upper = false;
+    for (qsizetype i = 0; i < n; ++i) {
+        const char16_t c = s[i];
+        other |= c >= 0x7F || (c < 0x20 && (c < 0x09 || c > 0x0D));
+        upper |= c >= u'A' && c <= u'Z';
+    }
+    if (other) return false;
+    if (!upper) {
+        folded = src;
+        return true;
+    }
+    folded = QString(n, Qt::Uninitialized);
+    char16_t *d = reinterpret_cast<char16_t *>(folded.data());
+    for (qsizetype i = 0; i < n; ++i) d[i] = lowerAscii(s[i]);
+    return true;
+}
+
+// Canonically equivalent text folds alike: a base with marks that NFC would
+// change (decomposed file names, NFD input, marks out of canonical order,
+// excluded compositions) is put into NFC first. Composed carries that text
+// and, for each of its units, the source index of the sequence it came from.
+struct Composed {
+    QString text;
+    QVector<int> map;
+};
+
+bool needsComposition(const QString &src)
+{
+    const char16_t *s = reinterpret_cast<const char16_t *>(src.utf16());
+    const qsizetype n = src.size();
+    int previousClass = 0;
+    for (qsizetype i = 0; i < n; ++i) {
+        const char16_t c = s[i];
+        if (c < 0x0300) {
+            previousClass = 0;
             continue;
         }
-
-        // A stray sokuon with no following syllable: emit nothing meaningful.
-        pendingGemination = false;
-
-        const auto it = table.constFind(c);
-        if (it != table.constEnd()) {
-            out.push(it.value(), srcIdx);
-        } else {
-            out.push(base.at(j), srcIdx);
+        char32_t cp = c;
+        if (QChar::isHighSurrogate(c) && i + 1 < n && QChar::isLowSurrogate(s[i + 1])) {
+            cp = QChar::surrogateToUcs4(c, s[++i]);
         }
+        if (normalizes(cp)) return true;
+        const int cls = QChar::combiningClass(cp);
+        if (cls != 0 && previousClass > cls) return true;  // marks out of canonical order
+        previousClass = cls;
     }
-
-    return {std::move(out.text), std::move(out.srcIndex)};
+    return false;
 }
 
-FoldResult fold(const QString &src, bool romanizeCjk)
+Composed compose(const QString &src)
 {
-    return foldImpl(src, /*withIndex=*/true, romanizeCjk);
+    const char16_t *s = reinterpret_cast<const char16_t *>(src.utf16());
+    const qsizetype n = src.size();
+    Composed out;
+    out.text.reserve(n);
+    out.map.reserve(n);
+    qsizetype i = 0;
+    while (i < n) {
+        const auto [first, firstWidth] = decode(s, n, i);
+        qsizetype j = i + firstWidth;
+        bool composable = normalizes(first);
+        const int firstClass = QChar::combiningClass(first);
+        int previousClass = firstClass != 0 ? firstClass : markLedClass(first);
+        // The starter a following starter would compose with; a mark blocks it.
+        char32_t starter = previousClass == 0 ? first : 0;
+        while (j < n) {
+            const auto [next, width] = decode(s, n, j);
+            const int cls = QChar::combiningClass(next);
+            if (cls != 0) {
+                starter = 0;
+                composable = composable || normalizes(next) || previousClass > cls;
+                previousClass = cls;
+            } else if (const int led = markLedClass(next)) {
+                // Decomposed, it is marks on the base before it.
+                starter = 0;
+                composable = true;
+                previousClass = led;
+            } else {
+                starter = composeStarters(starter, next);
+                if (starter == 0) break;
+                composable = true;
+            }
+            j += width;
+        }
+        const QStringView sequence(s + i, j - i);
+        if (composable) {
+            const QString nfc = sequence.toString().normalized(QString::NormalizationForm_C);
+            out.text += nfc;
+            out.map.insert(out.map.size(), nfc.size(), int(i));
+        } else {
+            out.text += sequence;
+            for (qsizetype k = i; k < j; ++k) out.map.append(int(k));
+        }
+        i = j;
+    }
+    return out;
 }
 
-QString foldText(const QString &src, bool romanizeCjk)
+void remap(QVector<int> &index, const QVector<int> &map)
 {
-    return foldImpl(src, /*withIndex=*/false, romanizeCjk).text;
+    for (int &k : index) k = map.at(k);
+}
+
+QVector<int> identityIndex(qsizetype n)
+{
+    QVector<int> index(n);
+    for (qsizetype i = 0; i < n; ++i) index[i] = int(i);
+    return index;
+}
+
+qsizetype collectRun(const char16_t *s, qsizetype n, qsizetype i, Script family, int srcOverride,
+                     std::uint32_t &mask, Units &units)
+{
+    while (i < n) {
+        const auto [cp, width] = decode(s, n, i);
+        const std::uint32_t e = entryFor(cp);
+        const Script script = scriptOf(e);
+        if (familyOf(script) != family && script != Script::Inherited) {
+            // Thai and Lao may write a space before the repetition mark, which
+            // repeats the word before it (จริง ๆ).
+            const bool beforeRepeat = (family == Script::Thai || family == Script::Lao) && cp == u' ' && i + 1 < n
+                && (s[i + 1] == 0x0E46 || s[i + 1] == 0x0EC6);
+            if (!beforeRepeat) break;
+        }
+        mask |= maskOf(script);
+        const int src = srcOverride >= 0 ? srcOverride : int(i);
+        if (hasDecomp(e)) {
+            const QStringView form = decompOf(cp);
+            for (qsizetype k = 0; k < form.size(); ++k) {
+                const auto [dcp, dwidth] = decode(form.utf16(), form.size(), k);
+                units.append({dcp, entryFor(dcp), src});
+                k += dwidth - 1;
+            }
+        } else {
+            units.append({cp, e, src});
+        }
+        i += width;
+    }
+    return i;
+}
+
+// The reading style of each script family in one pass (0 everywhere is the
+// primary fold).
+using Styles = std::array<std::uint8_t, 32>;
+constexpr Styles kPrimary{};
+
+void dispatch(Script family, const Units &units, const Styles &styles, const Context &ctx, Out &out)
+{
+    const int style = styles[unsigned(family)];
+    const Unit *u = units.data();
+    const qsizetype n = units.size();
+    switch (family) {
+    case Script::Kana:
+        foldKana(u, n, style, out);
+        return;
+    case Script::Han:
+        foldHan(u, n, style, ctx, out);
+        return;
+    case Script::Hangul:
+        foldHangul(u, n, style, out);
+        return;
+    case Script::Armenian:
+        foldArmenian(u, n, style, out);
+        return;
+    case Script::Greek:
+        foldGreek(u, n, style, out);
+        return;
+    case Script::Cyrillic:
+        foldCyrillic(u, n, style, ctx, out);
+        return;
+    case Script::Thai:
+    case Script::Lao:
+        if (style > 0) {
+            foldThai(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Brahmic:
+        if (style > 0) {
+            foldBrahmic(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Arabic:
+        if (style > 0) {
+            foldArabic(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Hebrew:
+        if (style > 0) {
+            foldHebrew(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::Syriac:
+        if (style > 0) {
+            foldSyriac(u, n, out);
+            return;
+        }
+        break;
+    case Script::Thaana:
+        if (style > 0) {
+            foldThaana(u, n, out);
+            return;
+        }
+        break;
+    case Script::Tibetan:
+        if (style > 0) {
+            foldTibetan(u, n, style, out);
+            return;
+        }
+        break;
+    case Script::LatinAlt:
+        if (style > 0) {
+            foldLatinAlt(u, n, style, out);
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+    for (qsizetype k = 0; k < n; ++k) emitPrimary(u[k], out);
+}
+
+// Folds s[0, n) into `out` with reading style `pass`. `srcOverride` maps every
+// unit to one source index (a compatibility expansion folds in place of the
+// character it came from). `mask` collects the scripts seen; `fullMask` is the
+// whole string's, which language-dependent readings consult.
+void runPass(const char16_t *s, qsizetype n, const Styles &styles, int srcOverride, std::uint32_t &mask,
+             std::uint32_t fullMask, Out &out)
+{
+    qsizetype i = 0;
+    while (i < n) {
+        if (s[i] < 0x80) {
+            qsizetype j = i + 1;
+            while (j < n && s[j] < 0x80) ++j;
+            out.putAscii(s + i, j - i, srcOverride >= 0 ? srcOverride : int(i), srcOverride < 0);
+            i = j;
+            continue;
+        }
+        const auto [cp, width] = decode(s, n, i);
+        const std::uint32_t e = entryFor(cp);
+        const Script script = scriptOf(e);
+        const Kind kind = kindOf(e);
+        const Script family = familyOf(script);
+        if (kind == Kind::Script || styles[unsigned(family)] > 0) {
+            Units units;
+            Context ctx;
+            ctx.mask = fullMask | mask;
+            ctx.before = srcOverride < 0 ? previousCodePoint(s, i) : 0;
+            const qsizetype end = collectRun(s, n, i, family, srcOverride, mask, units);
+            if (units.isEmpty()) {
+                i += width;
+                continue;
+            }
+            dispatch(family, units, styles, ctx, out);
+            i = end;
+            continue;
+        }
+        mask |= maskOf(script);
+        const int src = srcOverride >= 0 ? srcOverride : int(i);
+        switch (kind) {
+        case Kind::Keep:
+            out.put(s[i], src);
+            if (width == 2) out.put(s[i + 1], srcOverride >= 0 ? srcOverride : int(i + 1));
+            break;
+        case Kind::Char:
+            out.put(char16_t(payloadOf(e)), src);
+            break;
+        case Kind::Pool:
+            out.put(QStringView(kPool + payloadOf(e), qsizetype(lengthOf(e))), src);
+            break;
+        case Kind::Expand:
+            runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), styles, src, mask, fullMask, out);
+            break;
+        case Kind::Drop:
+        case Kind::Script:
+            break;
+        }
+        i += width;
+    }
+}
+
+// Kana and ideographs choose their styles together: Japanese readings of
+// kanji pair with the kana spelling of the same pass.
+Script groupOf(Script family)
+{
+    return family == Script::Kana ? Script::Han : family;
+}
+
+void assign(Styles &styles, Script group, int style)
+{
+    const auto set = [&](Script family) {
+        styles[unsigned(family)] = std::uint8_t(style < styleCount(family) ? style : 0);
+    };
+    set(group);
+    if (group == Script::Han) set(Script::Kana);
+}
+
+struct Group {
+    Script group;
+    int count;
+};
+
+// The script groups in `mask` that have alternate readings.
+QVarLengthArray<Group, 8> readingGroups(std::uint32_t mask)
+{
+    QVarLengthArray<Group, 8> groups;
+    for (unsigned s = 0; s < 32; ++s) {
+        if (!(mask & (1u << s))) continue;
+        const Script group = groupOf(familyOf(Script(s)));
+        const int count = group == Script::Han ? std::max(styleCount(Script::Han), styleCount(Script::Kana))
+                                               : styleCount(group);
+        if (count < 2 || std::any_of(groups.cbegin(), groups.cend(), [&](const Group &g) { return g.group == group; })) {
+            continue;
+        }
+        groups.append({group, count});
+    }
+    return groups;
+}
+
+struct Folded {
+    QString text;
+    QVector<int> index;
+};
+
+Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::uint32_t &mask,
+                std::uint32_t fullMask)
+{
+    Out out(withIndex, src.size() + 8);
+    runPass(reinterpret_cast<const char16_t *>(src.utf16()), src.size(), styles, -1, mask, fullMask, out);
+    QVector<int> index = out.takeIndex();
+    return {out.takeText(), std::move(index)};
+}
+
+// Every distinct fold of `src`, primary first.
+//
+// Each script group reads independently. A group alone contributes each of
+// its styles that reads this string differently; with several groups, the
+// folds cover every combination of those distinct readings (up to 16), so a
+// word mixing scripts matches whichever reading each part is typed in.
+// Beyond that, the groups also move together style by style.
+QVector<FoldResult> allFolds(const QString &src, bool withIndex)
+{
+    std::uint32_t mask = 0;
+    Folded primary = foldPass(src, kPrimary, withIndex, mask, 0);
+    QVector<FoldResult> folds;
+    folds.append({std::move(primary.text), std::move(primary.index)});
+    const auto fold = [&](const Styles &styles) {
+        std::uint32_t seen = 0;
+        return foldPass(src, styles, withIndex, seen, mask);
+    };
+    const auto add = [&](Folded &&alt) {
+        const bool duplicate = std::any_of(folds.cbegin(), folds.cend(),
+                                           [&](const FoldResult &f) { return f.text == alt.text; });
+        if (!duplicate) folds.append({std::move(alt.text), std::move(alt.index)});
+    };
+
+    const QVarLengthArray<Group, 8> groups = readingGroups(mask);
+    // The styles of each group that read this string differently from its others.
+    QVarLengthArray<QVarLengthArray<int, 4>, 8> distinct;
+    for (const Group &g : groups) {
+        QVarLengthArray<int, 4> styles{0};
+        QStringList readings{folds.first().text};
+        for (int k = 1; k < g.count; ++k) {
+            Styles alone{};
+            assign(alone, g.group, k);
+            Folded alt = fold(alone);
+            if (readings.contains(alt.text)) continue;
+            readings.append(alt.text);
+            styles.append(k);
+            add(std::move(alt));
+        }
+        distinct.append(styles);
+    }
+    if (groups.size() < 2) return folds;
+
+    int combinations = 1;
+    for (const auto &styles : distinct) combinations = std::min<int>(combinations * int(styles.size()), 17);
+    if (combinations <= 16) {
+        for (int index = 1; index < combinations; ++index) {
+            Styles styles{};
+            int rest = index;
+            int varied = 0;
+            for (qsizetype g = 0; g < groups.size(); ++g) {
+                const int k = distinct[g][rest % distinct[g].size()];
+                rest /= int(distinct[g].size());
+                assign(styles, groups[g].group, k);
+                varied += k != 0;
+            }
+            if (varied >= 2) add(fold(styles));  // one group alone is already folded
+        }
+        return folds;
+    }
+    int widest = 1;
+    for (const Group &g : groups) widest = std::max(widest, g.count);
+    for (int k = 1; k < widest; ++k) {
+        Styles styles{};
+        for (const Group &g : groups) assign(styles, g.group, k < g.count ? k : 0);
+        add(fold(styles));
+    }
+    return folds;
+}
+
+} // namespace
+
+namespace Engine {
+
+void emitPrimary(const Unit &unit, Out &out)
+{
+    const std::uint32_t e = unit.entry;
+    switch (kindOf(e)) {
+    case Kind::Keep:
+    case Kind::Script:
+        out.putCodePoint(unit.cp, unit.src);
+        return;
+    case Kind::Char:
+        out.put(char16_t(payloadOf(e)), unit.src);
+        return;
+    case Kind::Pool:
+        out.put(QStringView(kPool + payloadOf(e), qsizetype(lengthOf(e))), unit.src);
+        return;
+    case Kind::Expand: {
+        std::uint32_t mask = 0;
+        runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), kPrimary, unit.src, mask, 0, out);
+        return;
+    }
+    case Kind::Drop:
+        return;
+    }
+}
+
+} // namespace Engine
+
+FoldResult fold(const QString &src)
+{
+    if (QString ascii; foldAscii(src, ascii)) return {std::move(ascii), identityIndex(src.size())};
+    std::uint32_t mask = 0;
+    if (needsComposition(src)) {
+        const Composed composed = compose(src);
+        Folded primary = foldPass(composed.text, kPrimary, true, mask, 0);
+        remap(primary.index, composed.map);
+        return {std::move(primary.text), std::move(primary.index)};
+    }
+    Folded primary = foldPass(src, kPrimary, true, mask, 0);
+    return {std::move(primary.text), std::move(primary.index)};
+}
+
+QString foldText(const QString &src)
+{
+    if (QString ascii; foldAscii(src, ascii)) return ascii;
+    std::uint32_t mask = 0;
+    return foldPass(needsComposition(src) ? compose(src).text : src, kPrimary, false, mask, 0).text;
+}
+
+QString foldSegments(const QString &src)
+{
+    if (QString ascii; foldAscii(src, ascii)) return ascii;
+    const QVector<FoldResult> folds = allFolds(needsComposition(src) ? compose(src).text : src, false);
+    if (folds.size() == 1) return folds.first().text;
+    QString joined = folds.first().text;
+    for (qsizetype k = 1; k < folds.size(); ++k) {
+        joined += kSegmentSeparator;
+        joined += folds.at(k).text;
+    }
+    return joined;
+}
+
+QVector<FoldResult> foldAll(const QString &src)
+{
+    if (QString ascii; foldAscii(src, ascii)) return {{std::move(ascii), identityIndex(src.size())}};
+    if (!needsComposition(src)) return allFolds(src, true);
+    const Composed composed = compose(src);
+    QVector<FoldResult> folds = allFolds(composed.text, true);
+    for (FoldResult &f : folds) remap(f.srcIndex, composed.map);
+    return folds;
+}
+
+quint32 cacheSignature()
+{
+    return (kVersion * 0x9E3779B1u) ^ Engine::kDataDigest;
 }
 
 } // namespace Search::Fold

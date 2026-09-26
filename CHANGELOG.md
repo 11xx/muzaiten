@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+### Added
+
+- Search matches Korean by romanization: `ak dan chil` finds `악단광칠`,
+  syllable by syllable, as pronounced (`hangugeo` for `한국어`) or in
+  McCune-Reischauer (`pochonbo` for `보천보`).
+- Search keeps every common romanization of a title or name, and a query
+  matches any of them: Hepburn romaji with long vowels collapsed (`tokyo`
+  beside `toukyou`), toneless Chinese pinyin with word readings for common
+  polyphones, modern and phonetic Greek (`efcharisto`, `yiorgos`), common and
+  Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
+  their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i` (`miller` finds
+  `Müller`). Results
+  highlight whichever reading matched.
+- Search matches Thai and Lao by romanization, read syllable by syllable
+  with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,
+  `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
+  `jai`); Lao in its standard and French-style spellings (`viangchan`,
+  `wiangjan`).
+- Search matches Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil,
+  Telugu, Kannada, Malayalam, Sinhala, Myanmar and Khmer by romanization:
+  the common spelling with the inherent vowel dropped where Hindi drops it
+  (`kamla`, `zindagi`, `kabhi khushi kabhi gham`), every inherent vowel kept
+  (`kamala`), and the ee/oo spelling of film titles (`deewana`, `dilwale`).
+- Search matches Arabic (with Persian, Urdu, Kurdish and Pashto letters),
+  Hebrew and Yiddish, Syriac and Thaana by romanization. Vowel marks give the
+  vowels where written; unvocalized words read their vowel letters in
+  context, with a guessed first-syllable a (`habibi`, `salam`, `shalom`) and
+  el-/ou/ee spellings (`nour`, `eljadeed`). Typed Arabic and Hebrew match
+  regardless of vowel marks, tatweel, alef and yeh variants and final forms.
+- Search matches Tibetan in Wylie transliteration (`smonlam`, `lhasa`,
+  `bka'`, also without the apostrophe), and the shad and danda separate
+  words like spaces.
+- Armenian, Georgian, Kazakh and other Cyrillic letters, Ethiopic, Cherokee,
+  Canadian syllabics, Yi, Bopomofo and Mongolian romanize for search.
+  Look-alike punctuation that tag editors and file-name sanitizers substitute
+  (`∶`, `⁄`, `’`, `×`, CJK brackets) folds onto ASCII, styled Unicode letters
+  (`𝓗𝓮𝓵𝓵𝓸`, `🅲🅻🅴🅰🅽`) read as plain letters, and digits of every script
+  read as `0`-`9`.
+
+### Changed
+
+- CJK ideographs keep their written form in the primary search fold, with
+  traditional and simplified characters folded together, so typing one kanji
+  or hanzi finds every word containing it; readings are alternates.
+- Search folding is a per-character table lookup compiled at build time, about
+  15 times faster over library titles and 24 times faster over file paths. The
+  search cache rebuilds once.
+
+### Fixed
+
+- Katakana loanword spellings romanize as one sound (`ティ` ti, `ファ` fa,
+  `シェ` she) instead of letter by letter (`tei`, `fua`), and text written
+  decomposed, as in file names from macOS (separate accents, kana voicing
+  marks, Hangul jamo), folds like composed text.
+
+- Anchored search terms (`^wall`, `the wall$`), fuzzy matching and exclusion
+  globs now check a field's display text and its sort name separately, so a
+  sort name no longer stops an anchored term from matching. Invisible
+  direction marks and word joiners in tags no longer split a match. The search
+  cache rebuilds once.
+
 ## [2026.9.11]
 
 ### Added

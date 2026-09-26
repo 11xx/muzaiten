@@ -52,6 +52,29 @@ private slots:
         QVERIFY(!m.matches(rec(QStringLiteral("x"), QStringLiteral("/mnt/music/a.flac"))));
     }
 
+    void prefixAndSuffixGlobsApplyToEachFoldedForm()
+    {
+        SearchRecord r = rec(QStringLiteral("The Wall"), QStringLiteral("/m/a.flac"));
+        r.titleSort = QStringLiteral("Wall, The");
+        foldRecordNorms(r);
+
+        QVERIFY(ExcludeMatcher({QStringLiteral("wall*"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QStringLiteral("*wall"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("*floyd"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void interiorWildcardsMatchOneFoldedFormAtATime()
+    {
+        // Müller folds to muller, mueller and miller; no single form matches
+        // r*m or r?m, only a span across two of them would.
+        SearchRecord r = rec(QString::fromUtf8("Müller"), QStringLiteral("/m/a.flac"));
+        foldRecordNorms(r);
+        QVERIFY(!ExcludeMatcher({QStringLiteral("r*m"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("er?mi"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QStringLiteral("mi*er"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QStringLiteral("mue?ler"), ExcludeScope::AnyField}).matches(r));
+    }
+
     void interiorWildcardUsesRegex()
     {
         ExcludeMatcher m({QStringLiteral("live*2003"), ExcludeScope::AnyField});
