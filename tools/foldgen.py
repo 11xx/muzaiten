@@ -792,7 +792,9 @@ class Generator:
             ch = chr(cp)
             if unicodedata.category(ch) == "Cn":
                 continue
-            if is_han(cp) and not 0x2F800 <= cp <= 0x2FA1F:
+            # Most astral ideographs fold to themselves and are answered by the
+            # range fallback; those with a simplified form need an entry.
+            if is_han(cp) and not 0x2F800 <= cp <= 0x2FA1F and ch not in self.simplified:
                 continue
             entry, form = self.entry_for(cp)
             kind, script, _, _, _ = unpack(entry)

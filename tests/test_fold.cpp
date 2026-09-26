@@ -121,6 +121,21 @@ private slots:
         QVERIFY(segments(QString::fromUtf8("阿")).contains(QString::fromUtf8("阿")));
     }
 
+    void traditionalAndSimplifiedFoldTogetherBeyondTheBmp()
+    {
+        // Traditional forms outside the BMP fold onto their simplified form
+        // like BMP ones do (𡑍 onto 𫭼, 𨧀 onto 𬭊), and a BMP traditional form
+        // can fold onto an astral simplified one (欓 onto 𣗋).
+        for (const auto &[traditional, simplified] :
+             {std::pair(U"\U0002144D", U"\U0002BB7C"), std::pair(U"\U000289C0", U"\U0002CB4A"),
+              std::pair(U"\u6B13", U"\U000235CB")}) {
+            const QString t = QString::fromUcs4(traditional);
+            const QString s = QString::fromUcs4(simplified);
+            QCOMPARE(Fold::foldText(t), Fold::foldText(s));
+            QCOMPARE(Fold::foldText(t), s);
+        }
+    }
+
     void controlAndFormatCharactersAreDropped()
     {
         const QString src = QStringLiteral("a") + QChar(0x200E) + QStringLiteral("b") + QChar(0x2060)

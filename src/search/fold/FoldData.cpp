@@ -10,15 +10,16 @@ namespace Search::Fold::Engine {
 
 std::uint32_t astralEntry(char32_t cp)
 {
+    const AstralEntry *end = kAstral + kAstralCount;
+    const AstralEntry *it = std::lower_bound(kAstral, end, cp,
+                                             [](const AstralEntry &e, char32_t c) { return e.cp < c; });
+    if (it != end && it->cp == cp) return it->entry;
     for (std::size_t k = 0; k < kAstralHanCount; ++k) {
         if (cp >= kAstralHan[k].first && cp <= kAstralHan[k].last) {
             return (std::uint32_t(Kind::Keep)) | (std::uint32_t(Script::Han) << 3);
         }
     }
-    const AstralEntry *end = kAstral + kAstralCount;
-    const AstralEntry *it = std::lower_bound(kAstral, end, cp,
-                                             [](const AstralEntry &e, char32_t c) { return e.cp < c; });
-    return it != end && it->cp == cp ? it->entry : std::uint32_t(Kind::Keep);
+    return std::uint32_t(Kind::Keep);
 }
 
 QStringView decompOf(char32_t cp)
