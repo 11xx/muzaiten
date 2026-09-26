@@ -13,7 +13,8 @@ pinyin (`yinyue` → `音乐`). Picard/MusicBrainz `*sort` reading tags fill in
 proper-noun readings (`utada` → 宇多田ヒカル). Typing the original script still
 matches too, and a kanji or hanzi matches the words that contain it. Scripts
 whose reading depends on the surrounding letters (CJK ideographs, Thai, Lao,
-the Indic scripts, Sinhala, Myanmar, Khmer, Arabic, Hebrew, Syriac, Thaana)
+the Indic scripts, Sinhala, Myanmar, Khmer, Arabic, Hebrew, Syriac, Thaana,
+Tibetan)
 match as written when typed in their own script, ignoring Arabic and Hebrew
 vowel marks and letter variants.
 
@@ -34,6 +35,7 @@ common reading and a query matches any of them:
 | Arabic, Persian, Urdu | vowel marks when written; otherwise the consonants with ا و ي as vowels (`mhmud`), with a first-syllable a (`habibi`, `salam`), and in el-/ou/ee spelling (`nour`, `eljadeed`) |
 | Hebrew, Yiddish | points when written (`bereshit`); otherwise soft (`tora`) and hard spellings with a first a (`shalom`, `torah`) |
 | Syriac, Thaana | their vowel marks (`dhivehi`) |
+| Tibetan | Wylie, syllables joined (`smonlam`, `lhasa`) |
 | Indic, Sinhala, Myanmar, Khmer | common (`kamla`, `zindagi`, `dilvale`), with every inherent vowel (`kamala`), and the ee/oo spelling of film titles (`deewana`, `phool`, `dilwale`) |
 
 Traditional and simplified Chinese characters match each other. Half-width

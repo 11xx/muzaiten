@@ -111,6 +111,9 @@ enum class ThaiVowel : std::uint8_t {
 // behaves like, and its [style 1, style 2] spellings.
 struct ThaiChar { ThaiRole role; ThaiVowel vowel; char16_t thai; Str initial[2]; Str final[2]; };
 
+enum class TibetanRole : std::uint8_t { None, Base, Subjoined, Vowel, Coda, Tsheg };
+struct TibetanChar { TibetanRole role; Str roman; };
+
 enum class AbjadRole : std::uint8_t {
     None, Consonant, Alef, Ain, Waw, Yeh, Maksura, Marbuta, Hamza, VowelLetter, He, Shin,
     Vowel, Shadda, Sukun, Dagesh, ShinDot, SinDot, Rafe, Geresh, Sheva,
@@ -160,6 +163,7 @@ extern const Word kChineseWords[];
 extern const std::size_t kChineseWordCount;
 extern const int kChineseLongest;
 extern const GreekStyle kGreekStyles[];
+extern const TibetanChar kTibetanChars[0x100];
 extern const AbjadBlock kAbjadBlocks[];
 extern const std::size_t kAbjadBlockCount;
 extern const AbjadChar kAbjadChars[];
@@ -278,5 +282,6 @@ void foldArabic(const Unit *units, qsizetype n, int style, Out &out);
 void foldHebrew(const Unit *units, qsizetype n, int style, Out &out);
 void foldSyriac(const Unit *units, qsizetype n, Out &out);
 void foldThaana(const Unit *units, qsizetype n, Out &out);
+void foldTibetan(const Unit *units, qsizetype n, Out &out);
 
 } // namespace Search::Fold::Engine

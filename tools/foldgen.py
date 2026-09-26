@@ -412,6 +412,10 @@ class Generator:
             abjad = self.abjad_script(ord(first))
             if abjad is not None:
                 return S[abjad]
+            if 0x0F00 <= ord(first) <= 0x0FFF:
+                return S["Tibetan"]
+        if ord(first) in (0x0F0B, 0x0F0C):
+            return S["Tibetan"]
         if ord(first) == 0x05F3:
             return S["Hebrew"]
         low = first.lower()
@@ -441,6 +445,8 @@ class Generator:
             return unicodedata.normalize("NFKC", ch)
         if script in (S["Arabic"], S["Hebrew"]) and ord(ch) >= 0xFB1D:
             return unicodedata.normalize("NFKC", ch)
+        if script == S["Tibetan"]:
+            return unicodedata.normalize("NFD", ch)
         return ch
 
     def entry_for(self, cp: int) -> tuple[int, Optional[str]]:
@@ -469,7 +475,7 @@ class Generator:
             return pack(EXPAND, S["None"], off, length), None
         form = None
         if script in (S["Greek"], S["Cyrillic"], S["CyrillicUk"], S["CyrillicBe"], S["CyrillicSr"],
-                      S["LatinAlt"], S["Han"], S["Lao"], S["Arabic"], S["Hebrew"]):
+                      S["LatinAlt"], S["Han"], S["Lao"], S["Arabic"], S["Hebrew"], S["Tibetan"]):
             candidate = self.handler_form(ch, script)
             if candidate != ch:
                 form = candidate
@@ -559,6 +565,36 @@ class Generator:
                 if words in table["names"]:
                     return "Consonant", styles(table["names"][words]), "", ""
         return "None", styles(""), "", ""
+
+    # -- Tibetan -----------------------------------------------------------------
+
+    TIBETAN_SOUNDS = {"K": "k", "KH": "kh", "G": "g", "NG": "ng", "C": "c", "CH": "ch", "J": "j", "NY": "ny",
+                      "TT": "t", "TTH": "th", "DD": "d", "NN": "n", "T": "t", "TH": "th", "D": "d", "N": "n",
+                      "P": "p", "PH": "ph", "B": "b", "M": "m", "TS": "ts", "TSH": "tsh", "DZ": "dz", "W": "w",
+                      "ZH": "zh", "Z": "z", "-": "", "": "", "Y": "y", "R": "r", "L": "l", "SH": "sh", "SS": "sh",
+                      "S": "s", "H": "h", "FIXED-FORM R": "r", "KK": "k", "RR": "r"}
+    TIBETAN_VOWELS = {"AA": "", "I": "i", "U": "u", "E": "e", "EE": "ai", "O": "o", "OO": "au",
+                      "REVERSED I": "i", "VOCALIC RR": "ri", "VOCALIC LL": "li"}
+
+    def tibetan_info(self, cp: int) -> tuple[str, str]:
+        """(role, spelling) of a Tibetan code point."""
+        n = name(chr(cp))
+        if cp in (0x0F0B, 0x0F0C):
+            return "Tsheg", ""
+        for prefix, role in (("TIBETAN LETTER ", "Base"), ("TIBETAN SUBJOINED LETTER ", "Subjoined")):
+            if n.startswith(prefix):
+                stem = n[len(prefix):]
+                stem = stem[:-1] if stem.endswith("A") else stem
+                sound = self.TIBETAN_SOUNDS.get(stem.strip())
+                return (role, sound) if sound is not None else ("None", "")
+        if n.startswith("TIBETAN VOWEL SIGN "):
+            vowel = self.TIBETAN_VOWELS.get(n[len("TIBETAN VOWEL SIGN "):])
+            return ("Vowel", vowel) if vowel is not None else ("None", "")
+        if cp in (0x0F7E, 0x0F82, 0x0F83):
+            return "Coda", "m"
+        if cp == 0x0F7F:
+            return "Coda", "h"
+        return "None", ""
 
     # -- Brahmic -----------------------------------------------------------------
 
@@ -973,6 +1009,12 @@ class Generator:
             f"const Str kHebrewFinalHe[2] = {str_array(self.abjad['hebrew']['final_he'])};",
         ]
 
+        # Tibetan
+        tibetan_rows = []
+        for cp in range(0x0F00, 0x1000):
+            role, sound = self.tibetan_info(cp)
+            tibetan_rows.append(f"    {{TibetanRole::{role}, {pool.ref(sound)}}},")
+
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
 
@@ -981,7 +1023,7 @@ class Generator:
                             bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
-                            abjad_block_rows, abjad_constants)).encode())
+                            abjad_block_rows, abjad_constants, tibetan_rows)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -1042,6 +1084,10 @@ class Generator:
         w("")
         w(f"const GreekStyle kGreekStyles[{len(greek_styles)}] = {{")
         out.extend(greek_styles)
+        w("};")
+        w("")
+        w("const TibetanChar kTibetanChars[0x100] = {")
+        out.extend(tibetan_rows)
         w("};")
         w("")
         w(f"const AbjadBlock kAbjadBlocks[{len(abjad_block_rows)}] = {{")
