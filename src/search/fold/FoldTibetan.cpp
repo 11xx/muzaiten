@@ -6,10 +6,12 @@
 // follows the root unless a vowel sign is written. The root is the stack
 // that carries a vowel sign or subjoined letters; otherwise the syllable's
 // spelling decides it: a prefix letter (ག ད བ མ འ) precedes only certain
-// roots, only ག ང ད ན བ མ འ ར ལ ས end a syllable, and a final ས after one
-// of them is a second suffix (གངས gangs, མངས mangs; དགའ dga'). A stack before the root that is not a lone prefix
-// reads with its own a, as Sanskrit words do (པདྨེ padme). Syllables join
-// without a separator (སྨོན་ལམ smonlam).
+// roots, and only ག ང ད ན བ མ འ ར ལ ས end a syllable (དགའ dga', གངས gangs).
+// Where a spelling reads either way the prefix reading wins (དམས dmas),
+// except in the two words convention reads root first (མངས mangs). A stack
+// before the root that is not a lone prefix reads with its own a, as
+// Sanskrit words do (པདྨེ padme). Syllables join without a separator
+// (སྨོན་ལམ smonlam).
 //
 // Style 1 is Wylie, with the silent འ as an apostrophe (བཀའ bka'); style 2
 // drops the apostrophe (bka).
@@ -64,6 +66,14 @@ bool isSuffixLetter(char32_t cp)  // ག ང ད ན བ མ འ ར ལ ས
         || cp == 0x0F60 || cp == 0x0F62 || cp == 0x0F63 || cp == 0x0F66;
 }
 
+// The three-letter spellings a prefix could open that read as root, suffix
+// and second suffix ས instead: མངས mangs, བགས bags. The other spellings that
+// read either way (དགས དངས དབས དམས མགས འགས འབས) keep the prefix reading.
+bool readsRootFirst(char32_t first, char32_t second, char32_t third)
+{
+    return third == 0x0F66 && ((first == 0x0F58 && second == 0x0F44) || (first == 0x0F56 && second == 0x0F42));
+}
+
 
 const TibetanChar &tibetanOf(char32_t cp)
 {
@@ -82,13 +92,8 @@ qsizetype rootOf(const QVarLengthArray<Stack, 8> &stacks)
     const auto plain = [&](qsizetype k) { return !stacks[k].subjoined; };
     if (stacks.size() >= 4) return 1;
     if (stacks.size() == 3) {
-        // Root and two suffixes when the syllable ends in the second suffix ས
-        // after a suffix letter (གངས gangs, མངས mangs), even where a prefix
-        // reading would also be legal; otherwise prefix, root, suffix when
-        // legal (དགའ dga').
         const bool prefixed = plain(0) && prefixes(stacks[0].base, stacks[1].base) && isSuffixLetter(stacks[2].base);
-        const bool suffixed = isSuffixLetter(stacks[1].base) && stacks[2].base == 0x0F66;
-        return prefixed && !suffixed ? 1 : 0;
+        return prefixed && !readsRootFirst(stacks[0].base, stacks[1].base, stacks[2].base) ? 1 : 0;
     }
     if (stacks.size() == 2 && !isSuffixLetter(stacks[1].base) && prefixes(stacks[0].base, stacks[1].base)) return 1;
     return 0;
