@@ -98,10 +98,13 @@ private slots:
         QCOMPARE(Fold::foldText(QString::fromUtf8("さんしん")), QStringLiteral("sanshin"));
         QCOMPARE(Fold::foldText(QString::fromUtf8("サンシン")), QStringLiteral("sanshin"));   // katakana
         QCOMPARE(Fold::foldText(QString::fromUtf8("さんしんのはな")), QStringLiteral("sanshinnohana"));
-        QCOMPARE(Fold::foldText(QString::fromUtf8("とうきょう")), QStringLiteral("toukyou")); // yōon
         QCOMPARE(Fold::foldText(QString::fromUtf8("がっこう")), QStringLiteral("gakkou"));     // sokuon
-        QCOMPARE(Fold::foldText(QString::fromUtf8("まっちゃ")), QStringLiteral("matcha"));     // sokuon + ち
         QCOMPARE(Fold::foldText(QString::fromUtf8("ラーメン")), QStringLiteral("ramen"));      // long mark dropped
+        // Yōon and small-vowel morae read as one in the wapuro alternate; the
+        // primary fold reads each kana on its own.
+        QCOMPARE(Fold::foldText(QString::fromUtf8("とうきょう")), QStringLiteral("toukiyou"));
+        QVERIFY(segments(QString::fromUtf8("とうきょう")).contains(QStringLiteral("toukyou")));
+        QVERIFY(segments(QString::fromUtf8("まっちゃ")).contains(QStringLiteral("matcha")));     // sokuon + ち
     }
 
     void kanjiReadingsAreAlternates()
@@ -110,11 +113,11 @@ private slots:
         // matches, including one character of a dictionary word.
         QCOMPARE(Fold::foldText(QString::fromUtf8("東京")), QString::fromUtf8("东京"));
         QVERIFY(Fold::foldText(QString::fromUtf8("東京")).contains(Fold::foldText(QString::fromUtf8("東"))));
-        // Word readings beat single-kanji ones (東京 not 東+京), in Hepburn,
-        // pinyin and wapuro.
+        // Word readings beat single-kanji ones (東京 not 東+京), in wapuro,
+        // Hepburn and pinyin.
         QCOMPARE(segments(QString::fromUtf8("東京")),
-                 (QStringList{QString::fromUtf8("东京"), QStringLiteral("tokyo"), QStringLiteral("dongjing"),
-                              QStringLiteral("toukyou")}));
+                 (QStringList{QString::fromUtf8("东京"), QStringLiteral("toukyou"), QStringLiteral("tokyo"),
+                              QStringLiteral("dongjing")}));
         // The headline goal, end to end: 三線(word) + の(kana) + 花(single kanji).
         QVERIFY(segments(QString::fromUtf8("三線の花")).contains(QStringLiteral("sanshinnohana")));
         // A kanji with no dictionary entry keeps its surface in the Japanese readings.
@@ -240,17 +243,18 @@ private slots:
 
     void iterationMarksUseTheirSourcePosition()
     {
-        const Fold::FoldResult kanji = Fold::fold(QString::fromUtf8("阿々"));
-        QCOMPARE(kanji.text, QString::fromUtf8("阿阿"));
-        QCOMPARE(kanji.srcIndex, (QVector<int>{0, 1}));
-
-        const Fold::FoldResult kana = Fold::fold(QString::fromUtf8("こゝ"));
-        QCOMPARE(kana.text, QStringLiteral("koko"));
-        QCOMPARE(kana.srcIndex, (QVector<int>{0, 0, 1, 1}));
-
-        const Fold::FoldResult voiced = Fold::fold(QString::fromUtf8("つゞ"));
-        QCOMPARE(voiced.text, QStringLiteral("tsuzu"));
-        QCOMPARE(voiced.srcIndex, (QVector<int>{0, 0, 0, 1, 1}));
+        // The primary fold keeps iteration marks as written, like a query that
+        // types them; the alternates expand them at the mark's position.
+        QCOMPARE(Fold::foldText(QString::fromUtf8("阿々")), QString::fromUtf8("阿々"));
+        const auto expanded = [](const QString &src, const QString &text) {
+            for (const Fold::FoldResult &f : Fold::foldAll(src)) {
+                if (f.text == text) return f.srcIndex;
+            }
+            return QVector<int>{-1};
+        };
+        QCOMPARE(expanded(QString::fromUtf8("阿々"), QString::fromUtf8("阿阿")), (QVector<int>{0, 1}));
+        QCOMPARE(expanded(QString::fromUtf8("こゝ"), QStringLiteral("koko")), (QVector<int>{0, 0, 1, 1}));
+        QCOMPARE(expanded(QString::fromUtf8("つゞ"), QStringLiteral("tsuzu")), (QVector<int>{0, 0, 0, 1, 1}));
     }
 
     void alternateIndexMapsSpreadReadingsOverTheirWord()
@@ -321,6 +325,23 @@ private slots:
                 QCOMPARE(f.srcIndex.size(), f.text.size());
                 QVERIFY(!f.text.contains(Fold::kSegmentSeparator));
                 for (const int i : f.srcIndex) QVERIFY2(i >= 0 && i < s.size(), qPrintable(s));
+            }
+            // A substring cut between starters folds to a substring of some
+            // fold of the whole: a query typed in the text's script finds it.
+            const QString nfc = s.normalized(QString::NormalizationForm_C);
+            const QStringList folds = segments(nfc);
+            QList<qsizetype> cuts;
+            for (qsizetype i = 0; i <= nfc.size(); ++i) {
+                if (i == nfc.size() || (!nfc.at(i).isLowSurrogate() && QChar::combiningClass(nfc.at(i).unicode()) == 0)) {
+                    cuts.append(i);
+                }
+            }
+            for (qsizetype a = 0; a + 1 < cuts.size(); ++a) {
+                const QString query = Fold::foldText(nfc.mid(cuts[a], cuts[a + 1] - cuts[a])).trimmed();
+                if (query.isEmpty()) continue;
+                const bool found = std::any_of(folds.cbegin(), folds.cend(),
+                                               [&](const QString &f) { return f.contains(query); });
+                QVERIFY2(found, qPrintable(nfc.mid(cuts[a], cuts[a + 1] - cuts[a]) + QStringLiteral(" in ") + nfc));
             }
         }
     }

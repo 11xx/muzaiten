@@ -274,6 +274,32 @@ private slots:
         QCOMPARE(titleOf(QStringLiteral("^title:tokyo")), QString::fromUtf8("東京の夜"));
     }
 
+    void queriesInTheirOwnScriptFindTextContainingThem()
+    {
+        // A query typed in a script folds to its primary form, which must
+        // occur in some fold of any text containing the query.
+        const QList<QPair<QString, QString>> cases = {
+            {QString::fromUtf8("パーティー"), QString::fromUtf8("テ")},
+            {QString::fromUtf8("パーティー"), QString::fromUtf8("ティ")},
+            {QString::fromUtf8("きゃく"), QString::fromUtf8("き")},
+            {QString::fromUtf8("きゃく"), QString::fromUtf8("ゃく")},
+            {QString::fromUtf8("հետ"), QString::fromUtf8("ետ")},
+            {QString::fromUtf8("Ուրախ"), QString::fromUtf8("րախ")},
+            {QString::fromUtf8("한국어"), QString::fromUtf8("국어")},
+            {QString::fromUtf8("東京の夜"), QString::fromUtf8("京の")},
+            {QString::fromUtf8("สวัสดี"), QString::fromUtf8("วัส")},
+            {QString::fromUtf8("Їхав Київ"), QString::fromUtf8("иїв")},
+        };
+        for (const auto &[text, query] : cases) {
+            SearchRecord r = makeRecord(text, QStringLiteral("Artist"), QStringLiteral("Album"));
+            foldRecordNorms(r);
+            SearchIndex idx;
+            idx.build({r});
+            QVERIFY2(idx.match(SearchQuery::parse(query), false).size() == 1,
+                     qPrintable(query + QStringLiteral(" in ") + text));
+        }
+    }
+
     void highlightFollowsAlternateReadings()
     {
         // "hangugeo" matches only the pronounced reading; its letters still

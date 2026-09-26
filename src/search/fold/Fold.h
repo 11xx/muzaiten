@@ -14,19 +14,22 @@
 // - The primary fold is deterministic and compositional, so a query typed in
 //   any script folds to a substring of the fold of text containing it. It
 //   drops control and format characters, applies NFKC, lowercases, strips
-//   diacritics, folds look-alike punctuation onto ASCII, and romanizes
-//   scripts with one reading per letter: Latin, Greek, Cyrillic, Georgian,
-//   Armenian, kana (wapuro romaji, きゃ→kya, っか→kka, ティ→ti) and Hangul
-//   (Revised Romanization, syllable by syllable: 악단광칠→akdangwangchil).
-//   Scripts whose reading depends on the surrounding letters keep a
-//   normalized surface: CJK ideographs (folded to simplified Chinese), Thai,
-//   Lao, the Brahmic scripts, Tibetan, and Arabic, Hebrew and Syriac without
-//   their vowel marks and letter variants.
+//   diacritics, folds look-alike punctuation onto ASCII, composes canonically
+//   equivalent sequences, and romanizes letter by letter: Latin, Greek,
+//   Cyrillic, Georgian, Armenian (ե→e), kana (each on its own: きゃ→kiya,
+//   っか→kka; iteration marks as written) and Hangul (Revised Romanization,
+//   syllable by syllable: 악단광칠→akdangwangchil). Scripts whose reading
+//   depends on the surrounding letters keep a normalized surface: CJK
+//   ideographs (folded to simplified Chinese), Thai, Lao, the Brahmic
+//   scripts, Tibetan, and Arabic, Hebrew and Syriac without their vowel
+//   marks and letter variants.
 // - Alternate readings are what a searcher might type instead: German
-//   ae/oe/ue and ü as i, modern and phonetic Greek, common and Slavic Cyrillic spellings
-//   with Ukrainian, Belarusian and Serbian letters, Western Armenian, Hepburn
-//   romaji with long vowels collapsed (tokyo), Japanese kanji readings from a
-//   seed dictionary, Chinese pinyin, Korean as pronounced (한국어→hangugeo)
+//   ae/oe/ue and ü as i, modern and phonetic Greek, common and Slavic
+//   Cyrillic spellings with Ukrainian, Belarusian and Serbian letters,
+//   Eastern and Western Armenian as read (Երևան→yerevan), wapuro romaji
+//   (きゃ→kya, ティ→ti) and Hepburn with long vowels collapsed (tokyo),
+//   Japanese kanji readings from a seed dictionary, Chinese pinyin, Korean
+//   as pronounced (한국어→hangugeo)
 //   and in McCune-Reischauer (보천보→pochonbo), Thai RTGS and common
 //   spellings, Indic with and without Hindi schwa deletion, Arabic and Hebrew
 //   with their vowel letters read in context, and Tibetan Wylie.

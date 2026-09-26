@@ -119,20 +119,24 @@ void foldCyrillic(const Unit *u, qsizetype n, int style, const Context &ctx, Out
     }
 }
 
+// Style 0, the primary fold, reads letter by letter (ե e, ու ov), so an
+// Armenian query finds any text containing it; style 1 is Eastern Armenian
+// as read, with word-initial forms and ու as u (Երևան yerevan); style 2 is
+// Western Armenian.
 void foldArmenian(const Unit *u, qsizetype n, int style, Out &out)
 {
-    bool atStart = true;
+    bool atStart = style != 0;
     for (qsizetype k = 0; k < n; ++k) {
         if (scriptOf(u[k].entry) == Script::Inherited) continue;
         const char32_t cp = u[k].cp;
-        const AlphaRule *rule = k + 1 < n ? findRule(kArmenianEastern, cp, u[k + 1].cp) : nullptr;
+        const AlphaRule *rule = style != 0 && k + 1 < n ? findRule(kArmenianEastern, cp, u[k + 1].cp) : nullptr;
         if (rule) {
             out.put(atStart ? rule->initial : rule->medial, u[k].src);
             ++k;
             atStart = false;
             continue;
         }
-        if (style == 1) rule = findRule(kArmenianWestern, cp, 0);
+        if (style == 2) rule = findRule(kArmenianWestern, cp, 0);
         if (!rule) rule = findRule(kArmenianEastern, cp, 0);
         if (rule) out.put(atStart ? rule->initial : rule->medial, u[k].src);
         else emitPrimary(u[k], out);

@@ -3,7 +3,7 @@
 # distinct fold in order, primary first.
 ジ	ji
 っか	kka
-きゃ	kya
+きゃ	kiya	kya
 ß	ss
 ｶ	ka
 ｶﾞ	ga
@@ -40,32 +40,34 @@ Motörhead	motorhead	motoerhead
 Ђорђе Балашевић	djordje balashevic	djordje balasevic	dorde balasevic
 Беларусь Ў	belarus u	bielarus w
 Қазақстан	qazaqstan
-# Armenian: Eastern, then Western.
-Երևան	yerevan
+# Armenian: letter by letter, then Eastern and Western as read.
+Երևան	erevan	yerevan
 Հայաստան	hayastan	hayasdan
-Ուրախ	urakh
-ոսկի	voski	vosgi
+Ուրախ	ovrakh	urakh
+ոսկի	oski	voski	vosgi
 ქართული	kartuli
-# Kana: wapuro, then Hepburn with long vowels collapsed.
-ティーンエイジャー	tineija
-ファンタジー	fantaji
-ディスコ	disuko
-シェフ	shefu
-ヴァイオリン	vaiorin
-くゎ	kwa
-ウィンドウ	windou	windo
-とうきょう	toukyou	tokyo
-りゅういち	ryuuichi	ryuichi
+# Kana: each kana on its own (iteration marks as written), then wapuro,
+# then Hepburn with long vowels collapsed.
+ティ	tei	ti
+ティーンエイジャー	teineijiya	tineija
+ファンタジー	fuantaji	fantaji
+ディスコ	deisuko	disuko
+シェフ	shiefu	shefu
+ヴァイオリン	vuaiorin	vaiorin
+くゎ	kuwa	kwa
+ウィンドウ	uindou	windou	windo
+とうきょう	toukiyou	toukyou	tokyo
+りゅういち	riyuuichi	ryuuichi	ryuichi
 まゐご	mawigo	maigo
-こゝろ	kokoro
-つゞく	tsuzuku
-カヽ	kaka
-カヾ	kaga
+こゝろ	koゝro	kokoro
+つゞく	tsuゞku	tsuzuku
+カヽ	kaヽ	kaka
+カヾ	kaヾ	kaga
 ドリームレス・ドリームス	dorimuresu dorimusu
 # Ideographs keep their (simplified) surface; readings are alternates:
-# Japanese seed words in Hepburn, pinyin, Japanese seed words in wapuro.
-花々	花花	hanahana	huahua
-東京の夜	东京no夜	tokyonoyoru	dongjingnoye	toukyounoyoru
+# Japanese seed words in wapuro, then in Hepburn, then pinyin.
+花々	花々	hanahana	huahua
+東京の夜	东京no夜	toukyounoyoru	tokyonoyoru	dongjingnoye
 傳達給你	传达给你	chuandageini
 音乐	音乐	yinyue
 长城	长城	changcheng

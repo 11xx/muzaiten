@@ -99,10 +99,9 @@ int styleCount(Script family)
     case Script::Lao:
     case Script::LatinAlt:
     case Script::Tibetan:
-        return 3;
-    case Script::Armenian:
     case Script::Kana:
-        return 2;
+    case Script::Armenian:
+        return 3;
     default:
         return 1;
     }

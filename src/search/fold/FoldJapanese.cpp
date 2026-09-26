@@ -1,15 +1,19 @@
 // Kana and CJK ideographs.
 //
-// Kana romanize in wapuro style (the primary fold: とうきょう → toukyou) or in
-// Hepburn with long vowels collapsed (tokyo). A syllable followed by a small
-// vowel reads as one mora the way loanwords spell it (ティ ti, ファ fa, シェ
-// she, きゃ kya), a sokuon doubles the next consonant, ー is dropped, and the
-// iteration marks repeat the previous kana.
+// The primary fold reads every kana on its own (ティ tei, きゃ kiya), keeps
+// iteration marks as written, doubles the consonant after a sokuon and drops
+// ー. It is compositional, so a kana query folds to a substring of the fold
+// of any text containing it (テ in ティ, ゃく in きゃく). Two alternates read
+// as searchers spell: style 1 is wapuro, where a syllable and a following
+// small vowel make one mora the way loanwords spell it (ティ ti, ファ fa, シェ
+// she, きゃ kya) and iteration marks repeat the kana before them
+// (とうきょう toukyou); style 2 is Hepburn with long vowels collapsed (tokyo).
 //
 // Ideographs keep their surface form in the primary fold (traditional forms
-// folded to simplified, compiled into the entry). Alternate readings give the
-// Japanese seed dictionary's readings, romanized as kana, and toneless pinyin
-// with word readings for polyphones (音乐 yinyue, 快乐 kuaile).
+// folded to simplified, compiled into the entry; 々 as written). Alternate
+// readings expand 々 and give the Japanese seed dictionary's readings in
+// wapuro (style 1) and Hepburn (style 2), romanized as kana, and toneless
+// pinyin with word readings for polyphones (style 3: 音乐 yinyue, 快乐 kuaile).
 
 #include "search/fold/FoldEngine.h"
 
@@ -88,7 +92,8 @@ void geminate(Reading &r)
 
 void foldKana(const Unit *u, qsizetype n, int style, Out &out)
 {
-    const bool hepburn = style == 1;
+    const bool hepburn = style == 2;
+    const bool combines = style != 0;
     bool pendingGemination = false;
     const KanaInfo *last = nullptr;
     char16_t lastVowel = 0;
@@ -110,12 +115,14 @@ void foldKana(const Unit *u, qsizetype n, int style, Out &out)
             pendingGemination = true;
             continue;
         case KanaKind::Iteration:
-            if (!last) continue;
-            info = last;
-            break;
         case KanaKind::VoicedIteration:
+            if (style == 0) {
+                emitPrimary(u[k], out);  // as written, like the query that types it
+                lastVowel = 0;
+                continue;
+            }
             if (!last) continue;
-            info = last->voiced ? &kKana[last->voiced] : last;
+            info = info->kind == KanaKind::Iteration || !last->voiced ? last : &kKana[last->voiced];
             break;
         default:
             break;
@@ -130,7 +137,7 @@ void foldKana(const Unit *u, qsizetype n, int style, Out &out)
         }
         Reading reading;
         bool combined = false;
-        if (info->kind == KanaKind::Syllable && info->vowel && k + 1 < n && isKanaUnit(u[k + 1])
+        if (combines && info->kind == KanaKind::Syllable && info->vowel && k + 1 < n && isKanaUnit(u[k + 1])
             && kanaOf(u[k + 1]).kind == KanaKind::Small) {
             combine(*info, kanaOf(u[k + 1]), reading);
             combined = true;
@@ -199,12 +206,12 @@ const Word *longestWord(const Word *words, std::size_t count, int longest, QStri
 
 void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out)
 {
-    // Iteration marks repeat the ideograph before them.
+    // Outside the primary fold, iteration marks repeat the ideograph before them.
     QVarLengthArray<char32_t, 32> cps(n);
     QVarLengthArray<char16_t, 32> keys(n);
     for (qsizetype k = 0; k < n; ++k) {
         char32_t cp = u[k].cp;
-        if (isIterationMark(cp)) {
+        if (style != 0 && isIterationMark(cp)) {
             if (k > 0) cp = cps[k - 1];
             else if (ctx.before != 0 && isHanEntry(entryFor(ctx.before))) cp = ctx.before;
         }
@@ -217,7 +224,7 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         for (qsizetype k = 0; k < n; ++k) emitSurface(cps[k], u[k].src, out);
         return;
     }
-    if (style == 2) {
+    if (style == 3) {
         for (qsizetype j = 0; j < n;) {
             qsizetype len = 0;
             if (const Word *w = longestWord(kChineseWords, kChineseWordCount, kChineseLongest, keyView, j, len)) {
@@ -236,8 +243,8 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         }
         return;
     }
-    // Styles 1 and 3: Japanese readings, romanized in Hepburn (1) or wapuro (3).
-    const int kanaStyle = style == 1 ? 1 : 0;
+    // Styles 1 and 2: Japanese readings, romanized in wapuro (1) or Hepburn (2).
+    const int kanaStyle = style;
     for (qsizetype j = 0; j < n;) {
         qsizetype len = 0;
         if (const Word *w = longestWord(kJapaneseWords, kJapaneseWordCount, kJapaneseLongest, keyView, j, len)) {
