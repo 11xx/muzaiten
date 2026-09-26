@@ -164,6 +164,8 @@ private slots:
                                         QStringLiteral("hangugomueller")}) {
             QVERIFY2(mixed.contains(expected), qPrintable(expected));
         }
+        // A script whose readings all agree takes no combination away.
+        QVERIFY(segments(QString::fromUtf8("한국어Müllerα")).contains(QStringLiteral("hangugeomillera")));
         // Kana and kanji still read as one Japanese spelling per fold.
         QVERIFY(segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoyoru")));
         QVERIFY(!segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoye")));

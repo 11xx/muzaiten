@@ -432,19 +432,15 @@ void assign(Styles &styles, Script group, int style)
     if (group == Script::Han) set(Script::Kana);
 }
 
-// The alternate passes for a string whose scripts are `mask`. Each script
-// group reads independently: with several groups, the passes cover every
-// combination of their styles (up to 16 passes), so a word mixing scripts
-// matches whichever reading each part is typed in. Beyond that, each group
-// varies alone besides the passes that move every group together.
-QVarLengthArray<Styles, 16> alternateStyles(std::uint32_t mask)
+struct Group {
+    Script group;
+    int count;
+};
+
+// The script groups in `mask` that have alternate readings.
+QVarLengthArray<Group, 8> readingGroups(std::uint32_t mask)
 {
-    struct Group {
-        Script group;
-        int count;
-    };
     QVarLengthArray<Group, 8> groups;
-    int widest = 1;
     for (unsigned s = 0; s < 32; ++s) {
         if (!(mask & (1u << s))) continue;
         const Script group = groupOf(familyOf(Script(s)));
@@ -454,42 +450,8 @@ QVarLengthArray<Styles, 16> alternateStyles(std::uint32_t mask)
             continue;
         }
         groups.append({group, count});
-        widest = std::max(widest, count);
     }
-    QVarLengthArray<Styles, 16> passes;
-    const auto add = [&](const Styles &styles) {
-        if (styles != kPrimary && std::find(passes.cbegin(), passes.cend(), styles) == passes.cend()) {
-            passes.append(styles);
-        }
-    };
-    for (int k = 1; k < widest; ++k) {
-        Styles styles{};
-        for (const Group &g : groups) assign(styles, g.group, k < g.count ? k : 0);
-        add(styles);
-    }
-    if (groups.size() < 2) return passes;
-    int combinations = 1;
-    for (const Group &g : groups) combinations = std::min(combinations * g.count, 17);
-    if (combinations <= 16) {
-        for (int index = 1; index < combinations; ++index) {
-            Styles styles{};
-            int rest = index;
-            for (const Group &g : groups) {
-                assign(styles, g.group, rest % g.count);
-                rest /= g.count;
-            }
-            add(styles);
-        }
-        return passes;
-    }
-    for (const Group &g : groups) {
-        for (int k = 1; k < g.count; ++k) {
-            Styles styles{};
-            assign(styles, g.group, k);
-            add(styles);
-        }
-    }
-    return passes;
+    return groups;
 }
 
 struct Folded {
@@ -507,18 +469,70 @@ Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::u
 }
 
 // Every distinct fold of `src`, primary first.
+//
+// Each script group reads independently. A group alone contributes each of
+// its styles that reads this string differently; with several groups, the
+// folds cover every combination of those distinct readings (up to 16), so a
+// word mixing scripts matches whichever reading each part is typed in.
+// Beyond that, the groups also move together style by style.
 QVector<FoldResult> allFolds(const QString &src, bool withIndex)
 {
     std::uint32_t mask = 0;
     Folded primary = foldPass(src, kPrimary, withIndex, mask, 0);
     QVector<FoldResult> folds;
     folds.append({std::move(primary.text), std::move(primary.index)});
-    for (const Styles &styles : alternateStyles(mask)) {
+    const auto fold = [&](const Styles &styles) {
         std::uint32_t seen = 0;
-        Folded alt = foldPass(src, styles, withIndex, seen, mask);
+        return foldPass(src, styles, withIndex, seen, mask);
+    };
+    const auto add = [&](Folded &&alt) {
         const bool duplicate = std::any_of(folds.cbegin(), folds.cend(),
                                            [&](const FoldResult &f) { return f.text == alt.text; });
         if (!duplicate) folds.append({std::move(alt.text), std::move(alt.index)});
+    };
+
+    const QVarLengthArray<Group, 8> groups = readingGroups(mask);
+    // The styles of each group that read this string differently from its others.
+    QVarLengthArray<QVarLengthArray<int, 4>, 8> distinct;
+    for (const Group &g : groups) {
+        QVarLengthArray<int, 4> styles{0};
+        QStringList readings{folds.first().text};
+        for (int k = 1; k < g.count; ++k) {
+            Styles alone{};
+            assign(alone, g.group, k);
+            Folded alt = fold(alone);
+            if (readings.contains(alt.text)) continue;
+            readings.append(alt.text);
+            styles.append(k);
+            add(std::move(alt));
+        }
+        distinct.append(styles);
+    }
+    if (groups.size() < 2) return folds;
+
+    int combinations = 1;
+    for (const auto &styles : distinct) combinations = std::min<int>(combinations * int(styles.size()), 17);
+    if (combinations <= 16) {
+        for (int index = 1; index < combinations; ++index) {
+            Styles styles{};
+            int rest = index;
+            int varied = 0;
+            for (qsizetype g = 0; g < groups.size(); ++g) {
+                const int k = distinct[g][rest % distinct[g].size()];
+                rest /= int(distinct[g].size());
+                assign(styles, groups[g].group, k);
+                varied += k != 0;
+            }
+            if (varied >= 2) add(fold(styles));  // one group alone is already folded
+        }
+        return folds;
+    }
+    int widest = 1;
+    for (const Group &g : groups) widest = std::max(widest, g.count);
+    for (int k = 1; k < widest; ++k) {
+        Styles styles{};
+        for (const Group &g : groups) assign(styles, g.group, k < g.count ? k : 0);
+        add(fold(styles));
     }
     return folds;
 }
