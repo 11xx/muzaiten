@@ -49,6 +49,23 @@ bool isClusterPair(char16_t first, char16_t second)
     }
 }
 
+// Clusters of native words; loanword clusters (บร, ดร, ฟล) do not start a
+// syllable after a closed one (ประกอบละคร prakoplakhon, สิบล้อ siplo).
+bool isNativeCluster(char16_t first, char16_t second)
+{
+    const bool velar = first == u'ก' || first == u'ข' || first == u'ค';
+    switch (second) {
+    case u'ร':
+        return velar || first == u'ต' || first == u'ป' || first == u'พ';
+    case u'ล':
+        return velar || first == u'ป' || first == u'พ';
+    case u'ว':
+        return velar;
+    default:
+        return false;
+    }
+}
+
 class Parser {
 public:
     Parser(const Letter *l, qsizetype n, int style, Out &out)
@@ -92,11 +109,27 @@ private:
     QStringView initial(qsizetype j) const { return view(m_l[j].c->initial[m_style]); }
     QStringView final(qsizetype j) const { return view(m_l[j].c->final[m_style]); }
 
-    // A vowel sign, post-vowel or tone mark at `j` belongs to the consonant before it.
-    bool attachesToConsonant(qsizetype j) const
+    bool isNucleusMark(qsizetype j) const
     {
         const ThaiRole r = role(j);
         return r == ThaiRole::Above || r == ThaiRole::Post || r == ThaiRole::Tone || r == ThaiRole::Cluster;
+    }
+
+    // อ after a consonant, with no sign of its own, is the vowel o (บอก bok),
+    // except the silent อ leading ย (อยู่ yu).
+    bool isVowelO(qsizetype j) const
+    {
+        if (thai(j) != u'อ' || role(j) != ThaiRole::Consonant || j == 0 || role(j - 1) != ThaiRole::Consonant) {
+            return false;
+        }
+        if (isNucleusMark(j + 1)) return false;
+        return !(thai(j + 1) == u'ย' && isNucleusMark(j + 2));
+    }
+
+    // A vowel sign, post-vowel, tone mark or vowel อ at `j` belongs to the consonant before it.
+    bool attachesToConsonant(qsizetype j) const
+    {
+        return isNucleusMark(j) || isVowelO(j);
     }
 
     // The consonant at `j`, after leading vowel `pre` and a first consonant,
@@ -146,13 +179,21 @@ private:
         return count;
     }
 
-    // The consonant at `j` ends the current syllable. Consonants ending a word
-    // with no written vowel read from the right, o between the last two and a
-    // before those (นคร nakhon, ยน yon), so only a lone one is a final.
+    // The consonant at `j` ends the current syllable. It does not when a
+    // vowel or a cluster partner with a vowel follows it: then it starts the
+    // next syllable (กลัวความ kluakhwam). Consonants ending a word with no
+    // written vowel read from the right, o between the last two and a before
+    // those (นคร nakhon, ยน yon), so a lone one is a final, and so is ย or ว
+    // closing a diphthong before two more (สายฝน saifon).
     bool isFinal(qsizetype j) const
     {
         if (role(j) != ThaiRole::Consonant || attachesToConsonant(j + 1)) return false;
+        if (role(j + 1) == ThaiRole::Consonant && isNativeCluster(thai(j), thai(j + 1))
+            && attachesToConsonant(j + 2)) {
+            return false;
+        }
         const qsizetype tail = bareTail(j);
+        if (tail == 3 && (thai(j) == u'ย' || thai(j) == u'ว')) return true;
         return tail < 0 || tail == 1 || tail >= 4;
     }
 
@@ -277,8 +318,8 @@ private:
             if (above == ThaiVowel::II && thai(i) == u'ย') { v = ThaiVowel::IA; ++i; }
             else if (above == ThaiVowel::UEE && thai(i) == u'อ') { v = ThaiVowel::UEA; ++i; }
             else if (above == ThaiVowel::O && thai(i) == u'า' && role(i) == ThaiRole::Post) { v = ThaiVowel::AO; ++i; }
-            else if (above == ThaiVowel::I) v = ThaiVowel::OE;
-            else if (above == ThaiVowel::O) v = ThaiVowel::E;
+            else if (above == ThaiVowel::I) { v = ThaiVowel::OE; needFinal = true; }
+            else if (above == ThaiVowel::O) { v = ThaiVowel::E; needFinal = true; }
             else if (above == ThaiVowel::IA) v = ThaiVowel::IA;
             else if (thai(i) == u'า' && role(i) == ThaiRole::Post) {
                 ++i;
@@ -296,6 +337,7 @@ private:
             if (thai(i) == u'ะ') { ++i; open = true; }
         } else if (pre == u'แ') {
             v = ThaiVowel::AE;
+            needFinal = above == ThaiVowel::O;
             if (thai(i) == u'ะ') { ++i; open = true; }
         } else if (pre == u'โ') {
             v = ThaiVowel::O;
@@ -312,6 +354,7 @@ private:
                 if (thai(i) == u'ะ') ++i;
             } else {
                 v = above;
+                needFinal = above == ThaiVowel::A;  // ั always closes its syllable (กัน kan)
                 if (above == ThaiVowel::UEE && thai(i) == u'อ' && role(i) == ThaiRole::Consonant) ++i;
             }
         } else if (role(i) == ThaiRole::Post) {
