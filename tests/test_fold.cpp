@@ -265,6 +265,8 @@ private slots:
         QCOMPARE(segments(QString::fromUcs4(U"\u0F66\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F66\u0F71\u0F72")));
         QCOMPARE(segments(QString::fromUcs4(U"\u03B1\u03B9\u0344")), segments(QString::fromUcs4(U"\u03B1\u0390")));
         QCOMPARE(segments(QString::fromUcs4(U"\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F71\u0F72")));
+        // Kannada oo decomposed into three parts composes in two steps.
+        QCOMPARE(segments(QString::fromUcs4(U"\u0C95\u0CC6\u0CC2\u0CD5")), segments(QString::fromUcs4(U"\u0C95\u0CCB")));
         const Fold::FoldResult reordered = Fold::fold(QString::fromUcs4(U"x\u0F66\u0F72\u0F71"));
         QCOMPARE(reordered.srcIndex.size(), reordered.text.size());
         for (const int i : reordered.srcIndex) QVERIFY(i >= 0 && i < 4);
@@ -280,6 +282,13 @@ private slots:
         const Fold::FoldResult cafe = Fold::fold(QString::fromUcs4(U"Cafe\u0301\u212A"));
         QCOMPARE(cafe.text, QStringLiteral("cafek"));
         QCOMPARE(cafe.srcIndex, (QVector<int>{0, 1, 2, 3, 5}));
+        // A Hangul vowel composes only with a leading consonant, a final only
+        // with a syllable that lacks one; composed jamo map to their syllable.
+        QCOMPARE(Fold::fold(QString::fromUcs4(U"A\u1169")).srcIndex, (QVector<int>{0, 1}));
+        QCOMPARE(Fold::fold(QString::fromUcs4(U"\uAC00\u1169\u11A8")).srcIndex, (QVector<int>{0, 0, 1, 2}));
+        const Fold::FoldResult jamo = Fold::fold(QString::fromUcs4(U"A\u1112\u1161\u11AB"));
+        QCOMPARE(jamo.text, QStringLiteral("ahan"));
+        QCOMPARE(jamo.srcIndex, (QVector<int>{0, 1, 1, 1}));
     }
 
     void iterationMarksUseTheirSourcePosition()

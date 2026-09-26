@@ -1051,23 +1051,25 @@ class Generator:
         # Hangul composes algorithmically: an LV syllable takes a final jamo.
         for cp in range(0x11A8, 0x11C3):
             composable_bmp[cp // 32] |= 1 << (cp % 32)
-        # Starters (combining class 0) that NFC may merge into the sequence
-        # before them: the second half of a composition, or a character whose
-        # decomposition begins with a mark (U+0F73). Every other starter,
-        # including one NFC replaces on its own (the Kelvin sign), begins a
-        # sequence of its own.
-        def composes_second(cp: int) -> bool:
-            return (cp < 0x10000 and bool(composable_bmp[cp // 32] >> (cp % 32) & 1)) or cp in composable_astral
-
-        joining: list[int] = []
+        # Starters NFC composes with the starter before them (two-part vowels;
+        # Hangul composes algorithmically at runtime), and starters whose
+        # decomposition begins with a mark (U+0F73), which NFC reorders among
+        # the marks before them.
+        starter_pairs: list[tuple[int, int, int]] = []
+        mark_led: list[int] = []
         for cp in range(0x110000):
-            if 0xD800 <= cp <= 0xDFFF or unicodedata.combining(chr(cp)):
+            if 0xD800 <= cp <= 0xDFFF or 0xAC00 <= cp <= 0xD7A3:
                 continue
-            head = ord(unicodedata.normalize("NFD", chr(cp))[0])
-            if unicodedata.combining(chr(head)):
-                joining.append(cp)
-            elif head == cp and composes_second(cp) and unicodedata.normalize("NFC", chr(cp)) == chr(cp):
-                joining.append(cp)
+            decomposition = unicodedata.decomposition(chr(cp))
+            if not decomposition or decomposition.startswith("<"):
+                continue
+            parts = [int(x, 16) for x in decomposition.split()]
+            if unicodedata.combining(chr(cp)) == 0 and unicodedata.combining(unicodedata.normalize("NFD", chr(cp))[0]):
+                mark_led.append(cp)
+            elif (len(parts) == 2 and unicodedata.combining(chr(parts[1])) == 0
+                  and unicodedata.normalize("NFC", unicodedata.normalize("NFD", chr(cp))) == chr(cp)):
+                starter_pairs.append((parts[0], parts[1], cp))
+        starter_pairs.sort()
 
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
@@ -1078,7 +1080,7 @@ class Generator:
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
                             abjad_block_rows, abjad_constants, tibetan_rows, composable_bmp,
-                            composable_astral, joining)).encode())
+                            composable_astral, starter_pairs, mark_led)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -1148,8 +1150,13 @@ class Generator:
         w(f"const char32_t kComposableAstral[{len(composable_astral)}] = {{"
           + ", ".join(f"0x{cp:X}" for cp in composable_astral) + "};")
         w(f"const std::size_t kComposableAstralCount = {len(composable_astral)};")
-        w(f"const char32_t kJoiningStarters[{len(joining)}] = {{" + ", ".join(f"0x{cp:X}" for cp in joining) + "};")
-        w(f"const std::size_t kJoiningStarterCount = {len(joining)};")
+        w(f"const StarterComposition kStarterCompositions[{len(starter_pairs)}] = {{")
+        for first, second, composite in starter_pairs:
+            w(f"    {{0x{first:X}, 0x{second:X}, 0x{composite:X}}},")
+        w("};")
+        w(f"const std::size_t kStarterCompositionCount = {len(starter_pairs)};")
+        w(f"const char32_t kMarkLedStarters[{len(mark_led)}] = {{" + ", ".join(f"0x{cp:X}" for cp in mark_led) + "};")
+        w(f"const std::size_t kMarkLedStarterCount = {len(mark_led)};")
         w("")
         w("const TibetanChar kTibetanChars[0x100] = {")
         out.extend(tibetan_rows)

@@ -28,9 +28,29 @@ bool normalizes(char32_t cp)
     return std::binary_search(kComposableAstral, kComposableAstral + kComposableAstralCount, cp);
 }
 
-bool joinsPrevious(char32_t cp)
+char32_t composeStarters(char32_t first, char32_t second)
 {
-    return std::binary_search(kJoiningStarters, kJoiningStarters + kJoiningStarterCount, cp);
+    if (!normalizes(second)) return 0;
+    // Hangul composes algorithmically: a leading consonant takes a vowel, and
+    // a syllable without a final consonant takes one.
+    constexpr char32_t kSyllable = 0xAC00;
+    if (second >= 0x1161 && second <= 0x1175) {
+        return first >= 0x1100 && first <= 0x1112 ? kSyllable + ((first - 0x1100) * 21 + (second - 0x1161)) * 28 : 0;
+    }
+    if (second >= 0x11A8 && second <= 0x11C2) {
+        return first >= kSyllable && first <= 0xD7A3 && (first - kSyllable) % 28 == 0 ? first + (second - 0x11A7) : 0;
+    }
+    const StarterComposition *end = kStarterCompositions + kStarterCompositionCount;
+    const StarterComposition *it = std::lower_bound(kStarterCompositions, end, std::pair(first, second),
+                                                    [](const StarterComposition &c, std::pair<char32_t, char32_t> key) {
+                                                        return std::pair(c.first, c.second) < key;
+                                                    });
+    return it != end && it->first == first && it->second == second ? it->composite : 0;
+}
+
+bool leadsWithMark(char32_t cp)
+{
+    return std::binary_search(kMarkLedStarters, kMarkLedStarters + kMarkLedStarterCount, cp);
 }
 
 QStringView decompOf(char32_t cp)

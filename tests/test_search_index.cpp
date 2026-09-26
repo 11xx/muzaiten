@@ -375,6 +375,10 @@ private slots:
             QString::fromUcs4(U"A\u212A"), SearchQuery::parse(QStringLiteral("k")),
             Search::HighlightField::Title, false);
         QCOMPARE(kelvin, (QVector<int>{1}));
+        const QVector<int> vowel = Search::highlightPositions(
+            QString::fromUcs4(U"A\u1169"), SearchQuery::parse(QStringLiteral("o")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(vowel, (QVector<int>{1}));
 
         // Romaji query highlights the underlying kana it romanizes.
         const QVector<int> kana = Search::highlightPositions(

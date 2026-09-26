@@ -67,6 +67,7 @@ struct CodeRange { char32_t first; char32_t last; };
 struct AstralEntry { char32_t cp; std::uint32_t entry; };
 struct Decomp { char32_t cp; Str seq; };
 struct Word { Str key; Str value; };
+struct StarterComposition { char32_t first; char32_t second; char32_t composite; };
 
 enum class KanaKind : std::uint8_t {
     None, Syllable, Moraic, Small, Sokuon, Long, Iteration, VoicedIteration, Dakuten, Handakuten,
@@ -170,8 +171,10 @@ extern const TibetanChar kTibetanChars[0x100];
 extern const std::uint32_t kComposableBmp[0x10000 / 32];
 extern const char32_t kComposableAstral[];
 extern const std::size_t kComposableAstralCount;
-extern const char32_t kJoiningStarters[];
-extern const std::size_t kJoiningStarterCount;
+extern const StarterComposition kStarterCompositions[];
+extern const std::size_t kStarterCompositionCount;
+extern const char32_t kMarkLedStarters[];
+extern const std::size_t kMarkLedStarterCount;
 extern const AbjadBlock kAbjadBlocks[];
 extern const std::size_t kAbjadBlockCount;
 extern const AbjadChar kAbjadChars[];
@@ -216,11 +219,14 @@ QStringView decompOf(char32_t cp);
 // excluded composition such as U+0344, a singleton).
 bool normalizes(char32_t cp);
 
-// NFC may merge `cp`, a starter (combining class 0), into the base and marks
-// before it: a Hangul vowel or final, the second half of an Indic two-part
-// vowel, a Tibetan vowel sign whose decomposition begins with a mark. Marks
-// always belong to the sequence before them.
-bool joinsPrevious(char32_t cp);
+// The character NFC composes from the starters `first` and `second` (combining
+// class 0; Hangul jamo, the halves of a two-part vowel), or 0 when they stay
+// apart.
+char32_t composeStarters(char32_t first, char32_t second);
+
+// `cp` is a starter whose decomposition begins with a mark (U+0F73), so NFC
+// reorders it among the marks before it.
+bool leadsWithMark(char32_t cp);
 
 // The rule for `first` followed by `second` (0 for a single letter) in `range`.
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second);

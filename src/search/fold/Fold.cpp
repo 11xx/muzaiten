@@ -207,11 +207,19 @@ Composed compose(const QString &src)
         qsizetype j = i + firstWidth;
         bool composable = normalizes(first);
         int previousClass = QChar::combiningClass(first);
+        // The starter a following starter would compose with; a mark blocks it.
+        char32_t starter = previousClass == 0 ? first : 0;
         while (j < n) {
             const auto [next, width] = decode(s, n, j);
             const int cls = QChar::combiningClass(next);
-            if (cls == 0 && !joinsPrevious(next)) break;
-            composable = composable || normalizes(next) || (cls != 0 && previousClass > cls);
+            if (cls == 0) {
+                starter = composeStarters(starter, next);
+                if (starter == 0 && !(previousClass != 0 && leadsWithMark(next))) break;
+                composable = true;
+            } else {
+                starter = 0;
+                composable = composable || normalizes(next) || previousClass > cls;
+            }
             previousClass = cls;
             j += width;
         }
