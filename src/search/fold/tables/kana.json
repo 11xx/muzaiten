@@ -1,0 +1,32 @@
+{
+  "_doc": "Hiragana readings; katakana folds onto hiragana first. A value is the wapuro spelling, or [wapuro, Hepburn] where the two differ. `small` gives the vowel a small kana contributes after a syllable (きゃ kya, ファ fa, ティ ti); `combine` overrides the consonant a syllable keeps before a small vowel. `katakana` holds katakana without a hiragana counterpart.",
+  "kana": {
+    "あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+    "か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+    "が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+    "さ": "sa", "し": "shi", "す": "su", "せ": "se", "そ": "so",
+    "ざ": "za", "じ": "ji", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+    "た": "ta", "ち": "chi", "つ": "tsu", "て": "te", "と": "to",
+    "だ": "da", "ぢ": "ji", "づ": "zu", "で": "de", "ど": "do",
+    "な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+    "は": "ha", "ひ": "hi", "ふ": "fu", "へ": "he", "ほ": "ho",
+    "ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+    "ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+    "ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+    "や": "ya", "ゆ": "yu", "よ": "yo",
+    "ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+    "わ": "wa", "ゐ": ["wi", "i"], "ゑ": ["we", "e"], "を": ["wo", "o"], "ん": "n", "ゔ": "vu"
+  },
+  "small": {
+    "ぁ": "a", "ぃ": "i", "ぅ": "u", "ぇ": "e", "ぉ": "o",
+    "ゃ": "ya", "ゅ": "yu", "ょ": "yo", "ゎ": "wa", "ゕ": "ka", "ゖ": "ke"
+  },
+  "combine": {
+    "う": "w", "く": "kw", "ぐ": "gw"
+  },
+  "katakana": {
+    "ヷ": "va", "ヸ": "vi", "ヹ": "ve", "ヺ": "vo",
+    "ㇰ": "k", "ㇱ": "sh", "ㇲ": "s", "ㇳ": "t", "ㇴ": "n", "ㇵ": "h", "ㇶ": "h", "ㇷ": "p",
+    "ㇸ": "h", "ㇹ": "h", "ㇺ": "m", "ㇻ": "r", "ㇼ": "r", "ㇽ": "r", "ㇾ": "r", "ㇿ": "r"
+  }
+}

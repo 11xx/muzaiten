@@ -148,7 +148,7 @@ CacheSignature currentSignature(const Database &db)
     const auto state = db.searchContentState();
     CacheSignature sig;
     sig.formatVersion  = kFormatVersion;
-    sig.foldVersion    = Fold::kVersion;
+    sig.foldVersion    = Fold::cacheSignature();
     sig.schemaVersion  = Schema::currentVersion;
     sig.databaseId = state.databaseId;
     sig.databasePath = state.databasePath;

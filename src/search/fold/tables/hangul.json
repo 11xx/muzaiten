@@ -1,0 +1,16 @@
+{
+  "_doc": "Letters for Korean romanization, indexed by Unicode jamo order: 19 initials, 21 vowels, and the seven sounds a final consonant settles on. The syllable arithmetic and the sound changes between syllables (liaison, nasalization, lateralization, aspiration, palatalization) are code; these tables only spell the result. `rr` is Revised Romanization; `mr` is McCune-Reischauer with its breves and apostrophes dropped, where plain stops are voiced between voiced sounds and voiceless elsewhere.",
+  "rr": {
+    "initials": ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"],
+    "vowels": ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i"],
+    "codas": {"k": "k", "n": "n", "t": "t", "l": "l", "m": "m", "p": "p", "ng": "ng"},
+    "lateral": "l"
+  },
+  "mr": {
+    "initials": ["k", "kk", "n", "t", "tt", "r", "m", "p", "pp", "s", "ss", "", "ch", "tch", "ch", "k", "t", "p", "h"],
+    "voiced_initials": ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "tch", "ch", "k", "t", "p", "h"],
+    "vowels": ["a", "ae", "ya", "yae", "o", "e", "yo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "u", "ui", "i"],
+    "codas": {"k": "k", "n": "n", "t": "t", "l": "l", "m": "m", "p": "p", "ng": "ng"},
+    "lateral": "l"
+  }
+}

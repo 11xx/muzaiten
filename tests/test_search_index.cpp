@@ -251,6 +251,39 @@ private slots:
         QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 1);
     }
 
+    void romanizedQueriesFindNonLatinArtists()
+    {
+        SearchRecord korean = makeRecord(QStringLiteral("Song"), QString::fromUtf8("악단광칠"), QStringLiteral("Album"));
+        SearchRecord pronounced = makeRecord(QString::fromUtf8("한국어"), QStringLiteral("Artist"), QStringLiteral("Album"));
+        SearchRecord japanese = makeRecord(QString::fromUtf8("東京の夜"), QStringLiteral("Artist"), QStringLiteral("Album"));
+        for (SearchRecord *r : {&korean, &pronounced, &japanese}) foldRecordNorms(*r);
+
+        SearchIndex idx;
+        idx.build({korean, pronounced, japanese});
+        const auto titleOf = [&](const QString &query) {
+            const auto results = idx.match(SearchQuery::parse(query), false);
+            return results.size() == 1 ? results.first().rec.title : QString();
+        };
+        QCOMPARE(titleOf(QStringLiteral("ak dan chil")), QStringLiteral("Song"));
+        QCOMPARE(titleOf(QString::fromUtf8("악단")), QStringLiteral("Song"));
+        QCOMPARE(titleOf(QStringLiteral("hangugeo")), QString::fromUtf8("한국어"));
+        QCOMPARE(titleOf(QStringLiteral("hangukeo")), QString::fromUtf8("한국어"));
+        QCOMPARE(titleOf(QStringLiteral("tokyo")), QString::fromUtf8("東京の夜"));
+        QCOMPARE(titleOf(QStringLiteral("dongjing")), QString::fromUtf8("東京の夜"));
+        QCOMPARE(titleOf(QString::fromUtf8("東")), QString::fromUtf8("東京の夜"));
+        QCOMPARE(titleOf(QStringLiteral("^title:tokyo")), QString::fromUtf8("東京の夜"));
+    }
+
+    void highlightFollowsAlternateReadings()
+    {
+        // "hangugeo" matches only the pronounced reading; its letters still
+        // map back onto the three syllables.
+        const QVector<int> pos = Search::highlightPositions(
+            QString::fromUtf8("한국어 노래"), SearchQuery::parse(QStringLiteral("hangugeo")),
+            Search::HighlightField::Title, false);
+        QCOMPARE(pos, (QVector<int>{0, 1, 2}));
+    }
+
     void anchorsApplyToEachFoldedForm()
     {
         // The norm carries the display fold and the sort-name fold; an anchor

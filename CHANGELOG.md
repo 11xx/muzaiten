@@ -2,7 +2,39 @@
 
 ## [Unreleased]
 
+### Added
+
+- Search matches Korean by romanization: `ak dan chil` finds `악단광칠`,
+  syllable by syllable, as pronounced (`hangugeo` for `한국어`) or in
+  McCune-Reischauer (`pochonbo` for `보천보`).
+- Search keeps every common romanization of a title or name, and a query
+  matches any of them: Hepburn romaji with long vowels collapsed (`tokyo`
+  beside `toukyou`), toneless Chinese pinyin with word readings for common
+  polyphones, modern and phonetic Greek (`efcharisto`, `yiorgos`), common and
+  Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
+  their own way, Western Armenian, and German-style `ae`/`oe`/`ue`. Results
+  highlight whichever reading matched.
+- Armenian, Georgian, Kazakh and other Cyrillic letters, Ethiopic, Cherokee,
+  Canadian syllabics, Yi, Bopomofo and Mongolian romanize for search.
+  Look-alike punctuation that tag editors and file-name sanitizers substitute
+  (`∶`, `⁄`, `’`, `×`, CJK brackets) folds onto ASCII, styled Unicode letters
+  (`𝓗𝓮𝓵𝓵𝓸`, `🅲🅻🅴🅰🅽`) read as plain letters, and digits of every script
+  read as `0`-`9`.
+
+### Changed
+
+- CJK ideographs keep their written form in the primary search fold, with
+  traditional and simplified characters folded together, so typing one kanji
+  or hanzi finds every word containing it; readings are alternates.
+- Search folding is a per-character table lookup compiled at build time, about
+  15 times faster over library titles and 24 times faster over file paths. The
+  search cache rebuilds once.
+
 ### Fixed
+
+- Katakana loanword spellings romanize as one sound (`ティ` ti, `ファ` fa,
+  `シェ` she) instead of letter by letter (`tei`, `fua`), and kana in file names
+  written by macOS (with separate voicing marks) fold like typed kana.
 
 - Anchored search terms (`^wall`, `the wall$`), fuzzy matching and exclusion
   globs now check a field's display text and its sort name separately, so a

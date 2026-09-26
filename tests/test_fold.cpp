@@ -1,31 +1,31 @@
 #include <QTest>
 #include <QFile>
 #include <QString>
+#include <QStringList>
 
 #include "search/fold/Fold.h"
 
 using namespace Search;
 
+namespace {
+
+QStringList segments(const QString &src)
+{
+    QStringList texts;
+    for (const Fold::FoldResult &f : Fold::foldAll(src)) texts.append(f.text);
+    return texts;
+}
+
+} // namespace
+
 class TestFold : public QObject {
     Q_OBJECT
 
 private slots:
-    void tableDataLoaded()
-    {
-        const Fold::TableStats stats = Fold::tableStats();
-        QVERIFY(stats.transliterationEntries > 0);
-        QVERIFY(stats.kanaEntries > 0);
-        QVERIFY(stats.yoonPrefixEntries > 0);
-        QVERIFY(stats.smallVowelEntries > 0);
-        QVERIFY(stats.dictionaryEntries > 0);
-        QVERIFY(stats.dictionaryMaxKeyLen > 0);
-        QCOMPARE(stats.dictionaryMaxKeyLen, stats.dictionaryLongestKeyLen);
-    }
-
     void goldenCorpus_data()
     {
         QTest::addColumn<QString>("input");
-        QTest::addColumn<QString>("expected");
+        QTest::addColumn<QStringList>("expected");
 
         QFile file(QStringLiteral(FOLD_CASES_PATH));
         QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
@@ -35,20 +35,21 @@ private slots:
             const QString trimmed = line.trimmed();
             if (trimmed.isEmpty() || trimmed.startsWith(QChar('#'))) continue;
 
-            const qsizetype tab = line.indexOf(QChar('\t'));
-            QVERIFY2(tab >= 0, qPrintable(QStringLiteral("corpus row has no tab: %1").arg(line)));
-            const QString input = line.left(tab);
-            const QString expected = line.mid(tab + 1);
+            QStringList fields = line.split(QChar('\t'));
+            QVERIFY2(fields.size() >= 2, qPrintable(QStringLiteral("corpus row has no tab: %1").arg(line)));
+            const QString input = fields.takeFirst();
             const QByteArray rowName = input.toUtf8();
-            QTest::newRow(rowName.constData()) << input << expected;
+            QTest::newRow(rowName.constData()) << input << fields;
         }
     }
 
+    // One expected field checks the primary fold; more check every fold, in order.
     void goldenCorpus()
     {
         QFETCH(QString, input);
-        QFETCH(QString, expected);
-        QCOMPARE(Fold::foldText(input), expected);
+        QFETCH(QStringList, expected);
+        QCOMPARE(Fold::foldText(input), expected.first());
+        if (expected.size() > 1) QCOMPARE(segments(input), expected);
     }
 
     void asciiPassthroughAndLowercase()
@@ -56,6 +57,9 @@ private slots:
         QCOMPARE(Fold::foldText(QStringLiteral("Hello World")), QStringLiteral("hello world"));
         // Spaces and punctuation are preserved (not slug-collapsed).
         QCOMPARE(Fold::foldText(QStringLiteral("a-b_c.d")), QStringLiteral("a-b_c.d"));
+        // Lowercase ASCII comes back as the same shared string.
+        const QString plain = QString::fromUtf8("already folded");
+        QVERIFY(Fold::foldText(plain).isSharedWith(plain));
     }
 
     void latinDiacritics()
@@ -100,29 +104,21 @@ private slots:
         QCOMPARE(Fold::foldText(QString::fromUtf8("ラーメン")), QStringLiteral("ramen"));      // long mark dropped
     }
 
-    void kanjiDictionaryReadings()
+    void kanjiReadingsAreAlternates()
     {
-        // Word-level reading from the dictionary.
-        QCOMPARE(Fold::foldText(QString::fromUtf8("三線")), QStringLiteral("sanshin"));
-        // Longest-match word beats single-kanji fallbacks (東京 not 東+京).
-        QCOMPARE(Fold::foldText(QString::fromUtf8("東京")), QStringLiteral("toukyou"));
+        // Ideographs keep their surface in the primary fold, so typing them
+        // matches, including one character of a dictionary word.
+        QCOMPARE(Fold::foldText(QString::fromUtf8("東京")), QString::fromUtf8("东京"));
+        QVERIFY(Fold::foldText(QString::fromUtf8("東京")).contains(Fold::foldText(QString::fromUtf8("東"))));
+        // Word readings beat single-kanji ones (東京 not 東+京), in Hepburn,
+        // pinyin and wapuro.
+        QCOMPARE(segments(QString::fromUtf8("東京")),
+                 (QStringList{QString::fromUtf8("东京"), QStringLiteral("tokyo"), QStringLiteral("dongjing"),
+                              QStringLiteral("toukyou")}));
         // The headline goal, end to end: 三線(word) + の(kana) + 花(single kanji).
-        QCOMPARE(Fold::foldText(QString::fromUtf8("三線の花")), QStringLiteral("sanshinnohana"));
-        // A kanji with no dictionary entry passes through so typing it still matches.
-        QCOMPARE(Fold::foldText(QString::fromUtf8("阿")), QString::fromUtf8("阿"));
-    }
-
-    void basicFoldSkipsCjkRomanization()
-    {
-        // Diacritics and script transliteration still apply in basic mode...
-        QCOMPARE(Fold::foldText(QString::fromUtf8("Café"), false), QStringLiteral("cafe"));
-        QCOMPARE(Fold::foldText(QString::fromUtf8("Привет"), false), QStringLiteral("privet"));
-        // ...but kana and kanji pass through (deferred to the extended tier).
-        QCOMPARE(Fold::foldText(QString::fromUtf8("さんしん"), false), QString::fromUtf8("さんしん"));
-        QCOMPARE(Fold::foldText(QString::fromUtf8("三線"), false), QString::fromUtf8("三線"));
-        // Extended (the default) romanizes them.
-        QCOMPARE(Fold::foldText(QString::fromUtf8("さんしん")), QStringLiteral("sanshin"));
-        QCOMPARE(Fold::foldText(QString::fromUtf8("三線")), QStringLiteral("sanshin"));
+        QVERIFY(segments(QString::fromUtf8("三線の花")).contains(QStringLiteral("sanshinnohana")));
+        // A kanji with no dictionary entry keeps its surface in the Japanese readings.
+        QVERIFY(segments(QString::fromUtf8("阿")).contains(QString::fromUtf8("阿")));
     }
 
     void controlAndFormatCharactersAreDropped()
@@ -139,6 +135,16 @@ private slots:
     {
         const QString once = Fold::foldText(QString::fromUtf8("Café SHCHükÖ"));
         QCOMPARE(Fold::foldText(once), once);
+    }
+
+    void segmentsJoinDistinctFolds()
+    {
+        QCOMPARE(Fold::foldSegments(QStringLiteral("Plain Text")), QStringLiteral("plain text"));
+        QCOMPARE(Fold::foldSegments(QString::fromUtf8("Müller")),
+                 QStringLiteral("muller") + Fold::kSegmentSeparator + QStringLiteral("mueller"));
+        const QVector<Fold::FoldResult> all = Fold::foldAll(QString::fromUtf8("Müller"));
+        QCOMPARE(all.size(), 2);
+        QCOMPARE(all.at(1).srcIndex, (QVector<int>{0, 1, 1, 2, 3, 4, 5}));
     }
 
     void sourceIndexMapping()
@@ -170,6 +176,11 @@ private slots:
         const Fold::FoldResult ext = Fold::fold(QStringLiteral("a") + astral + QStringLiteral("b"));
         QCOMPARE(ext.text.size(), 4);
         QCOMPARE(ext.srcIndex, (QVector<int>{0, 1, 2, 3}));
+
+        // A Hangul syllable's letters all map to the syllable.
+        const Fold::FoldResult hangul = Fold::fold(QString::fromUtf8("a악단"));
+        QCOMPARE(hangul.text, QStringLiteral("aakdan"));
+        QCOMPARE(hangul.srcIndex, (QVector<int>{0, 1, 1, 2, 2, 2}));
     }
 
     void sourceIndexMappingForCompatibilityForms()
@@ -177,6 +188,25 @@ private slots:
         const Fold::FoldResult result = Fold::fold(QString::fromUtf8("AｶﾞBﾊﾟC"));
         QCOMPARE(result.text, QStringLiteral("agabpac"));
         QCOMPARE(result.srcIndex, (QVector<int>{0, 1, 1, 3, 4, 4, 6}));
+
+        // A compatibility character folds through its expansion in place.
+        const Fold::FoldResult square = Fold::fold(QString::fromUtf8("x㌔"));
+        QCOMPARE(square.text, QStringLiteral("xkiro"));
+        QCOMPARE(square.srcIndex, (QVector<int>{0, 1, 1, 1, 1}));
+    }
+
+    void decomposedInputFoldsLikeComposed()
+    {
+        // File names written by macOS are NFD: kana carry combining voicing
+        // marks and Hangul arrives as conjoining jamo.
+        const QString deco = QString::fromUtf8("テ") + QChar(0x3099) + QString::fromUtf8("スコ");
+        QCOMPARE(Fold::foldText(deco), QStringLiteral("desuko"));
+        const QString pa = QString::fromUtf8("ハ") + QChar(0x309A);
+        QCOMPARE(Fold::foldText(pa), QStringLiteral("pa"));
+        const QString han = QString(QChar(0x1112)) + QChar(0x1161) + QChar(0x11AB)  // 한
+            + QChar(0x1100) + QChar(0x116E) + QChar(0x11A8);                        // 국
+        QCOMPARE(Fold::foldText(han), QStringLiteral("hanguk"));
+        QCOMPARE(Fold::fold(han).srcIndex, (QVector<int>{0, 0, 0, 3, 3, 3}));
     }
 
     void iterationMarksUseTheirSourcePosition()
@@ -194,11 +224,38 @@ private slots:
         QCOMPARE(voiced.srcIndex, (QVector<int>{0, 0, 0, 1, 1}));
     }
 
+    void alternateIndexMapsSpreadReadingsOverTheirWord()
+    {
+        const QVector<Fold::FoldResult> all = Fold::foldAll(QString::fromUtf8("東京"));
+        const auto hepburn = std::find_if(all.cbegin(), all.cend(),
+                                          [](const Fold::FoldResult &f) { return f.text == QStringLiteral("tokyo"); });
+        QVERIFY(hepburn != all.cend());
+        QCOMPARE(hepburn->srcIndex, (QVector<int>{0, 0, 1, 1, 1}));
+    }
+
     void foldTextMatchesFoldText()
     {
         // The hot-path (foldText) and the highlight-path (fold) must agree.
-        const QString s = QString::fromUtf8("Café 三線 がっこう Привет");
+        const QString s = QString::fromUtf8("Café 三線 がっこう Привет 악단광칠");
         QCOMPARE(Fold::fold(s).text, Fold::foldText(s));
+        QCOMPARE(Fold::foldAll(s).first().text, Fold::foldText(s));
+    }
+
+    void everySegmentIndexMapMatchesItsText()
+    {
+        for (const QString &s : {QString::fromUtf8("東京の夜"), QString::fromUtf8("한국어 노래"),
+                                 QString::fromUtf8("Ευχαριστώ"), QString::fromUtf8("Їхав Івась")}) {
+            for (const Fold::FoldResult &f : Fold::foldAll(s)) {
+                QCOMPARE(f.srcIndex.size(), f.text.size());
+                for (const int i : f.srcIndex) QVERIFY(i >= 0 && i < s.size());
+            }
+        }
+    }
+
+    void cacheSignatureIsStable()
+    {
+        QCOMPARE(Fold::cacheSignature(), Fold::cacheSignature());
+        QVERIFY(Fold::cacheSignature() != Fold::kVersion);
     }
 };
 

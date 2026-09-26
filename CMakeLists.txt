@@ -148,6 +148,10 @@ set(MUZAITEN_SOURCES
     src/scrobble/ScrobbleDestination.cpp
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
+    src/search/fold/FoldAlphabets.cpp
+    src/search/fold/FoldData.cpp
+    src/search/fold/FoldJapanese.cpp
+    src/search/fold/FoldKorean.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
     src/search/RankConfig.cpp
@@ -398,6 +402,10 @@ set(MUZAITEN_CORE_SOURCES
 set(MUZAITEN_SEARCH_SOURCES
     src/search/Exclusion.cpp
     src/search/fold/Fold.cpp
+    src/search/fold/FoldAlphabets.cpp
+    src/search/fold/FoldData.cpp
+    src/search/fold/FoldJapanese.cpp
+    src/search/fold/FoldKorean.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
     src/search/RankConfig.cpp
@@ -684,7 +692,24 @@ add_library(muzaiten_core STATIC ${MUZAITEN_CORE_SOURCES})
 muzaiten_configure_library(muzaiten_core)
 target_link_libraries(muzaiten_core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD)
 
-add_library(muzaiten_search STATIC ${MUZAITEN_SEARCH_SOURCES})
+# The search fold's per-code-point tables are compiled from the hand-authored
+# tables and the Han reading data by tools/foldgen.py.
+file(GLOB MUZAITEN_FOLD_TABLES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/tables/*.json)
+set(MUZAITEN_FOLD_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated/FoldTables.inc)
+add_custom_command(
+    OUTPUT ${MUZAITEN_FOLD_GENERATED}
+    COMMAND "${Python3_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/tools/foldgen.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/tables ${MUZAITEN_FOLD_GENERATED}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/foldgen.py
+            ${MUZAITEN_FOLD_TABLES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/han_pinyin.tsv
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/han_simplified.tsv
+    COMMENT "Compiling search fold tables"
+    VERBATIM
+)
+set_source_files_properties(src/search/fold/FoldData.cpp PROPERTIES OBJECT_DEPENDS ${MUZAITEN_FOLD_GENERATED})
+
+add_library(muzaiten_search STATIC ${MUZAITEN_SEARCH_SOURCES} ${MUZAITEN_FOLD_GENERATED})
 muzaiten_configure_library(muzaiten_search)
 target_link_libraries(muzaiten_search PUBLIC muzaiten_core Qt6::Core PRIVATE Qt6::Sql)
 

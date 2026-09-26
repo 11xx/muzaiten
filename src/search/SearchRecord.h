@@ -62,8 +62,8 @@ struct SearchRecord {
 };
 
 // Compute a record's folded norm fields from its display fields and sort/reading
-// names (full fold: diacritics/scripts + CJK romanization + sort-reading
-// enrichment). When `pool` is given, the high-repetition norms (artist/
+// names: every folded form of each (Fold::foldSegments), the sort name's after
+// the display text's. When `pool` is given, the high-repetition norms (artist/
 // album-artist/album) are interned through it to save memory. The raw sort
 // names are folded in and then cleared to reclaim memory.
 inline void foldRecordNorms(SearchRecord &rec, QHash<QString, QString> *pool = nullptr)
@@ -80,9 +80,9 @@ inline void foldRecordNorms(SearchRecord &rec, QHash<QString, QString> *pool = n
         return v;
     };
     const auto foldField = [&](const QString &text, const QString &reading) {
-        QString f = Fold::foldText(text);
+        QString f = Fold::foldSegments(text);
         if (!reading.isEmpty()) {
-            const QString fr = Fold::foldText(reading);
+            const QString fr = Fold::foldSegments(reading);
             if (!fr.isEmpty() && fr != f) {
                 f += Fold::kSegmentSeparator + fr;
             }
@@ -93,8 +93,8 @@ inline void foldRecordNorms(SearchRecord &rec, QHash<QString, QString> *pool = n
     rec.normArtist      = intern(foldField(rec.artistName, rec.artistSort));
     rec.normAlbumArtist = intern(foldField(rec.albumArtistName, rec.albumArtistSort));
     rec.normAlbum       = intern(foldField(rec.albumTitle, rec.albumSort));
-    rec.normFilename    = Fold::foldText(rec.filename);
-    rec.normPath        = Fold::foldText(rec.path);
+    rec.normFilename    = Fold::foldSegments(rec.filename);
+    rec.normPath        = Fold::foldSegments(rec.path);
     rec.titleSort.clear();
     rec.artistSort.clear();
     rec.albumArtistSort.clear();

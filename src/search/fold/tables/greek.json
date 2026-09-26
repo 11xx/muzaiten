@@ -1,0 +1,39 @@
+{
+  "_doc": "Greek. `letters` is the primary letter-by-letter reading (classical: η e, υ y, φ ph, χ ch). Each style is an alternate reading with its own letters and two-letter rules: a string value applies everywhere, [initial, medial] depends on the pair starting a word, and `u_diphthongs` give [before a voiced sound, before a voiceless one or the end of a word]. A diaeresis on the second vowel keeps a pair apart. `front_gamma` replaces γ before e and i sounds.",
+  "letters": {
+    "α": "a", "β": "b", "γ": "g", "δ": "d", "ε": "e", "ζ": "z", "η": "e", "θ": "th",
+    "ι": "i", "κ": "k", "λ": "l", "μ": "m", "ν": "n", "ξ": "x", "ο": "o", "π": "p",
+    "ρ": "r", "σ": "s", "ς": "s", "τ": "t", "υ": "y", "φ": "ph", "χ": "ch", "ψ": "ps", "ω": "o",
+    "ϝ": "w", "ͷ": "w", "ϙ": "q", "ϟ": "q", "ϛ": "st", "ϡ": "ss", "ͳ": "ss", "ϳ": "j",
+    "ͱ": "h", "ϸ": "sh", "ϻ": "s"
+  },
+  "styles": [
+    {
+      "name": "elot",
+      "letters": {
+        "α": "a", "β": "v", "γ": "g", "δ": "d", "ε": "e", "ζ": "z", "η": "i", "θ": "th",
+        "ι": "i", "κ": "k", "λ": "l", "μ": "m", "ν": "n", "ξ": "x", "ο": "o", "π": "p",
+        "ρ": "r", "σ": "s", "ς": "s", "τ": "t", "υ": "y", "φ": "f", "χ": "ch", "ψ": "ps", "ω": "o"
+      },
+      "pairs": {
+        "ου": "ou", "αι": "ai", "ει": "ei", "οι": "oi", "υι": "yi",
+        "γγ": "ng", "γξ": "nx", "γχ": "nch", "μπ": ["b", "mp"], "ντ": ["d", "nt"], "γκ": ["g", "gk"]
+      },
+      "u_diphthongs": {"αυ": ["av", "af"], "ευ": ["ev", "ef"], "ηυ": ["iv", "if"]}
+    },
+    {
+      "name": "phonetic",
+      "letters": {
+        "α": "a", "β": "v", "γ": "g", "δ": "d", "ε": "e", "ζ": "z", "η": "i", "θ": "th",
+        "ι": "i", "κ": "k", "λ": "l", "μ": "m", "ν": "n", "ξ": "x", "ο": "o", "π": "p",
+        "ρ": "r", "σ": "s", "ς": "s", "τ": "t", "υ": "i", "φ": "f", "χ": "h", "ψ": "ps", "ω": "o"
+      },
+      "pairs": {
+        "ου": "u", "αι": "e", "ει": "i", "οι": "i", "υι": "i",
+        "γγ": "ng", "γξ": "nx", "γχ": "nh", "μπ": ["b", "mb"], "ντ": ["d", "nd"], "γκ": ["g", "g"]
+      },
+      "u_diphthongs": {"αυ": ["av", "af"], "ευ": ["ev", "ef"], "ηυ": ["iv", "if"]},
+      "front_gamma": "y"
+    }
+  ]
+}

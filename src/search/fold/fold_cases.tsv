@@ -1,4 +1,6 @@
-# input<TAB>expected folded text
+# input<TAB>primary fold[<TAB>alternate reading...]
+# One expected field checks the primary fold only; more fields list every
+# distinct fold in order, primary first.
 ジ	ji
 っか	kka
 きゃ	kya
@@ -8,12 +10,78 @@
 ﾊﾟ	pa
 ＡＢＣ	abc
 Привет мир	privet mir
-γειά σου	geia soy
 Crème brûlée	creme brulee
-花々	hanahana
+# Punctuation look-alikes fold onto what a searcher types.
+11∶11	11:11
+don’t stop	don't stop
+A × B	a x b
+【MV】	[mv]
+# Letters styled with Unicode "fonts" read as the letters.
+𝓗𝓮𝓵𝓵𝓸	hello
+🅲🅻🅴🅰🅽	clean
+ᴀʙᴄ	abc
+# Digits of every script read as ASCII digits.
+١٢٣	123
+๑๒๓	123
+# German-style digraphs are an alternate spelling.
+Müller	muller	mueller
+Björk	bjork	bjoerk
+# Greek: letter by letter, then modern (ELOT 743), then phonetic.
+γειά σου	geia soy	geia sou	yia su
+Ευχαριστώ	eycharisto	efcharisto	efharisto
+μπουζούκι	mpoyzoyki	bouzouki	buzuki
+Γιώργος	giorgos	yiorgos
+Αϊ	ai
+# Cyrillic: primary, common (with the string's language), Slavic Latin.
+Їхав Івась на коні	yikhav ivas na koni	jihav ivas na koni
+Хрущёв	khrushchev	hruschyov	hruscev
+Чайковский	chaikovskii	chaykovskiy	cajkovskij
+Ђорђе Балашевић	djordje balashevic	djordje balasevic	dorde balasevic
+Беларусь Ў	belarus u	bielarus w
+Қазақстан	qazaqstan
+# Armenian: Eastern, then Western.
+Երևան	yerevan
+Հայաստան	hayastan	hayasdan
+Ուրախ	urakh
+ոսկի	voski	vosgi
+ქართული	kartuli
+# Kana: wapuro, then Hepburn with long vowels collapsed.
+ティーンエイジャー	tineija
+ファンタジー	fantaji
+ディスコ	disuko
+シェフ	shefu
+ヴァイオリン	vaiorin
+くゎ	kwa
+ウィンドウ	windou	windo
+とうきょう	toukyou	tokyo
+りゅういち	ryuuichi	ryuichi
+まゐご	mawigo	maigo
 こゝろ	kokoro
 つゞく	tsuzuku
 カヽ	kaka
 カヾ	kaga
-# Unknown kanji remains unchanged when no seed reading exists.
+ドリームレス・ドリームス	dorimuresu dorimusu
+# Ideographs keep their (simplified) surface; readings are alternates:
+# Japanese seed words in Hepburn, pinyin, Japanese seed words in wapuro.
+花々	花花	hanahana	huahua
+東京の夜	东京no夜	tokyonoyoru	dongjingnoye	toukyounoyoru
+傳達給你	传达给你	chuandageini
+音乐	音乐	yinyue
+长城	长城	changcheng
+快乐	快乐	kuaile
+# An unknown kanji keeps its surface.
 阿	阿
+# Hangul: syllable by syllable, as pronounced, McCune-Reischauer.
+악단광칠	akdangwangchil	aktangwangchil
+한국어	hangukeo	hangugeo	hangugo
+별의 시	byeolui si	byeorui si	pyorui si
+좋아	jota	joa	choa
+신라	sinra	silla
+독립	dokrip	dongnip	tongnip
+같이	gati	gachi	kachi
+보천보	bocheonbo	pochonbo
+ㅋㅋㅋ	kkk
+# Syllabaries read by their Unicode names.
+ኢትዮጵያ	ityophya
+ᏣᎳᎩ	tsalagi
+ㄐㄧㄝ	jie

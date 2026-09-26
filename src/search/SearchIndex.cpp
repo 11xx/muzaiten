@@ -159,6 +159,36 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
 
 // ---- highlight positions (delegate) ---------------------------------------
 
+namespace {
+
+// Positions in folded text `hay` that `term` matches, or none.
+QVector<int> termPositions(const QString &hay, const Term &term, bool fuzzyMode)
+{
+    const QString &needle = term.text;
+    QVector<int> positions;
+    const auto span = [&](qsizetype start) {
+        for (qsizetype k = 0; k < needle.length(); ++k) positions.append(static_cast<int>(start + k));
+    };
+    const bool exact = term.forceExact || !fuzzyMode;
+    if (!exact) {
+        const MatchResult mr = fuzzyMatchV2(hay, needle, /*caseSensitive=*/true, /*withPositions=*/true);
+        if (mr.matched()) positions = mr.positions;
+        return positions;
+    }
+    if (term.prefixAnchor && term.suffixAnchor) {
+        if (hay == needle) span(0);
+    } else if (term.prefixAnchor) {
+        if (hay.startsWith(needle)) span(0);
+    } else if (term.suffixAnchor) {
+        if (hay.endsWith(needle)) span(hay.length() - needle.length());
+    } else {
+        for (qsizetype idx = hay.indexOf(needle); idx >= 0; idx = hay.indexOf(needle, idx + 1)) span(idx);
+    }
+    return positions;
+}
+
+} // namespace
+
 QVector<int> highlightPositions(const QString &text, const SearchQuery &query,
                                  HighlightField field, bool fuzzyMode)
 {
@@ -167,54 +197,22 @@ QVector<int> highlightPositions(const QString &text, const SearchQuery &query,
     // Match in folded space (the needle is already folded by the parser), then
     // project the matched positions back onto the original display string via
     // the fold's source-index map — folding can change length (ß→ss, 三→san,
-    // dropped combining marks), so folded indices are not display indices.
-    const Fold::FoldResult folded = Fold::fold(text);
-    const QString &hay = folded.text;
-
-    QVector<int> foldedPos;
-    for (const Term &term : query.terms) {
-        if (!termAppliesTo(term, field)) continue;
-        const QString &needle = term.text;
-        if (needle.isEmpty()) continue;
-
-        const bool exact = term.forceExact || !fuzzyMode;
-        if (exact) {
-            if (term.prefixAnchor && term.suffixAnchor) {
-                if (hay == needle) {
-                    for (int k = 0; k < needle.length(); ++k) foldedPos.append(k);
-                }
-                continue;
-            }
-            if (term.prefixAnchor) {
-                if (hay.startsWith(needle)) {
-                    for (int k = 0; k < needle.length(); ++k) foldedPos.append(k);
-                }
-                continue;
-            }
-            if (term.suffixAnchor) {
-                if (hay.endsWith(needle)) {
-                    const int start = static_cast<int>(hay.length() - needle.length());
-                    for (int k = 0; k < needle.length(); ++k) foldedPos.append(start + k);
-                }
-                continue;
-            }
-            // Highlight every occurrence.
-            int idx = static_cast<int>(hay.indexOf(needle));
-            while (idx >= 0) {
-                for (int k = 0; k < needle.length(); ++k) foldedPos.append(idx + k);
-                idx = static_cast<int>(hay.indexOf(needle, idx + 1));
-            }
-        } else {
-            const MatchResult mr = fuzzyMatchV2(hay, needle, /*caseSensitive=*/true, /*withPositions=*/true);
-            if (mr.matched()) foldedPos += mr.positions;
-        }
-    }
+    // dropped combining marks), so folded indices are not display indices. A
+    // term that misses the primary fold is looked up in the alternate readings
+    // the index also matched (한국어 found by "hangugeo").
+    const QVector<Fold::FoldResult> folds = Fold::foldAll(text);
 
     QVector<int> positions;
-    positions.reserve(foldedPos.size());
-    const QVector<int> &src = folded.srcIndex;
-    for (const int p : foldedPos) {
-        if (p >= 0 && p < src.size()) positions.append(src.at(p));
+    for (const Term &term : query.terms) {
+        if (!termAppliesTo(term, field) || term.text.isEmpty()) continue;
+        for (const Fold::FoldResult &folded : folds) {
+            const QVector<int> foldedPos = termPositions(folded.text, term, fuzzyMode);
+            if (foldedPos.isEmpty()) continue;
+            for (const int p : foldedPos) {
+                if (p >= 0 && p < folded.srcIndex.size()) positions.append(folded.srcIndex.at(p));
+            }
+            break;
+        }
     }
     std::sort(positions.begin(), positions.end());
     positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
