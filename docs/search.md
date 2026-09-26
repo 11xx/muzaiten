@@ -23,7 +23,7 @@ common reading and a query matches any of them:
 
 | Script | Readings a query can use |
 |--------|--------------------------|
-| Latin | `muller` and `mueller` for `Müller`; `bjork`, `bjoerk` |
+| Latin | `muller`, `mueller` and `miller` for `Müller`; `bjork`, `bjoerk` |
 | Greek | letter by letter (`eycharisto`), modern (`efcharisto`), phonetic (`efharisto`, `yiorgos`) |
 | Cyrillic | `khrushchev`, `hruschyov`, `hruscev`; Ukrainian, Belarusian and Serbian spellings when the text uses their letters |
 | Armenian | Eastern (`hayastan`) and Western (`hayasdan`) |

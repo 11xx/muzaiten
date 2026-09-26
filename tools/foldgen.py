@@ -177,6 +177,7 @@ class Generator:
                                for name, b in self.brahmic["blocks"].items()]
 
         self.german = without_doc(self.latin["german"])
+        self.u_as_i = without_doc(self.latin["u_as_i"])
         self.cyrillic_letters = self.cyrillic["letters"]
         self.language_of: dict[str, str] = {}
         for lang, letters in self.cyrillic["language_letters"].items():
@@ -920,6 +921,7 @@ class Generator:
         armenian_eastern = alpha_range({**self.armenian["letters"], **self.armenian["pairs"]})
         armenian_western = alpha_range(self.armenian["western"])
         german = alpha_range(self.german)
+        u_as_i = alpha_range(self.u_as_i)
 
         # Thai and Lao
         vowel_names = ["A", "I", "II", "UE", "UEE", "U", "UU", "E", "AE", "O", "OO", "IA", "UEA", "UA", "OE",
@@ -1133,6 +1135,7 @@ class Generator:
         w(f"const AlphaRange kArmenianEastern = {armenian_eastern};")
         w(f"const AlphaRange kArmenianWestern = {armenian_western};")
         w(f"const AlphaRange kGerman = {german};")
+        w(f"const AlphaRange kUmlautAsI = {u_as_i};")
         w("")
         w(f"const char16_t kPool[{max(1, len(pool.units))}] = {{")
         for i in range(0, len(pool.units), 16):

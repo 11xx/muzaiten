@@ -62,5 +62,9 @@
     "å": "aa",
     "ő": "oe",
     "ű": "ue"
+  },
+  "u_as_i": {
+    "_doc": "A second alternate for ü, the i that Portuguese and English spellings of German names use (Müller also matches miller).",
+    "ü": "i"
   }
 }

@@ -23,7 +23,7 @@
 //   Lao, the Brahmic scripts, Tibetan, and Arabic, Hebrew and Syriac without
 //   their vowel marks and letter variants.
 // - Alternate readings are what a searcher might type instead: German
-//   ae/oe/ue, modern and phonetic Greek, common and Slavic Cyrillic spellings
+//   ae/oe/ue and ü as i, modern and phonetic Greek, common and Slavic Cyrillic spellings
 //   with Ukrainian, Belarusian and Serbian letters, Western Armenian, Hepburn
 //   romaji with long vowels collapsed (tokyo), Japanese kanji readings from a
 //   seed dictionary, Chinese pinyin, Korean as pronounced (한국어→hangugeo)

@@ -12,7 +12,8 @@
   beside `toukyou`), toneless Chinese pinyin with word readings for common
   polyphones, modern and phonetic Greek (`efcharisto`, `yiorgos`), common and
   Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
-  their own way, Western Armenian, and German-style `ae`/`oe`/`ue`. Results
+  their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i` (`miller` finds
+  `Müller`). Results
   highlight whichever reading matched.
 - Search matches Thai and Lao by romanization, read syllable by syllable
   with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,

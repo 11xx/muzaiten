@@ -141,9 +141,10 @@ private slots:
     {
         QCOMPARE(Fold::foldSegments(QStringLiteral("Plain Text")), QStringLiteral("plain text"));
         QCOMPARE(Fold::foldSegments(QString::fromUtf8("Müller")),
-                 QStringLiteral("muller") + Fold::kSegmentSeparator + QStringLiteral("mueller"));
+                 QStringLiteral("muller") + Fold::kSegmentSeparator + QStringLiteral("mueller")
+                     + Fold::kSegmentSeparator + QStringLiteral("miller"));
         const QVector<Fold::FoldResult> all = Fold::foldAll(QString::fromUtf8("Müller"));
-        QCOMPARE(all.size(), 2);
+        QCOMPARE(all.size(), 3);
         QCOMPARE(all.at(1).srcIndex, (QVector<int>{0, 1, 1, 2, 3, 4, 5}));
     }
 

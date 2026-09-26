@@ -187,6 +187,7 @@ extern const CyrillicStyle kCyrillicStyles[];
 extern const AlphaRange kArmenianEastern;
 extern const AlphaRange kArmenianWestern;
 extern const AlphaRange kGerman;
+extern const AlphaRange kUmlautAsI;
 extern const char16_t kPool[];
 extern const std::size_t kPoolSize;
 
@@ -275,7 +276,7 @@ void foldHangul(const Unit *units, qsizetype n, int style, Out &out);
 void foldGreek(const Unit *units, qsizetype n, int style, Out &out);
 void foldCyrillic(const Unit *units, qsizetype n, int style, const Context &ctx, Out &out);
 void foldArmenian(const Unit *units, qsizetype n, int style, Out &out);
-void foldGerman(const Unit *units, qsizetype n, Out &out);
+void foldLatinAlt(const Unit *units, qsizetype n, int style, Out &out);
 void foldThai(const Unit *units, qsizetype n, int style, Out &out);
 void foldBrahmic(const Unit *units, qsizetype n, int style, Out &out);
 void foldArabic(const Unit *units, qsizetype n, int style, Out &out);

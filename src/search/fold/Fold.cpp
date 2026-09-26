@@ -98,8 +98,8 @@ int styleCount(Script family)
     case Script::Hangul:
     case Script::Thai:
     case Script::Lao:
-        return 3;
     case Script::LatinAlt:
+        return 3;
     case Script::Armenian:
     case Script::Kana:
         return 2;
@@ -262,8 +262,8 @@ void dispatch(Script family, const Units &units, int pass, const Context &ctx, O
         }
         break;
     case Script::LatinAlt:
-        if (style == 1) {
-            foldGerman(u, n, out);
+        if (style > 0) {
+            foldLatinAlt(u, n, style, out);
             return;
         }
         break;

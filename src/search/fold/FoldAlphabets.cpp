@@ -1,5 +1,5 @@
 // Alternate readings of alphabets whose primary fold is letter by letter:
-// Greek, Cyrillic, Armenian, and Latin letters with a digraph spelling.
+// Greek, Cyrillic, Armenian, and Latin letters with other common spellings.
 
 #include "search/fold/FoldEngine.h"
 
@@ -140,10 +140,12 @@ void foldArmenian(const Unit *u, qsizetype n, int style, Out &out)
     }
 }
 
-void foldGerman(const Unit *u, qsizetype n, Out &out)
+// Style 1 spells umlauts as digraphs (mueller); style 2 spells ü as i (miller).
+void foldLatinAlt(const Unit *u, qsizetype n, int style, Out &out)
 {
+    const AlphaRange table = style == 1 ? kGerman : kUmlautAsI;
     for (qsizetype k = 0; k < n; ++k) {
-        if (const AlphaRule *rule = findRule(kGerman, u[k].cp, 0)) out.put(rule->medial, u[k].src);
+        if (const AlphaRule *rule = findRule(table, u[k].cp, 0)) out.put(rule->medial, u[k].src);
         else emitPrimary(u[k], out);
     }
 }

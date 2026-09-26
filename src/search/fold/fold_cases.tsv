@@ -23,9 +23,10 @@ A × B	a x b
 # Digits of every script read as ASCII digits.
 ١٢٣	123
 ๑๒๓	123
-# German-style digraphs are an alternate spelling.
-Müller	muller	mueller
+# German-style digraphs are an alternate spelling, and ü also reads i.
+Müller	muller	mueller	miller
 Björk	bjork	bjoerk
+Motörhead	motorhead	motoerhead
 # Greek: letter by letter, then modern (ELOT 743), then phonetic.
 γειά σου	geia soy	geia sou	yia su
 Ευχαριστώ	eycharisto	efcharisto	efharisto
