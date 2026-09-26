@@ -8,11 +8,12 @@
 // - style 1, common: long vowels written once (aa as a), and for Hindi and
 //   its neighbours the inherent vowel dropped where speech drops it, at the
 //   end of a word and between a vowel-consonant and a consonant-vowel
-//   (कमला kamla, दिलवाले dilvale, समझ samajh);
+//   (कमला kamla, दिलवाले dilvale, समझ samajh, उम्र umr);
 // - style 2, full: every inherent vowel kept (kamala), as Sanskrit and the
 //   Dravidian languages read;
 // - style 3, the ee/oo spelling of film titles and names (दीवाना deewana,
-//   फूल phool), with व as w.
+//   फूल phool), with व as w, keeping the vowel after a final semivowel
+//   cluster as Sanskrit words do (मित्र mitra).
 //
 // An anusvara reads m before p, b and m and n elsewhere; Bengali reads it ng
 // (বাংলা bangla), the southern scripts m at the end of a word (മലയാളം
@@ -103,9 +104,11 @@ bool isSemivowel(const Spelling &consonant)
 }
 
 // Drops the inherent vowel where Hindi speech drops it: at the end of a word
-// (दर्द dard, धर्म dharm), except after a cluster ending in a semivowel (मित्र
-// mitra, सूर्य surya), and between a vowel-consonant and a consonant-vowel.
-void deleteSchwas(QVarLengthArray<Syllable, 16> &syl)
+// (दर्द dard, धर्म dharm) and between a vowel-consonant and a consonant-vowel.
+// After a final cluster ending in a semivowel, Perso-Arabic words drop it
+// (उम्र umr) and Sanskrit ones keep it (मित्र mitra); spelling cannot tell
+// them apart, so `keepSemivowelClusters` chooses, and the readings differ.
+void deleteSchwas(QVarLengthArray<Syllable, 16> &syl, bool keepSemivowelClusters)
 {
     const qsizetype n = syl.size();
     if (n < 2) return;
@@ -115,7 +118,7 @@ void deleteSchwas(QVarLengthArray<Syllable, 16> &syl)
     Syllable &last = syl[n - 1];
     const bool afterCluster = syl[n - 2].kind == VowelKind::None;
     if (last.kind == VowelKind::Inherent && last.hasConsonant && !last.hasCoda()
-        && !(afterCluster && isSemivowel(last.consonant))) {
+        && !(keepSemivowelClusters && afterCluster && isSemivowel(last.consonant))) {
         last.deleted = true;
     }
     for (qsizetype k = n - 2; k >= 1; --k) {
@@ -144,7 +147,7 @@ void emitWord(QVarLengthArray<Syllable, 16> &syl, int style, BrahmicReading read
 {
     if (style != 2) {
         if (reading == BrahmicReading::North || reading == BrahmicReading::Bengali) {
-            deleteSchwas(syl);
+            deleteSchwas(syl, style == 3);
         } else if (reading == BrahmicReading::Khmer && syl.size() > 1) {
             Syllable &last = syl.back();
             if (last.kind == VowelKind::Inherent && !last.hasCoda()) last.deleted = true;
