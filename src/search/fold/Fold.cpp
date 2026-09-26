@@ -206,21 +206,27 @@ Composed compose(const QString &src)
         const auto [first, firstWidth] = decode(s, n, i);
         qsizetype j = i + firstWidth;
         bool composable = normalizes(first);
-        int previousClass = QChar::combiningClass(first);
+        const int firstClass = QChar::combiningClass(first);
+        int previousClass = firstClass != 0 ? firstClass : markLedClass(first);
         // The starter a following starter would compose with; a mark blocks it.
         char32_t starter = previousClass == 0 ? first : 0;
         while (j < n) {
             const auto [next, width] = decode(s, n, j);
             const int cls = QChar::combiningClass(next);
-            if (cls == 0) {
-                starter = composeStarters(starter, next);
-                if (starter == 0 && !(previousClass != 0 && leadsWithMark(next))) break;
-                composable = true;
-            } else {
+            if (cls != 0) {
                 starter = 0;
                 composable = composable || normalizes(next) || previousClass > cls;
+                previousClass = cls;
+            } else if (const int led = markLedClass(next)) {
+                // Decomposed, it is marks on the base before it.
+                starter = 0;
+                composable = true;
+                previousClass = led;
+            } else {
+                starter = composeStarters(starter, next);
+                if (starter == 0) break;
+                composable = true;
             }
-            previousClass = cls;
             j += width;
         }
         const QStringView sequence(s + i, j - i);

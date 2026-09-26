@@ -1053,10 +1053,9 @@ class Generator:
             composable_bmp[cp // 32] |= 1 << (cp % 32)
         # Starters NFC composes with the starter before them (two-part vowels;
         # Hangul composes algorithmically at runtime), and starters whose
-        # decomposition begins with a mark (U+0F73), which NFC reorders among
-        # the marks before them.
+        # decomposition is marks (U+0F73), with the class of the last mark.
         starter_pairs: list[tuple[int, int, int]] = []
-        mark_led: list[int] = []
+        mark_led: list[tuple[int, int]] = []
         for cp in range(0x110000):
             if 0xD800 <= cp <= 0xDFFF or 0xAC00 <= cp <= 0xD7A3:
                 continue
@@ -1064,8 +1063,9 @@ class Generator:
             if not decomposition or decomposition.startswith("<"):
                 continue
             parts = [int(x, 16) for x in decomposition.split()]
-            if unicodedata.combining(chr(cp)) == 0 and unicodedata.combining(unicodedata.normalize("NFD", chr(cp))[0]):
-                mark_led.append(cp)
+            nfd = unicodedata.normalize("NFD", chr(cp))
+            if unicodedata.combining(chr(cp)) == 0 and unicodedata.combining(nfd[0]):
+                mark_led.append((cp, unicodedata.combining(nfd[-1])))
             elif (len(parts) == 2 and unicodedata.combining(chr(parts[1])) == 0
                   and unicodedata.normalize("NFC", unicodedata.normalize("NFD", chr(cp))) == chr(cp)):
                 starter_pairs.append((parts[0], parts[1], cp))
@@ -1155,7 +1155,8 @@ class Generator:
             w(f"    {{0x{first:X}, 0x{second:X}, 0x{composite:X}}},")
         w("};")
         w(f"const std::size_t kStarterCompositionCount = {len(starter_pairs)};")
-        w(f"const char32_t kMarkLedStarters[{len(mark_led)}] = {{" + ", ".join(f"0x{cp:X}" for cp in mark_led) + "};")
+        w(f"const MarkLedStarter kMarkLedStarters[{len(mark_led)}] = {{"
+          + ", ".join(f"{{0x{cp:X}, {cls}}}" for cp, cls in mark_led) + "};")
         w(f"const std::size_t kMarkLedStarterCount = {len(mark_led)};")
         w("")
         w("const TibetanChar kTibetanChars[0x100] = {")

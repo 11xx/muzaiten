@@ -48,9 +48,12 @@ char32_t composeStarters(char32_t first, char32_t second)
     return it != end && it->first == first && it->second == second ? it->composite : 0;
 }
 
-bool leadsWithMark(char32_t cp)
+int markLedClass(char32_t cp)
 {
-    return std::binary_search(kMarkLedStarters, kMarkLedStarters + kMarkLedStarterCount, cp);
+    const MarkLedStarter *end = kMarkLedStarters + kMarkLedStarterCount;
+    const MarkLedStarter *it = std::lower_bound(kMarkLedStarters, end, cp,
+                                                [](const MarkLedStarter &m, char32_t c) { return m.cp < c; });
+    return it != end && it->cp == cp ? it->lastClass : 0;
 }
 
 QStringView decompOf(char32_t cp)

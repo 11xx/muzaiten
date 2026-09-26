@@ -265,6 +265,21 @@ private slots:
         QCOMPARE(segments(QString::fromUcs4(U"\u0F66\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F66\u0F71\u0F72")));
         QCOMPARE(segments(QString::fromUcs4(U"\u03B1\u03B9\u0344")), segments(QString::fromUcs4(U"\u03B1\u0390")));
         QCOMPARE(segments(QString::fromUcs4(U"\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F71\u0F72")));
+        // Tibetan vowels that decompose into marks (U+0F73 = U+0F71 U+0F72)
+        // reorder among the marks around them, including each other.
+        const char32_t markLed[] = {0x0F73, 0x0F75, 0x0F81};
+        for (const QString &before : {QString(), QString(QChar(0x0F66)), QString::fromUcs4(U"\u0F66\u0F74")}) {
+            for (const char32_t a : markLed) {
+                for (const char32_t b : markLed) {
+                    const QString s = before + QString::fromUcs4(&a, 1) + QString::fromUcs4(&b, 1);
+                    QCOMPARE(segments(s), segments(s.normalized(QString::NormalizationForm_C)));
+                    QCOMPARE(Fold::foldText(Fold::foldText(s)), Fold::foldText(s));
+                }
+            }
+        }
+        // A mark after them still composes with the base (A + U+0308 = Ä).
+        const QString umlaut = QString::fromUcs4(U"A\u0F75\u0308");
+        QCOMPARE(segments(umlaut), segments(umlaut.normalized(QString::NormalizationForm_C)));
         // Kannada oo decomposed into three parts composes in two steps.
         QCOMPARE(segments(QString::fromUcs4(U"\u0C95\u0CC6\u0CC2\u0CD5")), segments(QString::fromUcs4(U"\u0C95\u0CCB")));
         const Fold::FoldResult reordered = Fold::fold(QString::fromUcs4(U"x\u0F66\u0F72\u0F71"));

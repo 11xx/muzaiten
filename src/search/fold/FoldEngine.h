@@ -68,6 +68,7 @@ struct AstralEntry { char32_t cp; std::uint32_t entry; };
 struct Decomp { char32_t cp; Str seq; };
 struct Word { Str key; Str value; };
 struct StarterComposition { char32_t first; char32_t second; char32_t composite; };
+struct MarkLedStarter { char32_t cp; int lastClass; };
 
 enum class KanaKind : std::uint8_t {
     None, Syllable, Moraic, Small, Sokuon, Long, Iteration, VoicedIteration, Dakuten, Handakuten,
@@ -173,7 +174,7 @@ extern const char32_t kComposableAstral[];
 extern const std::size_t kComposableAstralCount;
 extern const StarterComposition kStarterCompositions[];
 extern const std::size_t kStarterCompositionCount;
-extern const char32_t kMarkLedStarters[];
+extern const MarkLedStarter kMarkLedStarters[];
 extern const std::size_t kMarkLedStarterCount;
 extern const AbjadBlock kAbjadBlocks[];
 extern const std::size_t kAbjadBlockCount;
@@ -224,9 +225,9 @@ bool normalizes(char32_t cp);
 // apart.
 char32_t composeStarters(char32_t first, char32_t second);
 
-// `cp` is a starter whose decomposition begins with a mark (U+0F73), so NFC
-// reorders it among the marks before it.
-bool leadsWithMark(char32_t cp);
+// For a starter whose decomposition is marks on the base before it (U+0F73 =
+// U+0F71 U+0F72), the combining class of the mark it ends in; otherwise 0.
+int markLedClass(char32_t cp);
 
 // The rule for `first` followed by `second` (0 for a single letter) in `range`.
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second);
