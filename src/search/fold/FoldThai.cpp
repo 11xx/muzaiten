@@ -210,17 +210,28 @@ private:
         return tail < 0 || tail == 1 || tail >= 4;
     }
 
-    // A word from the irregular-word table starting at `i`, emitted with its
-    // reading spread over its letters; returns its length, 0 when none.
-    qsizetype word(qsizetype i)
+    // The longest word from the irregular-word table starting at `i`.
+    const Word *wordAt(qsizetype i, qsizetype &length)
     {
         if (m_keys.isEmpty()) {
             for (qsizetype k = 0; k < m_n; ++k) m_keys.append(m_l[k].cp);
         }
         const QStringView keys(m_keys.data(), m_keys.size());
         for (qsizetype len = std::min<qsizetype>(kThaiLongest, m_n - i); len >= 2; --len) {
-            const Word *w = findWord(kThaiWords, kThaiWordCount, keys.mid(i, len));
-            if (!w) continue;
+            if (const Word *w = findWord(kThaiWords, kThaiWordCount, keys.mid(i, len))) {
+                length = len;
+                return w;
+            }
+        }
+        return nullptr;
+    }
+
+    // A word from the irregular-word table starting at `i`, emitted with its
+    // reading spread over its letters; returns its length, 0 when none.
+    qsizetype word(qsizetype i)
+    {
+        qsizetype len = 0;
+        if (const Word *w = wordAt(i, len)) {
             QStringView reading = view(w->value);
             const qsizetype space = reading.indexOf(u' ');
             if (space >= 0) reading = m_style == 0 ? reading.left(space) : reading.mid(space + 1);
@@ -232,6 +243,12 @@ private:
             return len;
         }
         return 0;
+    }
+
+    bool startsWord(qsizetype i)
+    {
+        qsizetype len = 0;
+        return wordAt(i, len) != nullptr;
     }
 
     // Letters at `j` a silencer mutes: a consonant, optionally with a vowel
@@ -432,7 +449,8 @@ private:
         put(spelled, vowelSrc);
 
         // Final consonant, unless a silencer mutes it.
-        if (!open && (needFinal || isFinal(i)) && role(i) == ThaiRole::Consonant) {
+        // A consonant starting a word from the table is not a final (ตัวจริง tuaching).
+        if (!open && (needFinal || (isFinal(i) && !startsWord(i))) && role(i) == ThaiRole::Consonant) {
             const qsizetype f = i++;
             skipTones(i);
             if (role(i) == ThaiRole::Silencer) {
