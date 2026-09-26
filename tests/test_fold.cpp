@@ -259,10 +259,12 @@ private slots:
 
     void canonicalOrderAndExcludedCompositionsFoldAlike()
     {
-        // Tibetan vowel signs in either order, and Greek dialytika tonos as
-        // the excluded U+0344 or as a precomposed letter.
+        // Tibetan vowel signs in either order, after a letter or opening the
+        // text, and Greek dialytika tonos as the excluded U+0344 or as a
+        // precomposed letter.
         QCOMPARE(segments(QString::fromUcs4(U"\u0F66\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F66\u0F71\u0F72")));
         QCOMPARE(segments(QString::fromUcs4(U"\u03B1\u03B9\u0344")), segments(QString::fromUcs4(U"\u03B1\u0390")));
+        QCOMPARE(segments(QString::fromUcs4(U"\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F71\u0F72")));
         const Fold::FoldResult reordered = Fold::fold(QString::fromUcs4(U"x\u0F66\u0F72\u0F71"));
         QCOMPARE(reordered.srcIndex.size(), reordered.text.size());
         for (const int i : reordered.srcIndex) QVERIFY(i >= 0 && i < 4);

@@ -206,7 +206,7 @@ Composed compose(const QString &src)
         const auto [first, firstWidth] = decode(s, n, i);
         qsizetype j = i + firstWidth;
         bool composable = normalizes(first);
-        int previousClass = 0;
+        int previousClass = QChar::combiningClass(first);
         while (j < n) {
             const auto [next, width] = decode(s, n, j);
             const int cls = QChar::combiningClass(next);
