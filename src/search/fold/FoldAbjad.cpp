@@ -139,6 +139,11 @@ void foldArabic(const Unit *u, qsizetype n, int style, Out &out)
         const Letter *next = k + 1 < count ? &w[k + 1] : nullptr;
         const bool atStart = k == first;
         const QStringView vowel(l.vowel.data(), l.vowel.size());
+        // و after a damma and ي after a kasra lengthen that vowel (نُور nur, حَبِيب habib).
+        const QStringView before = k > first ? QStringView(w[k - 1].vowel.data(), w[k - 1].vowel.size()) : QStringView();
+        const bool lengthens = vowel.isEmpty() && !l.shadda && !l.sukun
+            && ((l.role() == AbjadRole::Waw && before == u"u") || (l.role() == AbjadRole::Yeh && before == u"i"));
+        if (lengthens) continue;
         switch (l.role()) {
         case AbjadRole::Consonant:
         case AbjadRole::Ain:
