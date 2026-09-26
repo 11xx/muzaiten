@@ -102,6 +102,15 @@ struct GreekStyle {
     Str frontGamma;
 };
 
+enum class ThaiRole : std::uint8_t { None, Consonant, Pre, Above, Post, Tone, Silencer, Repeat, Letter, Cluster };
+enum class ThaiVowel : std::uint8_t {
+    A, I, II, UE, UEE, U, UU, E, AE, O, OO, IA, UEA, UA, OE, OEI, AI, AO, AM, ImplicitA, ImplicitO, RUE, LUE, RI,
+    Count,
+};
+// A Thai or Lao character: its role in a syllable, the Thai letter it
+// behaves like, and its [style 1, style 2] spellings.
+struct ThaiChar { ThaiRole role; ThaiVowel vowel; char16_t thai; Str initial[2]; Str final[2]; };
+
 struct AlphaRule { char32_t first; char32_t second; Str initial; Str medial; };
 struct AlphaRange { std::uint32_t begin; std::uint32_t count; };
 struct CyrillicStyle { AlphaRange map; AlphaRange uk; AlphaRange be; AlphaRange sr; };
@@ -128,6 +137,9 @@ extern const Word kChineseWords[];
 extern const std::size_t kChineseWordCount;
 extern const int kChineseLongest;
 extern const GreekStyle kGreekStyles[];
+extern const ThaiChar kThaiChars[128];
+extern const ThaiChar kLaoChars[128];
+extern const Str kThaiVowels[][2];
 extern const AlphaRule kAlphaRules[];
 extern const CyrillicStyle kCyrillicStyles[];
 extern const AlphaRange kArmenianEastern;
@@ -222,5 +234,6 @@ void foldGreek(const Unit *units, qsizetype n, int style, Out &out);
 void foldCyrillic(const Unit *units, qsizetype n, int style, const Context &ctx, Out &out);
 void foldArmenian(const Unit *units, qsizetype n, int style, Out &out);
 void foldGerman(const Unit *units, qsizetype n, Out &out);
+void foldThai(const Unit *units, qsizetype n, int style, Out &out);
 
 } // namespace Search::Fold::Engine

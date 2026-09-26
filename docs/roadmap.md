@@ -30,7 +30,7 @@ development builds include a `.devN` suffix and local Git identity.
 - MusicBrainz network lookup (IDs are already read from tags when present).
 - Bit-depth-aware audio-quality scoring in search ranking.
 - Broader playlist import/export.
-- More search-fold scripts (Thai, Lao, Indic, Arabic, Hebrew, Tibetan) and
+- More search-fold scripts (Indic, Arabic, Hebrew, Tibetan) and
   dictionary readings for Japanese kanji compounds.
 - Shared persisted settings with a `muzaitenctl config` command (e.g. a default
   fuzzy/exact mode for the CLI picker).

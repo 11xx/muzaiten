@@ -11,7 +11,9 @@ scripts and look-alike punctuation don't get in the way. `cafe` finds `Café`,
 `악단광칠`), Japanese by romaji (`sanshin no hana` → `三線の花`), and Chinese by
 pinyin (`yinyue` → `音乐`). Picard/MusicBrainz `*sort` reading tags fill in
 proper-noun readings (`utada` → 宇多田ヒカル). Typing the original script still
-matches too, and a kanji or hanzi matches the words that contain it.
+matches too, and a kanji or hanzi matches the words that contain it. Scripts
+whose reading depends on the surrounding letters (CJK ideographs, Thai, Lao)
+match exactly as written when typed in their own script.
 
 Many scripts are romanized more than one way, so the library side keeps every
 common reading and a query matches any of them:
@@ -25,6 +27,8 @@ common reading and a query matches any of them:
 | Korean | syllable by syllable (`hangukeo`), as pronounced (`hangugeo`), McCune-Reischauer (`pochonbo` for `보천보`) |
 | Japanese | wapuro (`toukyou`), Hepburn (`tokyo`); common kanji through a seed dictionary |
 | Chinese | toneless pinyin, with word readings for common polyphones (`yinyue` for `音乐`, `changcheng` for `长城`) |
+| Thai | RTGS (`sawatdi`, `khopkhun`) and the common spelling (`sawasdee`, `khobkhun`, `jai`) |
+| Lao | standard (`viangchan`) and French-style (`wiangjan`) |
 
 Traditional and simplified Chinese characters match each other. Half-width
 and full-width forms, styled "fancy text" letters (`𝓗𝓮𝓵𝓵𝓸`, `🅲🅻🅴🅰🅽`), macOS
@@ -38,7 +42,7 @@ Unicode's character database and writes one entry per code point, so folding
 is a table lookup per character. The hand-authored tables live in
 `src/search/fold/tables/`, one JSON file per script family (`latin`,
 `punctuation`, `greek`, `cyrillic`, `armenian`, `georgian`, `kana`, `han`,
-`hangul`, `other`); each file's `_doc` key describes its fields. Letters the
+`hangul`, `thai`, `other`); each file's `_doc` key describes its fields. Letters the
 tables don't list are derived from their Unicode names where the name spells
 the sound (`LATIN SMALL LETTER D WITH HOOK` reads `d`, Ethiopic, Cherokee and
 Canadian syllabics read their syllable names).

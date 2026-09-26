@@ -14,6 +14,11 @@
   Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
   their own way, Western Armenian, and German-style `ae`/`oe`/`ue`. Results
   highlight whichever reading matched.
+- Search matches Thai and Lao by romanization, read syllable by syllable
+  with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,
+  `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
+  `jai`); Lao in its standard and French-style spellings (`viangchan`,
+  `wiangjan`).
 - Armenian, Georgian, Kazakh and other Cyrillic letters, Ethiopic, Cherokee,
   Canadian syllabics, Yi, Bopomofo and Mongolian romanize for search.
   Look-alike punctuation that tag editors and file-name sanitizers substitute

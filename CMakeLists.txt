@@ -152,6 +152,7 @@ set(MUZAITEN_SOURCES
     src/search/fold/FoldData.cpp
     src/search/fold/FoldJapanese.cpp
     src/search/fold/FoldKorean.cpp
+    src/search/fold/FoldThai.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
     src/search/RankConfig.cpp
@@ -406,6 +407,7 @@ set(MUZAITEN_SEARCH_SOURCES
     src/search/fold/FoldData.cpp
     src/search/fold/FoldJapanese.cpp
     src/search/fold/FoldKorean.cpp
+    src/search/fold/FoldThai.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
     src/search/RankConfig.cpp

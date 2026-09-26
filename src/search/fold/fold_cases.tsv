@@ -85,3 +85,25 @@ Björk	bjork	bjoerk
 ኢትዮጵያ	ityophya
 ᏣᎳᎩ	tsalagi
 ㄐㄧㄝ	jie
+# Thai keeps its surface; readings are RTGS, then the common spelling.
+สวัสดี	สวัสดี	sawatdi	sawasdee
+ขอบคุณ	ขอบคุณ	khopkhun	khobkhun
+ใจ	ใจ	chai	jai
+กรุงเทพมหานคร	กรุงเทพมหานคร	krungthepmahanakhon
+กันยายน	กันยายน	kanyayon
+ถนน	ถนน	thanon
+กลม	กลม	klom
+เด็กๆ	เด็กๆ	dekdek
+จันทร์	จันทร์	chan	jan
+ปราโมทย์	ปราโมทย์	pramot
+ศักดิ์สิทธิ์	ศักดิ์สิทธิ์	saksit
+ฤดู	ฤดู	ruedu	ruedoo
+ไทย	ไทย	thai
+เครื่องบิน	เครื่องบิน	khrueangbin
+กรรม	กรรม	kam
+ขวด	ขวด	khuat	khuad
+ทราย	ทราย	sai
+# Lao reads through the same parser: standard, then French-style.
+ວຽງຈັນ	ວຽງຈັນ	viangchan	wiangjan
+ຫຼວງພະບາງ	ຫຼວງພະບາງ	luangphabang
+ສະບາຍດີ	ສະບາຍດີ	sabaidi	sabaidee

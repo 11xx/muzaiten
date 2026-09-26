@@ -171,6 +171,7 @@ class Generator:
         self.hangul = load_json(tables / "hangul.json")
         self.han = load_json(tables / "han.json")
         self.other = load_json(tables / "other.json")
+        self.thai = load_json(tables / "thai.json")
 
         self.german = without_doc(self.latin["german"])
         self.cyrillic_letters = self.cyrillic["letters"]
@@ -396,6 +397,10 @@ class Generator:
         first = nfkc[0] if nfkc else ch
         if is_han(ord(first)) or ord(first) in HAN_ITERATION:
             return S["Han"]
+        if unicodedata.category(first)[0] in "LM":
+            for script, (lo, hi) in (("Thai", (0x0E00, 0x0E7F)), ("Lao", (0x0E80, 0x0EFF))):
+                if lo <= ord(first) <= hi:
+                    return S[script]
         low = first.lower()
         composed = unicodedata.normalize("NFC", low)
         if composed in self.german:
@@ -418,6 +423,8 @@ class Generator:
                       S["Armenian"], S["LatinAlt"]):
             return unicodedata.normalize("NFC", unicodedata.normalize("NFKC", ch).lower())
         if script == S["Han"]:
+            return unicodedata.normalize("NFKC", ch)
+        if script == S["Lao"] and ord(ch) in (0x0EDC, 0x0EDD):
             return unicodedata.normalize("NFKC", ch)
         return ch
 
@@ -447,7 +454,7 @@ class Generator:
             return pack(EXPAND, S["None"], off, length), None
         form = None
         if script in (S["Greek"], S["Cyrillic"], S["CyrillicUk"], S["CyrillicBe"], S["CyrillicSr"],
-                      S["LatinAlt"], S["Han"]):
+                      S["LatinAlt"], S["Han"], S["Lao"]):
             candidate = self.handler_form(ch, script)
             if candidate != ch:
                 form = candidate
@@ -717,13 +724,50 @@ class Generator:
         armenian_western = alpha_range(self.armenian["western"])
         german = alpha_range(self.german)
 
+        # Thai and Lao
+        vowel_names = ["A", "I", "II", "UE", "UEE", "U", "UU", "E", "AE", "O", "OO", "IA", "UEA", "UA", "OE",
+                       "OEI", "AI", "AO", "AM", "IMPLICIT_A", "IMPLICIT_O", "RUE", "LUE", "RI"]
+        enum_names = {"IMPLICIT_A": "ImplicitA", "IMPLICIT_O": "ImplicitO"}
+        thai_vowels = self.thai["vowels"]
+        vowel_rows = [f"    {{{pool.ref(thai_vowels[v][0])}, {pool.ref(thai_vowels[v][1])}}}," for v in vowel_names]
+        role_names = {"pre": "Pre", "above": "Above", "post": "Post", "tone": "Tone", "silencer": "Silencer",
+                      "repeat": "Repeat", "letter": "Letter"}
+
+        def thai_block(table: dict, base: int, lao: bool) -> list[str]:
+            rows = []
+            for cp in range(base, base + 128):
+                ch = chr(cp)
+                role, vowel, thai_eq, values = "None", "A", cp, ["", "", "", ""]
+                if ch in table["consonants"]:
+                    row = table["consonants"][ch]
+                    if lao:
+                        thai_eq, values = ord(row[0]), row[1:]
+                    else:
+                        values = row
+                    role = "Cluster" if ch == "ຼ" else "Consonant"
+                elif ch in table["marks"]:
+                    mark = table["marks"][ch]
+                    kind, detail = (mark, None) if isinstance(mark, str) else (mark[0], mark[1])
+                    role = role_names[kind]
+                    if detail in thai_vowels:
+                        vowel = detail
+                    elif detail is not None:
+                        thai_eq = ord(detail)
+                rows.append(f"    {{ThaiRole::{role}, ThaiVowel::{enum_names.get(vowel, vowel)}, 0x{thai_eq:X}, "
+                            f"{{{pool.ref(values[0])}, {pool.ref(values[2])}}}, "
+                            f"{{{pool.ref(values[1])}, {pool.ref(values[3])}}}}},")
+            return rows
+
+        thai_rows = thai_block(self.thai["thai"], 0x0E00, False)
+        lao_rows = thai_block(self.thai["lao"], 0x0E80, True)
+
         # Pinyin syllable strings go into the pool before it is frozen.
         pinyin_refs = [pool.ref(s) for s in pinyin_syllables]
 
         digest = hashlib.sha256()
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
                             bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
-                            greek_styles, alpha_rows, cyr_styles)).encode())
+                            greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
 
@@ -784,6 +828,16 @@ class Generator:
         w("")
         w(f"const GreekStyle kGreekStyles[{len(greek_styles)}] = {{")
         out.extend(greek_styles)
+        w("};")
+        w("")
+        w("const ThaiChar kThaiChars[128] = {")
+        out.extend(thai_rows)
+        w("};")
+        w("const ThaiChar kLaoChars[128] = {")
+        out.extend(lao_rows)
+        w("};")
+        w(f"const Str kThaiVowels[{len(vowel_rows)}][2] = {{")
+        out.extend(vowel_rows)
         w("};")
         w("")
         w(f"const AlphaRule kAlphaRules[{len(alpha_rows)}] = {{")
