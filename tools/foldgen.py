@@ -571,7 +571,7 @@ class Generator:
     TIBETAN_SOUNDS = {"K": "k", "KH": "kh", "G": "g", "NG": "ng", "C": "c", "CH": "ch", "J": "j", "NY": "ny",
                       "TT": "t", "TTH": "th", "DD": "d", "NN": "n", "T": "t", "TH": "th", "D": "d", "N": "n",
                       "P": "p", "PH": "ph", "B": "b", "M": "m", "TS": "ts", "TSH": "tsh", "DZ": "dz", "W": "w",
-                      "ZH": "zh", "Z": "z", "-": "", "": "", "Y": "y", "R": "r", "L": "l", "SH": "sh", "SS": "sh",
+                      "ZH": "zh", "Z": "z", "-": "'", "": "", "Y": "y", "R": "r", "L": "l", "SH": "sh", "SS": "sh",
                       "S": "s", "H": "h", "FIXED-FORM R": "r", "KK": "k", "RR": "r"}
     TIBETAN_VOWELS = {"AA": "", "I": "i", "U": "u", "E": "e", "EE": "ai", "O": "o", "OO": "au",
                       "REVERSED I": "i", "VOCALIC RR": "ri", "VOCALIC LL": "li"}

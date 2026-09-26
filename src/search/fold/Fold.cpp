@@ -91,7 +91,6 @@ int styleCount(Script family)
         return 3;
     case Script::Syriac:
     case Script::Thaana:
-    case Script::Tibetan:
         return 2;
     case Script::Greek:
     case Script::Cyrillic:
@@ -99,6 +98,7 @@ int styleCount(Script family)
     case Script::Thai:
     case Script::Lao:
     case Script::LatinAlt:
+    case Script::Tibetan:
         return 3;
     case Script::Armenian:
     case Script::Kana:
@@ -257,7 +257,7 @@ void dispatch(Script family, const Units &units, int pass, const Context &ctx, O
         break;
     case Script::Tibetan:
         if (style > 0) {
-            foldTibetan(u, n, out);
+            foldTibetan(u, n, style, out);
             return;
         }
         break;

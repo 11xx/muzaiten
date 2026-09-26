@@ -32,7 +32,8 @@
   el-/ou/ee spellings (`nour`, `eljadeed`). Typed Arabic and Hebrew match
   regardless of vowel marks, tatweel, alef and yeh variants and final forms.
 - Search matches Tibetan in Wylie transliteration (`smonlam`, `lhasa`,
-  `ommanipadmehum`), and the shad and danda separate words like spaces.
+  `bka'`, also without the apostrophe), and the shad and danda separate
+  words like spaces.
 - Armenian, Georgian, Kazakh and other Cyrillic letters, Ethiopic, Cherokee,
   Canadian syllabics, Yi, Bopomofo and Mongolian romanize for search.
   Look-alike punctuation that tag editors and file-name sanitizers substitute

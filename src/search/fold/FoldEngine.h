@@ -283,6 +283,6 @@ void foldArabic(const Unit *units, qsizetype n, int style, Out &out);
 void foldHebrew(const Unit *units, qsizetype n, int style, Out &out);
 void foldSyriac(const Unit *units, qsizetype n, Out &out);
 void foldThaana(const Unit *units, qsizetype n, Out &out);
-void foldTibetan(const Unit *units, qsizetype n, Out &out);
+void foldTibetan(const Unit *units, qsizetype n, int style, Out &out);
 
 } // namespace Search::Fold::Engine

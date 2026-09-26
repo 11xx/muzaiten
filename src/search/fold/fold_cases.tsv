@@ -156,10 +156,14 @@ Motörhead	motorhead	motoerhead
 חיים	חיימ	chaym	haim
 ג׳ורג׳	ג'ורג'	jorj
 ދިވެހި	ދިވެހި	dhivehi
-# Tibetan keeps its surface; the reading is Wylie with syllables joined.
+# Tibetan keeps its surface; readings are Wylie with syllables joined.
 སྨོན་ལམ་	སྨོན་ལམ་	smonlam
 བོད་སྐད་	བོད་སྐད་	bodskad
 ལྷ་ས་	ལྷ་ས་	lhasa
 རྒྱ་མཚོ་	རྒྱ་མཚོ་	rgyamtsho
 བསྒྲུབས་	བསྒྲུབས་	bsgrubs
 ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ	ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ	ommanipadmehum
+# The root follows legal spelling; the silent འ is an apostrophe, then omitted.
+གངས་	གངས་	gangs
+བཀའ་	བཀའ་	bka'	bka
+འོད་	འོད་	'od	od

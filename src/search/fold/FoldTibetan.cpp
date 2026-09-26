@@ -4,13 +4,20 @@
 // letters, the root stack (a base letter with superscript and subscript
 // letters written under it), and optional suffixes. The inherent vowel a
 // follows the root unless a vowel sign is written. The root is the stack
-// that carries a vowel sign or subjoined letters; otherwise it is the first
-// stack, or the second when three or more stacks start with a prefix letter
-// (ག ད བ མ འ). A stack before the root that is not a lone prefix reads with
-// its own a, as Sanskrit words do (པདྨེ padme). Syllables join without a
-// separator (སྨོན་ལམ smonlam).
+// that carries a vowel sign or subjoined letters; otherwise the syllable's
+// spelling decides it: a prefix letter (ག ད བ མ འ) precedes only certain
+// roots, and only ག ང ད ན བ མ འ ར ལ ས end a syllable, with ས or ད after them
+// (གངས gangs, དགའ dga'). A stack before the root that is not a lone prefix
+// reads with its own a, as Sanskrit words do (པདྨེ padme). Syllables join
+// without a separator (སྨོན་ལམ smonlam).
+//
+// Style 1 is Wylie, with the silent འ as an apostrophe (བཀའ bka'); style 2
+// drops the apostrophe (bka).
 
 #include "search/fold/FoldEngine.h"
+
+#include <algorithm>
+#include <initializer_list>
 
 namespace Search::Fold::Engine {
 
@@ -29,6 +36,35 @@ bool isPrefixLetter(char32_t cp)
     return cp == 0x0F42 || cp == 0x0F51 || cp == 0x0F56 || cp == 0x0F58 || cp == 0x0F60;  // ག ད བ མ འ
 }
 
+// The root letters a prefix may precede.
+bool prefixes(char32_t prefix, char32_t root)
+{
+    const auto in = [root](std::initializer_list<char32_t> roots) {
+        return std::find(roots.begin(), roots.end(), root) != roots.end();
+    };
+    switch (prefix) {
+    case 0x0F42:  // ག: ཅ ཉ ཏ ད ན ཙ ཞ ཟ ཡ ཤ ས
+        return in({0x0F45, 0x0F49, 0x0F4F, 0x0F51, 0x0F53, 0x0F59, 0x0F5E, 0x0F5F, 0x0F61, 0x0F64, 0x0F66});
+    case 0x0F51:  // ད: ཀ ག ང པ བ མ
+        return in({0x0F40, 0x0F42, 0x0F44, 0x0F54, 0x0F56, 0x0F58});
+    case 0x0F56:  // བ: ཀ ག ཅ ཏ ད ཙ ཞ ཟ ཤ ས
+        return in({0x0F40, 0x0F42, 0x0F45, 0x0F4F, 0x0F51, 0x0F59, 0x0F5E, 0x0F5F, 0x0F64, 0x0F66});
+    case 0x0F58:  // མ: ཁ ག ང ཆ ཇ ཉ ཐ ད ན ཚ ཛ
+        return in({0x0F41, 0x0F42, 0x0F44, 0x0F46, 0x0F47, 0x0F49, 0x0F50, 0x0F51, 0x0F53, 0x0F5A, 0x0F5B});
+    case 0x0F60:  // འ: ཁ ག ཆ ཇ ཐ ད ཕ བ ཚ ཛ
+        return in({0x0F41, 0x0F42, 0x0F46, 0x0F47, 0x0F50, 0x0F51, 0x0F55, 0x0F56, 0x0F5A, 0x0F5B});
+    default:
+        return false;
+    }
+}
+
+bool isSuffixLetter(char32_t cp)  // ག ང ད ན བ མ འ ར ལ ས
+{
+    return cp == 0x0F42 || cp == 0x0F44 || cp == 0x0F51 || cp == 0x0F53 || cp == 0x0F56 || cp == 0x0F58
+        || cp == 0x0F60 || cp == 0x0F62 || cp == 0x0F63 || cp == 0x0F66;
+}
+
+
 const TibetanChar &tibetanOf(char32_t cp)
 {
     static const TibetanChar none{TibetanRole::None, {0, 0}};
@@ -43,18 +79,29 @@ qsizetype rootOf(const QVarLengthArray<Stack, 8> &stacks)
     for (qsizetype k = 0; k < stacks.size(); ++k) {
         if (stacks[k].subjoined) return k;
     }
+    const auto plain = [&](qsizetype k) { return !stacks[k].subjoined; };
     if (stacks.size() >= 4) return 1;
-    if (stacks.size() == 3 && isPrefixLetter(stacks[0].base)) return 1;
+    if (stacks.size() == 3) {
+        // Prefix, root, suffix (དགའ dga') wins over root and two suffixes
+        // (གངས gangs) when both spell a legal syllable.
+        const bool prefixed = plain(0) && prefixes(stacks[0].base, stacks[1].base) && isSuffixLetter(stacks[2].base);
+        return prefixed ? 1 : 0;
+    }
+    if (stacks.size() == 2 && !isSuffixLetter(stacks[1].base) && prefixes(stacks[0].base, stacks[1].base)) return 1;
     return 0;
 }
 
-void foldSyllable(QVarLengthArray<Stack, 8> &stacks, QVarLengthArray<Str, 2> &coda, int codaSrc, Out &out)
+void foldSyllable(QVarLengthArray<Stack, 8> &stacks, QVarLengthArray<Str, 2> &coda, int codaSrc, int style,
+                  Out &out)
 {
     if (stacks.isEmpty()) return;
     const qsizetype root = rootOf(stacks);
     for (qsizetype k = 0; k < stacks.size(); ++k) {
         const Stack &s = stacks[k];
-        for (const Str letter : s.letters) out.put(letter, s.src);
+        for (const Str letter : s.letters) {
+            if (style == 2 && view(letter) == u"'") continue;
+            out.put(letter, s.src);
+        }
         // Only one prefix letter precedes a root; any other stack there is a
         // syllable of a Sanskrit word with its own a (པདྨེ padme).
         if (k < root && (k + 1 < root || !isPrefixLetter(s.base) || s.subjoined)) out.put(u'a', s.src);
@@ -69,7 +116,7 @@ void foldSyllable(QVarLengthArray<Stack, 8> &stacks, QVarLengthArray<Str, 2> &co
 
 } // namespace
 
-void foldTibetan(const Unit *u, qsizetype n, Out &out)
+void foldTibetan(const Unit *u, qsizetype n, int style, Out &out)
 {
     QVarLengthArray<Stack, 8> stacks;
     QVarLengthArray<Str, 2> coda;
@@ -98,13 +145,13 @@ void foldTibetan(const Unit *u, qsizetype n, Out &out)
             codaSrc = u[k].src;
             break;
         case TibetanRole::Tsheg:
-            foldSyllable(stacks, coda, codaSrc, out);
+            foldSyllable(stacks, coda, codaSrc, style, out);
             break;
         case TibetanRole::None:
             break;
         }
     }
-    foldSyllable(stacks, coda, codaSrc, out);
+    foldSyllable(stacks, coda, codaSrc, style, out);
 }
 
 } // namespace Search::Fold::Engine
