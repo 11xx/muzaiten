@@ -102,7 +102,9 @@ struct GreekStyle {
     Str frontGamma;
 };
 
-enum class ThaiRole : std::uint8_t { None, Consonant, Pre, Above, Post, Tone, Silencer, Repeat, Letter, Cluster };
+// Space is the space Thai and Lao write before the repetition mark ๆ; the
+// tables never assign it.
+enum class ThaiRole : std::uint8_t { None, Consonant, Pre, Above, Post, Tone, Silencer, Repeat, Letter, Cluster, Space };
 enum class ThaiVowel : std::uint8_t {
     A, I, II, UE, UEE, U, UU, E, AE, O, OO, IA, UEA, UA, OE, OEI, AI, AO, AM, ImplicitA, ImplicitO, RUE, LUE, RI,
     Count,

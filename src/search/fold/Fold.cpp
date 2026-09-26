@@ -176,7 +176,13 @@ qsizetype collectRun(const char16_t *s, qsizetype n, qsizetype i, Script family,
         const auto [cp, width] = decode(s, n, i);
         const std::uint32_t e = entryFor(cp);
         const Script script = scriptOf(e);
-        if (familyOf(script) != family && script != Script::Inherited) break;
+        if (familyOf(script) != family && script != Script::Inherited) {
+            // Thai and Lao may write a space before the repetition mark, which
+            // repeats the word before it (จริง ๆ).
+            const bool beforeRepeat = (family == Script::Thai || family == Script::Lao) && cp == u' ' && i + 1 < n
+                && (s[i + 1] == 0x0E46 || s[i + 1] == 0x0EC6);
+            if (!beforeRepeat) break;
+        }
         mask |= maskOf(script);
         const int src = srcOverride >= 0 ? srcOverride : int(i);
         if (hasDecomp(e)) {

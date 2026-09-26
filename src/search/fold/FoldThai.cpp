@@ -86,6 +86,11 @@ public:
                 ++i;
                 continue;
             }
+            if (r == ThaiRole::Space) {
+                m_out.put(u' ', m_l[i].src);
+                ++i;
+                continue;
+            }
             if (r == ThaiRole::Letter) {
                 i = vowelLetter(i);
                 commit();
@@ -457,10 +462,12 @@ private:
 
 void foldThai(const Unit *u, qsizetype n, int style, Out &out)
 {
+    static const ThaiChar space{ThaiRole::Space, ThaiVowel::A, u' ', {{0, 0}, {0, 0}}, {{0, 0}, {0, 0}}};
     QVarLengthArray<Letter, 64> letters;
     for (qsizetype k = 0; k < n; ++k) {
         const char32_t cp = u[k].cp;
-        if (cp >= 0x0E00 && cp <= 0x0E7F) letters.append({&kThaiChars[cp - 0x0E00], char16_t(cp), u[k].src});
+        if (cp == u' ') letters.append({&space, u' ', u[k].src});
+        else if (cp >= 0x0E00 && cp <= 0x0E7F) letters.append({&kThaiChars[cp - 0x0E00], char16_t(cp), u[k].src});
         else if (cp >= 0x0E80 && cp <= 0x0EFF) letters.append({&kLaoChars[cp - 0x0E80], char16_t(cp), u[k].src});
     }
     Parser(letters.data(), letters.size(), style - 1, out).run();
