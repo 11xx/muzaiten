@@ -252,6 +252,47 @@ private slots:
         }
     }
 
+    void randomTextKeepsTheInvariants()
+    {
+        // Letters, marks and punctuation of every script the fold reads, mixed
+        // at random with lone surrogates and controls (fixed seed).
+        const QList<QPair<char32_t, char32_t>> ranges = {
+            {0x20, 0x7E}, {0xC0, 0x24F}, {0x300, 0x36F}, {0x370, 0x3FF}, {0x400, 0x52F}, {0x530, 0x58F},
+            {0x590, 0x5FF}, {0x600, 0x6FF}, {0x700, 0x74F}, {0x780, 0x7BF}, {0x900, 0xDFF}, {0xE00, 0xEFF},
+            {0xF00, 0xFFF}, {0x1000, 0x109F}, {0x10A0, 0x10FF}, {0x1100, 0x11FF}, {0x1780, 0x17FF},
+            {0x200B, 0x206F}, {0x3000, 0x30FF}, {0x3130, 0x318F}, {0x4E00, 0x4E80}, {0xAC00, 0xAD00},
+            {0xD800, 0xDFFF}, {0xF900, 0xF9FF}, {0xFB00, 0xFEFF}, {0xFF00, 0xFFEF}, {0x1D400, 0x1D4FF},
+            {0x1F100, 0x1F1FF}, {0x20000, 0x20100},
+        };
+        quint32 state = 0x2545F491u;
+        const auto next = [&state] {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            return state;
+        };
+        for (int round = 0; round < 3000; ++round) {
+            QString s;
+            const int length = 1 + int(next() % 12);
+            for (int k = 0; k < length; ++k) {
+                const auto &[lo, hi] = ranges[qsizetype(next() % quint32(ranges.size()))];
+                const char32_t cp = lo + char32_t(next() % (hi - lo + 1));
+                if (cp >= 0x10000) s += QString::fromUcs4(&cp, 1);
+                else s += QChar(char16_t(cp));
+            }
+            const QVector<Fold::FoldResult> all = Fold::foldAll(s);
+            QVERIFY(!all.isEmpty());
+            QCOMPARE(all.first().text, Fold::foldText(s));
+            QCOMPARE(Fold::fold(s).text, Fold::foldText(s));
+            QVERIFY(Fold::foldSegments(s).startsWith(Fold::foldText(s)));
+            for (const Fold::FoldResult &f : all) {
+                QCOMPARE(f.srcIndex.size(), f.text.size());
+                QVERIFY(!f.text.contains(Fold::kSegmentSeparator));
+                for (const int i : f.srcIndex) QVERIFY2(i >= 0 && i < s.size(), qPrintable(s));
+            }
+        }
+    }
+
     void cacheSignatureIsStable()
     {
         QCOMPARE(Fold::cacheSignature(), Fold::cacheSignature());

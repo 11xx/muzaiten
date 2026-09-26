@@ -18,13 +18,18 @@
 //   scripts with one reading per letter: Latin, Greek, Cyrillic, Georgian,
 //   Armenian, kana (wapuro romaji, きゃ→kya, っか→kka, ティ→ti) and Hangul
 //   (Revised Romanization, syllable by syllable: 악단광칠→akdangwangchil).
-//   CJK ideographs keep their surface form, folded to simplified Chinese.
+//   Scripts whose reading depends on the surrounding letters keep a
+//   normalized surface: CJK ideographs (folded to simplified Chinese), Thai,
+//   Lao, the Brahmic scripts, Tibetan, and Arabic, Hebrew and Syriac without
+//   their vowel marks and letter variants.
 // - Alternate readings are what a searcher might type instead: German
 //   ae/oe/ue, modern and phonetic Greek, common and Slavic Cyrillic spellings
 //   with Ukrainian, Belarusian and Serbian letters, Western Armenian, Hepburn
 //   romaji with long vowels collapsed (tokyo), Japanese kanji readings from a
-//   seed dictionary, Chinese pinyin, and Korean as pronounced (한국어→hangugeo)
-//   and in McCune-Reischauer (보천보→pochonbo).
+//   seed dictionary, Chinese pinyin, Korean as pronounced (한국어→hangugeo)
+//   and in McCune-Reischauer (보천보→pochonbo), Thai RTGS and common
+//   spellings, Indic with and without Hindi schwa deletion, Arabic and Hebrew
+//   with their vowel letters read in context, and Tibetan Wylie.
 //
 // The index stores foldSegments(): the primary fold followed by each distinct
 // alternate, separated by kSegmentSeparator. A query folds to the primary

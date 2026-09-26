@@ -31,7 +31,6 @@ from typing import Optional
 # ---- entry layout (FoldEngine.h) --------------------------------------------
 
 KEEP, CHAR, POOL, DROP, SCRIPT, EXPAND = range(6)
-KIND_NAMES = ["Keep", "Char", "Pool", "Drop", "Script", "Expand"]
 
 SCRIPTS = [
     "None", "Inherited", "Latin", "LatinAlt", "Greek", "Cyrillic", "CyrillicUk",
