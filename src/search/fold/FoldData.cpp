@@ -22,7 +22,7 @@ std::uint32_t astralEntry(char32_t cp)
     return std::uint32_t(Kind::Keep);
 }
 
-bool composesWithPrevious(char32_t cp)
+bool normalizes(char32_t cp)
 {
     if (cp < 0x10000) return (kComposableBmp[cp / 32] >> (cp % 32)) & 1u;
     return std::binary_search(kComposableAstral, kComposableAstral + kComposableAstralCount, cp);

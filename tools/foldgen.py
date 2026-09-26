@@ -13,8 +13,8 @@ C++ include holding:
   precomposed, uppercase or compatibility character;
 - every script handler's tables, with their strings in one UTF-16 pool.
 
-The runtime never normalizes: NFKC, case mapping, NFD and mark stripping
-are all applied here. The layout of an entry is documented in
+NFKC, case mapping, NFD and mark stripping are all applied here; the
+runtime only puts text that needs it into NFC before looking code points up. The layout of an entry is documented in
 src/search/fold/FoldEngine.h and must match ENTRY_* below.
 
 Usage: tools/foldgen.py <tables-dir> <output.inc>
@@ -1023,12 +1023,20 @@ class Generator:
             role, sound = self.tibetan_info(cp)
             tibetan_rows.append(f"    {{TibetanRole::{role}, {pool.ref(sound)}}},")
 
-        # Code points that compose canonically with the one before them (the
-        # second half of an NFC composition), so the runtime composes only
-        # text that needs it.
+        # Code points that make NFC change the text around them: the second
+        # half of a canonical composition, and characters NFC replaces
+        # (excluded compositions, singletons). The runtime normalizes only
+        # text containing one, or marks out of canonical order.
         composable_bmp = [0] * (0x10000 // 32)
         composable_astral: list[int] = []
         for cp in range(0x110000):
+            if 0xD800 <= cp <= 0xDFFF:
+                continue
+            if unicodedata.normalize("NFC", chr(cp)) != chr(cp):
+                if cp < 0x10000:
+                    composable_bmp[cp // 32] |= 1 << (cp % 32)
+                elif cp not in composable_astral:
+                    composable_astral.append(cp)
             decomposition = unicodedata.decomposition(chr(cp))
             if not decomposition or decomposition.startswith("<"):
                 continue

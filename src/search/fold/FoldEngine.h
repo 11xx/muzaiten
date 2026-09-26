@@ -3,7 +3,8 @@
 // Internals of the search fold: the compiled tables and the script handlers.
 //
 // tools/foldgen.py precomputes every code point's primary fold, so the
-// runtime never normalizes. An entry is 32 bits:
+// runtime applies no per-character normalization; it only puts text into
+// NFC first when NFC would change it (decomposed input, marks out of order). An entry is 32 bits:
 //
 //   bits  0-2   kind      Keep, Char, Pool, Drop, Script or Expand
 //   bits  3-7   script    which handler reads the code point in an alternate pass
@@ -207,10 +208,11 @@ inline std::uint32_t entryFor(char32_t cp) { return cp < 0x10000 ? kBmp[cp] : as
 // The code points a handler reads for `cp`, when its entry has the decomp bit.
 QStringView decompOf(char32_t cp);
 
-// `cp` composes canonically with the code point before it (a combining accent,
-// a kana voicing mark, a Hangul vowel or final, the second half of an Indic
-// two-part vowel).
-bool composesWithPrevious(char32_t cp);
+// NFC may change text containing `cp`: it composes canonically with the code
+// point before it (a combining accent, a kana voicing mark, a Hangul vowel or
+// final, the second half of an Indic two-part vowel), or NFC replaces it (an
+// excluded composition such as U+0344, a singleton).
+bool normalizes(char32_t cp);
 
 // The rule for `first` followed by `second` (0 for a single letter) in `range`.
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second);

@@ -255,6 +255,17 @@ private slots:
         QCOMPARE(Fold::fold(han).srcIndex, (QVector<int>{0, 0, 0, 3, 3, 3}));
     }
 
+    void canonicalOrderAndExcludedCompositionsFoldAlike()
+    {
+        // Tibetan vowel signs in either order, and Greek dialytika tonos as
+        // the excluded U+0344 or as a precomposed letter.
+        QCOMPARE(segments(QString::fromUcs4(U"\u0F66\u0F72\u0F71")), segments(QString::fromUcs4(U"\u0F66\u0F71\u0F72")));
+        QCOMPARE(segments(QString::fromUcs4(U"\u03B1\u03B9\u0344")), segments(QString::fromUcs4(U"\u03B1\u0390")));
+        const Fold::FoldResult reordered = Fold::fold(QString::fromUcs4(U"x\u0F66\u0F72\u0F71"));
+        QCOMPARE(reordered.srcIndex.size(), reordered.text.size());
+        for (const int i : reordered.srcIndex) QVERIFY(i >= 0 && i < 4);
+    }
+
     void iterationMarksUseTheirSourcePosition()
     {
         // The primary fold keeps iteration marks as written, like a query that
@@ -329,9 +340,11 @@ private slots:
             }
             const QVector<Fold::FoldResult> all = Fold::foldAll(s);
             QVERIFY(!all.isEmpty());
-            // Canonically equivalent spellings fold alike.
+            // Canonically equivalent spellings fold alike, the random one
+            // included (its marks may be out of canonical order).
             QCOMPARE(segments(s.normalized(QString::NormalizationForm_D)),
                      segments(s.normalized(QString::NormalizationForm_C)));
+            QCOMPARE(segments(s), segments(s.normalized(QString::NormalizationForm_C)));
             QCOMPARE(all.first().text, Fold::foldText(s));
             QCOMPARE(Fold::fold(s).text, Fold::foldText(s));
             QVERIFY(Fold::foldSegments(s).startsWith(Fold::foldText(s)));

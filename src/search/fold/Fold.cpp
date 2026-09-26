@@ -162,10 +162,10 @@ bool foldAscii(const QString &src, QString &folded)
     return true;
 }
 
-// Canonically equivalent text folds alike: a base followed by marks that
-// compose with it (decomposed file names, NFD input) is composed first.
-// Composed carries the composed text and, for each of its units, the
-// source index of the sequence it came from.
+// Canonically equivalent text folds alike: a base with marks that NFC would
+// change (decomposed file names, NFD input, marks out of canonical order,
+// excluded compositions) is put into NFC first. Composed carries that text
+// and, for each of its units, the source index of the sequence it came from.
 struct Composed {
     QString text;
     QVector<int> map;
@@ -175,14 +175,21 @@ bool needsComposition(const QString &src)
 {
     const char16_t *s = reinterpret_cast<const char16_t *>(src.utf16());
     const qsizetype n = src.size();
-    for (qsizetype i = 1; i < n; ++i) {
+    int previousClass = 0;
+    for (qsizetype i = 0; i < n; ++i) {
         const char16_t c = s[i];
-        if (c < 0x0300) continue;
-        if (QChar::isLowSurrogate(c) && QChar::isHighSurrogate(s[i - 1])) {
-            if (composesWithPrevious(QChar::surrogateToUcs4(s[i - 1], c))) return true;
+        if (c < 0x0300) {
+            previousClass = 0;
             continue;
         }
-        if (composesWithPrevious(c)) return true;
+        char32_t cp = c;
+        if (QChar::isHighSurrogate(c) && i + 1 < n && QChar::isLowSurrogate(s[i + 1])) {
+            cp = QChar::surrogateToUcs4(c, s[++i]);
+        }
+        if (normalizes(cp)) return true;
+        const int cls = QChar::combiningClass(cp);
+        if (cls != 0 && previousClass > cls) return true;  // marks out of canonical order
+        previousClass = cls;
     }
     return false;
 }
@@ -196,13 +203,17 @@ Composed compose(const QString &src)
     out.map.reserve(n);
     qsizetype i = 0;
     while (i < n) {
-        qsizetype j = i + decode(s, n, i).width;
-        bool composable = false;
+        const auto [first, firstWidth] = decode(s, n, i);
+        qsizetype j = i + firstWidth;
+        bool composable = normalizes(first);
+        int previousClass = 0;
         while (j < n) {
             const auto [next, width] = decode(s, n, j);
-            const bool composes = composesWithPrevious(next);
-            if (!composes && QChar::combiningClass(next) == 0) break;
-            composable = composable || composes;
+            const int cls = QChar::combiningClass(next);
+            const bool composes = normalizes(next);
+            if (!composes && cls == 0) break;
+            composable = composable || composes || (cls != 0 && previousClass > cls);
+            previousClass = cls;
             j += width;
         }
         const QStringView sequence(s + i, j - i);
