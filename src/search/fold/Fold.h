@@ -10,6 +10,7 @@
 // anchors, exclusions) works on folded text with no further changes.
 //
 // Pipeline (per source character, with ASCII fast-pathing):
+//   0. control and format characters dropped    (U+200E, U+2060, U+001F)
 //   1. Unicode NFKC compatibility normalization
 //   2. lowercase, NFD decomposition, and combining-mark stripping
 //   3. Japanese iteration-mark expansion and seed dictionary readings
@@ -32,10 +33,17 @@
 
 namespace Search::Fold {
 
-// Version 2 guards the on-disk search-cache signature against changes to the
-// fold pipeline or its transliteration, kana, and kanji-reading data. The cache
-// stores folded norms, so a mismatch here must invalidate it.
-inline constexpr quint32 kVersion = 2;
+// Guards the on-disk search-cache signature against changes to the fold
+// pipeline, its data tables, or the norm segment layout. The cache stores
+// folded norms, so any change to their bytes must bump it.
+inline constexpr quint32 kVersion = 3;
+
+// Separates the alternative folded forms of one field inside a search norm
+// (the display text's fold, then a sort name's). Anchored and fuzzy matching
+// score each segment on its own, so `^the beatles$` still matches a norm that
+// also carries "beatles, the". The fold drops control characters, so no folded
+// needle can contain the separator and a plain substring never spans segments.
+inline constexpr QChar kSegmentSeparator = QChar(0x1F);
 
 // Folded text plus a map from each folded character back to the index of the
 // source character it derived from.  Used by highlighting to project match

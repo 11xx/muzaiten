@@ -251,6 +251,24 @@ private slots:
         QCOMPARE(idx.match(SearchQuery::parse(QStringLiteral("sanshin")), false).size(), 1);
     }
 
+    void anchorsApplyToEachFoldedForm()
+    {
+        // The norm carries the display fold and the sort-name fold; an anchor
+        // answers against either one, never against their concatenation.
+        SearchRecord r = makeRecord(QStringLiteral("The Wall"), QStringLiteral("Pink Floyd"), QStringLiteral("The Wall"));
+        r.titleSort = QStringLiteral("Wall, The");
+        foldRecordNorms(r);
+
+        SearchIndex idx;
+        idx.build({r});
+        for (const QString &query : {QStringLiteral("title:wall$"), QStringLiteral("^title:wall"),
+                                     QStringLiteral("^title:the"), QStringLiteral("title:the$")}) {
+            QVERIFY2(idx.match(SearchQuery::parse(query), false).size() == 1, qPrintable(query));
+            QVERIFY2(idx.match(SearchQuery::parse(query), true).size() == 1, qPrintable(query));
+        }
+        QVERIFY(idx.match(SearchQuery::parse(QStringLiteral("^title:floyd")), false).isEmpty());
+    }
+
     void appendGrowsIndexIncrementally()
     {
         // Streaming build: append() must extend the index without disturbing the

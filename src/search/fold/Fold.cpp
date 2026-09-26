@@ -276,6 +276,15 @@ void appendNfkcUnit(const QString &unit, int srcIndex,
                    srcIndex, base, baseSrc);
 }
 
+// Invisible characters (bidi marks, word joiners, C0/C1 controls other than
+// whitespace) carry no searchable text and would split an otherwise matching
+// substring.
+bool isDroppedControl(QChar ch)
+{
+    const QChar::Category cat = ch.category();
+    return (cat == QChar::Other_Control && !ch.isSpace()) || cat == QChar::Other_Format;
+}
+
 // Stage A: NFKC compatibility normalization, then NFD decomposition, lowercase,
 // and combining-mark stripping, per source unit. Every surviving char records
 // the source index of the unit that produced it.
@@ -288,6 +297,7 @@ void decomposeFold(const QString &src, QString &base, QVector<int> &baseSrc)
         const QChar ch = src.at(i);
         const char16_t u = ch.unicode();
 
+        if (isDroppedControl(ch)) continue;
         if (u < 0x80) {                              // ASCII fast path
             base += (u >= 'A' && u <= 'Z') ? QChar(u + 0x20) : ch;
             baseSrc.append(i);

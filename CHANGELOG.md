@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anchored search terms (`^wall`, `the wall$`), fuzzy matching and exclusion
+  globs now check a field's display text and its sort name separately, so a
+  sort name no longer stops an anchored term from matching. Invisible
+  direction marks and word joiners in tags no longer split a match. The search
+  cache rebuilds once.
+
 ## [2026.9.11]
 
 ### Added

@@ -84,7 +84,7 @@ inline void foldRecordNorms(SearchRecord &rec, QHash<QString, QString> *pool = n
         if (!reading.isEmpty()) {
             const QString fr = Fold::foldText(reading);
             if (!fr.isEmpty() && fr != f) {
-                f += QLatin1Char(' ') + fr;
+                f += Fold::kSegmentSeparator + fr;
             }
         }
         return f;

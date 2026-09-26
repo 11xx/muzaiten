@@ -52,6 +52,17 @@ private slots:
         QVERIFY(!m.matches(rec(QStringLiteral("x"), QStringLiteral("/mnt/music/a.flac"))));
     }
 
+    void prefixAndSuffixGlobsApplyToEachFoldedForm()
+    {
+        SearchRecord r = rec(QStringLiteral("The Wall"), QStringLiteral("/m/a.flac"));
+        r.titleSort = QStringLiteral("Wall, The");
+        foldRecordNorms(r);
+
+        QVERIFY(ExcludeMatcher({QStringLiteral("wall*"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QStringLiteral("*wall"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("*floyd"), ExcludeScope::AnyField}).matches(r));
+    }
+
     void interiorWildcardUsesRegex()
     {
         ExcludeMatcher m({QStringLiteral("live*2003"), ExcludeScope::AnyField});

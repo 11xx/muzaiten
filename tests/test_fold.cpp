@@ -125,6 +125,16 @@ private slots:
         QCOMPARE(Fold::foldText(QString::fromUtf8("三線")), QStringLiteral("sanshin"));
     }
 
+    void controlAndFormatCharactersAreDropped()
+    {
+        const QString src = QStringLiteral("a") + QChar(0x200E) + QStringLiteral("b") + QChar(0x2060)
+            + QStringLiteral("c") + QChar(0x1F) + QStringLiteral("d\te");
+        const Fold::FoldResult folded = Fold::fold(src);
+        QCOMPARE(folded.text, QStringLiteral("abcd\te"));
+        QCOMPARE(folded.srcIndex, (QVector<int>{0, 2, 4, 6, 7, 8}));
+        QVERIFY(!folded.text.contains(Fold::kSegmentSeparator));
+    }
+
     void idempotentOnFoldedText()
     {
         const QString once = Fold::foldText(QString::fromUtf8("Café SHCHükÖ"));

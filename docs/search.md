@@ -113,6 +113,11 @@ files.
 
 Combine freely: `miles ext:flac rating:>=80 !live`
 
+A field can have more than one folded form: its display text and its sort
+name (`The Wall` and `Wall, The`). Anchors and fuzzy matching check each form
+on its own, so `^wall` and `the wall$` both find that title. Exclusion globs
+with a leading or trailing `*` behave the same way.
+
 ## Ranking and exclusions
 
 `Settings > Search ranking…` opens a panel that controls how results are

@@ -39,7 +39,7 @@ bool isBoundaryChar(QChar c)
 {
     return c.isSpace() || c == QLatin1Char('/') || c == QLatin1Char('-')
         || c == QLatin1Char('_') || c == QLatin1Char('.') || c == QLatin1Char('(')
-        || c == QLatin1Char('[') || c == QLatin1Char(',');
+        || c == QLatin1Char('[') || c == QLatin1Char(',') || c == Fold::kSegmentSeparator;
 }
 
 int exactFieldScore(const QString &norm, const Term &term, int weight)
@@ -115,17 +115,31 @@ int fieldWeight(MatchFieldRole role)
     return 100;
 }
 
-int scoreTextField(const QString &norm, const Term &term, bool fuzzyMode, int weight)
-{
-    return term.forceExact || !fuzzyMode ? exactFieldScore(norm, term, weight)
-                                         : fuzzyFieldScore(norm, term.text, weight);
-}
-
 void consider(int score, int &best)
 {
     if (score > best) {
         best = score;
     }
+}
+
+// Anchors and fuzzy alignment answer per segment of the norm; an unanchored
+// substring cannot span segments, so it scans the whole norm at once.
+int scoreTextField(const QString &norm, const Term &term, bool fuzzyMode, int weight)
+{
+    const bool exact = term.forceExact || !fuzzyMode;
+    const auto scoreSegment = [&](const QString &segment) {
+        return exact ? exactFieldScore(segment, term, weight)
+                     : fuzzyFieldScore(segment, term.text, weight);
+    };
+    if ((exact && !term.prefixAnchor && !term.suffixAnchor)
+        || !norm.contains(Fold::kSegmentSeparator)) {
+        return scoreSegment(norm);
+    }
+    int best = INT_MIN;
+    for (const QString &segment : norm.split(Fold::kSegmentSeparator)) {
+        consider(scoreSegment(segment), best);
+    }
+    return best;
 }
 
 bool documentFieldApplies(const MatchField &field, const Term &term)
