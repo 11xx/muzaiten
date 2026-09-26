@@ -350,6 +350,46 @@ private slots:
         }
     }
 
+    void randomNormalizationSequencesFoldLikeTheirNormalForms()
+    {
+        // Characters NFC composes, reorders or replaces, mixed at random
+        // (fixed seed): bases, marks of many classes, two-part vowel halves,
+        // Hangul jamo, starters that decompose into marks, singletons and
+        // excluded compositions.
+        const char32_t pool[] = {
+            u'a', u'e', u'o', u'A', 0x03B1, 0x03B9, 0x03C9, 0x304B, 0x30CF, 0x0915, 0x0F66, 0x0F40,
+            0x0300, 0x0301, 0x0308, 0x0316, 0x031B, 0x0327, 0x0345, 0x0340, 0x0343, 0x0344, 0x05B4, 0x093C,
+            0x094D, 0x3099, 0x309A, 0x0F71, 0x0F72, 0x0F74, 0x0F80, 0x0F84, 0x0F73, 0x0F75, 0x0F81,
+            0x09C7, 0x09BE, 0x09D7, 0x0B47, 0x0B3E, 0x0B56, 0x0B57, 0x0B92, 0x0BD7, 0x0BC6, 0x0BBE, 0x0CC6,
+            0x0CBF, 0x0CC2, 0x0CD5, 0x0CD6, 0x0CCA, 0x0D46, 0x0D3E, 0x0D57, 0x0DD9, 0x0DCF, 0x0DDF, 0x0DCA,
+            0x1025, 0x102E, 0x1100, 0x1112, 0x1161, 0x1175, 0x11A8, 0x11C2, 0xAC00, 0xAC01, 0xD7A3,
+            0x212A, 0x212B, 0x2126, 0xF902, 0x0958, 0xFB1D, 0x05D9,
+        };
+        quint32 state = 0x9E3779B9u;
+        const auto next = [&state] {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            return state;
+        };
+        for (int round = 0; round < 20000; ++round) {
+            QString s;
+            const int length = 1 + int(next() % 8);
+            for (int k = 0; k < length; ++k) {
+                const char32_t cp = pool[next() % std::size(pool)];
+                s += QString::fromUcs4(&cp, 1);
+            }
+            const QString nfc = s.normalized(QString::NormalizationForm_C);
+            QCOMPARE(segments(s), segments(nfc));
+            QCOMPARE(segments(s.normalized(QString::NormalizationForm_D)), segments(nfc));
+            QCOMPARE(Fold::foldText(Fold::foldText(s)), Fold::foldText(s));
+            for (const Fold::FoldResult &f : Fold::foldAll(s)) {
+                QCOMPARE(f.srcIndex.size(), f.text.size());
+                for (const int i : f.srcIndex) QVERIFY2(i >= 0 && i < s.size(), qPrintable(s));
+            }
+        }
+    }
+
     void randomTextKeepsTheInvariants()
     {
         // Letters, marks and punctuation of every script the fold reads, mixed
