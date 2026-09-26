@@ -99,6 +99,33 @@ private:
         return r == ThaiRole::Above || r == ThaiRole::Post || r == ThaiRole::Tone || r == ThaiRole::Cluster;
     }
 
+    // The consonant at `j`, after leading vowel `pre` and a first consonant,
+    // takes that vowel: what follows it completes `pre` (เ with ็ ิ ีย ือ าะ ะ,
+    // แ and โ with ะ; เสด็จ sadet, เจริญ charoen, เฉพาะ chapho), a tone mark on
+    // it leaves `pre` as its only vowel (เสน่ห์ sane), or the one consonant
+    // after it ends the word (แสดง sadaeng, เสมอ samoe). Otherwise `j` closes
+    // the first consonant's syllable or starts its own (เทพมหา thepmaha,
+    // ปราโมทย์ pramot, เวลา wela, เมโลดี้ melodi). ใ and ไ always end with their
+    // consonant.
+    bool carriesVowel(qsizetype j, char16_t pre) const
+    {
+        if (pre == u'ใ' || pre == u'ไ') return false;
+        qsizetype k = j + 1;
+        const bool toned = role(k) == ThaiRole::Tone;
+        while (role(k) == ThaiRole::Tone) ++k;
+        if (role(k) == ThaiRole::Above) {
+            const ThaiVowel sign = m_l[k].c->vowel;
+            if (pre == u'แ') return sign == ThaiVowel::O;
+            if (pre != u'เ') return false;
+            return sign == ThaiVowel::O || sign == ThaiVowel::I || (sign == ThaiVowel::II && thai(k + 1) == u'ย')
+                || (sign == ThaiVowel::UEE && thai(k + 1) == u'อ');
+        }
+        if (role(k) == ThaiRole::Post) return thai(k) == u'ะ' || (pre == u'เ' && thai(k) == u'า' && thai(k + 1) == u'ะ');
+        if (toned) return true;
+        if (role(k) != ThaiRole::Consonant || silenced(k)) return false;
+        return k + 1 >= m_n || role(k + 1) == ThaiRole::Pre;
+    }
+
     // How many consonants without a written vowel run from `j` to the end of
     // the word, or -1 when another written syllable follows them.
     qsizetype bareTail(qsizetype j) const
@@ -195,6 +222,18 @@ private:
             onset = i++;                                      // หมา ma, ຫຼວງ luang
         }
         else if (thai(onset) == u'อ' && thai(i) == u'ย' && role(i) == ThaiRole::Consonant) onset = i++;
+        // In the RTGS reading a leading vowel belongs to the second consonant
+        // when that one carries it; the first is then a syllable of its own
+        // with an unwritten a (เสมอ samoe, แสดง sadaeng; not the cluster in
+        // เพลง or the final in เขต). Spelling alone cannot always tell (เจริญ
+        // charoen, but the name เตชิน techin), so the common reading keeps the
+        // vowel on the first consonant and the index holds both.
+        if (m_style == 0 && pre != 0 && role(i) == ThaiRole::Consonant && !isClusterPair(thai(onset), thai(i))
+            && carriesVowel(i, pre)) {
+            put(initial(onset), m_l[onset].src);
+            put(vowel(ThaiVowel::ImplicitA), m_l[onset].src);
+            onset = i++;
+        }
         skipTones(i);
         QStringView onsetText = initial(onset);
         QStringView clusterText;
