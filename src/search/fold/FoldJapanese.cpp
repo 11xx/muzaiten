@@ -165,15 +165,6 @@ bool isHanEntry(std::uint32_t e)
     return scriptOf(e) == Script::Han && !(kindOf(e) == Kind::Script);
 }
 
-const Word *findWord(const Word *words, std::size_t count, QStringView key)
-{
-    const Word *end = words + count;
-    const Word *it = std::lower_bound(words, end, key, [](const Word &w, QStringView k) {
-        return view(w.key).compare(k) < 0;
-    });
-    return it != end && view(it->key) == key ? it : nullptr;
-}
-
 std::uint16_t pinyinOf(char32_t cp)
 {
     if (cp >= 0x3400 && cp < 0xA000) return kHanPinyinBmp[cp - 0x3400];

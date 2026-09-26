@@ -182,6 +182,9 @@ extern const std::size_t kBrahmicClusterCount;
 extern const ThaiChar kThaiChars[128];
 extern const ThaiChar kLaoChars[128];
 extern const Str kThaiVowels[][2];
+extern const Word kThaiWords[];
+extern const std::size_t kThaiWordCount;
+extern const int kThaiLongest;
 extern const AlphaRule kAlphaRules[];
 extern const CyrillicStyle kCyrillicStyles[];
 extern const AlphaRange kArmenianEastern;
@@ -201,6 +204,9 @@ QStringView decompOf(char32_t cp);
 
 // The rule for `first` followed by `second` (0 for a single letter) in `range`.
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second);
+
+// The word spelled `key` in a table sorted by key, or nullptr.
+const Word *findWord(const Word *words, std::size_t count, QStringView key);
 
 // ---- output --------------------------------------------------------------------
 

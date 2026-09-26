@@ -1,5 +1,5 @@
 {
-  "_doc": "Thai and Lao. Thai text keeps its surface in the primary fold; its readings are alternates parsed syllable by syllable (leading vowels, unwritten vowels, final-consonant values). `consonants` gives [RTGS initial, RTGS final, common initial, common final]; the common reading is how names are usually spelled (jai, sawasdee, khob khun). `vowels` spells each vowel pattern [RTGS, common]. `marks` gives each vowel sign or mark its role (pre: written before the consonant; above: a sign on the consonant, with the vowel it spells; post: after it; tone; silencer; repeat; letter: a vowel letter). Lao `consonants` add the Thai letter they behave like, and Lao readings are [standard initial, final, French-style initial, final] (Vientiane, Xieng).",
+  "_doc": "Thai and Lao. Thai text keeps its surface in the primary fold; its readings are alternates parsed syllable by syllable (leading vowels, unwritten vowels, final-consonant values). `consonants` gives [RTGS initial, RTGS final, common initial, common final]; the common reading is how names are usually spelled (jai, sawasdee, khob khun). `vowels` spells each vowel pattern [RTGS, common]. `marks` gives each vowel sign or mark its role (pre: written before the consonant; above: a sign on the consonant, with the vowel it spells; post: after it; tone; silencer; repeat; letter: a vowel letter). Lao `consonants` add the Thai letter they behave like, and Lao readings are [standard initial, final, French-style initial, final] (Vientiane, Xieng). `words` spells Thai words that spelling rules misread (a silent letter, a letter read twice), [RTGS, common] or one reading for both; the longest word matches first, inside compounds too.",
   "vowels": {
     "A": ["a", "a"], "I": ["i", "i"], "II": ["i", "ee"], "UE": ["ue", "ue"], "UEE": ["ue", "ue"],
     "U": ["u", "u"], "UU": ["u", "oo"], "E": ["e", "e"], "AE": ["ae", "ae"], "O": ["o", "o"],
@@ -7,6 +7,15 @@
     "OEI": ["oei", "oei"], "AI": ["ai", "ai"], "AO": ["ao", "ao"], "AM": ["am", "am"],
     "IMPLICIT_A": ["a", "a"], "IMPLICIT_O": ["o", "o"], "RUE": ["rue", "rue"], "LUE": ["lue", "lue"],
     "RI": ["ri", "ri"]
+  },
+  "words": {
+    "จริง": ["ching", "jing"], "ธรรมดา": "thammada", "ธรรมชาติ": "thammachat", "วัฒนธรรม": "watthanatham",
+    "เหตุ": "het", "เหตุผล": "hetphon", "สามารถ": "samat", "บริษัท": "borisat", "กรุณา": "karuna",
+    "ภรรยา": "phanraya", "ศาสนา": "satsana", "ประวัติศาสตร์": "prawattisat", "วิทยาลัย": "witthayalai",
+    "มหาวิทยาลัย": "mahawitthayalai", "ราชการ": "ratchakan", "จักรยาน": "chakkrayan", "ปรัชญา": "pratchaya",
+    "คุณภาพ": "khunnaphap", "ธนาคาร": "thanakhan", "ชาติ": "chat", "ญาติ": "yat", "สมุทร": "samut",
+    "พรหม": "phrom", "กษัตริย์": "kasat", "เพชร": "phet", "บัตร": "bat", "อาทิตย์": "athit", "พุทธ": "phut",
+    "ภูมิ": "phum", "เกียรติ": "kiat"
   },
   "thai": {
     "consonants": {

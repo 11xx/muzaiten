@@ -16,12 +16,15 @@
 
 #include "search/fold/FoldEngine.h"
 
+#include <algorithm>
+
 namespace Search::Fold::Engine {
 
 namespace {
 
 struct Letter {
     const ThaiChar *c;
+    char16_t cp;
     int src;
 };
 
@@ -94,6 +97,11 @@ public:
             }
             if (const qsizetype muted = silenced(i)) {
                 i += muted;
+                continue;
+            }
+            if (const qsizetype length = word(i)) {
+                i += length;
+                commit();
                 continue;
             }
             i = syllable(i);
@@ -195,6 +203,30 @@ private:
         const qsizetype tail = bareTail(j);
         if (tail == 3 && (thai(j) == u'ย' || thai(j) == u'ว')) return true;
         return tail < 0 || tail == 1 || tail >= 4;
+    }
+
+    // A word from the irregular-word table starting at `i`, emitted with its
+    // reading spread over its letters; returns its length, 0 when none.
+    qsizetype word(qsizetype i)
+    {
+        if (m_keys.isEmpty()) {
+            for (qsizetype k = 0; k < m_n; ++k) m_keys.append(m_l[k].cp);
+        }
+        const QStringView keys(m_keys.data(), m_keys.size());
+        for (qsizetype len = std::min<qsizetype>(kThaiLongest, m_n - i); len >= 2; --len) {
+            const Word *w = findWord(kThaiWords, kThaiWordCount, keys.mid(i, len));
+            if (!w) continue;
+            QStringView reading = view(w->value);
+            const qsizetype space = reading.indexOf(u' ');
+            if (space >= 0) reading = m_style == 0 ? reading.left(space) : reading.mid(space + 1);
+            for (qsizetype r = 0; r < reading.size(); ++r) {
+                const QStringView letter = reading.mid(r, 1);
+                m_syllable.append(letter.utf16(), 1);
+                m_out.put(letter, m_l[i + ((2 * r + 1) * len) / (2 * reading.size())].src);
+            }
+            return len;
+        }
+        return 0;
     }
 
     // Letters at `j` a silencer mutes: a consonant, optionally with a vowel
@@ -418,6 +450,7 @@ private:
     Out &m_out;
     Syllable m_syllable;
     Syllable m_last;
+    QVarLengthArray<char16_t, 64> m_keys;
 };
 
 } // namespace
@@ -427,8 +460,8 @@ void foldThai(const Unit *u, qsizetype n, int style, Out &out)
     QVarLengthArray<Letter, 64> letters;
     for (qsizetype k = 0; k < n; ++k) {
         const char32_t cp = u[k].cp;
-        if (cp >= 0x0E00 && cp <= 0x0E7F) letters.append({&kThaiChars[cp - 0x0E00], u[k].src});
-        else if (cp >= 0x0E80 && cp <= 0x0EFF) letters.append({&kLaoChars[cp - 0x0E80], u[k].src});
+        if (cp >= 0x0E00 && cp <= 0x0E7F) letters.append({&kThaiChars[cp - 0x0E00], char16_t(cp), u[k].src});
+        else if (cp >= 0x0E80 && cp <= 0x0EFF) letters.append({&kLaoChars[cp - 0x0E80], char16_t(cp), u[k].src});
     }
     Parser(letters.data(), letters.size(), style - 1, out).run();
 }

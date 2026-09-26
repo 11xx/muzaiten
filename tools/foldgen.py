@@ -958,6 +958,11 @@ class Generator:
             return rows
 
         thai_rows = thai_block(self.thai["thai"], 0x0E00, False)
+        thai_word_table = {}
+        for key, value in self.thai["words"].items():
+            readings = [value] if isinstance(value, str) else list(value)
+            thai_word_table[key] = " ".join(readings)
+        thai_word_rows, thai_longest = words(thai_word_table, False)
         lao_rows = thai_block(self.thai["lao"], 0x0E80, True)
 
         # Brahmic
@@ -1023,7 +1028,7 @@ class Generator:
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
                             bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
-                            brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
+                            thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
                             abjad_block_rows, abjad_constants, tibetan_rows)).encode())
         if len(pool.units) >= (1 << PAYLOAD_BITS):
             sys.exit(f"string pool has {len(pool.units)} units; entries address {1 << PAYLOAD_BITS}")
@@ -1122,6 +1127,11 @@ class Generator:
         w("const ThaiChar kLaoChars[128] = {")
         out.extend(lao_rows)
         w("};")
+        w(f"const Word kThaiWords[{len(thai_word_rows)}] = {{")
+        out.extend(thai_word_rows)
+        w("};")
+        w(f"const std::size_t kThaiWordCount = {len(thai_word_rows)};")
+        w(f"const int kThaiLongest = {thai_longest};")
         w(f"const Str kThaiVowels[{len(vowel_rows)}][2] = {{")
         out.extend(vowel_rows)
         w("};")

@@ -29,6 +29,15 @@ QStringView decompOf(char32_t cp)
     return it != end && it->cp == cp ? view(it->seq) : QStringView();
 }
 
+const Word *findWord(const Word *words, std::size_t count, QStringView key)
+{
+    const Word *end = words + count;
+    const Word *it = std::lower_bound(words, end, key, [](const Word &w, QStringView k) {
+        return view(w.key).compare(k) < 0;
+    });
+    return it != end && view(it->key) == key ? it : nullptr;
+}
+
 const AlphaRule *findRule(AlphaRange range, char32_t first, char32_t second)
 {
     const AlphaRule *begin = kAlphaRules + range.begin;

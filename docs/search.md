@@ -30,7 +30,7 @@ common reading and a query matches any of them:
 | Korean | syllable by syllable (`hangukeo`), as pronounced (`hangugeo`), McCune-Reischauer (`pochonbo` for `보천보`) |
 | Japanese | wapuro (`toukyou`), Hepburn (`tokyo`); common kanji through a seed dictionary |
 | Chinese | toneless pinyin, with word readings for common polyphones (`yinyue` for `音乐`, `changcheng` for `长城`) |
-| Thai | RTGS (`sawatdi`, `khopkhun`) and the common spelling (`sawasdee`, `khobkhun`, `jai`) |
+| Thai | RTGS (`sawatdi`, `khopkhun`) and the common spelling (`sawasdee`, `khobkhun`, `jai`); words spelling rules misread come from a word table (`ching` for `จริง`) |
 | Lao | standard (`viangchan`) and French-style (`wiangjan`) |
 | Arabic, Persian, Urdu | vowel marks when written; otherwise the consonants with ا و ي as vowels (`mhmud`), with a first-syllable a (`habibi`, `salam`), and in el-/ou/ee spelling (`nour`, `eljadeed`) |
 | Hebrew, Yiddish | points when written (`bereshit`); otherwise soft (`tora`) and hard spellings with a first a (`shalom`, `torah`) |
