@@ -6,8 +6,8 @@
 // follows the root unless a vowel sign is written. The root is the stack
 // that carries a vowel sign or subjoined letters; otherwise the syllable's
 // spelling decides it: a prefix letter (ག ད བ མ འ) precedes only certain
-// roots, and only ག ང ད ན བ མ འ ར ལ ས end a syllable, with ས or ད after them
-// (གངས gangs, དགའ dga'). A stack before the root that is not a lone prefix
+// roots, only ག ང ད ན བ མ འ ར ལ ས end a syllable, and a final ས after one
+// of them is a second suffix (གངས gangs, མངས mangs; དགའ dga'). A stack before the root that is not a lone prefix
 // reads with its own a, as Sanskrit words do (པདྨེ padme). Syllables join
 // without a separator (སྨོན་ལམ smonlam).
 //
@@ -82,10 +82,13 @@ qsizetype rootOf(const QVarLengthArray<Stack, 8> &stacks)
     const auto plain = [&](qsizetype k) { return !stacks[k].subjoined; };
     if (stacks.size() >= 4) return 1;
     if (stacks.size() == 3) {
-        // Prefix, root, suffix (དགའ dga') wins over root and two suffixes
-        // (གངས gangs) when both spell a legal syllable.
+        // Root and two suffixes when the syllable ends in the second suffix ས
+        // after a suffix letter (གངས gangs, མངས mangs), even where a prefix
+        // reading would also be legal; otherwise prefix, root, suffix when
+        // legal (དགའ dga').
         const bool prefixed = plain(0) && prefixes(stacks[0].base, stacks[1].base) && isSuffixLetter(stacks[2].base);
-        return prefixed ? 1 : 0;
+        const bool suffixed = isSuffixLetter(stacks[1].base) && stacks[2].base == 0x0F66;
+        return prefixed && !suffixed ? 1 : 0;
     }
     if (stacks.size() == 2 && !isSuffixLetter(stacks[1].base) && prefixes(stacks[0].base, stacks[1].base)) return 1;
     return 0;
