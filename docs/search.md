@@ -27,7 +27,7 @@ common reading and a query matches any of them:
 | Greek | letter by letter (`eycharisto`), modern (`efcharisto`), phonetic (`efharisto`, `yiorgos`) |
 | Cyrillic | `khrushchev`, `hruschyov`, `hruscev`; Ukrainian, Belarusian and Serbian spellings when the text uses their letters |
 | Armenian | Eastern (`yerevan`, `hayastan`) and Western (`hayasdan`) |
-| Korean | syllable by syllable (`hangukeo`), as pronounced (`hangugeo`), McCune-Reischauer (`pochonbo` for `보천보`) |
+| Korean | syllable by syllable (`hangukeo`), as pronounced (`hangugeo`), McCune-Reischauer (`pochonbo` for `보천보`), conventional name spellings (`lee jieun` for `이지은`, `kim taehyung` for `김태형`) |
 | Japanese | wapuro (`toukyou`), Hepburn (`tokyo`); common kanji through a seed dictionary |
 | Chinese | toneless pinyin; a character with two readings matches either (`changfa` or `zhangfa` for `长发`), and word readings settle common polyphones (`yinyue` for `音乐`, `chongqing` for `重庆`) |
 | Thai | RTGS (`sawatdi`, `khopkhun`) and the common spelling (`sawasdee`, `khobkhun`, `jai`); words spelling rules misread come from a word table (`ching` for `จริง`) |
@@ -37,6 +37,11 @@ common reading and a query matches any of them:
 | Syriac, Thaana | their vowel marks (`dhivehi`) |
 | Tibetan | Wylie, syllables joined (`smonlam`, `lhasa`, `bka'`), and without the a-chung apostrophe (`bka`) |
 | Indic, Sinhala, Myanmar, Khmer | common (`kamla`, `zindagi`, `dilvale`), with every inherent vowel (`kamala`), and the ee/oo spelling of film titles (`deewana`, `phool`, `dilwale`) |
+
+For conventional Korean name spellings, the first syllable of each Hangul word
+uses the surname table, with two-syllable surnames matched before one-syllable
+ones. Remaining syllables use common given-name spellings when listed and
+Revised Romanization otherwise.
 
 Traditional and simplified Chinese characters match each other. Half-width
 and full-width forms, styled "fancy text" letters (`𝓗𝓮𝓵𝓵𝓸`, `🅲🅻🅴🅰🅽`), macOS

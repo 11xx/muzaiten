@@ -95,6 +95,32 @@ private slots:
         QCOMPARE(Fold::foldText(QString::fromUtf8("ёжик")), QStringLiteral("ezhik"));
     }
 
+    void conventionalKoreanNames_data()
+    {
+        QTest::addColumn<QString>("input");
+        QTest::addColumn<QString>("expected");
+
+        QTest::newRow("Lee Ji-eun") << QString::fromUtf8("이지은") << QStringLiteral("leejieun");
+        QTest::newRow("Jeon Jung-kook") << QString::fromUtf8("전정국") << QStringLiteral("jeonjungkook");
+        QTest::newRow("Kim Tae-hyung") << QString::fromUtf8("김태형") << QStringLiteral("kimtaehyung");
+        QTest::newRow("Min Yoon-gi") << QString::fromUtf8("민윤기") << QStringLiteral("minyoongi");
+        QTest::newRow("Jung Ho-seok") << QString::fromUtf8("정호석") << QStringLiteral("junghoseok");
+        QTest::newRow("Park Jae-beom") << QString::fromUtf8("박재범") << QStringLiteral("parkjaebum");
+        QTest::newRow("Namgung Min") << QString::fromUtf8("남궁민") << QStringLiteral("namgoongmin");
+        QTest::newRow("Um Jung-hwa") << QString::fromUtf8("엄정화") << QStringLiteral("umjunghwa");
+        QTest::newRow("Hwangbo Min") << QString::fromUtf8("황보민") << QStringLiteral("hwangbomin");
+        QTest::newRow("Jegal Min") << QString::fromUtf8("제갈민") << QStringLiteral("jegalmin");
+        QTest::newRow("Sunwoo Min") << QString::fromUtf8("선우민") << QStringLiteral("sunwoomin");
+        QTest::newRow("Dokgo Min") << QString::fromUtf8("독고민") << QStringLiteral("dokgomin");
+    }
+
+    void conventionalKoreanNames()
+    {
+        QFETCH(QString, input);
+        QFETCH(QString, expected);
+        QVERIFY2(segments(input).contains(expected), qPrintable(expected));
+    }
+
     void kanaRomaji()
     {
         QCOMPARE(Fold::foldText(QString::fromUtf8("さんしん")), QStringLiteral("sanshin"));
@@ -215,6 +241,10 @@ private slots:
                                         QStringLiteral("hangugomueller")}) {
             QVERIFY2(mixed.contains(expected), qPrintable(expected));
         }
+        for (const QString &expected : {QStringLiteral("hankookeomuller"), QStringLiteral("hankookeomueller"),
+                                        QStringLiteral("hankookeomiller")}) {
+            QVERIFY2(mixed.contains(expected), qPrintable(expected));
+        }
         // A script whose readings all agree takes no combination away.
         QVERIFY(segments(QString::fromUtf8("한국어Müllerα")).contains(QStringLiteral("hangugeomillera")));
         // Kana and kanji still read as one Japanese spelling per fold.
@@ -285,6 +315,15 @@ private slots:
         const Fold::FoldResult hangul = Fold::fold(QString::fromUtf8("a악단"));
         QCOMPARE(hangul.text, QStringLiteral("aakdan"));
         QCOMPARE(hangul.srcIndex, (QVector<int>{0, 1, 1, 2, 2, 2}));
+
+        bool foundName = false;
+        for (const Fold::FoldResult &f : Fold::foldAll(QString::fromUtf8("남궁민"))) {
+            if (f.text != QStringLiteral("namgoongmin")) continue;
+            QCOMPARE(f.srcIndex, (QVector<int>{0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2}));
+            foundName = true;
+            break;
+        }
+        QVERIFY(foundName);
     }
 
     void sourceIndexMappingForCompatibilityForms()

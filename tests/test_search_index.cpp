@@ -283,6 +283,19 @@ private slots:
         }
     }
 
+    void conventionalKoreanNameQueriesFindHangul()
+    {
+        SearchRecord artist = makeRecord(QStringLiteral("Song"), QString::fromUtf8("이지은"),
+                                         QStringLiteral("Album"));
+        foldRecordNorms(artist);
+
+        SearchIndex idx;
+        idx.build({artist});
+        const auto results = idx.match(SearchQuery::parse(QStringLiteral("lee jieun")), false);
+        QCOMPARE(results.size(), 1);
+        QCOMPARE(results.first().rec.artistName, QString::fromUtf8("이지은"));
+    }
+
     void chinesePolyphoneQueriesMatchBothReadings()
     {
         SearchRecord record = makeRecord(QString::fromUtf8("长发"), QStringLiteral("Artist"),

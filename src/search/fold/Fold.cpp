@@ -100,12 +100,13 @@ int styleCount(Script family)
         return 4;
     case Script::Hebrew:
         return 3;
+    case Script::Hangul:
+        return 4;
     case Script::Syriac:
     case Script::Thaana:
         return 2;
     case Script::Greek:
     case Script::Cyrillic:
-    case Script::Hangul:
     case Script::Thai:
     case Script::Lao:
     case Script::LatinAlt:

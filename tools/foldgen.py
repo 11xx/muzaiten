@@ -932,11 +932,34 @@ class Generator:
 
         coda_order = ["k", "n", "t", "l", "m", "p", "ng"]
         rr, mr = self.hangul["rr"], self.hangul["mr"]
+        names = self.hangul["names"]
+        surname_rows = []
+        for key in sorted(names["surnames"], key=lambda k: k.encode("utf-16-be")):
+            syllables = names["surnames"][key]
+            if len(key) not in (1, 2) or len(syllables) != len(key):
+                sys.exit(f"hangul.json: surname {key!r} must have one spelling per one or two syllables")
+            key_ref = pool.ref(key)
+            first_ref = pool.ref(syllables[0])
+            second_ref = pool.ref(syllables[1]) if len(syllables) == 2 else "{0, 0}"
+            surname_rows.append("    {" + key_ref + ", {" + first_ref + ", " + second_ref + "}},")
+        given_name_rows = []
+        for key in sorted(names["given"], key=lambda k: k.encode("utf-16-be")):
+            if len(key) != 1 or not (0xAC00 <= ord(key) <= 0xD7A3):
+                sys.exit(f"hangul.json: given-name key {key!r} must be one precomposed Hangul syllable")
+            given_name_rows.append(f"    {{{pool.ref(key)}, {pool.ref(names['given'][key])}}},")
         hangul_lines = [
             f"const HangulStyle kHangulRr = {{{str_array(rr['initials'])}, {str_array(rr['initials'])}, "
             f"{str_array(rr['vowels'])}, {str_array([rr['codas'][c] for c in coda_order])}, {pool.ref(rr['lateral'])}}};",
             f"const HangulStyle kHangulMr = {{{str_array(mr['initials'])}, {str_array(mr['voiced_initials'])}, "
             f"{str_array(mr['vowels'])}, {str_array([mr['codas'][c] for c in coda_order])}, {pool.ref(mr['lateral'])}}};",
+            f"const HangulSurname kHangulSurnames[{len(surname_rows)}] = {{",
+            *surname_rows,
+            "};",
+            f"const std::size_t kHangulSurnameCount = {len(surname_rows)};",
+            f"const Word kHangulGivenNames[{len(given_name_rows)}] = {{",
+            *given_name_rows,
+            "};",
+            f"const std::size_t kHangulGivenNameCount = {len(given_name_rows)};",
         ]
 
         # Han
