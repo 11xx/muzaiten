@@ -87,13 +87,12 @@ the first reading; style 4 uses the second when present and otherwise repeats
 the first.
 Chinese word lookup folds
 each character to its simplified form first, so a word row also supplies the
-reading for traditional and variant spellings. Japanese seed readings continue
-to match the written characters. Han runs use forward and backward longest
+reading for traditional and variant spellings. Japanese seed readings match the written characters. Han runs use forward and backward longest
 matches; the segmentation with fewer pieces wins, then the one with fewer
-single characters, with backward matching breaking a tie. Rows whose primary
-reading agrees with every character default are omitted from the reading
-overrides unless the row has a second reading or a character has another
-reading, but every row remains available to guide word boundaries.
+single characters. When those counts tie, the segmentation that leaves more
+function words as single characters wins; backward matching breaks the final
+tie. Every word row supplies its reading, including rows whose reading agrees
+with the simplified characters’ defaults.
 
 The Han checker also checks word format, each syllable against its character's
 authored reading or Unihan default, and each toneless reading against

@@ -1031,22 +1031,12 @@ class Generator:
                     syllables = value.split()
                     if len(syllables) != len(key):
                         sys.exit(f"Chinese word table: {key} has {len(key)} characters but {len(syllables)} syllables")
-                    # A word that reads as its characters' defaults adds nothing,
-                    # unless an alternate word or character reading must be preserved.
-                    if (not alternate
-                            and all(reading_of.get(c) == s for c, s in zip(key, syllables))
-                            and not any(c in self.han_second_pinyin for c in key)):
-                        continue
                 alt_ref = pool.ref(alternate) if alternate else "{0, 0}"
                 rows.append(f"    {{{pool.ref(key)}, {pool.ref(value)}, {alt_ref}}},")
             return rows, longest
 
         japanese_rows, japanese_longest = words(self.han["japanese"], False)
         chinese_rows, chinese_longest = words(self.chinese_words, True)
-        chinese_segment_rows = [
-            f"    {{{pool.ref(key)}, {{0, 0}}, {{0, 0}}}},"
-            for key in sorted(self.chinese_words, key=lambda k: k.encode("utf-16-be"))
-        ]
 
         # Greek
         greek_styles = []
@@ -1246,7 +1236,7 @@ class Generator:
         digest = hashlib.sha256()
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
                             bmp_pinyin, astral_pinyin, second_pinyin, pinyin_syllables,
-                            japanese_rows, chinese_rows, chinese_segment_rows,
+                            japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
                             abjad_block_rows, abjad_constants, tibetan_rows, composable_bmp,
@@ -1308,10 +1298,6 @@ class Generator:
         w("};")
         w(f"const std::size_t kJapaneseWordCount = {len(japanese_rows)};")
         w(f"const int kJapaneseLongest = {japanese_longest};")
-        w(f"const Word kChineseWordSegments[{len(chinese_segment_rows)}] = {{")
-        out.extend(chinese_segment_rows)
-        w("};")
-        w(f"const std::size_t kChineseWordSegmentCount = {len(chinese_segment_rows)};")
         w(f"const Word kChineseWords[{len(chinese_rows)}] = {{")
         out.extend(chinese_rows)
         w("};")

@@ -123,6 +123,35 @@ class FoldHanDataTests(unittest.TestCase):
             (str(words), "2", "重庆", "format", "chóng qìng", "a distinct second reading"), findings
         )
 
+    def test_cedict_extra_reports_each_missing_word_reading_and_can_be_suppressed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "长\tcháng zhǎng\t\n城\tchéng\t\n", encoding="utf-8",
+            )
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text("长城\tcháng chéng\tzhǎng chéng\n", encoding="utf-8")
+            references = {"长城": {("chang", "cheng"), ("zhang", "cheng"), ("chang", "chengx")}}
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(
+                    words, authored, references, {"chang", "zhang", "cheng"}, set(), set(),
+                )
+                suppressed, suppressed_counts = checker.check_words(
+                    words, authored, references, {"chang", "zhang", "cheng"}, set(),
+                    {("长城", "cedict-extra", "cháng chéng; zhǎng chéng", "chang chengx")},
+                )
+        finding = (str(words), "1", "长城", "cedict-extra", "cháng chéng; zhǎng chéng", "chang chengx")
+        self.assertIn(finding, findings)
+        self.assertEqual(counts["cedict-extra"], 1)
+        self.assertNotIn(finding, suppressed)
+        self.assertEqual(suppressed_counts["cedict-extra"], 0)
+
     def test_cedict_indexes_both_spellings_and_prints_its_date_line(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = pathlib.Path(directory) / "cedict.zip"

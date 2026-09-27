@@ -41,7 +41,6 @@
 上尉	shàng wèi
 上校	shàng xiào
 上缴	shàng jiǎo
-上都	shàng dū
 上颌	shàng hé
 下属	xià shǔ
 下裳	xià cháng
@@ -80,7 +79,6 @@
 中将	zhōng jiàng
 中尉	zhōng wèi
 中校	zhōng xiào
-中都	zhōng dū
 中队长	zhōng duì zhǎng
 丰姿绰约	fēng zī chuò yuē
 丰都	fēng dū
@@ -132,7 +130,6 @@
 乾隆	qián lóng
 了不得	liǎo bu de
 了不起	liǎo bù qǐ
-了事	liǎo shì
 了却	liǎo què
 了如指掌	liǎo rú zhǐ zhǎng
 了局	liǎo jú
@@ -345,7 +342,7 @@
 公仔	gōng zǎi
 公仔面	gōng zǎi miàn
 公尺	gōng chǐ
-公差	gōng chā
+公差	gōng chā	gōng chāi
 公祭	gōng jì
 公转	gōng zhuàn
 六六大顺	liù liù dà shùn
@@ -414,6 +411,7 @@
 列车长	liè chē zhǎng
 刚劲	gāng jìng
 刚正不阿	gāng zhèng bù ē
+初露头角	chū lù tóu jiǎo
 刨冰	bào bīng
 刨子	bào zi
 刨床	bào chuáng
@@ -619,6 +617,7 @@
 叶韵	xié yùn
 号召	hào zhào
 号角	hào jiǎo
+叽叽喳喳	jī jī zhā zhā
 吁气	xū qì
 各行各业	gè háng gè yè
 合作	hé zuò
@@ -715,7 +714,6 @@
 和衣	hé yī
 和诗	hè shī
 和谐	hé xié
-和面	huó miàn
 和韵	hè yùn
 咔嚓	kā chā
 咖哩	gā lī	kā lī
@@ -745,6 +743,7 @@
 品种	pǐn zhǒng
 哕哕	huì huì
 哥俩	gē liǎ
+哥哥	gē ge
 哪个	nǎ gè
 哪些	nǎ xiē
 哪吒	né zhā
@@ -776,7 +775,7 @@
 啜泣	chuò qì
 啜饮	chuò yǐn
 喀嚓	kā chā
-喁喁	yóng yóng
+喁喁	yú yú	yóng yóng
 喁喁私语	yú yú sī yǔ
 喋喋	dié dié
 喋喋不休	dié dié bù xiū
@@ -784,7 +783,7 @@
 喔唷	ō yō
 喔喔	wō wō
 喧嚣	xuān xiāo
-喳喳	chā chā
+喳喳	chā chā	zhā zhā
 喷涌	pēn yǒng
 嗒然	tà rán
 嗨哟	hāi yō
@@ -844,7 +843,6 @@
 地球	dì qiú
 地磅	dì bàng
 地窨子	dì yìn zi
-地面	dì miàn
 场合	chǎng hé
 坚强	jiān qiáng
 坦率	tǎn shuài
@@ -913,17 +911,16 @@
 大藏经	dà zàng jīng
 大调	dà diào
 大辟	dà pì
-大都	dà dōu
+大都	dà dōu	dà dū
 大都会	dà dū huì
 大队长	dà duì zhǎng
 大陆	dà lù
 大隗	dà wěi
-大黄	dài huáng	dà huáng
+大黄	dà huáng	dài huáng
 大龙湫	dà lóng qiū
 天地	tiān dì
 天姥山	tiān mǔ shān
 太子参	tài zǐ shēn
-太行	tài háng
 太行山	tài háng shān
 失调	shī tiáo	shī diào
 失调症	shī tiáo zhèng
@@ -1144,6 +1141,7 @@
 峙立	zhì lì
 崆峒	kōng tóng
 崩溃	bēng kuì
+崭露头角	zhǎn lù tóu jiǎo
 崴嵬	wēi wéi
 崴脚	wǎi jiǎo
 嵌入	qiàn rù
@@ -1248,6 +1246,7 @@
 强求	qiǎng qiú
 强词夺理	qiǎng cí duó lǐ
 强调	qiáng diào
+强调色	qiáng diào sè
 强迫	qiǎng pò
 归宿	guī sù
 归属	guī shǔ
@@ -1257,7 +1256,7 @@
 彷佛	fǎng fú
 彷徨	páng huáng
 徒长	tú zhǎng
-得了	dé le
+得了	dé le	dé liǎo
 得亏	děi kuī
 得到	dé dào
 得劲	dé jìn
@@ -1312,9 +1311,11 @@
 悬崖勒马	xuán yá lè mǎ
 悬瀑	xuán pù
 情调	qíng diào
+情非得已	qíng fēi dé yǐ
 惊吓	jīng xià
 惊心动魄	jīng xīn dòng pò
 惝恍	chǎng huǎng
+想念	xiǎng niàn
 惺忪	xīng sōng
 意思	yì si
 意见	yì jiàn
@@ -1353,6 +1354,7 @@
 手刹	shǒu shā
 手如柔荑	shǒu rú róu tí
 手术	shǒu shù
+手机	shǒu jī
 手臂	shǒu bì
 扎实	zhā shi
 扎彩	zā cǎi
@@ -1362,7 +1364,7 @@
 扑棱	pū lēng
 扒开	bā kāi
 扒手	pá shǒu
-扒拉	bā la
+扒拉	bā la	pá la
 扒灰	pá huī
 扒犁	pá lí
 扒皮	bā pí
@@ -1505,7 +1507,7 @@
 摇旗呐喊	yáo qí nà hǎn
 摩天	mó tiān
 摩天大厦	mó tiān dà shà
-摩挲	mó suō
+摩挲	mó suō	mā sa
 摩擦	mó cā
 摩登	mó dēng
 撒尿	sā niào
@@ -1528,6 +1530,7 @@
 攒钱	zǎn qián
 攒集	cuán jí
 支行	zhī háng
+收到	shōu dào
 收拾	shōu shi
 收缩	shōu suō
 收缴	shōu jiǎo
@@ -1595,7 +1598,6 @@
 旧都	jiù dū
 时差	shí chā
 时期	shí qī
-明了	míng liǎo
 明瞭	míng liǎo
 星宿	xīng xiù
 星宿海	xīng xiù hǎi
@@ -1804,9 +1806,9 @@
 槛内人	kǎn nèi rén
 槛外人	kǎn wài rén
 槛车	jiàn chē
-槟城	bīn chéng
+槟城	bīng chéng	bīn chéng
 槟子	bīn zi
-槟榔	bīn láng
+槟榔	bīng láng	bīn láng
 模仿	mó fǎng
 模具	mú jù
 模型	mó xíng
@@ -1888,7 +1890,6 @@
 没劲	méi jìn
 没完没了	méi wán méi liǎo
 没意思	méi yì si
-没收	mò shōu
 没有	méi yǒu
 没法	méi fǎ
 没用	méi yòng
@@ -1966,7 +1967,7 @@
 清洗	qīng xǐ
 渑水	shéng shuǐ
 渑池	miǎn chí
-温和	wēn hé
+温和	wēn hé	wēn huo
 温差	wēn chā
 温度	wēn dù
 温情脉脉	wēn qíng mò mò
@@ -2006,7 +2007,7 @@
 澄净	chéng jìng
 澄明	chéng míng
 澄沙	dèng shā
-澄清	chéng qīng
+澄清	chéng qīng	dèng qīng
 澄澈	chéng chè
 澄莹	chéng yíng
 澹台	tán tái
@@ -2038,7 +2039,7 @@
 熟人	shú rén
 熟悉	shú xī
 熟练	shú liàn
-熟透	shóu tòu	shú tòu
+熟透	shú tòu	shóu tòu
 熨帖	yù tiē
 熨斗	yùn dǒu
 熨烫	yùn tàng
@@ -2098,6 +2099,7 @@
 王焘	wáng tāo
 玢岩	fēn yán
 玩弄	wán nòng
+玻色子	bō sè zǐ
 珍珠蚌	zhēn zhū bàng
 珠盘玉敦	zhū pán yù duì
 珩磨	háng mó
@@ -2106,7 +2108,7 @@
 理事长	lǐ shì zhǎng
 理解	lǐ jiě
 琢玉	zhuó yù
-琢磨	zuó mo
+琢磨	zuó mo	zhuó mó
 琴行	qín háng
 瑜伽	yú jiā
 瑷珲	ài huī
@@ -2128,7 +2130,7 @@
 由不得	yóu bu de
 甲壳	jiǎ qiào
 甲壳类	jiǎ qiào lèi
-甲壳虫	jiǎ qiào chóng
+甲壳虫	jiǎ qiào chóng	jiǎ ké chóng
 甲戌	jiǎ xū
 电位差	diàn wèi chā
 电烙铁	diàn lào tie
@@ -2164,7 +2166,6 @@
 白术	bái zhú
 白色	bái sè
 百般	bǎi bān
-的哥	dí gē
 的士	dí shì
 的确	dí què
 的话	de huà
@@ -2182,7 +2183,7 @@
 盛情	shèng qíng
 盛满	chéng mǎn
 盛行	shèng xíng
-盛装	shèng zhuāng
+盛装	shèng zhuāng	chéng zhuāng
 盛饭	chéng fàn
 目的	mù dì
 目的地	mù dì dì
@@ -2207,12 +2208,12 @@
 着凉	zháo liáng
 着呢	zhe ne
 着急	zháo jí
-着想	zhuó xiǎng
-着手	zhuó shǒu
+着想	zhuó xiǎng	zhe xiǎng
+着手	zhuó shǒu	zhe shǒu
 着数	zhāo shù
 着法	zhāo fǎ
 着火	zháo huǒ
-着落	zhuó luò
+着落	zhuó luò	zhe luò
 着装	zhuó zhuāng
 着迷	zháo mí
 着重	zhuó zhòng
@@ -2230,7 +2231,6 @@
 矜寡	guān guǎ
 矜持	jīn chí
 矜贵	jīn guì
-知了	zhī liǎo
 知觉	zhī jué
 知识	zhī shi
 石头	shí tou
@@ -2452,6 +2452,7 @@
 缩小	suō xiǎo
 缩短	suō duǎn
 缩砂	sù shā
+缪斯	miù sī
 缲丝	sāo sī
 缲边	qiāo biān
 缴械	jiǎo xiè
@@ -2461,7 +2462,7 @@
 罗刹	luó chà
 罗布泊	luó bù pō
 罗布泊镇	luó bù pō zhèn
-罢了	bà le
+罢了	bà le	bà liǎo
 罪恶	zuì è
 羊圈	yáng juàn
 美差	měi chāi
@@ -2594,7 +2595,6 @@
 芥蓝	gài lán
 芫花	yuán huā
 芫荽	yán sui
-花都	huā dū
 苍术	cāng zhú
 苕子	tiáo zi
 苕溪	tiáo xī
@@ -2613,7 +2613,7 @@
 茄盒	qié hé
 茈草	zǐ cǎo
 茜色	qiàn sè
-茜茜	xī xī
+茜茜	xī xī	qiàn qiàn
 茜草	qiàn cǎo
 茶匙	chá chí
 茶叶	chá yè
@@ -2667,12 +2667,12 @@
 著名	zhù míng
 著呢	zhe ne
 著急	zháo jí
-著想	zhuó xiǎng
-著手	zhuó shǒu
+著想	zhuó xiǎng	zhe xiǎng
+著手	zhuó shǒu	zhe shǒu
 著数	zhāo shù
 著法	zhāo fǎ
 著火	zháo huǒ
-著落	zhuó luò
+著落	zhuó luò	zhe luò
 著装	zhuó zhuāng
 著迷	zháo mí
 著重	zhuó zhòng
@@ -2733,12 +2733,12 @@
 蛤蚧	gé jiè
 蛤蜊	gé lí
 蛤蟆	há ma
-蜂螫	fēng shì
+蜂螫	fēng shì	fēng zhē
 蜜桔	mì jú
 蝤蛑	qiú móu
 蝤蛴	qiú qí
 螫针	shì zhēn
-螵蛸	piāo shāo
+螵蛸	piāo xiāo
 螺钿	luó diàn
 蟒蛇	mǎng shé
 血压	xuè yā
@@ -2902,7 +2902,7 @@
 调息	tiáo xī
 调情	tiáo qíng
 调戏	tiáo xì
-调拨	diào bō
+调拨	diào bō	tiáo bō
 调换	diào huàn
 调控	tiáo kòng
 调教	tiáo jiào
@@ -2928,7 +2928,7 @@
 调试	tiáo shì
 调速	tiáo sù
 调速器	tiáo sù qì
-调配	diào pèi
+调配	diào pèi	tiáo pèi
 调酒	tiáo jiǔ
 调酒师	tiáo jiǔ shī
 调音	tiáo yīn
@@ -3096,7 +3096,7 @@
 部将	bù jiàng
 部长	bù zhǎng
 郭隗	guō wěi
-都会	dū huì
+都会	dōu huì	dū huì
 都兰	dū lán
 都匀	dū yún
 都城	dū chéng
@@ -3219,6 +3219,8 @@
 长江	cháng jiāng
 长男	zhǎng nán
 长相	zhǎng xiàng
+长相厮守	cháng xiāng sī shǒu
+长相守	cháng xiāng shǒu
 长短	cháng duǎn
 长笛	cháng dí
 长老	zhǎng lǎo
@@ -3327,7 +3329,7 @@
 露底	lòu dǐ
 露怯	lòu qiè
 露水	lù shuǐ
-露点	lù diǎn
+露点	lù diǎn	lòu diǎn
 露白	lòu bái
 露相	lòu xiàng
 露脸	lòu liǎn
@@ -3344,6 +3346,8 @@
 静脉	jìng mài
 非得	fēi děi
 靠得住	kào de zhù
+面包	miàn bāo
+面对	miàn duì
 革命	gé mìng
 革新	gé xīn
 革除	gé chú

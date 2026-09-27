@@ -299,6 +299,23 @@ qsizetype singleCharacterCount(const WordSegments &segments)
     });
 }
 
+// Function words commonly stand alone beside longer lexical words. Prefer a
+// segmentation that leaves those words single when all larger counts tie.
+constexpr QStringView kChineseFunctionWords = u"的了着地得都也和就在是不很还又才把被给让从向对与跟为以而并或吗呢吧啊么过";
+
+qsizetype functionWordCount(const WordSegments &segments, QStringView keys,
+                            const QVarLengthArray<qsizetype, 32> &offsets)
+{
+    qsizetype count = 0;
+    for (const WordSegment &segment : segments) {
+        if (segment.length != 1) continue;
+        const qsizetype first = offsets[segment.first];
+        if (offsets[segment.first + 1] - first == 1
+            && kChineseFunctionWords.contains(keys[first])) ++count;
+    }
+    return count;
+}
+
 } // namespace
 
 void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out)
@@ -342,33 +359,25 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         return;
     }
     if (style == 3 || style == 4) {
-        const WordSegments forward = segmentChineseForward(kChineseWordSegments, kChineseWordSegmentCount,
+        const WordSegments forward = segmentChineseForward(kChineseWords, kChineseWordCount,
                                                            kChineseLongest, chineseKeyView, chineseOffsets);
-        const WordSegments backward = segmentChineseBackward(kChineseWordSegments, kChineseWordSegmentCount,
+        const WordSegments backward = segmentChineseBackward(kChineseWords, kChineseWordCount,
                                                              kChineseLongest, chineseKeyView, chineseOffsets);
         const bool chooseForward = forward.size() < backward.size()
             || (forward.size() == backward.size()
-                && singleCharacterCount(forward) < singleCharacterCount(backward));
+                && (singleCharacterCount(forward) < singleCharacterCount(backward)
+                    || (singleCharacterCount(forward) == singleCharacterCount(backward)
+                        && functionWordCount(forward, chineseKeyView, chineseOffsets)
+                            > functionWordCount(backward, chineseKeyView, chineseOffsets))));
         const WordSegments &segments = chooseForward ? forward : backward;
         for (const WordSegment &segment : segments) {
             if (segment.word) {
-                const qsizetype keyStart = chineseOffsets[segment.first];
-                const qsizetype keyEnd = chineseOffsets[segment.first + segment.length];
-                const QStringView wordKey = chineseKeyView.mid(keyStart, keyEnd - keyStart);
-                if (const Word *word = findWord(kChineseWords, kChineseWordCount, wordKey)) {
-                    qsizetype m = 0;
-                    const Str reading = style == 4 && word->alternate.len ? word->alternate : word->value;
-                    for (const QStringView syllable : view(reading).tokenize(u' ')) {
-                        out.put(syllable, u[segment.first + std::min(m, segment.length - 1)].src);
-                        ++m;
-                    }
-                } else {
-                    for (qsizetype m = 0; m < segment.length; ++m) {
-                        const qsizetype j = segment.first + m;
-                        const std::uint16_t fallback = pinyinOf(cps[j]);
-                        if (fallback) out.put(kPinyin[fallback], u[j].src);
-                        else emitSurface(cps[j], u[j].src, out);
-                    }
+                qsizetype m = 0;
+                const Str reading = style == 4 && segment.word->alternate.len
+                    ? segment.word->alternate : segment.word->value;
+                for (const QStringView syllable : view(reading).tokenize(u' ')) {
+                    out.put(syllable, u[segment.first + std::min(m, segment.length - 1)].src);
+                    ++m;
                 }
                 continue;
             }

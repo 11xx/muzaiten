@@ -71,7 +71,7 @@ DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
 CHECK_KINDS = (
     "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
-    "reading", "cedict", "uncommon",
+    "reading", "cedict", "cedict-extra", "uncommon",
 )
 TIER_FILES = ("gb2312.tsv", "big5.tsv", "jis.tsv", "ksx.tsv")
 
@@ -544,6 +544,12 @@ def check_words(
             if references and tuple(valid_pinyin) not in references:
                 alternatives = sorted(" ".join(reading) for reading in references)
                 add(row_number, word, "cedict", reading_text, "; ".join(alternatives))
+
+        if has_valid_reading and references:
+            authored = {tuple(pinyin_base(syllable) for syllable in field.split())
+                        for field in reading_fields}
+            for reference in sorted(references - authored):
+                add(row_number, word, "cedict-extra", "; ".join(reading_fields), " ".join(reference))
 
         if has_valid_reading and not references:
             add(row_number, word, "uncommon", reading_fields[0], "-")
