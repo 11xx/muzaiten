@@ -885,9 +885,6 @@
 劔	simplified	剑	-	Variant policy; no direct Unihan fold.
 劒	simplified	剑	-	Variant policy; no direct Unihan fold.
 剱	simplified	剑	-	Variant policy; no direct Unihan fold.
-辧	default	bàn	biàn	Unihan kDefinition gives 辦's meaning (manage, handle); 辧 is the Japanese variant of 辦 → 办. Its kMandarin biàn is kept as a second reading.
-辧	unattested	bàn	-	Unihan kDefinition gives 辦's meaning (manage, handle); 辧 is the Japanese variant of 辦 → 办. Its kMandarin biàn is kept as a second reading.
-辧	simplified	办	-	Unihan kDefinition gives 辦's meaning (manage, handle); 辧 is the Japanese variant of 辦 → 办. Its kMandarin biàn is kept as a second reading.
 勠	simplified	戮	-	Variant policy; no direct Unihan fold.
 匳	simplified	奁	-	Variant policy; no direct Unihan fold.
 卆	simplified	卒	-	Variant policy; no direct Unihan fold.
@@ -1684,3 +1681,4 @@
 屛	tone	bǐng	-	Variant of 屏; bǐng in 屏息.
 熢	default	fēng	péng	fēng represents 烽, as in 烽火, beacon fire. [MOE](https://dict.variants.moe.edu.tw/dictView.jsp?ID=25788)
 釪	default	yú	huá	yú denotes a small bell or alms bowl; Taiwan also assigns yú. [CNS11643](https://www.cns11643.gov.tw/wordView.jsp?ID=145955)
+辧	simplified	辨	-	The Taiwan MOE variant dictionary lists 辧 as a variant of 辨 (distinguish), distinct from 辦; it reads biàn and folds with 辨.

@@ -151,6 +151,9 @@ private slots:
             for (const QString &spelling : spellings) QCOMPARE(Fold::foldText(spelling), terminal);
         }
 
+        // A variant folds with the character it is a variant of (辧 of 辨, not 辦).
+        QCOMPARE(Fold::foldText(QString::fromUtf8("辧別")), Fold::foldText(QString::fromUtf8("辨別")));
+
         const QString root = QStringLiteral(FOLD_HAN_DATA_PATH);
         QSet<QString> mapped;
         const auto appendCodePoints = [&mapped](const QString &text) {
