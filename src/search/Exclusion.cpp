@@ -1,10 +1,60 @@
 #include "search/Exclusion.h"
 
 #include "search/SearchRecord.h"
+#include "search/fold/Fold.h"
 
 #include <QRegularExpression>
 
 namespace Search {
+
+enum class GlobTokenKind { Literal, Star, Question };
+
+struct GlobToken {
+    GlobTokenKind kind;
+    QString text;
+};
+
+static QVector<GlobToken> foldGlob(const QString &glob)
+{
+    QVector<GlobToken> tokens;
+    QString literalRun;
+    const auto appendLiteralRun = [&] {
+        if (!literalRun.isEmpty()) {
+            const QString folded = Fold::foldText(literalRun);
+            if (!folded.isEmpty()) {
+                tokens.push_back({GlobTokenKind::Literal, folded});
+            }
+            literalRun.clear();
+        }
+    };
+
+    for (const QChar c : glob) {
+        if (c == QLatin1Char('*') || c == QLatin1Char('?')) {
+            appendLiteralRun();
+            tokens.push_back({c == QLatin1Char('*') ? GlobTokenKind::Star : GlobTokenKind::Question, {}});
+        } else {
+            literalRun += c;
+        }
+    }
+    appendLiteralRun();
+    return tokens;
+}
+
+static QString globRegex(const QVector<GlobToken> &tokens)
+{
+    QString pattern;
+    for (const GlobToken &token : tokens) {
+        if (token.kind == GlobTokenKind::Literal) {
+            pattern += QRegularExpression::escape(token.text);
+        } else {
+            const QString wildcard = token.kind == GlobTokenKind::Star
+                ? QStringLiteral("*") : QStringLiteral("?");
+            pattern += QRegularExpression::wildcardToRegularExpression(
+                wildcard, QRegularExpression::UnanchoredWildcardConversion);
+        }
+    }
+    return pattern;
+}
 
 ExcludeMatcher::ExcludeMatcher(const ExcludeRule &rule)
     : m_scope(rule.scope)
@@ -14,30 +64,31 @@ ExcludeMatcher::ExcludeMatcher(const ExcludeRule &rule)
         return;
     }
 
-    const QString lower = g.toLower();
-    const bool hasInterior = [&] {
-        // Wildcards anywhere other than the leading/trailing position force regex.
-        const QString inner = lower.mid(1, lower.length() - 2);
-        return inner.contains(QLatin1Char('*')) || inner.contains(QLatin1Char('?'))
-            || lower.contains(QLatin1Char('?'));
-    }();
+    const QVector<GlobToken> tokens = foldGlob(g);
+    bool hasQuestion = false;
+    bool hasInterior = false;
+    for (qsizetype i = 0; i < tokens.size(); ++i) {
+        const GlobTokenKind kind = tokens.at(i).kind;
+        hasQuestion |= kind == GlobTokenKind::Question;
+        hasInterior |= kind != GlobTokenKind::Literal && i > 0 && i + 1 < tokens.size();
+    }
+    hasInterior |= hasQuestion;
 
     if (hasInterior) {
         m_kind = Kind::Regex;
-        // UnanchoredWildcardConversion already produces a substring-style
-        // (unanchored) pattern, which is exactly what an exclusion glob wants,
-        // so m_regex is used as-is — no further anchoring adjustment.
-        m_regex = QRegularExpression::fromWildcard(
-            g, Qt::CaseInsensitive, QRegularExpression::UnanchoredWildcardConversion);
+        m_regex = QRegularExpression(globRegex(tokens), QRegularExpression::CaseInsensitiveOption);
         m_valid = m_regex.isValid();
         return;
     }
 
-    const bool lead  = lower.startsWith(QLatin1Char('*'));
-    const bool trail = lower.endsWith(QLatin1Char('*'));
-    QString core = lower;
-    if (trail) core.chop(1);
-    if (lead && !core.isEmpty()) core = core.mid(1);
+    const bool lead = !tokens.isEmpty() && tokens.first().kind == GlobTokenKind::Star;
+    const bool trail = !tokens.isEmpty() && tokens.last().kind == GlobTokenKind::Star;
+    const qsizetype first = lead ? 1 : 0;
+    const qsizetype last = tokens.size() - (trail ? 1 : 0);
+    QString core;
+    for (qsizetype i = first; i < last; ++i) {
+        core += tokens.at(i).text;
+    }
 
     if (core.isEmpty()) {
         return;  // pattern was just "*" — matches everything; treat as invalid/no-op

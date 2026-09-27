@@ -163,6 +163,10 @@ name (`The Wall` and `Wall, The`). Anchors and fuzzy matching check each form
 on its own, so `^wall` and `the wall$` both find that title. Exclusion globs
 with a leading or trailing `*` behave the same way.
 
+Literal text in exclusion globs folds like a search query, so `*café*`
+matches `Café`, and `*東京*` matches the simplified primary fold of `東京`.
+`*` and `?` remain wildcards, and each glob matches one folded form at a time.
+
 ## Ranking and exclusions
 
 `Settings > Search ranking…` opens a panel that controls how results are

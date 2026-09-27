@@ -19,6 +19,13 @@ static SearchRecord rec(const QString &title, const QString &path)
     return r;
 }
 
+static SearchRecord foldedRec(const QString &title, const QString &path)
+{
+    SearchRecord r = rec(title, path);
+    foldRecordNorms(r);
+    return r;
+}
+
 class TestExclusion : public QObject {
     Q_OBJECT
 
@@ -81,6 +88,54 @@ private slots:
         QVERIFY(m.isValid());
         QVERIFY(m.matches(rec(QStringLiteral("Live in London 2003"), QStringLiteral("/m/a.flac"))));
         QVERIFY(!m.matches(rec(QStringLiteral("Studio 2003"), QStringLiteral("/m/a.flac"))));
+    }
+
+    void accentedGlobLiteralsUseQueryFolding()
+    {
+        const SearchRecord r = foldedRec(QString::fromUtf8("Café Society"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("*café*"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("café*"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("CAFÉ*"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void hanGlobLiteralsUseQueryFolding()
+    {
+        const SearchRecord r = foldedRec(QString::fromUtf8("東京"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("*東京*"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void questionWildcardStillMatchesFoldedText()
+    {
+        const SearchRecord r = foldedRec(QString::fromUtf8("Café"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QStringLiteral("caf?"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void emptyFoldedLiteralRunDoesNotBecomeAWildcard()
+    {
+        // A run that folds to nothing (a zero-width space) disappears: the glob
+        // below is the suffix pattern *ab, not a wildcard at its start.
+        const ExcludeMatcher suffix({QStringLiteral("\u200B*ab"), ExcludeScope::AnyField});
+        QVERIFY(suffix.matches(foldedRec(QStringLiteral("xab"), QStringLiteral("/m/a.flac"))));
+        QVERIFY(!suffix.matches(foldedRec(QStringLiteral("abx"), QStringLiteral("/m/b.flac"))));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("\u200B"), ExcludeScope::AnyField}).isValid());
+    }
+
+    void foldedWildcardLookalikesRemainLiteral()
+    {
+        const ExcludeMatcher substring({QString::fromUtf8("a＊b"), ExcludeScope::AnyField});
+        QVERIFY(substring.matches(foldedRec(QStringLiteral("a*b"), QStringLiteral("/m/a.flac"))));
+        QVERIFY(!substring.matches(foldedRec(QStringLiteral("axb"), QStringLiteral("/m/b.flac"))));
+        // With ? the glob becomes a regex, where the folded * must stay escaped.
+        const ExcludeMatcher regex({QString::fromUtf8("a＊b?"), ExcludeScope::AnyField});
+        QVERIFY(regex.matches(foldedRec(QStringLiteral("a*bX"), QStringLiteral("/m/c.flac"))));
+        QVERIFY(!regex.matches(foldedRec(QStringLiteral("axbX"), QStringLiteral("/m/d.flac"))));
+    }
+
+    void asciiGlobMatchingRemainsCaseInsensitive()
+    {
+        const SearchRecord r = foldedRec(QStringLiteral("Live in London 2003"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QStringLiteral("LIVE*2003"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("STUDIO*2003"), ExcludeScope::AnyField}).matches(r));
     }
 
     void pathScopeDoesNotMatchTitle()

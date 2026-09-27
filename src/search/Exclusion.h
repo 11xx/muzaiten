@@ -4,10 +4,11 @@
 // filter phase (before relevance scoring), so excluded items are skipped early
 // and never consume the result cap.
 //
-// Each rule is a glob (*, ?) plus a scope. Globs are auto-lowered to the cheapest
-// matcher at compile time: a bare word or `*word*` becomes a substring test,
-// `word*` a prefix, `*word` a suffix, and anything with interior `*`/`?` falls
-// back to a compiled wildcard regex.
+// Each rule is a glob (*, ?) plus a scope. Literal runs fold like search
+// queries, with wildcard boundaries preserved. Globs are auto-lowered to the
+// cheapest matcher at compile time: a bare word or `*word*` becomes a substring
+// test, `word*` a prefix, `*word` a suffix, and anything with interior `*`/`?`
+// falls back to a compiled wildcard regex.
 
 #include <QMetaType>
 #include <QRegularExpression>
@@ -44,7 +45,7 @@ private:
 
     ExcludeScope        m_scope = ExcludeScope::Path;
     Kind                m_kind  = Kind::Substring;
-    QString             m_needle;   // lowercased, for substring/prefix/suffix
+    QString             m_needle;   // folded, for substring/prefix/suffix
     QRegularExpression  m_regex;    // for Kind::Regex (case-insensitive)
     bool                m_valid = false;
 };
