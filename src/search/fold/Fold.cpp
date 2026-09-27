@@ -524,6 +524,89 @@ QVector<FoldResult> allFolds(const QString &src, bool withIndex)
     }
     if (groups.size() < 2) return folds;
 
+    const int secondHanStyle = styleCount(Script::Han) - 1;
+    qsizetype hanGroup = -1;
+    for (qsizetype g = 0; g < groups.size(); ++g) {
+        if (groups[g].group == Script::Han
+            && std::find(distinct[g].cbegin(), distinct[g].cend(), secondHanStyle) != distinct[g].cend()) {
+            hanGroup = g;
+            break;
+        }
+    }
+
+    if (hanGroup >= 0) {
+        QVarLengthArray<QVarLengthArray<int, 4>, 8> establishedStyles;
+        QVarLengthArray<QVarLengthArray<int, 4>, 8> secondHanStyles;
+        for (qsizetype g = 0; g < groups.size(); ++g) {
+            QVarLengthArray<int, 4> established;
+            for (const int style : distinct[g]) {
+                if (g != hanGroup || style != secondHanStyle) established.append(style);
+            }
+            establishedStyles.append(established);
+            if (g == hanGroup) {
+                QVarLengthArray<int, 4> second{secondHanStyle};
+                secondHanStyles.append(second);
+            } else {
+                secondHanStyles.append(established);
+            }
+        }
+
+        const auto product = [](const auto &choices) {
+            int count = 1;
+            for (const auto &styles : choices) {
+                if (count > 16 / int(styles.size())) return 17;
+                count *= int(styles.size());
+            }
+            return count;
+        };
+        const auto enumerate = [&](const auto &choices, int combinations, bool fixedHan) {
+            if (combinations <= 16) {
+                for (int index = 0; index < combinations; ++index) {
+                    Styles styles{};
+                    int rest = index;
+                    int varied = 0;
+                    for (qsizetype g = 0; g < groups.size(); ++g) {
+                        const auto &options = choices[g];
+                        const int style = options[rest % int(options.size())];
+                        rest /= int(options.size());
+                        assign(styles, groups[g].group, style);
+                        varied += style != 0;
+                    }
+                    if (varied >= 2) add(fold(styles));
+                }
+                return;
+            }
+
+            int widest = 1;
+            for (const Group &g : groups) {
+                const int count = g.group == Script::Han ? secondHanStyle : g.count;
+                widest = std::max(widest, count);
+            }
+            for (int k = 1; k < widest; ++k) {
+                Styles styles{};
+                int varied = 0;
+                for (const Group &g : groups) {
+                    if (fixedHan && g.group == Script::Han) {
+                        assign(styles, g.group, secondHanStyle);
+                        ++varied;
+                        continue;
+                    }
+                    const int count = g.group == Script::Han ? secondHanStyle : g.count;
+                    const int style = k < count ? k : 0;
+                    assign(styles, g.group, style);
+                    varied += style != 0;
+                }
+                if (varied >= 2) add(fold(styles));
+            }
+        };
+
+        // Keep the established reading combinations intact, then combine the
+        // second Han reading with those same non-Han alternatives.
+        enumerate(establishedStyles, product(establishedStyles), false);
+        enumerate(secondHanStyles, product(secondHanStyles), true);
+        return folds;
+    }
+
     int combinations = 1;
     for (const auto &styles : distinct) combinations = std::min<int>(combinations * int(styles.size()), 17);
     if (combinations <= 16) {

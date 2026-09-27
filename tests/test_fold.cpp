@@ -219,6 +219,24 @@ private slots:
         QVERIFY(!segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoye")));
     }
 
+    void secondHanReadingPreservesMixedScriptCombinations()
+    {
+        const QStringList withoutSecondReading = segments(QString::fromUtf8("ηMüller"));
+        QCOMPARE(withoutSecondReading,
+                 (QStringList{QStringLiteral("emuller"), QStringLiteral("emueller"), QStringLiteral("emiller"),
+                              QStringLiteral("imuller"), QStringLiteral("imueller"), QStringLiteral("imiller")}));
+
+        const QStringList mixed = segments(QString::fromUtf8("ηMüller长"));
+        for (const QString &established :
+             {QStringLiteral("emuller长"), QStringLiteral("emueller长"), QStringLiteral("emiller长"),
+              QStringLiteral("imuller长"), QStringLiteral("imueller长"), QStringLiteral("imiller长"),
+              QStringLiteral("emullerchang"), QStringLiteral("emuellerchang"), QStringLiteral("emillerchang"),
+              QStringLiteral("imullerchang"), QStringLiteral("imuellerchang"), QStringLiteral("imillerchang")}) {
+            QVERIFY2(mixed.contains(established), qPrintable(established));
+        }
+        QVERIFY(mixed.contains(QStringLiteral("imuellerzhang")));
+    }
+
     void segmentsJoinDistinctFolds()
     {
         QCOMPARE(Fold::foldSegments(QStringLiteral("Plain Text")), QStringLiteral("plain text"));
