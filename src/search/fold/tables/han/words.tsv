@@ -1,5 +1,5 @@
 # Public domain, hand-authored Chinese word readings.
-# word<TAB>tone-marked Hanyu Pinyin, one syllable per character
+# word<TAB>tone-marked pinyin, one syllable per character[<TAB>second reading]
 一丘之貉	yī qiū zhī hé
 一了百了	yī liǎo bǎi liǎo
 一刹那	yī chà nà
@@ -17,6 +17,7 @@
 一模一样	yī mú yī yàng
 一气呵成	yī qì hē chéng
 一目了然	yī mù liǎo rán
+一目瞭然	yī mù liǎo rán
 一般	yī bān
 一鳞半爪	yī lín bàn zhǎo
 丁香	dīng xiāng
@@ -120,8 +121,11 @@
 乳糜	rǔ mí
 乳臭	rǔ xiù
 乳臭小儿	rǔ xiù xiǎo ér
+乳臭未乾	rǔ xiù wèi gān
 乳臭未干	rǔ xiù wèi gān
 乾卦	qián guà
+乾咳	gān ké
+乾哕	gān yuě
 乾坤	qián kūn
 乾旦	qián dàn
 乾清宫	qián qīng gōng
@@ -146,7 +150,7 @@
 二十八宿	èr shí bā xiù
 于思	yú sāi
 于都	yú dū
-亏折	kuī shé
+亏折	kuī shé	kuī zhé
 云杉	yún shān
 云裳	yún cháng
 五侯鲭	wǔ hóu zhēng
@@ -284,7 +288,7 @@
 侥幸心理	jiǎo xìng xīn lǐ
 侧柏	cè bǎi
 便利	biàn lì
-便宜	pián yi
+便宜	pián yi	biàn yí
 便条	biàn tiáo
 便溺	biàn niào
 便衣	biàn yī
@@ -345,7 +349,7 @@
 公祭	gōng jì
 公转	gōng zhuàn
 六六大顺	liù liù dà shùn
-六合	lù hé
+六合	liù hé	lù hé
 六安	lù ān
 六月	liù yuè
 六朝	liù cháo
@@ -436,7 +440,7 @@
 削弱	xuē ruò
 削皮	xiāo pí
 削铅笔	xiāo qiān bǐ
-前传	qián zhuàn
+前传	qián zhuàn	qián chuán
 前提	qián tí
 前爪	qián zhuǎ
 剑鞘	jiàn qiào
@@ -505,6 +509,7 @@
 卒子	zú zi
 卒然	cù rán
 单于	chán yú
+单亲	dān qīn
 单位	dān wèi
 单县	shàn xiàn
 单姓	dān xìng
@@ -573,14 +578,14 @@
 反省	fǎn xǐng
 反诘	fǎn jié
 发人深省	fā rén shēn xǐng
-发卡	fà qiǎ
+发卡	fà qiǎ	fā kǎ
 发育	fā yù
 发胖	fā pàng
 发颤	fā chàn
 取得	qǔ dé
 受不了	shòu bù liǎo
 口臭	kǒu chòu
-口角	kǒu jué
+口角	kǒu jué	kǒu jiǎo
 古乐	gǔ yuè
 古刹	gǔ chà
 古都	gǔ dū
@@ -622,7 +627,7 @@
 合得来	hé de lái
 合欢	hé huān
 合适	hé shì
-同行	tóng háng
+同行	tóng xíng	tóng háng
 名人传	míng rén zhuàn
 名刹	míng chà
 名单	míng dān
@@ -713,7 +718,7 @@
 和面	huó miàn
 和韵	hè yùn
 咔嚓	kā chā
-咖哩	gā lī
+咖哩	gā lī	kā lī
 咖啡	kā fēi
 咖啡因	kā fēi yīn
 咖啡色	kā fēi sè
@@ -879,7 +884,7 @@
 壳牌	qiào pái
 处长	chù zhǎng
 复辟	fù bì
-外传	wài zhuàn
+外传	wài zhuàn	wài chuán
 外壳	wài ké
 外行	wài háng
 多么	duō me
@@ -890,7 +895,7 @@
 大地	dà dì
 大埔	dà bù
 大大落落	dà dà luō luō
-大夫	dài fu
+大夫	dài fu	dà fū
 大学	dà xué
 大家	dà jiā
 大将	dà jiàng
@@ -913,14 +918,14 @@
 大队长	dà duì zhǎng
 大陆	dà lù
 大隗	dà wěi
-大黄	dài huáng
+大黄	dài huáng	dà huáng
 大龙湫	dà lóng qiū
 天地	tiān dì
 天姥山	tiān mǔ shān
 太子参	tài zǐ shēn
 太行	tài háng
 太行山	tài háng shān
-失调	shī tiáo
+失调	shī tiáo	shī diào
 失调症	shī tiáo zhèng
 夹克	jiā kè
 夹子	jiā zi
@@ -1010,6 +1015,7 @@
 家什	jiā shi
 家僮	jiā tóng
 家属	jiā shǔ
+家庭	jiā tíng
 家畜	jiā chù
 家长	jiā zhǎng
 家长会	jiā zhǎng huì
@@ -1153,7 +1159,7 @@
 差不多	chà bu duō
 差不离	chà bu lí
 差之毫厘	chā zhī háo lí
-差事	chāi shì
+差事	chāi shì	chà shì
 差人	chāi rén
 差价	chā jià
 差使	chāi shi
@@ -1288,7 +1294,7 @@
 总得	zǒng děi
 总括	zǒng kuò
 总行	zǒng háng
-总长	zǒng zhǎng
+总长	zǒng zhǎng	zǒng cháng
 恁地	nèn dì
 恁般	nèn bān
 恐吓	kǒng hè
@@ -1336,7 +1342,7 @@
 戴安娜	dài ān nà
 房宿	fáng xiù
 房柁	fáng tuó
-所长	suǒ zhǎng
+所长	suǒ zhǎng	suǒ cháng
 扁圆	biǎn yuán
 扁平	biǎn píng
 扁担	biǎn dan
@@ -1463,7 +1469,7 @@
 损兵折将	sǔn bīng zhé jiàng
 捡拾	jiǎn shí
 换行	huàn háng
-掉色	diào shǎi
+掉色	diào shǎi	diào sè
 掌柁	zhǎng duò
 掌柜	zhǎng guì
 掌柜的	zhǎng guì de
@@ -1509,7 +1515,7 @@
 撮弄	cuō nòng
 撮箕	cuō jī
 撮要	cuō yào
-擘开	bāi kāi
+擘开	bāi kāi	bò kāi
 擘画	bò huà
 擢发难数	zhuó fà nán shǔ
 攒动	cuán dòng
@@ -1542,6 +1548,7 @@
 数不清	shǔ bù qīng
 数不着	shǔ bù zháo
 数不胜数	shǔ bù shèng shǔ
+数不著	shǔ bù zháo
 数九	shǔ jiǔ
 数九寒天	shǔ jiǔ hán tiān
 数伏	shǔ fú
@@ -1550,6 +1557,7 @@
 数字	shù zì
 数学	shù xué
 数得着	shǔ de zháo
+数得著	shǔ de zháo
 数据	shù jù
 数数	shǔ shù
 数来宝	shǔ lái bǎo
@@ -1588,6 +1596,7 @@
 时差	shí chā
 时期	shí qī
 明了	míng liǎo
+明瞭	míng liǎo
 星宿	xīng xiù
 星宿海	xīng xiù hǎi
 是否	shì fǒu
@@ -1635,7 +1644,7 @@
 朝拜	cháo bài
 朝朝暮暮	zhāo zhāo mù mù
 朝气	zhāo qì
-朝阳	zhāo yáng
+朝阳	zhāo yáng	cháo yáng
 朝霞	zhāo xiá
 朝鲜	cháo xiǎn
 期年	jī nián
@@ -1717,7 +1726,7 @@
 栅格	shān gé
 栅门	zhà mén
 标准差	biāo zhǔn chā
-标识	biāo zhì
+标识	biāo zhì	biāo shí
 栎树	lì shù
 栎阳	yuè yáng
 树叶	shù yè
@@ -1846,7 +1855,7 @@
 毛呢	máo ní
 氏族	shì zú
 氐宿	dī xiù
-民乐	mín yuè
+民乐	mín yuè	mín lè
 气刹	qì shā
 气势磅礴	qì shì páng bó
 气喘吁吁	qì chuǎn xū xū
@@ -1918,7 +1927,7 @@
 浅显	qiǎn xiǎn
 浅色	qiǎn sè
 浅薄	qiǎn bó
-测度	cè duó
+测度	cè duó	cè dù
 浍河	huì hé
 济公传	jì gōng zhuàn
 浒墅关	xǔ shù guān
@@ -2029,7 +2038,7 @@
 熟人	shú rén
 熟悉	shú xī
 熟练	shú liàn
-熟透	shóu tòu
+熟透	shóu tòu	shú tòu
 熨帖	yù tiē
 熨斗	yùn dǒu
 熨烫	yùn tàng
@@ -2085,7 +2094,7 @@
 率直	shuài zhí
 率领	shuài lǐng
 玉珩	yù héng
-玉米糁	yù mǐ shēn
+玉米糁	yù mǐ shēn	yù mǐ sǎn
 王焘	wáng tāo
 玢岩	fēn yán
 玩弄	wán nòng
@@ -2114,6 +2123,7 @@
 生长点	shēng zhǎng diǎn
 生长素	shēng zhǎng sù
 用得着	yòng de zháo
+用得著	yòng de zháo
 田垌	tián dòng
 由不得	yóu bu de
 甲壳	jiǎ qiào
@@ -2211,6 +2221,9 @@
 睡着	shuì zháo
 睡著	shuì zháo
 睡觉	shuì jiào
+瞭如指掌	liǎo rú zhǐ zhǎng
+瞭然	liǎo rán
+瞭解	liǎo jiě
 瞿塘峡	qú táng xiá
 瞿然	jù rán
 瞿秋白	qú qiū bái
@@ -2323,7 +2336,7 @@
 简朴	jiǎn pǔ
 箕宿	jī xiù
 算了	suàn le
-箪食壶浆	dān sì hú jiāng
+箪食壶浆	dān sì hú jiāng	dān shí hú jiāng
 米囤	mǐ dùn
 米芾	mǐ fú
 类似	lèi sì
@@ -2348,6 +2361,8 @@
 粘胶纤维	nián jiāo xiān wéi
 粘腻	nián nì
 粘膜	nián mó
+粘著	nián zhuó
+粘著力	nián zhuó lì
 粘贴	zhān tiē
 粘连	zhān lián
 粘附	zhān fù
@@ -2645,17 +2660,22 @@
 落差	luò chā
 落枕	lào zhěn
 落色	lào shǎi
-落魄	luò tuò
+落魄	luò pò	luò tuò
 著书	zhù shū
 著作	zhù zuò
 著凉	zháo liáng
 著名	zhù míng
+著呢	zhe ne
 著急	zháo jí
 著想	zhuó xiǎng
 著手	zhuó shǒu
+著数	zhāo shù
+著法	zhāo fǎ
 著火	zháo huǒ
 著落	zhuó luò
+著装	zhuó zhuāng
 著迷	zháo mí
+著重	zhuó zhòng
 著陆	zhuó lù
 董事长	dǒng shì zhǎng
 葭莩	jiā fú
@@ -2732,7 +2752,7 @@
 行为	xíng wéi
 行了	xíng le
 行伍	háng wǔ
-行会	háng huì
+行会	háng huì	xíng huì
 行会制	háng huì zhì
 行内	háng nèi
 行列	háng liè
@@ -2810,7 +2830,7 @@
 角宿	jiǎo xiù
 角度	jiǎo dù
 角斗	jué dòu
-角斗士	jué dòu shì
+角斗士	jué dòu shì	jiǎo dòu shì
 角色	jué sè
 角落	jiǎo luò
 角逐	jué zhú
@@ -2972,7 +2992,7 @@
 躲藏	duǒ cáng
 车票	chē piào
 车站	chē zhàn
-车行	chē háng
+车行	chē háng	chē xíng
 车辆	chē liàng
 车马炮	jū mǎ pào
 车驾	chē jià
@@ -2990,7 +3010,7 @@
 转弯	zhuǎn wān
 转弯抹角	zhuǎn wān mò jiǎo
 转折	zhuǎn zhé
-转文	zhuǎi wén
+转文	zhuǎi wén	zhuǎn wén
 转盘	zhuàn pán
 转行	zhuǎn háng
 转身	zhuǎn shēn
@@ -3116,6 +3136,7 @@
 重组	chóng zǔ
 重聚	chóng jù
 重要	zhòng yào
+重覆	chóng fù
 重视	zhòng shì
 重返	chóng fǎn
 重逢	chóng féng
@@ -3130,7 +3151,7 @@
 金钥匙	jīn yào shi
 金铤	jīn dìng
 钉耙	dīng pá
-钉钯	dīng pá
+钉钯	dīng pá	dīng bǎ
 钥匙	yào shi
 钥匙圈	yào shi quān
 钥匙扣	yào shi kòu
@@ -3206,6 +3227,7 @@
 长进	zhǎng jìn
 长颈鹿	cháng jǐng lù
 长高	zhǎng gāo
+长龙	cháng lóng
 门将	mén jiàng
 门槛	mén kǎn
 门槛效应	mén kǎn xiào yìng
@@ -3215,7 +3237,7 @@
 闯将	chuǎng jiàng
 阅读	yuè dú
 阏氏	yān zhī
-阑槛	lán jiàn
+阑槛	lán jiàn	lán kǎn
 阔绰	kuò chuò
 队长	duì zhǎng
 阴差阳错	yīn chā yáng cuò
@@ -3292,7 +3314,6 @@
 雕砌	diāo qì
 雪泥鸿爪	xuě ní hóng zhǎo
 雪茄	xuě jiā
-震天价响	zhèn tiān jie xiǎng
 霓裳	ní cháng
 霓裳羽衣	ní cháng yǔ yī
 露一手	lòu yī shǒu
@@ -3392,6 +3413,7 @@
 高校	gāo xiào
 高楼大厦	gāo lóu dà shà
 高着	gāo zhāo
+高著	gāo zhāo
 鬲津河	gé jīn hé
 鬼宿	guǐ xiù
 鬼影幢幢	guǐ yǐng chuáng chuáng
