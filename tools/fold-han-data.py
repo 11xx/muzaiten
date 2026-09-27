@@ -112,7 +112,11 @@ def cedict_pinyin(token: str) -> str | None:
 
 
 def cedict_words(archive: pathlib.Path) -> tuple[str, dict[str, set[tuple[str, ...]]]]:
-    """Index simplified spellings and their numbered-pinyin readings."""
+    """Index simplified and traditional spellings and their numbered-pinyin readings.
+
+    Traditional spellings count because a row may keep a character that has no
+    simplified mapping of its own (著急 for traditional text, where 着急 is the
+    simplified spelling)."""
     words: dict[str, set[tuple[str, ...]]] = defaultdict(set)
     date_line = "date line unavailable"
     with zipfile.ZipFile(archive) as z:
@@ -128,10 +132,11 @@ def cedict_words(archive: pathlib.Path) -> tuple[str, dict[str, set[tuple[str, .
             match = re.match(r"^(\S+)\s+(\S+)\s+\[([^]]*)\]", line)
             if not match:
                 continue
-            _, simplified, reading_text = match.groups()
+            traditional, simplified, reading_text = match.groups()
             syllables = tuple(cedict_pinyin(token) for token in reading_text.split())
             if syllables and all(syllables):
                 words[simplified].add(syllables)
+                words[traditional].add(syllables)
     return date_line, words
 
 

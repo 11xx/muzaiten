@@ -74,7 +74,7 @@ class FoldHanDataTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, r"words.tsv:2: expected 2 tab-separated fields"):
                 foldgen.load_han_words(words, {})
 
-    def test_cedict_indexes_simplified_words_and_prints_its_date_line(self):
+    def test_cedict_indexes_both_spellings_and_prints_its_date_line(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = pathlib.Path(directory) / "cedict.zip"
             with checker.zipfile.ZipFile(archive, "w") as zipped:
@@ -85,7 +85,7 @@ class FoldHanDataTests(unittest.TestCase):
             date_line, words = checker.cedict_words(archive)
 
         self.assertEqual(date_line, "#! date=2026-09-26T00:33:45Z")
-        self.assertEqual(words, {"乐队": {("yue", "dui")}})
+        self.assertEqual(words, {"乐队": {("yue", "dui")}, "樂隊": {("yue", "dui")}})
 
     def test_word_findings_cover_duplicates_readings_cedict_and_uncommon(self):
         with tempfile.TemporaryDirectory() as directory:
