@@ -205,6 +205,13 @@ target_include_directories(bench_radio_context PRIVATE ../src)
 target_link_libraries(bench_radio_context PRIVATE muzaiten_app muzaiten_ui_app)
 target_compile_features(bench_radio_context PRIVATE cxx_std_26)
 
+# Search latency benchmark. Built by default but not registered with CTest:
+# timings need an explicit library copy and an otherwise idle machine.
+add_executable(bench_search bench_search.cpp)
+target_include_directories(bench_search PRIVATE ../src)
+target_link_libraries(bench_search PRIVATE muzaiten_db muzaiten_search Qt6::Core)
+target_compile_features(bench_search PRIVATE cxx_std_26)
+
 # Queue-state save benchmark. Built by default but not registered with CTest:
 # it times persisted-document writes, a product-decision artifact, not a gate.
 add_executable(bench_queue_state
