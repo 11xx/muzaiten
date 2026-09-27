@@ -459,6 +459,7 @@ void assign(Styles &styles, Script group, int style)
 struct Group {
     Script group;
     int count;
+    int establishedCount;
 };
 
 // The script groups in `mask` that have alternate readings.
@@ -473,7 +474,10 @@ QVarLengthArray<Group, 8> readingGroups(std::uint32_t mask)
         if (count < 2 || std::any_of(groups.cbegin(), groups.cend(), [&](const Group &g) { return g.group == group; })) {
             continue;
         }
-        groups.append({group, count});
+        // The final Han and Hangul styles add readings alongside each
+        // family's established styles.
+        const int establishedCount = count - int(group == Script::Han || group == Script::Hangul);
+        groups.append({group, count, establishedCount});
     }
     return groups;
 }
@@ -495,10 +499,9 @@ Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::u
 // Every distinct fold of `src`, primary first.
 //
 // Each script group reads independently. A group alone contributes each of
-// its styles that reads this string differently; with several groups, the
-// folds cover every combination of those distinct readings (up to 16), so a
-// word mixing scripts matches whichever reading each part is typed in.
-// Beyond that, the groups also move together style by style.
+// its styles that reads this string differently. Established styles combine
+// up to 16 ways before moving together style by style; additional styles are
+// then combined with those established readings under the same cap.
 QVector<FoldResult> allFolds(const QString &src, bool withIndex)
 {
     std::uint32_t mask = 0;
@@ -534,113 +537,85 @@ QVector<FoldResult> allFolds(const QString &src, bool withIndex)
     }
     if (groups.size() < 2) return folds;
 
-    const int secondHanStyle = styleCount(Script::Han) - 1;
-    qsizetype hanGroup = -1;
+    QVarLengthArray<qsizetype, 8> establishedSizes;
+    QVarLengthArray<qsizetype, 8> additionalGroups;
     for (qsizetype g = 0; g < groups.size(); ++g) {
-        if (groups[g].group == Script::Han
-            && std::find(distinct[g].cbegin(), distinct[g].cend(), secondHanStyle) != distinct[g].cend()) {
-            hanGroup = g;
-            break;
+        qsizetype establishedSize = 0;
+        for (const int style : distinct[g]) {
+            establishedSize += style < groups[g].establishedCount;
         }
+        establishedSizes.append(establishedSize);
+        if (establishedSize < distinct[g].size()) additionalGroups.append(g);
     }
 
-    if (hanGroup >= 0) {
-        QVarLengthArray<QVarLengthArray<int, 4>, 8> establishedStyles;
-        QVarLengthArray<QVarLengthArray<int, 4>, 8> secondHanStyles;
+    constexpr int combinationLimit = 16;
+    const auto enumerate = [&](const std::array<int, 32> &fixedStyles) {
+        int combinations = 1;
         for (qsizetype g = 0; g < groups.size(); ++g) {
-            QVarLengthArray<int, 4> established;
-            for (const int style : distinct[g]) {
-                if (g != hanGroup || style != secondHanStyle) established.append(style);
-            }
-            establishedStyles.append(established);
-            if (g == hanGroup) {
-                QVarLengthArray<int, 4> second{secondHanStyle};
-                secondHanStyles.append(second);
-            } else {
-                secondHanStyles.append(established);
-            }
+            const int fixed = fixedStyles[unsigned(groups[g].group)];
+            const int count = fixed >= 0 ? 1 : int(establishedSizes[g]);
+            if (combinations > combinationLimit / count) combinations = combinationLimit + 1;
+            else if (combinations <= combinationLimit) combinations *= count;
         }
 
-        const auto product = [](const auto &choices) {
-            int count = 1;
-            for (const auto &styles : choices) {
-                if (count > 16 / int(styles.size())) return 17;
-                count *= int(styles.size());
-            }
-            return count;
-        };
-        const auto enumerate = [&](const auto &choices, int combinations, bool fixedHan) {
-            if (combinations <= 16) {
-                for (int index = 0; index < combinations; ++index) {
-                    Styles styles{};
-                    int rest = index;
-                    int varied = 0;
-                    for (qsizetype g = 0; g < groups.size(); ++g) {
-                        const auto &options = choices[g];
-                        const int style = options[rest % int(options.size())];
-                        rest /= int(options.size());
-                        assign(styles, groups[g].group, style);
-                        varied += style != 0;
-                    }
-                    if (varied >= 2) add(fold(styles));
-                }
-                return;
-            }
-
-            int widest = 1;
-            for (const Group &g : groups) {
-                const int count = g.group == Script::Han ? secondHanStyle : g.count;
-                widest = std::max(widest, count);
-            }
-            for (int k = 1; k < widest; ++k) {
+        if (combinations <= combinationLimit) {
+            for (int index = 0; index < combinations; ++index) {
                 Styles styles{};
+                int rest = index;
                 int varied = 0;
-                for (const Group &g : groups) {
-                    if (fixedHan && g.group == Script::Han) {
-                        assign(styles, g.group, secondHanStyle);
-                        ++varied;
-                        continue;
-                    }
-                    const int count = g.group == Script::Han ? secondHanStyle : g.count;
-                    const int style = k < count ? k : 0;
-                    assign(styles, g.group, style);
+                for (qsizetype g = 0; g < groups.size(); ++g) {
+                    const int fixed = fixedStyles[unsigned(groups[g].group)];
+                    const int count = fixed >= 0 ? 1 : int(establishedSizes[g]);
+                    const int style = fixed >= 0 ? fixed : distinct[g][rest % count];
+                    rest /= count;
+                    assign(styles, groups[g].group, style);
                     varied += style != 0;
                 }
                 if (varied >= 2) add(fold(styles));
             }
-        };
-
-        // Keep the established reading combinations intact, then combine the
-        // second Han reading with those same non-Han alternatives.
-        enumerate(establishedStyles, product(establishedStyles), false);
-        enumerate(secondHanStyles, product(secondHanStyles), true);
-        return folds;
-    }
-
-    int combinations = 1;
-    for (const auto &styles : distinct) combinations = std::min<int>(combinations * int(styles.size()), 17);
-    if (combinations <= 16) {
-        for (int index = 1; index < combinations; ++index) {
-            Styles styles{};
-            int rest = index;
-            int varied = 0;
-            for (qsizetype g = 0; g < groups.size(); ++g) {
-                const int k = distinct[g][rest % distinct[g].size()];
-                rest /= int(distinct[g].size());
-                assign(styles, groups[g].group, k);
-                varied += k != 0;
-            }
-            if (varied >= 2) add(fold(styles));  // one group alone is already folded
+            return;
         }
-        return folds;
-    }
-    int widest = 1;
-    for (const Group &g : groups) widest = std::max(widest, g.count);
-    for (int k = 1; k < widest; ++k) {
-        Styles styles{};
-        for (const Group &g : groups) assign(styles, g.group, k < g.count ? k : 0);
-        add(fold(styles));
-    }
+
+        int widest = 1;
+        for (qsizetype g = 0; g < groups.size(); ++g) {
+            if (fixedStyles[unsigned(groups[g].group)] < 0) {
+                widest = std::max(widest, groups[g].establishedCount);
+            }
+        }
+        for (int k = 1; k < widest; ++k) {
+            Styles styles{};
+            int varied = 0;
+            for (const Group &group : groups) {
+                const int fixed = fixedStyles[unsigned(group.group)];
+                const int style = fixed >= 0 ? fixed : (k < group.establishedCount ? k : 0);
+                assign(styles, group.group, style);
+                varied += style != 0;
+            }
+            if (varied >= 2) add(fold(styles));
+        }
+    };
+
+    std::array<int, 32> fixedStyles;
+    fixedStyles.fill(-1);
+    enumerate(fixedStyles);
+    if (additionalGroups.isEmpty()) return folds;
+
+    const auto enumerateAdditional = [&](const auto &self, qsizetype at, bool any,
+                                         std::array<int, 32> &fixed) -> void {
+        if (at == additionalGroups.size()) {
+            if (any) enumerate(fixed);
+            return;
+        }
+        const qsizetype g = additionalGroups[at];
+        self(self, at + 1, any, fixed);
+        for (qsizetype option = establishedSizes[g]; option < distinct[g].size(); ++option) {
+            const int style = distinct[g][option];
+            fixed[unsigned(groups[g].group)] = style;
+            self(self, at + 1, true, fixed);
+        }
+        fixed[unsigned(groups[g].group)] = -1;
+    };
+    enumerateAdditional(enumerateAdditional, 0, false, fixedStyles);
     return folds;
 }
 

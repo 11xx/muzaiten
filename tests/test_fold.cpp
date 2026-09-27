@@ -112,6 +112,7 @@ private slots:
         QTest::newRow("Jegal Min") << QString::fromUtf8("제갈민") << QStringLiteral("jegalmin");
         QTest::newRow("Sunwoo Min") << QString::fromUtf8("선우민") << QStringLiteral("sunwoomin");
         QTest::newRow("Dokgo Min") << QString::fromUtf8("독고민") << QStringLiteral("dokgomin");
+        QTest::newRow("Kye Young") << QString::fromUtf8("계영") << QStringLiteral("kyeyoung");
     }
 
     void conventionalKoreanNames()
@@ -119,6 +120,30 @@ private slots:
         QFETCH(QString, input);
         QFETCH(QString, expected);
         QVERIFY2(segments(input).contains(expected), qPrintable(expected));
+    }
+
+    void addedReadingsPreserveEstablishedMixedScriptFolds()
+    {
+        const QStringList korean{QStringLiteral("sinra"), QStringLiteral("silla")};
+        const QStringList latin{QStringLiteral("muller"), QStringLiteral("mueller"), QStringLiteral("miller")};
+        const QStringList greek{QStringLiteral("e"), QStringLiteral("i")};
+        QStringList established;
+        for (const QString &ko : korean) {
+            for (const QString &la : latin) {
+                for (const QString &gr : greek) established.append(ko + la + gr);
+            }
+        }
+
+        const QString mixed = QString::fromUtf8("신라Müllerη");
+        const QString mixedWithHan = mixed + QString::fromUtf8("长");
+        const QStringList withoutHanFolds = segments(mixed);
+        const QStringList withHanFolds = segments(mixedWithHan);
+        for (const QString &expected : established) {
+            QVERIFY2(withoutHanFolds.contains(expected), qPrintable(expected));
+            QVERIFY2(withHanFolds.contains(expected + QStringLiteral("zhang")),
+                     qPrintable(expected + QStringLiteral("zhang")));
+        }
+        QVERIFY(withoutHanFolds.contains(QStringLiteral("shinramuellere")));
     }
 
     void kanaRomaji()

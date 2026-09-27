@@ -9,7 +9,8 @@
   McCune-Reischauer (`pochonbo` for `보천보`).
 - Korean names also match conventional surname and given-name spellings:
   `lee jieun`, `kim taehyung`, `jeon jungkook` and `namgoongmin` find their
-  Hangul spellings.
+  Hangul spellings, and `kye young` finds `계영`. These readings preserve
+  established combinations in mixed-script names and titles.
 - Search keeps every common romanization of a title or name, and a query
   matches any of them: Hepburn romaji with long vowels collapsed (`tokyo`
   beside `toukyou`), toneless Chinese pinyin with word readings for common

@@ -53,7 +53,7 @@ namespace Search::Fold {
 // Revision of the fold pipeline. cacheSignature() mixes it with a digest of
 // the compiled tables; the on-disk search cache stores folded norms, so a
 // change to either must invalidate it.
-inline constexpr quint32 kVersion = 4;
+inline constexpr quint32 kVersion = 5;
 
 // Separates the alternative folded forms of one field inside a search norm
 // (the display text's fold, its alternate readings, then a sort name's).
