@@ -1,5 +1,7 @@
 #include <QTest>
+#include <QDirIterator>
 #include <QFile>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -136,6 +138,52 @@ private slots:
             const QString s = QString::fromUcs4(simplified);
             QCOMPARE(Fold::foldText(t), Fold::foldText(s));
             QCOMPARE(Fold::foldText(t), s);
+        }
+    }
+
+    void hanSimplificationChainsAreTerminalAndIdempotent()
+    {
+        for (const auto &[spellings, terminal] :
+             {std::pair(QStringList{QString::fromUtf8("鉅"), QString::fromUtf8("钜"), QString::fromUtf8("巨")},
+                        QString::fromUtf8("巨")),
+              std::pair(QStringList{QString::fromUtf8("鯰"), QString::fromUtf8("鲶"), QString::fromUtf8("鲇")},
+                        QString::fromUtf8("鲇"))}) {
+            for (const QString &spelling : spellings) QCOMPARE(Fold::foldText(spelling), terminal);
+        }
+
+        const QString root = QStringLiteral(FOLD_HAN_DATA_PATH);
+        QSet<QString> mapped;
+        const auto appendCodePoints = [&mapped](const QString &text) {
+            for (const uint value : text.toUcs4()) {
+                const char32_t codePoint = value;
+                mapped.insert(QString::fromUcs4(&codePoint, 1));
+            }
+        };
+        const auto appendSources = [&](const QString &path, bool authored) {
+            QFile file(path);
+            QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
+            const QString contents = QString::fromUtf8(file.readAll());
+            for (const QString &line : contents.split(QChar('\n'))) {
+                if (line.isEmpty() || line.startsWith(QChar('#'))) continue;
+                const QStringList columns = line.split(QChar('\t'));
+                if (authored) {
+                    if (columns.size() == 3
+                        && ((columns[1] != QStringLiteral("-") && !columns[1].isEmpty()) || !columns[2].isEmpty())) {
+                        appendCodePoints(columns[0]);
+                    }
+                } else if (columns.size() == 2) {
+                    appendCodePoints(columns[1]);
+                }
+            }
+        };
+
+        QDirIterator authored(root + QStringLiteral("/tables/han"), {QStringLiteral("*.tsv")});
+        while (authored.hasNext()) appendSources(authored.next(), true);
+        appendSources(root + QStringLiteral("/unihan/han_pinyin.tsv"), false);
+        appendSources(root + QStringLiteral("/unihan/han_simplified.tsv"), false);
+        for (const QString &character : mapped) {
+            const QString primary = Fold::foldText(character);
+            QCOMPARE(Fold::foldText(primary), primary);
         }
     }
 

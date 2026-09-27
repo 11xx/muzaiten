@@ -201,6 +201,28 @@ def is_han(cp: int) -> bool:
     return in_ranges(cp, HAN_RANGES) and unicodedata.category(chr(cp)) == "Lo"
 
 
+def resolve_simplification_chains(mappings: dict[str, str]) -> dict[str, str]:
+    """Replace every simplified mapping target with its terminal form."""
+    resolved: dict[str, str] = {}
+    for source in mappings:
+        if source in resolved:
+            continue
+        path: list[str] = []
+        positions: dict[str, int] = {}
+        current = source
+        while current in mappings and current not in resolved:
+            if current in positions:
+                cycle = path[positions[current]:] + [current]
+                raise ValueError("Han simplification cycle: " + " -> ".join(cycle))
+            positions[current] = len(path)
+            path.append(current)
+            current = mappings[current]
+        terminal = resolved.get(current, current)
+        for ch in reversed(path):
+            resolved[ch] = terminal
+    return resolved
+
+
 # ---- the generator -----------------------------------------------------------
 
 
@@ -281,6 +303,10 @@ class Generator:
                 self.han_second_pinyin[ch] = secondary
             if simplified:
                 self.simplified[ch] = simplified
+        try:
+            self.simplified = resolve_simplification_chains(self.simplified)
+        except ValueError as exc:
+            sys.exit(str(exc))
         self.kana_ids: dict[str, int] = {}
 
     # -- transliteration of one normalized, lowercase, mark-free character --
