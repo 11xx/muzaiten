@@ -66,6 +66,9 @@ private slots:
             {"情非得已", "qingfeideyi"}, {"叽叽喳喳", "jijizhazha"},
             {"牵着手", "qianzheshou"}, {"我们都会好的", "womendouhuihaode"},
             {"槟榔", "binglang"}, {"活著", "huozhe"},
+            {"穿著打扮", "chuanzhuodaban"}, {"沉著", "chenzhuo"}, {"著實", "zhuoshi"},
+            {"提高著", "tigaozhe"}, {"紧紧粘着你", "jinjinzhanzheni"}, {"你还愿意", "nihaiyuanyi"},
+            {"节目的", "jiemude"},
         };
         for (const auto &[input, reading] : cases) {
             QVERIFY2(segments(QString::fromUtf8(input)).contains(QString::fromUtf8(reading)), input);

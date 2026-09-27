@@ -57,6 +57,10 @@
 不曾	bù céng
 不由得	bù yóu de
 不省人事	bù xǐng rén shì
+不着痕迹	bù zhuó hén jì
+不着边际	bù zhuó biān jì
+不著痕迹	bù zhuó hén jì
+不著边际	bù zhuó biān jì
 不蔓不枝	bù màn bù zhī
 不计其数	bù jì qí shù
 丑恶	chǒu è
@@ -543,6 +547,8 @@
 压迫	yā pò
 厌恶	yàn wù
 厚朴	hòu pò
+原来	yuán lái
+原谅	yuán liàng
 厦大	xià dà
 厦门	xià mén
 厦门大学	xià mén dà xué
@@ -873,6 +879,7 @@
 增长率	zēng zhǎng lǜ
 墨翟	mò dí
 壁宿	bì xiù
+士兵	shì bīng
 士卒	shì zú
 壮丁	zhuàng dīng
 声乐	shēng yuè
@@ -1204,6 +1211,7 @@
 干将莫邪	gān jiāng mò yé
 平刨	píng bào
 平均差	píng jūn chā
+平均数	píng jūn shù
 年长	nián zhǎng
 并且	bìng qiě
 广厦	guǎng shà
@@ -1323,6 +1331,7 @@
 感冒	gǎn mào
 感召	gǎn zhào
 感觉	gǎn jué
+愿意	yuàn yì
 慊慊	qiàn qiàn
 慰藉	wèi jiè
 懒觉	lǎn jiào
@@ -1877,6 +1886,8 @@
 汽车	qì chē
 沉没	chén mò
 沉溺	chén nì
+沉着	chén zhuó
+沉著	chén zhuó
 沌口	zhuàn kǒu
 沙参	shā shēn
 沙铫	shā diào
@@ -2034,6 +2045,7 @@
 焯水	chāo shuǐ
 焯烫	chāo tàng
 焯菜	chāo cài
+然后	rán hòu
 煲仔饭	bāo zǎi fàn
 熏陶	xūn táo
 熟人	shú rén
@@ -2206,13 +2218,18 @@
 真的	zhēn de
 眼圈	yǎn quān
 着凉	zháo liáng
+着力	zhuó lì
 着呢	zhe ne
+着墨	zhuó mò
+着实	zhuó shí	zhe shí
 着急	zháo jí
 着想	zhuó xiǎng	zhe xiǎng
 着手	zhuó shǒu	zhe shǒu
 着数	zhāo shù
 着法	zhāo fǎ
 着火	zháo huǒ
+着眼	zhuó yǎn	zhe yǎn
+着色	zhuó sè
 着落	zhuó luò	zhe luò
 着装	zhuó zhuāng
 着迷	zháo mí
@@ -2319,6 +2336,8 @@
 穷愁潦倒	qióng chóu liáo dǎo
 空洞	kōng dòng
 空调	kōng tiáo
+穿着	chuān zhe	chuān zhuó
+穿著	chuān zhe	chuān zhuó
 窘迫	jiǒng pò
 窥伺	kuī sì
 窨井	yìn jǐng
@@ -2351,7 +2370,7 @@
 粘液	nián yè
 粘湿	nián shī
 粘滞	nián zhì
-粘着	nián zhuó
+粘着	zhān zhe	nián zhuó
 粘着力	nián zhuó lì
 粘稠	nián chóu
 粘米	nián mǐ
@@ -2361,7 +2380,7 @@
 粘胶纤维	nián jiāo xiān wéi
 粘腻	nián nì
 粘膜	nián mó
-粘著	nián zhuó
+粘著	zhān zhe	nián zhuó
 粘著力	nián zhuó lì
 粘贴	zhān tiē
 粘连	zhān lián
@@ -2425,6 +2444,7 @@
 经络	jīng luò
 结尾	jié wěi
 结扎	jié zā
+结果	jié guǒ
 给予	jǐ yǔ
 给付	jǐ fù
 给养	jǐ yǎng
@@ -2505,6 +2525,8 @@
 胖子	pàng zi
 胡萝卜	hú luó bo
 胳臂	gē bei
+胶着	jiāo zhuó
+胶著	jiāo zhuó
 胶鬲	jiāo gé
 胸椎	xiōng zhuī
 胸脯	xiōng pú
@@ -2585,6 +2607,7 @@
 艾灸	ài jiǔ
 艾草	ài cǎo
 艾蒿	ài hāo
+节目	jié mù
 节省	jié shěng
 芟荑	shān yí
 芥兰	gài lán
@@ -2664,14 +2687,19 @@
 著书	zhù shū
 著作	zhù zuò
 著凉	zháo liáng
+著力	zhuó lì
 著名	zhù míng
 著呢	zhe ne
+著墨	zhuó mò
+著实	zhuó shí	zhe shí
 著急	zháo jí
 著想	zhuó xiǎng	zhe xiǎng
 著手	zhuó shǒu	zhe shǒu
 著数	zhāo shù
 著法	zhāo fǎ
 著火	zháo huǒ
+著眼	zhuó yǎn	zhe yǎn
+著色	zhuó sè
 著落	zhuó luò	zhe luò
 著装	zhuó zhuāng
 著迷	zháo mí
@@ -2837,9 +2865,12 @@
 觜宿	zī xiù
 解元	jiè yuán
 解决	jiě jué
+解开	jiě kāi
 解放	jiě fàng
 解数	xiè shù
 解答	jiě dá
+解脱	jiě tuō
+解药	jiě yào
 解送	jiè sòng
 解释	jiě shì
 警察局长	jǐng chá jú zhǎng
@@ -2988,6 +3019,8 @@
 蹊径	xī jìng
 蹊跷	qī qiao
 身先士卒	shēn xiān shì zú
+身着	shēn zhuó
+身著	shēn zhuó
 躯壳	qū qiào
 躲藏	duǒ cáng
 车票	chē piào
@@ -3214,6 +3247,7 @@
 长幼	zhǎng yòu
 长幼有序	zhǎng yòu yǒu xù
 长度	cháng dù
+长得	zhǎng de
 长房	zhǎng fáng
 长期	cháng qī
 长江	cháng jiāng
@@ -3280,6 +3314,8 @@
 陂池	bēi chí
 陂陀	pō tuó
 附和	fù hè
+附着	fù zhuó
+附著	fù zhuó
 陆地	lù dì
 陆续	lù xù
 降低	jiàng dī
@@ -3460,6 +3496,8 @@
 黄蘖	huáng bò
 黄陂	huáng pí
 黄骠马	huáng biāo mǎ
+黏着	nián zhuó
+黏著	nián zhuó
 默契	mò qì
 黾勉	mǐn miǎn
 黾池	miǎn chí

@@ -301,7 +301,7 @@ qsizetype singleCharacterCount(const WordSegments &segments)
 
 // Function words commonly stand alone beside longer lexical words. Prefer a
 // segmentation that leaves those words single when all larger counts tie.
-constexpr QStringView kChineseFunctionWords = u"的了着地得都也和就在是不很还又才把被给让从向对与跟为以而并或吗呢吧啊么过";
+constexpr QStringView kChineseFunctionWords = u"的了着著地得都也和就在是不很还又才把被给让从向对与跟为以而并或吗呢吧啊么过";
 
 qsizetype functionWordCount(const WordSegments &segments, QStringView keys,
                             const QVarLengthArray<qsizetype, 32> &offsets)
