@@ -16,15 +16,19 @@
 #include "search/Exclusion.h"
 #include "search/FuzzyMatch.h"
 #include "search/SearchQuery.h"
+#include "search/SearchMatcher.h"
 #include "search/SearchRecord.h"
 
 #include <QVector>
+
+#include <vector>
 
 namespace Search {
 
 struct ScoredResult {
     SearchRecord rec;          // copy of the matching record (embedded for thread safety)
     int          score = 0;
+    int          index = -1;
 };
 
 // Cap on the number of results materialized/returned per query. A broad query
@@ -76,6 +80,7 @@ public:
 
 private:
     QVector<SearchRecord> m_records;
+    std::vector<NormMasks> m_masks;
 };
 
 } // namespace Search

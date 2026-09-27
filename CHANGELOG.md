@@ -69,6 +69,9 @@
 
 ### Changed
 
+- Typing in search is faster, fuzzy mode above all: fields that cannot hold
+  the query are skipped before any scoring, using small character masks the
+  index builds when it loads. Match counts, scores and ranking are unchanged.
 - Highlighting search results is about a quarter faster over file paths and
   a fifth faster over titles.
 - CJK ideographs keep their written form in the primary search fold, with

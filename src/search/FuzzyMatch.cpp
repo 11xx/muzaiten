@@ -98,7 +98,7 @@ static int16_t bonusFor(CharClass prev, CharClass cur)
     return 0;
 }
 
-static int16_t bonusAt(const QString &text, int idx)
+static int16_t bonusAt(QStringView text, int idx)
 {
     if (idx == 0) return bonusBoundaryWhite;
     return bonusFor(charClassOf(text[idx - 1]), charClassOf(text[idx]));
@@ -212,10 +212,10 @@ MatchResult exactMatchNaive(const QString &text,
 // Modified Smith-Waterman DP.
 
 // Greedy V1 used as fallback for very large inputs (same as fzf).
-static MatchResult fuzzyMatchV1(const QString &text,
-                                 const QString &pattern,
-                                 bool caseSensitive,
-                                 bool withPositions)
+static MatchResult fuzzyMatchV1(QStringView text,
+                                QStringView pattern,
+                                bool caseSensitive,
+                                bool withPositions)
 {
     const int N = static_cast<int>(text.length());
     const int M = static_cast<int>(pattern.length());
@@ -288,10 +288,10 @@ static MatchResult fuzzyMatchV1(const QString &text,
     return {sidx, eidx, score, withPositions ? positions : QVector<int>{}};
 }
 
-MatchResult fuzzyMatchV2(const QString &text,
-                          const QString &pattern,
-                          bool caseSensitive,
-                          bool withPositions)
+MatchResult fuzzyMatchV2(QStringView text,
+                         QStringView pattern,
+                         bool caseSensitive,
+                         bool withPositions)
 {
     if (pattern.isEmpty()) return {0, 0, 0, {}};
 

@@ -402,6 +402,12 @@ target_compile_definitions(test_fold PRIVATE
 )
 add_test(NAME test_fold COMMAND test_fold)
 
+add_executable(test_search_matcher_bounds test_search_matcher_bounds.cpp)
+target_include_directories(test_search_matcher_bounds PRIVATE ../src)
+target_link_libraries(test_search_matcher_bounds PRIVATE muzaiten_search Qt6::Core Qt6::Test)
+target_compile_features(test_search_matcher_bounds PRIVATE cxx_std_26)
+add_test(NAME test_search_matcher_bounds COMMAND test_search_matcher_bounds)
+
 add_executable(test_search_index
     test_search_index.cpp
 )

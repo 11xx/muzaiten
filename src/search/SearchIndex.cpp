@@ -41,16 +41,21 @@ bool termAppliesTo(const Term &term, HighlightField field)
 void SearchIndex::build(QVector<SearchRecord> records)
 {
     m_records = std::move(records);
+    m_masks.clear();
+    m_masks.reserve(static_cast<std::size_t>(m_records.size()));
+    for (const SearchRecord &rec : m_records) m_masks.push_back(recordNormMasks(rec));
 }
 
 void SearchIndex::append(QVector<SearchRecord> records)
 {
     if (m_records.isEmpty()) {
-        m_records = std::move(records);
+        build(std::move(records));
         return;
     }
     m_records.reserve(m_records.size() + records.size());
+    m_masks.reserve(static_cast<std::size_t>(m_records.size() + records.size()));
     for (SearchRecord &rec : records) {
+        m_masks.push_back(recordNormMasks(rec));
         m_records.push_back(std::move(rec));
     }
 }
@@ -59,6 +64,8 @@ void SearchIndex::clear()
 {
     m_records.clear();
     m_records.squeeze();
+    m_masks.clear();
+    m_masks.shrink_to_fit();
 }
 
 QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMode,
@@ -72,6 +79,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     // per-record allocations — only record indices are collected.
     struct Candidate { int index; int score; };
     const int n = static_cast<int>(m_records.size());
+    const auto termMasks = termCharacterMasks(query);
 
     // Score the half-open slice [lo, hi) into `out`. Records are scored
     // independently, so slices run on separate threads with no shared mutable
@@ -88,7 +96,12 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             }
             if (excluded) continue;
 
-            const int score = matchSearchRecord(rec, query, fuzzyMode);
+            bool exact = false;
+            const int bound = matchSearchRecordBound(rec, m_masks[static_cast<std::size_t>(i)],
+                                                      query, termMasks, fuzzyMode, &exact);
+            if (bound == INT_MIN) continue;
+            const int score = exact ? bound : scoreSearchRecord(rec, m_masks[static_cast<std::size_t>(i)],
+                                                                query, termMasks, fuzzyMode);
             if (score != INT_MIN) out.push_back({i, score});
         }
     };
@@ -152,7 +165,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     QVector<ScoredResult> results;
     results.reserve(keep);
     for (const Candidate &c : candidates) {
-        results.push_back({m_records[c.index], c.score});
+        results.push_back({m_records[c.index], c.score, c.index});
     }
     return results;
 }

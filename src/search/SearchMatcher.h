@@ -4,6 +4,8 @@
 #include "search/fold/Fold.h"
 
 #include <QString>
+#include <QStringView>
+#include <array>
 #include <QVector>
 
 namespace Search {
@@ -69,5 +71,18 @@ inline int firstPanelMatchRow(const QVector<MatchDocument> &docs, const QString 
 // Hot-path matcher for the library index. This keeps SearchIndex from building
 // per-record document vectors while sharing the same term/scoring rules.
 int matchSearchRecord(const SearchRecord &rec, const SearchQuery &query, bool fuzzyMode);
+
+// Character-presence masks for the six folded record fields.
+enum NormSlot { NormTitle, NormArtist, NormAlbumArtist, NormAlbum, NormFilename, NormPath, NormSlotCount };
+using NormMasks = std::array<quint64, NormSlotCount>;
+quint64 normCharacterMask(QStringView text);
+NormMasks recordNormMasks(const SearchRecord &rec);
+QVector<quint64> termCharacterMasks(const SearchQuery &query);
+int matchSearchRecordBound(const SearchRecord &rec, const NormMasks &masks,
+                           const SearchQuery &query, const QVector<quint64> &termMasks,
+                           bool fuzzyMode, bool *exact);
+int scoreSearchRecord(const SearchRecord &rec, const NormMasks &masks,
+                      const SearchQuery &query, const QVector<quint64> &termMasks,
+                      bool fuzzyMode);
 
 } // namespace Search
