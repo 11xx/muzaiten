@@ -85,6 +85,7 @@ int styleCount(Script family)
 {
     switch (family) {
     case Script::Han:
+        return 5;
     case Script::Brahmic:
     case Script::Arabic:
         return 4;

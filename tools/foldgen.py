@@ -251,6 +251,7 @@ class Generator:
 
         self.han_authored, self.han_authored_locations = load_authored_han(tables / "han")
         self.han_pinyin: dict[str, str] = {}
+        self.han_second_pinyin: dict[str, str] = {}
         pinyin_path = tables.parent / "unihan" / "han_pinyin.tsv"
         for line_number, (reading_field, characters) in tsv_rows(pinyin_path, 2):
             reading = toneless_pinyin(reading_field)
@@ -276,6 +277,8 @@ class Generator:
         for ch, (primary, secondary, simplified) in self.han_authored.items():
             if primary is not None:
                 self.han_pinyin[ch] = primary
+            if secondary is not None:
+                self.han_second_pinyin[ch] = secondary
             if simplified:
                 self.simplified[ch] = simplified
         self.kana_ids: dict[str, int] = {}
@@ -929,6 +932,8 @@ class Generator:
                 bmp_pinyin[cp - 0x3400] = pinyin_id(reading)
             elif cp >= 0x10000:
                 astral_pinyin.append((cp, pinyin_id(reading)))
+        second_pinyin = [(ord(ch), pinyin_id(reading))
+                         for ch, reading in sorted(self.han_second_pinyin.items())]
 
         def words(table: dict, split: bool) -> tuple[list[str], int]:
             rows = []
@@ -939,7 +944,10 @@ class Generator:
                     syllables = value.split()
                     if len(syllables) != len(key):
                         sys.exit(f"han.json: {key} has {len(key)} characters but {len(syllables)} syllables")
-                    if all(reading_of.get(c) == s for c, s in zip(key, syllables)):
+                    # A word that reads as its characters' defaults adds nothing,
+                    # unless one of them has a second reading the word must not take.
+                    if (all(reading_of.get(c) == s for c, s in zip(key, syllables))
+                            and not any(c in self.han_second_pinyin for c in key)):
                         continue
                 rows.append(f"    {{{pool.ref(key)}, {pool.ref(value)}}},")
                 longest = max(longest, len(key.encode("utf-16-le")) // 2)
@@ -1145,7 +1153,8 @@ class Generator:
 
         digest = hashlib.sha256()
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
-                            bmp_pinyin, astral_pinyin, pinyin_syllables, japanese_rows, chinese_rows,
+                            bmp_pinyin, astral_pinyin, second_pinyin, pinyin_syllables,
+                            japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
                             abjad_block_rows, abjad_constants, tibetan_rows, composable_bmp,
@@ -1196,6 +1205,11 @@ class Generator:
             w(f"    {{0x{cp:X}, {pid}}},")
         w("};")
         w(f"const std::size_t kHanPinyinAstralCount = {len(astral_pinyin)};")
+        w(f"const HanSecondPinyin kHanSecondPinyin[{max(1, len(second_pinyin))}] = {{")
+        for cp, pid in second_pinyin:
+            w(f"    {{0x{cp:X}, {pid}}},")
+        w("};")
+        w(f"const std::size_t kHanSecondPinyinCount = {len(second_pinyin)};")
         w(f"const Str kPinyin[{len(pinyin_refs) + 1}] = {{{{0, 0}}, {', '.join(pinyin_refs)}}};")
         w(f"const Word kJapaneseWords[{len(japanese_rows)}] = {{")
         out.extend(japanese_rows)

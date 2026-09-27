@@ -14,6 +14,9 @@
   Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
   their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i`
   (`miller` finds `Müller`). Results highlight whichever reading matched.
+- A Chinese character with two readings matches a query typed with either
+  (`changfa` or `zhangfa` finds `长发`), unless a word reading settles it
+  (`chongqing` for `重庆`).
 - Search matches Thai and Lao by romanization, read syllable by syllable
   with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,
   `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
