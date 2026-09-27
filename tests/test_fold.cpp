@@ -54,6 +54,29 @@ private slots:
         if (expected.size() > 1) QCOMPARE(segments(input), expected);
     }
 
+    void chinesePhrasesIncludeOrdinaryReadings()
+    {
+        const std::pair<const char *, const char *> cases[] = {
+            {"著急", "zhaoji"}, {"大排长龙", "dapaichanglong"},
+            {"单亲家庭", "danqinjiating"}, {"我的哥哥", "wodegege"},
+            {"没收到", "meishoudao"}, {"勇敢地面对", "yonggandemiandui"},
+            {"牛奶和面包", "niunaihemianbao"}, {"心中都是你", "xinzhongdoushini"},
+            {"出了事", "chuleshi"}, {"说明了", "shuomingle"},
+            {"崭露头角", "zhanlutoujiao"}, {"长相厮守", "changxiangsishou"},
+            {"情非得已", "qingfeideyi"}, {"叽叽喳喳", "jijizhazha"},
+            {"牵着手", "qianzheshou"}, {"我们都会好的", "womendouhuihaode"},
+            {"槟榔", "binglang"}, {"活著", "huozhe"},
+            {"穿著打扮", "chuanzhuodaban"}, {"沉著", "chenzhuo"}, {"著實", "zhuoshi"},
+            {"提高著", "tigaozhe"}, {"紧紧粘着你", "jinjinzhanzheni"}, {"你还愿意", "nihaiyuanyi"},
+            {"节目的", "jiemude"}, {"戴着墨镜", "daizhemojing"}, {"带着力量", "daizheliliang"},
+            {"黏着你", "nianzheni"}, {"阴沉着脸", "yinchenzhelian"}, {"依附着", "yifuzhe"},
+            {"沉着冷静", "chenzhuolengjing"},
+        };
+        for (const auto &[input, reading] : cases) {
+            QVERIFY2(segments(QString::fromUtf8(input)).contains(QString::fromUtf8(reading)), input);
+        }
+    }
+
     void asciiPassthroughAndLowercase()
     {
         QCOMPARE(Fold::foldText(QStringLiteral("Hello World")), QStringLiteral("hello world"));

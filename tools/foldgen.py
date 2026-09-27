@@ -69,15 +69,17 @@ def load_json(path: pathlib.Path) -> dict:
         return json.load(f, object_pairs_hook=reject_duplicates)
 
 
-def tsv_rows(path: pathlib.Path, columns: int):
+def tsv_rows(path: pathlib.Path, columns: int | tuple[int, ...]):
+    accepted = (columns,) if isinstance(columns, int) else columns
+    expected = " or ".join(str(count) for count in accepted)
     with open(path, encoding="utf-8") as f:
         for line_number, line in enumerate(f, 1):
             line = line.rstrip("\n")
             if not line.strip() or line.startswith("#"):
                 continue
             fields = line.split("\t")
-            if len(fields) != columns:
-                sys.exit(f"{path}:{line_number}: expected {columns} tab-separated fields")
+            if len(fields) not in accepted:
+                sys.exit(f"{path}:{line_number}: expected {expected} tab-separated fields")
             yield line_number, fields
 
 
@@ -92,6 +94,8 @@ def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional
     entries: dict[str, tuple[Optional[str], Optional[str], str]] = {}
     locations: dict[str, tuple[pathlib.Path, int]] = {}
     for path in sorted(directory.glob("*.tsv")):
+        if path.name == "words.tsv":
+            continue
         for line_number, fields in tsv_rows(path, 3):
             ideograph, readings_field, simplified = fields
             if len(ideograph) != 1 or not is_han(ord(ideograph)):
@@ -119,6 +123,38 @@ def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional
             entries[ideograph] = (primary, secondary, simplified)
             locations[ideograph] = (path, line_number)
     return entries, locations
+
+
+def load_han_words(path: pathlib.Path, simplified: dict[str, str]) -> dict[str, tuple[str, str]]:
+    """Load simplified Han words with one or two tone-marked readings."""
+    words: dict[str, tuple[str, str]] = {}
+    for line_number, fields in tsv_rows(path, (2, 3)):
+        word, *reading_fields = fields
+        if not word or any(not is_han(ord(ch)) for ch in word):
+            sys.exit(f"{path}:{line_number}: word must contain only Han ideographs")
+        if any(simplified.get(ch, ch) != ch for ch in word):
+            sys.exit(f"{path}:{line_number}: word must use simplified Han forms")
+        normalized_readings = [" ".join(unicodedata.normalize("NFC", field).split())
+                               for field in reading_fields]
+        if len(normalized_readings) == 2 and normalized_readings[0] == normalized_readings[1]:
+            sys.exit(f"{path}:{line_number}: second reading must differ from the first")
+        plain_readings = []
+        for reading_index, reading_field in enumerate(reading_fields):
+            syllables = reading_field.split()
+            label = "second reading: " if reading_index == 1 else ""
+            if len(syllables) != len(word):
+                sys.exit(f"{path}:{line_number}: {label}{len(word)} characters but {len(syllables)} syllables")
+            plain = []
+            for syllable in syllables:
+                reading = toneless_pinyin(syllable)
+                if reading is None:
+                    sys.exit(f"{path}:{line_number}: {label}invalid tone-marked Hanyu Pinyin syllable {syllable!r}")
+                plain.append(reading)
+            plain_readings.append(" ".join(plain))
+        if word in words:
+            sys.exit(f"{path}:{line_number}: duplicate Han word {word!r}")
+        words[word] = (plain_readings[0], plain_readings[1] if len(plain_readings) == 2 else "")
+    return words
 
 
 def reject_authored_overlap(path: pathlib.Path, line_number: int, ideograph: str,
@@ -307,6 +343,7 @@ class Generator:
             self.simplified = resolve_simplification_chains(self.simplified)
         except ValueError as exc:
             sys.exit(str(exc))
+        self.chinese_words = load_han_words(tables / "han" / "words.tsv", self.simplified)
         self.kana_ids: dict[str, int] = {}
 
     # -- transliteration of one normalized, lowercase, mark-free character --
@@ -946,7 +983,7 @@ class Generator:
         for key in sorted(names["given"], key=lambda k: k.encode("utf-16-be")):
             if len(key) != 1 or not (0xAC00 <= ord(key) <= 0xD7A3):
                 sys.exit(f"hangul.json: given-name key {key!r} must be one precomposed Hangul syllable")
-            given_name_rows.append(f"    {{{pool.ref(key)}, {pool.ref(names['given'][key])}}},")
+            given_name_rows.append(f"    {{{pool.ref(key)}, {pool.ref(names['given'][key])}, {{0, 0}}}},")
         hangul_lines = [
             f"const HangulStyle kHangulRr = {{{str_array(rr['initials'])}, {str_array(rr['initials'])}, "
             f"{str_array(rr['vowels'])}, {str_array([rr['codas'][c] for c in coda_order])}, {pool.ref(rr['lateral'])}}};",
@@ -988,22 +1025,18 @@ class Generator:
             rows = []
             longest = 0
             for key in sorted(table, key=lambda k: k.encode("utf-16-be")):
-                value = table[key]
+                value, alternate = table[key] if split else (table[key], "")
+                longest = max(longest, len(key.encode("utf-16-le")) // 2)
                 if split:
                     syllables = value.split()
                     if len(syllables) != len(key):
-                        sys.exit(f"han.json: {key} has {len(key)} characters but {len(syllables)} syllables")
-                    # A word that reads as its characters' defaults adds nothing,
-                    # unless one of them has a second reading the word must not take.
-                    if (all(reading_of.get(c) == s for c, s in zip(key, syllables))
-                            and not any(c in self.han_second_pinyin for c in key)):
-                        continue
-                rows.append(f"    {{{pool.ref(key)}, {pool.ref(value)}}},")
-                longest = max(longest, len(key.encode("utf-16-le")) // 2)
+                        sys.exit(f"Chinese word table: {key} has {len(key)} characters but {len(syllables)} syllables")
+                alt_ref = pool.ref(alternate) if alternate else "{0, 0}"
+                rows.append(f"    {{{pool.ref(key)}, {pool.ref(value)}, {alt_ref}}},")
             return rows, longest
 
         japanese_rows, japanese_longest = words(self.han["japanese"], False)
-        chinese_rows, chinese_longest = words(self.han["chinese"]["words"], True)
+        chinese_rows, chinese_longest = words(self.chinese_words, True)
 
         # Greek
         greek_styles = []

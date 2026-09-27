@@ -68,7 +68,7 @@ struct Str { std::uint32_t off; std::uint32_t len; };
 struct CodeRange { char32_t first; char32_t last; };
 struct AstralEntry { char32_t cp; std::uint32_t entry; };
 struct Decomp { char32_t cp; Str seq; };
-struct Word { Str key; Str value; };
+struct Word { Str key; Str value; Str alternate; };
 struct StarterComposition { char32_t first; char32_t second; char32_t composite; };
 struct MarkLedStarter { char32_t cp; int lastClass; };
 

@@ -50,6 +50,168 @@ class FoldHanDataTests(unittest.TestCase):
         self.assertIn(checker.finding_key(rejected), reviewed)
         self.assertNotIn(checker.finding_key(distinct), reviewed)
 
+    def test_word_loader_skips_character_tables_and_checks_word_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "han.tsv").write_text("好\thǎo\t\n", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text("# word readings\n你\tnǐ\n", encoding="utf-8")
+
+            entries, _ = foldgen.load_authored_han(root)
+            self.assertEqual(entries, {"好": ("hao", None, "")})
+            self.assertEqual(checker.authored_ideographs(root), {"好"})
+            self.assertEqual(foldgen.load_han_words(words, {}), {"你": ("ni", "")})
+
+            words.write_text("# word readings\n行程\txíng chéng\tháng chéng\n", encoding="utf-8")
+            self.assertEqual(foldgen.load_han_words(words, {}), {"行程": ("xing cheng", "hang cheng")})
+
+            words.write_text("# word readings\n你好\tnǐ\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: 2 characters but 1 syllables"):
+                foldgen.load_han_words(words, {})
+
+            words.write_text("# word readings\n樂隊\tlè duì\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: word must use simplified Han forms"):
+                foldgen.load_han_words(words, {"樂": "乐"})
+
+            words.write_text("# word readings\n你好\tnǐ hǎo\tnǐ\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: second reading: 2 characters but 1 syllables"):
+                foldgen.load_han_words(words, {})
+
+            words.write_text("# word readings\n你\tnǐ\tnǐ\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: second reading must differ from the first"):
+                foldgen.load_han_words(words, {})
+
+            words.write_text("# word readings\n你好\tnǐ hǎo\tnǐ hào\textra\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: expected 2 or 3 tab-separated fields"):
+                foldgen.load_han_words(words, {})
+
+    def test_second_word_reading_is_checked_against_characters_and_cedict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "行\txíng háng\t\n程\tchéng\t\n重\tchóng zhòng\t\n庆\tqìng\t\n",
+                encoding="utf-8",
+            )
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text(
+                "行程\txíng chéng\thóng chéng\n重庆\tchóng qìng\tchóng qìng\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(
+                    words,
+                    authored,
+                    {"行程": {("xing", "cheng")}, "重庆": {("chong", "qing")}},
+                    {"xing", "hang", "cheng", "hong", "chong", "zhong", "qing"},
+                    set(),
+                    set(),
+                )
+
+        self.assertEqual(counts["format"], 1)
+        self.assertEqual(counts["reading"], 1)
+        self.assertEqual(counts["cedict"], 1)
+        self.assertIn((str(words), "1", "行程", "reading", "hóng", "xing hang"), findings)
+        self.assertIn((str(words), "1", "行程", "cedict", "hóng chéng", "xing cheng"), findings)
+        self.assertIn(
+            (str(words), "2", "重庆", "format", "chóng qìng", "a distinct second reading"), findings
+        )
+
+    def test_cedict_extra_reports_each_missing_word_reading_and_can_be_suppressed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "长\tcháng zhǎng\t\n城\tchéng\t\n", encoding="utf-8",
+            )
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text("长城\tcháng chéng\tzhǎng chéng\n", encoding="utf-8")
+            references = {"长城": {("chang", "cheng"), ("zhang", "cheng"), ("chang", "chengx")}}
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(
+                    words, authored, references, {"chang", "zhang", "cheng"}, set(), set(),
+                )
+                suppressed, suppressed_counts = checker.check_words(
+                    words, authored, references, {"chang", "zhang", "cheng"}, set(),
+                    {("长城", "cedict-extra", "cháng chéng; zhǎng chéng", "chang chengx")},
+                )
+        finding = (str(words), "1", "长城", "cedict-extra", "cháng chéng; zhǎng chéng", "chang chengx")
+        self.assertIn(finding, findings)
+        self.assertEqual(counts["cedict-extra"], 1)
+        self.assertNotIn(finding, suppressed)
+        self.assertEqual(suppressed_counts["cedict-extra"], 0)
+
+    def test_cedict_indexes_both_spellings_and_prints_its_date_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = pathlib.Path(directory) / "cedict.zip"
+            with checker.zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr(
+                    "cedict_ts.u8",
+                    "#! date=2026-09-26T00:33:45Z\n樂隊 乐队 [yue4 dui4] /band/\n",
+                )
+            date_line, words = checker.cedict_words(archive)
+
+        self.assertEqual(date_line, "#! date=2026-09-26T00:33:45Z")
+        self.assertEqual(words, {"乐队": {("yue", "dui")}, "樂隊": {("yue", "dui")}})
+
+    def test_word_findings_cover_duplicates_readings_cedict_and_uncommon(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "重\tchóng zhòng\t\n庆\tqìng\t\n行\txíng háng\t\n程\tchéng\t\n"
+                "罕\thǎn\t\n见\tjiàn\t\n",
+                encoding="utf-8",
+            )
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text(
+                "重庆\tchóng qìng\n重庆\tchóng qìng\n行程\thóng chéng\n罕见\thǎn jiàn\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(
+                    words,
+                    authored,
+                    {"重庆": {("chong", "qing")}, "行程": {("xing", "cheng")}},
+                    {"chong", "zhong", "qing", "xing", "hang", "hong", "cheng", "han", "jian"},
+                    set(),
+                    set(),
+                )
+                suppressed_findings, suppressed_counts = checker.check_words(
+                    words,
+                    authored,
+                    {"重庆": {("chong", "qing")}, "行程": {("xing", "cheng")}},
+                    {"chong", "zhong", "qing", "xing", "hang", "hong", "cheng", "han", "jian"},
+                    set(),
+                    {("行程", "reading", "hóng", "xing hang")},
+                )
+
+        self.assertEqual(counts["format"], 1)
+        self.assertEqual(counts["reading"], 1)
+        self.assertEqual(counts["cedict"], 1)
+        self.assertEqual(counts["uncommon"], 1)
+        self.assertIn((str(words), "3", "行程", "reading", "hóng", "xing hang"), findings)
+        self.assertIn((str(words), "3", "行程", "cedict", "hóng chéng", "xing cheng"), findings)
+
+        self.assertEqual(suppressed_counts["reading"], 0)
+        self.assertFalse(any(finding[3] == "reading" for finding in suppressed_findings))
+
     def test_directory_mode_requires_every_tier_but_explicit_files_are_scoped(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -77,6 +239,17 @@ class FoldHanDataTests(unittest.TestCase):
             with mock.patch.object(checker, "check", return_value=0) as check:
                 self.assertEqual(checker.main(["check", "--authored", str(authored), str(explicit)]), 0)
             self.assertEqual(check.call_args.args[0], [explicit])
+
+            words_file = root / "external-words.tsv"
+            with mock.patch.object(checker, "check", return_value=0) as check:
+                self.assertEqual(
+                    checker.main([
+                        "check", "--authored", str(partial), "--words", str(words_file), str(explicit),
+                    ]),
+                    0,
+                )
+            self.assertEqual(check.call_args.args[2], words_file)
+            self.assertEqual(check.call_args.args[3], partial)
 
     def test_every_reading_tone_uses_exact_attestation_across_variants(self):
         fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}

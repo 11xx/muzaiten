@@ -213,6 +213,109 @@ const Word *longestWord(const Word *words, std::size_t count, int longest, QStri
     return nullptr;
 }
 
+char32_t simplifiedHan(char32_t cp)
+{
+    const std::uint32_t entry = entryFor(cp);
+    if (kindOf(entry) == Kind::Char) return payloadOf(entry);
+    if (kindOf(entry) == Kind::Pool) {
+        const QStringView form(kPool + payloadOf(entry), qsizetype(lengthOf(entry)));
+        if (form.size() == 1) return form[0].unicode();
+        if (form.size() == 2 && QChar::isHighSurrogate(form[0].unicode())
+            && QChar::isLowSurrogate(form[1].unicode())) {
+            return QChar::surrogateToUcs4(form[0], form[1]);
+        }
+    }
+    return cp;
+}
+
+struct WordSegment { const Word *word; qsizetype first; qsizetype length; };
+using WordSegments = QVarLengthArray<WordSegment, 32>;
+
+const Word *longestChineseWord(const Word *words, std::size_t count, int longest, QStringView keys,
+                               const QVarLengthArray<qsizetype, 32> &offsets, qsizetype first,
+                               qsizetype &length)
+{
+    const qsizetype available = offsets.size() - 1 - first;
+    for (qsizetype chars = std::min<qsizetype>(longest, available); chars >= 1; --chars) {
+        const qsizetype start = offsets[first];
+        const qsizetype end = offsets[first + chars];
+        if (const Word *word = findWord(words, count, keys.mid(start, end - start))) {
+            length = chars;
+            return word;
+        }
+    }
+    return nullptr;
+}
+
+WordSegments segmentChineseForward(const Word *words, std::size_t count, int longest, QStringView keys,
+                                   const QVarLengthArray<qsizetype, 32> &offsets)
+{
+    WordSegments segments;
+    for (qsizetype first = 0; first < offsets.size() - 1;) {
+        qsizetype length = 0;
+        if (const Word *word = longestChineseWord(words, count, longest, keys, offsets, first, length)) {
+            segments.append({word, first, length});
+            first += length;
+        } else {
+            segments.append({nullptr, first, 1});
+            ++first;
+        }
+    }
+    return segments;
+}
+
+WordSegments segmentChineseBackward(const Word *words, std::size_t count, int longest, QStringView keys,
+                                    const QVarLengthArray<qsizetype, 32> &offsets)
+{
+    WordSegments segments;
+    for (qsizetype end = offsets.size() - 1; end > 0;) {
+        const qsizetype available = std::min<qsizetype>(longest, end);
+        const Word *match = nullptr;
+        qsizetype length = 0;
+        for (qsizetype chars = available; chars >= 1; --chars) {
+            const qsizetype start = offsets[end - chars];
+            const qsizetype finish = offsets[end];
+            if ((match = findWord(words, count, keys.mid(start, finish - start)))) {
+                length = chars;
+                break;
+            }
+        }
+        if (match) {
+            segments.append({match, end - length, length});
+            end -= length;
+        } else {
+            segments.append({nullptr, end - 1, 1});
+            --end;
+        }
+    }
+    std::reverse(segments.begin(), segments.end());
+    return segments;
+}
+
+qsizetype singleCharacterCount(const WordSegments &segments)
+{
+    return std::count_if(segments.cbegin(), segments.cend(), [](const WordSegment &segment) {
+        return segment.length == 1;
+    });
+}
+
+// Function words commonly stand alone beside longer lexical words. Prefer a
+// segmentation that leaves those words single when all larger counts tie.
+constexpr QStringView kChineseFunctionWords = u"的了着著地得都也和就在是不很还又才把被给让从向对与跟为以而并或吗呢吧啊么过";
+
+qsizetype functionWordCount(const WordSegments &segments, QStringView keys,
+                            const QVarLengthArray<qsizetype, 32> &offsets)
+{
+    qsizetype count = 0;
+    for (const WordSegment &segment : segments) {
+        if (segment.length != 1) continue;
+        const qsizetype first = offsets[segment.first];
+        if (offsets[segment.first + 1] - first == 1
+            && kChineseFunctionWords.contains(keys[first])) ++count;
+    }
+    return count;
+}
+
 } // namespace
 
 void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out)
@@ -220,6 +323,10 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
     // Outside the primary fold, iteration marks repeat the ideograph before them.
     QVarLengthArray<char32_t, 32> cps(n);
     QVarLengthArray<char16_t, 32> keys(n);
+    const bool chineseReading = style == 3 || style == 4;
+    QVarLengthArray<char16_t, 32> chineseKeys;
+    QVarLengthArray<qsizetype, 32> chineseOffsets;
+    if (chineseReading) chineseOffsets.resize(n + 1);
     for (qsizetype k = 0; k < n; ++k) {
         char32_t cp = u[k].cp;
         if (style != 0 && isIterationMark(cp)) {
@@ -228,8 +335,21 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         }
         cps[k] = cp;
         keys[k] = cp < 0x10000 ? char16_t(cp) : char16_t(0xFFFF);
+        if (chineseReading) {
+            chineseOffsets[k] = chineseKeys.size();
+            const char32_t simplified = simplifiedHan(cp);
+            if (simplified < 0x10000) {
+                chineseKeys.append(char16_t(simplified));
+            } else {
+                chineseKeys.append(QChar::highSurrogate(simplified));
+                chineseKeys.append(QChar::lowSurrogate(simplified));
+            }
+        }
     }
+    if (chineseReading) chineseOffsets[n] = chineseKeys.size();
     const QStringView keyView(keys.data(), n);
+    const QStringView chineseKeyView(chineseReading ? chineseKeys.data() : nullptr,
+                                     chineseReading ? chineseKeys.size() : 0);
 
     if (style == 0) {
         for (qsizetype k = 0; k < n; ++k) {
@@ -239,23 +359,33 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         return;
     }
     if (style == 3 || style == 4) {
-        for (qsizetype j = 0; j < n;) {
-            qsizetype len = 0;
-            if (const Word *w = longestWord(kChineseWords, kChineseWordCount, kChineseLongest, keyView, j, len)) {
-                const QStringView syllables = view(w->value);
+        const WordSegments forward = segmentChineseForward(kChineseWords, kChineseWordCount,
+                                                           kChineseLongest, chineseKeyView, chineseOffsets);
+        const WordSegments backward = segmentChineseBackward(kChineseWords, kChineseWordCount,
+                                                             kChineseLongest, chineseKeyView, chineseOffsets);
+        const bool chooseForward = forward.size() < backward.size()
+            || (forward.size() == backward.size()
+                && (singleCharacterCount(forward) < singleCharacterCount(backward)
+                    || (singleCharacterCount(forward) == singleCharacterCount(backward)
+                        && functionWordCount(forward, chineseKeyView, chineseOffsets)
+                            > functionWordCount(backward, chineseKeyView, chineseOffsets))));
+        const WordSegments &segments = chooseForward ? forward : backward;
+        for (const WordSegment &segment : segments) {
+            if (segment.word) {
                 qsizetype m = 0;
-                for (const QStringView syllable : syllables.tokenize(u' ')) {
-                    out.put(syllable, u[j + std::min(m, len - 1)].src);
+                const Str reading = style == 4 && segment.word->alternate.len
+                    ? segment.word->alternate : segment.word->value;
+                for (const QStringView syllable : view(reading).tokenize(u' ')) {
+                    out.put(syllable, u[segment.first + std::min(m, segment.length - 1)].src);
                     ++m;
                 }
-                j += len;
                 continue;
             }
+            const qsizetype j = segment.first;
             const std::uint16_t id = style == 4 ? secondPinyinOf(cps[j]) : 0;
             const std::uint16_t fallback = id ? id : pinyinOf(cps[j]);
             if (fallback) out.put(kPinyin[fallback], u[j].src);
             else emitSurface(cps[j], u[j].src, out);
-            ++j;
         }
         return;
     }

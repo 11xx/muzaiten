@@ -1,4 +1,4 @@
-# ideograph<TAB>kind<TAB>ours<TAB>reference<TAB>reason
+# ideograph-or-word<TAB>kind<TAB>ours<TAB>reference<TAB>reason
 耙	default	pá	bà	pá is the everyday rake reading in 耙子; bà denotes the agricultural harrow.
 扳	missing	bān	kXHC1983=pān	pān is the obsolete use corresponding to 攀.
 般	missing	bān bō	kXHC1983=pán	pán belongs to archaic 般乐; bō remains current in 般若.
@@ -1682,3 +1682,930 @@
 熢	default	fēng	péng	fēng represents 烽, as in 烽火, beacon fire. [MOE](https://dict.variants.moe.edu.tw/dictView.jsp?ID=25788)
 釪	default	yú	huá	yú denotes a small bell or alms bowl; Taiwan also assigns yú. [CNS11643](https://www.cns11643.gov.tw/wordView.jsp?ID=145955)
 辧	simplified	辨	-	The Taiwan MOE variant dictionary lists 辧 as a variant of 辨 (distinguish), distinct from 辦; it reads biàn and folds with 辨.
+一叶扁舟	uncommon	yī yè piān zhōu	-	set literary image (a lone skiff), frequent in poems and song titles
+一差二错	uncommon	yī chā èr cuò	-	idiom: an unexpected mishap
+一撮毛	uncommon	yī zuǒ máo	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+七里泷	uncommon	qī lǐ lóng	-	Recognized scenic stretch of the Fuchun River.
+万俟卨	uncommon	mò qí xiè	-	Historical official; established name reading.
+万箭攒心	uncommon	wàn jiàn cuán xīn	-	idiom: heart pierced by grief
+三都赋	uncommon	sān dū fù	-	Zuo Si's rhapsody (洛阳纸贵)
+下裳	uncommon	xià cháng	-	classical lower garment (上衣下裳), current in hanfu usage
+丌官	uncommon	qí guān	-	Compound surname; variant of 亓官.
+不吭声	uncommon	bù kēng shēng	-	Established expression meaning remain silent.
+不吱声	uncommon	bù zhī shēng	-	Established expression; zhī is an attested variant.
+不蔓不枝	uncommon	bù màn bù zhī	-	idiom from 爱莲说
+东涌	uncommon	dōng chōng	-	Established reading of the Hong Kong place.
+丢车保帅	uncommon	diū jū bǎo shuài	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+两肋	uncommon	liǎng lèi	-	Established anatomical term for both flanks.
+中队长	uncommon	zhōng duì zhǎng	-	squadron / Young Pioneers rank
+丰姿绰约	uncommon	fēng zī chuò yuē	-	Established idiom.
+丽莎	uncommon	lì shā	-	transliterated given name (Lisa)
+乘务长	uncommon	chéng wù zhǎng	-	purser
+乡镇长	uncommon	xiāng zhèn zhǎng	-	established administrative title
+书僮	uncommon	shū tóng	-	Literary word for a young attendant.
+书夹	uncommon	shū jiā	-	Established noun for a book clip or holder.
+乳糜	uncommon	rǔ mí	-	Established physiological term.
+乳臭	uncommon	rǔ xiù	-	dictionary word, as in 乳臭未干
+乳臭小儿	uncommon	rǔ xiù xiǎo ér	-	set insult, like 黄口小儿
+乾卦	uncommon	qián guà	-	Name of a hexagram.
+乾清宫	uncommon	qián qīng gōng	-	Well-known palace name.
+了悟	uncommon	liǎo wù	-	to realise (dictionary word)
+了无牵挂	uncommon	liǎo wú qiān guà	-	common fixed expression
+了无音信	uncommon	liǎo wú yīn xìn	-	recognised variant of 杳无音信
+了账	uncommon	liǎo zhàng	-	to settle an account
+于思	uncommon	yú sāi	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+亏折	cedict	kuī shé	kui zhe	现汉 reads 亏折 kuīshé (折 shé "lose capital", as in 折本); CC-CEDICT zhé is the generic reading
+云裳	uncommon	yún cháng	-	literary "cloud robes" (云想衣裳), common in titles
+五侯鲭	uncommon	wǔ hóu zhēng	-	Established historical allusion and dish name.
+井宿	uncommon	jǐng xiù	-	lunar mansion
+亟盼	uncommon	jí pàn	-	Established expression of urgent expectation.
+亟须	uncommon	jí xū	-	Established word meaning urgently need.
+亢宿	uncommon	kàng xiù	-	lunar mansion
+京圻	uncommon	jīng qí	-	Literary word for the capital region.
+人头攒动	uncommon	rén tóu cuán dòng	-	common idiom
+人影幢幢	uncommon	rén yǐng chuáng chuáng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+人物传记	uncommon	rén wù zhuàn jì	-	genre label "biography"
+什物	uncommon	shí wù	-	Established word for miscellaneous belongings.
+仇英	uncommon	qiú yīng	-	Well-known painter.
+仔裤	uncommon	zǎi kù	-	Established abbreviation for jeans.
+仔鱼	uncommon	zǐ yú	-	fish fry (dictionary word)
+他俩	uncommon	tā liǎ	-	the two of them
+仨瓜俩枣	uncommon	sā guā liǎ zǎo	-	Colloquial idiom for a trifling amount.
+伍员	uncommon	wǔ yún	-	Established personal name of Wu Zixu.
+伐木丁丁	uncommon	fá mù zhēng zhēng	-	Familiar Book of Songs quotation.
+会稽	uncommon	kuài jī	-	historical place name
+会稽山	uncommon	kuài jī shān	-	mountain in Shaoxing
+伛偻	uncommon	yǔ lǚ	-	Established word for a bent or stooped back.
+传主	uncommon	zhuàn zhǔ	-	subject of a biography
+传记文学	uncommon	zhuàn jì wén xué	-	literary genre
+传记片	uncommon	zhuàn jì piàn	-	biopic
+伧俗	uncommon	cāng sú	-	Established literary word for vulgarity.
+伧夫	uncommon	cāng fū	-	Established literary noun for a coarse fellow.
+伯仲	uncommon	bó zhòng	-	Established kinship and comparison word.
+佃仆	uncommon	diàn pú	-	Established historical social term.
+佃客	uncommon	diàn kè	-	Established historical term for a tenant.
+佃租	uncommon	diàn zū	-	Established agricultural rent term.
+何炅	uncommon	hé jiǒng	-	Well-known presenter.
+佛偈	uncommon	fó jì	-	Established Buddhist term.
+作传	uncommon	zuò zhuàn	-	set verb-object "write a biography" (cf. 立传)
+你俩	uncommon	nǐ liǎ	-	the two of you
+侗乡	uncommon	dòng xiāng	-	Established regional and cultural designation.
+侗家	uncommon	dòng jiā	-	Conventional designation for Dong people or households.
+侗寨	uncommon	dòng zhài	-	Established term for a Dong village.
+侗语	uncommon	dòng yǔ	-	Name of the Dong language.
+供给制	uncommon	gōng jǐ zhì	-	historical supply system
+供给量	uncommon	gōng jǐ liàng	-	quantity supplied (economics)
+侧柏	uncommon	cè bǎi	-	Chinese arborvitae
+俞伯牙	uncommon	yú bó yá	-	Well-known musician in traditional stories.
+俞大猷	uncommon	yú dà yóu	-	Well-known Ming general.
+俞敏洪	uncommon	yú mǐn hóng	-	Well-known public figure.
+俟河之清	uncommon	sì hé zhī qīng	-	Established idiom.
+倘使	uncommon	tǎng shǐ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+偈子	uncommon	jì zi	-	Established Buddhist word for a verse.
+偈语	uncommon	jì yǔ	-	Established Buddhist word for verse sayings.
+偈颂	uncommon	jì sòng	-	Established Buddhist term.
+偏裨	uncommon	piān pí	-	Established literary term for subordinate generals.
+做得到	uncommon	zuò de dào	-	high-frequency set potential form
+停泊处	uncommon	tíng bó chù	-	anchorage
+儒将	uncommon	rú jiàng	-	scholar-general
+六六大顺	uncommon	liù liù dà shùn	-	Established auspicious expression.
+兵来将挡	uncommon	bīng lái jiàng dǎng	-	idiom (兵来将挡，水来土掩)
+冒顿	uncommon	mò dú	-	Well-known Xiongnu ruler; conventional reading.
+军长	uncommon	jūn zhǎng	-	army commander
+农业银行	uncommon	nóng yè yín háng	-	bank name
+冯小刚	uncommon	féng xiǎo gāng	-	Well-known film director.
+冯巩	uncommon	féng gǒng	-	Well-known comedian.
+冰瀑	uncommon	bīng pù	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+冷杉	uncommon	lěng shān	-	Established tree name.
+净角	uncommon	jìng jué	-	painted-face role in opera
+凹地	uncommon	āo dì	-	Established terrain noun.
+凹面	uncommon	āo miàn	-	Established geometric term.
+刎颈之交	uncommon	wěn jǐng zhī jiāo	-	idiom
+刨除	uncommon	páo chú	-	Established word meaning deduct or exclude.
+刨食	uncommon	páo shí	-	Established word for scratching out food or a living.
+刹车油	uncommon	shā chē yóu	-	brake fluid
+刹车片	uncommon	shā chē piàn	-	brake pad
+刹车盘	uncommon	shā chē pán	-	brake disc
+刹那间	uncommon	chà nà jiān	-	in an instant
+刹闸	uncommon	shā zhá	-	colloquial "to brake"
+削皮	uncommon	xiāo pí	-	Established verb for peeling.
+前爪	uncommon	qián zhuǎ	-	Established anatomical noun; colloquial zhuǎ is valid.
+剑鞘	uncommon	jiàn qiào	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+剡县	uncommon	shàn xiàn	-	Recognized historical county name.
+剡木为矢	uncommon	yǎn mù wéi shǐ	-	Established classical quotation.
+剡溪	uncommon	shàn xī	-	Well-known literary river name.
+副会长	uncommon	fù huì zhǎng	-	vice-president (of an association)
+副局长	uncommon	fù jú zhǎng	-	deputy bureau chief
+副组长	uncommon	fù zǔ zhǎng	-	deputy group leader
+剿除	uncommon	jiǎo chú	-	Established verb meaning eradicate.
+办得到	uncommon	bàn de dào	-	set potential form (办得到/办不到)
+北门锁钥	uncommon	běi mén suǒ yuè	-	Established strategic idiom.
+匙子	uncommon	chí zi	-	Established regional word for a spoon.
+十里堡	uncommon	shí lǐ pù	-	Established place name with pù.
+半宿	uncommon	bàn xiǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+华仔	uncommon	huá zǎi	-	Andy Lau's nickname
+协调性	uncommon	xié tiáo xìng	-	coordination (ability)
+卒子	uncommon	zú zi	-	Established word for a pawn or foot soldier.
+卒然	uncommon	cù rán	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+单雄信	uncommon	shàn xióng xìn	-	Well-known historical and fictional figure.
+南宫适	uncommon	nán gōng kuò	-	Established name with 适 read kuò.
+危宿	uncommon	wēi xiù	-	lunar mansion
+卷柏	uncommon	juǎn bǎi	-	resurrection plant (TCM herb)
+压蔓	uncommon	yā wàn	-	Established horticultural term.
+厦大	uncommon	xià dà	-	Xiamen University
+参商	uncommon	shēn shāng	-	literary: two stars that never meet
+参差不一	uncommon	cēn cī bù yī	-	common idiom
+参星	uncommon	shēn xīng	-	the Shen star (Orion)
+参汤	uncommon	shēn tāng	-	ginseng soup
+参片	uncommon	shēn piàn	-	ginseng slices
+参茶	uncommon	shēn chá	-	ginseng tea
+参须	uncommon	shēn xū	-	ginseng rootlets
+古乐	uncommon	gǔ yuè	-	Carried over from the earlier hand-written word table.
+句践	uncommon	gōu jiàn	-	Established variant of the ruler name 勾践.
+叨光	uncommon	tāo guāng	-	Established polite expression.
+叨咕	uncommon	dáo gu	-	Established colloquial verb.
+叨教	uncommon	tāo jiào	-	Established polite expression.
+叨陪末座	uncommon	tāo péi mò zuò	-	Established polite idiom.
+召公	uncommon	shào gōng	-	Well-known historical title.
+可发一噱	uncommon	kě fā yī jué	-	Established literary expression for something laughable.
+台长	uncommon	tái zhǎng	-	station director
+叶音	uncommon	xié yīn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+吁气	uncommon	xū qì	-	Established verb meaning exhale or sigh.
+名人传	uncommon	míng rén zhuàn	-	Romain Rolland's Lives of the Illustrious
+名刹	uncommon	míng chà	-	famous temple
+听差	uncommon	tīng chāi	-	manservant
+吱吱	uncommon	zhī zhī	-	Established onomatopoeia.
+吱吱嘎嘎	cedict	zhī zhī gā gā	zi zi ga ga	Established creaking onomatopoeia; zhī variant is used.
+吱溜	uncommon	zī liū	-	Established onomatopoeia.
+呐呐	uncommon	nè nè	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+呐喊助威	uncommon	nà hǎn zhù wēi	-	common idiom
+员峤	uncommon	yuán qiáo	-	Named mythical mountain.
+呢绒	uncommon	ní róng	-	Established textile term.
+呱嗒	uncommon	guā dā	-	Established onomatopoeia; full-tone dā is used.
+呵叻	uncommon	kē lè	-	Korat, Thailand; 现汉 (kXHC1983) lists 呵 kē for this name
+呵叻府	uncommon	kē lè fǔ	-	Nakhon Ratchasima province
+呵气	uncommon	hē qì	-	to breathe out
+咋办	uncommon	zǎ bàn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+咋唬	uncommon	zhā hu	-	to bluster (variant of 咋呼 zhā hu)
+咋啦	uncommon	zǎ la	-	colloquial "what's up"
+咋回事	uncommon	zǎ huí shì	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+咋样	uncommon	zǎ yàng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+咋的	uncommon	zǎ de	-	colloquial "so what / how" (cf. 不咋的)
+和亲	uncommon	hé qīn	-	marriage alliance
+和声学	uncommon	hé shēng xué	-	harmony (music theory)
+和弄	uncommon	huò nong	-	to mix; to stir up trouble
+和泥	uncommon	huó ní	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+和诗	uncommon	hè shī	-	reply poem
+和韵	uncommon	hè yùn	-	matching rhymes
+咖哩	cedict	gā lī	ka li	Carried over from the earlier hand-written word table.
+咯吱窝	uncommon	gē zhi wō	-	colloquial spelling of 胳肢窝; CC-CEDICT notes pronunciation gē zhi wō
+咯嘣	uncommon	gē bēng	-	onomatopoeia (crack)
+咯痰	uncommon	kǎ tán	-	to cough up phlegm
+咳喘	uncommon	ké chuǎn	-	Established symptom term.
+咳声叹气	uncommon	hāi shēng tàn qì	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+咽部	uncommon	yān bù	-	Established anatomical term.
+哪天	uncommon	nǎ tiān	-	Established interrogative or indefinite time expression.
+哼哼	uncommon	hēng hēng	-	Established onomatopoeic verb; full tones are used.
+哼歌	uncommon	hēng gē	-	Conventional verb for humming a tune.
+唯唯喏喏	uncommon	wéi wéi nuò nuò	-	Established idiomatic variant of 唯唯诺诺.
+唼喋	uncommon	shà zhá	-	Established literary word for feeding or chattering sounds.
+商厦	uncommon	shāng shà	-	commercial building
+商契	uncommon	shāng xiè	-	Recognized name of the Shang ancestor.
+喁喁私语	uncommon	yú yú sī yǔ	-	Soft speech uses yú yú, not expectant yóng yóng.
+喔唷	uncommon	ō yō	-	The conventional interjection uses ō.
+喔喔	uncommon	wō wō	-	Conventional rooster-call onomatopoeia uses wō.
+嗨哟	uncommon	hāi yō	-	Established rhythmic work-song interjection.
+嘏辞	uncommon	gǔ cí	-	Established term for ritual blessings.
+嘘唏	uncommon	xū xī	-	Established literary variant of 嘘欷.
+嘶嗄	uncommon	sī shà	-	Established literary word meaning hoarse.
+噌吰	uncommon	chēng hóng	-	Familiar literary word for a resonant bell sound.
+噌噌	uncommon	cēng cēng	-	Established onomatopoeia.
+囤粮	uncommon	tún liáng	-	Established agricultural and storage term.
+囤聚	uncommon	tún jù	-	Established verb meaning stockpile.
+圜丘	uncommon	yuán qiū	-	Established ritual and architectural term.
+圜土	uncommon	huán tǔ	-	Established historical word for a prison.
+圜钱	uncommon	yuán qián	-	Established term for ancient round coins.
+圩场	uncommon	xū chǎng	-	Established regional market noun.
+圩垸	uncommon	wéi yuàn	-	Established term for embanked fields.
+圩堤	uncommon	wéi dī	-	Established embankment noun.
+圩日	uncommon	xū rì	-	Established regional word for market day.
+圩田	uncommon	wéi tián	-	Established agricultural term.
+地磅	uncommon	dì bàng	-	weighbridge
+增长点	uncommon	zēng zhǎng diǎn	-	growth point
+壁宿	uncommon	bì xiù	-	lunar mansion
+声色俱厉	uncommon	shēng sè jù lì	-	idiom
+大大落落	uncommon	dà dà luō luō	-	Established colloquial idiom.
+大楷	uncommon	dà kǎi	-	Established calligraphic term.
+大气磅礴	uncommon	dà qì páng bó	-	common phrase
+大涌镇	uncommon	dà chōng zhèn	-	Dachong town, Zhongshan
+大队长	uncommon	dà duì zhǎng	-	brigade / squadron leader
+大隗	uncommon	dà wěi	-	The established place and mythological name uses wěi.
+大黄	cedict	dài huáng	da huang	Traditional medicinal reading dài huáng is used.
+大龙湫	uncommon	dà lóng qiū	-	Well-known waterfall name.
+天姥山	uncommon	tiān mǔ shān	-	Well-known mountain and literary place name.
+太子参	uncommon	tài zǐ shēn	-	TCM herb
+太行	uncommon	tài háng	-	Taihang mountains
+失调症	uncommon	shī tiáo zhèng	-	disorder (思觉失调症 etc.)
+夹衣	uncommon	jiá yī	-	lined garment
+夹袍	uncommon	jiá páo	-	lined gown
+夹被	uncommon	jiá bèi	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+夹裤	uncommon	jiá kù	-	lined trousers
+夹谷	uncommon	jiá gǔ	-	the compound surname and the site of 夹谷之会 are read Jiágǔ
+奇零	uncommon	jī líng	-	Established word for odd amounts or remainders.
+奎宿	uncommon	kuí xiù	-	lunar mansion
+女宿	uncommon	nǚ xiù	-	lunar mansion (see collision note: 女宿舍)
+女配角	uncommon	nǚ pèi jué	-	supporting actress
+嫡长子	uncommon	dí zhǎng zǐ	-	eldest son of the principal wife
+孛儿只斤	uncommon	bó ér zhǐ jīn	-	Well-known Mongol clan name.
+孱羸	uncommon	chán léi	-	Established literary word meaning weak or frail.
+孱躯	uncommon	chán qū	-	Established literary noun for a frail body.
+守将	uncommon	shǒu jiàng	-	defending general
+宓妃	uncommon	fú fēi	-	Established mythological name; fú is used.
+定都	uncommon	dìng dū	-	to establish a capital
+宝刹	uncommon	bǎo chà	-	Established literary word for a Buddhist temple.
+审食其	uncommon	shěn yì jī	-	Han dynasty figure (食其 yì jī as in 郦食其)
+室宿	uncommon	shì xiù	-	lunar mansion
+室长	uncommon	shì zhǎng	-	dorm-room head
+宽豁	uncommon	kuān huò	-	豁 huò "open, broad" as in 豁达, 豁亮, not a neutral tone
+寒颤	uncommon	hán zhàn	-	Established word for a shiver.
+将仲子	uncommon	qiāng zhòng zǐ	-	Shijing poem, 将 qiāng "please"
+将相	uncommon	jiàng xiàng	-	generals and ministers
+将相和	uncommon	jiàng xiàng hé	-	famous story and opera
+将进酒	uncommon	qiāng jìn jiǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+将门	uncommon	jiàng mén	-	family of generals
+将门有将	uncommon	jiàng mén yǒu jiàng	-	idiom
+将门虎子	uncommon	jiàng mén hǔ zǐ	-	idiom
+尉官	uncommon	wèi guān	-	Established military rank category.
+小楷	uncommon	xiǎo kǎi	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+小队长	uncommon	xiǎo duì zhǎng	-	squad leader
+尾宿	uncommon	wěi xiù	-	lunar mansion
+屈戌	uncommon	qū xu	-	Established hardware noun; neutral final syllable is used.
+屏住	uncommon	bǐng zhù	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+屏弃	uncommon	bǐng qì	-	to discard (variant of 摒弃)
+屏息凝神	uncommon	bǐng xī níng shén	-	common idiom
+屏气凝神	uncommon	bǐng qì níng shén	-	common idiom
+屏气敛息	uncommon	bǐng qì liǎn xī	-	attested idiom variant
+属望	uncommon	zhǔ wàng	-	Established literary verb meaning place hopes in.
+屯兵	uncommon	tún bīng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+屯卦	uncommon	zhūn guà	-	Name of a hexagram; 屯 is zhūn.
+屯田	uncommon	tún tián	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+屯积	uncommon	tún jī	-	to hoard (variant of 囤积)
+屯粮	uncommon	tún liáng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+屯集	uncommon	tún jí	-	Established verb for gathering or stationing.
+山大王	uncommon	shān dài wáng	-	Established word for a bandit chief.
+山峤	uncommon	shān jiào	-	Established literary word for a high mountain.
+山楂树	uncommon	shān zhā shù	-	Tree name and familiar song title.
+山楂片	uncommon	shān zhā piàn	-	Established food name.
+岳飞传	uncommon	yuè fēi zhuàn	-	well-known storytelling work (评书)
+峒寨	uncommon	dòng zhài	-	Established regional word for a tribal settlement.
+峙立	uncommon	zhì lì	-	Established verb meaning stand towering.
+崴嵬	uncommon	wēi wéi	-	Established literary word for lofty terrain.
+嵌合	uncommon	qiàn hé	-	Established technical and general compound.
+嵌板	uncommon	qiàn bǎn	-	Established construction noun.
+嵌缝	uncommon	qiàn fèng	-	Established construction process.
+巨贾	uncommon	jù gǔ	-	tycoon
+差之毫厘	uncommon	chā zhī háo lí	-	idiom
+差人	uncommon	chāi rén	-	messenger; to send someone
+差值	uncommon	chā zhí	-	difference (maths)
+差序格局	uncommon	chā xù gé jú	-	Fei Xiaotong's sociological concept
+差忒	uncommon	chā tè	-	Established literary word for error or discrepancy.
+帷帱	uncommon	wéi chóu	-	Established literary word for curtains.
+幡幢	uncommon	fān chuáng	-	Established Buddhist banner term.
+幢号	uncommon	zhuàng hào	-	building number
+幢幡	uncommon	chuáng fān	-	Buddhist banner
+干将莫邪	uncommon	gān jiāng mò yé	-	legendary swords
+平刨	uncommon	píng bào	-	Established woodworking tool or machine.
+广厦	uncommon	guǎng shà	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+度德量力	uncommon	duó dé liàng lì	-	Established idiom.
+廑念	uncommon	jǐn niàn	-	Established literary expression of concern.
+建设银行	uncommon	jiàn shè yín háng	-	bank name
+弃车保帅	uncommon	qì jū bǎo shuài	-	idiom (chess 车 jū)
+弓缴	uncommon	gōng zhuó	-	Established literary term for bow and corded arrow.
+张宿	uncommon	zhāng xiù	-	lunar mansion
+弹吉他	uncommon	tán jí tā	-	Carried over from the earlier hand-written word table.
+归棹	uncommon	guī zhào	-	Established poetic word for a returning boat.
+当差	uncommon	dāng chāi	-	to be in service
+彷佛	uncommon	fǎng fú	-	Established orthographic variant of 仿佛.
+得劲	uncommon	dé jìn	-	comfortable, handy
+徵声	uncommon	zhǐ shēng	-	Traditional musical term; 徵 retains zhǐ.
+心宿	uncommon	xīn xiù	-	lunar mansion
+怫郁	uncommon	fú yù	-	Established literary word for pent-up distress.
+总行	uncommon	zǒng háng	-	head office (see collision note: 总行程)
+恁地	uncommon	nèn dì	-	Established literary and dialectal expression.
+恁般	cedict	nèn bān	ren ban	Established expression; nèn is the Mainland reading.
+恫瘝在抱	uncommon	tōng guān zài bào	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+悍将	uncommon	hàn jiàng	-	fierce general
+悟空传	uncommon	wù kōng zhuàn	-	novel and film
+悬瀑	uncommon	xuán pù	-	Established scenic noun for a hanging waterfall.
+慊慊	uncommon	qiàn qiàn	-	Established literary word for discontent or longing.
+懒觉	uncommon	lǎn jiào	-	Established noun in 睡懒觉.
+戆直	uncommon	zhuàng zhí	-	Established word meaning bluntly honest.
+戌年	uncommon	xū nián	-	Conventional calendrical term.
+成天价	uncommon	chéng tiān jie	-	all day long (价 jie suffix)
+战将	uncommon	zhàn jiàng	-	warrior general
+房宿	uncommon	fáng xiù	-	lunar mansion
+房柁	uncommon	fáng tuó	-	Established regional word for a house beam.
+手如柔荑	uncommon	shǒu rú róu tí	-	Familiar Book of Songs quotation.
+扎彩	uncommon	zā cǎi	-	Established craft term for tying decorations.
+扎手	uncommon	zhā shǒu	-	Established literal and figurative verb.
+扒鸡	uncommon	pá jī	-	braised chicken (德州扒鸡)
+扛枪	uncommon	káng qiāng	-	Conventional expression also meaning serve as a soldier.
+扛活	uncommon	káng huó	-	Established regional word for hired manual labor.
+扛鼎	uncommon	gāng dǐng	-	Established literary expression; 扛 is gāng.
+抗疟	uncommon	kàng nüè	-	Established medical compound.
+护士长	uncommon	hù shi zhǎng	-	head nurse
+抹不开	uncommon	mò bu kāi	-	to feel embarrassed (dictionary word)
+抹墙	uncommon	mò qiáng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+抹桌子	uncommon	mā zhuō zi	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+抹眼泪	uncommon	mǒ yǎn lèi	-	set expression "to weep"
+抹粉	uncommon	mǒ fěn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+抹脸	uncommon	mā liǎn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+拉纤	uncommon	lā qiàn	-	Established word for towing a boat by rope.
+拍卖行	uncommon	pāi mài háng	-	auction house
+拗句	uncommon	ào jù	-	Established prosodic term.
+拚搏	uncommon	pīn bó	-	Established variant spelling of 拼搏.
+拚杀	uncommon	pīn shā	-	Established variant spelling of 拼杀.
+招商银行	uncommon	zhāo shāng yín háng	-	bank name
+择业	uncommon	zé yè	-	Established word for choosing an occupation.
+择优	uncommon	zé yōu	-	Established word for selecting the best.
+择席	uncommon	zhái xí	-	Established regional word for trouble sleeping elsewhere.
+拱券	uncommon	gǒng xuàn	-	Established architectural term.
+拾起	uncommon	shí qǐ	-	to pick up
+指挥长	uncommon	zhǐ huī zhǎng	-	commander (of an operation)
+挓挲	uncommon	zhā sha	-	Established colloquial word for spreading out.
+挝鼓	uncommon	zhuā gǔ	-	Established literary expression for beating a drum.
+挺括	uncommon	tǐng kuò	-	括 is read kuò throughout (审音表); guā is the pre-1985 reading, dropped by 通用规范汉字字典
+捋顺	uncommon	lǚ shùn	-	Established literal and figurative verb.
+损兵折将	uncommon	sǔn bīng zhé jiàng	-	idiom
+掉色	cedict	diào shǎi	diao se	CC-CEDICT explicitly permits shǎi.
+掌柁	uncommon	zhǎng duò	-	Established variant spelling of 掌舵.
+掌柜的	uncommon	zhǎng guì de	-	shopkeeper
+掸人	uncommon	shàn rén	-	Shan people
+掸尘	uncommon	dǎn chén	-	Established cleaning and seasonal-custom term.
+掸族	uncommon	shàn zú	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+掸灰	uncommon	dǎn huī	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+掸瓶	uncommon	dǎn píng	-	Established noun for a duster-holding vase.
+揲蓍	uncommon	shé shī	-	Established divination term.
+撮子	uncommon	cuō zi	-	dustpan (dialect)
+撮弄	uncommon	cuō nòng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+撮箕	uncommon	cuō jī	-	dustpan (dialect)
+撮要	uncommon	cuō yào	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+擘开	cedict	bāi kāi	bo kai	Valid bāi reading of 擘 as a variant of 掰.
+攒动	uncommon	cuán dòng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+攒射	uncommon	cuán shè	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+攒眉	uncommon	cuán méi	-	to knit the brows
+攒足	uncommon	zǎn zú	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+敦实	uncommon	dūn shi	-	Established adjective.
+敦请	uncommon	dūn qǐng	-	Established polite verb.
+数叨	uncommon	shǔ dao	-	to scold, enumerate faults
+数说	uncommon	shǔ shuō	-	to enumerate; to scold
+数钱	uncommon	shǔ qián	-	to count money
+整天价	uncommon	zhěng tiān jie	-	all day long (价 jie suffix)
+整宿	uncommon	zhěng xiǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+斗宿	uncommon	dǒu xiù	-	lunar mansion
+斗杓	uncommon	dǒu biāo	-	Established astronomical term for the Dipper handle.
+族长制	uncommon	zú zhǎng zhì	-	patriarchal clan system
+无声无臭	uncommon	wú shēng wú xiù	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+昴宿	uncommon	mǎo xiù	-	lunar mansion (Pleiades)
+曝光台	uncommon	bào guāng tái	-	Established media term.
+曝光度	uncommon	bào guāng dù	-	exposure level
+曝光率	uncommon	bào guāng lǜ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+曝光量	uncommon	bào guāng liàng	-	exposure amount
+曲学阿世	uncommon	qū xué ē shì	-	idiom
+曾志伟	uncommon	zēng zhì wěi	-	Well-known actor.
+朝霞	uncommon	zhāo xiá	-	Established noun for morning rosy clouds.
+期年	uncommon	jī nián	-	Established literary term for a full year.
+杉木	uncommon	shā mù	-	Conventional lexical reading of 杉木 uses shā.
+杉树	uncommon	shān shù	-	Established tree name.
+杉篙	uncommon	shā gāo	-	Established noun for a fir pole.
+李晟	uncommon	lǐ shèng	-	Recognized personal name with shèng.
+杏核	uncommon	xìng hú	-	apricot stone (核 hú colloquial)
+杏脯	uncommon	xìng fǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+杭育	uncommon	háng yō	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+果壳	uncommon	guǒ ké	-	Established noun for a fruit or nut shell.
+枣核	uncommon	zǎo hú	-	date stone
+枣脯	uncommon	zǎo fǔ	-	candied dates
+柏木	uncommon	bǎi mù	-	Established tree and timber term.
+柜柳	uncommon	jǔ liǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+柞丝	uncommon	zuò sī	-	Established textile term for tussah silk.
+柞木	uncommon	zuò mù	-	Established tree and timber term.
+柞树	uncommon	zuò shù	-	Established tree name.
+柞蚕	uncommon	zuò cán	-	Established insect name.
+查士标	uncommon	zhā shì biāo	-	Recognized historical painter.
+查干湖	uncommon	chá gān hú	-	Chagan Lake, Jilin
+查慎行	uncommon	zhā shèn xíng	-	Qing poet
+查济	uncommon	zhā jì	-	Zhaji ancient village, Anhui
+查海生	uncommon	zhā hǎi shēng	-	real name of the poet Haizi
+查良镛	uncommon	zhā liáng yōng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+柳宿	uncommon	liǔ xiù	-	lunar mansion
+栎阳	uncommon	yuè yáng	-	Recognized historical place name.
+树行子	uncommon	shù hàng zi	-	row of trees (the one word with 行 hàng)
+栝楼	uncommon	guā lóu	-	Established plant name.
+校勘学	uncommon	jiào kān xué	-	textual criticism
+校审	uncommon	jiào shěn	-	proofread and review
+校对员	uncommon	jiào duì yuán	-	proofreader
+校改	uncommon	jiào gǎi	-	to proofread and correct
+校核	uncommon	jiào hé	-	to check
+校注	uncommon	jiào zhù	-	collation and annotation (book-title term)
+校点	uncommon	jiào diǎn	-	collate and punctuate
+校订本	uncommon	jiào dìng běn	-	revised edition
+校订版	uncommon	jiào dìng bǎn	-	revised edition
+校长室	uncommon	xiào zhǎng shì	-	principal's office
+桃核	uncommon	táo hú	-	peach stone
+桃脯	uncommon	táo fǔ	-	candied peach
+桔汁	uncommon	jú zhī	-	Common spelling of 橘汁.
+桔皮	uncommon	jú pí	-	Common spelling of 橘皮.
+桧树	uncommon	guì shù	-	Established tree name.
+梁山泊	uncommon	liáng shān pō	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+检察长	uncommon	jiǎn chá zhǎng	-	chief prosecutor
+棹歌	uncommon	zhào gē	-	Established poetic and musical term.
+椎心泣血	uncommon	chuí xīn qì xuè	-	Established idiom.
+楷树	uncommon	jiē shù	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+槛内人	uncommon	kǎn nèi rén	-	Honglou Meng: 槛 is the threshold of 铁门槛, read kǎn
+槛外人	uncommon	kǎn wài rén	-	Miaoyu's self-name, from 铁门槛; 槛 kǎn
+槟城	cedict	bīn chéng	bing cheng	Local Mandarin place-name reading bīn is used.
+槟榔	cedict	bīn láng	bing lang	Established Taiwan reading; bīn láng is used.
+款识	uncommon	kuǎn zhì	-	Established term for inscriptions or marks.
+歙张	uncommon	xī zhāng	-	Established literary word for contraction and expansion.
+歙砚	uncommon	shè yàn	-	Well-known type of inkstone.
+残差	uncommon	cán chā	-	residual (statistics)
+殷其雷	uncommon	yǐn qí léi	-	Shijing poem; 殷 yǐn (rumble)
+殷志源	uncommon	yīn zhì yuán	-	Eun Ji-won (Sechs Kies)
+殷承宗	uncommon	yīn chéng zōng	-	pianist
+殷桃	uncommon	yīn táo	-	actress
+殷正洋	uncommon	yīn zhèng yáng	-	singer
+殷秀梅	uncommon	yīn xiù méi	-	singer
+殷雷	uncommon	yǐn léi	-	Established literary thunder expression.
+毕宿	uncommon	bì xiù	-	lunar mansion (Hyades)
+毛呢	uncommon	máo ní	-	Established textile noun.
+氐宿	uncommon	dī xiù	-	lunar mansion
+气刹	uncommon	qì shā	-	air brake
+气势磅礴	uncommon	qì shì páng bó	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+水泊	uncommon	shuǐ pō	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+水蓼	uncommon	shuǐ liǎo	-	Established plant name.
+汤水	uncommon	tāng shuǐ	-	Established food noun; full-tone shuǐ is used.
+汤汤	uncommon	shāng shāng	-	Established literary description of flowing water.
+沌口	uncommon	zhuàn kǒu	-	Recognized Wuhan place name.
+沙铫	uncommon	shā diào	-	Established regional name for an earthenware pot.
+沟浍	uncommon	gōu kuài	-	Established agricultural drainage term.
+没世不忘	uncommon	mò shì bù wàng	-	idiom
+没入	uncommon	mò rù	-	to sink into (see collision note: 没入选)
+没顶	uncommon	mò dǐng	-	to be submerged
+没顶之灾	uncommon	mò dǐng zhī zāi	-	common phrase
+泌尿科	uncommon	mì niào kē	-	urology department
+泷冈	uncommon	shuāng gāng	-	Literary place name associated with Ouyang Xiu.
+泺水	uncommon	luò shuǐ	-	Recognized historical river name.
+浍河	uncommon	huì hé	-	Recognized river name.
+济公传	uncommon	jì gōng zhuàn	-	classic novel and TV series
+浒墅关	uncommon	xǔ shù guān	-	Recognized Suzhou place name.
+浦发银行	uncommon	pǔ fā yín háng	-	bank name
+浩浩汤汤	uncommon	hào hào shāng shāng	-	Familiar literary expression for vast flowing water.
+浮楂	uncommon	fú chá	-	Established literary variant of 浮槎.
+浮皮潦草	uncommon	fú pí liáo cǎo	-	idiom
+涡河	uncommon	guō hé	-	Recognized river name.
+涡虫	uncommon	wō chóng	-	Established zoological noun.
+淡沲	uncommon	dàn duò	-	Established poetic word for rippling or gentle scenery.
+深巷	uncommon	shēn xiàng	-	Conventional literary noun for a secluded alley.
+混合调式	uncommon	hùn hé diào shì	-	mixed mode (music)
+渑水	uncommon	shéng shuǐ	-	Recognized historical river name.
+湫隘	uncommon	jiǎo ài	-	Established literary adjective for cramped damp quarters.
+溱洧	uncommon	zhēn wěi	-	Book of Songs title and paired river names.
+溱潼	uncommon	qín tóng	-	Recognized Jiangsu place name.
+溺毙	uncommon	nì bì	-	to drown
+滂沲	uncommon	pāng tuó	-	Established variant of 滂沱.
+漯水	uncommon	tà shuǐ	-	Recognized historical river name.
+潦水	uncommon	lǎo shuǐ	-	rainwater (潦水尽而寒潭清)
+澄净	uncommon	chéng jìng	-	Established adjective.
+澄明	uncommon	chéng míng	-	Established adjective.
+澄沙	uncommon	dèng shā	-	Established food-processing noun.
+澄莹	uncommon	chéng yíng	-	Established literary adjective.
+澹台	uncommon	tán tái	-	Recognized compound surname.
+澹台灭明	uncommon	tán tái miè míng	-	Well-known disciple of Confucius.
+瀑布流	uncommon	pù bù liú	-	waterfall layout
+瀑流	uncommon	pù liú	-	Established scenic noun.
+炔雌醇	uncommon	quē cí chún	-	Established drug name.
+炮羊肉	uncommon	bāo yáng ròu	-	Established cooking term and dish.
+烙花	uncommon	lào huā	-	pyrography
+焯烫	uncommon	chāo tàng	-	Established cooking verb.
+焯菜	uncommon	chāo cài	-	Conventional cooking expression.
+煲仔饭	uncommon	bāo zǎi fàn	-	claypot rice
+熟透	cedict	shóu tòu	shu tou	Established expression; colloquial shóu is used.
+熨帖	uncommon	yù tiē	-	Established adjective; 熨 is yù here.
+爪哇语	uncommon	zhǎo wā yǔ	-	Javanese
+牛仔帽	uncommon	niú zǎi mào	-	cowboy hat
+牛仔服	uncommon	niú zǎi fú	-	denim clothing
+牛仔舞	uncommon	niú zǎi wǔ	-	jive
+牛宿	uncommon	niú xiù	-	lunar mansion
+牟其中	uncommon	móu qí zhōng	-	Recognized public figure.
+犬牙差互	uncommon	quǎn yá cī hù	-	idiom from 小石潭记
+狂且	uncommon	kuáng jū	-	Familiar Book of Songs expression.
+狗爪	uncommon	gǒu zhuǎ	-	dog's paw
+独唱会	uncommon	dú chàng huì	-	solo recital
+猫爪	uncommon	māo zhuǎ	-	cat's paw
+玉珩	uncommon	yù héng	-	Established jade-ornament noun.
+玉米糁	cedict	yù mǐ shēn	yu mi san	Established food noun; northern shēn is used.
+王焘	uncommon	wáng tāo	-	Recognized historical physician.
+玢岩	uncommon	fēn yán	-	The geological term uses fēn.
+珍珠蚌	uncommon	zhēn zhū bàng	-	Established zoological noun.
+珠盘玉敦	uncommon	zhū pán yù duì	-	Established historical idiom; 敦 is duì.
+珩磨	uncommon	háng mó	-	Established machining process.
+琢玉	uncommon	zhuó yù	-	Established craft and literary expression.
+琴行	uncommon	qín háng	-	instrument shop
+瑷珲	uncommon	ài huī	-	Recognized historical place name.
+瓜蔓	uncommon	guā wàn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+生角	uncommon	shēng jué	-	male role in opera
+生长发育	uncommon	shēng zhǎng fā yù	-	growth and development; also stops CC-CEDICT 长发 cháng fà from matching
+生长期	uncommon	shēng zhǎng qī	-	growth period; also stops 长期 cháng qī from matching
+生长点	uncommon	shēng zhǎng diǎn	-	growing point
+田垌	uncommon	tián dòng	-	Established southern regional landscape term.
+电位差	uncommon	diàn wèi chā	-	potential difference
+男配角	uncommon	nán pèi jué	-	supporting actor
+町畦	uncommon	tǐng qí	-	Established literary word for field boundaries.
+畜产	uncommon	xù chǎn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+畜养	uncommon	xù yǎng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+畜牧兽医	uncommon	xù mù shòu yī	-	discipline name
+畜牧场	uncommon	xù mù chǎng	-	livestock farm
+畜牧学	uncommon	xù mù xué	-	animal husbandry
+畹町	uncommon	wǎn dīng	-	Recognized Yunnan place name.
+疯长	uncommon	fēng zhǎng	-	to grow rampantly
+病革	uncommon	bìng jí	-	Established classical term for critical illness.
+皋陶	uncommon	gāo yáo	-	Well-known legendary figure.
+盖叫天	uncommon	gě jiào tiān	-	Well-known opera performer.
+盖聂	uncommon	gě niè	-	Well-known historical and fictional swordsman.
+盛满	uncommon	chéng mǎn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+相峙	uncommon	xiāng zhì	-	Established literary verb for standing opposed.
+瞿然	uncommon	jù rán	-	Established literary word for startled attention.
+矜寡	uncommon	guān guǎ	-	Established classical variant of 鳏寡.
+石幢	uncommon	shí chuáng	-	Established Buddhist monument term.
+砉然	uncommon	huā rán	-	Established sound word; huā is used for sudden noises.
+砌墙	uncommon	qì qiáng	-	Conventional construction verb.
+砩石	uncommon	fú shí	-	Established mineral name.
+硌牙	uncommon	gè yá	-	Established colloquial expression.
+硌脚	uncommon	gè jiǎo	-	Established colloquial expression.
+硫酸铊	uncommon	liú suān tā	-	Established chemical name.
+祢衡	uncommon	mí héng	-	Well-known historical writer.
+祭遵	uncommon	zhài zūn	-	Recognized Eastern Han general.
+禁得起	uncommon	jīn de qǐ	-	to withstand (dictionary word)
+禅寺	uncommon	chán sì	-	Established Buddhist noun.
+禅意	uncommon	chán yì	-	Established cultural and aesthetic noun.
+种师道	uncommon	chóng shī dào	-	Well-known Song general.
+秘钥	uncommon	mì yào	-	common misspelling of 密钥; 钥 yào
+秤铊	uncommon	chèng tuó	-	Established variant spelling of 秤砣.
+积潦	uncommon	jī lǎo	-	Established literary noun for accumulated rainwater.
+称心快意	uncommon	chèn xīn kuài yì	-	idiom
+称身	uncommon	chèn shēn	-	to fit well
+稽留	uncommon	jī liú	-	Established verb meaning delay or remain.
+稽首	uncommon	qǐ shǒu	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+穆棱河	uncommon	mù líng hé	-	Muling River
+窨茶	uncommon	xūn chá	-	Established tea-processing term.
+竹筠	uncommon	zhú yún	-	Established literary bamboo term.
+竹耙	uncommon	zhú pá	-	Established agricultural implement.
+笑呵呵	uncommon	xiào hē hē	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+等衰	uncommon	děng cuī	-	Established historical term for graded distinctions.
+筑圩	uncommon	zhù wéi	-	Established agricultural construction term.
+箕宿	uncommon	jī xiù	-	lunar mansion
+箪食壶浆	cedict	dān sì hú jiāng	dan shi hu jiang	CC-CEDICT explicitly permits sì.
+米囤	uncommon	mǐ dùn	-	Established grain-storage noun.
+粘住	uncommon	zhān zhù	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+粘合	uncommon	nián hé	-	粘 here stands for 黏 (CC-CEDICT 黏合 nián hé), consistent with the author's own 粘着, 粘胶
+粘合剂	uncommon	nián hé jì	-	as 粘合 (CC-CEDICT 黏合剂 nián hé jì)
+粘土	uncommon	nián tǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+粘土矿	uncommon	nián tǔ kuàng	-	clay mine (黏土)
+粘度	uncommon	nián dù	-	viscosity (黏度)
+粘液	uncommon	nián yè	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+粘湿	uncommon	nián shī	-	sticky-damp
+粘滞	uncommon	nián zhì	-	viscous
+粘着	uncommon	nián zhuó	-	to adhere (黏着)
+粘着力	uncommon	nián zhuó lì	-	adhesion
+粘米	uncommon	nián mǐ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+粘糊	uncommon	nián hu	-	sticky (黏糊)
+粘糊糊	uncommon	nián hū hū	-	sticky (黏糊糊)
+粘胶	uncommon	nián jiāo	-	viscose (黏胶)
+粘胶纤维	uncommon	nián jiāo xiān wéi	-	viscose fibre
+粘腻	uncommon	nián nì	-	sticky, cloying
+粘膜	uncommon	nián mó	-	Anatomical word is 黏膜; 粘 is nián here.
+粘附	uncommon	zhān fù	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+粮囤	uncommon	liáng dùn	-	Established grain-storage noun.
+精兵强将	uncommon	jīng bīng qiáng jiàng	-	idiom
+糁子	uncommon	shēn zi	-	The northern word for grain grits uses shēn.
+糜子	uncommon	méi zi	-	Established crop name.
+糜粥	uncommon	mí zhōu	-	Established literary word for porridge.
+糜黍	uncommon	méi shǔ	-	Established crop term.
+繁台	uncommon	pó tái	-	Recognized Kaifeng historical site.
+繁钦	uncommon	pó qīn	-	Han poet; surname 繁 Pó
+繇役	uncommon	yáo yì	-	Established classical variant of 徭役.
+红参	uncommon	hóng shēn	-	red ginseng
+纤绳	uncommon	qiàn shéng	-	Established boat-towing noun.
+纯嘏	uncommon	chún gǔ	-	Established classical blessing expression.
+纶巾	uncommon	guān jīn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+经纪行	uncommon	jīng jì háng	-	brokerage
+经纶	uncommon	jīng lún	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+络子	uncommon	lào zi	-	Established noun for a knotted net or pouch.
+综片	uncommon	zèng piàn	-	Established weaving-machine part.
+缉边	uncommon	qī biān	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+缩砂	uncommon	sù shā	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+缲丝	uncommon	sāo sī	-	Established silk-processing term.
+缲边	uncommon	qiāo biān	-	Established sewing term.
+罗布泊镇	uncommon	luó bù pō zhèn	-	Lop Nur town
+羊圈	uncommon	yáng juàn	-	Established livestock enclosure noun.
+群氓	uncommon	qún máng	-	Established word for a crowd or rabble.
+羹匙	uncommon	gēng chí	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+羽扇纶巾	uncommon	yǔ shàn guān jīn	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+翟让	uncommon	zhái ràng	-	Well-known Sui rebel leader.
+翠柏	uncommon	cuì bǎi	-	Established tree and literary noun.
+翼宿	uncommon	yì xiù	-	lunar mansion
+耙田	uncommon	bà tián	-	Established agricultural operation.
+耙耱	uncommon	bà mò	-	Established agricultural operation.
+耸峙	uncommon	sǒng zhì	-	Established verb meaning stand towering.
+肋条	uncommon	lèi tiáo	-	Established anatomical and structural noun.
+肋脦	reading	te	de	XHC1983 gives 脦 te in 肋脦 (lē te); the syllable belongs to this word only.
+肋脦	uncommon	lē te	-	XHC1983 gives 脦 te in 肋脦 (lē te); the syllable belongs to this word only.
+肋膜	uncommon	lèi mó	-	Established anatomical term.
+肥仔	uncommon	féi zǎi	-	fatty (Cantonese nickname)
+肯綮	uncommon	kěn qìng	-	Established literary word for the crux.
+育才	uncommon	yù cái	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+胃宿	uncommon	wèi xiù	-	lunar mansion
+胶鬲	uncommon	jiāo gé	-	Well-known historical figure.
+胸脯肉	uncommon	xiōng pú ròu	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+腊八	uncommon	là bā	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+腊味	uncommon	là wèi	-	Established food noun.
+腌菜	uncommon	yān cài	-	Established food noun.
+腥膻	uncommon	xīng shān	-	Established odor term.
+膀肿	uncommon	pāng zhǒng	-	Established regional word for swelling.
+膻味	uncommon	shān wèi	-	Established odor noun.
+膻气	uncommon	shān qì	-	Established odor noun.
+般若寺	uncommon	bō rě sì	-	temple name
+般若经	uncommon	bō rě jīng	-	Prajñāpāramitā sutras
+良将	uncommon	liáng jiàng	-	good general
+色样	uncommon	sè yàng	-	colour sample is a trade term read sè; shǎi belongs to colloquial words like 掉色
+艴然	uncommon	fú rán	-	Established literary word for an angry appearance.
+艴然不悦	uncommon	fú rán bù yuè	-	Established literary expression.
+芟荑	uncommon	shān yí	-	Established literary word for clearing weeds.
+芥子	uncommon	jiè zǐ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+苕子	uncommon	tiáo zi	-	Established plant name.
+苕溪	uncommon	tiáo xī	-	Recognized river name.
+苕粉	uncommon	sháo fěn	-	Established regional food name.
+茄泥	uncommon	qié ní	-	Established dish name.
+茄盒	uncommon	qié hé	-	Established dish name.
+茈草	uncommon	zǐ cǎo	-	Established plant name.
+茜色	uncommon	qiàn sè	-	Established color word.
+茜茜	uncommon	xī xī	-	Established personal name, including Sisi.
+草芥	uncommon	cǎo jiè	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+药行	uncommon	yào háng	-	drug store
+莎莎	uncommon	shā shā	-	given name / salsa
+莎鸡	uncommon	suō jī	-	Established insect name and literary word.
+莘庄	uncommon	xīn zhuāng	-	Recognized Shanghai place name.
+莞城	uncommon	guǎn chéng	-	Recognized Dongguan place name.
+莞草	uncommon	guān cǎo	-	Established plant name.
+莫邪	uncommon	mò yé	-	Well-known legendary sword and personal name.
+菀结	uncommon	yù jié	-	Established literary word for pent-up feelings.
+萌蘖	uncommon	méng niè	-	Established botanical term.
+萨莎	uncommon	sà shā	-	transliterated name (Sasha)
+落魄	cedict	luò tuò	luo po	CC-CEDICT explicitly permits tuò.
+著凉	uncommon	zháo liáng	-	Carried over from the earlier hand-written word table.
+著陆	uncommon	zhuó lù	-	Carried over from the earlier hand-written word table.
+葭莩	uncommon	jiā fú	-	Established botanical and kinship allusion.
+蓼科	uncommon	liǎo kē	-	Established botanical family name.
+蓼莪	uncommon	lù é	-	The Book of Songs title uses lù.
+蓼蓼	uncommon	lù lù	-	Established classical adjective meaning tall or luxuriant.
+蔚然	uncommon	wèi rán	-	Established adjective.
+薯莨	uncommon	shǔ liáng	-	Established plant name.
+虚宿	uncommon	xū xiù	-	lunar mansion
+虾蟆陵	uncommon	há ma líng	-	from 琵琶行
+蚌肉	uncommon	bàng ròu	-	Established food ingredient noun.
+蚵仔煎	reading	é	he ke	Taiwan Mandarin reads the dish é zǎi jiān, after the Hokkien name; it is how the name is said.
+蛤壳	uncommon	gé ké	-	Established shell and medicinal-material noun.
+蜂螫	cedict	fēng shì	feng zhe	Literary shì is valid for stinging.
+蜜桔	uncommon	mì jú	-	Common spelling of 蜜橘.
+蝤蛑	uncommon	qiú móu	-	Established crab name.
+螫针	uncommon	shì zhēn	-	Established zoological noun.
+螺钿	uncommon	luó diàn	-	Established decorative inlay term.
+行了	uncommon	xíng le	-	A real word; its row lets segmentation read the words around it correctly.
+行伍	uncommon	háng wǔ	-	ranks, army
+行会制	uncommon	háng huì zhì	-	guild system
+行内	uncommon	háng nèi	-	in the trade; inline
+行商	cedict	xíng shāng	hang shang	现汉 reads 行商 xíngshāng, the itinerant trader (vs 坐商); CC-CEDICT háng fits only the Canton Hong merchants
+行商坐贾	uncommon	xíng shāng zuò gǔ	-	idiom
+行外	uncommon	háng wài	-	outsider to the trade
+行帮	uncommon	háng bāng	-	guild
+行数	uncommon	háng shù	-	line count
+行末	uncommon	háng mò	-	end of line
+行规	uncommon	háng guī	-	trade rules
+行首	uncommon	háng shǒu	-	start of line; guild head
+补给线	uncommon	bǔ jǐ xiàn	-	supply line
+袷衣	uncommon	jiá yī	-	Established clothing term.
+裨将	uncommon	pí jiàng	-	Established military term.
+褚时健	uncommon	chǔ shí jiàn	-	Well-known public figure.
+褪毛	uncommon	tuì máo	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+褪皮	uncommon	tuì pí	-	to peel, shed skin
+覃思	uncommon	tán sī	-	Established literary term for deep thought.
+角宿	uncommon	jiǎo xiù	-	lunar mansion
+角斗士	cedict	jué dòu shì	jiao dou shi	gladiator; 角斗 is jué dòu (CC-CEDICT 角斗 agrees, its 角斗士 jiǎo is inconsistent)
+解送	uncommon	jiè sòng	-	Established verb for escorting under guard.
+警察局长	uncommon	jǐng chá jú zhǎng	-	police chief
+评传	uncommon	píng zhuàn	-	critical biography
+诘屈	uncommon	jí qū	-	Established word; jí is used in the 佶屈 variant tradition.
+诘屈聱牙	uncommon	jié qū áo yá	-	Established idiom; jié is an established variant reading.
+诘责	uncommon	jié zé	-	Established verb for questioning reproachfully.
+诘难	uncommon	jié nàn	-	Established verb for challenging an argument.
+说得来	uncommon	shuō de lái	-	to get along (dictionary word)
+说得通	uncommon	shuō de tōng	-	to make sense
+谁人	uncommon	shéi rén	-	Established literary interrogative.
+谁何	uncommon	shuí hé	-	Established literary challenge or questioning expression.
+谁家	uncommon	shéi jiā	-	Conventional interrogative and poetic expression.
+调光	uncommon	tiáo guāng	-	dimming
+调压	uncommon	tiáo yā	-	voltage regulation
+调压器	uncommon	tiáo yā qì	-	voltage regulator
+调和油	uncommon	tiáo hé yóu	-	blended cooking oil
+调弦	uncommon	tiáo xián	-	to tune strings
+调律师	uncommon	tiáo lǜ shī	-	piano tuner
+调息	uncommon	tiáo xī	-	breath regulation
+调温	uncommon	tiáo wēn	-	temperature control
+调皮鬼	uncommon	tiáo pí guǐ	-	little rascal
+调色剂	uncommon	tiáo sè jì	-	toner, tinting agent
+调解员	uncommon	tiáo jiě yuán	-	mediator
+调速器	uncommon	tiáo sù qì	-	governor
+调音台	uncommon	tiáo yīn tái	-	mixing console
+调音器	uncommon	tiáo yīn qì	-	tuner
+调音师	uncommon	tiáo yīn shī	-	tuner (person)
+谌容	uncommon	chén róng	-	Well-known writer.
+谌龙	uncommon	chén lóng	-	Well-known badminton player.
+谐调	uncommon	xié tiáo	-	harmonious (variant of 协调)
+豁亮	uncommon	huò liàng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+豁口	uncommon	huō kǒu	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+豁嘴	uncommon	huō zuǐ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+豁子	uncommon	huō zi	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+豁牙	uncommon	huō yá	-	gap-toothed
+败将	uncommon	bài jiàng	-	defeated general
+贲卦	uncommon	bì guà	-	Name of a hexagram.
+贾乃亮	uncommon	jiǎ nǎi liàng	-	actor
+贾人	uncommon	gǔ rén	-	Established literary word for a merchant.
+贾岛	uncommon	jiǎ dǎo	-	Tang poet
+贾政	uncommon	jiǎ zhèng	-	Honglou Meng character
+贾樟柯	uncommon	jiǎ zhāng kē	-	film director
+贾母	uncommon	jiǎ mǔ	-	Honglou Meng character
+贾玲	uncommon	jiǎ líng	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+赶圩	uncommon	gǎn xū	-	Established regional market-going term.
+趵突泉	uncommon	bào tū quán	-	Well-known spring name.
+跑不了	uncommon	pǎo bu liǎo	-	idiomatic "bound to" as well as "can't escape"
+车马炮	uncommon	jū mǎ pào	-	chess pieces, set phrase
+轧朋友	uncommon	gá péng you	-	Established Wu-region expression for dating.
+轧花	uncommon	yà huā	-	Established textile-processing term.
+轧账	uncommon	gá zhàng	-	Established regional accounting term.
+轸宿	uncommon	zhěn xiù	-	lunar mansion
+辟易	uncommon	bì yì	-	to retreat in fear (dictionary word)
+过得硬	uncommon	guò de yìng	-	up to standard (dictionary word)
+逼拶	uncommon	bī zā	-	Established literary verb meaning press or compel.
+那般	uncommon	nà bān	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+那英	uncommon	nā yīng	-	Well-known singer.
+郄缺	uncommon	xì quē	-	Established variant spelling of the historical name 郤缺.
+郇国	uncommon	xún guó	-	Recognized ancient state name.
+郗超	uncommon	xī chāo	-	Recognized historical name; surname reading xī is used.
+郗鉴	uncommon	xī jiàn	-	Recognized historical name; surname reading xī is used.
+郢都	uncommon	yǐng dū	-	Chu capital
+郦食其	uncommon	lì yì jī	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+部将	uncommon	bù jiàng	-	subordinate general
+郭隗	uncommon	guō wěi	-	Well-known historical figure.
+都护府	uncommon	dū hù fǔ	-	protectorate
+都暻秀	uncommon	dū jǐng xiù	-	Doh Kyung-soo (EXO D.O.)
+配给制	uncommon	pèi jǐ zhì	-	rationing system
+酾酒	uncommon	shī jiǔ	-	Established literary expression; shī is valid.
+重唱	uncommon	chóng chàng	-	Carried over from the earlier hand-written word table.
+重燃	uncommon	chóng rán	-	Carried over from the earlier hand-written word table.
+重遇	uncommon	chóng yù	-	Carried over from the earlier hand-written word table.
+金莎	uncommon	jīn shā	-	singer Kym; Ferrero Rocher
+金钥匙	uncommon	jīn yào shi	-	golden key
+金铤	uncommon	jīn dìng	-	Established ingot noun; dìng is the ingot reading.
+钉钯	cedict	dīng pá	ding ba	Established variant of 钉耙; pá is valid.
+钥匙圈	uncommon	yào shi quān	-	key ring
+钥匙扣	uncommon	yào shi kòu	-	key chain
+钦差大臣	uncommon	qīn chāi dà chén	-	imperial envoy
+钯金	uncommon	bǎ jīn	-	Established metal name.
+铁栅	uncommon	tiě zhà	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+铁爪	uncommon	tiě zhǎo	-	iron claw
+铁铛	uncommon	tiě chēng	-	Established iron-pan noun.
+铁镐	uncommon	tiě gǎo	-	Established tool noun.
+铅中毒	uncommon	qiān zhòng dú	-	Established medical term.
+铅印	uncommon	qiān yìn	-	Established printing term.
+铊盐	uncommon	tā yán	-	Established chemical class name.
+铜臭	uncommon	tóng xiù	-	stink of money
+铜钿	uncommon	tóng tián	-	Established regional word for coins or money.
+铣刀	uncommon	xǐ dāo	-	Established machining tool.
+铣削	uncommon	xǐ xiāo	-	Established machining process.
+铫子	uncommon	diào zi	-	Established regional cooking-vessel noun.
+锦纶	uncommon	jǐn lún	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+镦粗	uncommon	dūn cū	-	Established metalworking process.
+镦锻	uncommon	dūn duàn	-	Established metalworking process.
+长吁	uncommon	cháng xū	-	Established literary word for a long sigh.
+长姐	uncommon	zhǎng jiě	-	eldest sister
+长孙皇后	uncommon	zhǎng sūn huáng hòu	-	Empress Zhangsun
+长幼有序	uncommon	zhǎng yòu yǒu xù	-	idiom
+长房	uncommon	zhǎng fáng	-	eldest branch of a family
+门槛效应	uncommon	mén kǎn xiào yìng	-	foot-in-the-door effect
+门樘	uncommon	mén táng	-	Established architectural noun.
+问卜	uncommon	wèn bǔ	-	Established divination term.
+闯将	uncommon	chuǎng jiàng	-	daring general
+阽危	uncommon	diàn wēi	-	Established literary danger term; diàn is valid.
+阿信	uncommon	ā xìn	-	Mayday's Ashin; Oshin
+阿哲	uncommon	ā zhé	-	Jeff Chang's nickname
+阿姆	uncommon	ā mǔ	-	Eminem's Chinese nickname
+阿姐	uncommon	ā jiě	-	elder sister
+阿朵	uncommon	ā duǒ	-	singer
+阿杜	uncommon	ā dù	-	singer
+阿桑	uncommon	ā sāng	-	singer
+阿牛	uncommon	ā niú	-	singer
+阿谀逢迎	uncommon	ē yú féng yíng	-	idiom
+阿黛尔	uncommon	ā dài ěr	-	Adele
+陂池	uncommon	bēi chí	-	Established literary and agricultural noun.
+陶鬲	uncommon	táo lì	-	Established archaeological vessel term.
+隐栝	uncommon	yǐn kuò	-	Established literary variant of 檃栝.
+隗嚣	uncommon	wěi xiāo	-	Well-known historical figure.
+隽才	uncommon	jùn cái	-	Established word for outstanding talent; 隽 is 俊.
+隽秀	uncommon	jùn xiù	-	Here 隽 means 俊, so it is jùn.
+雕砌	uncommon	diāo qì	-	Established architectural and literary verb.
+震天价响	cedict	zhèn tiān jie xiǎng	zhen tian ga xiang	Established idiom; neutral jie is a valid particle reading.
+霓裳羽衣	uncommon	ní cháng yǔ yī	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+露天矿	uncommon	lù tiān kuàng	-	open-pit mine
+鞭鞘	uncommon	biān shāo	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+顺蔓摸瓜	uncommon	shùn wàn mō guā	-	idiom (variant of 顺藤摸瓜)
+颉颃	uncommon	xié háng	-	Established literary word for rising and falling or rivalry.
+颌骨	uncommon	hé gǔ	-	Established anatomical noun.
+饧糖	uncommon	xíng táng	-	Established malt-sugar noun.
+馆长	uncommon	guǎn zhǎng	-	curator
+马夹	uncommon	mǎ jiá	-	vest (variant of 马甲)
+马尾巴	uncommon	mǎ wěi ba	-	尾巴 is wěi ba; yǐ ba is colloquial only, and 尾 yǐ is standard only in 马尾儿 (horsehair)
+驽骀	uncommon	nú tái	-	Established literary horse term.
+骀荡	uncommon	dài dàng	-	Established literary adjective.
+骠勇	uncommon	piào yǒng	-	Established adjective meaning brave and fierce.
+骠骑	uncommon	piào qí	-	Established cavalry and military-title term.
+高着	uncommon	gāo zhāo	-	Established variant spelling of 高招.
+鬲津河	uncommon	gé jīn hé	-	Recognized historical river name.
+鬼宿	uncommon	guǐ xiù	-	lunar mansion (see collision note: 鬼宿舍)
+鬼影幢幢	uncommon	guǐ yǐng chuáng chuáng	-	common phrase
+鲁迅传	uncommon	lǔ xùn zhuàn	-	biography title
+鲑科	uncommon	guī kē	-	Established fish-family name.
+鲭科	uncommon	qīng kē	-	Established fish-family name.
+鳞爪	uncommon	lín zhǎo	-	fragments (一鳞半爪)
+鸡毛掸子	uncommon	jī máo dǎn zi	-	feather duster
+鸡脯	uncommon	jī pú	-	chicken breast
+鸡脯肉	uncommon	jī pú ròu	-	chicken breast meat
+鸭爪	uncommon	yā zhuǎ	-	duck feet
+鸿鹄之志	uncommon	hóng hú zhī zhì	-	Well-known idiom.
+鹰爪	uncommon	yīng zhǎo	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+鹰鹘	uncommon	yīng hú	-	Established bird term and literary comparison.
+鹿脯	uncommon	lù fǔ	-	Written identically by two authors working blind; CC-CEDICT does not list it.
+麻将桌	uncommon	má jiàng zhuō	-	mahjong table
+黄蘖	uncommon	huáng bò	-	Established variant spelling of 黄檗.
+黄骠马	uncommon	huáng biāo mǎ	-	Established horse term and familiar storytelling motif.
+黾勉	uncommon	mǐn miǎn	-	Established literary word for diligent effort.
+黾池	uncommon	miǎn chí	-	Recognized historical spelling of 渑池.
+龙爪	uncommon	lóng zhǎo	-	dragon claw
+乾哕	uncommon	gān yuě	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+数不著	uncommon	shǔ bù zháo	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+数得著	uncommon	shǔ de zháo	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+粘著	uncommon	nián zhuó	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+粘著力	uncommon	nián zhuó lì	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+著数	uncommon	zhāo shù	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+著装	uncommon	zhuó zhuāng	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+高著	uncommon	gāo zhāo	-	Traditional spelling with a character that does not fold to its simplified counterpart (著, 乾); authored and checked against CC-CEDICT traditional forms.
+吱吱嘎嘎	cedict-extra	zhī zhī gā gā	zi zi ga ga	creak reading of 吱 is zhī, as in CC-CEDICT's own 吱嘎/嘎吱/咯吱; zī is the chirp reading, CC-CEDICT's zī here is inconsistent
+喳喳	cedict	zhā zhā	cha cha	chā chā matches CC-CEDICT; zhā zhā is the deliberate 叽叽喳喳 reading
+恁般	cedict-extra	nèn bān	ren ban	rèn is the Taiwan pronunciation (CC-CEDICT: 恁 nèn, Taiwan pr. rèn); mainland 恁般/恁地 is nèn
+甲壳虫	cedict	jiǎ ké chóng	jia qiao chong	ké is the colloquial and Taiwan reading of 壳; jiǎkéchóng is what many say for the band and the car, useful second
+着想	cedict	zhe xiǎng	zhuo xiang	zhe xiǎng is the deliberate particle reading (坐着想你); zháo xiǎng is a variant not needed
+着手	cedict	zhe shǒu	zhuo shou	zhe shǒu is the deliberate particle reading (牵着手)
+着落	cedict	zhe luò	zhuo luo	zhe luò is the deliberate particle reading (望着落日)
+粘连	cedict-extra	zhān lián	nian lian	CC-CEDICT itself marks 粘 nián as variant of 黏; standard 粘连 is zhānlián
+著想	cedict	zhe xiǎng	zhuo xiang	traditional twin of 着想; zhe xiǎng deliberate
+著手	cedict	zhe shǒu	zhuo shou	traditional twin of 着手; zhe shǒu deliberate (牽著手)
+著落	cedict	zhe luò	zhuo luo	traditional twin of 着落; zhe luò deliberate
+行商	cedict-extra	xíng shāng	hang shang	itinerant trader (vs 坐商) is xíngshāng; háng belongs only to the Qing Canton Hong merchants and CC-CEDICT misapplies it; xíng also fits 进行商谈 splits
+行头	cedict-extra	xíng tou	hang tou	hángtóu is archaic (CC-CEDICT marks it so); current 行头 is xíngtou
+都会	cedict	dōu huì	du hui	dōu huì first is deliberate (我们都会好的); dū huì second present
+长相守	uncommon	cháng xiāng shǒu	-	correct cháng xiāng shǒu; the row is needed to beat 长相 zhǎngxiàng
+不著痕迹	uncommon	bù zhuó hén jì	-	Traditional spelling with 著, which does not fold to 着; CC-CEDICT lists 不着痕迹.
+不著边际	uncommon	bù zhuó biān jì	-	Traditional spelling with 著, which does not fold to 着; CC-CEDICT lists 不着边际.
+着实	cedict	zhe shí	zhuo shi	zhe shí is the particle before a word starting with 实 (看着实在); 着实 zhuó shí comes first.
+着眼	cedict	zhe yǎn	zhuo yan	zhe yǎn is the particle before 眼 (看着眼前); 着眼 zhuó yǎn comes first.
+穿着	cedict	chuān zhe	chuan zhuo	In running text 穿着 is mostly 穿 with the particle 着 (wearing); chuān zhuó, the noun for attire, is the second reading.
+穿著	cedict	chuān zhe	chuan zhuo	Traditional twin of 穿着: 穿 with the particle 著 (wearing) first, chuān zhuó (attire) second.
+粘着	uncommon	zhān zhe	-	In running text 粘着 is 粘 zhān with the particle 着 (紧紧粘着你); nián zhuó (adhesion, usually written 黏着) is second.
+粘著	uncommon	zhān zhe	-	Traditional twin of 粘着: zhān zhe first, nián zhuó second.
+胶著	uncommon	jiāo zhuó	-	Traditional spelling with 著 (膠著), which does not fold to 着; CC-CEDICT lists 胶着.
+著实	uncommon	zhuó shí	-	Traditional spelling with 著 (著實), which does not fold to 着; CC-CEDICT lists 着实.
+著眼	cedict	zhe yǎn	zhuo yan	Traditional twin of 着眼: zhuó yǎn first, the particle reading zhe yǎn second (看著眼前).
+沉着	cedict	chén zhe	chen zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+沉著	cedict	chén zhe	chen zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+着力	cedict	zhe lì	zhuo li	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+着墨	cedict	zhe mò	zhuo mo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+着色	cedict	zhe sè	zhuo se	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+胶着	cedict	jiāo zhe	jiao zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+著力	cedict	zhe lì	zhuo li	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+著墨	cedict	zhe mò	zhuo mo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+著色	cedict	zhe sè	zhuo se	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+身着	cedict	shēn zhe	shen zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+身著	cedict	shēn zhe	shen zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+附着	cedict	fù zhe	fu zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+附著	cedict	fù zhe	fu zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+黏着	cedict	nián zhe	nian zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
+黏著	cedict	nián zhe	nian zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.

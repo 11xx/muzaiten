@@ -4,6 +4,10 @@
 
 ### Added
 
+- Search reads about 3,500 Chinese words in context, including traditional
+  spellings. 快乐 matches `kuaile` without also matching `kuaiyue`, and 长城
+  matches `changcheng` without also matching `zhangcheng`. Words with two
+  pronunciations match either reading.
 - Search matches Korean by romanization: `ak dan chil` finds `악단광칠`,
   syllable by syllable, as pronounced (`hangugeo` for `한국어`) or in
   McCune-Reischauer (`pochonbo` for `보천보`).
@@ -54,6 +58,9 @@
 - CJK ideographs keep their written form in the primary search fold, with
   traditional and simplified characters folded together, so typing one kanji
   or hanzi finds every word containing it; readings are alternates.
+- Traditional-script titles receive the same Chinese word readings as their
+  simplified forms, so 音樂 reads like 音乐; bidirectional word segmentation
+  also resolves overlapping polyphones.
 - Search folding is a per-character table lookup compiled at build time, about
   15 times faster over library titles and 24 times faster over file paths. The
   search cache rebuilds once.
