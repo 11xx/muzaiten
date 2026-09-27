@@ -19,7 +19,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "muzaiten/fold-sweep"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "muzaiten-tools/fold-sweep"
 SEP = "\x1f"
 CLASSES = ("worse", "better", "still-broken", "primary", "lost", "gained", "reordered")
 
@@ -49,6 +49,9 @@ def prepare_build(base_sha: str, head_build: Path, base_tree: Path) -> tuple[Pat
         base_tree.parent.mkdir(parents=True, exist_ok=True)
         run("git", "worktree", "add", "--detach", str(base_tree), base_sha)
     else:
+        if subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=base_tree,
+                          stdout=subprocess.DEVNULL).returncode == 0:
+            raise ValueError(f"{base_tree}: base tree is on a branch; the sweep only reuses detached trees")
         if output("git", "status", "--porcelain", "--untracked-files=no", cwd=base_tree):
             raise ValueError(f"{base_tree}: base worktree has local changes")
         if output("git", "rev-parse", "HEAD", cwd=base_tree) != base_sha:
@@ -108,7 +111,7 @@ def han_module():
 
 def cedict_rows() -> list[tuple[str, str, str]]:
     han = han_module()
-    archive = Path.home() / ".cache/muzaiten" / han.CEDICT_CACHE_FILE
+    archive = han.TOOLS_CACHE / han.CEDICT_CACHE_FILE
     if not archive.exists():
         raise ValueError(f"{archive}: missing CC-CEDICT archive; cache it with fold-han-data.py check")
     _, words = han.cedict_words(han.cedict_archive(archive))

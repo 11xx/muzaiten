@@ -140,6 +140,8 @@ class SweepTests(unittest.TestCase):
                 (tree / "source").write_text("edited")
                 with self.assertRaisesRegex(ValueError, "local changes"):
                     sweep.prepare_build(second, build, tree)
+                with self.assertRaisesRegex(ValueError, "on a branch"):
+                    sweep.prepare_build(second, build, repo)
 
     def test_live_library_refused_before_open(self):
         with tempfile.TemporaryDirectory() as directory:

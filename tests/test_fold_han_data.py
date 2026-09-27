@@ -34,18 +34,18 @@ checker = load_tool("fold_han_data", ROOT / "tools" / "fold-han-data.py")
 class FoldHanDataTests(unittest.TestCase):
     def test_opencc_download_publishes_only_verified_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
-            home = pathlib.Path(directory)
-            cache = home / ".cache/muzaiten/opencc-1.4.2/TSCharacters.txt"
+            tools_cache = pathlib.Path(directory)
+            cache = tools_cache / "opencc-1.4.2/TSCharacters.txt"
             def download(_url, destination):
                 pathlib.Path(destination).write_bytes(b"partial")
-            with mock.patch.object(pathlib.Path, "home", return_value=home), \
+            with mock.patch.object(checker, "TOOLS_CACHE", tools_cache), \
                  mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(b"complete").hexdigest()), \
                  mock.patch.object(checker.urllib.request, "urlretrieve", side_effect=download):
                 with self.assertRaisesRegex(ValueError, "sha256"):
                     checker.opencc_archive()
                 self.assertFalse(cache.exists())
                 self.assertEqual(list(cache.parent.iterdir()), [])
-            with mock.patch.object(pathlib.Path, "home", return_value=home), \
+            with mock.patch.object(checker, "TOOLS_CACHE", tools_cache), \
                  mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(b"complete").hexdigest()), \
                  mock.patch.object(checker.urllib.request, "urlretrieve", side_effect=lambda _, dest: pathlib.Path(dest).write_bytes(b"complete")):
                 self.assertEqual(checker.opencc_archive(), cache)

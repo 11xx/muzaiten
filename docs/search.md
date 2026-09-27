@@ -108,7 +108,8 @@ that differs from OpenCC's first traditional-to-simplified mapping, including
 another listed target; a reviewer chooses the intended fold or records the
 disagreement. CC-CEDICT and OpenCC are check-only references and never ship.
 The checker downloads them to
-`~/.cache/muzaiten/` on first use and prints its date line with the word
+`$XDG_CACHE_HOME/muzaiten-tools/` (`~/.cache/muzaiten-tools/` by default, apart
+from the application's own cache) on first use and prints its date line with the word
 findings. Use `tools/fold-han-data.py check --words FILE` to check a word table
 outside the repository. Reviewed word findings match the word, kind, ours and
 reference fields in the same way as character findings.
@@ -121,13 +122,13 @@ beginning with `#` are comments.
 
 `python3 tools/fold-sweep.py --base master` compares the current working tree's
 fold segments with a detached base revision that provides `Fold::foldSegments`.
-The sweep owns a detached worktree under
-`$XDG_CACHE_HOME/muzaiten/fold-sweep/base` (or `~/.cache/muzaiten/fold-sweep/base`
-when `XDG_CACHE_HOME` is unset or empty); `--base-tree DIR` selects another
-location. Its base build stays in the sweep cache. It builds only the search library
-in each configured tree and checks CC-CEDICT spellings and readings, the
-phrase corpus `tools/fold-sweep-phrases.tsv`, optional `--corpus FILE` line
-corpora, labelled `corpus:<stem>`, and an optional `--library FILE` copy of a library database. Each
+The sweep owns a detached worktree at `muzaiten-tools/fold-sweep/base` in the
+same cache directory; `--base-tree DIR` selects another detached tree, and a
+tree checked out on a branch is refused. The base build sits beside the tree,
+in `<tree>-build`. The sweep builds only the search library in each tree and
+checks CC-CEDICT spellings and readings, the phrase corpus
+`tools/fold-sweep-phrases.tsv`, optional `--corpus FILE` line corpora labelled
+`corpus:<stem>`, and an optional `--library FILE` copy of a library database. Each
 phrase row is `text<TAB>expected fold`, where the expected fold is an ordinary
 reading or the simplified form a query written in the other script folds to.
 The library option refuses files inside the live data directory and counts
@@ -136,7 +137,7 @@ skipped values containing line breaks or the segment separator.
 limits printed examples per class.
 
 `worse` loses an expected reading, `better` gains one, and `still-broken` marks
-a phrase whose expected reading is absent on both sides. `primary` changes the
+an expected reading (a phrase's or a CC-CEDICT entry's) absent on both sides. `primary` changes the
 first segment, `lost` removes another segment, `gained` adds one, and
 `reordered` changes only the order of alternate segments. Unchanged
 rows appear only in counts. `--fail-on-regression` exits with status 1 if any

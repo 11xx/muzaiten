@@ -18,7 +18,7 @@ Directory mode requires all four tier files; explicit FILE arguments select
 the character files. The checker also checks `words.tsv`, whose rows use
 simplified words and one or two tone-marked readings, against authored or
 Unihan character readings and CC-CEDICT. It caches CC-CEDICT under
-`~/.cache/muzaiten/`, never copies it into the repository, and prints its date
+`$XDG_CACHE_HOME/muzaiten-tools/` (`~/.cache/muzaiten-tools/` by default), never copies it into the repository, and prints its date
 line with word findings.
 
 Usage: tools/fold-han-data.py [generate] [--unihan Unihan.zip]
@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import pathlib
 import re
 import sys
+import tempfile
 import unicodedata
 import urllib.request
 import zipfile
@@ -52,6 +54,8 @@ DEFAULT_AUTHORED_DIR = FOLD_DIR / "tables" / "han"
 DEFAULT_UNIHAN_DIR = FOLD_DIR / "unihan"
 DEFAULT_REVIEWED_FILE = ROOT / "tools" / "fold-han-reviewed.tsv"
 CEDICT_CACHE_FILE = "cedict.zip"
+# Reference downloads, kept apart from the application's own cache directory.
+TOOLS_CACHE = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "muzaiten-tools"
 
 IDEOGRAPH_BLOCKS = [
     (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0x20000, 0x2A6DF), (0x2A700, 0x2B73F),
@@ -83,7 +87,7 @@ PARTICLE_READINGS = {"着": "zhe", "著": "zhe", "了": "le", "的": "de", "地"
 
 def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
     if path is None:
-        path = pathlib.Path.home() / ".cache" / "muzaiten" / f"Unihan-{UNIHAN_VERSION}.zip"
+        path = TOOLS_CACHE / f"Unihan-{UNIHAN_VERSION}.zip"
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             urllib.request.urlretrieve(UNIHAN_URL, path)
@@ -101,7 +105,7 @@ def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
 def cedict_archive(path: pathlib.Path | None = None) -> pathlib.Path:
     """Return the cached CC-CEDICT archive, downloading it on first use."""
     if path is None:
-        path = pathlib.Path.home() / ".cache" / "muzaiten" / CEDICT_CACHE_FILE
+        path = TOOLS_CACHE / CEDICT_CACHE_FILE
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             urllib.request.urlretrieve(CEDICT_URL, path)
@@ -112,10 +116,9 @@ def cedict_archive(path: pathlib.Path | None = None) -> pathlib.Path:
 
 def opencc_archive(path: pathlib.Path | None = None) -> pathlib.Path:
     if path is None:
-        path = pathlib.Path.home() / ".cache" / "muzaiten" / "opencc-1.4.2" / "TSCharacters.txt"
+        path = TOOLS_CACHE / "opencc-1.4.2" / "TSCharacters.txt"
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            import tempfile
             with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".TSCharacters-", delete=False) as temporary:
                 staged = pathlib.Path(temporary.name)
             try:
