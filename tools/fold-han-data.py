@@ -8,8 +8,8 @@ before its fields are used.
 
 `check` validates authored rows, compares their readings and simplified forms
 with Unihan 16.0.0 (a reading counts as attested when the character or its
-simplified or traditional counterpart has it, and as archaic when only Hanyu
-Da Zidian does), checks every reading's exact tone, checks national-standard
+simplified or traditional counterpart has it, and a reading after the first
+as archaic when only Hanyu Da Zidian does), checks every reading's exact tone, checks national-standard
 tier coverage, and applies exact reviewed-disagreement suppressions. Authored
 rows use `ideograph<TAB>readings<TAB>simplified`; readings are tone-marked
 Mandarin pinyin or `-`, and the simplified field is empty when no form applies.
@@ -482,7 +482,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
             for base, reading in our_by_base.items():
                 if base not in attested:
                     add(path, row_number, raw_ch, "unattested", reading, "-")
-                elif base not in current:
+                elif base not in current and reading != readings[0]:
                     add(path, row_number, raw_ch, "archaic", reading, "kHanyuPinyin only")
 
             authored_bases = set(our_by_base)

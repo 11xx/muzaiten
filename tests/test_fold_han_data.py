@@ -110,5 +110,30 @@ class FoldHanDataTests(unittest.TestCase):
         self.assertNotIn("吗", {row[2] for row in tone_findings})
 
 
+    def test_archaic_applies_to_readings_after_the_first(self):
+        fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
+        fields["kHanyuPinyin"].update({"夲": "10001.010:běn", "房": "10002.020:fáng,páng"})
+        fields["kMandarin"].update({"夲": "běn", "房": "fáng"})
+        fields["kTGHZ2013"]["房"] = "房:fáng"
+
+        with tempfile.TemporaryDirectory() as directory:
+            authored = pathlib.Path(directory) / "authored.tsv"
+            authored.write_text("夲\tběn\t本\n房\tfáng páng\t\n", encoding="utf-8")
+            reviewed = pathlib.Path(directory) / "reviewed.tsv"
+            reviewed.write_text("", encoding="utf-8")
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(checker, "unihan_archive", return_value=object()),
+                mock.patch.object(checker, "unihan_fields", return_value=fields),
+                mock.patch.object(checker, "tiers", return_value={}),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                checker.check([authored], reviewed)
+
+        archaic = {(row.split("\t")[2], row.split("\t")[4]) for row in stdout.getvalue().splitlines()
+                   if "\tarchaic\t" in row}
+        self.assertEqual(archaic, {("房", "páng")})
+
 if __name__ == "__main__":
     unittest.main()
