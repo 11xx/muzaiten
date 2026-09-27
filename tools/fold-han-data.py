@@ -115,7 +115,17 @@ def opencc_archive(path: pathlib.Path | None = None) -> pathlib.Path:
         path = pathlib.Path.home() / ".cache" / "muzaiten" / "opencc-1.4.2" / "TSCharacters.txt"
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            urllib.request.urlretrieve(OPENCC_URL, path)
+            import tempfile
+            with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".TSCharacters-", delete=False) as temporary:
+                staged = pathlib.Path(temporary.name)
+            try:
+                urllib.request.urlretrieve(OPENCC_URL, staged)
+                digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+                if digest != OPENCC_SHA256:
+                    raise ValueError(f"{staged}: sha256 {digest}, expected OpenCC 1.4.2's {OPENCC_SHA256}")
+                staged.replace(path)
+            finally:
+                staged.unlink(missing_ok=True)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if digest != OPENCC_SHA256:
         raise ValueError(f"{path}: sha256 {digest}, expected OpenCC 1.4.2's {OPENCC_SHA256}")
@@ -652,7 +662,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             if path.name in TIER_FILES:
                 opencc_values = opencc.get(raw_ch)
                 our_simple = simplified_text if simplified_text not in {"", "-"} else raw_ch
-                if opencc_values and (our_simple not in opencc_values or our_simple != opencc_values[0]):
+                if opencc_values and our_simple != opencc_values[0]:
                     add(path, row_number, raw_ch, "opencc", our_simple, "/".join(opencc_values))
             readings = [] if reading_text in {"", "-"} else reading_text.split()
             if reading_text == "":

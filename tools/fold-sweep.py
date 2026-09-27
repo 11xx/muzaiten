@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+from contextlib import closing
 import csv
+import fcntl
 import hashlib
 import importlib.util
 import os
@@ -13,11 +15,11 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE_TREE = Path.home() / ".worktrees/muzaiten-fold-sweep-base"
-CACHE = Path.home() / ".cache/muzaiten/fold-sweep"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "muzaiten/fold-sweep"
 SEP = "\x1f"
 CLASSES = ("worse", "better", "still-broken", "primary", "lost", "gained", "reordered")
 
@@ -39,20 +41,21 @@ def cache_values(build: Path) -> dict[str, str]:
     return values
 
 
-def prepare_build(base_sha: str, head_build: Path) -> tuple[Path, Path, dict[str, str], float]:
+def prepare_build(base_sha: str, head_build: Path, base_tree: Path) -> tuple[Path, Path, dict[str, str], float]:
     head = cache_values(head_build)
     generator = head["CMAKE_GENERATOR"]
     build_type = head.get("CMAKE_BUILD_TYPE", "")
-    if not BASE_TREE.exists():
-        BASE_TREE.parent.mkdir(parents=True, exist_ok=True)
-        run("git", "worktree", "add", "--detach", str(BASE_TREE), base_sha)
-    elif output("git", "rev-parse", "HEAD", cwd=BASE_TREE) != base_sha:
-        if output("git", "status", "--porcelain", cwd=BASE_TREE):
-            raise ValueError(f"{BASE_TREE}: base worktree has local changes")
-        run("git", "checkout", "--detach", base_sha, cwd=BASE_TREE)
-    base_build = BASE_TREE / "build-sweep"
+    if not base_tree.exists():
+        base_tree.parent.mkdir(parents=True, exist_ok=True)
+        run("git", "worktree", "add", "--detach", str(base_tree), base_sha)
+    else:
+        if output("git", "status", "--porcelain", "--untracked-files=no", cwd=base_tree):
+            raise ValueError(f"{base_tree}: base worktree has local changes")
+        if output("git", "rev-parse", "HEAD", cwd=base_tree) != base_sha:
+            run("git", "checkout", "--detach", base_sha, cwd=base_tree)
+    base_build = base_tree.with_name(f"{base_tree.name}-build")
     if not (base_build / "CMakeCache.txt").exists():
-        run("cmake", "-S", str(BASE_TREE), "-B", str(base_build), "-G", generator,
+        run("cmake", "-S", str(base_tree), "-B", str(base_build), "-G", generator,
             f"-DCMAKE_BUILD_TYPE={build_type}")
     else:
         base = cache_values(base_build)
@@ -75,7 +78,13 @@ def compile_inspector(name: str, tree: Path, build: Path, compiler: str) -> Path
     core = build / "libmuzaiten_core.a"
     if core.exists():
         command.append(str(core))
-    run(*command, *libs, "-o", str(binary))
+    with tempfile.NamedTemporaryFile(prefix=f".{name}-", dir=CACHE, delete=False) as temporary:
+        staged = Path(temporary.name)
+    try:
+        run(*command, *libs, "-o", str(staged))
+        os.replace(staged, binary)
+    finally:
+        staged.unlink(missing_ok=True)
     return binary
 
 
@@ -122,25 +131,29 @@ def phrase_rows(path: Path = ROOT / "tools/fold-sweep-phrases.tsv") -> list[tupl
 
 
 def corpus_rows(paths: list[Path]) -> list[tuple[str, str, str]]:
-    return [(path.stem, line, "") for path in paths for line in path.read_text().splitlines() if line]
+    return [(f"corpus:{path.stem}", line, "") for path in paths for line in path.read_text().splitlines() if line]
 
 
 def checked_library_path(path: Path, data_home: Path | None = None) -> Path:
-    live = (data_home or Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))) / "muzaiten"
+    live = (data_home or Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")) / "muzaiten"
     resolved = path.resolve()
     if resolved.is_relative_to(live.resolve()):
         raise ValueError(f"{path}: live muzaiten data directory is not a library copy")
     return resolved
 
 
-def library_rows(path: Path, data_home: Path | None = None) -> list[tuple[str, str, str]]:
+def library_rows(path: Path, data_home: Path | None = None) -> tuple[list[tuple[str, str, str]], int]:
     uri = f"{checked_library_path(path, data_home).as_uri()}?mode=ro&immutable=1"
     rows = []
-    with sqlite3.connect(uri, uri=True) as db:
+    skipped = 0
+    with closing(sqlite3.connect(uri, uri=True)) as db:
         for column in ("title", "artist_name", "album_artist_name", "album_title", "path"):
             for (value,) in db.execute(f"SELECT DISTINCT {column} FROM tracks WHERE {column} IS NOT NULL AND {column} != ''"):
+                if any(char in value for char in ("\n", "\r", SEP)):
+                    skipped += 1
+                    continue
                 rows.append(("library", value, ""))
-    return rows
+    return rows, skipped
 
 
 def classify(corpus: str, expected: str, base: tuple[str, ...], head: tuple[str, ...]) -> str | None:
@@ -148,7 +161,7 @@ def classify(corpus: str, expected: str, base: tuple[str, ...], head: tuple[str,
         return "worse"
     if expected and expected not in base and expected in head:
         return "better"
-    if corpus in ("phrases", "cedict") and expected not in base and expected not in head:
+    if expected and expected not in base and expected not in head:
         return "still-broken"
     if base == head:
         return None
@@ -168,16 +181,18 @@ def evaluate(rows: list[tuple[str, str, str]], base: list[tuple[str, ...]],
     for (corpus, value, expected), old, new in zip(rows, base, head, strict=True):
         kind = classify(corpus, expected, old, new)
         counts[corpus][kind or "unchanged"] += 1
-        if kind and (corpus != "cedict" or kind != "still-broken"):
+        if kind:
             changes.append((corpus, kind, value, expected, " | ".join(old), " | ".join(new)))
     return changes, counts
 
 
-def report(changes, counts, examples: int, path: Path | None) -> None:
+def report(changes, counts, examples: int, path: Path | None, skipped: int = 0) -> None:
     for corpus, counter in counts.items():
         print(f"{corpus}: " + ", ".join(f"{key}={counter[key]}" for key in ("unchanged", *CLASSES)))
+    if skipped:
+        print(f"library: skipped invalid values={skipped}")
     for kind in CLASSES:
-        selected = [row for row in changes if row[1] == kind]
+        selected = [row for row in changes if row[1] == kind and not (row[0] == "cedict" and kind == "still-broken")]
         for row in selected[:examples]:
             print("\t".join(row))
     if path:
@@ -190,6 +205,7 @@ def report(changes, counts, examples: int, path: Path | None) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="master")
+    parser.add_argument("--base-tree", type=Path, default=CACHE / "base")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
     parser.add_argument("--corpus", type=Path, action="append", default=[])
     parser.add_argument("--library", type=Path)
@@ -202,20 +218,25 @@ def main(argv: list[str] | None = None) -> int:
             checked_library_path(args.library)
         sha = output("git", "rev-parse", "--verify", f"{args.base}^{{commit}}")
         head_build = args.build_dir.resolve()
-        base_build, _, head_cache, elapsed = prepare_build(sha, head_build)
-        print(f"base build: {elapsed:.2f}s", file=sys.stderr)
+        CACHE.mkdir(parents=True, exist_ok=True)
+        with (CACHE / "base.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            base_build, _, head_cache, elapsed = prepare_build(sha, head_build, args.base_tree)
+            print(f"base build: {elapsed:.2f}s", file=sys.stderr)
+            base_binary = compile_inspector(f"base-{sha}", args.base_tree, base_build, cache_values(base_build)["CMAKE_CXX_COMPILER"])
         compiler = head_cache["CMAKE_CXX_COMPILER"]
-        base_binary = compile_inspector(f"base-{sha}", BASE_TREE, base_build, cache_values(base_build)["CMAKE_CXX_COMPILER"])
         checkout = hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]
         head_binary = compile_inspector(f"head-{checkout}", ROOT, head_build, compiler)
         rows = cedict_rows() + phrase_rows() + corpus_rows(args.corpus)
+        skipped = 0
         if args.library:
-            rows += library_rows(args.library)
+            library, skipped = library_rows(args.library)
+            rows += library
         inputs = list(dict.fromkeys(row[1] for row in rows))
         old = dict(zip(inputs, inspector(base_binary, inputs), strict=True))
         new = dict(zip(inputs, inspector(head_binary, inputs), strict=True))
         changes, counts = evaluate(rows, [old[row[1]] for row in rows], [new[row[1]] for row in rows])
-        report(changes, counts, args.examples, args.report)
+        report(changes, counts, args.examples, args.report, skipped)
         return int(args.fail_on_regression and any(row[1] == "worse" for row in changes))
     except (OSError, ValueError, subprocess.CalledProcessError, sqlite3.Error, KeyError) as error:
         print(f"fold-sweep: {error}", file=sys.stderr)

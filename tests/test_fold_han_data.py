@@ -32,6 +32,25 @@ checker = load_tool("fold_han_data", ROOT / "tools" / "fold-han-data.py")
 
 
 class FoldHanDataTests(unittest.TestCase):
+    def test_opencc_download_publishes_only_verified_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            cache = home / ".cache/muzaiten/opencc-1.4.2/TSCharacters.txt"
+            def download(_url, destination):
+                pathlib.Path(destination).write_bytes(b"partial")
+            with mock.patch.object(pathlib.Path, "home", return_value=home), \
+                 mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(b"complete").hexdigest()), \
+                 mock.patch.object(checker.urllib.request, "urlretrieve", side_effect=download):
+                with self.assertRaisesRegex(ValueError, "sha256"):
+                    checker.opencc_archive()
+                self.assertFalse(cache.exists())
+                self.assertEqual(list(cache.parent.iterdir()), [])
+            with mock.patch.object(pathlib.Path, "home", return_value=home), \
+                 mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(b"complete").hexdigest()), \
+                 mock.patch.object(checker.urllib.request, "urlretrieve", side_effect=lambda _, dest: pathlib.Path(dest).write_bytes(b"complete")):
+                self.assertEqual(checker.opencc_archive(), cache)
+            self.assertEqual(cache.read_bytes(), b"complete")
+
     def test_edge_particles_at_word_boundaries_and_reviewed_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -43,13 +62,13 @@ class FoldHanDataTests(unittest.TestCase):
             (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
             (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
             words = root / "words.tsv"
-            words.write_text("的哥\tdī gē\n的哥\tdī gē\tde gē\n沉着\tchén zhuó\n好的人\thǎo de rén\n",
+            words.write_text("的哥\tdī gē\n的哥\tdī gē\tde gē\n沉着\tchén zhuó\n好的人\thǎo de rén\n暖和\tnuǎn huo\tnuǎn hé\n",
                              encoding="utf-8")
             with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
                 findings, counts = checker.check_words(words, authored, {},
-                    {"di", "ge", "de", "chen", "zhuo", "hao", "ren"}, set(), set())
+                    {"di", "ge", "de", "chen", "zhuo", "hao", "ren", "nuan", "huo", "he"}, set(), set())
                 reviewed, reviewed_counts = checker.check_words(words, authored, {},
-                    {"di", "ge", "de", "chen", "zhuo", "hao", "ren"}, set(),
+                    {"di", "ge", "de", "chen", "zhuo", "hao", "ren", "nuan", "huo", "he"}, set(),
                     {("的哥", "edge-particle", "dī gē", "first:的 de"),
                      ("沉着", "edge-particle", "other", "last:着 zhe")})
         edges = [finding for finding in findings if finding[3] == "edge-particle"]
@@ -63,9 +82,9 @@ class FoldHanDataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             reference = root / "TSCharacters.txt"
-            reference.write_text("# comment\n傳\t传\n發\t发 髮\n", encoding="utf-8")
+            reference.write_text("# comment\n傳\t传\n發\t发 髮\n說\t说\n", encoding="utf-8")
             authored = root / "gb2312.tsv"
-            authored.write_text("傳\tchuán\t傳\n發\tfā\t髮\n妳\tnǐ\t你\n", encoding="utf-8")
+            authored.write_text("傳\tchuán\t傳\n發\tfā\t髮\n妳\tnǐ\t你\n說\tshuō\t说\n", encoding="utf-8")
             reviewed = root / "reviewed.tsv"
             reviewed.write_text("", encoding="utf-8")
             fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
