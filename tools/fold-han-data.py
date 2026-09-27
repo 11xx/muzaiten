@@ -7,7 +7,9 @@ excluded from both generated files. The pinned Unihan archive is checked
 before its fields are used.
 
 `check` validates authored rows, compares their readings and simplified forms
-with Unihan 16.0.0, checks national-standard tier coverage, and applies exact
+with Unihan 16.0.0 (a reading counts as attested when the character or its
+simplified or traditional counterpart has it, and as archaic when only Hanyu
+Da Zidian does), checks national-standard tier coverage, and applies exact
 reviewed-disagreement suppressions. Authored rows use
 `ideograph<TAB>readings<TAB>simplified`; readings are tone-marked Mandarin
 pinyin or `-`, and the simplified field is empty when no form applies.
@@ -51,10 +53,14 @@ READING_FIELDS = (
 )
 ATTESTING_FIELDS = READING_FIELDS
 MODERN_DICTIONARY_FIELDS = ("kTGHZ2013", "kXHC1983")
+# Evidence of current use; a reading only kHanyuPinyin (Hanyu Da Zidian, a
+# historical dictionary) attests is reported as archaic.
+CURRENT_FIELDS = ("kMandarin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu")
+VARIANT_FIELDS = ("kSimplifiedVariant", "kTraditionalVariant")
 TONE_MARKS = {"\u0304", "\u0301", "\u030c", "\u0300"}
 DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
-CHECK_KINDS = ("format", "coverage", "default", "tone", "unattested", "missing", "simplified")
+CHECK_KINDS = ("format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified")
 
 
 def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
@@ -358,7 +364,7 @@ def clean_tsv(value: str) -> str:
 
 def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
     archive = unihan_archive(None)
-    fields = unihan_fields(archive, *READING_FIELDS, "kSimplifiedVariant")
+    fields = unihan_fields(archive, *READING_FIELDS, *VARIANT_FIELDS)
     inventory = pinyin_inventory(fields)
     reviewed = read_reviewed(reviewed_file)
     generated_tiers = tiers()
@@ -445,11 +451,24 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
             elif mandarin and our_first and unicodedata.normalize("NFC", our_first) != unicodedata.normalize("NFC", mandarin):
                 add(path, row_number, raw_ch, "tone", our_first, mandarin)
 
-            attested = {
-                toneless(reading)
-                for field in ATTESTING_FIELDS
-                for reading in field_readings(field, fields[field].get(raw_ch, ""))
+            # A reading is often recorded only under the character's simplified
+            # or traditional counterpart, so those count as attestation too.
+            family = {raw_ch} | {
+                chr(int(code[2:], 16))
+                for field in VARIANT_FIELDS
+                for code in fields[field].get(raw_ch, "").split()
             }
+
+            def readings_in(field_names: tuple[str, ...]) -> set[str]:
+                return {
+                    toneless(reading)
+                    for member in family
+                    for field in field_names
+                    for reading in field_readings(field, fields[field].get(member, ""))
+                }
+
+            attested = readings_in(ATTESTING_FIELDS)
+            current = readings_in(CURRENT_FIELDS)
             our_by_base = {}
             for reading in readings:
                 base = toneless(reading)
@@ -458,6 +477,8 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
             for base, reading in our_by_base.items():
                 if base not in attested:
                     add(path, row_number, raw_ch, "unattested", reading, "-")
+                elif base not in current:
+                    add(path, row_number, raw_ch, "archaic", reading, "kHanyuPinyin only")
 
             authored_bases = set(our_by_base)
             modern_values: dict[str, dict[str, list[str]]] = defaultdict(dict)
