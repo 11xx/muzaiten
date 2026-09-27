@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 import csv
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ CLASSES = ("worse", "better", "still-broken", "primary", "lost", "gained", "reor
 
 
 def run(*args: str, cwd: Path = ROOT) -> None:
-    subprocess.run(args, cwd=cwd, check=True)
+    subprocess.run(args, cwd=cwd, check=True, stdout=sys.stderr)
 
 
 def output(*args: str, cwd: Path = ROOT) -> str:
@@ -189,7 +190,7 @@ def report(changes, counts, examples: int, path: Path | None) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="master")
-    parser.add_argument("--build-dir", type=Path, default=Path("build"))
+    parser.add_argument("--build-dir", type=Path, default=ROOT / "build")
     parser.add_argument("--corpus", type=Path, action="append", default=[])
     parser.add_argument("--library", type=Path)
     parser.add_argument("--report", type=Path)
@@ -205,7 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"base build: {elapsed:.2f}s", file=sys.stderr)
         compiler = head_cache["CMAKE_CXX_COMPILER"]
         base_binary = compile_inspector(f"base-{sha}", BASE_TREE, base_build, cache_values(base_build)["CMAKE_CXX_COMPILER"])
-        head_binary = compile_inspector(f"head-{output('git', 'rev-parse', '--short', 'HEAD')}", ROOT, head_build, compiler)
+        checkout = hashlib.sha256(str(ROOT).encode()).hexdigest()[:12]
+        head_binary = compile_inspector(f"head-{checkout}", ROOT, head_build, compiler)
         rows = cedict_rows() + phrase_rows() + corpus_rows(args.corpus)
         if args.library:
             rows += library_rows(args.library)

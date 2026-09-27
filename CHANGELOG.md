@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
-### Added
+### Developer tooling
 
-- Developer tooling compares search fold readings against a base revision across
-  CC-CEDICT, phrase examples, and optional text or library corpora.
+- A fold regression sweep compares search fold readings against a base
+  revision across CC-CEDICT, phrase examples, and optional text or library
+  corpora.
+
+### Added
 
 - Search reads about 3,500 Chinese words in context, including traditional
   spellings. 快乐 matches `kuaile` without also matching `kuaiyue`, and 长城

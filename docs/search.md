@@ -50,22 +50,6 @@ counterparts.
 
 ### Fold data and conformance corpus
 
-`python3 tools/fold-sweep.py --base master` compares the current working tree's
-fold segments with a detached base revision. It builds only the search library
-in each configured tree and checks CC-CEDICT spellings and readings, the
-checked-in phrase corpus, optional `--corpus FILE` line corpora, and an optional
-`--library FILE` copy of a library database. The library option refuses files
-inside the live data directory. `--report FILE` writes every changed or broken
-row as TSV; `--examples N` limits printed examples per class.
-
-`worse` loses an expected reading, `better` gains one, and `still-broken` marks
-a phrase whose expected reading is absent on both sides. `primary` changes the
-first segment, `lost` removes another segment, `gained` adds one, and
-`reordered` changes only the order of alternate segments. Unchanged
-rows appear only in counts. `--fail-on-regression` exits with status 1 if any
-expected reading that worked in the base stops working in the current tree.
-
-
 The fold is compiled at build time: `tools/foldgen.py` reads the tables and
 Unicode's character database and writes one entry per code point, so folding
 is a table lookup per character. The hand-authored tables live in
@@ -126,6 +110,24 @@ line: `input<TAB>primary fold`, optionally followed by `<TAB>`-separated
 alternate readings. A row with one expected field checks the primary fold; a
 row with more checks every distinct fold, in order. Blank lines and lines
 beginning with `#` are comments.
+
+`python3 tools/fold-sweep.py --base master` compares the current working tree's
+fold segments with a detached base revision. It builds only the search library
+in each configured tree and checks CC-CEDICT spellings and readings, the
+phrase corpus `tools/fold-sweep-phrases.tsv`, optional `--corpus FILE` line
+corpora, and an optional `--library FILE` copy of a library database. Each
+phrase row is `text<TAB>expected fold`, where the expected fold is an ordinary
+reading or the simplified form a query written in the other script folds to.
+The library option refuses files inside the live data directory.
+`--report FILE` writes every changed or broken row as TSV; `--examples N`
+limits printed examples per class.
+
+`worse` loses an expected reading, `better` gains one, and `still-broken` marks
+a phrase whose expected reading is absent on both sides. `primary` changes the
+first segment, `lost` removes another segment, `gained` adds one, and
+`reordered` changes only the order of alternate segments. Unchanged
+rows appear only in counts. `--fail-on-regression` exits with status 1 if any
+expected reading that worked in the base stops working in the current tree.
 
 The result list always keeps a highlighted cursor you move with the arrow or
 `Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style.

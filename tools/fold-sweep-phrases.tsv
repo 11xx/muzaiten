@@ -1,4 +1,5 @@
-# Text and expected ordinary reading
+# text<TAB>expected fold: an ordinary reading, or the simplified form a query
+# written in the other script folds to
 著急	zhaoji
 大排长龙	dapaichanglong
 单亲家庭	danqinjiating
@@ -39,3 +40,7 @@
 新长征路上的摇滚	xinchangzhenglushangdeyaogun
 滙豐	huifeng
 汇丰	huifeng
+陳慧嫺	陈慧娴
+竇唯	窦唯
+新長征路上的搖滾	新长征路上的摇滚
+滙豐	汇丰
