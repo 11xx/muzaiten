@@ -80,22 +80,26 @@ missing tiers; explicit file arguments select the character files, while the
 word file is still checked from `--words` or `words.tsv` in the authored
 directory. Reviewed rows in `tools/fold-han-reviewed.tsv` match an ideograph
 or word, finding kind, authored value and reference value, followed by the
-reason for the decision. The word table at `tables/han/words.tsv` uses one
-simplified spelling and tone-marked pinyin with one syllable per character.
+reason for the decision. Rows in `tables/han/words.tsv` use
+`word<TAB>reading[<TAB>second reading]`: the word is simplified Han, and each
+tone-marked reading has one syllable per character. Chinese fold style 3 uses
+the first reading; style 4 uses the second when present and otherwise repeats
+the first.
 Chinese word lookup folds
 each character to its simplified form first, so a word row also supplies the
 reading for traditional and variant spellings. Japanese seed readings continue
 to match the written characters. Han runs use forward and backward longest
 matches; the segmentation with fewer pieces wins, then the one with fewer
-single characters, with backward matching breaking a tie. Rows that agree with
-every character default are omitted from the reading overrides unless a
-character has another reading, but every row remains available to guide word
-boundaries.
+single characters, with backward matching breaking a tie. Rows whose primary
+reading agrees with every character default are omitted from the reading
+overrides unless the row has a second reading or a character has another
+reading, but every row remains available to guide word boundaries.
 
 The Han checker also checks word format, each syllable against its character's
-authored reading or Unihan default, and the toneless reading against
-CC-CEDICT. Findings are `format`, `reading`, `cedict` (the dictionary lists the
-word only with other readings), or `uncommon` (the dictionary has no entry).
+authored reading or Unihan default, and each toneless reading against
+CC-CEDICT. An identical second reading is a format finding. Findings are
+`format`, `reading`, `cedict` (the dictionary lists the word only with other
+readings), or `uncommon` (the dictionary has no entry).
 CC-CEDICT is reference data only. The checker downloads it to
 `~/.cache/muzaiten/` on first use and prints its date line with the word
 findings. Use `tools/fold-han-data.py check --words FILE` to check a word table

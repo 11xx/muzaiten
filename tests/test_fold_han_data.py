@@ -60,7 +60,10 @@ class FoldHanDataTests(unittest.TestCase):
             entries, _ = foldgen.load_authored_han(root)
             self.assertEqual(entries, {"好": ("hao", None, "")})
             self.assertEqual(checker.authored_ideographs(root), {"好"})
-            self.assertEqual(foldgen.load_han_words(words, {}), {"你": "ni"})
+            self.assertEqual(foldgen.load_han_words(words, {}), {"你": ("ni", "")})
+
+            words.write_text("# word readings\n行程\txíng chéng\tháng chéng\n", encoding="utf-8")
+            self.assertEqual(foldgen.load_han_words(words, {}), {"行程": ("xing cheng", "hang cheng")})
 
             words.write_text("# word readings\n你好\tnǐ\n", encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, r"words.tsv:2: 2 characters but 1 syllables"):
@@ -70,9 +73,55 @@ class FoldHanDataTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, r"words.tsv:2: word must use simplified Han forms"):
                 foldgen.load_han_words(words, {"樂": "乐"})
 
-            words.write_text("# word readings\n你好\tnǐ hǎo\textra\n", encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: expected 2 tab-separated fields"):
+            words.write_text("# word readings\n你好\tnǐ hǎo\tnǐ\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: second reading: 2 characters but 1 syllables"):
                 foldgen.load_han_words(words, {})
+
+            words.write_text("# word readings\n你\tnǐ\tnǐ\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: second reading must differ from the first"):
+                foldgen.load_han_words(words, {})
+
+            words.write_text("# word readings\n你好\tnǐ hǎo\tnǐ hào\textra\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: expected 2 or 3 tab-separated fields"):
+                foldgen.load_han_words(words, {})
+
+    def test_second_word_reading_is_checked_against_characters_and_cedict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "行\txíng háng\t\n程\tchéng\t\n重\tchóng zhòng\t\n庆\tqìng\t\n",
+                encoding="utf-8",
+            )
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text(
+                "行程\txíng chéng\thóng chéng\n重庆\tchóng qìng\tchóng qìng\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(
+                    words,
+                    authored,
+                    {"行程": {("xing", "cheng")}, "重庆": {("chong", "qing")}},
+                    {"xing", "hang", "cheng", "hong", "chong", "zhong", "qing"},
+                    set(),
+                    set(),
+                )
+
+        self.assertEqual(counts["format"], 1)
+        self.assertEqual(counts["reading"], 1)
+        self.assertEqual(counts["cedict"], 1)
+        self.assertIn((str(words), "1", "行程", "reading", "hóng", "xing hang"), findings)
+        self.assertIn((str(words), "1", "行程", "cedict", "hóng chéng", "xing cheng"), findings)
+        self.assertIn(
+            (str(words), "2", "重庆", "format", "chóng qìng", "a distinct second reading"), findings
+        )
 
     def test_cedict_indexes_both_spellings_and_prints_its_date_line(self):
         with tempfile.TemporaryDirectory() as directory:

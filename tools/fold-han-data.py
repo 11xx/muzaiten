@@ -16,9 +16,10 @@ Mandarin pinyin or `-`, and the simplified field is empty when no form applies.
 Reviewed rows use `ideograph-or-word<TAB>kind<TAB>ours<TAB>reference<TAB>reason`.
 Directory mode requires all four tier files; explicit FILE arguments select
 the character files. The checker also checks `words.tsv`, whose rows use
-simplified words and tone-marked readings, against authored or Unihan character
-readings and CC-CEDICT. CC-CEDICT is cached under `~/.cache/muzaiten/` and is
-never copied into the repository; its date line is printed with word findings.
+simplified words and one or two tone-marked readings, against authored or
+Unihan character readings and CC-CEDICT. It caches CC-CEDICT under
+`~/.cache/muzaiten/`, never copies it into the repository, and prints its date
+line with word findings.
 
 Usage: tools/fold-han-data.py [generate] [--unihan Unihan.zip]
                               [--authored DIR] [output-dir]
@@ -492,12 +493,10 @@ def check_words(
             continue
         columns = line.split("\t")
         word = columns[0] if columns else ""
-        if len(columns) != 2:
-            add(row_number, word, "format", f"columns={len(columns)}", "2 columns")
+        if len(columns) not in (2, 3):
+            add(row_number, word, "format", f"columns={len(columns)}", "2 or 3 columns")
             continue
 
-        reading_text = columns[1]
-        syllables = reading_text.split()
         valid_word = bool(word) and all(is_unihan_ideograph(ch) for ch in word)
         if not valid_word:
             add(row_number, word, "format", word or "-", "one or more CJK ideographs")
@@ -511,32 +510,43 @@ def check_words(
             if word != expected_simple:
                 add(row_number, word, "format", word, expected_simple)
 
-        if not syllables:
-            add(row_number, word, "format", reading_text or "-", "tone-marked pinyin syllables")
-        elif valid_word and len(syllables) != len(word):
-            add(row_number, word, "format", f"{len(syllables)} syllables", f"{len(word)} syllables")
-
-        valid_pinyin = []
-        for syllable in syllables:
-            valid = is_tone_marked_pinyin(syllable, inventory, special_spellings)
-            if not valid:
-                add(row_number, word, "format", syllable, "tone-marked Mandarin syllable")
-            valid_pinyin.append(pinyin_base(syllable) if valid else None)
-
-        if not valid_word or len(syllables) != len(word) or any(base is None for base in valid_pinyin):
-            continue
-
-        for ch, syllable, base in zip(word, syllables, valid_pinyin):
-            available = readings.get(ch, [])
-            if base not in available:
-                add(row_number, word, "reading", syllable, " ".join(available) or "-")
-
         references = cedict.get(word)
-        if not references:
-            add(row_number, word, "uncommon", reading_text, "-")
-        elif tuple(valid_pinyin) not in references:
-            alternatives = sorted(" ".join(reading) for reading in references)
-            add(row_number, word, "cedict", reading_text, "; ".join(alternatives))
+        reading_fields = columns[1:]
+        normalized_readings = [" ".join(unicodedata.normalize("NFC", field).split())
+                               for field in reading_fields]
+        if len(normalized_readings) == 2 and normalized_readings[0] == normalized_readings[1]:
+            add(row_number, word, "format", reading_fields[1], "a distinct second reading")
+
+        has_valid_reading = False
+        for reading_text in reading_fields:
+            syllables = reading_text.split()
+            if not syllables:
+                add(row_number, word, "format", reading_text or "-", "tone-marked pinyin syllables")
+            elif valid_word and len(syllables) != len(word):
+                add(row_number, word, "format", f"{len(syllables)} syllables", f"{len(word)} syllables")
+
+            valid_pinyin = []
+            for syllable in syllables:
+                valid = is_tone_marked_pinyin(syllable, inventory, special_spellings)
+                if not valid:
+                    add(row_number, word, "format", syllable, "tone-marked Mandarin syllable")
+                valid_pinyin.append(pinyin_base(syllable) if valid else None)
+
+            if not valid_word or len(syllables) != len(word) or any(base is None for base in valid_pinyin):
+                continue
+            has_valid_reading = True
+
+            for ch, syllable, base in zip(word, syllables, valid_pinyin):
+                available = readings.get(ch, [])
+                if base not in available:
+                    add(row_number, word, "reading", syllable, " ".join(available) or "-")
+
+            if references and tuple(valid_pinyin) not in references:
+                alternatives = sorted(" ".join(reading) for reading in references)
+                add(row_number, word, "cedict", reading_text, "; ".join(alternatives))
+
+        if has_valid_reading and not references:
+            add(row_number, word, "uncommon", reading_fields[0], "-")
 
     unsuppressed = [finding for finding in findings if finding_key(finding) not in reviewed]
     counts = Counter(finding[3] for finding in unsuppressed)

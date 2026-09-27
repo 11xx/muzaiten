@@ -4,6 +4,9 @@
 
 ### Added
 
+- Chinese word readings can include a second tone-marked pronunciation. Search
+  uses the first reading in pinyin style 3 and the second in style 4, falling
+  back to the first when no second reading is recorded.
 - Search matches Korean by romanization: `ak dan chil` finds `악단광칠`,
   syllable by syllable, as pronounced (`hangugeo` for `한국어`) or in
   McCune-Reischauer (`pochonbo` for `보천보`).

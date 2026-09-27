@@ -357,7 +357,8 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
                 const QStringView wordKey = chineseKeyView.mid(keyStart, keyEnd - keyStart);
                 if (const Word *word = findWord(kChineseWords, kChineseWordCount, wordKey)) {
                     qsizetype m = 0;
-                    for (const QStringView syllable : view(word->value).tokenize(u' ')) {
+                    const Str reading = style == 4 && word->alternate.len ? word->alternate : word->value;
+                    for (const QStringView syllable : view(reading).tokenize(u' ')) {
                         out.put(syllable, u[segment.first + std::min(m, segment.length - 1)].src);
                         ++m;
                     }
