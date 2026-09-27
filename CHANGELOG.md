@@ -7,6 +7,8 @@
 - A fold regression sweep compares search fold readings against a base
   revision across CC-CEDICT, phrase examples, and optional text or library
   corpora.
+- Han data checks flag word readings that lose an edge particle reading and
+  simplified forms that disagree with pinned OpenCC mappings for review.
 
 ### Added
 

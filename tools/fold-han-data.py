@@ -43,6 +43,8 @@ UNIHAN_VERSION = "16.0.0"
 UNIHAN_SHA256 = "b8f000df69de7828d21326a2ffea462b04bc7560022989f7cc704f10521ef3e0"
 UNIHAN_URL = f"https://www.unicode.org/Public/{UNIHAN_VERSION}/ucd/Unihan.zip"
 CEDICT_URL = "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip"
+OPENCC_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/data/dictionary/TSCharacters.txt"
+OPENCC_SHA256 = "737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d925"
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FOLD_DIR = ROOT / "src" / "search" / "fold"
@@ -71,9 +73,12 @@ DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
 CHECK_KINDS = (
     "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
-    "reading", "cedict", "cedict-extra", "uncommon",
+    "reading", "cedict", "cedict-extra", "uncommon", "edge-particle", "opencc",
 )
 TIER_FILES = ("gb2312.tsv", "big5.tsv", "jis.tsv", "ksx.tsv")
+# At a word edge, these characters must retain a reading used when they are particles.
+PARTICLE_READINGS = {"着": "zhe", "著": "zhe", "了": "le", "的": "de", "地": "de",
+                     "得": "de", "都": "dou", "和": "he", "没": "mei", "还": "hai"}
 
 
 def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
@@ -103,6 +108,29 @@ def cedict_archive(path: pathlib.Path | None = None) -> pathlib.Path:
     if not zipfile.is_zipfile(path):
         raise ValueError(f"{path}: not a CC-CEDICT zip archive")
     return path
+
+
+def opencc_archive(path: pathlib.Path | None = None) -> pathlib.Path:
+    if path is None:
+        path = pathlib.Path.home() / ".cache" / "muzaiten" / "opencc-1.4.2" / "TSCharacters.txt"
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(OPENCC_URL, path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != OPENCC_SHA256:
+        raise ValueError(f"{path}: sha256 {digest}, expected OpenCC 1.4.2's {OPENCC_SHA256}")
+    return path
+
+
+def opencc_characters(path: pathlib.Path) -> dict[str, list[str]]:
+    mappings = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        key, values = line.split("\t", 1)
+        if len(key) == 1:
+            mappings[key] = values.split()
+    return mappings
 
 
 def cedict_pinyin(token: str) -> str | None:
@@ -512,6 +540,16 @@ def check_words(
 
         references = cedict.get(word)
         reading_fields = columns[1:]
+        if valid_word:
+            for position, index in (("first", 0), ("last", -1)):
+                particle = PARTICLE_READINGS.get(word[index])
+                if particle and not any(
+                    len(syllables := reading.split()) == len(word)
+                    and pinyin_base(syllables[index]) == particle
+                    for reading in reading_fields
+                ):
+                    add(row_number, word, "edge-particle", " / ".join(reading_fields),
+                        f"{position}:{word[index]} {particle}")
         normalized_readings = [" ".join(unicodedata.normalize("NFC", field).split())
                                for field in reading_fields]
         if len(normalized_readings) == 2 and normalized_readings[0] == normalized_readings[1]:
@@ -560,7 +598,10 @@ def check_words(
 
 
 def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pathlib.Path | None = None,
-          authored_dir: pathlib.Path = DEFAULT_AUTHORED_DIR) -> int:
+          authored_dir: pathlib.Path = DEFAULT_AUTHORED_DIR,
+          opencc_path: pathlib.Path | None = None) -> int:
+    opencc = (opencc_characters(opencc_archive(opencc_path))
+              if any(path.name in TIER_FILES for path in files) else {})
     archive = unihan_archive(None)
     fields = unihan_fields(archive, *READING_FIELDS, *VARIANT_FIELDS)
     inventory = pinyin_inventory(fields)
@@ -608,6 +649,11 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
                 continue
 
             reading_text, simplified_text = columns[1], columns[2]
+            if path.name in TIER_FILES:
+                opencc_values = opencc.get(raw_ch)
+                our_simple = simplified_text if simplified_text not in {"", "-"} else raw_ch
+                if opencc_values and (our_simple not in opencc_values or our_simple != opencc_values[0]):
+                    add(path, row_number, raw_ch, "opencc", our_simple, "/".join(opencc_values))
             readings = [] if reading_text in {"", "-"} else reading_text.split()
             if reading_text == "":
                 add(path, row_number, raw_ch, "format", "", "tone-marked readings or -")
@@ -764,6 +810,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                               help="reviewed-disagreements TSV")
     check_parser.add_argument("--words", type=pathlib.Path,
                               help="word readings TSV (default: words.tsv in the authored directory)")
+    check_parser.add_argument("--opencc", type=pathlib.Path,
+                              help="OpenCC TSCharacters.txt instead of the cached reference")
     check_parser.add_argument("files", nargs="*", type=pathlib.Path,
                               help="specific files to check; these replace the directory scan")
     return parser.parse_args(argv)
@@ -785,7 +833,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         files = required
     try:
-        return check(files, args.reviewed, args.words or args.authored / "words.tsv", args.authored)
+        return check(files, args.reviewed, args.words or args.authored / "words.tsv", args.authored,
+                     args.opencc)
     except (OSError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 2

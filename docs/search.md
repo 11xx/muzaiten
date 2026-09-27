@@ -98,8 +98,16 @@ The Han checker also checks word format, each syllable against its character's
 authored reading or Unihan default, and each toneless reading against
 CC-CEDICT. An identical second reading is a format finding. Findings are
 `format`, `reading`, `cedict` (the dictionary lists the word only with other
-readings), or `uncommon` (the dictionary has no entry).
-CC-CEDICT is reference data only. The checker downloads it to
+readings), `uncommon` (the dictionary has no entry), `edge-particle` (a word
+edge lacks a particle reading), or `opencc` (the authored simplified form
+differs from OpenCC's first mapping).
+`edge-particle` reports a word whose first or last character lacks its particle
+reading in both authored readings; a reviewer adds that reading or records why
+the word should keep its existing readings. `opencc` reports a simplified form
+that differs from OpenCC's first traditional-to-simplified mapping, including
+another listed target; a reviewer chooses the intended fold or records the
+disagreement. CC-CEDICT and OpenCC are check-only references and never ship.
+The checker downloads them to
 `~/.cache/muzaiten/` on first use and prints its date line with the word
 findings. Use `tools/fold-han-data.py check --words FILE` to check a word table
 outside the repository. Reviewed word findings match the word, kind, ours and
