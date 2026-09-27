@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compile the search-fold tables into C++ initializers.
 
-Reads the hand-authored tables in src/search/fold/tables/, the Han reading
-data next to them, and Python's Unicode character database, and writes one
+Reads the hand-authored tables in src/search/fold/tables/, the authored and
+generated Han data, and Python's Unicode character database, and writes one
 C++ include holding:
 
 - a 32-bit entry per BMP code point and a sorted table of astral entries,
@@ -69,16 +69,64 @@ def load_json(path: pathlib.Path) -> dict:
         return json.load(f, object_pairs_hook=reject_duplicates)
 
 
-def load_tsv(path: pathlib.Path) -> list[tuple[str, str]]:
-    rows = []
+def tsv_rows(path: pathlib.Path, columns: int):
     with open(path, encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, 1):
             line = line.rstrip("\n")
-            if not line or line.startswith("#"):
+            if not line.strip() or line.startswith("#"):
                 continue
-            key, value = line.split("\t")
-            rows.append((key, value))
-    return rows
+            fields = line.split("\t")
+            if len(fields) != columns:
+                sys.exit(f"{path}:{line_number}: expected {columns} tab-separated fields")
+            yield line_number, fields
+
+
+def toneless_pinyin(reading: str) -> Optional[str]:
+    plain = "".join(ch for ch in unicodedata.normalize("NFD", reading)
+                    if not unicodedata.category(ch).startswith("M")).lower()
+    return plain if plain and plain.isascii() and plain.isalpha() else None
+
+
+def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional[str], Optional[str], str]],
+                                                        dict[str, tuple[pathlib.Path, int]]]:
+    entries: dict[str, tuple[Optional[str], Optional[str], str]] = {}
+    locations: dict[str, tuple[pathlib.Path, int]] = {}
+    for path in sorted(directory.glob("*.tsv")):
+        for line_number, fields in tsv_rows(path, 3):
+            ideograph, readings_field, simplified = fields
+            if len(ideograph) != 1 or not is_han(ord(ideograph)):
+                sys.exit(f"{path}:{line_number}: expected one Han ideograph")
+            if simplified and (len(simplified) != 1 or not is_han(ord(simplified))):
+                sys.exit(f"{path}:{line_number}: simplified form must be empty or one Han ideograph")
+            if readings_field == "-":
+                readings: list[str] = []
+            else:
+                tokens = readings_field.split()
+                if not tokens:
+                    sys.exit(f"{path}:{line_number}: readings must be '-' or space-separated pinyin")
+                readings = []
+                for token in tokens:
+                    reading = toneless_pinyin(token)
+                    if reading is None:
+                        sys.exit(f"{path}:{line_number}: invalid Hanyu Pinyin reading {token!r}")
+                    readings.append(reading)
+            if ideograph in locations:
+                first_path, first_line = locations[ideograph]
+                sys.exit(f"{path}:{line_number}: duplicate authored ideograph {ideograph!r}; "
+                         f"first listed at {first_path}:{first_line}")
+            primary = readings[0] if readings else None
+            secondary = next((reading for reading in readings[1:] if reading != primary), None)
+            entries[ideograph] = (primary, secondary, simplified)
+            locations[ideograph] = (path, line_number)
+    return entries, locations
+
+
+def reject_authored_overlap(path: pathlib.Path, line_number: int, ideograph: str,
+                            locations: dict[str, tuple[pathlib.Path, int]]) -> None:
+    if ideograph in locations:
+        authored_path, authored_line = locations[ideograph]
+        sys.exit(f"{path}:{line_number}: Unihan ideograph {ideograph!r} is also authored at "
+                 f"{authored_path}:{authored_line}")
 
 
 def without_doc(table: dict) -> dict:
@@ -201,10 +249,35 @@ class Generator:
                     sys.exit(f"conflicting readings for {key!r}")
                 self.letters[key] = value
 
+        self.han_authored, self.han_authored_locations = load_authored_han(tables / "han")
+        self.han_pinyin: dict[str, str] = {}
+        pinyin_path = tables.parent / "unihan" / "han_pinyin.tsv"
+        for line_number, (reading_field, characters) in tsv_rows(pinyin_path, 2):
+            reading = toneless_pinyin(reading_field)
+            if reading is None or reading != reading_field:
+                sys.exit(f"{pinyin_path}:{line_number}: invalid toneless pinyin {reading_field!r}")
+            for ch in characters:
+                reject_authored_overlap(pinyin_path, line_number, ch, self.han_authored_locations)
+                if ch in self.han_pinyin:
+                    sys.exit(f"{pinyin_path}:{line_number}: duplicate Unihan pinyin ideograph {ch!r}")
+                self.han_pinyin[ch] = reading
+
         self.simplified: dict[str, str] = {}
-        for simple, traditional in load_tsv(tables.parent / "han_simplified.tsv"):
+        simplified_path = tables.parent / "unihan" / "han_simplified.tsv"
+        for line_number, (simple, traditional) in tsv_rows(simplified_path, 2):
+            if len(simple) != 1 or not is_han(ord(simple)):
+                sys.exit(f"{simplified_path}:{line_number}: expected one simplified Han ideograph")
             for ch in traditional:
+                reject_authored_overlap(simplified_path, line_number, ch, self.han_authored_locations)
+                if not is_han(ord(ch)):
+                    sys.exit(f"{simplified_path}:{line_number}: expected traditional Han ideographs")
                 self.simplified[ch] = simple
+
+        for ch, (primary, secondary, simplified) in self.han_authored.items():
+            if primary is not None:
+                self.han_pinyin[ch] = primary
+            if simplified:
+                self.simplified[ch] = simplified
         self.kana_ids: dict[str, int] = {}
 
     # -- transliteration of one normalized, lowercase, mark-free character --
@@ -840,11 +913,7 @@ class Generator:
         # Han
         pinyin_syllables: list[str] = []
         syllable_id: dict[str, int] = {}
-        reading_of: dict[str, str] = {}
-        for reading, chars in load_tsv(self.tables.parent / "han_pinyin.tsv"):
-            for ch in chars:
-                reading_of[ch] = reading
-        reading_of.update(self.han["chinese"]["chars"])
+        reading_of = self.han_pinyin
 
         def pinyin_id(reading: str) -> int:
             if reading not in syllable_id:

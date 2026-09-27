@@ -56,10 +56,21 @@ tables don't list are derived from their Unicode names where the name spells
 the sound (`LATIN SMALL LETTER D WITH HOOK` reads `d`, Ethiopic, Cherokee and
 Canadian syllabics read their syllable names).
 
-Per-character pinyin and traditional-to-simplified forms come from Unicode
-CLDR via ICU: `tools/fold-han-data.py` regenerates `han_pinyin.tsv` and
-`han_simplified.tsv` (Unicode License v3, see `UNICODE-LICENSE.txt` beside
-them). Word-level readings and overrides are in `tables/han.json`.
+Han readings and simplified forms of the essential ideographs are
+hand-authored in `src/search/fold/tables/han/`: one file per national
+standard set (`gb2312`, `big5`, `jis`, `ksx`), each listing the ideographs no
+earlier set has. Each tab-separated row has an ideograph, its Hanyu Pinyin
+readings with tone marks (most common first; `-` for none), and the
+simplified form a traditional or variant ideograph folds to (empty when it
+keeps its written form).
+
+Every other ideograph reads from Unicode's Unihan database:
+`tools/fold-han-data.py` generates `src/search/fold/unihan/han_pinyin.tsv`
+and `han_simplified.tsv` from a pinned Unihan release, leaving out the
+authored ideographs (Unicode License v3, see `UNICODE-LICENSE.txt` there).
+`tools/fold-han-data.py check` compares the authored tables with Unihan and
+lists every disagreement not yet reviewed in `tools/fold-han-reviewed.tsv`.
+Word-level readings are in `tables/han.json`.
 
 The conformance file `src/search/fold/fold_cases.tsv` holds one UTF-8 case per
 line: `input<TAB>primary fold`, optionally followed by `<TAB>`-separated
