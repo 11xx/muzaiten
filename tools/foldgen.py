@@ -983,7 +983,7 @@ class Generator:
         for key in sorted(names["given"], key=lambda k: k.encode("utf-16-be")):
             if len(key) != 1 or not (0xAC00 <= ord(key) <= 0xD7A3):
                 sys.exit(f"hangul.json: given-name key {key!r} must be one precomposed Hangul syllable")
-            given_name_rows.append(f"    {{{pool.ref(key)}, {pool.ref(names['given'][key])}}},")
+            given_name_rows.append(f"    {{{pool.ref(key)}, {pool.ref(names['given'][key])}, {{0, 0}}}},")
         hangul_lines = [
             f"const HangulStyle kHangulRr = {{{str_array(rr['initials'])}, {str_array(rr['initials'])}, "
             f"{str_array(rr['vowels'])}, {str_array([rr['codas'][c] for c in coda_order])}, {pool.ref(rr['lateral'])}}};",
