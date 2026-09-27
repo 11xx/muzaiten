@@ -2611,15 +2611,14 @@
 黏著	cedict	nián zhe	nian zhuo	Particle second reading: in running text the characters are often a verb with the particle 着/著 zhe (戴着墨镜, 阴沉着脸, 黏着你); the word reading zhuó comes first.
 一了百了	edge-particle	yī liǎo bǎi liǎo	last:了 le	Idiom; its final 了 is liǎo and never the aspect particle.
 不得了	edge-particle	bù dé liǎo	last:了 le	了 is always liǎo in the potential complement 不了.
-丰都	edge-particle	fēng dū	last:都 dou	Segmenter keeps it: 丰富都 folds …fengfudou; 丰都 is a place name.
+丰都	edge-particle	fēng dū	last:都 dou	Segmenter keeps it: 丰富都 folds …fengfudou and 丰收都 …fengshoudou; 丰都 is a place name.
 了不得	edge-particle	liǎo bu de	first:了 le	Segmenter keeps it: 到了不得不 folds …daolebudebu.
-了不起	edge-particle	liǎo bù qǐ	first:了 le	不起 after the particle 了 is rare; the complement 不起 follows a verb directly (看不起).
+了不起	cedict	le bù qǐ	liao bu qi	Particle second reading: 了 is the particle in running text (变成了不起眼 folds …bianchenglebuqiyan); the word reading liǎo bù qǐ comes first.
 了却	cedict	le què	liao que	Particle second reading: 了 is the particle in running text (来了却 folds …laileque); the word reading liǎo què comes first.
 了如指掌	edge-particle	liǎo rú zhǐ zhǎng	first:了 le	Four-character idiom; the particle 了 never precedes 如指掌.
-了局	edge-particle	liǎo jú	first:了 le	局 after the particle 了 (输了局) is rare.
-了得	edge-particle	liǎo de	first:了 le	得 after the particle 了 (少了得补) is colloquial and rare in text.
-了悟	edge-particle	liǎo wù	first:了 le	悟 after the particle 了 is rare; 悟了 is the usual order.
-了断	edge-particle	liǎo duàn	first:了 le	断 after the particle 了 is rare; 断了 is the usual order.
+了局	cedict	le jú	liao ju	Particle second reading: 了 is the particle in running text (设了局 folds …sheleju); the word reading liǎo jú comes first.
+了得	cedict	le dé	liao de	Particle second reading: 了 is the particle in running text (有了得力助手 folds …youledelizhushou); the word reading liǎo de comes first.
+了断	cedict	le duàn	liao duan	Particle second reading: 了 is the particle in running text (出现了断层 folds …chuxianleduanceng); the word reading liǎo duàn comes first.
 了无	edge-particle	liǎo wú	first:了 le	Segmenter keeps it: 多了无限 folds …duolewuxian and 吃了无数 …chilewushu.
 了无牵挂	edge-particle	liǎo wú qiān guà	first:了 le	Four-character idiom; the particle 了 never precedes 无牵挂.
 了无生趣	edge-particle	liǎo wú shēng qù	first:了 le	Four-character idiom; the particle 了 never precedes 无生趣.
@@ -2630,7 +2629,7 @@
 于都	cedict	yú dōu	yu du	Particle second reading: 都 is the particle in running text (终于都过去 folds …zhongyudouguoqu); the word reading yú dū comes first.
 京都	cedict	jīng dōu	jing du	Particle second reading: 都 is the particle in running text (北京都下雪 folds …beijingdouxiaxue); the word reading jīng dū comes first.
 众矢之的	edge-particle	zhòng shǐ zhī dì	last:的 de	Idiom; 的 dì (target) closes it and no particle context exists.
-偿还	edge-particle	cháng huán	last:还 hai	偿 before the adverb 还 (补偿还没到) is rare.
+偿还	cedict	cháng hái	chang huan	Particle second reading: 还 is the particle in running text (补偿还在 folds …buchanghaizai); the word reading cháng huán comes first.
 免不了	edge-particle	miǎn bu liǎo	last:了 le	了 is always liǎo in the potential complement 不了.
 全军覆没	edge-particle	quán jūn fù mò	last:没 mei	Idiom; 没 mò (perish) closes it and no particle context exists.
 凹地	edge-particle	āo dì	last:地 de	凹 takes no adverbial 地; 凹地 is a landform noun.
@@ -2640,18 +2639,17 @@
 吞没	edge-particle	tūn mò	last:没 mei	吞 before the negative 没 is rare.
 呱呱坠地	edge-particle	gū gū zhuì dì	last:地 de	Idiom; 坠地 is to fall to the ground and no particle context exists.
 和弄	edge-particle	huò nong	first:和 he	弄 opening a word after the conjunction 和 (你和弄堂) is rare.
-和泥	edge-particle	huó ní	first:和 he	泥 opening a noun after the conjunction 和 (水和泥土) is rare; 和泥 huó ní is the mud-mixing word.
 和牌	edge-particle	hú pái	first:和 he	Mahjong term; 牌 opening a noun after the conjunction 和 (我和牌友) is rare.
 和稀泥	edge-particle	huò xī ní	first:和 he	Idiom; 稀泥 after the conjunction 和 is rare.
 国都	cedict	guó dōu	guo du	Particle second reading: 都 is the particle in running text (全国都在 folds …quanguodouzai); the word reading guó dū comes first.
 土地	edge-particle	tǔ dì	last:地 de	土 takes no adverbial 地 (本土地 is rare); 土地 is the land noun.
-地区	edge-particle	dì qū	first:地 de	Adverbial 地 precedes a verb and 区 rarely opens one (好好地区分 is not ordinary).
+地区	cedict	de qū	di qu	Particle second reading: 地 is the particle in running text (明确地区分 folds …mingquedequfen); the word reading dì qū comes first.
 地图	edge-particle	dì tú	first:地 de	Adverbial 地 precedes a verb and 图 rarely opens one.
 地地道道	edge-particle	dì dì dào dào	first:地 de	Reduplicated idiom; adverbial 地 never precedes 地道道.
 地址	edge-particle	dì zhǐ	first:地 de	Adverbial 地 precedes a verb and 址 never opens one.
 地壳	edge-particle	dì qiào	first:地 de	Adverbial 地 precedes a verb and 壳 never opens one.
-地契	edge-particle	dì qì	first:地 de	Adverbial 地 precedes a verb and 契 rarely opens one.
-地方	edge-particle	dì fang	first:地 de	Adverbial 地 precedes a verb and 方 rarely opens one (慢慢地方便 is not ordinary).
+地契	edge-particle	dì qì	first:地 de	Segmenter keeps it: 完美地契合 folds …wanmeideqihe.
+地方	edge-particle	dì fang	first:地 de	Segmenter keeps it: 极大地方便 folds …jidadefangbian.
 地球	edge-particle	dì qiú	first:地 de	Adverbial 地 precedes a verb and 球 never opens one.
 地磅	edge-particle	dì bàng	first:地 de	Adverbial 地 precedes a verb and 磅 never opens one.
 地窨子	edge-particle	dì yìn zi	first:地 de	Adverbial 地 precedes a verb and 窨 never opens one.
@@ -2662,10 +2660,10 @@
 少不了	edge-particle	shǎo bu liǎo	last:了 le	了 is always liǎo in the potential complement 不了.
 帝都	cedict	dì dōu	di du	Particle second reading: 都 is the particle in running text (上帝都知道 folds …shangdidouzhidao); the word reading dì dū comes first.
 建都	edge-particle	jiàn dū	last:都 dou	Segmenter keeps it: 重建都 folds …chongjiandou.
-归还	edge-particle	guī huán	last:还 hai	归 before the adverb 还 (回归还早) is rare.
+归还	cedict	guī hái	gui huan	Particle second reading: 还 is the particle in running text (总归还是 folds …zongguihaishi); the word reading guī huán comes first.
 得亏	cedict	de kuī	dei kui	Particle second reading: 得 is the particle in running text (显得亏欠 folds …xiandekuiqian); the word reading děi kuī comes first.
 忘不了	edge-particle	wàng bu liǎo	last:了 le	了 is always liǎo in the potential complement 不了.
-总得	edge-particle	zǒng děi	last:得 de	总 is an adverb and takes no complement 得 (汇总得很好 is rare).
+总得	edge-particle	zǒng děi	last:得 de	总 closes verbs that seldom take the complement 得; the segmenter keeps 总结得很好 (…zongjiedehenhao).
 恁地	edge-particle	nèn dì	last:地 de	Archaic adverb (so, thus); 恁 takes no adverbial 地.
 成都	cedict	chéng dōu	cheng du	Particle second reading: 都 is the particle in running text (完成都很难 folds …wanchengdouhennan); the word reading chéng dū comes first.
 执着	edge-particle	zhí zhuó	last:着 zhe	执 with the particle 着 (手执着剑) is literary and rare; 执着 is the everyday word.
@@ -2674,7 +2672,7 @@
 掺和	edge-particle	chān huo	last:和 he	掺 before the conjunction 和 is rare.
 搀和	edge-particle	chān huo	last:和 he	搀 before the conjunction 和 is rare.
 搅和	edge-particle	jiǎo huo	last:和 he	搅 before the conjunction 和 (搅拌和) is rare.
-故都	edge-particle	gù dū	last:都 dou	故 before the particle 都 (缘故都) is rare; 故都 is the former-capital word.
+故都	cedict	gù dōu	gu du	Particle second reading: 都 is the particle in running text (事故都是 folds …shigudoushi); the word reading gù dū comes first.
 数不着	edge-particle	shǔ bù zháo	last:着 zhe	着 is always zháo in the potential complement 不着.
 数不著	edge-particle	shǔ bù zháo	last:著 zhe	著 is always zháo in the potential complement 不著.
 数得着	edge-particle	shǔ de zháo	last:着 zhe	着 is always zháo in the potential complement 得着.
@@ -2716,26 +2714,26 @@
 睡著	cedict	shuì zhe	shui zhao	Particle second reading: 著 is the particle in running text (睡著睡著 folds …shuizheshuizhe); the word reading shuì zháo comes first.
 神出鬼没	edge-particle	shén chū guǐ mò	last:没 mei	Idiom; 没 mò (vanish) closes it and no particle context exists.
 种地	edge-particle	zhòng dì	last:地 de	种 takes no adverbial 地 (各种地 is not ordinary); 种地 is the farming verb.
-终了	edge-particle	zhōng liǎo	last:了 le	终 ends adverbs that take no particle 了: 最终了解 folds …zuizhongliaojie as the word 了解.
+终了	cedict	zhōng le	zhong liao	Particle second reading: 了 is the particle in running text (剧终了 folds …juzhongle); the word reading zhōng liǎo comes first.
 耙地	edge-particle	bà dì	last:地 de	耙 takes no adverbial 地; 耙地 is the harrowing verb.
-著书	cedict	zhe shū	zhu shu	Particle second reading: 著 is the particle in running text (拿著书 folds …nazheshu); the word reading zhù shū comes first.
-著作	cedict	zhe zuò	zhu zuo	Particle second reading: 著 is the particle in running text (做著作业 folds …zuozhezuoye); the word reading zhù zuò comes first.
+著书	cedict	zhe shū	zhu shu	Particle second reading: 著 is the particle in running text (拿著書 folds …nazheshu); the word reading zhù shū comes first.
+著作	cedict	zhe zuò	zhu zuo	Particle second reading: 著 is the particle in running text (做著作業 folds …zuozhezuoye); the word reading zhù zuò comes first.
 著名	cedict	zhe míng	zhu ming	Particle second reading: 著 is the particle in running text (看著名字 folds …kanzhemingzi); the word reading zhù míng comes first.
 著急	cedict	zhe jí	zhao ji	Particle second reading: 著 is the particle in running text (看著急 folds …kanzheji); the word reading zháo jí comes first.
 著数	edge-particle	zhāo shù	first:著 zhe	Segmenter keeps it: 看著数字 folds …kanzheshuzi.
-著法	cedict	zhe fǎ	zhao fa	Particle second reading: 著 is the particle in running text (跟著法国 folds …genzhefaguo); the word reading zhāo fǎ comes first.
+著法	cedict	zhe fǎ	zhao fa	Particle second reading: 著 is the particle in running text (跟著法國 folds …genzhefaguo); the word reading zhāo fǎ comes first.
 著火	cedict	zhe huǒ	zhao huo	Particle second reading: 著 is the particle in running text (望著火焰 folds …wangzhehuoyan); the word reading zháo huǒ comes first.
-著迷	cedict	zhe mí	zhao mi	Particle second reading: 著 is the particle in running text (望著迷雾 folds …wangzhemiwu); the word reading zháo mí comes first.
-著重	edge-particle	zhuó zhòng	first:著 zhe	Segmenter keeps it: 跟著重复 folds …genzhechongfu and 带著重要的 …daizhezhongyaode.
+著迷	cedict	zhe mí	zhao mi	Particle second reading: 著 is the particle in running text (望著迷霧 folds …wangzhemiwu); the word reading zháo mí comes first.
+著重	edge-particle	zhuó zhòng	first:著 zhe	Segmenter keeps it: 跟著重複 folds …genzhechongfu and 帶著重要 …daizhezhongyao.
 著陆	edge-particle	zhuó lù	first:著 zhe	Segmenter keeps it: 沿著陆地 folds …yanzheludi.
 衣着	edge-particle	yī zhuó	last:着 zhe	衣 is a noun and 衣 with the particle 着 (穿衣着) is rare.
 衣著	edge-particle	yī zhuó	last:著 zhe	衣 is a noun and 衣 with the particle 著 (穿衣著) is rare.
 覆没	edge-particle	fù mò	last:没 mei	覆 before the negative 没 does not occur.
-论著	cedict	lùn zhe	lun zhu	Particle second reading: 著 is the particle in running text (谈论著 folds …tanlunzhe); the word reading lùn zhù comes first.
+论著	cedict	lùn zhe	lun zhu	Particle second reading: 著 is the particle in running text (談論著 folds …tanlunzhe); the word reading lùn zhù comes first.
 跑不了	edge-particle	pǎo bu liǎo	last:了 le	了 is always liǎo in the potential complement 不了.
 迁都	edge-particle	qiān dū	last:都 dou	迁 before the particle 都 (变迁都) is rare.
 还乡	edge-particle	huán xiāng	first:还 hai	乡 opening a word after the adverb 还 (我还乡下) is rare.
-还击	edge-particle	huán jī	first:还 hai	击 opening a word after the adverb 还 (他还击败了) is rare.
+还击	cedict	hái jī	huan ji	Particle second reading: 还 is the particle in running text (他还击败过冠军 folds …tahaijibaiguoguanjun); the word reading huán jī comes first.
 还原	edge-particle	huán yuán	first:还 hai	Segmenter keeps it: 还原来的样子 folds …haiyuanlaideyangzi.
 还愿	edge-particle	huán yuàn	first:还 hai	Segmenter keeps it: 你还愿意 folds …nihaiyuanyi.
 还给	cedict	hái gěi	huan gei	Particle second reading: 还 is the particle in running text (他还给我打电话 folds …tahaigeiwodadianhua); the word reading huán gěi comes first.
@@ -2747,14 +2745,14 @@
 都安	cedict	dōu ān	du an	Particle second reading: 都 is the particle in running text (都安静 folds …douanjing); the word reading dū ān comes first.
 都察院	edge-particle	dū chá yuàn	first:都 dou	Historical office; segmenter keeps the particle: 都察觉 folds …douchajue.
 都市	edge-particle	dū shì	first:都 dou	市 opening a word after the particle 都 (我们都市民) is not ordinary.
-都护	edge-particle	dū hù	first:都 dou	Historical office; 护 opening a word after the particle 都 (都护着他) is rare.
+都护	cedict	dōu hù	du hu	Particle second reading: 都 is the particle in running text (都护送 folds …douhusong); the word reading dū hù comes first.
 都护府	edge-particle	dū hù fǔ	first:都 dou	Historical office; 护府 never follows the particle 都.
 都昌	edge-particle	dū chāng	first:都 dou	Place name; 昌 opening a word after the particle 都 (都昌盛) is rare.
 都暻秀	edge-particle	dū jǐng xiù	first:都 dou	Personal name; 暻 never follows the particle 都.
 都柏林	edge-particle	dū bó lín	first:都 dou	Place name (Dublin); 柏林 after the particle 都 is not ordinary.
 都江堰	edge-particle	dū jiāng yàn	first:都 dou	Place name; 江堰 never follows the particle 都.
 都灵	edge-particle	dū líng	first:都 dou	Place name (Turin); 灵 opening a word after the particle 都 (都灵活) is rare.
-都督	edge-particle	dū dū	first:都 dou	Historical office; 督 opening a word after the particle 都 (都督促) is rare.
+都督	cedict	dōu dū	du du	Particle second reading: 都 is the particle in running text (老师都督促 folds …laoshidouducu); the word reading dū dū comes first.
 陆地	edge-particle	lù dì	last:地 de	Segmenter keeps it: 大陆地 folds …dalude.
 陪都	edge-particle	péi dū	last:都 dou	陪 before the particle 都 is rare; 陪都 is the auxiliary-capital word.
 隐没	edge-particle	yǐn mò	last:没 mei	隐 before the negative 没 is rare.
@@ -2846,5 +2844,5 @@
 鷭	opencc	鷭	𬸪	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
 寀	simplified	采	-	寀 is a variant of 采; OpenCC folds it there and Unihan omits the mapping.
 捱	simplified	挨	-	捱 is a variant of 挨 (挨打, 挨饿); OpenCC folds it there and Unihan omits the mapping.
-碕	simplified	埼	-	碕 is a variant of 埼 in Japanese place names (埼玉); OpenCC folds it there and Unihan omits the mapping.
+碕	simplified	埼	-	Unihan lists 碕 and 埼 as Morohashi semantic variants; OpenCC folds 碕 to 埼 and Unihan omits the mapping.
 钁	simplified	镢	䦆	镢 is the General Standard (2013) form of 钁; Unihan names the rare Extension A form 䦆.
