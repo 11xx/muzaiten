@@ -9,10 +9,13 @@ before its fields are used.
 `check` validates authored rows, compares their readings and simplified forms
 with Unihan 16.0.0 (a reading counts as attested when the character or its
 simplified or traditional counterpart has it, and as archaic when only Hanyu
-Da Zidian does), checks national-standard tier coverage, and applies exact
-reviewed-disagreement suppressions. Authored rows use
-`ideograph<TAB>readings<TAB>simplified`; readings are tone-marked Mandarin
-pinyin or `-`, and the simplified field is empty when no form applies.
+Da Zidian does), checks every reading's exact tone, checks national-standard
+tier coverage, and applies exact reviewed-disagreement suppressions. Authored
+rows use `ideograph<TAB>readings<TAB>simplified`; readings are tone-marked
+Mandarin pinyin or `-`, and the simplified field is empty when no form applies.
+Reviewed rows use `ideograph<TAB>kind<TAB>ours<TAB>reference<TAB>reason`.
+Directory mode requires all four tier files; explicit FILE arguments check
+only those files.
 
 Usage: tools/fold-han-data.py [generate] [--unihan Unihan.zip]
                               [--authored DIR] [output-dir]
@@ -61,6 +64,7 @@ TONE_MARKS = {"\u0304", "\u0301", "\u030c", "\u0300"}
 DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
 CHECK_KINDS = ("format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified")
+TIER_FILES = ("gb2312.tsv", "big5.tsv", "jis.tsv", "ksx.tsv")
 
 
 def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
@@ -306,7 +310,6 @@ def expected_tone_position(letters: str) -> int | None:
 def is_tone_marked_pinyin(
     reading: str,
     inventory: set[str],
-    neutral_spellings: set[str],
     special_spellings: set[str],
 ) -> bool:
     """Check tone placement and membership in Unihan's Mandarin syllables."""
@@ -337,25 +340,29 @@ def is_tone_marked_pinyin(
     if base not in inventory:
         return False
     if not tone_positions:
-        # Unihan-attested neutral-tone syllables follow the standard unmarked spelling.
-        return unicodedata.normalize("NFC", reading) in neutral_spellings
+        return True
     expected = expected_tone_position(base)
     if expected is None:
         return unicodedata.normalize("NFC", reading) in special_spellings
     return len(tone_positions) == 1 and tone_positions[0] == expected
 
 
-def read_reviewed(path: pathlib.Path) -> set[tuple[str, str, str]]:
+def read_reviewed(path: pathlib.Path) -> set[tuple[str, str, str, str]]:
     """Load exact finding keys from a reviewed-disagreements TSV."""
     reviewed = set()
     for row_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
         fields = raw_line.split("\t")
-        if len(fields) != 4:
-            raise ValueError(f"{path}:{row_number}: expected four reviewed columns")
-        reviewed.add((fields[0], fields[1], fields[2]))
+        if len(fields) != 5:
+            raise ValueError(f"{path}:{row_number}: expected five reviewed columns")
+        reviewed.add((fields[0], fields[1], fields[2], fields[3]))
     return reviewed
+
+
+def finding_key(finding: tuple[str, str, str, str, str, str]) -> tuple[str, str, str, str]:
+    """Return the exact fields a reviewed row must match to suppress a finding."""
+    return finding[2], finding[3], finding[4], finding[5]
 
 
 def clean_tsv(value: str) -> str:
@@ -416,23 +423,29 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
             if reading_text not in {"", "-"} and not readings:
                 add(path, row_number, raw_ch, "format", reading_text, "tone-marked readings or -")
 
+            family = {raw_ch} | {
+                chr(int(code[2:], 16))
+                for field in VARIANT_FIELDS
+                for code in fields[field].get(raw_ch, "").split()
+            }
+            attested_by_base: dict[str, set[str]] = defaultdict(set)
+            for member in family:
+                for field in ATTESTING_FIELDS:
+                    for reading in field_readings(field, fields[field].get(member, "")):
+                        attested_by_base[toneless(reading)].add(unicodedata.normalize("NFC", reading))
+            attested_spellings = {form for forms in attested_by_base.values() for form in forms}
+
             seen_readings = set()
-            attested_spellings = {
-                unicodedata.normalize("NFC", reading)
-                for field in ATTESTING_FIELDS
-                for reading in field_readings(field, fields[field].get(raw_ch, ""))
-            }
-            neutral_spellings = {
-                reading for reading in attested_spellings
-                if not any(char in TONE_MARKS for char in unicodedata.normalize("NFD", reading))
-            }
             for reading in readings:
                 normalized = unicodedata.normalize("NFC", reading)
-                if not is_tone_marked_pinyin(reading, inventory, neutral_spellings, attested_spellings):
+                if not is_tone_marked_pinyin(reading, inventory, attested_spellings):
                     add(path, row_number, raw_ch, "format", reading, "tone-marked Mandarin syllable")
                 if normalized in seen_readings:
                     add(path, row_number, raw_ch, "format", reading, "reading listed once")
                 seen_readings.add(normalized)
+                attested = sorted(attested_by_base.get(toneless(reading), set()))
+                if normalized not in attested:
+                    add(path, row_number, raw_ch, "tone", reading, " ".join(attested) if attested else "-")
 
             if simplified_text and not (
                 len(simplified_text) == 1
@@ -448,17 +461,9 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
             reference_base = toneless(mandarin) if mandarin else None
             if mandarin and ours_base != reference_base:
                 add(path, row_number, raw_ch, "default", our_first or "-", mandarin)
-            elif mandarin and our_first and unicodedata.normalize("NFC", our_first) != unicodedata.normalize("NFC", mandarin):
-                add(path, row_number, raw_ch, "tone", our_first, mandarin)
 
             # A reading is often recorded only under the character's simplified
             # or traditional counterpart, so those count as attestation too.
-            family = {raw_ch} | {
-                chr(int(code[2:], 16))
-                for field in VARIANT_FIELDS
-                for code in fields[field].get(raw_ch, "").split()
-            }
-
             def readings_in(field_names: tuple[str, ...]) -> set[str]:
                 return {
                     toneless(reading)
@@ -513,7 +518,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
 
         unsuppressed = [
             finding for finding in findings[per_file_start:]
-            if (finding[2], finding[3], finding[4]) not in reviewed
+            if finding_key(finding) not in reviewed
         ]
         counts = Counter(finding[3] for finding in unsuppressed)
         print(
@@ -523,7 +528,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
 
     unsuppressed = [
         finding for finding in findings
-        if (finding[2], finding[3], finding[4]) not in reviewed
+        if finding_key(finding) not in reviewed
     ]
     for finding in unsuppressed:
         print("\t".join(clean_tsv(value) for value in finding))
@@ -561,8 +566,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     files = args.files
-    if not files and args.authored.is_dir():
-        files = sorted(args.authored.glob("*.tsv"))
+    if not files:
+        required = [args.authored / name for name in TIER_FILES]
+        missing = [path for path in required if not path.is_file()]
+        if missing:
+            for path in missing:
+                print(f"{path}: required authored Han tier file is missing", file=sys.stderr)
+            return 2
+        files = required
     try:
         return check(files, args.reviewed)
     except (OSError, ValueError) as exc:

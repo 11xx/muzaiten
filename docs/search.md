@@ -68,9 +68,13 @@ Every other ideograph reads from Unicode's Unihan database:
 `tools/fold-han-data.py` generates `src/search/fold/unihan/han_pinyin.tsv`
 and `han_simplified.tsv` from a pinned Unihan release, leaving out the
 authored ideographs (Unicode License v3, see `UNICODE-LICENSE.txt` there).
-`tools/fold-han-data.py check` compares the authored tables with Unihan and
-lists every disagreement not yet reviewed in `tools/fold-han-reviewed.tsv`.
-Word-level readings are in `tables/han.json`.
+`tools/fold-han-data.py check` compares the authored tables with Unihan,
+including the exact tone of every reading across simplified and traditional
+counterparts. With no file arguments it checks all four tier files and reports
+missing tiers; explicit file arguments check only those files. Reviewed rows
+in `tools/fold-han-reviewed.tsv` match the ideograph, finding kind, authored
+value and reference value, followed by the reason for the decision. Word-level
+readings are in `tables/han.json`.
 
 The conformance file `src/search/fold/fold_cases.tsv` holds one UTF-8 case per
 line: `input<TAB>primary fold`, optionally followed by `<TAB>`-separated
