@@ -112,15 +112,23 @@ private slots:
 
     void emptyFoldedLiteralRunDoesNotBecomeAWildcard()
     {
-        const SearchRecord r = foldedRec(QStringLiteral("ab"), QStringLiteral("/m/a.flac"));
-        QVERIFY(ExcludeMatcher({QStringLiteral("a*\u200Bb"), ExcludeScope::AnyField}).matches(r));
+        // A run that folds to nothing (a zero-width space) disappears: the glob
+        // below is the suffix pattern *ab, not a wildcard at its start.
+        const ExcludeMatcher suffix({QStringLiteral("\u200B*ab"), ExcludeScope::AnyField});
+        QVERIFY(suffix.matches(foldedRec(QStringLiteral("xab"), QStringLiteral("/m/a.flac"))));
+        QVERIFY(!suffix.matches(foldedRec(QStringLiteral("abx"), QStringLiteral("/m/b.flac"))));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("\u200B"), ExcludeScope::AnyField}).isValid());
     }
 
     void foldedWildcardLookalikesRemainLiteral()
     {
-        const ExcludeMatcher m({QString::fromUtf8("a＊b"), ExcludeScope::AnyField});
-        QVERIFY(m.matches(foldedRec(QStringLiteral("a*b"), QStringLiteral("/m/a.flac"))));
-        QVERIFY(!m.matches(foldedRec(QStringLiteral("axb"), QStringLiteral("/m/b.flac"))));
+        const ExcludeMatcher substring({QString::fromUtf8("a＊b"), ExcludeScope::AnyField});
+        QVERIFY(substring.matches(foldedRec(QStringLiteral("a*b"), QStringLiteral("/m/a.flac"))));
+        QVERIFY(!substring.matches(foldedRec(QStringLiteral("axb"), QStringLiteral("/m/b.flac"))));
+        // With ? the glob becomes a regex, where the folded * must stay escaped.
+        const ExcludeMatcher regex({QString::fromUtf8("a＊b?"), ExcludeScope::AnyField});
+        QVERIFY(regex.matches(foldedRec(QStringLiteral("a*bX"), QStringLiteral("/m/c.flac"))));
+        QVERIFY(!regex.matches(foldedRec(QStringLiteral("axbX"), QStringLiteral("/m/d.flac"))));
     }
 
     void asciiGlobMatchingRemainsCaseInsensitive()
