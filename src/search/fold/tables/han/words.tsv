@@ -131,10 +131,11 @@
 乾坤	qián kūn
 乾旦	qián dàn
 乾清宫	qián qīng gōng
+乾著急	gān zháo jí
 乾隆	qián lóng
 了不得	liǎo bu de
 了不起	liǎo bù qǐ
-了却	liǎo què
+了却	liǎo què	le què
 了如指掌	liǎo rú zhǐ zhǎng
 了局	liǎo jú
 了得	liǎo de
@@ -145,12 +146,12 @@
 了无生趣	liǎo wú shēng qù
 了无音信	liǎo wú yīn xìn
 了然	liǎo rán
-了结	liǎo jié
+了结	liǎo jié	le jié
 了解	liǎo jiě
-了账	liǎo zhàng
+了账	liǎo zhàng	le zhàng
 二十八宿	èr shí bā xiù
 于思	yú sāi
-于都	yú dū
+于都	yú dū	yú dōu
 亏折	kuī shé	kuī zhé
 云杉	yún shān
 云裳	yún cháng
@@ -167,7 +168,7 @@
 交给	jiāo gěi
 交通银行	jiāo tōng yín háng
 京圻	jīng qí
-京都	jīng dū
+京都	jīng dū	jīng dōu
 亲人	qīn rén
 亲切	qīn qiè
 亲家	qìng jia
@@ -401,7 +402,7 @@
 凹陷	āo xiàn
 凹面	āo miàn
 出差	chū chāi
-出没	chū mò
+出没	chū mò	chū méi
 出鞘	chū qiào
 刀鞘	dāo qiào
 分数	fēn shù
@@ -594,7 +595,7 @@
 口角	kǒu jué	kǒu jiǎo
 古乐	gǔ yuè
 古刹	gǔ chà
-古都	gǔ dū
+古都	gǔ dū	gǔ dōu
 句号	jù hào
 句子	jù zi
 句读	jù dòu
@@ -825,7 +826,7 @@
 园丁	yuán dīng
 园长	yuán zhǎng
 围剿	wéi jiǎo
-国都	guó dū
+国都	guó dū	guó dōu
 图穷匕见	tú qióng bǐ xiàn
 圆圈	yuán quān
 圆柏	yuán bǎi
@@ -900,7 +901,7 @@
 大人	dà ren
 大伯子	dà bǎi zi
 大厦	dà shà
-大地	dà dì
+大地	dà dì	dà de
 大埔	dà bù
 大大落落	dà dà luō luō
 大夫	dài fu	dà fū
@@ -928,7 +929,7 @@
 大隗	dà wěi
 大黄	dà huáng	dài huáng
 大龙湫	dà lóng qiū
-天地	tiān dì
+天地	tiān dì	tiān de
 天姥山	tiān mǔ shān
 太子参	tài zǐ shēn
 太行山	tài háng shān
@@ -1007,7 +1008,7 @@
 安娜	ān nà
 宓妃	fú fēi
 官差	guān chāi
-定都	dìng dū
+定都	dìng dū	dìng dōu
 宝刹	bǎo chà
 宝坻	bǎo dǐ
 宝石	bǎo shí
@@ -1199,7 +1200,7 @@
 师长	shī zhǎng
 希特勒	xī tè lè
 希腊	xī là
-帝都	dì dū
+帝都	dì dū	dì dōu
 带劲	dài jìn
 帷帱	wéi chóu
 常识	cháng shí
@@ -1212,6 +1213,7 @@
 干哕	gān yuě
 干将	gàn jiàng
 干将莫邪	gān jiāng mò yé
+干着急	gān zháo jí
 平刨	píng bào
 平均差	píng jūn chā
 平均数	píng jūn shù
@@ -1268,7 +1270,7 @@
 彷徨	páng huáng
 徒长	tú zhǎng
 得了	dé le	dé liǎo
-得亏	děi kuī
+得亏	děi kuī	de kuī
 得到	dé dào
 得劲	dé jìn
 得失	dé shī
@@ -1346,7 +1348,7 @@
 成员	chéng yuán
 成天价	chéng tiān jie
 成熟	chéng shú
-成都	chéng dū
+成都	chéng dū	chéng dōu
 成长	chéng zhǎng
 战将	zhàn jiàng
 戛然	jiá rán
@@ -1607,7 +1609,7 @@
 无论	wú lùn
 无限	wú xiàn
 旦角	dàn jué
-旧都	jiù dū
+旧都	jiù dū	jiù dōu
 时差	shí chā
 时期	shí qī
 明瞭	míng liǎo
@@ -1617,11 +1619,11 @@
 昴宿	mǎo xiù
 显得	xiǎn de
 显示屏	xiǎn shì píng
-显著	xiǎn zhù
+显著	xiǎn zhù	xiǎn zhe
 晓得	xiǎo de
 景色	jǐng sè
 暂且	zàn qiě
-暖和	nuǎn huo
+暖和	nuǎn huo	nuǎn hé
 暴利	bào lì
 暴力	bào lì
 暴动	bào dòng
@@ -1899,7 +1901,7 @@
 没了	méi le
 没事	méi shì
 没什么	méi shén me
-没入	mò rù
+没入	mò rù	méi rù
 没关系	méi guān xi
 没劲	méi jìn
 没完没了	méi wán méi liǎo
@@ -1908,9 +1910,9 @@
 没法	méi fǎ
 没用	méi yòng
 没精打采	méi jīng dǎ cǎi
-没落	mò luò
+没落	mò luò	méi luò
 没错	méi cuò
-没顶	mò dǐng
+没顶	mò dǐng	méi dǐng
 没顶之灾	mò dǐng zhī zāi
 没齿不忘	mò chǐ bù wàng
 没齿难忘	mò chǐ nán wàng
@@ -2200,8 +2202,8 @@
 盛行	shèng xíng
 盛装	shèng zhuāng	chéng zhuāng
 盛饭	chéng fàn
-目的	mù dì
-目的地	mù dì dì
+目的	mù dì	mù de
+目的地	mù dì dì	mù dì de
 直截了当	zhí jié liǎo dàng
 直率	zhí shuài
 直角	zhí jiǎo
@@ -2221,27 +2223,27 @@
 真的	zhēn de
 眼圈	yǎn quān
 眼睛	yǎn jing
-着凉	zháo liáng
+着凉	zháo liáng	zhe liáng
 着力	zhuó lì	zhe lì
 着呢	zhe ne
 着墨	zhuó mò	zhe mò
 着实	zhuó shí	zhe shí
-着急	zháo jí
+着急	zháo jí	zhe jí
 着想	zhuó xiǎng	zhe xiǎng
 着手	zhuó shǒu	zhe shǒu
 着数	zhāo shù
-着法	zhāo fǎ
-着火	zháo huǒ
+着法	zhāo fǎ	zhe fǎ
+着火	zháo huǒ	zhe huǒ
 着眼	zhuó yǎn	zhe yǎn
 着色	zhuó sè	zhe sè
 着落	zhuó luò	zhe luò
-着装	zhuó zhuāng
-着迷	zháo mí
+着装	zhuó zhuāng	zhe zhuāng
+着迷	zháo mí	zhe mí
 着重	zhuó zhòng
 着陆	zhuó lù
 睡眼惺忪	shuì yǎn xīng sōng
-睡着	shuì zháo
-睡著	shuì zháo
+睡着	shuì zháo	shuì zhe
+睡著	shuì zháo	shuì zhe
 睡觉	shuì jiào
 瞭如指掌	liǎo rú zhǐ zhǎng
 瞭然	liǎo rán
@@ -2688,25 +2690,25 @@
 落枕	lào zhěn
 落色	lào shǎi
 落魄	luò pò	luò tuò
-著书	zhù shū
-著作	zhù zuò
-著凉	zháo liáng
+著书	zhù shū	zhe shū
+著作	zhù zuò	zhe zuò
+著凉	zháo liáng	zhe liáng
 著力	zhuó lì	zhe lì
-著名	zhù míng
+著名	zhù míng	zhe míng
 著呢	zhe ne
 著墨	zhuó mò	zhe mò
 著实	zhuó shí	zhe shí
-著急	zháo jí
+著急	zháo jí	zhe jí
 著想	zhuó xiǎng	zhe xiǎng
 著手	zhuó shǒu	zhe shǒu
 著数	zhāo shù
-著法	zhāo fǎ
-著火	zháo huǒ
+著法	zhāo fǎ	zhe fǎ
+著火	zháo huǒ	zhe huǒ
 著眼	zhuó yǎn	zhe yǎn
 著色	zhuó sè	zhe sè
 著落	zhuó luò	zhe luò
-著装	zhuó zhuāng
-著迷	zháo mí
+著装	zhuó zhuāng	zhe zhuāng
+著迷	zháo mí	zhe mí
 著重	zhuó zhòng
 著陆	zhuó lù
 董事长	dǒng shì zhǎng
@@ -2882,7 +2884,7 @@
 认识	rèn shi
 议长	yì zhǎng
 记得	jì de
-论著	lùn zhù
+论著	lùn zhù	lùn zhe
 证券	zhèng quàn
 证券行	zhèng quàn háng
 评价	píng jià
@@ -3076,7 +3078,7 @@
 还愿	huán yuàn
 还是	hái shì
 还有	hái yǒu
-还给	huán gěi
+还给	huán gěi	hái gěi
 还魂	huán hún
 这个	zhè gè
 这么	zhè me
@@ -3137,7 +3139,7 @@
 都兰	dū lán
 都匀	dū yún
 都城	dū chéng
-都安	dū ān
+都安	dū ān	dōu ān
 都察院	dū chá yuàn
 都市	dū shì
 都护	dū hù
@@ -3431,7 +3433,7 @@
 饿莩遍野	è piǎo biàn yě
 馆长	guǎn zhǎng
 首尾	shǒu wěi
-首都	shǒu dū
+首都	shǒu dū	shǒu dōu
 首都机场	shǒu dū jī chǎng
 首长	shǒu zhǎng
 马仔	mǎ zǎi
