@@ -3,6 +3,7 @@
 #include "search/SearchRecord.h"
 
 #include <QTest>
+#include <algorithm>
 #include <climits>
 #include <random>
 
@@ -12,6 +13,7 @@ class SearchMatcherBoundsTest : public QObject {
     Q_OBJECT
 private slots:
     void masksAndIndex();
+    void rankedPruning();
 };
 
 void SearchMatcherBoundsTest::masksAndIndex()
@@ -114,6 +116,60 @@ void SearchMatcherBoundsTest::masksAndIndex()
     QVERIFY(longBound >= longScore);
     QCOMPARE(scoreSearchRecord(longRecord, longMasks, longQuery, longTermMasks, true), longScore);
     QVERIFY(normCharacterMask(split.normTitle) & (quint64{1} << 63));
+}
+
+void SearchMatcherBoundsTest::rankedPruning()
+{
+    QVector<SearchRecord> records;
+    records.reserve(42000);
+    for (int i = 0; i < 42000; ++i) {
+        SearchRecord rec;
+        rec.title = i % 7 == 0 ? QStringLiteral("silver comet live") : QStringLiteral("silver comet");
+        rec.artistName = i % 5 == 0 ? QStringLiteral("quiet harbor") : QStringLiteral("quiet river");
+        rec.albumTitle = QStringLiteral("collection");
+        rec.filename = QString::number(i) + QStringLiteral(".flac");
+        rec.path = i % 11 == 0 ? QStringLiteral("/excluded/") + rec.filename
+                               : QStringLiteral("/music/") + rec.filename;
+        foldRecordNorms(rec);
+        records.push_back(std::move(rec));
+    }
+    SearchIndex index;
+    index.build(records);
+    const ExclusionSet excluded = compileExcludes({{QStringLiteral("*/excluded/*"), ExcludeScope::Path}});
+    const QStringList queries = {QStringLiteral("silver"), QStringLiteral("sver"),
+                                 QStringLiteral("title:silver"), QStringLiteral("!absent"),
+                                 QStringLiteral("nothingmatches")};
+    for (const QString &text : queries) {
+        const SearchQuery query = SearchQuery::parse(text);
+        for (bool fuzzy : {false, true}) {
+            for (bool useExclusion : {false, true}) {
+                const ExclusionSet &excludes = useExclusion ? excluded : ExclusionSet{};
+                struct Expected { int index; int score; };
+                std::vector<Expected> expected;
+                for (int i = 0; i < records.size(); ++i) {
+                    bool skip = false;
+                    for (const ExcludeMatcher &ex : excludes) {
+                        if (ex.matches(records[i])) { skip = true; break; }
+                    }
+                    if (skip) continue;
+                    const int score = matchSearchRecord(records[i], query, fuzzy);
+                    if (score != INT_MIN) expected.push_back({i, score});
+                }
+                std::sort(expected.begin(), expected.end(), [](const Expected &a, const Expected &b) {
+                    return a.score != b.score ? a.score > b.score : a.index < b.index;
+                });
+                int total = -1;
+                const auto actual = index.match(query, fuzzy, excludes, &total);
+                QCOMPARE(total, static_cast<int>(expected.size()));
+                const int retained = std::min(static_cast<int>(expected.size()), kMaxResults);
+                QCOMPARE(actual.size(), retained);
+                for (int i = 0; i < retained; ++i) {
+                    QCOMPARE(actual[i].index, expected[static_cast<std::size_t>(i)].index);
+                    QCOMPARE(actual[i].score, expected[static_cast<std::size_t>(i)].score);
+                }
+            }
+        }
+    }
 }
 
 QTEST_GUILESS_MAIN(SearchMatcherBoundsTest)
