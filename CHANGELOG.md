@@ -64,6 +64,8 @@
 
 ### Fixed
 
+- Exclusion patterns match accented and non-Latin text the way search does:
+  `*café*` excludes `Café`, and `*東京*` excludes `東京`.
 - Katakana loanword spellings romanize as one sound (`ティ` ti, `ファ` fa,
   `シェ` she) instead of letter by letter (`tei`, `fua`), and text written
   decomposed, as in file names from macOS (separate accents, kana voicing

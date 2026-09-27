@@ -19,6 +19,13 @@ static SearchRecord rec(const QString &title, const QString &path)
     return r;
 }
 
+static SearchRecord foldedRec(const QString &title, const QString &path)
+{
+    SearchRecord r = rec(title, path);
+    foldRecordNorms(r);
+    return r;
+}
+
 class TestExclusion : public QObject {
     Q_OBJECT
 
@@ -81,6 +88,46 @@ private slots:
         QVERIFY(m.isValid());
         QVERIFY(m.matches(rec(QStringLiteral("Live in London 2003"), QStringLiteral("/m/a.flac"))));
         QVERIFY(!m.matches(rec(QStringLiteral("Studio 2003"), QStringLiteral("/m/a.flac"))));
+    }
+
+    void accentedGlobLiteralsUseQueryFolding()
+    {
+        const SearchRecord r = foldedRec(QString::fromUtf8("Café Society"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("*café*"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("café*"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("CAFÉ*"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void hanGlobLiteralsUseQueryFolding()
+    {
+        const SearchRecord r = foldedRec(QString::fromUtf8("東京"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QString::fromUtf8("*東京*"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void questionWildcardStillMatchesFoldedText()
+    {
+        const SearchRecord r = foldedRec(QString::fromUtf8("Café"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QStringLiteral("caf?"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void emptyFoldedLiteralRunDoesNotBecomeAWildcard()
+    {
+        const SearchRecord r = foldedRec(QStringLiteral("ab"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QStringLiteral("a*\u200Bb"), ExcludeScope::AnyField}).matches(r));
+    }
+
+    void foldedWildcardLookalikesRemainLiteral()
+    {
+        const ExcludeMatcher m({QString::fromUtf8("a＊b"), ExcludeScope::AnyField});
+        QVERIFY(m.matches(foldedRec(QStringLiteral("a*b"), QStringLiteral("/m/a.flac"))));
+        QVERIFY(!m.matches(foldedRec(QStringLiteral("axb"), QStringLiteral("/m/b.flac"))));
+    }
+
+    void asciiGlobMatchingRemainsCaseInsensitive()
+    {
+        const SearchRecord r = foldedRec(QStringLiteral("Live in London 2003"), QStringLiteral("/m/a.flac"));
+        QVERIFY(ExcludeMatcher({QStringLiteral("LIVE*2003"), ExcludeScope::AnyField}).matches(r));
+        QVERIFY(!ExcludeMatcher({QStringLiteral("STUDIO*2003"), ExcludeScope::AnyField}).matches(r));
     }
 
     void pathScopeDoesNotMatchTitle()
