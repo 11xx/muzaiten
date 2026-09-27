@@ -65,13 +65,19 @@ Motörhead	motorhead	motoerhead
 カヾ	kaゞ	kaga
 ドリームレス・ドリームス	dorimuresu dorimusu
 # Ideographs keep their (simplified) surface; readings are alternates:
-# Japanese seed words in wapuro, then in Hepburn, then pinyin.
+# Japanese seed readings use wapuro and Hepburn, followed by Chinese pinyin.
+# Authored ideographs can also have a second pinyin reading.
 花々	花々	hanahana	huahua
 東京の夜	东京no夜	toukyounoyoru	tokyonoyoru	dongjingnoye
-傳達給你	传达给你	chuandageini
+傳達給你	传达给你	chuandageini	zhuandajini
 音乐	音乐	yinyue
-长城	长城	changcheng
-快乐	快乐	kuaile
+长城	长城	changcheng	zhangcheng
+长发	长发	changfa	zhangfa
+重庆	重庆	chongqing
+大地	大地	dadi
+长ティ	长tei	长ti	changtei	zhangtei
+中	中	zhong
+快乐	快乐	kuaile	kuaiyue
 湮没之音	湮没之音	yanmozhiyin
 # An unknown kanji keeps its surface.
 阿	阿

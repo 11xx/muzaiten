@@ -283,6 +283,21 @@ private slots:
         }
     }
 
+    void chinesePolyphoneQueriesMatchBothReadings()
+    {
+        SearchRecord record = makeRecord(QString::fromUtf8("长发"), QStringLiteral("Artist"),
+                                         QStringLiteral("Album"));
+        foldRecordNorms(record);
+
+        SearchIndex idx;
+        idx.build({record});
+        for (const QString &query : {QStringLiteral("zhangfa"), QStringLiteral("changfa")}) {
+            const auto results = idx.match(SearchQuery::parse(query), false);
+            QCOMPARE(results.size(), 1);
+            QCOMPARE(results.first().rec.title, QString::fromUtf8("长发"));
+        }
+    }
+
     void queriesInTheirOwnScriptFindTextContainingThem()
     {
         // A query typed in a script folds to its primary form, which must

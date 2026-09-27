@@ -1,5 +1,7 @@
 #include <QTest>
+#include <QDirIterator>
 #include <QFile>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -139,6 +141,55 @@ private slots:
         }
     }
 
+    void hanSimplificationChainsAreTerminalAndIdempotent()
+    {
+        for (const auto &[spellings, terminal] :
+             {std::pair(QStringList{QString::fromUtf8("鉅"), QString::fromUtf8("钜"), QString::fromUtf8("巨")},
+                        QString::fromUtf8("巨")),
+              std::pair(QStringList{QString::fromUtf8("鯰"), QString::fromUtf8("鲶"), QString::fromUtf8("鲇")},
+                        QString::fromUtf8("鲇"))}) {
+            for (const QString &spelling : spellings) QCOMPARE(Fold::foldText(spelling), terminal);
+        }
+
+        // A variant folds with the character it is a variant of (辧 of 辨, not 辦).
+        QCOMPARE(Fold::foldText(QString::fromUtf8("辧別")), Fold::foldText(QString::fromUtf8("辨別")));
+
+        const QString root = QStringLiteral(FOLD_HAN_DATA_PATH);
+        QSet<QString> mapped;
+        const auto appendCodePoints = [&mapped](const QString &text) {
+            for (const uint value : text.toUcs4()) {
+                const char32_t codePoint = value;
+                mapped.insert(QString::fromUcs4(&codePoint, 1));
+            }
+        };
+        const auto appendSources = [&](const QString &path, bool authored) {
+            QFile file(path);
+            QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
+            const QString contents = QString::fromUtf8(file.readAll());
+            for (const QString &line : contents.split(QChar('\n'))) {
+                if (line.isEmpty() || line.startsWith(QChar('#'))) continue;
+                const QStringList columns = line.split(QChar('\t'));
+                if (authored) {
+                    if (columns.size() == 3
+                        && ((columns[1] != QStringLiteral("-") && !columns[1].isEmpty()) || !columns[2].isEmpty())) {
+                        appendCodePoints(columns[0]);
+                    }
+                } else if (columns.size() == 2) {
+                    appendCodePoints(columns[1]);
+                }
+            }
+        };
+
+        QDirIterator authored(root + QStringLiteral("/tables/han"), {QStringLiteral("*.tsv")});
+        while (authored.hasNext()) appendSources(authored.next(), true);
+        appendSources(root + QStringLiteral("/unihan/han_pinyin.tsv"), false);
+        appendSources(root + QStringLiteral("/unihan/han_simplified.tsv"), false);
+        for (const QString &character : mapped) {
+            const QString primary = Fold::foldText(character);
+            QCOMPARE(Fold::foldText(primary), primary);
+        }
+    }
+
     void controlAndFormatCharactersAreDropped()
     {
         const QString src = QStringLiteral("a") + QChar(0x200E) + QStringLiteral("b") + QChar(0x2060)
@@ -169,6 +220,24 @@ private slots:
         // Kana and kanji still read as one Japanese spelling per fold.
         QVERIFY(segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoyoru")));
         QVERIFY(!segments(QString::fromUtf8("東京の夜")).contains(QStringLiteral("tokyonoye")));
+    }
+
+    void secondHanReadingPreservesMixedScriptCombinations()
+    {
+        const QStringList withoutSecondReading = segments(QString::fromUtf8("ηMüller"));
+        QCOMPARE(withoutSecondReading,
+                 (QStringList{QStringLiteral("emuller"), QStringLiteral("emueller"), QStringLiteral("emiller"),
+                              QStringLiteral("imuller"), QStringLiteral("imueller"), QStringLiteral("imiller")}));
+
+        const QStringList mixed = segments(QString::fromUtf8("ηMüller长"));
+        for (const QString &established :
+             {QStringLiteral("emuller长"), QStringLiteral("emueller长"), QStringLiteral("emiller长"),
+              QStringLiteral("imuller长"), QStringLiteral("imueller长"), QStringLiteral("imiller长"),
+              QStringLiteral("emullerchang"), QStringLiteral("emuellerchang"), QStringLiteral("emillerchang"),
+              QStringLiteral("imullerchang"), QStringLiteral("imuellerchang"), QStringLiteral("imillerchang")}) {
+            QVERIFY2(mixed.contains(established), qPrintable(established));
+        }
+        QVERIFY(mixed.contains(QStringLiteral("imuellerzhang")));
     }
 
     void segmentsJoinDistinctFolds()

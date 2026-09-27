@@ -391,6 +391,7 @@ target_link_libraries(test_fold PRIVATE muzaiten_search Qt6::Core Qt6::Test)
 target_compile_features(test_fold PRIVATE cxx_std_26)
 target_compile_definitions(test_fold PRIVATE
     FOLD_CASES_PATH="${CMAKE_SOURCE_DIR}/src/search/fold/fold_cases.tsv"
+    FOLD_HAN_DATA_PATH="${CMAKE_SOURCE_DIR}/src/search/fold"
 )
 add_test(NAME test_fold COMMAND test_fold)
 
@@ -510,6 +511,8 @@ add_test(NAME test_playlist_converter
 add_test(NAME test_arch_provider_gate
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_provider_gate.py
             ${CMAKE_SOURCE_DIR}/packaging/features-clap/check-arch-gate.py)
+add_test(NAME test_fold_han_data
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_han_data.py ${CMAKE_SOURCE_DIR})
 
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp

@@ -95,6 +95,7 @@ struct HangulStyle {
 };
 
 struct HanAstralPinyin { char32_t cp; std::uint16_t pinyin; };
+struct HanSecondPinyin { char32_t cp; std::uint16_t pinyin; };
 
 enum class GreekPairKind : std::uint8_t { Plain, Initial, Voicing };
 struct GreekPair { char16_t first; char16_t second; Str a; Str b; GreekPairKind kind; };
@@ -160,6 +161,9 @@ extern const HangulStyle kHangulMr;
 extern const std::uint16_t kHanPinyinBmp[0xA000 - 0x3400];
 extern const HanAstralPinyin kHanPinyinAstral[];
 extern const std::size_t kHanPinyinAstralCount;
+// Sparse readings for authored ideographs with a second distinct pinyin.
+extern const HanSecondPinyin kHanSecondPinyin[];
+extern const std::size_t kHanSecondPinyinCount;
 extern const Str kPinyin[];
 extern const Word kJapaneseWords[];
 extern const std::size_t kJapaneseWordCount;

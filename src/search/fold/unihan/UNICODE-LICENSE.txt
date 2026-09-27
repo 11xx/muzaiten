@@ -1,5 +1,5 @@
-The Han reading data in han_pinyin.tsv and han_simplified.tsv is derived from
-Unicode CLDR transforms as shipped with ICU, under the license below.
+The Unihan-derived files in this directory use Unicode Unihan 16.0.0 data.
+They are distributed under the Unicode License v3 below.
 
 UNICODE LICENSE V3
 

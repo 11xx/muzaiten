@@ -703,6 +703,8 @@ target_link_libraries(muzaiten_core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD)
 # The search fold's per-code-point tables are compiled from the hand-authored
 # tables and the Han reading data by tools/foldgen.py.
 file(GLOB MUZAITEN_FOLD_TABLES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/tables/*.json)
+file(GLOB MUZAITEN_FOLD_HAN_TABLES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/tables/han/*.tsv)
+file(GLOB MUZAITEN_UNIHAN_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/unihan/*)
 set(MUZAITEN_FOLD_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated/FoldTables.inc)
 add_custom_command(
     OUTPUT ${MUZAITEN_FOLD_GENERATED}
@@ -710,8 +712,8 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/tables ${MUZAITEN_FOLD_GENERATED}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/foldgen.py
             ${MUZAITEN_FOLD_TABLES}
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/han_pinyin.tsv
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/search/fold/han_simplified.tsv
+            ${MUZAITEN_FOLD_HAN_TABLES}
+            ${MUZAITEN_UNIHAN_FILES}
     COMMENT "Compiling search fold tables"
     VERBATIM
 )

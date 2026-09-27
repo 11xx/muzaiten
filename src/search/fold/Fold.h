@@ -28,8 +28,9 @@
 //   Cyrillic spellings with Ukrainian, Belarusian and Serbian letters,
 //   Eastern and Western Armenian as read (Երևան→yerevan), wapuro romaji
 //   (きゃ→kya, ティ→ti) and Hepburn with long vowels collapsed (tokyo),
-//   Japanese kanji readings from a seed dictionary, Chinese pinyin, Korean
-//   as pronounced (한국어→hangugeo)
+//   Japanese kanji readings from a seed dictionary, Chinese pinyin with a
+//   second reading for characters that have two, Korean as pronounced
+//   (한국어→hangugeo)
 //   and in McCune-Reischauer (보천보→pochonbo), Thai RTGS and common
 //   spellings, Indic with and without Hindi schwa deletion, Arabic and Hebrew
 //   with their vowel letters read in context, and Tibetan Wylie.

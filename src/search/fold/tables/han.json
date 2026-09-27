@@ -1,5 +1,5 @@
 {
-  "_doc": "Readings for CJK ideographs beyond the per-character pinyin in han_pinyin.tsv. `japanese` is the kanji seed dictionary (surface to hiragana reading, longest surface wins); `chinese.chars` replaces a character's default pinyin; `chinese.words` gives toneless pinyin for words whose characters read differently than alone, one syllable per character.",
+  "_doc": "Per-word CJK readings that supplement the per-character data in tables/han and unihan. `japanese` is the kanji seed dictionary (surface to hiragana reading, longest surface wins); `chinese.words` gives toneless pinyin for words whose characters read differently than alone, one syllable per character.",
   "japanese": {
     "三線": "さんしん", "言葉": "ことば", "世界": "せかい", "未来": "みらい", "物語": "ものがたり",
     "東京": "とうきょう", "京都": "きょうと", "音楽": "おんがく", "時間": "じかん", "約束": "やくそく",
@@ -9,9 +9,6 @@
     "星": "ほし", "雪": "ゆき", "夜": "よる", "朝": "あさ", "色": "いろ"
   },
   "chinese": {
-    "chars": {
-      "长": "chang", "長": "chang", "地": "di", "泊": "bo"
-    },
     "words": {
       "音乐": "yin yue", "音樂": "yin yue", "乐队": "yue dui", "樂隊": "yue dui", "乐团": "yue tuan", "樂團": "yue tuan",
       "乐器": "yue qi", "樂器": "yue qi", "乐曲": "yue qu", "樂曲": "yue qu", "乐章": "yue zhang", "樂章": "yue zhang",

@@ -12,8 +12,9 @@
 // Ideographs keep their surface form in the primary fold (traditional forms
 // folded to simplified, compiled into the entry; 々 and 〻 as 々). Alternate
 // readings expand 々 and give the Japanese seed dictionary's readings in
-// wapuro (style 1) and Hepburn (style 2), romanized as kana, and toneless
-// pinyin with word readings for polyphones (style 3: 音乐 yinyue, 快乐 kuaile).
+// wapuro (style 1) and Hepburn (style 2), romanized as kana, then toneless
+// pinyin (style 3) and the same with each polyphone's second reading
+// (style 4). Chinese word readings take precedence in both pinyin styles.
 
 #include "search/fold/FoldEngine.h"
 
@@ -184,6 +185,14 @@ std::uint16_t pinyinOf(char32_t cp)
     return it != end && it->cp == cp ? it->pinyin : std::uint16_t(0);
 }
 
+std::uint16_t secondPinyinOf(char32_t cp)
+{
+    const HanSecondPinyin *end = kHanSecondPinyin + kHanSecondPinyinCount;
+    const HanSecondPinyin *it = std::lower_bound(kHanSecondPinyin, end, cp,
+                                                 [](const HanSecondPinyin &h, char32_t c) { return h.cp < c; });
+    return it != end && it->cp == cp ? it->pinyin : std::uint16_t(0);
+}
+
 void emitSurface(char32_t cp, int src, Out &out)
 {
     emitPrimary({cp, entryFor(cp), src}, out);
@@ -229,7 +238,7 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         }
         return;
     }
-    if (style == 3) {
+    if (style == 3 || style == 4) {
         for (qsizetype j = 0; j < n;) {
             qsizetype len = 0;
             if (const Word *w = longestWord(kChineseWords, kChineseWordCount, kChineseLongest, keyView, j, len)) {
@@ -242,7 +251,9 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
                 j += len;
                 continue;
             }
-            if (const std::uint16_t id = pinyinOf(cps[j])) out.put(kPinyin[id], u[j].src);
+            const std::uint16_t id = style == 4 ? secondPinyinOf(cps[j]) : 0;
+            const std::uint16_t fallback = id ? id : pinyinOf(cps[j]);
+            if (fallback) out.put(kPinyin[fallback], u[j].src);
             else emitSurface(cps[j], u[j].src, out);
             ++j;
         }
