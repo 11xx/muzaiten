@@ -2764,3 +2764,87 @@
 高著	edge-particle	gāo zhāo	last:著 zhe	Segmenter keeps it: 提高著 folds …tigaozhe.
 魔都	edge-particle	mó dū	last:都 dou	魔 before the particle 都 (妖魔都) is rare; 魔都 is the Shanghai nickname.
 鹄的	edge-particle	gǔ dì	last:的 de	Literary target word; 的 dì closes it and no particle context exists.
+乾	opencc	乾	干/乾	Sense-split: GB2312 keeps 乾 for qián (乾隆, 乾坤) while traditional text also writes 干 (dry) as 乾; one mapping cannot serve both, and word rows supply traditional gān words (乾咳).
+俓	opencc	径	俓/𠇹	径 is the common modern form and 𠇹 is a rare Extension B variant, so keep 径.
+勣	opencc	绩	𪟝/绩	绩 is the common mainland variant fold for 勣, and the systematic 𪟝 is rare, so keep 绩.
+吒	opencc	吒	咤/吒	吒 is the standard character in the name 哪吒, and its zhà-sense overlap with 咤 is not a general replacement.
+壗	opencc	壗	𡋤	𡋤 is a rare Extension B form not in the 2013 table, so the Japanese character stays unmapped.
+徵	opencc	徵	征/徵	Sense-split: GB2312 keeps 徵 for zhǐ (宫商角徵羽) while traditional text also writes 征 as 徵; one mapping cannot serve both, and word rows supply traditional zhēng words (徵召, 徵集).
+戱	opencc	戏	戯	戏 is the mainland standard and 戯 is the Japanese intermediate form, so keep 戏.
+拚	opencc	拚	拼	Sense-split: GB2312 keeps 拚 for pàn (拚弃) while traditional text also writes 拼 as 拚; one mapping cannot serve both, and word rows supply the pīn words (拚搏, 拚杀).
+擽	opencc	擽	㧰	㧰 is a rare Extension A form not in the 2013 table, so the Japanese character stays unmapped.
+斅	opencc	敩	斅/𢽾	敩 is the standard simplified form and 𢽾 is a rare Extension B variant, so keep 敩.
+晛	opencc	晛	𬀪	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+暐	opencc	暐	𬀩	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+椀	opencc	碗	椀/碗	碗 is the standard modern form and 椀 is its variant, so keep 碗.
+樢	opencc	茑	㭤	茑 is the standard simplified form of 蔦 and 㭤 is a rare Extension A variant, so keep 茑.
+樫	opencc	樫	㭴	㭴 is a rare Extension A form not in the 2013 table, so the Japanese character stays unmapped.
+浿	opencc	浿	𬇙	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+潚	opencc	潚	㴋	㴋 is a rare Extension A form not in the 2013 table, so 潚 stays unmapped.
+澂	opencc	澄	澂/澄	澄 is the common modern form and 澂 is its variant, so keep 澄.
+澾	opencc	澾	㳠	㳠 is a rare Extension A form not in the 2013 table, so 澾 stays unmapped.
+濆	opencc	濆	𣸣	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+煇	opencc	辉	煇/𪸩	辉 is the standard modern form and 𪸩 is a rare systematic variant, so keep 辉.
+犇	opencc	奔	犇/奔	奔 is the common modern form and 犇 is a rare variant, so keep 奔.
+甦	opencc	苏	甦/苏	苏 is the standard modern form and 甦 is its rare variant, so folding 甦 onto 苏 aids search.
+睍	opencc	睍	𪾢	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+竚	opencc	伫	竚/𥩟	伫 is the standard modern form and 𥩟 is a rare Extension B variant, so keep 伫.
+筴	opencc	筴	䇲	䇲 is a rare Extension A form not in the 2013 table, so 筴 stays unmapped.
+篠	opencc	筱	筿	筱 is the standard modern form and 筿 is a rare variant, so keep 筱.
+籔	opencc	籔	䉤	䉤 is a rare Extension A form not in the 2013 table, so 籔 stays unmapped.
+糺	opencc	纠	糺/𫄙	纠 is the common modern form and 𫄙 is a rare systematic variant, so keep 纠.
+絪	opencc	絪	𬘡	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+綎	opencc	綎	𬘩	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+緤	opencc	绁	緤/𫄬	绁 is the common modern form and 𫄬 is a rare systematic variant, so keep 绁.
+縯	opencc	縯	𬙂	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+繈	opencc	襁	繈/𫄶	襁 is the common mainland variant fold for 繈, and the systematic 𫄶 is rare, so keep 襁.
+繻	opencc	繻	𦈡	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+繿	opencc	褴	䍀	褴 is the common modern form and 䍀 is a rare systematic variant, so keep 褴.
+耑	opencc	端	耑/专	端 is the better-known modern form for the duān sense of 耑, so the established variant fold stays.
+蒭	opencc	刍	蒭/𫇴	刍 is the common modern form and 𫇴 is a rare systematic variant, so keep 刍.
+蔯	opencc	蔯	𫈟	𫈟 is a rare Extension C form not in the 2013 table, so 蔯 stays unmapped.
+蔿	opencc	蔿	𫇭	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+薹	opencc	薹	苔/薹	薹 is the standard character for garlic scapes (蒜薹) while OpenCC's 苔 means moss, so merging the two would be wrong.
+藷	opencc	薯	藷/𫉄	薯 is the common modern form in 番薯 and 薯莨, while 𫉄 is a rare systematic alternative.
+衹	opencc	只	衹/只	只 is the standard modern form and 衹 is its rare variant, so folding 衹 onto 只 aids search.
+袷	opencc	袷	夹/袷	袷 is standard in 袷衣 and the loanword 袷袢, and folding it onto the common 夹 would miswrite 袷袢.
+訏	opencc	訏	𬣙	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+訢	opencc	欣	䜣/欣	欣 is the common mainland variant fold for 訢, and the systematic 䜣 is rare, so keep 欣.
+譆	opencc	嘻	譆/𫍻	嘻 is the common modern form and 𫍻 is a rare systematic alternative, so keep 嘻.
+讌	opencc	宴	䜩	宴 is the common modern form for a banquet and 䜩 is a rare systematic variant, so keep 宴.
+軏	opencc	軏	𫐄	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+迺	opencc	乃	迺/乃	乃 is the standard modern form and 迺 is its name-oriented variant, so folding 迺 onto 乃 aids search.
+邨	opencc	村	邨/村	村 is the common modern form and 邨 is a variant used in names, so folding 邨 onto 村 aids search.
+釿	opencc	釿	𬬱	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鈇	opencc	鈇	𫓧	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鈽	opencc	钚	钸	钚 is the standard mainland name for plutonium and is in the 2013 table, while 钸 is a rare nonstandard variant.
+鉅	opencc	钜	巨/钜	钜 is a standard character in the 2013 table used in names, and folding it onto the very common 巨 would merge distinct uses.
+鉋	opencc	刨	铇	刨 is the standard modern form in 刨冰 and 刨床, while 铇 is a rare variant.
+鉥	opencc	鉥	𬬸	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鉾	opencc	矛	鉾/𫓴	矛 is the common modern form and 鉾 is a Japanese variant of it, so keep 矛.
+銶	opencc	銶	𨱇	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+錞	opencc	錞	𬭚	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+錤	opencc	錤	𫓹	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鏥	opencc	锈	鏥/𫔊	锈 is the common modern form and 𫔊 is a rare systematic variant, so keep 锈.
+鐄	opencc	鐄	𨱑	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鐇	opencc	鐇	𫔍	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鐥	opencc	鐥	䦅	䦅 is a rare Extension A form not in the 2013 table, so 鐥 stays unmapped.
+鑪	opencc	炉	𬬻/炉	炉 is the common mainland variant fold for 鑪, and the systematic 𬬻 is rare, so keep 炉.
+阪	opencc	坂	阪/坂	阪 and 坂 are variant forms of bǎn that Unihan folds onto 坂, and consolidating them adds matches without touching an unrelated character.
+頫	opencc	俯	𫖯/俯	俯 is the common mainland variant fold for 頫, and the systematic 𫖯 is rare, so keep 俯.
+頴	opencc	颖	颕	颖 is the standard modern form and 颕 is a rare variant, so keep 颖.
+馼	opencc	馼	𫘜	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+騵	opencc	騵	𫘪	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鮟	opencc	鮟	𩽾	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鮠	opencc	鮠	𬶏	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鰊	opencc	鰊	𬶠	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鰌	opencc	鳅	䲡	鳅 is the standard modern form and 䲡 is a rare systematic variant, so keep 鳅.
+鰕	opencc	虾	鰕/𫚥	虾 is the standard modern form and 𫚥 is a rare systematic variant, so keep 虾.
+鰤	opencc	鰤	𫚕	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鱇	opencc	鱇	𩾌	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鱚	opencc	鱚	𬶮	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+鷭	opencc	鷭	𬸪	Extension-block target: like every rare systematic Extension simplification in the authored tables, the ideograph keeps its own form, since few queries are typed in it.
+寀	simplified	采	-	寀 is a variant of 采; OpenCC folds it there and Unihan omits the mapping.
+捱	simplified	挨	-	捱 is a variant of 挨 (挨打, 挨饿); OpenCC folds it there and Unihan omits the mapping.
+碕	simplified	埼	-	碕 is a variant of 埼 in Japanese place names (埼玉); OpenCC folds it there and Unihan omits the mapping.
+钁	simplified	镢	䦆	镢 is the General Standard (2013) form of 钁; Unihan names the rare Extension A form 䦆.
