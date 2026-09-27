@@ -2,12 +2,28 @@
 
 ## [Unreleased]
 
+### Developer tooling
+
+- A fold regression sweep compares search fold readings against a base
+  revision across CC-CEDICT, phrase examples, and optional text or library
+  corpora.
+- Han data checks flag word readings that lose an edge particle reading and
+  simplified forms that disagree with pinned OpenCC mappings for review.
+
 ### Added
 
 - Search reads about 3,500 Chinese words in context, including traditional
   spellings. 快乐 matches `kuaile` without also matching `kuaiyue`, and 长城
   matches `changcheng` without also matching `zhangcheng`. Words with two
   pronunciations match either reading.
+- Common words that start or end with 着, 了, 的, 地, 得, 都, 和, 没 or 还
+  also read that character as the particle, so ordinary text keeps its
+  reading where the word would otherwise claim it: 看着急 matches
+  `kanzheji`, 全国都在 `quanguodouzai`, 曲目的名字 `qumudemingzi` and
+  睡着睡着 `shuizheshuizhe`, beside the word readings `zhaoji`, `guodu`,
+  `mudi` and `shuizhao`.
+- The variants 捱, 寀, 碕 and 钁 match their common forms: 挨 finds 捱过,
+  采 finds 寀, 埼 finds 碕, and 镢 finds 钁.
 - Search matches Korean by romanization: `ak dan chil` finds `악단광칠`,
   syllable by syllable, as pronounced (`hangugeo` for `한국어`) or in
   McCune-Reischauer (`pochonbo` for `보천보`).

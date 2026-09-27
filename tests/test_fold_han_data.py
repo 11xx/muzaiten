@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import pathlib
@@ -31,6 +32,115 @@ checker = load_tool("fold_han_data", ROOT / "tools" / "fold-han-data.py")
 
 
 class FoldHanDataTests(unittest.TestCase):
+    def test_opencc_download_publishes_only_verified_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tools_cache = pathlib.Path(directory)
+            cache = tools_cache / "opencc-1.4.2/TSCharacters.txt"
+            def download(_url, destination):
+                pathlib.Path(destination).write_bytes(b"partial")
+            with mock.patch.object(checker, "TOOLS_CACHE", tools_cache), \
+                 mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(b"complete").hexdigest()), \
+                 mock.patch.object(checker.urllib.request, "urlretrieve", side_effect=download):
+                with self.assertRaisesRegex(ValueError, "sha256"):
+                    checker.opencc_archive()
+                self.assertFalse(cache.exists())
+                self.assertEqual(list(cache.parent.iterdir()), [])
+            with mock.patch.object(checker, "TOOLS_CACHE", tools_cache), \
+                 mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(b"complete").hexdigest()), \
+                 mock.patch.object(checker.urllib.request, "urlretrieve", side_effect=lambda _, dest: pathlib.Path(dest).write_bytes(b"complete")):
+                self.assertEqual(checker.opencc_archive(), cache)
+            self.assertEqual(cache.read_bytes(), b"complete")
+
+    def test_edge_particles_at_word_boundaries_and_reviewed_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text("", encoding="utf-8")
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text("的哥\tdī gē\n的哥\tdī gē\tde gē\n沉着\tchén zhuó\n好的人\thǎo de rén\n暖和\tnuǎn huo\tnuǎn hé\n",
+                             encoding="utf-8")
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(words, authored, {},
+                    {"di", "ge", "de", "chen", "zhuo", "hao", "ren", "nuan", "huo", "he"}, set(), set())
+                reviewed, reviewed_counts = checker.check_words(words, authored, {},
+                    {"di", "ge", "de", "chen", "zhuo", "hao", "ren", "nuan", "huo", "he"}, set(),
+                    {("的哥", "edge-particle", "dī gē", "first:的 de"),
+                     ("沉着", "edge-particle", "other", "last:着 zhe")})
+        edges = [finding for finding in findings if finding[3] == "edge-particle"]
+        self.assertEqual([(f[1], f[2], f[5]) for f in edges],
+                         [("1", "的哥", "first:的 de"), ("3", "沉着", "last:着 zhe")])
+        self.assertEqual(counts["edge-particle"], 2)
+        self.assertEqual(reviewed_counts["edge-particle"], 1)
+        self.assertEqual([f[2] for f in reviewed if f[3] == "edge-particle"], ["沉着"])
+
+    def test_opencc_disagreements_and_bad_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            reference = root / "TSCharacters.txt"
+            reference.write_text("# comment\n傳\t传\n發\t发 髮\n說\t说\n", encoding="utf-8")
+            authored = root / "gb2312.tsv"
+            authored.write_text("傳\tchuán\t傳\n發\tfā\t髮\n妳\tnǐ\t你\n說\tshuō\t说\n", encoding="utf-8")
+            reviewed = root / "reviewed.tsv"
+            reviewed.write_text("", encoding="utf-8")
+            fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
+            output = io.StringIO()
+            with (mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(reference.read_bytes()).hexdigest()),
+                  mock.patch.object(checker, "unihan_archive", return_value=object()),
+                  mock.patch.object(checker, "unihan_fields", return_value=fields),
+                  mock.patch.object(checker, "tiers", return_value={}),
+                  contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO())):
+                checker.check([authored], reviewed, opencc_path=reference)
+            findings = [line.split("\t") for line in output.getvalue().splitlines() if "\topencc\t" in line]
+            self.assertEqual([(f[2], f[4], f[5]) for f in findings],
+                             [("傳", "傳", "传"), ("發", "髮", "发/髮")])
+            output = io.StringIO()
+            error = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(error):
+                result = checker.main(["check", "--opencc", str(reference), str(authored)])
+            self.assertEqual(result, 2)
+            self.assertEqual(output.getvalue(), "")
+            self.assertIn("sha256", error.getvalue())
+
+    def test_directory_mode_counts_both_new_kinds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            for name in checker.TIER_FILES:
+                (authored / name).write_text("傳\tchuán\t\n" if name == "gb2312.tsv" else "",
+                                             encoding="utf-8")
+            (authored / "words.tsv").write_text("的哥\tdī gē\n", encoding="utf-8")
+            reviewed = root / "reviewed.tsv"
+            reviewed.write_text("", encoding="utf-8")
+            reference = root / "TSCharacters.txt"
+            reference.write_text("傳\t传\n", encoding="utf-8")
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
+            output, summary = io.StringIO(), io.StringIO()
+            with (mock.patch.object(checker, "OPENCC_SHA256", hashlib.sha256(reference.read_bytes()).hexdigest()),
+                  mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan),
+                  mock.patch.object(checker, "unihan_archive", return_value=object()),
+                  mock.patch.object(checker, "unihan_fields", return_value=fields),
+                  mock.patch.object(checker, "tiers", return_value={}),
+                  mock.patch.object(checker, "cedict_archive", return_value=object()),
+                  mock.patch.object(checker, "cedict_words", return_value=("date", {})),
+                  contextlib.redirect_stdout(output), contextlib.redirect_stderr(summary)):
+                result = checker.main(["check", "--authored", str(authored),
+                                       "--reviewed", str(reviewed), "--opencc", str(reference)])
+            self.assertEqual(result, 1)
+            self.assertIn("opencc=1", summary.getvalue())
+            self.assertIn("edge-particle=1", summary.getvalue())
+            self.assertEqual(sum("\topencc\t" in line for line in output.getvalue().splitlines()), 1)
+            self.assertEqual(sum("\tedge-particle\t" in line for line in output.getvalue().splitlines()), 1)
+
     def test_simplification_chains_resolve_to_terminals_and_reject_cycles(self):
         self.assertEqual(
             foldgen.resolve_simplification_chains({"鉅": "钜", "钜": "巨", "鯰": "鲶", "鲶": "鲇"}),
