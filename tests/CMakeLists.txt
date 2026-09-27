@@ -511,6 +511,8 @@ add_test(NAME test_playlist_converter
 add_test(NAME test_arch_provider_gate
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_provider_gate.py
             ${CMAKE_SOURCE_DIR}/packaging/features-clap/check-arch-gate.py)
+add_test(NAME test_fold_sweep
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_sweep.py)
 add_test(NAME test_fold_han_data
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_han_data.py ${CMAKE_SOURCE_DIR})
 

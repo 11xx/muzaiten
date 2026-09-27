@@ -4,6 +4,9 @@
 
 ### Added
 
+- Developer tooling compares search fold readings against a base revision across
+  CC-CEDICT, phrase examples, and optional text or library corpora.
+
 - Search reads about 3,500 Chinese words in context, including traditional
   spellings. 快乐 matches `kuaile` without also matching `kuaiyue`, and 长城
   matches `changcheng` without also matching `zhangcheng`. Words with two
