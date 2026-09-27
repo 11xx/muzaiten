@@ -175,6 +175,8 @@ extern const Str kPinyin[];
 extern const Word kJapaneseWords[];
 extern const std::size_t kJapaneseWordCount;
 extern const int kJapaneseLongest;
+extern const Word kChineseWordSegments[];
+extern const std::size_t kChineseWordSegmentCount;
 extern const Word kChineseWords[];
 extern const std::size_t kChineseWordCount;
 extern const int kChineseLongest;

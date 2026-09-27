@@ -76,10 +76,31 @@ authored ideographs (Unicode License v3, see `UNICODE-LICENSE.txt` there).
 `tools/fold-han-data.py check` compares the authored tables with Unihan,
 including the exact tone of every reading across simplified and traditional
 counterparts. With no file arguments it checks all four tier files and reports
-missing tiers; explicit file arguments check only those files. Reviewed rows
-in `tools/fold-han-reviewed.tsv` match the ideograph, finding kind, authored
-value and reference value, followed by the reason for the decision. Word-level
-readings are in `tables/han.json`.
+missing tiers; explicit file arguments select the character files, while the
+word file is still checked from `--words` or `words.tsv` in the authored
+directory. Reviewed rows in `tools/fold-han-reviewed.tsv` match an ideograph
+or word, finding kind, authored value and reference value, followed by the
+reason for the decision. The word table at `tables/han/words.tsv` uses one
+simplified spelling and tone-marked pinyin with one syllable per character.
+Chinese word lookup folds
+each character to its simplified form first, so a word row also supplies the
+reading for traditional and variant spellings. Japanese seed readings continue
+to match the written characters. Han runs use forward and backward longest
+matches; the segmentation with fewer pieces wins, then the one with fewer
+single characters, with backward matching breaking a tie. Rows that agree with
+every character default are omitted from the reading overrides unless a
+character has another reading, but every row remains available to guide word
+boundaries.
+
+The Han checker also checks word format, each syllable against its character's
+authored reading or Unihan default, and the toneless reading against
+CC-CEDICT. Findings are `format`, `reading`, `cedict` (the dictionary lists the
+word only with other readings), or `uncommon` (the dictionary has no entry).
+CC-CEDICT is reference data only. The checker downloads it to
+`~/.cache/muzaiten/` on first use and prints its date line with the word
+findings. Use `tools/fold-han-data.py check --words FILE` to check a word table
+outside the repository. Reviewed word findings match the word, kind, ours and
+reference fields in the same way as character findings.
 
 The conformance file `src/search/fold/fold_cases.tsv` holds one UTF-8 case per
 line: `input<TAB>primary fold`, optionally followed by `<TAB>`-separated

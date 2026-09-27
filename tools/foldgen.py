@@ -92,6 +92,8 @@ def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional
     entries: dict[str, tuple[Optional[str], Optional[str], str]] = {}
     locations: dict[str, tuple[pathlib.Path, int]] = {}
     for path in sorted(directory.glob("*.tsv")):
+        if path.name == "words.tsv":
+            continue
         for line_number, fields in tsv_rows(path, 3):
             ideograph, readings_field, simplified = fields
             if len(ideograph) != 1 or not is_han(ord(ideograph)):
@@ -119,6 +121,30 @@ def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional
             entries[ideograph] = (primary, secondary, simplified)
             locations[ideograph] = (path, line_number)
     return entries, locations
+
+
+def load_han_words(path: pathlib.Path, simplified: dict[str, str]) -> dict[str, str]:
+    """Load simplified Han words with one tone-marked reading per character."""
+    words: dict[str, str] = {}
+    for line_number, fields in tsv_rows(path, 2):
+        word, reading_field = fields
+        if not word or any(not is_han(ord(ch)) for ch in word):
+            sys.exit(f"{path}:{line_number}: word must contain only Han ideographs")
+        if any(simplified.get(ch, ch) != ch for ch in word):
+            sys.exit(f"{path}:{line_number}: word must use simplified Han forms")
+        syllables = reading_field.split()
+        if len(syllables) != len(word):
+            sys.exit(f"{path}:{line_number}: {len(word)} characters but {len(syllables)} syllables")
+        plain = []
+        for syllable in syllables:
+            reading = toneless_pinyin(syllable)
+            if reading is None:
+                sys.exit(f"{path}:{line_number}: invalid tone-marked Hanyu Pinyin syllable {syllable!r}")
+            plain.append(reading)
+        if word in words:
+            sys.exit(f"{path}:{line_number}: duplicate Han word {word!r}")
+        words[word] = " ".join(plain)
+    return words
 
 
 def reject_authored_overlap(path: pathlib.Path, line_number: int, ideograph: str,
@@ -307,6 +333,7 @@ class Generator:
             self.simplified = resolve_simplification_chains(self.simplified)
         except ValueError as exc:
             sys.exit(str(exc))
+        self.chinese_words = load_han_words(tables / "han" / "words.tsv", self.simplified)
         self.kana_ids: dict[str, int] = {}
 
     # -- transliteration of one normalized, lowercase, mark-free character --
@@ -989,21 +1016,25 @@ class Generator:
             longest = 0
             for key in sorted(table, key=lambda k: k.encode("utf-16-be")):
                 value = table[key]
+                longest = max(longest, len(key.encode("utf-16-le")) // 2)
                 if split:
                     syllables = value.split()
                     if len(syllables) != len(key):
-                        sys.exit(f"han.json: {key} has {len(key)} characters but {len(syllables)} syllables")
+                        sys.exit(f"Chinese word table: {key} has {len(key)} characters but {len(syllables)} syllables")
                     # A word that reads as its characters' defaults adds nothing,
                     # unless one of them has a second reading the word must not take.
                     if (all(reading_of.get(c) == s for c, s in zip(key, syllables))
                             and not any(c in self.han_second_pinyin for c in key)):
                         continue
                 rows.append(f"    {{{pool.ref(key)}, {pool.ref(value)}}},")
-                longest = max(longest, len(key.encode("utf-16-le")) // 2)
             return rows, longest
 
         japanese_rows, japanese_longest = words(self.han["japanese"], False)
-        chinese_rows, chinese_longest = words(self.han["chinese"]["words"], True)
+        chinese_rows, chinese_longest = words(self.chinese_words, True)
+        chinese_segment_rows = [
+            f"    {{{pool.ref(key)}, {{0, 0}}}},"
+            for key in sorted(self.chinese_words, key=lambda k: k.encode("utf-16-be"))
+        ]
 
         # Greek
         greek_styles = []
@@ -1203,7 +1234,7 @@ class Generator:
         digest = hashlib.sha256()
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
                             bmp_pinyin, astral_pinyin, second_pinyin, pinyin_syllables,
-                            japanese_rows, chinese_rows,
+                            japanese_rows, chinese_rows, chinese_segment_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
                             abjad_block_rows, abjad_constants, tibetan_rows, composable_bmp,
@@ -1265,6 +1296,10 @@ class Generator:
         w("};")
         w(f"const std::size_t kJapaneseWordCount = {len(japanese_rows)};")
         w(f"const int kJapaneseLongest = {japanese_longest};")
+        w(f"const Word kChineseWordSegments[{len(chinese_segment_rows)}] = {{")
+        out.extend(chinese_segment_rows)
+        w("};")
+        w(f"const std::size_t kChineseWordSegmentCount = {len(chinese_segment_rows)};")
         w(f"const Word kChineseWords[{len(chinese_rows)}] = {{")
         out.extend(chinese_rows)
         w("};")

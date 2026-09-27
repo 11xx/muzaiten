@@ -54,6 +54,9 @@
 - CJK ideographs keep their written form in the primary search fold, with
   traditional and simplified characters folded together, so typing one kanji
   or hanzi finds every word containing it; readings are alternates.
+- Traditional-script titles receive the same Chinese word readings as their
+  simplified forms, so 音樂 reads like 音乐; bidirectional word segmentation
+  also resolves overlapping polyphones.
 - Search folding is a per-character table lookup compiled at build time, about
   15 times faster over library titles and 24 times faster over file paths. The
   search cache rebuilds once.

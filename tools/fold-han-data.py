@@ -13,14 +13,17 @@ as archaic when only Hanyu Da Zidian does), checks every reading's exact tone, c
 tier coverage, and applies exact reviewed-disagreement suppressions. Authored
 rows use `ideograph<TAB>readings<TAB>simplified`; readings are tone-marked
 Mandarin pinyin or `-`, and the simplified field is empty when no form applies.
-Reviewed rows use `ideograph<TAB>kind<TAB>ours<TAB>reference<TAB>reason`.
-Directory mode requires all four tier files; explicit FILE arguments check
-only those files.
+Reviewed rows use `ideograph-or-word<TAB>kind<TAB>ours<TAB>reference<TAB>reason`.
+Directory mode requires all four tier files; explicit FILE arguments select
+the character files. The checker also checks `words.tsv`, whose rows use
+simplified words and tone-marked readings, against authored or Unihan character
+readings and CC-CEDICT. CC-CEDICT is cached under `~/.cache/muzaiten/` and is
+never copied into the repository; its date line is printed with word findings.
 
 Usage: tools/fold-han-data.py [generate] [--unihan Unihan.zip]
                               [--authored DIR] [output-dir]
        tools/fold-han-data.py check [--authored DIR] [--reviewed FILE]
-                                    [FILE ...]
+                                    [--words FILE] [FILE ...]
 """
 
 from __future__ import annotations
@@ -38,12 +41,14 @@ from collections import Counter, defaultdict
 UNIHAN_VERSION = "16.0.0"
 UNIHAN_SHA256 = "b8f000df69de7828d21326a2ffea462b04bc7560022989f7cc704f10521ef3e0"
 UNIHAN_URL = f"https://www.unicode.org/Public/{UNIHAN_VERSION}/ucd/Unihan.zip"
+CEDICT_URL = "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.zip"
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FOLD_DIR = ROOT / "src" / "search" / "fold"
 DEFAULT_AUTHORED_DIR = FOLD_DIR / "tables" / "han"
 DEFAULT_UNIHAN_DIR = FOLD_DIR / "unihan"
 DEFAULT_REVIEWED_FILE = ROOT / "tools" / "fold-han-reviewed.tsv"
+CEDICT_CACHE_FILE = "cedict.zip"
 
 IDEOGRAPH_BLOCKS = [
     (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0x20000, 0x2A6DF), (0x2A700, 0x2B73F),
@@ -63,7 +68,10 @@ VARIANT_FIELDS = ("kSimplifiedVariant", "kTraditionalVariant")
 TONE_MARKS = {"\u0304", "\u0301", "\u030c", "\u0300"}
 DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
-CHECK_KINDS = ("format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified")
+CHECK_KINDS = (
+    "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
+    "reading", "cedict", "uncommon",
+)
 TIER_FILES = ("gb2312.tsv", "big5.tsv", "jis.tsv", "ksx.tsv")
 
 
@@ -82,6 +90,49 @@ def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
             f"Unihan {UNIHAN_VERSION} is required"
         )
     return path
+
+
+def cedict_archive(path: pathlib.Path | None = None) -> pathlib.Path:
+    """Return the cached CC-CEDICT archive, downloading it on first use."""
+    if path is None:
+        path = pathlib.Path.home() / ".cache" / "muzaiten" / CEDICT_CACHE_FILE
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(CEDICT_URL, path)
+    if not zipfile.is_zipfile(path):
+        raise ValueError(f"{path}: not a CC-CEDICT zip archive")
+    return path
+
+
+def cedict_pinyin(token: str) -> str | None:
+    """Return the toneless spelling of one numbered CC-CEDICT syllable."""
+    plain = token.lower().replace("u:", "u").replace("ü", "u").replace("v", "u")
+    plain = re.sub(r"[0-5]$", "", plain)
+    return plain if plain and plain.isascii() and plain.isalpha() else None
+
+
+def cedict_words(archive: pathlib.Path) -> tuple[str, dict[str, set[tuple[str, ...]]]]:
+    """Index simplified spellings and their numbered-pinyin readings."""
+    words: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+    date_line = "date line unavailable"
+    with zipfile.ZipFile(archive) as z:
+        member = next((name for name in z.namelist() if pathlib.PurePosixPath(name).name == "cedict_ts.u8"), None)
+        if member is None:
+            raise ValueError(f"{archive}: missing cedict_ts.u8")
+        for line in z.read(member).decode("utf-8").splitlines():
+            if line.startswith("#! date=") or line.startswith("#. Date:"):
+                date_line = line
+                continue
+            if not line or line.startswith("#"):
+                continue
+            match = re.match(r"^(\S+)\s+(\S+)\s+\[([^]]*)\]", line)
+            if not match:
+                continue
+            _, simplified, reading_text = match.groups()
+            syllables = tuple(cedict_pinyin(token) for token in reading_text.split())
+            if syllables and all(syllables):
+                words[simplified].add(syllables)
+    return date_line, words
 
 
 def unihan_fields(archive: pathlib.Path, *wanted: str) -> dict[str, dict[str, str]]:
@@ -165,6 +216,8 @@ def authored_ideographs(directory: pathlib.Path) -> set[str]:
         return set()
     chars = set()
     for path in sorted(directory.glob("*.tsv")):
+        if path.name == "words.tsv":
+            continue
         for raw_line in path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip("\r\n")
             if not line.strip() or line.lstrip().startswith("#"):
@@ -369,7 +422,124 @@ def clean_tsv(value: str) -> str:
     return value.replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n")
 
 
-def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
+def word_character_data(authored_dir: pathlib.Path) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """Read authored readings and simplified mappings, then Unihan defaults."""
+    readings: dict[str, list[str]] = {}
+    simplified: dict[str, str] = {}
+    pinyin_path = DEFAULT_UNIHAN_DIR / "han_pinyin.tsv"
+    for line in pinyin_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        pinyin, characters = line.split("\t", 1)
+        for ch in characters:
+            readings.setdefault(ch, [toneless(pinyin)])
+
+    simple_path = DEFAULT_UNIHAN_DIR / "han_simplified.tsv"
+    for line in simple_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        simple, characters = line.split("\t", 1)
+        for ch in characters:
+            simplified[ch] = simple
+
+    for path in sorted(authored_dir.glob("*.tsv")):
+        if path.name == "words.tsv":
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            columns = line.split("\t")
+            if len(columns) != 3 or len(columns[0]) != 1:
+                continue
+            ch, reading_text, simple = columns
+            readings[ch] = [] if reading_text == "-" else [toneless(reading) for reading in reading_text.split()]
+            if simple:
+                simplified[ch] = simple
+    return readings, simplified
+
+
+def terminal_simplified(ch: str, mappings: dict[str, str]) -> str:
+    seen = set()
+    while ch in mappings and ch not in seen:
+        seen.add(ch)
+        ch = mappings[ch]
+    return ch
+
+
+def check_words(
+    path: pathlib.Path,
+    authored_dir: pathlib.Path,
+    cedict: dict[str, set[tuple[str, ...]]],
+    inventory: set[str],
+    special_spellings: set[str],
+    reviewed: set[tuple[str, str, str, str]],
+) -> tuple[list[tuple[str, str, str, str, str, str]], Counter]:
+    """Check simplified Han word readings against character data and CC-CEDICT."""
+    readings, simplified = word_character_data(authored_dir)
+    findings: list[tuple[str, str, str, str, str, str]] = []
+    first_occurrence: dict[str, int] = {}
+
+    def add(row: int, word: str, kind: str, ours: str, reference: str) -> None:
+        findings.append((str(path), str(row), word or "-", kind, ours, reference))
+
+    for row_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        columns = line.split("\t")
+        word = columns[0] if columns else ""
+        if len(columns) != 2:
+            add(row_number, word, "format", f"columns={len(columns)}", "2 columns")
+            continue
+
+        reading_text = columns[1]
+        syllables = reading_text.split()
+        valid_word = bool(word) and all(is_unihan_ideograph(ch) for ch in word)
+        if not valid_word:
+            add(row_number, word, "format", word or "-", "one or more CJK ideographs")
+        else:
+            previous = first_occurrence.get(word)
+            if previous is not None:
+                add(row_number, word, "format", word, f"first listed at {path}:{previous}")
+            else:
+                first_occurrence[word] = row_number
+            expected_simple = "".join(terminal_simplified(ch, simplified) for ch in word)
+            if word != expected_simple:
+                add(row_number, word, "format", word, expected_simple)
+
+        if not syllables:
+            add(row_number, word, "format", reading_text or "-", "tone-marked pinyin syllables")
+        elif valid_word and len(syllables) != len(word):
+            add(row_number, word, "format", f"{len(syllables)} syllables", f"{len(word)} syllables")
+
+        valid_pinyin = []
+        for syllable in syllables:
+            valid = is_tone_marked_pinyin(syllable, inventory, special_spellings)
+            if not valid:
+                add(row_number, word, "format", syllable, "tone-marked Mandarin syllable")
+            valid_pinyin.append(pinyin_base(syllable) if valid else None)
+
+        if not valid_word or len(syllables) != len(word) or any(base is None for base in valid_pinyin):
+            continue
+
+        for ch, syllable, base in zip(word, syllables, valid_pinyin):
+            available = readings.get(ch, [])
+            if base not in available:
+                add(row_number, word, "reading", syllable, " ".join(available) or "-")
+
+        references = cedict.get(word)
+        if not references:
+            add(row_number, word, "uncommon", reading_text, "-")
+        elif tuple(valid_pinyin) not in references:
+            alternatives = sorted(" ".join(reading) for reading in references)
+            add(row_number, word, "cedict", reading_text, "; ".join(alternatives))
+
+    unsuppressed = [finding for finding in findings if finding_key(finding) not in reviewed]
+    counts = Counter(finding[3] for finding in unsuppressed)
+    return unsuppressed, counts
+
+
+def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pathlib.Path | None = None,
+          authored_dir: pathlib.Path = DEFAULT_AUTHORED_DIR) -> int:
     archive = unihan_archive(None)
     fields = unihan_fields(archive, *READING_FIELDS, *VARIANT_FIELDS)
     inventory = pinyin_inventory(fields)
@@ -530,6 +700,23 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path) -> int:
         finding for finding in findings
         if finding_key(finding) not in reviewed
     ]
+    if words_file is not None:
+        date_line, cedict = cedict_words(cedict_archive())
+        special_spellings = {
+            unicodedata.normalize("NFC", reading)
+            for field in READING_FIELDS
+            for value in fields[field].values()
+            for reading in field_readings(field, value)
+        }
+        word_findings, word_counts = check_words(
+            words_file, authored_dir, cedict, inventory, special_spellings, reviewed,
+        )
+        unsuppressed.extend(word_findings)
+        print(
+            f"{words_file}: " + " ".join(f"{kind}={word_counts[kind]}" for kind in CHECK_KINDS)
+            + f"; CC-CEDICT {date_line}",
+            file=sys.stderr,
+        )
     for finding in unsuppressed:
         print("\t".join(clean_tsv(value) for value in finding))
     return 1 if unsuppressed else 0
@@ -549,11 +736,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     generate_parser.add_argument("out_dir", nargs="?", type=pathlib.Path, default=DEFAULT_UNIHAN_DIR,
                                  help="output directory (default: src/search/fold/unihan)")
 
-    check_parser = commands.add_parser("check", help="check authored readings and variants against Unihan")
+    check_parser = commands.add_parser("check", help="check authored readings, variants, and words")
     check_parser.add_argument("--authored", type=pathlib.Path, default=DEFAULT_AUTHORED_DIR,
                               help="directory scanned when no FILE arguments are given")
     check_parser.add_argument("--reviewed", type=pathlib.Path, default=DEFAULT_REVIEWED_FILE,
                               help="reviewed-disagreements TSV")
+    check_parser.add_argument("--words", type=pathlib.Path,
+                              help="word readings TSV (default: words.tsv in the authored directory)")
     check_parser.add_argument("files", nargs="*", type=pathlib.Path,
                               help="specific files to check; these replace the directory scan")
     return parser.parse_args(argv)
@@ -575,7 +764,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         files = required
     try:
-        return check(files, args.reviewed)
+        return check(files, args.reviewed, args.words or args.authored / "words.tsv", args.authored)
     except (OSError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 2
