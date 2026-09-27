@@ -20,6 +20,8 @@ namespace Search {
 
 namespace {
 
+std::atomic<quint64> nextGeneration{0};
+
 // ---- highlight helpers (delegate, on-screen rows only) --------------------
 
 bool termAppliesTo(const Term &term, HighlightField field)
@@ -47,6 +49,7 @@ void SearchIndex::build(QVector<SearchRecord> records)
     m_masks.clear();
     m_masks.reserve(static_cast<std::size_t>(m_records.size()));
     for (const SearchRecord &rec : m_records) m_masks.push_back(recordNormMasks(rec));
+    m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 void SearchIndex::append(QVector<SearchRecord> records)
@@ -61,6 +64,7 @@ void SearchIndex::append(QVector<SearchRecord> records)
         m_masks.push_back(recordNormMasks(rec));
         m_records.push_back(std::move(rec));
     }
+    m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 void SearchIndex::clear()
@@ -69,6 +73,7 @@ void SearchIndex::clear()
     m_records.squeeze();
     m_masks.clear();
     m_masks.shrink_to_fit();
+    m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 namespace {
@@ -97,12 +102,18 @@ int keyIndex(RankKey key)
 
 QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMode,
                                           const ExclusionSet &excludes,
-                                          int *totalMatches) const
+                                          int *totalMatches, QVector<int> *matchingIndices,
+                                          const QVector<int> *candidateIndices,
+                                          const std::function<bool()> &cancelled) const
 {
+    Q_ASSERT(!matchingIndices || matchingIndices != candidateIndices);
     if (totalMatches) *totalMatches = 0;
+    if (matchingIndices) matchingIndices->clear();
+    if (cancelled && cancelled()) return {};
     if (query.isEmpty() || m_records.isEmpty()) return {};
 
-    const int n = static_cast<int>(m_records.size());
+    const int n = candidateIndices ? static_cast<int>(candidateIndices->size())
+                                   : static_cast<int>(m_records.size());
     const auto termMasks = termCharacterMasks(query);
 
     // Every worker keeps its own best kMaxResults ranks. Once a worker's heap
@@ -115,6 +126,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     // Aligned so workers' counters, written once per match, never share a line.
     struct alignas(64) Slice {
         std::vector<RankKey> heap;
+        QVector<int> indices;
         int count = 0;
     };
 
@@ -139,7 +151,10 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
                 }
             }
         };
-        for (int i = lo; i < hi; ++i) {
+        for (int pos = lo; pos < hi; ++pos) {
+            if ((pos & 2047) == 0 && cancelled && cancelled()) return;
+            const int i = candidateIndices ? candidateIndices->at(pos) : pos;
+            Q_ASSERT(i >= 0 && i < m_records.size());
             const SearchRecord &rec = m_records[i];
 
             // Exclusions are an early reject, before any relevance scoring, so
@@ -155,6 +170,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             const int bound = matchSearchRecordBound(rec, masks, query, termMasks, fuzzyMode, &exact);
             if (bound == INT_MIN) continue;
             ++out.count;
+            bool matched = true;
             if (exact) {
                 keep(rankKey(bound, i));
             } else if (rankKey(bound, i) > floor.load(std::memory_order_relaxed)) {
@@ -163,10 +179,12 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
                     // The bound admitted what the scorer rejects: never let a
                     // disagreement surface as a counted, unscorable match.
                     --out.count;
+                    matched = false;
                 } else {
                     keep(rankKey(score, i));
                 }
             }
+            if (matched && matchingIndices) out.indices.append(i);
         }
     };
 
@@ -190,6 +208,8 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
         for (std::thread &t : threads) t.join();
     }
 
+    if (cancelled && cancelled()) return {};
+
     // Every shown result survives in some worker's heap: a record outranked
     // there by kMaxResults others is outranked globally too.
     std::vector<RankKey> ranked;
@@ -197,6 +217,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     for (const Slice &slice : slices) {
         total += slice.count;
         ranked.insert(ranked.end(), slice.heap.begin(), slice.heap.end());
+        if (matchingIndices) *matchingIndices += slice.indices;
     }
     if (totalMatches) *totalMatches = total;
 

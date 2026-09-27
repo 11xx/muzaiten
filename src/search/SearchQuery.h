@@ -79,6 +79,11 @@ struct SearchQuery {
     static SearchQuery parse(const QString &queryString);
 };
 
+// True when every match of `after` must also match `before`. Terms keep their
+// order; only one existing positive text term may grow, and one conjunct may
+// be appended.
+bool narrows(const SearchQuery &before, const SearchQuery &after);
+
 // Wrap a raw value as a strict key:"..." phrase value: surrounds it with double
 // quotes and backslash-escapes embedded " and \. Used to build precise scoped
 // queries (e.g. artist:"suni clay") that match as one phrase.

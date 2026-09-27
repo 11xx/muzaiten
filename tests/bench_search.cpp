@@ -136,7 +136,7 @@ void memory(const Records &records)
 }
 
 bool queries(const Search::SearchIndex &index, const QStringList &querySet, int repeats,
-             int modeChoice, QFile *dump, int scale)
+             int modeChoice, QFile *dump, int scale, bool incremental)
 {
     QVector<qint64> overall[2];
     std::printf("  %-22s %-6s %10s %10s %10s\n", "query", "mode", "p50 ms", "max ms", "matches");
@@ -144,15 +144,21 @@ bool queries(const Search::SearchIndex &index, const QStringList &querySet, int 
         const QStringList parts = prefixes(query);
         for (int mode = 0; mode < 2; ++mode) {
             if (modeChoice != 2 && modeChoice != mode) continue;
+            Search::SearchQuery previousQuery;
+            QVector<int> previousMatches;
             QVector<qint64> samples;
             int matches = 0;
             for (const QString &prefix : parts) {
                 const auto parsed = Search::SearchQuery::parse(prefix);
+                const bool narrow = incremental && Search::narrows(previousQuery, parsed);
+                QVector<int> nextMatches;
                 QVector<qint64> repeatsNs;
                 for (int rep = 0; rep < repeats; ++rep) {
                     QElapsedTimer timer;
                     timer.start();
-                    const auto results = index.match(parsed, mode == 1, {}, &matches);
+                    const auto results = index.match(parsed, mode == 1, {}, &matches,
+                                                     incremental ? &nextMatches : nullptr,
+                                                     narrow ? &previousMatches : nullptr);
                     repeatsNs.append(timer.nsecsElapsed());
                     if (dump && rep == 0) {
                         QJsonArray top;
@@ -171,6 +177,10 @@ bool queries(const Search::SearchIndex &index, const QStringList &querySet, int 
                         row.insert(QStringLiteral("top"), top);
                         if (dump->write(QJsonDocument(row).toJson(QJsonDocument::Compact) + '\n') < 0) return false;
                     }
+                }
+                if (incremental) {
+                    previousQuery = parsed;
+                    previousMatches = std::move(nextMatches);
                 }
                 samples.append(percentile(repeatsNs, 0.5));
             }
@@ -191,7 +201,8 @@ bool queries(const Search::SearchIndex &index, const QStringList &querySet, int 
 }
 
 bool runScale(const Records &original, int scale, const Search::CacheSignature &signature,
-              const QString &cachePath, const QStringList &querySet, int repeats, int modeChoice, QFile *dump)
+              const QString &cachePath, const QStringList &querySet, int repeats, int modeChoice,
+              QFile *dump, bool incremental)
 {
     std::printf("\nscale %d\n", scale);
     Records records = scaledRecords(original, scale);
@@ -215,7 +226,7 @@ bool runScale(const Records &original, int scale, const Search::CacheSignature &
     }
     loaded.records.clear();
     memory(index.records());
-    return queries(index, querySet, repeats, modeChoice, dump, scale);
+    return queries(index, querySet, repeats, modeChoice, dump, scale, incremental);
 }
 
 // Randomized check of the matcher's prefilter against the original matcher:
@@ -348,6 +359,7 @@ int main(int argc, char **argv)
     int verifySamples = 0;
     int verifyIndexSamples = 0;
     QString dumpPath;
+    bool incremental = false;
     if (argc == 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--compare")) {
         QFile before(QString::fromLocal8Bit(argv[2])), after(QString::fromLocal8Bit(argv[3]));
         if (!before.open(QIODevice::ReadOnly) || !after.open(QIODevice::ReadOnly)) return 2;
@@ -362,6 +374,7 @@ int main(int argc, char **argv)
     }
     for (int i = 1; i < argc; ++i) {
         const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QStringLiteral("--incremental")) { incremental = true; continue; }
         if ((arg == QStringLiteral("--library") || arg == QStringLiteral("--scale")
              || arg == QStringLiteral("--queries") || arg == QStringLiteral("--repeat")
              || arg == QStringLiteral("--dump") || arg == QStringLiteral("--mode")
@@ -451,11 +464,11 @@ int main(int argc, char **argv)
     QFile dump(dumpPath);
     if (!dumpPath.isEmpty() && !dump.open(QIODevice::WriteOnly | QIODevice::Truncate)) return 2;
     QFile *dumpOutput = dumpPath.isEmpty() ? nullptr : &dump;
-    if (!runScale(records, 1, signature, temporary.filePath(QStringLiteral("search.cache")), querySet, repeats, modeChoice, dumpOutput)) {
+    if (!runScale(records, 1, signature, temporary.filePath(QStringLiteral("search.cache")), querySet, repeats, modeChoice, dumpOutput, incremental)) {
         std::fprintf(stderr, "cache write/read failed at scale 1\n");
         return 1;
     }
-    if (scale > 1 && !runScale(records, scale, signature, temporary.filePath(QStringLiteral("search.cache")), querySet, repeats, modeChoice, dumpOutput)) {
+    if (scale > 1 && !runScale(records, scale, signature, temporary.filePath(QStringLiteral("search.cache")), querySet, repeats, modeChoice, dumpOutput, incremental)) {
         std::fprintf(stderr, "cache write/read failed at scale %d\n", scale);
         return 1;
     }

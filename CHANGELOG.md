@@ -73,6 +73,8 @@
   the query are skipped before any scoring, using small character masks the
   index builds when it loads. Broad queries score only matches that can still
   reach the shown results. Match counts, scores and ranking are unchanged.
+  Each keystroke rechecks only records matched by the previous query when the
+  query narrows; a superseded scan stops early.
 - Highlighting search results is about a quarter faster over file paths and
   a fifth faster over titles.
 - CJK ideographs keep their written form in the primary search fold, with

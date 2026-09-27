@@ -416,6 +416,12 @@ target_link_libraries(test_search_index PRIVATE muzaiten_search Qt6::Core Qt6::T
 target_compile_features(test_search_index PRIVATE cxx_std_26)
 add_test(NAME test_search_index COMMAND test_search_index)
 
+add_executable(test_narrowing_cache test_narrowing_cache.cpp)
+target_include_directories(test_narrowing_cache PRIVATE ../src)
+target_link_libraries(test_narrowing_cache PRIVATE muzaiten_search Qt6::Core Qt6::Test)
+target_compile_features(test_narrowing_cache PRIVATE cxx_std_26)
+add_test(NAME test_narrowing_cache COMMAND test_narrowing_cache)
+
 add_executable(test_search_matcher
     test_search_matcher.cpp
 )

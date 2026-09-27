@@ -158,6 +158,7 @@ set(MUZAITEN_SOURCES
     src/search/fold/FoldTibetan.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
+    src/search/NarrowingCache.cpp
     src/search/RankConfig.cpp
     src/search/ResultRanker.cpp
     src/search/SearchIndex.cpp
@@ -324,6 +325,7 @@ set(MUZAITEN_HEADERS
     src/search/RankConfig.h
     src/search/ResultRanker.h
     src/search/SearchIndex.h
+    src/search/NarrowingCache.h
     src/search/SearchMatcher.h
     src/search/SearchQuery.h
     src/search/SearchRecord.h
@@ -416,6 +418,7 @@ set(MUZAITEN_SEARCH_SOURCES
     src/search/fold/FoldTibetan.cpp
     src/search/FuzzyMatch.cpp
     src/search/IndexCache.cpp
+    src/search/NarrowingCache.cpp
     src/search/RankConfig.cpp
     src/search/ResultRanker.cpp
     src/search/SearchIndex.cpp

@@ -8,6 +8,7 @@
 
 #include "search/Exclusion.h"
 #include "search/IndexCache.h"
+#include "search/NarrowingCache.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 
@@ -82,6 +83,8 @@ private:
     SearchIndex m_index;       // live, queryable index
     SearchIndex m_staging;     // background-refresh build target, swapped into m_index when done
     ExclusionSet m_excludes;
+    NarrowingCache m_narrowingCache;
+    quint64 m_exclusionVersion = 0;
     std::atomic<quint64> m_latestQueryId{0};
     Database *m_db = nullptr;  // opened on the worker thread in buildIndex()
 

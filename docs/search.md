@@ -150,9 +150,12 @@ The result list always keeps a highlighted cursor you move with the arrow or
 text box so `1` and `2` switch views; `/` jumps back into the box. The folded
 index is cached on disk, so opening search is near-instant on a warm cache;
 loading it also builds in-memory character masks that let a query skip fields
-that cannot match. A cold or stale cache streams results in as it builds (and
-refreshes quietly in the background, shown by a small "updating index" note). Deleting the cache
-file is harmless — it rebuilds on next open.
+that cannot match. As a query narrows while typing, search rechecks only the
+previous matches; an index update or changed exclusions starts a fresh scan,
+and a superseded query stops scanning. A cold or stale cache streams results
+in as it builds (and refreshes quietly in the background, shown by a small
+"updating index" note). Deleting the cache file is harmless — it rebuilds on
+next open.
 
 Freshness is tracked by a persisted database identity and search-content revision.
 SQLite triggers advance that revision for searchable track metadata, rating

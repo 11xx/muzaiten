@@ -21,6 +21,7 @@
 
 #include <QVector>
 
+#include <functional>
 #include <vector>
 
 namespace Search {
@@ -68,9 +69,18 @@ public:
     // Empty query → empty result. When totalMatches is non-null it receives the
     // full (uncapped) number of matching records. `excludes`, when non-empty,
     // drop matching records during the filter phase (before scoring).
+    // matchingIndices receives every match in ascending index order.
+    // candidateIndices must be ascending, unique, and valid for this index;
+    // it must not be the same vector as matchingIndices. Cancellation returns
+    // empty results and leaves the output count and indices empty.
     QVector<ScoredResult> match(const SearchQuery &query, bool fuzzyMode,
                                  const ExclusionSet &excludes = {},
-                                 int *totalMatches = nullptr) const;
+                                 int *totalMatches = nullptr,
+                                 QVector<int> *matchingIndices = nullptr,
+                                 const QVector<int> *candidateIndices = nullptr,
+                                 const std::function<bool()> &cancelled = {}) const;
+
+    quint64 generation() const { return m_generation; }
 
     int size() const { return static_cast<int>(m_records.size()); }
     bool isEmpty() const { return m_records.isEmpty(); }
@@ -81,6 +91,7 @@ public:
 private:
     QVector<SearchRecord> m_records;
     std::vector<NormMasks> m_masks;
+    quint64 m_generation = 0;
 };
 
 } // namespace Search
