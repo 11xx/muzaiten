@@ -1592,3 +1592,12 @@
 憘	simplified	喜	Variant policy; no direct Unihan fold.
 戱	simplified	戏	Mainland 戏 preferred to Japanese intermediate 戯.
 熺	simplified	熹	Variant policy; no direct Unihan fold.
+長	default	cháng	Ordered like its simplified form 长 (cháng first), so the two read alike by default.
+剎	default	chà	Ordered like its simplified form 刹 (chà first), so the two read alike by default.
+紮	default	zhā	Ordered like its simplified form 扎 (zhā first), so the two read alike by default.
+燾	default	tāo	Ordered like its simplified form 焘 (tāo first), so the two read alike by default.
+蕁	default	xún	Ordered like its simplified form 荨 (xún first), so the two read alike by default.
+鐔	default	tán	Ordered like its simplified form 镡 (tán first), so the two read alike by default.
+閼	default	yān	Ordered like its simplified form 阏 (yān first), so the two read alike by default.
+駘	default	dài	Ordered like its simplified form 骀 (dài first), so the two read alike by default.
+戇	default	gàng	Ordered like its simplified form 戆 (gàng first), so the two read alike by default.
