@@ -68,7 +68,9 @@ private slots:
             {"槟榔", "binglang"}, {"活著", "huozhe"},
             {"穿著打扮", "chuanzhuodaban"}, {"沉著", "chenzhuo"}, {"著實", "zhuoshi"},
             {"提高著", "tigaozhe"}, {"紧紧粘着你", "jinjinzhanzheni"}, {"你还愿意", "nihaiyuanyi"},
-            {"节目的", "jiemude"},
+            {"节目的", "jiemude"}, {"戴着墨镜", "daizhemojing"}, {"带着力量", "daizheliliang"},
+            {"黏着你", "nianzheni"}, {"阴沉着脸", "yinchenzhelian"}, {"依附着", "yifuzhe"},
+            {"沉着冷静", "chenzhuolengjing"},
         };
         for (const auto &[input, reading] : cases) {
             QVERIFY2(segments(QString::fromUtf8(input)).contains(QString::fromUtf8(reading)), input);
