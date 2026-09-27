@@ -95,6 +95,7 @@ struct HangulStyle {
     Str coda[7];            // k n t l m p ng
     Str lateral;            // ㄹ read as l after l or n
 };
+struct HangulSurname { Str key; Str syllables[2]; };
 
 struct HanAstralPinyin { char32_t cp; std::uint16_t pinyin; };
 struct HanSecondPinyin { char32_t cp; std::uint16_t pinyin; };
@@ -160,6 +161,10 @@ extern const std::size_t kDecompCount;
 extern const KanaInfo kKana[];
 extern const HangulStyle kHangulRr;
 extern const HangulStyle kHangulMr;
+extern const HangulSurname kHangulSurnames[];
+extern const std::size_t kHangulSurnameCount;
+extern const Word kHangulGivenNames[];
+extern const std::size_t kHangulGivenNameCount;
 extern const std::uint16_t kHanPinyinBmp[0xA000 - 0x3400];
 extern const HanAstralPinyin kHanPinyinAstral[];
 extern const std::size_t kHanPinyinAstralCount;

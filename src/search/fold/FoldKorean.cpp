@@ -2,7 +2,7 @@
 //
 // A syllable block is an initial, a vowel and an optional final consonant,
 // recovered arithmetically from its code point (conjoining jamo compose the
-// same way). Three readings:
+// same way). Four readings:
 //
 // - style 0, the primary fold: Revised Romanization syllable by syllable,
 //   each final at the sound it has alone (악단광칠 akdangwangchil, 한국어
@@ -14,8 +14,13 @@
 //   aspiration (좋고 joko) and palatalization (같이 gachi).
 // - style 2: McCune-Reischauer over the same pronunciation, with plain stops
 //   voiced between voiced sounds and voiceless elsewhere (보천보 pochonbo).
+// - style 3: conventional name spellings, with a longest surname match at the
+//   start of each word, given-name syllables after it, and Revised Romanization
+//   for syllables without a table entry (이지은 leejieun).
 
 #include "search/fold/FoldEngine.h"
+
+#include <algorithm>
 
 namespace Search::Fold::Engine {
 
@@ -168,8 +173,53 @@ bool voicedCoda(Coda c)
     return c == CodaNone || c == CodaN || c == CodaL || c == CodaM || c == CodaNG;
 }
 
+void foldWord(const Syllable *syl, qsizetype n, int style, Out &out);
+
+char16_t codeUnitOf(const Syllable &s)
+{
+    return char16_t(0xAC00 + (s.initial * 21 + s.vowel) * 28 + s.final);
+}
+
+const HangulSurname *findSurname(QStringView key)
+{
+    const HangulSurname *end = kHangulSurnames + kHangulSurnameCount;
+    const HangulSurname *it = std::lower_bound(
+        kHangulSurnames, end, key,
+        [](const HangulSurname &surname, QStringView value) { return view(surname.key).compare(value) < 0; });
+    return it != end && view(it->key) == key ? it : nullptr;
+}
+
+void foldName(const Syllable *syl, qsizetype n, Out &out)
+{
+    char16_t key[2] = {codeUnitOf(syl[0]), n > 1 ? codeUnitOf(syl[1]) : char16_t(0)};
+    const HangulSurname *surname = n > 1 ? findSurname(QStringView(key, 2)) : nullptr;
+    qsizetype next = 0;
+    if (surname) {
+        out.put(view(surname->syllables[0]), syl[0].src);
+        out.put(view(surname->syllables[1]), syl[1].src);
+        next = 2;
+    } else if ((surname = findSurname(QStringView(key, 1)))) {
+        out.put(view(surname->syllables[0]), syl[0].src);
+        next = 1;
+    }
+
+    for (; next < n; ++next) {
+        const char16_t codeUnit = codeUnitOf(syl[next]);
+        const Word *given = findWord(kHangulGivenNames, kHangulGivenNameCount, QStringView(&codeUnit, 1));
+        if (given) {
+            out.put(view(given->value), syl[next].src);
+        } else {
+            foldWord(&syl[next], 1, 0, out);
+        }
+    }
+}
+
 void foldWord(const Syllable *syl, qsizetype n, int style, Out &out)
 {
+    if (style == 3) {
+        foldName(syl, n, out);
+        return;
+    }
     const HangulStyle &st = style == 2 ? kHangulMr : kHangulRr;
     int onset = syl[0].initial;
     bool voiced = false;  // a word starts voiceless

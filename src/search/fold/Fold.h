@@ -30,8 +30,8 @@
 //   (きゃ→kya, ティ→ti) and Hepburn with long vowels collapsed (tokyo),
 //   Japanese kanji readings from a seed dictionary, Chinese pinyin with a
 //   second reading for characters that have two, Korean as pronounced
-//   (한국어→hangugeo)
-//   and in McCune-Reischauer (보천보→pochonbo), Thai RTGS and common
+//   (한국어→hangugeo), in McCune-Reischauer (보천보→pochonbo), and with
+//   conventional surname and given-name spellings (이지은→leejieun), Thai RTGS and common
 //   spellings, Indic with and without Hindi schwa deletion, Arabic and Hebrew
 //   with their vowel letters read in context, and Tibetan Wylie.
 //
@@ -53,7 +53,7 @@ namespace Search::Fold {
 // Revision of the fold pipeline. cacheSignature() mixes it with a digest of
 // the compiled tables; the on-disk search cache stores folded norms, so a
 // change to either must invalidate it.
-inline constexpr quint32 kVersion = 4;
+inline constexpr quint32 kVersion = 5;
 
 // Separates the alternative folded forms of one field inside a search norm
 // (the display text's fold, its alternate readings, then a sort name's).
