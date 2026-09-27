@@ -15,14 +15,19 @@ Out::Out(bool withIndex, qsizetype hint)
     : m_withIndex(withIndex)
 {
     if (hint > 0) grow(hint);
-    if (withIndex) m_src.reserve(hint);
 }
 
 void Out::grow(qsizetype extra)
 {
     const qsizetype cap = std::max(m_len + extra, m_cap * 2 + 16);
+    std::unique_ptr<int[]> src;
+    if (m_withIndex) {
+        src = std::make_unique_for_overwrite<int[]>(cap);
+        if (m_len > 0) std::copy_n(m_src.get(), m_len, src.get());
+    }
     m_text.resize(cap);
     m_data = reinterpret_cast<char16_t *>(m_text.data());
+    if (m_withIndex) m_src = std::move(src);
     m_cap = cap;
 }
 
@@ -47,18 +52,19 @@ void Out::putAscii(const char16_t *s, qsizetype n, int src, bool sequential)
     bool dropped = false;
     for (qsizetype k = 0; k < n; ++k) dropped |= isDroppedAscii(s[k]);
     if (!dropped) {
-        for (qsizetype k = 0; k < n; ++k) d[k] = lowerAscii(s[k]);
-        m_len += n;
-        if (m_withIndex) {
-            for (qsizetype k = 0; k < n; ++k) m_src.append(sequential ? src + int(k) : src);
+        for (qsizetype k = 0; k < n; ++k) {
+            d[k] = lowerAscii(s[k]);
+            if (m_withIndex) m_src[m_len + k] = sequential ? src + int(k) : src;
         }
+        m_len += n;
         return;
     }
     qsizetype written = 0;
     for (qsizetype k = 0; k < n; ++k) {
         if (isDroppedAscii(s[k])) continue;
-        d[written++] = lowerAscii(s[k]);
-        if (m_withIndex) m_src.append(sequential ? src + int(k) : src);
+        d[written] = lowerAscii(s[k]);
+        if (m_withIndex) m_src[m_len + written] = sequential ? src + int(k) : src;
+        ++written;
     }
     m_len += written;
 }
@@ -73,12 +79,15 @@ void Out::putCodePoint(char32_t cp, int src)
     put(QChar::lowSurrogate(cp), src);
 }
 
-QString Out::takeText()
+std::pair<QString, QList<int>> Out::take()
 {
+    QList<int> index;
+    if (m_withIndex) index = QList<int>(m_src.get(), m_src.get() + m_len);
     m_text.truncate(m_len);
     m_data = nullptr;
+    m_src.reset();
     m_len = m_cap = 0;
-    return std::move(m_text);
+    return {std::move(m_text), std::move(index)};
 }
 
 int styleCount(Script family)
@@ -478,8 +487,8 @@ Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::u
 {
     Out out(withIndex, src.size() + 8);
     runPass(reinterpret_cast<const char16_t *>(src.utf16()), src.size(), styles, -1, mask, fullMask, out);
-    QVector<int> index = out.takeIndex();
-    return {out.takeText(), std::move(index)};
+    auto [text, index] = out.take();
+    return {std::move(text), std::move(index)};
 }
 
 // Every distinct fold of `src`, primary first.

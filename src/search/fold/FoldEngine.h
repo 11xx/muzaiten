@@ -27,6 +27,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <utility>
 
 namespace Search::Fold::Engine {
 
@@ -250,16 +252,23 @@ public:
     void put(char16_t c, int src)
     {
         if (m_len == m_cap) grow(1);
-        m_data[m_len++] = c;
-        if (m_withIndex) m_src.append(src);
+        m_data[m_len] = c;
+        if (m_withIndex) m_src[m_len] = src;
+        ++m_len;
     }
     void put(QStringView s, int src)
     {
         const qsizetype n = s.size();
         if (m_len + n > m_cap) grow(n);
-        for (qsizetype k = 0; k < n; ++k) m_data[m_len + k] = s.utf16()[k];
+        if (m_withIndex) {
+            for (qsizetype k = 0; k < n; ++k) {
+                m_data[m_len + k] = s.utf16()[k];
+                m_src[m_len + k] = src;
+            }
+        } else {
+            for (qsizetype k = 0; k < n; ++k) m_data[m_len + k] = s.utf16()[k];
+        }
         m_len += n;
-        if (m_withIndex) m_src.insert(m_src.size(), n, src);
     }
     void put(Str s, int src) { put(view(s), src); }
     void putCodePoint(char32_t cp, int src);
@@ -271,8 +280,9 @@ public:
     QStringView text() const { return QStringView(m_data, m_len); }
     char16_t last() const { return m_len > 0 ? m_data[m_len - 1] : char16_t(0); }
 
-    QString takeText();
-    QList<int> takeIndex() { return std::move(m_src); }
+    // The folded text and, when built with an index, its source indices;
+    // leaves the builder empty.
+    std::pair<QString, QList<int>> take();
 
 private:
     void grow(qsizetype extra);
@@ -281,7 +291,7 @@ private:
     char16_t *m_data = nullptr;
     qsizetype m_len = 0;
     qsizetype m_cap = 0;
-    QList<int> m_src;
+    std::unique_ptr<int[]> m_src;
     bool m_withIndex;
 };
 

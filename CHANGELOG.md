@@ -45,6 +45,8 @@
 
 ### Changed
 
+- Highlighting search results is about a quarter faster over file paths and
+  a fifth faster over titles.
 - CJK ideographs keep their written form in the primary search fold, with
   traditional and simplified characters folded together, so typing one kanji
   or hanzi finds every word containing it; readings are alternates.
