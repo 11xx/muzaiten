@@ -307,7 +307,12 @@ bool narrows(const SearchQuery &before, const SearchQuery &after)
             || oldTerm.forceExact != newTerm.forceExact
             || oldTerm.numericValue != newTerm.numericValue
             || oldTerm.kind > TermKind::CodecText
-            || !newTerm.text.startsWith(oldTerm.text)) return false;
+            || !newTerm.text.startsWith(oldTerm.text)
+            // A term holding '/' matches a path as a whole instead of per
+            // folder, which can match more.
+            || (newTerm.text.contains(QLatin1Char('/')) && !oldTerm.text.contains(QLatin1Char('/')))) {
+            return false;
+        }
     }
     return true;
 }

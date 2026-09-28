@@ -80,8 +80,9 @@ struct SearchQuery {
 };
 
 // True when every match of `after` must also match `before`. Terms keep their
-// order; only one existing positive text term may grow, and one conjunct may
-// be appended.
+// order; only one existing positive text term may grow (and not gain its
+// first '/', which switches a path to whole-path matching), and one conjunct
+// may be appended.
 bool narrows(const SearchQuery &before, const SearchQuery &after);
 
 // Wrap a raw value as a strict key:"..." phrase value: surrounds it with double

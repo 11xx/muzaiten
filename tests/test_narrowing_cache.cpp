@@ -1,3 +1,4 @@
+#include <atomic>
 #include <QTest>
 
 #include "search/NarrowingCache.h"
@@ -40,6 +41,53 @@ private slots:
         check("title:blue", "title:\"blue\"", true);
         check("blue", "'blue", false);
         check("'blue", "'blues", true);
+        check("ab", "ab/", false);
+        check("ab/", "ab/c", true);
+    }
+
+    // A fuzzy term gaining '/' leaves per-folder path matching for the whole
+    // path, which can match more: the cached run must not reuse candidates.
+    void slashLeavesComponentMatching()
+    {
+        SearchIndex index;
+        index.build({record(QString(), QStringLiteral("/a/b/zzz.bin"))});
+        for (const QString &slashed : {QStringLiteral("ab/"), QString::fromUtf8("ab\xef\xbc\x8f")}) {
+            NarrowingCache cache;
+            int total = -1;
+            cache.run(index, SearchQuery::parse(QStringLiteral("ab")), true, {}, 0, &total);
+            QCOMPARE(total, 0);
+            int cached = -1, fresh = -1;
+            cache.run(index, SearchQuery::parse(slashed), true, {}, 0, &cached);
+            index.match(SearchQuery::parse(slashed), true, {}, &fresh);
+            QCOMPARE(fresh, 1);
+            QCOMPARE(cached, fresh);
+        }
+    }
+
+    // Cancelling in the middle of a multi-worker scan leaves no partial state:
+    // the next query equals a fresh scan.
+    void cancelMidScan()
+    {
+        QVector<SearchRecord> records;
+        for (int i = 0; i < 42000; ++i) {
+            records.push_back(record(QStringLiteral("blue %1").arg(i), QStringLiteral("/music/%1.ogg").arg(i)));
+        }
+        SearchIndex index;
+        index.build(records);
+        NarrowingCache cache;
+        std::atomic<int> polls{0};
+        int total = -1;
+        const auto cancelled = cache.run(index, SearchQuery::parse(QStringLiteral("blu")), false, {}, 0,
+                                         &total, [&] { return ++polls > 8; });
+        QVERIFY(polls > 8);
+        QVERIFY(cancelled.isEmpty());
+        QCOMPARE(total, 0);
+        int cachedTotal = -1, freshTotal = -1;
+        const auto cachedRun = cache.run(index, SearchQuery::parse(QStringLiteral("blue")), false, {}, 0, &cachedTotal);
+        const auto fresh = index.match(SearchQuery::parse(QStringLiteral("blue")), false, {}, &freshTotal);
+        QCOMPARE(cachedTotal, freshTotal);
+        QCOMPARE(cachedRun.size(), fresh.size());
+        for (qsizetype i = 0; i < fresh.size(); ++i) QCOMPARE(cachedRun[i].index, fresh[i].index);
     }
 
     void freshParity()

@@ -231,8 +231,8 @@ with a leading or trailing `*` behave the same way.
 
 A fuzzy free-text term matches a file path within one folder name or the
 file name, the library's own root folders included, so letters scattered
-across several folders do not add up to a match. A `path:` term matches the
-whole path, across folders.
+across several folders do not add up to a match. A term containing `/`, and
+any `path:` term, matches the whole path, across folders.
 
 Literal text in exclusion globs folds like a search query, so `*café*`
 matches `Café`, and `*東京*` matches the simplified primary fold of `東京`.

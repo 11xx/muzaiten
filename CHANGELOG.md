@@ -71,8 +71,8 @@
 
 - Fuzzy free-text search matches a file path within one folder name or the
   file name, so letters scattered across folders no longer add up to a
-  match and fuzzy queries report far fewer stray results. `path:` still
-  matches across the whole path.
+  match and fuzzy queries report far fewer stray results. A term containing
+  `/`, and any `path:` term, still matches across the whole path.
 - Typing in search is faster, fuzzy mode above all: fields that cannot hold
   the query are skipped before any scoring, using small character masks the
   index builds when it loads; broad queries score only matches that can still
