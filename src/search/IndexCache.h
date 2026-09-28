@@ -41,7 +41,7 @@ struct CacheSignature {
 namespace IndexCache {
 
 // Layout version of the serialized record stream; bump on any field change.
-inline constexpr quint32 kFormatVersion = 2;
+inline constexpr quint32 kFormatVersion = 3;
 
 // Default cache file under AppPaths::cacheDir().
 QString defaultPath();
@@ -50,9 +50,11 @@ QString defaultPath();
 CacheSignature currentSignature(const Database &db);
 QString mismatchReason(const CacheSignature &cached, const CacheSignature &current);
 
-// Atomically write the folded records + signature, zstd-compressed. Returns
-// false on any I/O or encoding error (caller falls back to a live build).
-bool write(const QString &path, const CacheSignature &signature, const QVector<SearchRecord> &records);
+// Atomically write the folded records + signature in zstd-compressed chunks of
+// at most `chunkRecords` records (tests pass small values). Returns false on
+// any I/O or encoding error (caller falls back to a live build).
+bool write(const QString &path, const CacheSignature &signature,
+           const QVector<SearchRecord> &records, quint32 chunkRecords = 4096);
 
 struct Loaded {
     bool ok = false;            // false if missing / unreadable / corrupt

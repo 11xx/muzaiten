@@ -104,6 +104,9 @@
 
 ### Fixed
 
+- Very large libraries keep their search cache across restarts instead of
+  rebuilding the index on every start. The cache rebuilds once after this
+  update.
 - Exclusion patterns match accented and non-Latin text the way search does:
   `*café*` excludes `Café`, and `*東京*` excludes `東京`.
 - Katakana loanword spellings romanize as one sound (`ティ` ti, `ファ` fa,

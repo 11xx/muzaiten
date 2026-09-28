@@ -14,7 +14,9 @@
 
 #include <zstd.h>
 
+#include <algorithm>
 #include <limits>
+#include <optional>
 
 namespace Search::IndexCache {
 
@@ -24,8 +26,14 @@ constexpr quint32 kMagic = 0x4D5A5349; // "MZSI"
 constexpr int     kZstdLevel = 3;
 constexpr auto    kDataStreamVersion = QDataStream::Qt_6_0;
 
-// Guard against a corrupt/tampered header claiming an absurd decoded size.
-constexpr unsigned long long kMaxDecodedBytes = 1024ull * 1024 * 1024; // 1 GiB
+// Records are stored in independently compressed chunks, so neither side ever
+// holds more than one chunk's payload. A chunk closes at a record count or at
+// kChunkTargetBytes, whichever comes first; the reader refuses any chunk that
+// claims more than kMaxChunkBytes or kMaxChunkRecords, so a corrupt or
+// tampered file cannot request an absurd allocation.
+constexpr quint64 kChunkTargetBytes = 4ull * 1024 * 1024;
+constexpr quint64 kMaxChunkBytes = 64ull * 1024 * 1024;
+constexpr quint32 kMaxChunkRecords = 65536;
 
 QByteArray zstdCompress(const QByteArray &raw)
 {
@@ -45,7 +53,7 @@ QByteArray zstdCompress(const QByteArray &raw)
 
 QByteArray zstdDecompress(const QByteArray &blob, quint64 rawSize)
 {
-    if (blob.isEmpty() || rawSize == 0 || rawSize > kMaxDecodedBytes) {
+    if (blob.isEmpty() || rawSize == 0 || rawSize > kMaxChunkBytes) {
         return {};
     }
     QByteArray out(static_cast<int>(rawSize), Qt::Uninitialized);
@@ -169,34 +177,59 @@ QString mismatchReason(const CacheSignature &cached, const CacheSignature &curre
     return QStringLiteral("hit");
 }
 
-bool write(const QString &path, const CacheSignature &signature, const QVector<SearchRecord> &records)
+bool write(const QString &path, const CacheSignature &signature,
+           const QVector<SearchRecord> &records, quint32 chunkRecords)
 {
-    if (!signature.valid() || signature.formatVersion != kFormatVersion) return false;
-    // Serialize the records, then compress that payload.
-    QByteArray payload;
-    {
-        QDataStream s(&payload, QIODevice::WriteOnly);
-        s.setVersion(kDataStreamVersion);
-        s << static_cast<quint64>(records.size());
-        for (const SearchRecord &r : records) {
-            writeRecord(s, r);
-        }
-    }
-    const QByteArray compressed = zstdCompress(payload);
-    if (compressed.isEmpty() && !payload.isEmpty()) {
-        return false;
-    }
+    if (!signature.valid() || signature.formatVersion != kFormatVersion
+        || chunkRecords == 0 || chunkRecords > kMaxChunkRecords) return false;
 
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) {
-        return false;
-    }
+    if (!file.open(QIODevice::WriteOnly)) return false;
     QDataStream s(&file);
     s.setVersion(kDataStreamVersion);
     s << kMagic;
     writeSignature(s, signature);
-    s << static_cast<quint64>(payload.size()); // raw payload size for the decoder
-    s << compressed;
+    s << static_cast<quint64>(records.size());
+
+    QByteArray raw;
+    std::optional<QDataStream> chunk;
+    quint32 count = 0;
+    const auto flush = [&] {
+        if (count == 0) return true;
+        chunk.reset();
+        const QByteArray compressed = zstdCompress(raw);
+        if (compressed.isEmpty()) return false;
+        s << count << static_cast<quint64>(raw.size()) << static_cast<quint64>(compressed.size());
+        if (s.status() != QDataStream::Ok
+            || s.writeRawData(compressed.constData(), compressed.size()) != compressed.size()) {
+            return false;
+        }
+        raw.clear();
+        count = 0;
+        return true;
+    };
+    for (const SearchRecord &record : records) {
+        if (!chunk) {
+            chunk.emplace(&raw, QIODevice::WriteOnly);
+            chunk->setVersion(kDataStreamVersion);
+        }
+        writeRecord(*chunk, record);
+        ++count;
+        // A single record larger than a whole chunk may hold is not cacheable.
+        if (chunk->status() != QDataStream::Ok || static_cast<quint64>(raw.size()) > kMaxChunkBytes) {
+            file.cancelWriting();
+            return false;
+        }
+        if ((count == chunkRecords || static_cast<quint64>(raw.size()) >= kChunkTargetBytes) && !flush()) {
+            file.cancelWriting();
+            return false;
+        }
+    }
+    if (!flush()) {
+        file.cancelWriting();
+        return false;
+    }
+    s << quint32(0);
     if (s.status() != QDataStream::Ok) {
         file.cancelWriting();
         return false;
@@ -208,54 +241,48 @@ bool forEachRecord(const QString &path, CacheSignature *outSignature,
                    const std::function<void(SearchRecord)> &sink, const CacheSignature *expected)
 {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return false;
-    }
+    if (!file.open(QIODevice::ReadOnly)) return false;
     QDataStream s(&file);
     s.setVersion(kDataStreamVersion);
 
     quint32 magic = 0;
     s >> magic;
-    if (magic != kMagic) {
-        return false;
-    }
+    if (magic != kMagic) return false;
     CacheSignature signature;
     const bool valid = readSignature(s, signature);
     if (outSignature != nullptr) *outSignature = signature;
     if (!valid || (expected != nullptr && signature != *expected)) return false;
-    quint64 rawSize = 0;
-    QByteArray compressed;
-    s >> rawSize >> compressed;
-    if (s.status() != QDataStream::Ok) {
-        return false;
-    }
 
-    const QByteArray payload = zstdDecompress(compressed, rawSize);
-    if (payload.isEmpty() && rawSize != 0) {
-        return false;
-    }
-
-    QDataStream ps(payload);
-    ps.setVersion(kDataStreamVersion);
-    quint64 count = 0;
-    ps >> count;
-    if (ps.status() != QDataStream::Ok || count > kMaxDecodedBytes) {
-        return false;
-    }
+    quint64 total = 0;
+    s >> total;
+    if (s.status() != QDataStream::Ok) return false;
+    quint64 seen = 0;
     QHash<QString, QString> pool;
-    for (quint64 i = 0; i < count; ++i) {
-        SearchRecord rec = readRecord(ps, pool);
-        if (ps.status() != QDataStream::Ok) {
-            return false; // truncated/corrupt payload
+    while (true) {
+        quint32 count = 0;
+        s >> count;
+        if (s.status() != QDataStream::Ok) return false;
+        if (count == 0) return seen == total && s.atEnd();
+        quint64 rawSize = 0, compressedSize = 0;
+        s >> rawSize >> compressedSize;
+        if (s.status() != QDataStream::Ok || count > kMaxChunkRecords
+            || count > total - seen || rawSize == 0 || rawSize > kMaxChunkBytes
+            || compressedSize == 0 || compressedSize > ZSTD_compressBound(kMaxChunkBytes)
+            || compressedSize > static_cast<quint64>(file.bytesAvailable())) return false;
+        QByteArray compressed(static_cast<qsizetype>(compressedSize), Qt::Uninitialized);
+        if (s.readRawData(compressed.data(), compressed.size()) != compressed.size()) return false;
+        const QByteArray raw = zstdDecompress(compressed, rawSize);
+        if (raw.isEmpty()) return false;
+        QDataStream chunk(raw);
+        chunk.setVersion(kDataStreamVersion);
+        for (quint32 i = 0; i < count; ++i) {
+            SearchRecord rec = readRecord(chunk, pool);
+            if (chunk.status() != QDataStream::Ok) return false;
+            sink(std::move(rec));
         }
-        sink(std::move(rec));
+        if (!chunk.atEnd()) return false;
+        seen += count;
     }
-
-    if (ps.status() != QDataStream::Ok || !ps.atEnd()) return false;
-    if (outSignature) {
-        *outSignature = signature;
-    }
-    return true;
 }
 
 Loaded read(const QString &path)
