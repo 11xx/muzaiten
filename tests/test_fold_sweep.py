@@ -88,6 +88,20 @@ class SweepTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected 2 output lines"):
                 sweep.inspector(Path("unused"), ["one", "two"])
 
+    def test_inspector_builds_from_its_own_tree(self):
+        # The inspector calls the library of its revision, so a base built
+        # from the working tree's source would not link against the base.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tree, build = root / "base", root / "base-build"
+            build.mkdir()
+            commands = []
+            with patch.object(sweep, "CACHE", root / "cache"), \
+                 patch.object(sweep, "output", return_value=""), \
+                 patch.object(sweep, "run", side_effect=lambda *command: commands.append(command)):
+                sweep.compile_inspector("base-x", tree, build, "c++")
+            self.assertIn(str(tree / "tools/fold-inspect.cpp"), commands[0])
+
     def test_phrase_rows_reject_bad_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "phrases.tsv"

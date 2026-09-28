@@ -89,9 +89,9 @@ def toneless_pinyin(reading: str) -> Optional[str]:
     return plain if plain and plain.isascii() and plain.isalpha() else None
 
 
-def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional[str], Optional[str], str]],
+def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[list[str], str]],
                                                         dict[str, tuple[pathlib.Path, int]]]:
-    entries: dict[str, tuple[Optional[str], Optional[str], str]] = {}
+    entries: dict[str, tuple[list[str], str]] = {}
     locations: dict[str, tuple[pathlib.Path, int]] = {}
     for path in sorted(directory.glob("*.tsv")):
         if path.name == "words.tsv":
@@ -118,9 +118,7 @@ def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional
                 first_path, first_line = locations[ideograph]
                 sys.exit(f"{path}:{line_number}: duplicate authored ideograph {ideograph!r}; "
                          f"first listed at {first_path}:{first_line}")
-            primary = readings[0] if readings else None
-            secondary = next((reading for reading in readings[1:] if reading != primary), None)
-            entries[ideograph] = (primary, secondary, simplified)
+            entries[ideograph] = (list(dict.fromkeys(readings)), simplified)
             locations[ideograph] = (path, line_number)
     return entries, locations
 
@@ -162,7 +160,7 @@ def load_han_words(path: pathlib.Path, simplified: dict[str, str]) -> dict[str, 
         if len(existing) > 2:
             first_word, first_row = first_rows[key]
             sys.exit(f"{path}:{line_number}: {word!r} merges with {first_word!r} at {path}:{first_row}; "
-                     "the engine holds only two readings per word until per-position readings land")
+                     "a word row holds at most two readings")
         first_rows.setdefault(key, (word, line_number))
         words[key] = (existing[0], existing[1] if len(existing) == 2 else "")
     return words
@@ -320,7 +318,7 @@ class Generator:
 
         self.han_authored, self.han_authored_locations = load_authored_han(tables / "han")
         self.han_pinyin: dict[str, str] = {}
-        self.han_second_pinyin: dict[str, str] = {}
+        self.han_readings: dict[str, list[str]] = {}
         pinyin_path = tables.parent / "unihan" / "han_pinyin.tsv"
         for line_number, (reading_field, characters) in tsv_rows(pinyin_path, 2):
             reading = toneless_pinyin(reading_field)
@@ -343,11 +341,11 @@ class Generator:
                     sys.exit(f"{simplified_path}:{line_number}: expected traditional Han ideographs")
                 self.simplified[ch] = simple
 
-        for ch, (primary, secondary, simplified) in self.han_authored.items():
-            if primary is not None:
-                self.han_pinyin[ch] = primary
-            if secondary is not None:
-                self.han_second_pinyin[ch] = secondary
+        for ch, (readings, simplified) in self.han_authored.items():
+            if readings:
+                self.han_pinyin[ch] = readings[0]
+            if len(readings) > 1:
+                self.han_readings[ch] = readings
             if simplified:
                 self.simplified[ch] = simplified
         try:
@@ -1029,8 +1027,8 @@ class Generator:
                 bmp_pinyin[cp - 0x3400] = pinyin_id(reading)
             elif cp >= 0x10000:
                 astral_pinyin.append((cp, pinyin_id(reading)))
-        second_pinyin = [(ord(ch), pinyin_id(reading))
-                         for ch, reading in sorted(self.han_second_pinyin.items())]
+        reading_lists = [(ord(ch), [pinyin_id(reading) for reading in readings])
+                         for ch, readings in sorted(self.han_readings.items())]
 
         def words(table: dict, split: bool) -> tuple[list[str], int]:
             rows = []
@@ -1246,7 +1244,7 @@ class Generator:
 
         digest = hashlib.sha256()
         digest.update(repr((bmp, astral, sorted(forms.items()), pool.units, kana_rows, hangul_lines,
-                            bmp_pinyin, astral_pinyin, second_pinyin, pinyin_syllables,
+                            bmp_pinyin, astral_pinyin, reading_lists, pinyin_syllables,
                             japanese_rows, chinese_rows,
                             greek_styles, alpha_rows, cyr_styles, vowel_rows, thai_rows, lao_rows,
                             thai_word_rows, brahmic_rows, brahmic_block_rows, merge_rows, cluster_rows, abjad_rows,
@@ -1298,11 +1296,17 @@ class Generator:
             w(f"    {{0x{cp:X}, {pid}}},")
         w("};")
         w(f"const std::size_t kHanPinyinAstralCount = {len(astral_pinyin)};")
-        w(f"const HanSecondPinyin kHanSecondPinyin[{max(1, len(second_pinyin))}] = {{")
-        for cp, pid in second_pinyin:
-            w(f"    {{0x{cp:X}, {pid}}},")
+        w(f"const HanReadingList kHanReadingLists[{max(1, len(reading_lists))}] = {{")
+        offset = 0
+        for cp, ids in reading_lists:
+            w(f"    {{0x{cp:X}, {offset}, {len(ids)}}},")
+            offset += len(ids)
         w("};")
-        w(f"const std::size_t kHanSecondPinyinCount = {len(second_pinyin)};")
+        w(f"const std::size_t kHanReadingListCount = {len(reading_lists)};")
+        w(f"const std::uint16_t kHanReadingIds[{max(1, offset)}] = {{")
+        for _, ids in reading_lists:
+            w("    " + ", ".join(map(str, ids)) + ",")
+        w("};")
         w(f"const Str kPinyin[{len(pinyin_refs) + 1}] = {{{{0, 0}}, {', '.join(pinyin_refs)}}};")
         w(f"const Word kJapaneseWords[{len(japanese_rows)}] = {{")
         out.extend(japanese_rows)

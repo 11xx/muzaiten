@@ -98,7 +98,7 @@ struct HangulStyle {
 struct HangulSurname { Str key; Str syllables[2]; };
 
 struct HanAstralPinyin { char32_t cp; std::uint16_t pinyin; };
-struct HanSecondPinyin { char32_t cp; std::uint16_t pinyin; };
+struct HanReadingList { char32_t cp; std::uint32_t offset; std::uint16_t count; };
 
 enum class GreekPairKind : std::uint8_t { Plain, Initial, Voicing };
 struct GreekPair { char16_t first; char16_t second; Str a; Str b; GreekPairKind kind; };
@@ -169,8 +169,9 @@ extern const std::uint16_t kHanPinyinBmp[0xA000 - 0x3400];
 extern const HanAstralPinyin kHanPinyinAstral[];
 extern const std::size_t kHanPinyinAstralCount;
 // Sparse readings for authored ideographs with a second distinct pinyin.
-extern const HanSecondPinyin kHanSecondPinyin[];
-extern const std::size_t kHanSecondPinyinCount;
+extern const HanReadingList kHanReadingLists[];
+extern const std::size_t kHanReadingListCount;
+extern const std::uint16_t kHanReadingIds[];
 extern const Str kPinyin[];
 extern const Word kJapaneseWords[];
 extern const std::size_t kJapaneseWordCount;
@@ -313,17 +314,41 @@ using Units = QVarLengthArray<Unit, 64>;
 struct Context {
     std::uint32_t mask = 0;   // every script in the string (Script bits)
     char32_t before = 0;      // the code point just before the run, 0 at the start
+    struct PinyinPlan *pinyin = nullptr;
+    int variant = 0;
+};
+
+struct PinyinPlan {
+    QVector<int> radices;
+    QVector<int> runs;
+    QVector<int> sourceRuns;
+    QVector<QVector<std::uint8_t>> choices;
+    std::uint64_t product = 1;
+    int cursor = 0;
+    bool counting = false;
+    bool capped = false;
+
+    void position(int radix, int source)
+    {
+        if (counting) {
+            radices.append(radix);
+            runs.append(sourceRuns[source]);
+        } else {
+            ++cursor;
+        }
+    }
+    int choice(int variant) const { return choices[variant][cursor - 1]; }
 };
 
 // Emits a unit's primary fold (for a handler falling back to it).
 void emitPrimary(const Unit &unit, Out &out);
 
-// Number of reading styles of a script family: the primary fold plus its
-// alternates. Pass k reads a family with style k when k is below its count.
+// Number of reading styles of a script family other than Han. Han's pinyin
+// style has a separate per-string variant count.
 int styleCount(Script family);
 
 void foldKana(const Unit *units, qsizetype n, int style, Out &out);
-void foldHan(const Unit *units, qsizetype n, int style, const Context &ctx, Out &out);
+void foldHan(const Unit *units, qsizetype n, int style, int variant, const Context &ctx, Out &out);
 void foldHangul(const Unit *units, qsizetype n, int style, Out &out);
 void foldGreek(const Unit *units, qsizetype n, int style, Out &out);
 void foldCyrillic(const Unit *units, qsizetype n, int style, const Context &ctx, Out &out);

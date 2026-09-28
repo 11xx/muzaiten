@@ -29,7 +29,7 @@ common reading and a query matches any of them:
 | Armenian | Eastern (`yerevan`, `hayastan`) and Western (`hayasdan`) |
 | Korean | syllable by syllable (`hangukeo`), as pronounced (`hangugeo`), McCune-Reischauer (`pochonbo` for `보천보`), conventional name spellings (`lee jieun` for `이지은`, `kim taehyung` for `김태형`, `kye young` for `계영`) |
 | Japanese | wapuro (`toukyou`), Hepburn (`tokyo`); common kanji through a seed dictionary |
-| Chinese | toneless pinyin; a character with two readings matches either (`changfa` or `zhangfa` for `长发`), and word readings settle common polyphones (`yinyue` for `音乐`, `chongqing` for `重庆`) |
+| Chinese | toneless pinyin; every authored reading of a polyphonic character can match, and choices combine across a title. Word readings settle their whole span (`yinyue` for `音乐`, `chongqing` for `重庆`) |
 | Thai | RTGS (`sawatdi`, `khopkhun`) and the common spelling (`sawasdee`, `khobkhun`, `jai`); words spelling rules misread come from a word table (`ching` for `จริง`) |
 | Lao | standard (`viangchan`) and French-style (`wiangjan`) |
 | Arabic, Persian, Urdu | vowel marks when written; otherwise the consonants with ا و ي as vowels (`mhmud`), with a first-syllable a (`habibi`, `salam`), and in el-/ou/ee spelling (`nour`, `eljadeed`) |
@@ -97,9 +97,14 @@ reason for the decision. Rows in `tables/han/words.tsv` use
 `word<TAB>reading[<TAB>second reading]`: the word may use any Han spelling;
 its key folds to simplified forms at build time, and rows whose keys coincide
 merge their readings. Each tone-marked reading has one syllable per character.
-Chinese fold style 3 uses
-the first reading; style 4 uses the second when present and otherwise repeats
-the first.
+Each polyphonic word span or unmatched character contributes its readings in
+authored order. Search combines these choices across a title, including
+choices in separate Han runs. A matched word supplies its whole reading; its
+characters do not add independent alternatives. The all-first and all-second
+combinations come first, then other combinations with fewer changed
+positions. A title contributes up to 64 pinyin variants; longer titles
+enumerate whitespace- or slash-separated runs in lockstep when their full
+product exceeds that limit.
 Chinese word lookup folds
 each character to its simplified form first, so a word row also supplies the
 reading for traditional and variant spellings. Japanese seed readings match the written characters. Han runs use forward and backward longest

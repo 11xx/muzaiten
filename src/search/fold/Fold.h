@@ -28,8 +28,8 @@
 //   Cyrillic spellings with Ukrainian, Belarusian and Serbian letters,
 //   Eastern and Western Armenian as read (Երևան→yerevan), wapuro romaji
 //   (きゃ→kya, ティ→ti) and Hepburn with long vowels collapsed (tokyo),
-//   Japanese kanji readings from a seed dictionary, Chinese pinyin with a
-//   second reading for characters that have two, Korean as pronounced
+//   Japanese kanji readings from a seed dictionary, Chinese pinyin with each
+//   polyphonic word or character reading chosen independently, Korean as pronounced
 //   (한국어→hangugeo), in McCune-Reischauer (보천보→pochonbo), and with
 //   conventional surname and given-name spellings (이지은→leejieun), Thai RTGS and common
 //   spellings, Indic with and without Hindi schwa deletion, Arabic and Hebrew
@@ -39,6 +39,9 @@
 // alternate, separated by kSegmentSeparator. A query folds to the primary
 // form only. The folding tables are compiled from src/search/fold/tables by
 // tools/foldgen.py; see docs/search.md.
+// Han pinyin variants form a per-string reading axis beside the romanization
+// style. Word rows suppress character alternatives within their spans; the
+// all-first and all-second choices precede the remaining combinations.
 //
 // Folding preserves spaces and punctuation: the matcher relies on word
 // boundaries for its fzf bonuses and on substring semantics.
@@ -53,7 +56,7 @@ namespace Search::Fold {
 // Revision of the fold pipeline. cacheSignature() mixes it with a digest of
 // the compiled tables; the on-disk search cache stores folded norms, so a
 // change to either must invalidate it.
-inline constexpr quint32 kVersion = 6;
+inline constexpr quint32 kVersion = 7;
 
 // Separates the alternative folded forms of one field inside a search norm
 // (the display text's fold, its alternate readings, then a sort name's).
@@ -75,6 +78,17 @@ struct FoldResult {
     QString      text;
     QVector<int> srcIndex;
 };
+
+struct Census {
+    int positions = 0;
+    quint64 product = 1;
+    int variants = 1;
+    bool capped = false;
+    qsizetype alternateUnits = 0;
+};
+
+// Counts the Han reading positions and the folded alternate text of one value.
+Census census(const QString &src);
 
 // The primary fold with the source-index map.
 FoldResult fold(const QString &src);

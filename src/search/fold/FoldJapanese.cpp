@@ -13,8 +13,9 @@
 // folded to simplified, compiled into the entry; 々 and 〻 as 々). Alternate
 // readings expand 々 and give the Japanese seed dictionary's readings in
 // wapuro (style 1) and Hepburn (style 2), romanized as kana, then toneless
-// pinyin (style 3) and the same with each polyphone's second reading
-// (style 4). Chinese word readings take precedence in both pinyin styles.
+// pinyin (style 3 and its variant axis). Each polyphonic word span or
+// unmatched character chooses its own reading; word spans suppress their
+// characters' readings.
 
 #include "search/fold/FoldEngine.h"
 
@@ -185,12 +186,12 @@ std::uint16_t pinyinOf(char32_t cp)
     return it != end && it->cp == cp ? it->pinyin : std::uint16_t(0);
 }
 
-std::uint16_t secondPinyinOf(char32_t cp)
+const HanReadingList *readingsOf(char32_t cp)
 {
-    const HanSecondPinyin *end = kHanSecondPinyin + kHanSecondPinyinCount;
-    const HanSecondPinyin *it = std::lower_bound(kHanSecondPinyin, end, cp,
-                                                 [](const HanSecondPinyin &h, char32_t c) { return h.cp < c; });
-    return it != end && it->cp == cp ? it->pinyin : std::uint16_t(0);
+    const HanReadingList *end = kHanReadingLists + kHanReadingListCount;
+    const HanReadingList *it = std::lower_bound(kHanReadingLists, end, cp,
+                                                [](const HanReadingList &h, char32_t c) { return h.cp < c; });
+    return it != end && it->cp == cp ? it : nullptr;
 }
 
 void emitSurface(char32_t cp, int src, Out &out)
@@ -318,12 +319,12 @@ qsizetype functionWordCount(const WordSegments &segments, QStringView keys,
 
 } // namespace
 
-void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out)
+void foldHan(const Unit *u, qsizetype n, int style, int variant, const Context &ctx, Out &out)
 {
     // Outside the primary fold, iteration marks repeat the ideograph before them.
     QVarLengthArray<char32_t, 32> cps(n);
     QVarLengthArray<char16_t, 32> keys(n);
-    const bool chineseReading = style == 3 || style == 4;
+    const bool chineseReading = style >= 3;
     QVarLengthArray<char16_t, 32> chineseKeys;
     QVarLengthArray<qsizetype, 32> chineseOffsets;
     if (chineseReading) chineseOffsets.resize(n + 1);
@@ -358,7 +359,7 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         }
         return;
     }
-    if (style == 3 || style == 4) {
+    if (chineseReading) {
         const WordSegments forward = segmentChineseForward(kChineseWords, kChineseWordCount,
                                                            kChineseLongest, chineseKeyView, chineseOffsets);
         const WordSegments backward = segmentChineseBackward(kChineseWords, kChineseWordCount,
@@ -373,8 +374,12 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
         for (const WordSegment &segment : segments) {
             if (segment.word) {
                 qsizetype m = 0;
-                const Str reading = style == 4 && segment.word->alternate.len
-                    ? segment.word->alternate : segment.word->value;
+                int choice = 0;
+                if (segment.word->alternate.len && ctx.pinyin) {
+                    ctx.pinyin->position(2, u[segment.first].src);
+                    if (!ctx.pinyin->counting) choice = ctx.pinyin->choice(variant);
+                }
+                const Str reading = choice ? segment.word->alternate : segment.word->value;
                 for (const QStringView syllable : view(reading).tokenize(u' ')) {
                     out.put(syllable, u[segment.first + std::min(m, segment.length - 1)].src);
                     ++m;
@@ -382,8 +387,13 @@ void foldHan(const Unit *u, qsizetype n, int style, const Context &ctx, Out &out
                 continue;
             }
             const qsizetype j = segment.first;
-            const std::uint16_t id = style == 4 ? secondPinyinOf(cps[j]) : 0;
-            const std::uint16_t fallback = id ? id : pinyinOf(cps[j]);
+            const HanReadingList *readings = readingsOf(cps[j]);
+            int choice = 0;
+            if (readings && ctx.pinyin) {
+                ctx.pinyin->position(readings->count, u[j].src);
+                if (!ctx.pinyin->counting) choice = ctx.pinyin->choice(variant);
+            }
+            const std::uint16_t fallback = readings ? kHanReadingIds[readings->offset + choice] : pinyinOf(cps[j]);
             if (fallback) out.put(kPinyin[fallback], u[j].src);
             else emitSurface(cps[j], u[j].src, out);
         }
