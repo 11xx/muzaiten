@@ -179,9 +179,28 @@ class FoldHanDataTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, r"words.tsv:2: 2 characters but 1 syllables"):
                 foldgen.load_han_words(words, {})
 
-            words.write_text("# word readings\n樂隊\tlè duì\n", encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, r"words.tsv:2: word must use simplified Han forms"):
-                foldgen.load_han_words(words, {"樂": "乐"})
+            words.write_text("# word readings\n樂隊\tlè duì\n乐队\tyuè duì\n", encoding="utf-8")
+            self.assertEqual(foldgen.load_han_words(words, {"樂": "乐", "隊": "队"}),
+                             {"乐队": ("le dui", "yue dui")})
+
+            words.write_text("樂隊\tlè duì\n乐队\tlè duì\n", encoding="utf-8")
+            self.assertEqual(foldgen.load_han_words(words, {"樂": "乐", "隊": "队"}),
+                             {"乐队": ("le dui", "")})
+
+            words.write_text("樂隊\tlè duì\n樂隊\tyuè duì\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "duplicate Han word"):
+                foldgen.load_han_words(words, {"樂": "乐", "隊": "队"})
+
+            words.write_text("樂隊\tlè duì\n乐队\tyuè duì\tlè duì\n", encoding="utf-8")
+            self.assertEqual(foldgen.load_han_words(words, {"樂": "乐", "隊": "队"}),
+                             {"乐队": ("le dui", "yue dui")})
+            words.write_text("樂隊\tlè duì\n乐队\tyuè duì\tlē duì\n", encoding="utf-8")
+            # Tone differences collapse to the same toneless reading.
+            self.assertEqual(foldgen.load_han_words(words, {"樂": "乐", "隊": "队"}),
+                             {"乐队": ("le dui", "yue dui")})
+            words.write_text("樂隊\tlè duì\n乐队\tyuè duì\n樂队\tlào duì\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, r"樂队.*樂隊.*two readings per word"):
+                foldgen.load_han_words(words, {"樂": "乐", "隊": "队"})
 
             words.write_text("# word readings\n你好\tnǐ hǎo\tnǐ\n", encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, r"words.tsv:2: second reading: 2 characters but 1 syllables"):
@@ -274,6 +293,92 @@ class FoldHanDataTests(unittest.TestCase):
 
         self.assertEqual(date_line, "#! date=2026-09-26T00:33:45Z")
         self.assertEqual(words, {"乐队": {("yue", "dui")}, "樂隊": {("yue", "dui")}})
+
+    def test_traditional_word_uses_cedict_and_joined_key_checks_first_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "樂\tlè yuè\t乐\n乐\tyuè\t\n隊\tduì\t队\n队\tduì\t\n",
+                encoding="utf-8")
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            archive = root / "cedict.zip"
+            with checker.zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("cedict_ts.u8", "樂隊 乐队 [le4 dui4] /music/\n")
+            _, cedict = checker.cedict_words(archive)
+            words = root / "words.tsv"
+            words.write_text("樂隊\tlè duì\n乐队\tyuè duì\n乐隊\tlè duì\n",
+                             encoding="utf-8")
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, counts = checker.check_words(
+                    words, authored, cedict, {"le", "yue", "dui"}, set(), set())
+            self.assertEqual(counts["duplicate"], 1)
+            self.assertFalse(any(f[1] == "2" and f[3] == "duplicate" for f in findings))
+            self.assertIn((str(words), "3", "乐隊", "duplicate", "乐隊",
+                           f"樂隊 at {words}:1"), findings)
+            self.assertFalse(any(f[2] == "樂隊" and f[3] in ("format", "joined-key", "uncommon")
+                                 for f in findings))
+            self.assertFalse(any(f[2] == "樂隊" and f[3] == "cedict" for f in findings))
+
+            words.write_text("乐队\tyuè duì\n", encoding="utf-8")
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, _ = checker.check_words(
+                    words, authored, cedict, {"le", "yue", "dui"}, set(), set())
+            self.assertIn((str(words), "1", "乐队", "joined-key", "yuè duì", "樂=le"), findings)
+
+    def test_traditional_word_is_valid_and_uses_traditional_cedict_headword(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "樂\tyuè\t乐\n隊\tduì\t队\n", encoding="utf-8")
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            archive = root / "cedict.zip"
+            with checker.zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("cedict_ts.u8", "樂隊 乐队 [yue4 dui4] /band/\n")
+            _, cedict = checker.cedict_words(archive)
+            words = root / "words.tsv"
+            words.write_text("樂隊\tyuè duì\n", encoding="utf-8")
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                findings, _ = checker.check_words(
+                    words, authored, cedict, {"yue", "dui"}, set(), set())
+            self.assertFalse(any(f[3] in ("format", "cedict", "uncommon") for f in findings))
+
+    def test_joined_key_requires_missing_first_source_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "authored"
+            authored.mkdir()
+            (authored / "han.tsv").write_text(
+                "樂\tlè yuè\t乐\n乐\tyuè\t\n队\tduì\t\n", encoding="utf-8")
+            unihan = root / "unihan"
+            unihan.mkdir()
+            (unihan / "han_pinyin.tsv").write_text("", encoding="utf-8")
+            (unihan / "han_simplified.tsv").write_text("", encoding="utf-8")
+            words = root / "words.tsv"
+            words.write_text("乐队\tyuè duì\n", encoding="utf-8")
+            with mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", unihan):
+                missing, _ = checker.check_words(
+                    words, authored, {}, {"le", "yue", "dui"}, set(), set())
+                words.write_text("乐队\tyuè duì\tlè duì\n", encoding="utf-8")
+                carried, _ = checker.check_words(
+                    words, authored, {}, {"le", "yue", "dui"}, set(), set())
+                (authored / "han.tsv").write_text(
+                    "樂\tyuè lè\t乐\n乐\tyuè\t\n队\tduì\t\n", encoding="utf-8")
+                words.write_text("乐队\tyuè duì\n", encoding="utf-8")
+                secondary_only, _ = checker.check_words(
+                    words, authored, {}, {"le", "yue", "dui"}, set(), set())
+            self.assertIn((str(words), "1", "乐队", "joined-key", "yuè duì", "樂=le"), missing)
+            self.assertFalse(any(f[3] == "joined-key" for f in carried))
+            self.assertFalse(any(f[3] == "joined-key" for f in secondary_only))
 
     def test_word_findings_cover_duplicates_readings_cedict_and_uncommon(self):
         with tempfile.TemporaryDirectory() as directory:

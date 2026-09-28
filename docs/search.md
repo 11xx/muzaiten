@@ -81,8 +81,10 @@ word file is still checked from `--words` or `words.tsv` in the authored
 directory. Reviewed rows in `tools/fold-han-reviewed.tsv` match an ideograph
 or word, finding kind, authored value and reference value, followed by the
 reason for the decision. Rows in `tables/han/words.tsv` use
-`word<TAB>reading[<TAB>second reading]`: the word is simplified Han, and each
-tone-marked reading has one syllable per character. Chinese fold style 3 uses
+`word<TAB>reading[<TAB>second reading]`: the word may use any Han spelling;
+its key folds to simplified forms at build time, and rows whose keys coincide
+merge their readings. Each tone-marked reading has one syllable per character.
+Chinese fold style 3 uses
 the first reading; style 4 uses the second when present and otherwise repeats
 the first.
 Chinese word lookup folds
@@ -97,7 +99,9 @@ with the simplified characters’ defaults.
 The Han checker also checks word format, each syllable against its character's
 authored reading or Unihan default, and each toneless reading against
 CC-CEDICT. An identical second reading is a format finding. Findings are
-`format`, `reading`, `cedict` (the dictionary lists the word only with other
+`format`, `duplicate` (a row adds no reading to an earlier row with the same
+key), `joined-key` (the key hides the first reading of a spelling that folds
+into it), `reading`, `cedict` (the dictionary lists the word only with other
 readings), `uncommon` (the dictionary has no entry), `edge-particle` (a word
 edge lacks a particle reading), or `opencc` (the authored simplified form
 differs from OpenCC's first mapping).

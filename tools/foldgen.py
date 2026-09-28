@@ -126,14 +126,14 @@ def load_authored_han(directory: pathlib.Path) -> tuple[dict[str, tuple[Optional
 
 
 def load_han_words(path: pathlib.Path, simplified: dict[str, str]) -> dict[str, tuple[str, str]]:
-    """Load simplified Han words with one or two tone-marked readings."""
+    """Load Han words under their simplified keys with up to two readings."""
     words: dict[str, tuple[str, str]] = {}
+    spellings: dict[str, int] = {}
+    first_rows: dict[str, tuple[str, int]] = {}
     for line_number, fields in tsv_rows(path, (2, 3)):
         word, *reading_fields = fields
         if not word or any(not is_han(ord(ch)) for ch in word):
             sys.exit(f"{path}:{line_number}: word must contain only Han ideographs")
-        if any(simplified.get(ch, ch) != ch for ch in word):
-            sys.exit(f"{path}:{line_number}: word must use simplified Han forms")
         normalized_readings = [" ".join(unicodedata.normalize("NFC", field).split())
                                for field in reading_fields]
         if len(normalized_readings) == 2 and normalized_readings[0] == normalized_readings[1]:
@@ -151,9 +151,20 @@ def load_han_words(path: pathlib.Path, simplified: dict[str, str]) -> dict[str, 
                     sys.exit(f"{path}:{line_number}: {label}invalid tone-marked Hanyu Pinyin syllable {syllable!r}")
                 plain.append(reading)
             plain_readings.append(" ".join(plain))
-        if word in words:
-            sys.exit(f"{path}:{line_number}: duplicate Han word {word!r}")
-        words[word] = (plain_readings[0], plain_readings[1] if len(plain_readings) == 2 else "")
+        if word in spellings:
+            sys.exit(f"{path}:{line_number}: duplicate Han word {word!r}; first listed at {path}:{spellings[word]}")
+        spellings[word] = line_number
+        key = "".join(simplified.get(ch, ch) for ch in word)
+        existing = [reading for reading in words.get(key, ()) if reading]
+        for reading in plain_readings:
+            if reading not in existing:
+                existing.append(reading)
+        if len(existing) > 2:
+            first_word, first_row = first_rows[key]
+            sys.exit(f"{path}:{line_number}: {word!r} merges with {first_word!r} at {path}:{first_row}; "
+                     "the engine holds only two readings per word until per-position readings land")
+        first_rows.setdefault(key, (word, line_number))
+        words[key] = (existing[0], existing[1] if len(existing) == 2 else "")
     return words
 
 

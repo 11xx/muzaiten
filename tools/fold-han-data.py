@@ -16,7 +16,7 @@ Mandarin pinyin or `-`, and the simplified field is empty when no form applies.
 Reviewed rows use `ideograph-or-word<TAB>kind<TAB>ours<TAB>reference<TAB>reason`.
 Directory mode requires all four tier files; explicit FILE arguments select
 the character files. The checker also checks `words.tsv`, whose rows use
-simplified words and one or two tone-marked readings, against authored or
+words in any spelling and one or two tone-marked readings, against authored or
 Unihan character readings and CC-CEDICT. It caches CC-CEDICT under
 `$XDG_CACHE_HOME/muzaiten-tools/` (`~/.cache/muzaiten-tools/` by default), never copies it into the repository, and prints its date
 line with word findings.
@@ -78,6 +78,7 @@ PINYIN_CIRCUMFLEX = "\u0302"
 CHECK_KINDS = (
     "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
     "reading", "cedict", "cedict-extra", "uncommon", "edge-particle", "opencc",
+    "duplicate", "joined-key",
 )
 TIER_FILES = ("gb2312.tsv", "big5.tsv", "jis.tsv", "ksx.tsv")
 # At a word edge, these characters must retain a reading used when they are particles.
@@ -521,10 +522,18 @@ def check_words(
     special_spellings: set[str],
     reviewed: set[tuple[str, str, str, str]],
 ) -> tuple[list[tuple[str, str, str, str, str, str]], Counter]:
-    """Check simplified Han word readings against character data and CC-CEDICT."""
+    """Check Han word readings against character data and CC-CEDICT."""
     readings, simplified = word_character_data(authored_dir)
     findings: list[tuple[str, str, str, str, str, str]] = []
     first_occurrence: dict[str, int] = {}
+    key_readings: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+    key_first: dict[str, tuple[str, int]] = {}
+    joined_sources: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    authored_sources = authored_ideographs(authored_dir)
+    for source in simplified:
+        key = terminal_simplified(source, simplified)
+        if source in authored_sources and source != key and readings.get(source):
+            joined_sources[key].append((source, readings[source][0]))
 
     def add(row: int, word: str, kind: str, ours: str, reference: str) -> None:
         findings.append((str(path), str(row), word or "-", kind, ours, reference))
@@ -547,9 +556,6 @@ def check_words(
                 add(row_number, word, "format", word, f"first listed at {path}:{previous}")
             else:
                 first_occurrence[word] = row_number
-            expected_simple = "".join(terminal_simplified(ch, simplified) for ch in word)
-            if word != expected_simple:
-                add(row_number, word, "format", word, expected_simple)
 
         references = cedict.get(word)
         reading_fields = columns[1:]
@@ -565,6 +571,28 @@ def check_words(
                         f"{position}:{word[index]} {particle}")
         normalized_readings = [" ".join(unicodedata.normalize("NFC", field).split())
                                for field in reading_fields]
+        if valid_word:
+            key = "".join(terminal_simplified(ch, simplified) for ch in word)
+            current = {tuple(pinyin_base(part) for part in field.split()) for field in reading_fields}
+            prior = key_readings[key]
+            if key in key_first and current <= prior:
+                earlier_word, earlier_row = key_first[key]
+                add(row_number, word, "duplicate", word, f"{earlier_word} at {path}:{earlier_row}")
+            key_first.setdefault(key, (word, row_number))
+            prior.update(current)
+            joined_reported: set[tuple[str, str]] = set()
+            for position, folded in enumerate(key):
+                for source, first_reading in joined_sources[folded]:
+                    if (source, first_reading) in joined_reported:
+                        continue
+                    if first_reading in readings.get(folded, []):
+                        continue
+                    if any(len(parts := field.split()) == len(word)
+                           and pinyin_base(parts[position]) == first_reading for field in reading_fields):
+                        continue
+                    add(row_number, word, "joined-key", " / ".join(reading_fields),
+                        f"{source}={first_reading}")
+                    joined_reported.add((source, first_reading))
         if len(normalized_readings) == 2 and normalized_readings[0] == normalized_readings[1]:
             add(row_number, word, "format", reading_fields[1], "a distinct second reading")
 
