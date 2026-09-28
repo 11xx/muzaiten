@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
+  written with its traditional form (訏, 軏), and the reverse.
+
 ### Developer tooling
 
 - Han word tables accept any spelling and merge readings under simplified keys;
