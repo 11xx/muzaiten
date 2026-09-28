@@ -54,6 +54,65 @@ private slots:
         if (expected.size() > 1) QCOMPARE(segments(input), expected);
     }
 
+    void polyphoneProducts()
+    {
+        const QString three = QString::fromUtf8("都都都");
+        QCOMPARE(Fold::census(three).product, quint64(8));
+        QCOMPARE(Fold::census(three).variants, 8);
+        QCOMPARE(segments(three).size(), 9);
+
+        const QString eight = QString::fromUtf8("都都都都都都都都");
+        const auto many = segments(eight);
+        QCOMPARE(Fold::census(eight).variants, 64);
+        QVERIFY(Fold::census(eight).capped);
+        QCOMPARE(many.size(), 65);
+        QCOMPARE(many[1], QStringLiteral("doudoudoudoudoudoudoudou"));
+        QCOMPARE(many[2], QStringLiteral("dudududududududu"));
+        for (int at = 0; at < 8; ++at) {
+            QString single;
+            for (int j = 0; j < 8; ++j) single += j == at ? QStringLiteral("du") : QStringLiteral("dou");
+            QVERIFY(many.contains(single));
+        }
+
+        const QString threeReadings = QString::fromUtf8("軋");
+        QCOMPARE(Fold::census(threeReadings).variants, 3);
+        QCOMPARE(segments(threeReadings),
+                 (QStringList{QString::fromUtf8("轧"), QStringLiteral("ya"),
+                              QStringLiteral("zha"), QStringLiteral("ga")}));
+    }
+
+    void cappedRunsKeepTheirOwnProducts()
+    {
+        const QString input = QString::fromUtf8("都都都 都都 都都");
+        const auto count = Fold::census(input);
+        QCOMPARE(count.product, quint64(128));
+        QCOMPARE(count.variants, 8);
+        QVERIFY(count.capped);
+        const auto folds = segments(input);
+        QCOMPARE(folds.size(), 9);
+        const auto first = folds[1].split(u' ');
+        QCOMPARE(first, (QStringList{QStringLiteral("doudoudou"), QStringLiteral("doudou"),
+                                     QStringLiteral("doudou")}));
+        for (int run = 0; run < 3; ++run) {
+            QSet<QString> readings;
+            for (qsizetype k = 1; k < folds.size(); ++k) readings.insert(folds[k].split(u' ')[run]);
+            QCOMPARE(readings.size(), run == 0 ? 8 : 4);
+        }
+    }
+
+    void mixedHanAndJapaneseReadingsKeepEstablishedFolds()
+    {
+        const auto folds = segments(QString::fromUtf8("稲垣貴繁/誰その夢"));
+        const QStringList established{
+            QString::fromUtf8("稻垣贵繁/谁sono梦"),
+            QString::fromUtf8("稻垣贵繁/谁sonoyume"),
+            QStringLiteral("daoyuanguifan/sheisonomeng"),
+            QStringLiteral("daoyuanguipo/shuisonomeng"),
+        };
+        for (const QString &reading : established) QVERIFY(folds.contains(reading));
+        QVERIFY(folds.contains(QStringLiteral("daoyuanguifan/shuisonomeng")));
+    }
+
     void chinesePhrasesIncludeOrdinaryReadings()
     {
         const std::pair<const char *, const char *> cases[] = {

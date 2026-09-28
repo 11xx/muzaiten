@@ -272,7 +272,7 @@ class FoldHanDataTests(unittest.TestCase):
             words.write_text("# word readings\n你\tnǐ\n", encoding="utf-8")
 
             entries, _ = foldgen.load_authored_han(root)
-            self.assertEqual(entries, {"好": ("hao", None, "")})
+            self.assertEqual(entries, {"好": (["hao"], "")})
             self.assertEqual(checker.authored_ideographs(root), {"好"})
             self.assertEqual(foldgen.load_han_words(words, {}), {"你": ("ni", "")})
 

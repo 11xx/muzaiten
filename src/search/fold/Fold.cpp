@@ -93,8 +93,6 @@ std::pair<QString, QList<int>> Out::take()
 int styleCount(Script family)
 {
     switch (family) {
-    case Script::Han:
-        return 5;
     case Script::Brahmic:
     case Script::Arabic:
         return 4;
@@ -312,7 +310,7 @@ void dispatch(Script family, const Units &units, const Styles &styles, const Con
         foldKana(u, n, style, out);
         return;
     case Script::Han:
-        foldHan(u, n, style, ctx, out);
+        foldHan(u, n, style, ctx.variant, ctx, out);
         return;
     case Script::Hangul:
         foldHangul(u, n, style, out);
@@ -386,7 +384,7 @@ void dispatch(Script family, const Units &units, const Styles &styles, const Con
 // character it came from). `mask` collects the scripts seen; `fullMask` is the
 // whole string's, which language-dependent readings consult.
 void runPass(const char16_t *s, qsizetype n, const Styles &styles, int srcOverride, std::uint32_t &mask,
-             std::uint32_t fullMask, Out &out)
+             std::uint32_t fullMask, Out &out, PinyinPlan *pinyin, int variant)
 {
     qsizetype i = 0;
     while (i < n) {
@@ -407,6 +405,8 @@ void runPass(const char16_t *s, qsizetype n, const Styles &styles, int srcOverri
             Context ctx;
             ctx.mask = fullMask | mask;
             ctx.before = srcOverride < 0 ? previousCodePoint(s, i) : 0;
+            ctx.pinyin = pinyin;
+            ctx.variant = variant;
             const qsizetype end = collectRun(s, n, i, family, srcOverride, mask, units);
             if (units.isEmpty()) {
                 i += width;
@@ -430,7 +430,7 @@ void runPass(const char16_t *s, qsizetype n, const Styles &styles, int srcOverri
             out.put(QStringView(kPool + payloadOf(e), qsizetype(lengthOf(e))), src);
             break;
         case Kind::Expand:
-            runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), styles, src, mask, fullMask, out);
+            runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), styles, src, mask, fullMask, out, pinyin, variant);
             break;
         case Kind::Drop:
         case Kind::Script:
@@ -447,11 +447,13 @@ Script groupOf(Script family)
     return family == Script::Kana ? Script::Han : family;
 }
 
-void assign(Styles &styles, Script group, int style)
+void assign(Styles &styles, Script group, int option, int &variant)
 {
     const auto set = [&](Script family) {
-        styles[unsigned(family)] = std::uint8_t(style < styleCount(family) ? style : 0);
+        const int style = family == Script::Han ? std::min(option, 3) : option;
+        styles[unsigned(family)] = std::uint8_t(family == Script::Han || style < styleCount(family) ? style : 0);
     };
+    if (group == Script::Han && option >= 3) variant = option - 3;
     set(group);
     if (group == Script::Han) set(Script::Kana);
 }
@@ -463,20 +465,20 @@ struct Group {
 };
 
 // The script groups in `mask` that have alternate readings.
-QVarLengthArray<Group, 8> readingGroups(std::uint32_t mask)
+QVarLengthArray<Group, 8> readingGroups(std::uint32_t mask, int hanCount)
 {
     QVarLengthArray<Group, 8> groups;
     for (unsigned s = 0; s < 32; ++s) {
         if (!(mask & (1u << s))) continue;
         const Script group = groupOf(familyOf(Script(s)));
-        const int count = group == Script::Han ? std::max(styleCount(Script::Han), styleCount(Script::Kana))
+        const int count = group == Script::Han ? std::max(hanCount, styleCount(Script::Kana))
                                                : styleCount(group);
         if (count < 2 || std::any_of(groups.cbegin(), groups.cend(), [&](const Group &g) { return g.group == group; })) {
             continue;
         }
-        // The final Han and Hangul styles add readings alongside each
-        // family's established styles.
-        const int establishedCount = count - int(group == Script::Han || group == Script::Hangul);
+        // Pinyin variants and the final Hangul style add readings alongside
+        // each family's established styles.
+        const int establishedCount = group == Script::Han ? 3 : count - int(group == Script::Hangul);
         groups.append({group, count, establishedCount});
     }
     return groups;
@@ -488,12 +490,80 @@ struct Folded {
 };
 
 Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::uint32_t &mask,
-                std::uint32_t fullMask)
+                std::uint32_t fullMask, PinyinPlan *pinyin = nullptr, int variant = 0)
 {
     Out out(withIndex, src.size() + 8);
-    runPass(reinterpret_cast<const char16_t *>(src.utf16()), src.size(), styles, -1, mask, fullMask, out);
+    if (pinyin) pinyin->cursor = 0;
+    runPass(reinterpret_cast<const char16_t *>(src.utf16()), src.size(), styles, -1, mask, fullMask, out, pinyin, variant);
     auto [text, index] = out.take();
     return {std::move(text), std::move(index)};
+}
+
+QVector<QVector<std::uint8_t>> orderedChoices(const QVector<int> &radices, int limit)
+{
+    QVector<QVector<std::uint8_t>> result;
+    QVector<std::uint8_t> choice(radices.size(), 0);
+    result.append(choice);
+    if (radices.isEmpty() || limit == 1) return result;
+    std::fill(choice.begin(), choice.end(), 1);
+    result.append(choice);
+    const auto visit = [&](const auto &self, int at, int remaining) -> void {
+        if (result.size() >= limit) return;
+        if (at == radices.size()) {
+            if (remaining == 0 && choice != QVector<std::uint8_t>(radices.size(), 1)) result.append(choice);
+            return;
+        }
+        if (remaining > 0) {
+            for (int reading = 1; reading < radices[at]; ++reading) {
+                choice[at] = std::uint8_t(reading);
+                self(self, at + 1, remaining - 1);
+            }
+        }
+        choice[at] = 0;
+        self(self, at + 1, remaining);
+    };
+    for (int weight = 1; weight <= radices.size() && result.size() < limit; ++weight) {
+        std::fill(choice.begin(), choice.end(), 0);
+        visit(visit, 0, weight);
+    }
+    return result;
+}
+
+void prepareChoices(PinyinPlan &plan)
+{
+    constexpr std::uint64_t limit = 64;
+    for (int radix : plan.radices) {
+        if (plan.product > UINT64_MAX / std::uint64_t(radix)) plan.product = UINT64_MAX;
+        else plan.product *= std::uint64_t(radix);
+    }
+    plan.capped = plan.product > limit;
+    if (!plan.capped) {
+        plan.choices = orderedChoices(plan.radices, int(plan.product));
+        return;
+    }
+    int runCount = 0;
+    for (int run : plan.runs) runCount = std::max(runCount, run + 1);
+    QVector<QVector<int>> runRadices(runCount);
+    QVector<QVector<int>> runPositions(runCount);
+    for (int i = 0; i < plan.radices.size(); ++i) {
+        runRadices[plan.runs[i]].append(plan.radices[i]);
+        runPositions[plan.runs[i]].append(i);
+    }
+    QVector<QVector<QVector<std::uint8_t>>> runChoices;
+    int variants = 1;
+    for (const auto &radices : runRadices) {
+        const auto choices = orderedChoices(radices, 64);
+        variants = std::max(variants, int(choices.size()));
+        runChoices.append(choices);
+    }
+    for (int k = 0; k < variants; ++k) {
+        QVector<std::uint8_t> choice(plan.radices.size(), 0);
+        for (int run = 0; run < runCount; ++run) {
+            const auto &selected = runChoices[run][k % runChoices[run].size()];
+            for (int j = 0; j < selected.size(); ++j) choice[runPositions[run][j]] = selected[j];
+        }
+        plan.choices.append(choice);
+    }
 }
 
 // Every distinct fold of `src`, primary first.
@@ -502,23 +572,43 @@ Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::u
 // its styles that reads this string differently. Established styles combine
 // up to 16 ways before moving together style by style; additional styles are
 // then combined with those established readings under the same cap.
-QVector<FoldResult> allFolds(const QString &src, bool withIndex)
+QVector<FoldResult> allFolds(const QString &src, bool withIndex, PinyinPlan *census = nullptr)
 {
     std::uint32_t mask = 0;
     Folded primary = foldPass(src, kPrimary, withIndex, mask, 0);
     QVector<FoldResult> folds;
     folds.append({std::move(primary.text), std::move(primary.index)});
-    const auto fold = [&](const Styles &styles) {
+    PinyinPlan plan;
+    if (mask & maskOf(Script::Han)) {
+        plan.sourceRuns.resize(src.size() + 1);
+        int run = 0;
+        for (qsizetype i = 0; i < src.size(); ++i) {
+            plan.sourceRuns[i] = run;
+            if (src[i].isSpace() || src[i] == u'/') ++run;
+        }
+        plan.sourceRuns[src.size()] = run;
+        Styles chinese{};
+        chinese[unsigned(Script::Han)] = 3;
         std::uint32_t seen = 0;
-        return foldPass(src, styles, withIndex, seen, mask);
+        plan.counting = true;
+        foldPass(src, chinese, false, seen, mask, &plan);
+        plan.counting = false;
+        prepareChoices(plan);
+    }
+    const int hanCount = 3 + std::max(1, int(plan.choices.size()));
+    if (census) *census = plan;
+    const auto fold = [&](const Styles &styles, int variant = 0) {
+        std::uint32_t seen = 0;
+        return foldPass(src, styles, withIndex, seen, mask, &plan, variant);
     };
     const auto add = [&](Folded &&alt) {
+        if (folds.size() >= 128) return;
         const bool duplicate = std::any_of(folds.cbegin(), folds.cend(),
                                            [&](const FoldResult &f) { return f.text == alt.text; });
         if (!duplicate) folds.append({std::move(alt.text), std::move(alt.index)});
     };
 
-    const QVarLengthArray<Group, 8> groups = readingGroups(mask);
+    const QVarLengthArray<Group, 8> groups = readingGroups(mask, hanCount);
     // The styles of each group that read this string differently from its others.
     QVarLengthArray<QVarLengthArray<int, 4>, 8> distinct;
     for (const Group &g : groups) {
@@ -526,8 +616,9 @@ QVector<FoldResult> allFolds(const QString &src, bool withIndex)
         QStringList readings{folds.first().text};
         for (int k = 1; k < g.count; ++k) {
             Styles alone{};
-            assign(alone, g.group, k);
-            Folded alt = fold(alone);
+            int variant = 0;
+            assign(alone, g.group, k, variant);
+            Folded alt = fold(alone, variant);
             if (readings.contains(alt.text)) continue;
             readings.append(alt.text);
             styles.append(k);
@@ -561,6 +652,7 @@ QVector<FoldResult> allFolds(const QString &src, bool withIndex)
         if (combinations <= combinationLimit) {
             for (int index = 0; index < combinations; ++index) {
                 Styles styles{};
+                int variant = 0;
                 int rest = index;
                 int varied = 0;
                 for (qsizetype g = 0; g < groups.size(); ++g) {
@@ -568,10 +660,10 @@ QVector<FoldResult> allFolds(const QString &src, bool withIndex)
                     const int count = fixed >= 0 ? 1 : int(establishedSizes[g]);
                     const int style = fixed >= 0 ? fixed : distinct[g][rest % count];
                     rest /= count;
-                    assign(styles, groups[g].group, style);
+                    assign(styles, groups[g].group, style, variant);
                     varied += style != 0;
                 }
-                if (varied >= 2) add(fold(styles));
+                if (varied >= 2) add(fold(styles, variant));
             }
             return;
         }
@@ -584,14 +676,15 @@ QVector<FoldResult> allFolds(const QString &src, bool withIndex)
         }
         for (int k = 1; k < widest; ++k) {
             Styles styles{};
+            int variant = 0;
             int varied = 0;
             for (const Group &group : groups) {
                 const int fixed = fixedStyles[unsigned(group.group)];
                 const int style = fixed >= 0 ? fixed : (k < group.establishedCount ? k : 0);
-                assign(styles, group.group, style);
+                assign(styles, group.group, style, variant);
                 varied += style != 0;
             }
-            if (varied >= 2) add(fold(styles));
+            if (varied >= 2) add(fold(styles, variant));
         }
     };
 
@@ -639,7 +732,7 @@ void emitPrimary(const Unit &unit, Out &out)
         return;
     case Kind::Expand: {
         std::uint32_t mask = 0;
-        runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), kPrimary, unit.src, mask, 0, out);
+        runPass(kPool + payloadOf(e), qsizetype(lengthOf(e)), kPrimary, unit.src, mask, 0, out, nullptr, 0);
         return;
     }
     case Kind::Drop:
@@ -691,6 +784,20 @@ QVector<FoldResult> foldAll(const QString &src)
     QVector<FoldResult> folds = allFolds(composed.text, true);
     for (FoldResult &f : folds) remap(f.srcIndex, composed.map);
     return folds;
+}
+
+Census census(const QString &src)
+{
+    const QString text = needsComposition(src) ? compose(src).text : src;
+    Engine::PinyinPlan plan;
+    const QVector<FoldResult> folds = allFolds(text, false, &plan);
+    Census result;
+    result.positions = int(plan.radices.size());
+    result.product = plan.product;
+    result.variants = std::max(1, int(plan.choices.size()));
+    result.capped = plan.capped;
+    for (qsizetype i = 1; i < folds.size(); ++i) result.alternateUnits += folds[i].text.size();
+    return result;
 }
 
 quint32 cacheSignature()

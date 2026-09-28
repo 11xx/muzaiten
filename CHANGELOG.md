@@ -19,6 +19,9 @@
 
 ### Added
 
+- Search combines every reading of Chinese polyphones across a title: typing
+  `yueqing` finds 乐清, and a title can match different readings in different
+  words without losing its established Japanese readings.
 - Search reads about 3,500 Chinese words in context, including traditional
   spellings. 快乐 matches `kuaile` without also matching `kuaiyue`, and 长城
   matches `changcheng` without also matching `zhangcheng`. Words with two
@@ -45,9 +48,9 @@
   Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
   their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i`
   (`miller` finds `Müller`). Results highlight whichever reading matched.
-- A Chinese character with two readings matches a query typed with either
-  (`changfa` or `zhangfa` finds `长发`), unless a word reading settles it
-  (`chongqing` for `重庆`).
+- A Chinese character with multiple readings matches a query typed with any
+  of them (`changfa` or `zhangfa` finds `长发`), unless a word reading settles
+  its span (`chongqing` for `重庆`).
 - Search matches Thai and Lao by romanization, read syllable by syllable
   with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,
   `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
