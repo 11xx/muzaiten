@@ -16,6 +16,11 @@ function(add_muzaiten_test name source)
 endfunction()
 
 add_muzaiten_test(test_rating test_rating.cpp)
+add_executable(test_index_cache test_index_cache.cpp)
+target_include_directories(test_index_cache PRIVATE ../src)
+target_link_libraries(test_index_cache PRIVATE muzaiten_db muzaiten_search Qt6::Core Qt6::Test)
+target_compile_features(test_index_cache PRIVATE cxx_std_26)
+add_test(NAME test_index_cache COMMAND test_index_cache)
 set_tests_properties(test_rating PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_track_menu_sections

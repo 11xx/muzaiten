@@ -215,6 +215,7 @@ bool runScale(const Records &original, int scale, const Search::CacheSignature &
     timer.start();
     if (!Search::IndexCache::write(cachePath, signature, index.records())) return false;
     phase("cache write", timer.nsecsElapsed());
+    std::printf("  cache size           %lld bytes\n", static_cast<long long>(QFileInfo(cachePath).size()));
     timer.start();
     auto loaded = Search::IndexCache::read(cachePath);
     const qint64 readNs = timer.nsecsElapsed();
