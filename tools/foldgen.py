@@ -160,7 +160,7 @@ def load_han_words(path: pathlib.Path, simplified: dict[str, str]) -> dict[str, 
         if len(existing) > 2:
             first_word, first_row = first_rows[key]
             sys.exit(f"{path}:{line_number}: {word!r} merges with {first_word!r} at {path}:{first_row}; "
-                     "the engine holds only two readings per word until per-position readings land")
+                     "a word row holds at most two readings")
         first_rows.setdefault(key, (word, line_number))
         words[key] = (existing[0], existing[1] if len(existing) == 2 else "")
     return words

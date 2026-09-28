@@ -303,7 +303,7 @@ class FoldHanDataTests(unittest.TestCase):
             self.assertEqual(foldgen.load_han_words(words, {"樂": "乐", "隊": "队"}),
                              {"乐队": ("le dui", "yue dui")})
             words.write_text("樂隊\tlè duì\n乐队\tyuè duì\n樂队\tlào duì\n", encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, r"樂队.*樂隊.*two readings per word"):
+            with self.assertRaisesRegex(SystemExit, r"樂队.*樂隊.*at most two readings"):
                 foldgen.load_han_words(words, {"樂": "乐", "隊": "队"})
 
             words.write_text("# word readings\n你好\tnǐ hǎo\tnǐ\n", encoding="utf-8")
