@@ -69,14 +69,27 @@ readings with tone marks (most common first; `-` for none), and the
 simplified form a traditional or variant ideograph folds to (empty when it
 keeps its written form).
 
-Every other ideograph reads from Unicode's Unihan database:
+Each variant family folds to a BMP common simplified form when a reference
+gives one, otherwise to a General Standard form, including astral forms.
+When neither exists, its BMP member remains the fold key and astral variants
+fold back to it.
+
+The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
+`extb`, `extc` and `cns` after the four essential sets. A file declares full
+coverage with a `# complete` header line; a file without it may still be
+partial while its set is being authored.
+
+Other ideographs with Unihan data read from Unicode's Unihan database:
 `tools/fold-han-data.py` generates `src/search/fold/unihan/han_pinyin.tsv`
 and `han_simplified.tsv` from a pinned Unihan release, leaving out the
 authored ideographs (Unicode License v3, see `UNICODE-LICENSE.txt` there).
-`tools/fold-han-data.py check` compares the authored tables with Unihan,
+`tools/fold-han-data.py check` compares the authored tables with Unihan and
+Taiwan's CNS 11643 open data for reading attestation,
 including the exact tone of every reading across simplified and traditional
-counterparts. With no file arguments it checks all four tier files and reports
-missing tiers; explicit file arguments select the character files, while the
+counterparts. It reports `family-target` disagreements for astral variant
+families and `variant-guard` findings for unsupported semantic variant folds.
+With no file arguments it requires the four essential tier files and checks
+rare files that exist; explicit file arguments select the character files, while the
 word file is still checked from `--words` or `words.tsv` in the authored
 directory. Reviewed rows in `tools/fold-han-reviewed.tsv` match an ideograph
 or word, finding kind, authored value and reference value, followed by the

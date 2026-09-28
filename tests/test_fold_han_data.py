@@ -11,6 +11,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 
@@ -32,6 +33,109 @@ checker = load_tool("fold_han_data", ROOT / "tools" / "fold-han-data.py")
 
 
 class FoldHanDataTests(unittest.TestCase):
+    def setUp(self):
+        self.cns_archive_patch = mock.patch.object(checker, "cns_archives", return_value=(pathlib.Path("properties"), pathlib.Path("mappings")))
+        self.cns_readings_patch = mock.patch.object(checker, "cns_readings", return_value={})
+        self.cns_archive_patch.start()
+        self.cns_readings_patch.start()
+        self.addCleanup(self.cns_archive_patch.stop)
+        self.addCleanup(self.cns_readings_patch.stop)
+
+    def test_cns_archives_parse_polyphones_and_skip_private_plane(self):
+        self.cns_archive_patch.stop()
+        self.cns_readings_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            properties, mappings = root / "Properties.zip", root / "MapingTables.zip"
+            with zipfile.ZipFile(properties, "w") as archive:
+                archive.writestr("CNS_pinyin_2.txt", "ㄐㄧ\tjī\nㄑㄧ\tqī\nㄑㄧˊ\tqí\n")
+                archive.writestr("CNS_phonetic.txt", "1-1111\tㄐㄧ\n1-1111\tㄑㄧ\n1-1111\tㄑㄧˊ\n15-1111\tㄐㄧ\n")
+            with zipfile.ZipFile(mappings, "w") as archive:
+                archive.writestr("Unicode/CNS2UNICODE_Unicode BMP.txt", "1-1111\t671F\n")
+                archive.writestr("Unicode/CNS2UNICODE_Unicode 15.txt", "15-1111\tF6001\n")
+            with mock.patch.object(checker, "CNS_SHA256", {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (properties, mappings)}):
+                self.assertEqual(checker.cns_archives((properties, mappings)), (properties, mappings))
+                self.assertEqual(checker.cns_readings((properties, mappings)), {"期": {"jī", "qī", "qí"}})
+                properties.write_bytes(b"bad")
+                with self.assertRaisesRegex(ValueError, "sha256"):
+                    checker.cns_archives((properties, mappings))
+
+    def test_rare_tiers_are_ordered_and_disjoint(self):
+        fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS,
+                                        "kZVariant", "kTGH", "kUnihanCore2020")}
+        fields["kTGH"] = {"𬣙": "1"}
+        fields["kUnihanCore2020"] = {"𬣙": "1", "𠀀": "1"}
+        fields["kMandarin"] = {"𠀀": "hē", "𪚥": "hé"}
+        with mock.patch.object(checker, "gb2312", return_value=["期"]), \
+             mock.patch.object(checker, "big5_level1", return_value=[]), \
+             mock.patch.object(checker, "jis_x0208", return_value=[]), \
+             mock.patch.object(checker, "ks_x1001", return_value=[]), \
+             mock.patch.object(checker, "big5_level2", return_value=["期", "沈"]):
+            result = checker.tiers(fields, {"𫛲": {"diāo"}})
+        self.assertEqual(tuple(result), tuple(name.removesuffix(".tsv") for name in checker.TIER_FILES))
+        self.assertEqual(result["tgh"], ["𬣙"])
+        self.assertEqual(result["core"], ["𠀀"])
+        self.assertEqual(result["extb"], ["𪚥"])
+        self.assertEqual(result["cns"], ["𫛲"])
+        all_chars = [ch for chars in result.values() for ch in chars]
+        self.assertEqual(len(all_chars), len(set(all_chars)))
+
+    def test_complete_marker_controls_coverage_and_missing_rare_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "han"; authored.mkdir()
+            for name in checker.TIER_FILES[:4]:
+                (authored / name).write_text("# complete\n" if name == "gb2312.tsv" else "", encoding="utf-8")
+            (authored / "tgh.tsv").write_text("# partial\n", encoding="utf-8")
+            (authored / "words.tsv").write_text("", encoding="utf-8")
+            reviewed = root / "reviewed.tsv"; reviewed.write_text("", encoding="utf-8")
+            fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
+            with mock.patch.object(checker, "unihan_archive", return_value=object()), \
+                 mock.patch.object(checker, "unihan_fields", return_value=fields), \
+                 mock.patch.object(checker, "opencc_archive", return_value=root / "opencc"), \
+                 mock.patch.object(checker, "opencc_characters", return_value={}), \
+                 mock.patch.object(checker, "tiers", return_value={"gb2312": ["期"], "tgh": ["𬣙"]}), \
+                 mock.patch.object(checker, "cedict_archive", return_value=object()), \
+                 mock.patch.object(checker, "cedict_words", return_value=("date", {})), \
+                 mock.patch.object(checker, "DEFAULT_UNIHAN_DIR", root), \
+                 mock.patch.object(checker, "word_character_data", return_value=({}, {})), \
+                 contextlib.redirect_stdout(output := io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(checker.main(["check", "--authored", str(authored), "--reviewed", str(reviewed)]), 1)
+            self.assertEqual(output.getvalue().count("\tcoverage\t"), 1)
+            self.assertIn("期", output.getvalue())
+
+    def test_cns_attestation_family_targets_and_variant_guard(self):
+        fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS,
+                                        "kZVariant", "kTGH", "kUnihanCore2020",
+                                        "kSemanticVariant", "kSpecializedSemanticVariant")}
+        fields["kSimplifiedVariant"].update({"訏": "U+2C8D9", "鵰": "U+2B6F2", "瑙": "U+3087B"})
+        fields["kTGH"]["𬣙"] = "1"
+        fields["kSemanticVariant"].update({"𠀀": "U+671F", "𠀁": "U+671F U+6C88"})
+        fields["kMandarin"].update({"期": "qī", "𠀀": "qī", "𠀁": "qī"})
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            authored = root / "han"; authored.mkdir()
+            (authored / "gb2312.tsv").write_text("期\tqī\t\n沈\tshěn\t\n", encoding="utf-8")
+            rare = authored / "tgh.tsv"
+            rare.write_text("訏\t-\t\n鵰\t-\t𫛲\n瑙\t-\t𰡻\n𠀀\tqī\t期\n𠀁\tqī\t期\n", encoding="utf-8")
+            reviewed = root / "reviewed.tsv"; reviewed.write_text("", encoding="utf-8")
+            with mock.patch.object(checker, "unihan_archive", return_value=object()), \
+                 mock.patch.object(checker, "unihan_fields", return_value=fields), \
+                 mock.patch.object(checker, "cns_readings", return_value={"沈": {"shěn"}, "期": {"qī"}}), \
+                 mock.patch.object(checker, "opencc_archive", return_value=root / "opencc"), \
+                 mock.patch.object(checker, "opencc_characters", return_value={"鵰": ["雕", "𫛲"]}), \
+                 mock.patch.object(checker, "tiers", return_value={"gb2312": ["期", "沈"], "tgh": []}), \
+                 contextlib.redirect_stdout(output := io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                checker.check([authored / "gb2312.tsv", rare], reviewed, authored_dir=authored)
+            findings = [line.split("\t") for line in output.getvalue().splitlines()]
+            family = {(row[2], row[5]) for row in findings if row[3] == "family-target"}
+            self.assertEqual(family, {("訏", "𬣙"), ("鵰", "雕"), ("瑙", "-")})
+            guards = [row[2] for row in findings if row[3] == "variant-guard"]
+            self.assertEqual(guards, ["𠀁"])
+            self.assertFalse(any(row[2] == "沈" and row[3] in {"unattested", "tone"} for row in findings))
+
     def test_opencc_download_publishes_only_verified_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             tools_cache = pathlib.Path(directory)
@@ -438,9 +542,9 @@ class FoldHanDataTests(unittest.TestCase):
                 (partial / name).write_text("", encoding="utf-8")
 
             for authored, missing in (
-                (empty, checker.TIER_FILES),
+                (empty, checker.TIER_FILES[:4]),
                 (partial, ("jis.tsv",)),
-                (root / "missing", checker.TIER_FILES),
+                (root / "missing", checker.TIER_FILES[:4]),
             ):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
