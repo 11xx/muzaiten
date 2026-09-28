@@ -7,6 +7,7 @@
 #include <QStringView>
 #include <array>
 #include <QVector>
+#include <functional>
 
 namespace Search {
 
@@ -78,11 +79,18 @@ using NormMasks = std::array<quint64, NormSlotCount>;
 quint64 normCharacterMask(QStringView text);
 NormMasks recordNormMasks(const SearchRecord &rec);
 QVector<quint64> termCharacterMasks(const SearchQuery &query);
+bool usesPathTree(const Term &term, bool fuzzyMode);
+// Decides a text term's path field through the index's folder table: with
+// `score` false it returns 0 when the path holds the term and INT_MIN when not;
+// with `score` true it returns the best fuzzy score of one component (weight
+// not included), or INT_MIN.
+using PathTermLookup = std::function_ref<int(qsizetype term, bool score)>;
 int matchSearchRecordBound(const SearchRecord &rec, const NormMasks &masks,
                            const SearchQuery &query, const QVector<quint64> &termMasks,
-                           bool fuzzyMode, bool *exact);
+                           bool fuzzyMode, bool *exact,
+                           const PathTermLookup *pathLookup = nullptr);
 int scoreSearchRecord(const SearchRecord &rec, const NormMasks &masks,
                       const SearchQuery &query, const QVector<quint64> &termMasks,
-                      bool fuzzyMode);
+                      bool fuzzyMode, const PathTermLookup *pathLookup = nullptr);
 
 } // namespace Search

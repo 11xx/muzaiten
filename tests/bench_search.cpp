@@ -306,6 +306,13 @@ int verifyIndex(const Records &records, int samples)
     };
     static const char *prefixes[] = {"", "", "", "^", "'", "!", "artist:", "title:", "path:", "album:"};
     int failures = 0;
+    int plainFailures = 0;
+    int fuzzyFailures = 0;
+    int fuzzyDrops = 0;
+    int fuzzyGains = 0;
+    int fuzzySameTotal = 0;
+    int fuzzyTopDifferences = 0;
+    int unexpectedFuzzy = 0;
     for (int s = 0; s < samples; ++s) {
         const auto &rec = records[pick(records.size())];
         const QString *fields[] = {&rec.normTitle, &rec.normArtist, &rec.normAlbum, &rec.normPath, &rec.normFilename};
@@ -328,19 +335,39 @@ int verifyIndex(const Records &records, int samples)
             });
             int total = 0;
             const auto results = index.match(parsed, fuzzy, {}, &total);
-            bool same = total == static_cast<int>(truth.size())
-                && results.size() == static_cast<qsizetype>(std::min<std::size_t>(truth.size(), Search::kMaxResults));
-            for (qsizetype r = 0; same && r < results.size(); ++r) {
-                same = results[r].index == truth[static_cast<std::size_t>(r)].index
+            bool sameTop = results.size() == static_cast<qsizetype>(
+                std::min<std::size_t>(truth.size(), Search::kMaxResults));
+            for (qsizetype r = 0; sameTop && r < results.size(); ++r) {
+                sameTop = results[r].index == truth[static_cast<std::size_t>(r)].index
                     && results[r].score == truth[static_cast<std::size_t>(r)].score;
             }
-            if (!same && ++failures <= 20) {
+            const bool same = total == static_cast<int>(truth.size()) && sameTop;
+            if (!same) {
+                ++failures;
+                if (fuzzy) {
+                    ++fuzzyFailures;
+                    if (total < static_cast<int>(truth.size())) ++fuzzyDrops;
+                    else if (total > static_cast<int>(truth.size())) ++fuzzyGains;
+                    else ++fuzzySameTotal;
+                    if (!sameTop) ++fuzzyTopDifferences;
+                    if (std::none_of(parsed.terms.begin(), parsed.terms.end(), [](const Search::Term &term) {
+                            return term.kind == Search::TermKind::FreeText && !term.forceExact;
+                        })) ++unexpectedFuzzy;
+                } else {
+                    ++plainFailures;
+                }
+            }
+            if (!same && failures <= 20) {
                 std::printf("FAIL query [%s] %s: total %d vs %zu\n", qPrintable(query),
                             fuzzy ? "fuzzy" : "plain", total, truth.size());
             }
         }
     }
-    std::printf("verify-index: %d queries x 2 modes, %d failures\n", samples, failures);
+    std::printf("verify-index: %d queries x 2 modes, %d failures (plain %d, fuzzy %d)\n",
+                samples, failures, plainFailures, fuzzyFailures);
+    std::printf("fuzzy differences: %d total drops, %d gains, %d unchanged totals, "
+                "%d different top lists, %d without a fuzzy free-text term\n",
+                fuzzyDrops, fuzzyGains, fuzzySameTotal, fuzzyTopDifferences, unexpectedFuzzy);
     return failures ? 1 : 0;
 }
 

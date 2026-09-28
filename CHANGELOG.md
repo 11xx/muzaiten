@@ -69,12 +69,17 @@
 
 ### Changed
 
+- Fuzzy free-text search matches a file path within one folder name or the
+  file name, so letters scattered across folders no longer add up to a
+  match and fuzzy queries report far fewer stray results. `path:` still
+  matches across the whole path.
 - Typing in search is faster, fuzzy mode above all: fields that cannot hold
   the query are skipped before any scoring, using small character masks the
-  index builds when it loads. Broad queries score only matches that can still
-  reach the shown results. Match counts, scores and ranking are unchanged.
-  Each keystroke rechecks only records matched by the previous query when the
-  query narrows; a superseded scan stops early.
+  index builds when it loads; broad queries score only matches that can still
+  reach the shown results; each keystroke rechecks only what the previous one
+  matched, and a superseded query stops scanning; folder names shared by many
+  tracks are checked once per query. Plain-mode counts and ranking are
+  unchanged.
 - Highlighting search results is about a quarter faster over file paths and
   a fifth faster over titles.
 - CJK ideographs keep their written form in the primary search fold, with

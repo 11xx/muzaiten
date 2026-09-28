@@ -491,8 +491,12 @@ bool maskedFieldHolds(QStringView norm, quint64 mask, const Term &term, quint64 
                                          : segmentSubsequence(norm, term.text, segmentedFlag(mask));
 }
 
+// `componentPath`, when set, scores the path field per component through the
+// index's folder table (term `termIndex`); it runs only if the field is not
+// skipped, since most scored records are decided by a heavier field first.
 int textTermScoreMasked(const SearchRecord &rec, const NormMasks &masks, const Term &term,
-                        quint64 termMask, bool fuzzyMode)
+                        quint64 termMask, bool fuzzyMode,
+                        const PathTermLookup *componentPath = nullptr, qsizetype termIndex = -1)
 {
     const int headroom = maxTextScore(term, fuzzyMode);
     int best = INT_MIN;
@@ -500,6 +504,11 @@ int textTermScoreMasked(const SearchRecord &rec, const NormMasks &masks, const T
         if (!fitsMask(masks[field.slot], termMask)) continue;
         const int weight = fieldWeight(field.role);
         if (best != INT_MIN && qint64{best} >= qint64{weight} + headroom) continue;
+        if (field.slot == NormPath && componentPath) {
+            const int componentScore = (*componentPath)(termIndex, true);
+            if (componentScore != INT_MIN) consider(weight + componentScore, best);
+            continue;
+        }
         consider(scoreTextField(rec.*field.norm, term, fuzzyMode, weight,
                                 segmentedFlag(masks[field.slot])),
                  best);
@@ -508,6 +517,14 @@ int textTermScoreMasked(const SearchRecord &rec, const NormMasks &masks, const T
 }
 
 } // namespace
+
+bool usesPathTree(const Term &term, bool fuzzyMode)
+{
+    if (term.text.isEmpty() || term.prefixAnchor || term.suffixAnchor
+        || term.text.contains(QLatin1Char('/'))) return false;
+    return term.kind == TermKind::FreeText
+        || (term.kind == TermKind::PathText && (!fuzzyMode || term.forceExact));
+}
 
 quint64 normCharacterMask(QStringView text)
 {
@@ -548,7 +565,7 @@ QVector<quint64> termCharacterMasks(const SearchQuery &query)
 
 int matchSearchRecordBound(const SearchRecord &rec, const NormMasks &masks,
                            const SearchQuery &query, const QVector<quint64> &termMasks,
-                           bool fuzzyMode, bool *exact)
+                           bool fuzzyMode, bool *exact, const PathTermLookup *pathLookup)
 {
     *exact = true;
     if (query.isEmpty()) return INT_MIN;
@@ -561,14 +578,18 @@ int matchSearchRecordBound(const SearchRecord &rec, const NormMasks &masks,
         const bool fuzzyTerm = fuzzyMode && !term.forceExact;
         if (!isTextKind(term.kind) || term.text.isEmpty()) {
             matched = termMatches(rec, term, fuzzyMode, &score);
-        } else if (fuzzyTerm || (maskDecides(term) && !term.prefixAnchor && !term.suffixAnchor)) {
+        } else if (fuzzyTerm || (pathLookup && usesPathTree(term, fuzzyMode))
+                   || (maskDecides(term) && !term.prefixAnchor && !term.suffixAnchor)) {
             // Membership only; the first field that holds the term has the
             // highest weight among those that do.
             const bool byMask = maskDecides(term);
             for (const NormField &field : textFields(term.kind)) {
                 if (!fitsMask(masks[field.slot], termMask)) continue;
-                if (byMask || maskedFieldHolds(rec.*field.norm, masks[field.slot], term,
-                                               termMask, fuzzyMode)) {
+                const bool holds = field.slot == NormPath && pathLookup && usesPathTree(term, fuzzyMode)
+                    ? (*pathLookup)(t, false) != INT_MIN
+                    : byMask || maskedFieldHolds(rec.*field.norm, masks[field.slot], term,
+                                                  termMask, fuzzyMode);
+                if (holds) {
                     matched = true;
                     score = static_cast<int>(std::min<qint64>(INT_MAX - 1,
                         static_cast<qint64>(fieldWeight(field.role)) + maxTextScore(term, fuzzyMode)));
@@ -592,7 +613,7 @@ int matchSearchRecordBound(const SearchRecord &rec, const NormMasks &masks,
 
 int scoreSearchRecord(const SearchRecord &rec, const NormMasks &masks,
                       const SearchQuery &query, const QVector<quint64> &termMasks,
-                      bool fuzzyMode)
+                      bool fuzzyMode, const PathTermLookup *pathLookup)
 {
     if (query.isEmpty()) return INT_MIN;
     qint64 total = 0;
@@ -601,7 +622,10 @@ int scoreSearchRecord(const SearchRecord &rec, const NormMasks &masks,
         int score = 0;
         bool matched;
         if (isTextKind(term.kind) && !term.text.isEmpty()) {
-            score = textTermScoreMasked(rec, masks, term, termMasks[t], fuzzyMode);
+            const bool componentPath = pathLookup && term.kind == TermKind::FreeText
+                && fuzzyMode && !term.forceExact && usesPathTree(term, fuzzyMode);
+            score = textTermScoreMasked(rec, masks, term, termMasks[t], fuzzyMode,
+                                        componentPath ? pathLookup : nullptr, t);
             matched = score != INT_MIN;
         } else {
             matched = termMatches(rec, term, fuzzyMode, &score);

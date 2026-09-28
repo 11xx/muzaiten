@@ -47,8 +47,16 @@ void SearchIndex::build(QVector<SearchRecord> records)
 {
     m_records = std::move(records);
     m_masks.clear();
+    m_folders.clear();
+    m_folderIds.clear();
+    m_pathSegments.clear();
+    m_pathOffsets.clear();
+    m_pathOffsets.push_back(0);
     m_masks.reserve(static_cast<std::size_t>(m_records.size()));
-    for (const SearchRecord &rec : m_records) m_masks.push_back(recordNormMasks(rec));
+    for (const SearchRecord &rec : m_records) {
+        m_masks.push_back(recordNormMasks(rec));
+        indexPath(rec.normPath);
+    }
     m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
@@ -62,6 +70,7 @@ void SearchIndex::append(QVector<SearchRecord> records)
     m_masks.reserve(static_cast<std::size_t>(m_records.size() + records.size()));
     for (SearchRecord &rec : records) {
         m_masks.push_back(recordNormMasks(rec));
+        indexPath(rec.normPath);
         m_records.push_back(std::move(rec));
     }
     m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -73,7 +82,49 @@ void SearchIndex::clear()
     m_records.squeeze();
     m_masks.clear();
     m_masks.shrink_to_fit();
+    m_folders.clear();
+    m_folders.shrink_to_fit();
+    m_folderIds.clear();
+    m_pathSegments.clear();
+    m_pathSegments.shrink_to_fit();
+    m_pathOffsets.clear();
+    m_pathOffsets.shrink_to_fit();
+    m_pathOffsets.push_back(0);
     m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+void SearchIndex::indexPath(const QString &normPath)
+{
+    const QStringView path(normPath);
+    for (qsizetype segmentStart = 0; segmentStart <= path.size();) {
+        qsizetype segmentEnd = path.indexOf(Fold::kSegmentSeparator, segmentStart);
+        if (segmentEnd < 0) segmentEnd = path.size();
+        int parent = -1;
+        qsizetype componentStart = segmentStart;
+        qsizetype slash = path.indexOf(QLatin1Char('/'), componentStart);
+        while (slash >= 0 && slash < segmentEnd) {
+            if (slash > componentStart) {
+                const QString component = path.mid(componentStart, slash - componentStart).toString();
+                const QPair<int, QString> key{parent, component};
+                const auto it = m_folderIds.constFind(key);
+                if (it != m_folderIds.cend()) {
+                    parent = *it;
+                } else {
+                    const int id = static_cast<int>(m_folders.size());
+                    m_folders.push_back({parent, component, normCharacterMask(component)});
+                    m_folderIds.insert(key, id);
+                    parent = id;
+                }
+            }
+            componentStart = slash + 1;
+            slash = path.indexOf(QLatin1Char('/'), componentStart);
+        }
+        m_pathSegments.push_back({parent, static_cast<int>(componentStart), static_cast<int>(segmentEnd),
+                                  normCharacterMask(path.mid(componentStart, segmentEnd - componentStart))});
+        if (segmentEnd == path.size()) break;
+        segmentStart = segmentEnd + 1;
+    }
+    m_pathOffsets.push_back(m_pathSegments.size());
 }
 
 namespace {
@@ -115,6 +166,39 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     const int n = candidateIndices ? static_cast<int>(candidateIndices->size())
                                    : static_cast<int>(m_records.size());
     const auto termMasks = termCharacterMasks(query);
+
+    // Each text term that uses the folder table decides every folder once:
+    // it holds the term itself or inherits its parent's answer (folders are
+    // numbered parents first). Component scores are computed only for the
+    // few records that get scored.
+    const auto subsequence = [](QStringView hay, QStringView needle) {
+        qsizetype pos = 0;
+        for (QChar ch : needle) {
+            pos = hay.indexOf(ch, pos);
+            if (pos < 0) return false;
+            ++pos;
+        }
+        return true;
+    };
+    struct FolderTerm {
+        bool fuzzy = false;
+        std::vector<quint8> holds;
+    };
+    std::vector<FolderTerm> folderTerms(static_cast<std::size_t>(query.terms.size()));
+    for (qsizetype t = 0; t < query.terms.size(); ++t) {
+        const Term &term = query.terms[t];
+        if (!usesPathTree(term, fuzzyMode)) continue;
+        FolderTerm &state = folderTerms[static_cast<std::size_t>(t)];
+        state.fuzzy = fuzzyMode && !term.forceExact;
+        state.holds.reserve(m_folders.size());
+        for (const FolderNode &folder : m_folders) {
+            const bool own = (folder.mask & termMasks[t]) == termMasks[t]
+                && (state.fuzzy ? subsequence(folder.component, term.text)
+                                : folder.component.contains(term.text));
+            state.holds.push_back(own || (folder.parent >= 0
+                                          && state.holds[static_cast<std::size_t>(folder.parent)]));
+        }
+    }
 
     // Every worker keeps its own best kMaxResults ranks. Once a worker's heap
     // is full, its worst rank is a floor no shown result can fall below; it is
@@ -166,15 +250,47 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             if (excluded) continue;
 
             const NormMasks &masks = m_masks[static_cast<std::size_t>(i)];
+            const auto lookup = [&](qsizetype t, bool score) {
+                const FolderTerm &state = folderTerms[static_cast<std::size_t>(t)];
+                const QStringView needle(query.terms[t].text);
+                const QStringView path(rec.normPath);
+                int best = INT_MIN;
+                const auto consider = [&](QStringView component) {
+                    const auto result = fuzzyMatchV2(component, needle, true, false);
+                    if (result.matched()) best = std::max(best, result.score);
+                };
+                for (std::size_t s = m_pathOffsets[static_cast<std::size_t>(i)];
+                     s < m_pathOffsets[static_cast<std::size_t>(i) + 1]; ++s) {
+                    const PathSegment &segment = m_pathSegments[s];
+                    const bool filenameFits = (segment.filenameMask & termMasks[t]) == termMasks[t];
+                    const QStringView filename = path.mid(segment.filenameStart,
+                                                          segment.filenameEnd - segment.filenameStart);
+                    if (!score) {
+                        if (segment.leaf >= 0 && state.holds[static_cast<std::size_t>(segment.leaf)]) return 0;
+                        if (filenameFits && (state.fuzzy ? subsequence(filename, needle)
+                                                         : filename.contains(needle))) return 0;
+                        continue;
+                    }
+                    if (filenameFits) consider(filename);
+                    for (int f = segment.leaf; f >= 0 && state.holds[static_cast<std::size_t>(f)];
+                         f = m_folders[static_cast<std::size_t>(f)].parent) {
+                        consider(m_folders[static_cast<std::size_t>(f)].component);
+                    }
+                }
+                return best;
+            };
+            const PathTermLookup pathLookup(lookup);
             bool exact = false;
-            const int bound = matchSearchRecordBound(rec, masks, query, termMasks, fuzzyMode, &exact);
+            const int bound = matchSearchRecordBound(rec, masks, query, termMasks,
+                                                     fuzzyMode, &exact, &pathLookup);
             if (bound == INT_MIN) continue;
             ++out.count;
             bool matched = true;
             if (exact) {
                 keep(rankKey(bound, i));
             } else if (rankKey(bound, i) > floor.load(std::memory_order_relaxed)) {
-                const int score = scoreSearchRecord(rec, masks, query, termMasks, fuzzyMode);
+                const int score = scoreSearchRecord(rec, masks, query, termMasks,
+                                                    fuzzyMode, &pathLookup);
                 if (score == INT_MIN) {
                     // The bound admitted what the scorer rejects: never let a
                     // disagreement surface as a counted, unscorable match.
@@ -281,6 +397,33 @@ QVector<int> highlightPositions(const QString &text, const SearchQuery &query,
     QVector<int> positions;
     for (const Term &term : query.terms) {
         if (!termAppliesTo(term, field) || term.text.isEmpty()) continue;
+        if (field == HighlightField::Path && term.kind == TermKind::FreeText
+            && fuzzyMode && !term.forceExact && usesPathTree(term, fuzzyMode)) {
+            int bestScore = INT_MIN;
+            QVector<int> bestPositions;
+            for (const Fold::FoldResult &folded : folds) {
+                const QStringView path(folded.text);
+                for (qsizetype start = 0; start <= path.size();) {
+                    qsizetype end = path.indexOf(QLatin1Char('/'), start);
+                    if (end < 0) end = path.size();
+                    const auto result = fuzzyMatchV2(path.mid(start, end - start),
+                                                     QStringView(term.text), true, true);
+                    if (result.matched() && result.score > bestScore) {
+                        bestScore = result.score;
+                        bestPositions.clear();
+                        for (int p : result.positions) {
+                            const qsizetype foldedIndex = start + p;
+                            if (foldedIndex >= 0 && foldedIndex < folded.srcIndex.size())
+                                bestPositions.append(folded.srcIndex.at(foldedIndex));
+                        }
+                    }
+                    if (end == path.size()) break;
+                    start = end + 1;
+                }
+            }
+            positions += bestPositions;
+            continue;
+        }
         for (const Fold::FoldResult &folded : folds) {
             const QVector<int> foldedPos = termPositions(folded.text, term, fuzzyMode);
             if (foldedPos.isEmpty()) continue;

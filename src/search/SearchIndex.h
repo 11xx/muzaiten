@@ -19,6 +19,7 @@
 #include "search/SearchMatcher.h"
 #include "search/SearchRecord.h"
 
+#include <QHash>
 #include <QVector>
 
 #include <functional>
@@ -89,8 +90,27 @@ public:
     const QVector<SearchRecord> &records() const { return m_records; }
 
 private:
+    struct FolderNode {
+        int parent = -1;
+        QString component;
+        quint64 mask = 0;
+    };
+    // One reading of a record's path: its innermost folder and its filename
+    // slice of normPath, with that slice's character mask.
+    struct PathSegment {
+        int leaf = -1;
+        int filenameStart = 0;
+        int filenameEnd = 0;
+        quint64 filenameMask = 0;
+    };
+
+    void indexPath(const QString &normPath);
     QVector<SearchRecord> m_records;
     std::vector<NormMasks> m_masks;
+    std::vector<FolderNode> m_folders;
+    QHash<QPair<int, QString>, int> m_folderIds;
+    std::vector<PathSegment> m_pathSegments;
+    std::vector<std::size_t> m_pathOffsets{0};
     quint64 m_generation = 0;
 };
 
