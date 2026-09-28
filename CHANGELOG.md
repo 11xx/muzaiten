@@ -4,6 +4,8 @@
 
 ### Developer tooling
 
+- Han word tables accept any spelling and merge readings under simplified keys;
+  data checks flag redundant rows and readings at joined keys.
 - A fold regression sweep compares search fold readings against a base
   revision across CC-CEDICT, phrase examples, and optional text or library
   corpora.
