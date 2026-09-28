@@ -50,11 +50,19 @@ QString defaultPath();
 CacheSignature currentSignature(const Database &db);
 QString mismatchReason(const CacheSignature &cached, const CacheSignature &current);
 
-// Atomically write the folded records + signature in zstd-compressed chunks of
-// at most `chunkRecords` records (tests pass small values). Returns false on
-// any I/O or encoding error (caller falls back to a live build).
+// How the writer cuts records into chunks: a chunk closes at `records`
+// records or `targetBytes` serialized, and never exceeds `maxBytes` (a record
+// larger than that makes the cache unwritable). Tests pass small values.
+struct ChunkLimits {
+    quint32 records = 4096;
+    quint64 targetBytes = 4ull * 1024 * 1024;
+    quint64 maxBytes = 64ull * 1024 * 1024;
+};
+
+// Atomically write the folded records + signature in zstd-compressed chunks.
+// Returns false on any I/O or encoding error (caller falls back to a live build).
 bool write(const QString &path, const CacheSignature &signature,
-           const QVector<SearchRecord> &records, quint32 chunkRecords = 4096);
+           const QVector<SearchRecord> &records, const ChunkLimits &limits = {});
 
 struct Loaded {
     bool ok = false;            // false if missing / unreadable / corrupt

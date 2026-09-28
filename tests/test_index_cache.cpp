@@ -66,6 +66,30 @@ private:
         return file.readAll();
     }
 
+    // The raw size of every chunk in a cache file, in order.
+    static QVector<quint64> chunkRawSizes(const QString &path)
+    {
+        QDataStream s(bytes(path));
+        s.setVersion(QDataStream::Qt_6_0);
+        quint32 magic, version, fold;
+        qint32 schema;
+        QString id, dbPath;
+        qint64 revision;
+        quint64 total;
+        s >> magic >> version >> fold >> schema >> id >> dbPath >> revision >> total;
+        QVector<quint64> sizes;
+        while (s.status() == QDataStream::Ok) {
+            quint32 count = 0;
+            s >> count;
+            if (count == 0) break;
+            quint64 raw = 0, compressed = 0;
+            s >> raw >> compressed;
+            s.skipRawData(static_cast<int>(compressed));
+            sizes.push_back(raw);
+        }
+        return sizes;
+    }
+
     static bool replace(const QString &path, const QByteArray &data)
     {
         QFile file(path);
@@ -90,7 +114,7 @@ private slots:
         const QString path = dir.filePath(QStringLiteral("index.cache"));
         QVector<SearchRecord> original;
         for (int i = 0; i < count; ++i) original.push_back(record(i));
-        QVERIFY(IndexCache::write(path, signature(), original, 3));
+        QVERIFY(IndexCache::write(path, signature(), original, {3}));
         QVector<SearchRecord> streamed;
         CacheSignature stored;
         QVERIFY(IndexCache::forEachRecord(path, &stored,
@@ -139,6 +163,53 @@ private slots:
         for (qsizetype i = 0; i < original.size(); ++i) equal(loaded.records[i], original[i]);
     }
 
+    // A record that fits a chunk alone but not beside the previous one starts
+    // a new chunk; only a record larger than a whole chunk is refused.
+    void recordsSplitBeforeOverflow()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("split.cache"));
+        const IndexCache::ChunkLimits limits{4096, 100'000, 100'000};
+        QVector<SearchRecord> records{record(0), record(1)};
+        records[0].title = QString(20'000, QLatin1Char('a'));
+        records[1].title = QString(35'000, QLatin1Char('b'));
+        QVERIFY(IndexCache::write(path, signature(), records, limits));
+        const QVector<quint64> sizes = chunkRawSizes(path);
+        QCOMPARE(sizes.size(), 2);
+        for (const quint64 size : sizes) QVERIFY(size <= limits.maxBytes);
+        const auto loaded = IndexCache::read(path);
+        QVERIFY(loaded.ok);
+        QCOMPARE(loaded.records.size(), records.size());
+        for (qsizetype i = 0; i < records.size(); ++i) equal(loaded.records[i], records[i]);
+
+        records.push_back(record(2));
+        records.back().title = QString(60'000, QLatin1Char('c'));
+        QVERIFY(!IndexCache::write(path, signature(), records, limits));
+    }
+
+    // The header's identity strings are bounded before they are decoded.
+    void oversizedHeaderStringRejected()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("header.cache"));
+        CacheSignature sig = signature();
+        sig.databaseId = QString(40'000, QLatin1Char('x'));
+        QVERIFY(!IndexCache::write(path, sig, {record(0)}));
+
+        QByteArray data;
+        {
+            QDataStream out(&data, QIODevice::WriteOnly);
+            out.setVersion(QDataStream::Qt_6_0);
+            out << quint32(0x4D5A5349) << sig.formatVersion << sig.foldVersion << sig.schemaVersion
+                << sig.databaseId << sig.databasePath << sig.contentRevision
+                << quint64(0) << quint32(0);
+        }
+        QVERIFY(replace(path, data));
+        QVERIFY(!IndexCache::read(path).ok);
+    }
+
     void corruption_data()
     {
         QTest::addColumn<QString>("kind");
@@ -155,7 +226,7 @@ private slots:
         const QString path = dir.filePath(QStringLiteral("index.cache"));
         QVector<SearchRecord> records;
         for (int i = 0; i < 5; ++i) records.push_back(record(i));
-        QVERIFY(IndexCache::write(path, signature(), records, 2));
+        QVERIFY(IndexCache::write(path, signature(), records, {2}));
         QByteArray data = bytes(path);
         QVERIFY(!data.isEmpty());
         QDataStream s(data);

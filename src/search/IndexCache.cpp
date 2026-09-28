@@ -16,7 +16,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <optional>
 
 namespace Search::IndexCache {
 
@@ -31,9 +30,27 @@ constexpr auto    kDataStreamVersion = QDataStream::Qt_6_0;
 // kChunkTargetBytes, whichever comes first; the reader refuses any chunk that
 // claims more than kMaxChunkBytes or kMaxChunkRecords, so a corrupt or
 // tampered file cannot request an absurd allocation.
-constexpr quint64 kChunkTargetBytes = 4ull * 1024 * 1024;
 constexpr quint64 kMaxChunkBytes = 64ull * 1024 * 1024;
 constexpr quint32 kMaxChunkRecords = 65536;
+
+// The header's identity strings are short (an id and a file path); a longer
+// declared length can only come from a damaged or tampered file.
+constexpr quint32 kMaxHeaderStringBytes = 64 * 1024;
+
+// Reads a QString only after checking its declared byte length, so the length
+// field alone cannot make the stream allocate.
+bool readBoundedString(QDataStream &s, QString &out)
+{
+    QIODevice *device = s.device();
+    const qint64 start = device->pos();
+    quint32 length = 0;
+    s >> length;
+    if (s.status() != QDataStream::Ok) return false;
+    if (length != 0xFFFFFFFFu && length > kMaxHeaderStringBytes) return false;
+    if (!device->seek(start)) return false;
+    s >> out;
+    return s.status() == QDataStream::Ok;
+}
 
 QByteArray zstdCompress(const QByteArray &raw)
 {
@@ -75,7 +92,9 @@ bool readSignature(QDataStream &s, CacheSignature &sig)
 {
     s >> sig.formatVersion;
     if (sig.formatVersion != kFormatVersion) return false;
-    s >> sig.foldVersion >> sig.schemaVersion >> sig.databaseId >> sig.databasePath >> sig.contentRevision;
+    s >> sig.foldVersion >> sig.schemaVersion;
+    if (!readBoundedString(s, sig.databaseId) || !readBoundedString(s, sig.databasePath)) return false;
+    s >> sig.contentRevision;
     return s.status() == QDataStream::Ok && sig.valid();
 }
 
@@ -178,10 +197,16 @@ QString mismatchReason(const CacheSignature &cached, const CacheSignature &curre
 }
 
 bool write(const QString &path, const CacheSignature &signature,
-           const QVector<SearchRecord> &records, quint32 chunkRecords)
+           const QVector<SearchRecord> &records, const ChunkLimits &limits)
 {
     if (!signature.valid() || signature.formatVersion != kFormatVersion
-        || chunkRecords == 0 || chunkRecords > kMaxChunkRecords) return false;
+        || limits.records == 0 || limits.records > kMaxChunkRecords
+        || limits.maxBytes == 0 || limits.maxBytes > kMaxChunkBytes
+        || limits.targetBytes > limits.maxBytes
+        || static_cast<quint64>(signature.databaseId.size()) * 2 > kMaxHeaderStringBytes
+        || static_cast<quint64>(signature.databasePath.size()) * 2 > kMaxHeaderStringBytes) {
+        return false;
+    }
 
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return false;
@@ -192,11 +217,9 @@ bool write(const QString &path, const CacheSignature &signature,
     s << static_cast<quint64>(records.size());
 
     QByteArray raw;
-    std::optional<QDataStream> chunk;
     quint32 count = 0;
     const auto flush = [&] {
         if (count == 0) return true;
-        chunk.reset();
         const QByteArray compressed = zstdCompress(raw);
         if (compressed.isEmpty()) return false;
         s << count << static_cast<quint64>(raw.size()) << static_cast<quint64>(compressed.size());
@@ -208,19 +231,30 @@ bool write(const QString &path, const CacheSignature &signature,
         count = 0;
         return true;
     };
+    QByteArray serialized;
     for (const SearchRecord &record : records) {
-        if (!chunk) {
-            chunk.emplace(&raw, QIODevice::WriteOnly);
-            chunk->setVersion(kDataStreamVersion);
+        serialized.clear();
+        {
+            QDataStream one(&serialized, QIODevice::WriteOnly);
+            one.setVersion(kDataStreamVersion);
+            writeRecord(one, record);
+            if (one.status() != QDataStream::Ok) {
+                file.cancelWriting();
+                return false;
+            }
         }
-        writeRecord(*chunk, record);
-        ++count;
-        // A single record larger than a whole chunk may hold is not cacheable.
-        if (chunk->status() != QDataStream::Ok || static_cast<quint64>(raw.size()) > kMaxChunkBytes) {
+        // A record larger than a whole chunk may hold is not cacheable; any
+        // other record starts a new chunk when it would overflow this one.
+        const auto size = static_cast<quint64>(serialized.size());
+        if (size > limits.maxBytes
+            || (static_cast<quint64>(raw.size()) + size > limits.maxBytes && !flush())) {
             file.cancelWriting();
             return false;
         }
-        if ((count == chunkRecords || static_cast<quint64>(raw.size()) >= kChunkTargetBytes) && !flush()) {
+        raw += serialized;
+        ++count;
+        if ((count == limits.records || static_cast<quint64>(raw.size()) >= limits.targetBytes)
+            && !flush()) {
             file.cancelWriting();
             return false;
         }
