@@ -15,6 +15,7 @@
 // When positions are not needed pass withPositions=false (faster).
 
 #include <QString>
+#include <QStringView>
 #include <QVector>
 
 namespace Search {
@@ -56,10 +57,10 @@ MatchResult exactMatchNaive(const QString &text,
 
 // Fuzzy (subsequence) match: finds the highest-scoring subsequence alignment.
 // pattern must already be lowercased when caseSensitive==false.
-MatchResult fuzzyMatchV2(const QString &text,
-                          const QString &pattern,
-                          bool caseSensitive,
-                          bool withPositions = false);
+MatchResult fuzzyMatchV2(QStringView text,
+                         QStringView pattern,
+                         bool caseSensitive,
+                         bool withPositions = false);
 
 // Convenience: run exact or fuzzy based on the fuzzyMode flag.
 inline MatchResult matchTerm(const QString &text,

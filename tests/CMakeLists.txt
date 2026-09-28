@@ -205,6 +205,13 @@ target_include_directories(bench_radio_context PRIVATE ../src)
 target_link_libraries(bench_radio_context PRIVATE muzaiten_app muzaiten_ui_app)
 target_compile_features(bench_radio_context PRIVATE cxx_std_26)
 
+# Search latency benchmark. Built by default but not registered with CTest:
+# timings need an explicit library copy and an otherwise idle machine.
+add_executable(bench_search bench_search.cpp)
+target_include_directories(bench_search PRIVATE ../src)
+target_link_libraries(bench_search PRIVATE muzaiten_db muzaiten_search Qt6::Core)
+target_compile_features(bench_search PRIVATE cxx_std_26)
+
 # Queue-state save benchmark. Built by default but not registered with CTest:
 # it times persisted-document writes, a product-decision artifact, not a gate.
 add_executable(bench_queue_state
@@ -395,6 +402,12 @@ target_compile_definitions(test_fold PRIVATE
 )
 add_test(NAME test_fold COMMAND test_fold)
 
+add_executable(test_search_matcher_bounds test_search_matcher_bounds.cpp)
+target_include_directories(test_search_matcher_bounds PRIVATE ../src)
+target_link_libraries(test_search_matcher_bounds PRIVATE muzaiten_search Qt6::Core Qt6::Test)
+target_compile_features(test_search_matcher_bounds PRIVATE cxx_std_26)
+add_test(NAME test_search_matcher_bounds COMMAND test_search_matcher_bounds)
+
 add_executable(test_search_index
     test_search_index.cpp
 )
@@ -402,6 +415,12 @@ target_include_directories(test_search_index PRIVATE ../src)
 target_link_libraries(test_search_index PRIVATE muzaiten_search Qt6::Core Qt6::Test)
 target_compile_features(test_search_index PRIVATE cxx_std_26)
 add_test(NAME test_search_index COMMAND test_search_index)
+
+add_executable(test_narrowing_cache test_narrowing_cache.cpp)
+target_include_directories(test_narrowing_cache PRIVATE ../src)
+target_link_libraries(test_narrowing_cache PRIVATE muzaiten_search Qt6::Core Qt6::Test)
+target_compile_features(test_narrowing_cache PRIVATE cxx_std_26)
+add_test(NAME test_narrowing_cache COMMAND test_narrowing_cache)
 
 add_executable(test_search_matcher
     test_search_matcher.cpp

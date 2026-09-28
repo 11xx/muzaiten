@@ -148,10 +148,14 @@ The result list always keeps a highlighted cursor you move with the arrow or
 `Ctrl+P`/`Ctrl+N` keys while the search box keeps focus, fzf-style.
 `Esc`/`Ctrl+G` first clears the query, then (when already empty) releases the
 text box so `1` and `2` switch views; `/` jumps back into the box. The folded
-index is cached on disk, so opening search is near-instant on a warm cache; a
-cold or stale cache streams results in as it builds (and refreshes quietly in
-the background, shown by a small "updating index" note). Deleting the cache
-file is harmless — it rebuilds on next open.
+index is cached on disk, so opening search is near-instant on a warm cache;
+loading it also builds in-memory character masks that let a query skip fields
+that cannot match. As a query narrows while typing, search rechecks only the
+previous matches; an index update or changed exclusions starts a fresh scan,
+and a superseded query stops scanning. A cold or stale cache streams results
+in as it builds (and refreshes quietly in the background, shown by a small
+"updating index" note). Deleting the cache file is harmless — it rebuilds on
+next open.
 
 Freshness is tracked by a persisted database identity and search-content revision.
 SQLite triggers advance that revision for searchable track metadata, rating
@@ -224,6 +228,11 @@ A field can have more than one folded form: its display text and its sort
 name (`The Wall` and `Wall, The`). Anchors and fuzzy matching check each form
 on its own, so `^wall` and `the wall$` both find that title. Exclusion globs
 with a leading or trailing `*` behave the same way.
+
+A fuzzy free-text term matches a file path within one folder name or the
+file name, the library's own root folders included, so letters scattered
+across several folders do not add up to a match. A term containing `/`, and
+any `path:` term, matches the whole path, across folders.
 
 Literal text in exclusion globs folds like a search query, so `*café*`
 matches `Café`, and `*東京*` matches the simplified primary fold of `東京`.

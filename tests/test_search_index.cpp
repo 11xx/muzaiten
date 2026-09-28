@@ -2,6 +2,7 @@
 #include <QSet>
 #include <QString>
 #include <QVector>
+#include <algorithm>
 
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
@@ -42,10 +43,114 @@ static SearchRecord makeRecord(const QString &title,
     return r;
 }
 
+static SearchRecord foldedPath(const QString &path)
+{
+    SearchRecord record = makeRecord({}, {}, {}, path);
+    foldRecordNorms(record);
+    return record;
+}
+
 class TestSearchIndex : public QObject {
     Q_OBJECT
 
 private slots:
+    void folderTreePreservesPlainResults()
+    {
+        const QVector<SearchRecord> records = {
+            foldedPath(QStringLiteral("/Music/Shared/Alpha/song.flac")),
+            foldedPath(QStringLiteral("/Music/Shared/Beta/other.mp3")),
+            foldedPath(QStringLiteral("/Other/Shared/Alpha/third.flac")),
+            foldedPath(QString::fromUtf8("/Рыбин/Борисенкоі/song.flac")),
+            foldedPath(QString::fromUtf8("/Рыбин/Борисенкоі/друга.flac")),
+            foldedPath(QString::fromUtf8("/Музика/Яблуко/пісня.flac")),
+            foldedPath(QStringLiteral("mpd:station")),
+            foldedPath(QStringLiteral("baretrack.flac")),
+            foldedPath(QString::fromUtf8("Music／Shared／Fullwidth.flac")),
+        };
+        SearchIndex built;
+        built.build(records);
+        SearchIndex appended;
+        appended.append(records.mid(0, 3));
+        appended.append(records.mid(3, 4));
+        appended.append(records.mid(7));
+        SearchIndex cleared;
+        cleared.build({foldedPath(QStringLiteral("obsolete/name.flac"))});
+        cleared.clear();
+        cleared.build(records);
+
+        const QStringList queries = {
+            QStringLiteral("music"), QStringLiteral("shared"), QStringLiteral("alpha"),
+            QStringLiteral("song"), QStringLiteral("path:shared"), QStringLiteral("path:music"),
+            QStringLiteral("path:mpd"), QStringLiteral("station"), QStringLiteral("baretrack"),
+            QStringLiteral("fullwidth"), QStringLiteral("ry"), QStringLiteral("borys"),
+            QStringLiteral("path:ry"), QStringLiteral("path:borys"),
+            QStringLiteral("^path:music"), QStringLiteral("path:shared/alpha"),
+            QStringLiteral("'music"), QStringLiteral("!shared"),
+            QStringLiteral("shared song"), QStringLiteral("shared !beta"),
+        };
+        for (const QString &text : queries) {
+            const SearchQuery query = SearchQuery::parse(text);
+            struct Hit { int score; int index; };
+            std::vector<Hit> expected;
+            for (int i = 0; i < records.size(); ++i) {
+                const int score = matchSearchRecord(records[i], query, false);
+                if (score != INT_MIN) expected.push_back({score, i});
+            }
+            std::sort(expected.begin(), expected.end(), [](const Hit &a, const Hit &b) {
+                return a.score != b.score ? a.score > b.score : a.index < b.index;
+            });
+            for (const SearchIndex *index : {&built, &appended, &cleared}) {
+                int total = -1;
+                const auto actual = index->match(query, false, {}, &total);
+                QCOMPARE(total, static_cast<int>(expected.size()));
+                QCOMPARE(actual.size(), static_cast<qsizetype>(expected.size()));
+                for (qsizetype i = 0; i < actual.size(); ++i) {
+                    QCOMPARE(actual[i].index, expected[static_cast<std::size_t>(i)].index);
+                    QCOMPARE(actual[i].score, expected[static_cast<std::size_t>(i)].score);
+                }
+            }
+        }
+        for (const QString &text : {QStringLiteral("shared"), QStringLiteral("song"),
+                                    QStringLiteral("borys"), QStringLiteral("path:ry")}) {
+            const SearchQuery query = SearchQuery::parse(text);
+            const auto expected = built.match(query, true);
+            for (const SearchIndex *index : {&appended, &cleared}) {
+                const auto actual = index->match(query, true);
+                QCOMPARE(actual.size(), expected.size());
+                for (qsizetype i = 0; i < actual.size(); ++i) {
+                    QCOMPARE(actual[i].index, expected[i].index);
+                    QCOMPARE(actual[i].score, expected[i].score);
+                }
+            }
+        }
+    }
+
+    void fuzzyPathStaysInsideAComponent()
+    {
+        SearchIndex index;
+        index.build({foldedPath(QStringLiteral("/a/c/zzz.bin")),
+                     foldedPath(QStringLiteral("/ac/zzz.bin")),
+                     foldedPath(QStringLiteral("/root/zzz.bin"))});
+        const auto free = index.match(SearchQuery::parse(QStringLiteral("ac")), true);
+        QCOMPARE(free.size(), 1);
+        QCOMPARE(free[0].index, 1);
+        const auto scoped = index.match(SearchQuery::parse(QStringLiteral("path:ac")), true);
+        QCOMPARE(scoped.size(), 2);
+    }
+
+    void fuzzyPathHighlightUsesOneComponent()
+    {
+        const auto free = highlightPositions(QStringLiteral("/archive/acme/file.flac"),
+                                             SearchQuery::parse(QStringLiteral("ame")),
+                                             HighlightField::Path, true);
+        QCOMPARE(free, (QVector<int>{9, 11, 12}));
+        const auto scoped = highlightPositions(QStringLiteral("/a/c/file.flac"),
+                                               SearchQuery::parse(QStringLiteral("path:ac")),
+                                               HighlightField::Path, true);
+        QVERIFY(scoped.contains(1));
+        QVERIFY(scoped.contains(3));
+    }
+
     void emptyQuery_returnsNothing()
     {
         SearchIndex idx;

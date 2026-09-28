@@ -9,13 +9,18 @@
 #include <QThread>
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
+#include <cstdint>
+#include <functional>
 #include <thread>
 #include <vector>
 
 namespace Search {
 
 namespace {
+
+std::atomic<quint64> nextGeneration{0};
 
 // ---- highlight helpers (delegate, on-screen rows only) --------------------
 
@@ -41,43 +46,199 @@ bool termAppliesTo(const Term &term, HighlightField field)
 void SearchIndex::build(QVector<SearchRecord> records)
 {
     m_records = std::move(records);
+    m_masks.clear();
+    m_folders.clear();
+    m_folderIds.clear();
+    m_pathSegments.clear();
+    m_pathOffsets.clear();
+    m_pathOffsets.push_back(0);
+    m_masks.reserve(static_cast<std::size_t>(m_records.size()));
+    for (const SearchRecord &rec : m_records) {
+        m_masks.push_back(recordNormMasks(rec));
+        indexPath(rec.normPath);
+    }
+    m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 void SearchIndex::append(QVector<SearchRecord> records)
 {
     if (m_records.isEmpty()) {
-        m_records = std::move(records);
+        build(std::move(records));
         return;
     }
     m_records.reserve(m_records.size() + records.size());
+    m_masks.reserve(static_cast<std::size_t>(m_records.size() + records.size()));
     for (SearchRecord &rec : records) {
+        m_masks.push_back(recordNormMasks(rec));
+        indexPath(rec.normPath);
         m_records.push_back(std::move(rec));
     }
+    m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 void SearchIndex::clear()
 {
     m_records.clear();
     m_records.squeeze();
+    m_masks.clear();
+    m_masks.shrink_to_fit();
+    m_folders.clear();
+    m_folders.shrink_to_fit();
+    m_folderIds.clear();
+    m_pathSegments.clear();
+    m_pathSegments.shrink_to_fit();
+    m_pathOffsets.clear();
+    m_pathOffsets.shrink_to_fit();
+    m_pathOffsets.push_back(0);
+    m_generation = nextGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
 }
+
+void SearchIndex::indexPath(const QString &normPath)
+{
+    const QStringView path(normPath);
+    for (qsizetype segmentStart = 0; segmentStart <= path.size();) {
+        qsizetype segmentEnd = path.indexOf(Fold::kSegmentSeparator, segmentStart);
+        if (segmentEnd < 0) segmentEnd = path.size();
+        int parent = -1;
+        qsizetype componentStart = segmentStart;
+        qsizetype slash = path.indexOf(QLatin1Char('/'), componentStart);
+        while (slash >= 0 && slash < segmentEnd) {
+            if (slash > componentStart) {
+                const QString component = path.mid(componentStart, slash - componentStart).toString();
+                const QPair<int, QString> key{parent, component};
+                const auto it = m_folderIds.constFind(key);
+                if (it != m_folderIds.cend()) {
+                    parent = *it;
+                } else {
+                    const int id = static_cast<int>(m_folders.size());
+                    m_folders.push_back({parent, component, normCharacterMask(component)});
+                    m_folderIds.insert(key, id);
+                    parent = id;
+                }
+            }
+            componentStart = slash + 1;
+            slash = path.indexOf(QLatin1Char('/'), componentStart);
+        }
+        m_pathSegments.push_back({parent, static_cast<int>(componentStart), static_cast<int>(segmentEnd),
+                                  normCharacterMask(path.mid(componentStart, segmentEnd - componentStart))});
+        if (segmentEnd == path.size()) break;
+        segmentStart = segmentEnd + 1;
+    }
+    m_pathOffsets.push_back(m_pathSegments.size());
+}
+
+namespace {
+
+// A result's rank as one integer: higher score first, then lower record
+// index, the order results are returned in. Comparing keys compares ranks.
+using RankKey = quint64;
+
+RankKey rankKey(int score, int index)
+{
+    const quint64 biased = static_cast<quint64>(static_cast<qint64>(score) + (qint64{1} << 31));
+    return (biased << 32) | (0xFFFFFFFFu - static_cast<quint32>(index));
+}
+
+int keyScore(RankKey key)
+{
+    return static_cast<int>(static_cast<qint64>(key >> 32) - (qint64{1} << 31));
+}
+
+int keyIndex(RankKey key)
+{
+    return static_cast<int>(0xFFFFFFFFu - static_cast<quint32>(key & 0xFFFFFFFFu));
+}
+
+} // namespace
 
 QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMode,
                                           const ExclusionSet &excludes,
-                                          int *totalMatches) const
+                                          int *totalMatches, QVector<int> *matchingIndices,
+                                          const QVector<int> *candidateIndices,
+                                          const std::function<bool()> &cancelled) const
 {
+    Q_ASSERT(!matchingIndices || matchingIndices != candidateIndices);
     if (totalMatches) *totalMatches = 0;
+    if (matchingIndices) matchingIndices->clear();
+    if (cancelled && cancelled()) return {};
     if (query.isEmpty() || m_records.isEmpty()) return {};
 
-    // Phase 1: cheap boolean filter + lightweight score. No positions, no
-    // per-record allocations — only record indices are collected.
-    struct Candidate { int index; int score; };
-    const int n = static_cast<int>(m_records.size());
+    const int n = candidateIndices ? static_cast<int>(candidateIndices->size())
+                                   : static_cast<int>(m_records.size());
+    const auto termMasks = termCharacterMasks(query);
 
-    // Score the half-open slice [lo, hi) into `out`. Records are scored
-    // independently, so slices run on separate threads with no shared mutable
-    // state — fuzzyMatchV2's scratch is thread_local, one slab per thread.
-    const auto scoreRange = [&](int lo, int hi, QVector<Candidate> &out) {
-        for (int i = lo; i < hi; ++i) {
+    // Each text term that uses the folder table decides every folder once:
+    // it holds the term itself or inherits its parent's answer (folders are
+    // numbered parents first). Component scores are computed only for the
+    // few records that get scored.
+    const auto subsequence = [](QStringView hay, QStringView needle) {
+        qsizetype pos = 0;
+        for (QChar ch : needle) {
+            pos = hay.indexOf(ch, pos);
+            if (pos < 0) return false;
+            ++pos;
+        }
+        return true;
+    };
+    struct FolderTerm {
+        bool fuzzy = false;
+        std::vector<quint8> holds;
+    };
+    std::vector<FolderTerm> folderTerms(static_cast<std::size_t>(query.terms.size()));
+    for (qsizetype t = 0; t < query.terms.size(); ++t) {
+        const Term &term = query.terms[t];
+        if (!usesPathTree(term, fuzzyMode)) continue;
+        FolderTerm &state = folderTerms[static_cast<std::size_t>(t)];
+        state.fuzzy = fuzzyMode && !term.forceExact;
+        state.holds.reserve(m_folders.size());
+        for (const FolderNode &folder : m_folders) {
+            const bool own = (folder.mask & termMasks[t]) == termMasks[t]
+                && (state.fuzzy ? subsequence(folder.component, term.text)
+                                : folder.component.contains(term.text));
+            state.holds.push_back(own || (folder.parent >= 0
+                                          && state.holds[static_cast<std::size_t>(folder.parent)]));
+        }
+    }
+
+    // Every worker keeps its own best kMaxResults ranks. Once a worker's heap
+    // is full, its worst rank is a floor no shown result can fall below; it is
+    // published so every worker skips scoring a record whose best possible rank
+    // (its bound) is lower. Every record is still decided, so the total count
+    // stays exact. A stale floor only costs extra scoring.
+    std::atomic<RankKey> floor{0};
+
+    // Aligned so workers' counters, written once per match, never share a line.
+    struct alignas(64) Slice {
+        std::vector<RankKey> heap;
+        QVector<int> indices;
+        int count = 0;
+    };
+
+    const auto scanSlice = [&](int lo, int hi, Slice &out) {
+        auto &heap = out.heap;
+        heap.reserve(static_cast<std::size_t>(std::min(kMaxResults, hi - lo)));
+        const auto keep = [&](RankKey key) {
+            if (static_cast<int>(heap.size()) < kMaxResults) {
+                heap.push_back(key);
+                std::push_heap(heap.begin(), heap.end(), std::greater<>());
+            } else if (key > heap.front()) {
+                std::pop_heap(heap.begin(), heap.end(), std::greater<>());
+                heap.back() = key;
+                std::push_heap(heap.begin(), heap.end(), std::greater<>());
+            } else {
+                return;
+            }
+            if (static_cast<int>(heap.size()) == kMaxResults) {
+                RankKey seen = floor.load(std::memory_order_relaxed);
+                while (heap.front() > seen
+                       && !floor.compare_exchange_weak(seen, heap.front(), std::memory_order_relaxed)) {
+                }
+            }
+        };
+        for (int pos = lo; pos < hi; ++pos) {
+            if ((pos & 2047) == 0 && cancelled && cancelled()) return;
+            const int i = candidateIndices ? candidateIndices->at(pos) : pos;
+            Q_ASSERT(i >= 0 && i < m_records.size());
             const SearchRecord &rec = m_records[i];
 
             // Exclusions are an early reject, before any relevance scoring, so
@@ -88,71 +249,102 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             }
             if (excluded) continue;
 
-            const int score = matchSearchRecord(rec, query, fuzzyMode);
-            if (score != INT_MIN) out.push_back({i, score});
+            const NormMasks &masks = m_masks[static_cast<std::size_t>(i)];
+            const auto lookup = [&](qsizetype t, bool score) {
+                const FolderTerm &state = folderTerms[static_cast<std::size_t>(t)];
+                const QStringView needle(query.terms[t].text);
+                const QStringView path(rec.normPath);
+                int best = INT_MIN;
+                const auto consider = [&](QStringView component) {
+                    const auto result = fuzzyMatchV2(component, needle, true, false);
+                    if (result.matched()) best = std::max(best, result.score);
+                };
+                for (std::size_t s = m_pathOffsets[static_cast<std::size_t>(i)];
+                     s < m_pathOffsets[static_cast<std::size_t>(i) + 1]; ++s) {
+                    const PathSegment &segment = m_pathSegments[s];
+                    const bool filenameFits = (segment.filenameMask & termMasks[t]) == termMasks[t];
+                    const QStringView filename = path.mid(segment.filenameStart,
+                                                          segment.filenameEnd - segment.filenameStart);
+                    if (!score) {
+                        if (segment.leaf >= 0 && state.holds[static_cast<std::size_t>(segment.leaf)]) return 0;
+                        if (filenameFits && (state.fuzzy ? subsequence(filename, needle)
+                                                         : filename.contains(needle))) return 0;
+                        continue;
+                    }
+                    if (filenameFits) consider(filename);
+                    for (int f = segment.leaf; f >= 0 && state.holds[static_cast<std::size_t>(f)];
+                         f = m_folders[static_cast<std::size_t>(f)].parent) {
+                        consider(m_folders[static_cast<std::size_t>(f)].component);
+                    }
+                }
+                return best;
+            };
+            const PathTermLookup pathLookup(lookup);
+            bool exact = false;
+            const int bound = matchSearchRecordBound(rec, masks, query, termMasks,
+                                                     fuzzyMode, &exact, &pathLookup);
+            if (bound == INT_MIN) continue;
+            ++out.count;
+            bool matched = true;
+            if (exact) {
+                keep(rankKey(bound, i));
+            } else if (rankKey(bound, i) > floor.load(std::memory_order_relaxed)) {
+                const int score = scoreSearchRecord(rec, masks, query, termMasks,
+                                                    fuzzyMode, &pathLookup);
+                if (score == INT_MIN) {
+                    // The bound admitted what the scorer rejects: never let a
+                    // disagreement surface as a counted, unscorable match.
+                    --out.count;
+                    matched = false;
+                } else {
+                    keep(rankKey(score, i));
+                }
+            }
+            if (matched && matchingIndices) out.indices.append(i);
         }
     };
 
-    // Fan the scan across cores. Fuzzy scoring is an order of magnitude heavier
-    // than exact, and a 90k-track library is the dominant per-keystroke cost, so
-    // this scan is the one place worth the thread spawn. Leave a core for the
-    // GUI/audio threads, and stay serial for small indexes where the spawn and
-    // join wouldn't pay off.
+    // Fan the scan across cores, leaving one for the GUI and audio threads,
+    // and stay serial for small indexes where spawning would not pay off.
     int workers = std::clamp(QThread::idealThreadCount() - 1, 1, 12);
     constexpr int kMinPerThread = 2500;
     workers = std::clamp(n / kMinPerThread, 1, workers);
 
-    QVector<Candidate> candidates;
-    if (workers <= 1) {
-        candidates.reserve(1024);
-        scoreRange(0, n, candidates);
-    } else {
-        QVector<QVector<Candidate>> partials(workers);
+    std::vector<Slice> slices(static_cast<std::size_t>(workers));
+    {
         std::vector<std::thread> threads;
         threads.reserve(static_cast<std::size_t>(workers - 1));
         const int chunk = (n + workers - 1) / workers;
         for (int w = 0; w + 1 < workers; ++w) {
-            const int lo = w * chunk;
+            const int lo = std::min(n, w * chunk);
             const int hi = std::min(n, lo + chunk);
-            threads.emplace_back(scoreRange, lo, hi, std::ref(partials[w]));
+            threads.emplace_back(scanSlice, lo, hi, std::ref(slices[static_cast<std::size_t>(w)]));
         }
-        scoreRange((workers - 1) * chunk, n, partials[workers - 1]); // last slice here
-
-        for (std::thread &t : threads) {
-            t.join();
-        }
-
-        // Concatenate in slice order: chunks are ascending contiguous ranges, so
-        // the merged list stays index-ordered and ties break exactly as before.
-        int total = 0;
-        for (const QVector<Candidate> &p : partials) {
-            total += static_cast<int>(p.size());
-        }
-        candidates.reserve(total);
-        for (const QVector<Candidate> &p : partials) {
-            candidates += p;
-        }
+        scanSlice(std::min(n, (workers - 1) * chunk), n, slices.back());
+        for (std::thread &t : threads) t.join();
     }
 
-    if (totalMatches) *totalMatches = static_cast<int>(candidates.size());
+    if (cancelled && cancelled()) return {};
 
-    // Phase 2: keep only the top-scoring slice, ordered by score desc.
-    const int keep = std::min(static_cast<int>(candidates.size()), kMaxResults);
-    const auto cmp = [](const Candidate &a, const Candidate &b) {
-        return a.score != b.score ? a.score > b.score : a.index < b.index;
-    };
-    if (keep < static_cast<int>(candidates.size())) {
-        std::partial_sort(candidates.begin(), candidates.begin() + keep, candidates.end(), cmp);
-        candidates.resize(keep);
-    } else {
-        std::sort(candidates.begin(), candidates.end(), cmp);
+    // Every shown result survives in some worker's heap: a record outranked
+    // there by kMaxResults others is outranked globally too.
+    std::vector<RankKey> ranked;
+    int total = 0;
+    for (const Slice &slice : slices) {
+        total += slice.count;
+        ranked.insert(ranked.end(), slice.heap.begin(), slice.heap.end());
+        if (matchingIndices) *matchingIndices += slice.indices;
     }
+    if (totalMatches) *totalMatches = total;
 
-    // Phase 3: materialize record copies only for the kept slice.
+    const int retained = std::min(static_cast<int>(ranked.size()), kMaxResults);
+    std::partial_sort(ranked.begin(), ranked.begin() + retained, ranked.end(), std::greater<>());
+
     QVector<ScoredResult> results;
-    results.reserve(keep);
-    for (const Candidate &c : candidates) {
-        results.push_back({m_records[c.index], c.score});
+    results.reserve(retained);
+    for (int r = 0; r < retained; ++r) {
+        const int index = keyIndex(ranked[static_cast<std::size_t>(r)]);
+        results.push_back({m_records[index], keyScore(ranked[static_cast<std::size_t>(r)]), index});
     }
     return results;
 }
@@ -205,6 +397,33 @@ QVector<int> highlightPositions(const QString &text, const SearchQuery &query,
     QVector<int> positions;
     for (const Term &term : query.terms) {
         if (!termAppliesTo(term, field) || term.text.isEmpty()) continue;
+        if (field == HighlightField::Path && term.kind == TermKind::FreeText
+            && fuzzyMode && !term.forceExact && usesPathTree(term, fuzzyMode)) {
+            int bestScore = INT_MIN;
+            QVector<int> bestPositions;
+            for (const Fold::FoldResult &folded : folds) {
+                const QStringView path(folded.text);
+                for (qsizetype start = 0; start <= path.size();) {
+                    qsizetype end = path.indexOf(QLatin1Char('/'), start);
+                    if (end < 0) end = path.size();
+                    const auto result = fuzzyMatchV2(path.mid(start, end - start),
+                                                     QStringView(term.text), true, true);
+                    if (result.matched() && result.score > bestScore) {
+                        bestScore = result.score;
+                        bestPositions.clear();
+                        for (int p : result.positions) {
+                            const qsizetype foldedIndex = start + p;
+                            if (foldedIndex >= 0 && foldedIndex < folded.srcIndex.size())
+                                bestPositions.append(folded.srcIndex.at(foldedIndex));
+                        }
+                    }
+                    if (end == path.size()) break;
+                    start = end + 1;
+                }
+            }
+            positions += bestPositions;
+            continue;
+        }
         for (const Fold::FoldResult &folded : folds) {
             const QVector<int> foldedPos = termPositions(folded.text, term, fuzzyMode);
             if (foldedPos.isEmpty()) continue;

@@ -16,15 +16,21 @@
 #include "search/Exclusion.h"
 #include "search/FuzzyMatch.h"
 #include "search/SearchQuery.h"
+#include "search/SearchMatcher.h"
 #include "search/SearchRecord.h"
 
+#include <QHash>
 #include <QVector>
+
+#include <functional>
+#include <vector>
 
 namespace Search {
 
 struct ScoredResult {
     SearchRecord rec;          // copy of the matching record (embedded for thread safety)
     int          score = 0;
+    int          index = -1;
 };
 
 // Cap on the number of results materialized/returned per query. A broad query
@@ -64,9 +70,18 @@ public:
     // Empty query → empty result. When totalMatches is non-null it receives the
     // full (uncapped) number of matching records. `excludes`, when non-empty,
     // drop matching records during the filter phase (before scoring).
+    // matchingIndices receives every match in ascending index order.
+    // candidateIndices must be ascending, unique, and valid for this index;
+    // it must not be the same vector as matchingIndices. Cancellation returns
+    // empty results and leaves the output count and indices empty.
     QVector<ScoredResult> match(const SearchQuery &query, bool fuzzyMode,
                                  const ExclusionSet &excludes = {},
-                                 int *totalMatches = nullptr) const;
+                                 int *totalMatches = nullptr,
+                                 QVector<int> *matchingIndices = nullptr,
+                                 const QVector<int> *candidateIndices = nullptr,
+                                 const std::function<bool()> &cancelled = {}) const;
+
+    quint64 generation() const { return m_generation; }
 
     int size() const { return static_cast<int>(m_records.size()); }
     bool isEmpty() const { return m_records.isEmpty(); }
@@ -75,7 +90,28 @@ public:
     const QVector<SearchRecord> &records() const { return m_records; }
 
 private:
+    struct FolderNode {
+        int parent = -1;
+        QString component;
+        quint64 mask = 0;
+    };
+    // One reading of a record's path: its innermost folder and its filename
+    // slice of normPath, with that slice's character mask.
+    struct PathSegment {
+        int leaf = -1;
+        int filenameStart = 0;
+        int filenameEnd = 0;
+        quint64 filenameMask = 0;
+    };
+
+    void indexPath(const QString &normPath);
     QVector<SearchRecord> m_records;
+    std::vector<NormMasks> m_masks;
+    std::vector<FolderNode> m_folders;
+    QHash<QPair<int, QString>, int> m_folderIds;
+    std::vector<PathSegment> m_pathSegments;
+    std::vector<std::size_t> m_pathOffsets{0};
+    quint64 m_generation = 0;
 };
 
 } // namespace Search

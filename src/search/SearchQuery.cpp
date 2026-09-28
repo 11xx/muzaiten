@@ -286,6 +286,37 @@ SearchQuery SearchQuery::parse(const QString &queryString)
     return q;
 }
 
+bool narrows(const SearchQuery &before, const SearchQuery &after)
+{
+    if (before.isEmpty() || after.terms.size() < before.terms.size()
+        || after.terms.size() > before.terms.size() + 1) return false;
+    int changed = 0;
+    for (qsizetype i = 0; i < before.terms.size(); ++i) {
+        const Term &oldTerm = before.terms[i];
+        const Term &newTerm = after.terms[i];
+        const bool same = oldTerm.kind == newTerm.kind && oldTerm.op == newTerm.op
+            && oldTerm.text == newTerm.text && oldTerm.negate == newTerm.negate
+            && oldTerm.prefixAnchor == newTerm.prefixAnchor
+            && oldTerm.suffixAnchor == newTerm.suffixAnchor
+            && oldTerm.forceExact == newTerm.forceExact
+            && oldTerm.numericValue == newTerm.numericValue;
+        if (same) continue;
+        if (++changed > 1 || oldTerm.negate || newTerm.negate || oldTerm.suffixAnchor
+            || newTerm.suffixAnchor || oldTerm.kind != newTerm.kind
+            || oldTerm.op != newTerm.op || oldTerm.prefixAnchor != newTerm.prefixAnchor
+            || oldTerm.forceExact != newTerm.forceExact
+            || oldTerm.numericValue != newTerm.numericValue
+            || oldTerm.kind > TermKind::CodecText
+            || !newTerm.text.startsWith(oldTerm.text)
+            // A term holding '/' matches a path as a whole instead of per
+            // folder, which can match more.
+            || (newTerm.text.contains(QLatin1Char('/')) && !oldTerm.text.contains(QLatin1Char('/')))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 QString quoteFieldValue(const QString &raw)
 {
     QString escaped = raw;
