@@ -76,7 +76,7 @@ def compile_inspector(name: str, tree: Path, build: Path, compiler: str) -> Path
     binary = CACHE / name
     flags = output("pkg-config", "--cflags", "Qt6Core").split()
     libs = output("pkg-config", "--libs", "Qt6Core").split()
-    command = [compiler, "-std=c++26", "-O2", "-fPIC", str(ROOT / "tools/fold-inspect.cpp"),
+    command = [compiler, "-std=c++26", "-O2", "-fPIC", str(tree / "tools/fold-inspect.cpp"),
                f"-I{tree / 'src'}", *flags, str(build / "libmuzaiten_search.a")]
     core = build / "libmuzaiten_core.a"
     if core.exists():
