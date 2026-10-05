@@ -1110,6 +1110,7 @@ bool GStreamerPlaybackBackend::configureSink()
     // arbitrary interval around a source switch.
     m_audioSink = GST_ELEMENT(gst_object_ref_sink(sink));
     m_sinkFactory = factory;
+    ++m_sinkRun;
     // Requested by the first open, through applyStreamTarget().
     m_handoffTarget = sharedSinkTarget(m_profile);
     if (m_sinkFactory == QStringLiteral("pipewiresink")) {
@@ -1189,6 +1190,7 @@ void GStreamerPlaybackBackend::removeAudioSinkProbe()
 
 void GStreamerPlaybackBackend::releaseAudioSink()
 {
+    ++m_sinkRun;
     if (m_audioSink != nullptr) {
         if (m_currentDeviceHandler != 0) {
             g_signal_handler_disconnect(m_audioSink, m_currentDeviceHandler);
@@ -1282,8 +1284,11 @@ void GStreamerPlaybackBackend::retargetBeforeFormatChange(GstElement *sink, GstE
             g_free(device);
             if (!current.isEmpty() && current != target) {
                 target = current;
-                QMetaObject::invokeMethod(this, [this, route = QString::fromUtf8(current)]() {
-                    noteObservedRoute(route);
+                QMetaObject::invokeMethod(this, [this, route = QString::fromUtf8(current),
+                                                 run = m_sinkRun.load()]() {
+                    if (run == m_sinkRun.load()) {
+                        noteObservedRoute(route);
+                    }
                 }, Qt::QueuedConnection);
             }
         }

@@ -18,6 +18,7 @@
 #define private public
 #include "playback/GStreamerPlaybackBackend.h"
 #undef private
+#include "playback/OutputEndpointMonitor.h"
 #include "playback/PipeWireStreamWatch.h"
 
 namespace {
@@ -645,6 +646,121 @@ private slots:
         player.waitForFinished(3000);
         QTRY_COMPARE_WITH_TIMEOUT(watch.linkedSink(), QString(), 8000);
         watch.stop();
+    }
+
+    void nativeStreamWatchDropsEndedRuns_data()
+    {
+        QTest::addColumn<bool>("replaced");
+        QTest::newRow("stopped") << false;
+        QTest::newRow("replaced by another run") << true;
+    }
+
+    // A report the watch queued before it was stopped, or before a new run
+    // replaced it, is never delivered.
+    void nativeStreamWatchDropsEndedRuns()
+    {
+        QFETCH(bool, replaced);
+        if (!PipeWireStreamWatch::supported()) {
+            QSKIP("built without PipeWire support");
+        }
+        if (QStandardPaths::findExecutable(QStringLiteral("pw-cat")).isEmpty()) {
+            QSKIP("pw-cat is not installed");
+        }
+        const QString name = QStringLiteral("muz-watch-%1").arg(m_round);
+        PipeWireStreamWatch watch;
+        QSignalSpy changed(&watch, &PipeWireStreamWatch::linkedSinkChanged);
+        QVERIFY(watch.start(name));
+        QProcess player;
+        player.start(QStringLiteral("pw-cat"),
+                     {QStringLiteral("--playback"), QStringLiteral("--target"), m_main,
+                      QStringLiteral("-P"), QStringLiteral("{ node.name = \"%1\" }").arg(name), path("long-a")});
+        QVERIFY(player.waitForStarted(3000));
+        // The route is known to the watch, and its report is still queued.
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return watch.linkedSink() == m_main; }));
+        if (replaced) {
+            QVERIFY(watch.start(name + QStringLiteral("-other")));
+        } else {
+            watch.stop();
+        }
+        QTest::qWait(500);
+        for (const QList<QVariant> &report : std::as_const(changed)) {
+            QVERIFY2(report.first().toString() != m_main, "a report from an ended run was delivered");
+        }
+        player.kill();
+        player.waitForFinished(3000);
+        watch.stop();
+    }
+
+    // A device removal the provider reported just before the monitor was
+    // restarted belongs to the old run: it must not remove the endpoint from
+    // the new run's list, which has it.
+    void endpointMonitorDropsEventsOfEndedRuns()
+    {
+        OutputEndpointMonitor monitor;
+        QVERIFY(monitor.start(QStringLiteral("pulsesink")));
+        QVERIFY(monitor.contains(m_other));
+        QSignalSpy removed(&monitor, &OutputEndpointMonitor::endpointRemoved);
+
+        m_graph->removeModule(m_modules.take(m_other));
+        // The provider reports the removal on its own thread; it is queued here.
+        QThread::msleep(800);
+        monitor.stop();
+        m_modules.insert(m_other, m_graph->addSink(m_other));
+        QVERIFY(monitor.start(QStringLiteral("pulsesink")));
+        QVERIFY(monitor.contains(m_other));
+
+        QTest::qWait(500);
+        QVERIFY(monitor.contains(m_other));
+        QCOMPARE(removed.count(), 0);
+        monitor.stop();
+    }
+
+    void outputChangeDropsQueuedObservations_data()
+    {
+        QTest::addColumn<QString>("transport");
+        QTest::newRow("pulse") << QStringLiteral("pulse");
+        QTest::newRow("native") << QStringLiteral("pipewire");
+    }
+
+    // A mixer move is seen but not yet delivered when the user picks another
+    // output. The old observation must not come back as a move to adopt over
+    // the newer choice.
+    void outputChangeDropsQueuedObservations()
+    {
+        QFETCH(QString, transport);
+        SKIP_UNLESS_TRANSPORT(transport);
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        const QString chosen = QStringLiteral("muz_chosen_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        m_modules.insert(chosen, m_graph->addSink(chosen));
+        PlaybackProfile profile = transportProfile(transport);
+        profile.sharedEndpoint = preferred;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        backend.play(url("long-a"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+
+        // No event processing from the move until the new output is chosen.
+        m_graph->mixerMove(m_other);
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return m_graph->route() == m_other; }));
+        QThread::msleep(300);
+        profile.sharedEndpoint = chosen;
+        backend.setProfile(profile);
+
+        // As after an output change in the app, events run before the track
+        // is reopened on the new output.
+        QTest::qWait(1500);
+        QCOMPARE(adopted.count(), 0);
+        QCOMPARE(backend.outputStatus().preferredEndpoint, chosen);
+        backend.play(url("long-b"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), chosen, 8000);
+        QCOMPARE(m_graph->requestedTarget(), chosen);
+        QTest::qWait(1500);
+        QCOMPARE(adopted.count(), 0);
+        QCOMPARE(m_graph->route(), chosen);
+        backend.stop();
     }
 
 private:

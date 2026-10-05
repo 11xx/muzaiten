@@ -5,6 +5,8 @@
 #include <QMutex>
 #include <QTimer>
 
+#include <atomic>
+
 class OutputEndpointMonitor;
 class PipeWireStreamWatch;
 
@@ -249,6 +251,9 @@ private:
     QTimer m_externalMoveTimer;
     // The last route seen for the current pinned stream.
     QString m_lastRoute;
+    // Bumped whenever the sink is created or released. A route the streaming
+    // thread queued for an older sink is dropped on delivery.
+    std::atomic<quint64> m_sinkRun{0};
     OutputStatus m_publishedStatus;
     double m_volume = 1.0;
     QTimer m_transitionTimer;

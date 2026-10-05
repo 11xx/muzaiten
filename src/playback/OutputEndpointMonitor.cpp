@@ -1,7 +1,6 @@
 #include "playback/OutputEndpointMonitor.h"
 
 #include <QMetaObject>
-#include <QPointer>
 
 #include <algorithm>
 
@@ -37,6 +36,12 @@ QString endpointLabel(GstDevice *device)
     g_free(display);
     return label;
 }
+
+// What a provider's bus handler needs: the monitor and the run it serves.
+struct ProviderRun {
+    OutputEndpointMonitor *monitor = nullptr;
+    quint64 run = 0;
+};
 
 GstDeviceProvider *makeProvider(const QString &sinkFactory)
 {
@@ -116,9 +121,11 @@ bool OutputEndpointMonitor::start(const QString &sinkFactory)
             if (device != nullptr && gst_device_has_classes(device, "Audio/Sink")) {
                 const QString name = endpointName(device);
                 const QString label = endpointLabel(device);
-                QPointer<OutputEndpointMonitor> monitor(static_cast<OutputEndpointMonitor *>(userData));
-                QMetaObject::invokeMethod(monitor, [monitor, added, name, label]() {
-                    if (monitor == nullptr) {
+                const auto *source = static_cast<const ProviderRun *>(userData);
+                OutputEndpointMonitor *monitor = source->monitor;
+                // Dropped if the monitor is gone or this run ended meanwhile.
+                QMetaObject::invokeMethod(monitor, [monitor, run = source->run, added, name, label]() {
+                    if (run != monitor->m_run) {
                         return;
                     }
                     if (added) {
@@ -134,7 +141,8 @@ bool OutputEndpointMonitor::start(const QString &sinkFactory)
         }
         return GST_BUS_DROP;
     };
-    gst_bus_set_sync_handler(bus, handler, this, nullptr);
+    gst_bus_set_sync_handler(bus, handler, new ProviderRun{this, ++m_run},
+                             [](gpointer data) { delete static_cast<ProviderRun *>(data); });
     gst_object_unref(bus);
 
     if (!gst_device_provider_start(m_provider)) {
@@ -157,6 +165,7 @@ bool OutputEndpointMonitor::start(const QString &sinkFactory)
 
 void OutputEndpointMonitor::stop()
 {
+    ++m_run;
     if (m_provider == nullptr) {
         return;
     }

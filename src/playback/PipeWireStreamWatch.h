@@ -39,4 +39,8 @@ signals:
 private:
     struct Impl;
     std::unique_ptr<Impl> d;
+    // The current run, bumped by every start() and stop(). A report queued by
+    // a run that has since ended is dropped on delivery, so a stopped or
+    // replaced run never speaks for the current one.
+    quint64 m_run = 0;
 };
