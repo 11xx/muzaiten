@@ -49,6 +49,7 @@ class PanelSearchController;
 struct MainPanelTarget;
 class PlaybackBackend;
 class QTimer;
+class QLabel;
 class QProgressBar;
 class QPushButton;
 class QStackedWidget;
@@ -241,6 +242,11 @@ private:
     // to shared so it won't immediately re-grab).
     void releaseHeldOutputDevice();
     bool canReleaseOutputDevice() const;
+    // Show, in the status bar, an output that is waiting, falling back, or
+    // configured beyond what the transport can do; hidden otherwise.
+    void updateOutputIndicator();
+    // Save a preferred endpoint chosen in a mixer as the profile's choice.
+    void adoptSharedEndpoint(const QString &name, const QString &label);
     void scheduleHeldDeviceRelease(int delayMs);
     void updateDsdTakeoverPromptText();
     void configureLinkRoots();
@@ -484,6 +490,7 @@ private:
     // Offered in the status bar only when bit-perfect playback fails because
     // PipeWire is holding the target device; click frees it and retries.
     QPushButton *m_takeOverDeviceButton = nullptr;
+    QLabel *m_outputIndicator = nullptr;
     QTimer *m_dsdTakeoverPromptTimer = nullptr;
     QTimer *m_takenOverDsdReleaseTimer = nullptr;
     bool m_dsdTakeoverPromptActive = false;

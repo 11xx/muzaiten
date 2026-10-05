@@ -1000,6 +1000,33 @@ QJsonObject AppCore::ipcStatus() const
     status.insert(QStringLiteral("radio"),
                   (m_player != nullptr && m_player->radioActive()) ? QStringLiteral("active")
                                                                    : QStringLiteral("inactive"));
+    if (m_playback != nullptr) {
+        const OutputStatus output = m_playback->outputStatus();
+        static const QHash<OutputStatus::Route, QString> routeNames{
+            {OutputStatus::Route::System, QStringLiteral("system")},
+            {OutputStatus::Route::Preferred, QStringLiteral("preferred")},
+            {OutputStatus::Route::Waiting, QStringLiteral("waiting")},
+            {OutputStatus::Route::Fallback, QStringLiteral("fallback")},
+            {OutputStatus::Route::Direct, QStringLiteral("direct")},
+            {OutputStatus::Route::Unsupported, QStringLiteral("unsupported")},
+        };
+        QJsonObject object{
+            {QStringLiteral("route"), routeNames.value(output.route)},
+            {QStringLiteral("transport"), output.transport},
+        };
+        if (!output.transportNote.isEmpty()) {
+            object.insert(QStringLiteral("transport_note"), output.transportNote);
+        }
+        if (!output.preferredEndpoint.isEmpty()) {
+            object.insert(QStringLiteral("preferred"), output.preferredEndpoint);
+            object.insert(QStringLiteral("preferred_label"), output.preferredLabel);
+            object.insert(QStringLiteral("preferred_available"), output.preferredAvailable);
+        }
+        if (!output.currentEndpoint.isEmpty()) {
+            object.insert(QStringLiteral("current"), output.currentEndpoint);
+        }
+        status.insert(QStringLiteral("output"), object);
+    }
     return status;
 }
 

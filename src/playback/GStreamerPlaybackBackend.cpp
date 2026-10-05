@@ -1201,6 +1201,19 @@ QString GStreamerPlaybackBackend::sharedSinkFactory(const QString &sinkChoice)
     return {};
 }
 
+QVector<OutputEndpoint> GStreamerPlaybackBackend::sharedEndpoints(const QString &sinkChoice) const
+{
+    const QString factory = sharedSinkFactory(sinkChoice);
+    if (m_endpoints != nullptr && m_endpoints->running() && m_monitoredFactory == factory) {
+        return m_endpoints->endpoints();
+    }
+    QVector<OutputEndpoint> endpoints = OutputEndpointMonitor::probe(factory);
+    std::sort(endpoints.begin(), endpoints.end(), [](const OutputEndpoint &a, const OutputEndpoint &b) {
+        return a.label.localeAwareCompare(b.label) < 0;
+    });
+    return endpoints;
+}
+
 bool GStreamerPlaybackBackend::preferredEndpointRoutable() const
 {
     return m_profile.mode == QStringLiteral("shared") && !m_dsdActive

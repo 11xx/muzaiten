@@ -39,6 +39,7 @@ public:
     DsdSupport dsdSupport() const override;
     bool supportsSharedEndpoint() const override { return true; }
     OutputStatus outputStatus() const override;
+    QVector<OutputEndpoint> sharedEndpoints(const QString &sinkChoice) const override;
 
     // The sink factory a shared transport choice ("auto", "pipewire",
     // "pulse", "alsa") resolves to with the installed plugins, or empty.
