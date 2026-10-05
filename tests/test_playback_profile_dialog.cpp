@@ -4,7 +4,10 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QTemporaryDir>
+#include <QPushButton>
 #include <QtTest/QtTest>
+
+#include "AudioDeviceFixtures.h"
 
 #define private public
 #include "ui/PlaybackProfileDialog.h"
@@ -71,6 +74,35 @@ private slots:
         unsupported.setSharedEndpoints({}, false);
         unsupported.setProfile(PlaybackProfile{});
         QVERIFY(!unsupported.m_endpointCombo->isEnabled());
+    }
+
+    // The remembered direct card is absent and another has its number: the
+    // dialog lists the remembered one as unavailable and returns its
+    // identity unchanged, in either mode, without offering to take over the
+    // other card.
+    void absentDirectIdentityIsKept()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B")}};
+        for (const QString &mode : {QStringLiteral("bit-perfect"), QStringLiteral("shared")}) {
+            PlaybackProfileDialog dialog;
+            PlaybackProfile profile;
+            profile.mode = mode;
+            profile.device = mode == QStringLiteral("bit-perfect") ? QStringLiteral("hw:2") : QString();
+            profile.deviceId = QStringLiteral("alsa_card.a");
+            profile.deviceLabel = QStringLiteral("Card A");
+            dialog.setProfile(profile);
+
+            QCOMPARE(dialog.m_deviceCombo->currentText(), QStringLiteral("Card A (unavailable)"));
+            QVERIFY(dialog.m_deviceAction->isHidden());
+            const PlaybackProfile result = dialog.profile();
+            QCOMPARE(result.deviceId, QStringLiteral("alsa_card.a"));
+            QCOMPARE(result.deviceLabel, QStringLiteral("Card A"));
+            if (mode == QStringLiteral("bit-perfect")) {
+                QCOMPARE(result.device, QStringLiteral("hw:2"));
+            }
+        }
+        QVERIFY(graph.profileSwitches.isEmpty());
     }
 
     void statusDescribesWaitAndTransport()

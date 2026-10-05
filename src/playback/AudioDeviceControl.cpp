@@ -7,6 +7,8 @@
 #include <QProcess>
 #include <QStandardPaths>
 
+#include <utility>
+
 namespace AudioDeviceControl {
 
 namespace {
@@ -121,6 +123,42 @@ std::optional<DeviceState> parseDevice(const QJsonObject &obj)
     return dev;
 }
 
+Tooling systemTooling()
+{
+    return {
+        [] {
+            return !QStandardPaths::findExecutable(QStringLiteral("pw-dump")).isEmpty()
+                && !QStandardPaths::findExecutable(QStringLiteral("wpctl")).isEmpty();
+        },
+        []() -> std::optional<QByteArray> {
+            QByteArray out;
+            if (!run(QStringLiteral("pw-dump"), {}, &out, nullptr))
+                return std::nullopt;
+            return out;
+        },
+        [](int pwId, int profileIndex, QString *error) {
+            return run(QStringLiteral("wpctl"),
+                       {QStringLiteral("set-profile"), QString::number(pwId), QString::number(profileIndex)},
+                       nullptr, error);
+        },
+    };
+}
+
+Tooling &tooling()
+{
+    static Tooling current = systemTooling();
+    return current;
+}
+
+QJsonArray dumpObjects()
+{
+    const std::optional<QByteArray> out = tooling().dump();
+    if (!out)
+        return {};
+    const QJsonDocument doc = QJsonDocument::fromJson(*out);
+    return doc.isArray() ? doc.array() : QJsonArray();
+}
+
 bool setProfile(const DeviceState &dev, int profileIndex, QString *error)
 {
     if (dev.pwId < 0 || profileIndex < 0) {
@@ -128,11 +166,7 @@ bool setProfile(const DeviceState &dev, int profileIndex, QString *error)
             *error = QStringLiteral("Device or profile is unknown");
         return false;
     }
-    return run(QStringLiteral("wpctl"),
-               {QStringLiteral("set-profile"),
-                QString::number(dev.pwId),
-                QString::number(profileIndex)},
-               nullptr, error);
+    return tooling().setProfile(dev.pwId, profileIndex, error);
 }
 
 struct SinkNode {
@@ -144,13 +178,7 @@ std::optional<SinkNode> findSinkNode(const QString &hwPath)
 {
     if (hwPath.isEmpty())
         return std::nullopt;
-    QByteArray out;
-    if (!run(QStringLiteral("pw-dump"), {}, &out, nullptr))
-        return std::nullopt;
-    const QJsonDocument doc = QJsonDocument::fromJson(out);
-    if (!doc.isArray())
-        return std::nullopt;
-    const QJsonArray arr = doc.array();
+    const QJsonArray arr = dumpObjects();
 
     int deviceId = -1;
     for (const QJsonValue &value : arr) {
@@ -179,24 +207,20 @@ std::optional<SinkNode> findSinkNode(const QString &hwPath)
 
 } // namespace
 
+Tooling setTooling(Tooling replacement)
+{
+    return std::exchange(tooling(), std::move(replacement));
+}
+
 bool toolingAvailable()
 {
-    return !QStandardPaths::findExecutable(QStringLiteral("pw-dump")).isEmpty()
-        && !QStandardPaths::findExecutable(QStringLiteral("wpctl")).isEmpty();
+    return tooling().available();
 }
 
 QVector<DeviceState> enumerate()
 {
     QVector<DeviceState> devices;
-    QByteArray out;
-    if (!run(QStringLiteral("pw-dump"), {}, &out, nullptr))
-        return devices;
-
-    const QJsonDocument doc = QJsonDocument::fromJson(out);
-    if (!doc.isArray())
-        return devices;
-
-    for (const QJsonValue &value : doc.array()) {
+    for (const QJsonValue &value : dumpObjects()) {
         if (auto dev = parseDevice(value.toObject()))
             devices.append(*dev);
     }
@@ -223,6 +247,28 @@ std::optional<DeviceState> findByStableId(const QString &stableId)
             return dev;
     }
     return std::nullopt;
+}
+
+std::optional<DeviceState> findSelected(const QString &stableId, const QString &hwPath)
+{
+    return stableId.isEmpty() ? findByHwPath(hwPath) : findByStableId(stableId);
+}
+
+DirectTarget resolveDirect(const QString &stableId, const QString &savedDevice)
+{
+    DirectTarget target;
+    if (stableId.isEmpty()) {
+        target.status = savedDevice.isEmpty() ? DirectTarget::Status::Unavailable : DirectTarget::Status::Manual;
+        target.hwPath = savedDevice;
+        target.description = savedDevice;
+        return target;
+    }
+    if (const auto dev = findByStableId(stableId); dev && !dev->hwPath.isEmpty()) {
+        target.status = DirectTarget::Status::Resolved;
+        target.hwPath = dev->hwPath;
+        target.description = dev->description;
+    }
+    return target;
 }
 
 bool takeOver(const DeviceState &dev, QString *error)

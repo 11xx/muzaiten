@@ -17,6 +17,7 @@
 
 class ArtworkCache;
 class Database;
+class DirectDeviceResolver;
 class FeatureStore;
 class IpcServer;
 class LastFmScrobbler;
@@ -68,6 +69,8 @@ public:
     PlayEventRecorder   *playEventRecorder() const;
     MprisService        *mpris() const;
     IpcServer           *ipc() const;
+    // Resolves the direct output card by identity; shared with the window.
+    DirectDeviceResolver *directDevices() const { return m_directDevices; }
     MainWindow          *window() const;
     QStringList storageWarnings() const { return m_storageWarnings; }
 
@@ -270,6 +273,7 @@ private:
     std::unique_ptr<RadioSession>      m_radioSession;
     PlayerCore       *m_player = nullptr;
     PlaybackBackend  *m_playback = nullptr;
+    DirectDeviceResolver *m_directDevices = nullptr;
     ListenTracker    *m_listenTracker = nullptr;
     PlayEventRecorder *m_playEventRecorder = nullptr;
     ListenBrainzHub  *m_listenBrainzHub = nullptr;

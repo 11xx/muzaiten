@@ -41,6 +41,15 @@ private:
     void refreshDeviceStatus();
     // Take over (free) or release the selected card via AudioDeviceControl.
     void toggleSelectedDeviceTakeover();
+    // The direct device chosen in the list. stableId is set only for a saved
+    // identity whose card is absent; hwPath then is its last known number.
+    struct SelectedDevice {
+        QString hwPath;
+        QString stableId;
+    };
+    SelectedDevice selectedDevice() const;
+    // List the saved, absent direct identity as an unavailable entry.
+    void addAbsentDeviceEntry();
     // Select |name| in the output list, adding it as unavailable if absent.
     void selectEndpoint(const QString &name, const QString &label);
     void refreshEndpointControls();
@@ -63,4 +72,10 @@ private:
     QSpinBox *m_readAheadMb = nullptr;
     QString m_releasedDeviceHw;
     int m_releasedSinkNodeId = -1;
+    // The direct selection the dialog opened with.
+    QString m_savedDevice;
+    QString m_savedDeviceId;
+    QString m_savedDeviceLabel;
+    // Set while that identity's card is absent.
+    QString m_absentDeviceId;
 };

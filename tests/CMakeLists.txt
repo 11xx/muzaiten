@@ -609,6 +609,15 @@ target_compile_features(test_gstreamer_playback PRIVATE cxx_std_26)
 add_test(NAME test_gstreamer_playback COMMAND test_gstreamer_playback)
 set_tests_properties(test_gstreamer_playback PROPERTIES ENVIRONMENT "MUZAITEN_DEMO_SILENT_AUDIO=1")
 
+add_executable(test_audio_device_control
+    test_audio_device_control.cpp
+    AudioDeviceFixtures.h
+)
+target_include_directories(test_audio_device_control PRIVATE ../src)
+target_link_libraries(test_audio_device_control PRIVATE muzaiten_playback Qt6::Core Qt6::Test)
+target_compile_features(test_audio_device_control PRIVATE cxx_std_26)
+add_test(NAME test_audio_device_control COMMAND test_audio_device_control)
+
 add_executable(test_playback_profile_dialog
     test_playback_profile_dialog.cpp
 )

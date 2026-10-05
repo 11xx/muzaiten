@@ -40,6 +40,8 @@ public:
     bool supportsSharedEndpoint() const override { return true; }
     OutputStatus outputStatus() const override;
     QVector<OutputEndpoint> sharedEndpoints(const QString &sinkChoice) const override;
+    void setDirectDeviceCheck(DirectDeviceCheck check) override { m_directCheck = std::move(check); }
+    void retryDirectDevice() override;
 
     // The sink factory a shared transport choice ("auto", "pipewire",
     // "pulse", "alsa") resolves to with the installed plugins, or empty.
@@ -119,6 +121,15 @@ private:
     void checkCurrentRoute();
     void confirmExternalMove();
     void setSinkTarget(const QByteArray &target);
+    // m_directCheck for the profile's card; |savedDevice| is its last known
+    // number. Fills in the saved label for an absent card.
+    DirectDevice checkDirectDevice(const QString &savedDevice) const;
+    // Re-resolve the direct card before opening it; false when it is absent.
+    // A card found under another number is written into the sink, which is
+    // reopened since alsasink holds its PCM from READY.
+    bool prepareDirectOpen();
+    // Hold a native DSD start until its device is present.
+    void deferDsdStart(const QUrl &url, State targetState, const QString &label);
     void publishOutputStatus();
     void pauseInternal(bool release);
     void beginTargetTransition(State targetState);
@@ -196,6 +207,11 @@ private:
     // only when the last transport intent was to play.
     bool m_waitingForOutput = false;
     bool m_resumeOnOutput = false;
+    // The wait is for the direct card rather than a shared endpoint.
+    bool m_waitingForDirect = false;
+    DirectDeviceCheck m_directCheck;
+    QString m_directLabel;
+    QString m_deferredDsdUri;
     // Where the PulseAudio stream is linked, as last read.
     QString m_currentEndpoint;
     unsigned long m_currentDeviceHandler = 0;

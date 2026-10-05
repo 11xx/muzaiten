@@ -124,6 +124,7 @@ set(MUZAITEN_SOURCES
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp
     src/playback/AudioDeviceControl.cpp
+    src/playback/DirectDeviceResolver.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/OutputEndpointMonitor.cpp
     src/playback/QtPlaybackBackend.cpp
@@ -279,6 +280,7 @@ set(MUZAITEN_HEADERS
     src/mpris/MprisService.h
     src/player/PlayerCore.h
     src/playback/AudioDeviceControl.h
+    src/playback/DirectDeviceResolver.h
     src/playback/OutputEndpointMonitor.h
     src/playback/PlaybackBackend.h
     src/playback/PlaybackTypes.h
@@ -490,6 +492,8 @@ set(MUZAITEN_PLAYER_SOURCES
 
 set(MUZAITEN_PLAYBACK_SOURCES
     src/playback/AudioDeviceControl.cpp
+    src/playback/DirectDeviceResolver.cpp
+    src/playback/DirectDeviceResolver.h
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/OutputEndpointMonitor.cpp
     src/playback/OutputEndpointMonitor.h

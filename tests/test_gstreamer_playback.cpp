@@ -88,6 +88,86 @@ private slots:
         QCOMPARE(qtBackend.outputStatus().route, OutputStatus::Route::System);
     }
 
+    // A direct open asks which card is selected right now and waits while
+    // it is absent, resuming only the intent the user left it with.
+    void directOpenWaitsForItsCard()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeToneWav(path, 440.0, 5000));
+
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.mode = QStringLiteral("bit-perfect");
+        profile.sink = QStringLiteral("alsa");
+        profile.device = QStringLiteral("hw:2");
+        profile.deviceId = QStringLiteral("alsa_card.a");
+        backend.setProfile(profile);
+        bool present = false;
+        int checks = 0;
+        backend.setDirectDeviceCheck([&](const QString &stableId, const QString &) {
+            if (stableId != QStringLiteral("alsa_card.a")) {
+                return PlaybackBackend::DirectDevice{};
+            }
+            ++checks;
+            PlaybackBackend::DirectDevice device;
+            device.available = present;
+            device.hwPath = present ? QStringLiteral("hw:3") : QString();
+            device.label = QStringLiteral("Card A");
+            return device;
+        });
+
+        backend.play(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Waiting);
+        QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Card A"));
+        backend.retryDirectDevice();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+
+        present = true;
+        backend.retryDirectDevice();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 5000);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Direct);
+
+        // Bit-perfect pauses release the card, so a resume checks it again.
+        backend.pause();
+        present = false;
+        const int before = checks;
+        backend.resume();
+        QVERIFY(checks > before);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        backend.pause();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        present = true;
+        backend.retryDirectDevice();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 5000);
+        backend.stop();
+    }
+
+    void nativeDsdStartWaitsForItsCard()
+    {
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.deviceId = QStringLiteral("alsa_card.a");
+        backend.setProfile(profile);
+        backend.setDirectDeviceCheck([](const QString &, const QString &) {
+            return PlaybackBackend::DirectDevice{};
+        });
+        backend.setOutputMode(PlaybackBackend::OutputMode::NativeDsd, QStringLiteral("hw:2"));
+        backend.play(QUrl::fromLocalFile(QStringLiteral("/nonexistent/track.dsf")));
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QVERIFY(backend.hasSource());
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Waiting);
+        backend.resume();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        backend.stop();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Stopped);
+        QVERIFY(!backend.hasSource());
+    }
+
     void shortSuccessorCannotCancelPendingHandoff()
     {
         QTemporaryDir dir;

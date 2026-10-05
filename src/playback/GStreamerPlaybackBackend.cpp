@@ -233,6 +233,7 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
         m_softPaused = false;
         m_pendingSeekMs = -1;
         m_waitingForOutput = false;
+        m_waitingForDirect = false;
         m_resumeOnOutput = false;
         finishTargetTransition();
         rebuildPipeline();
@@ -281,6 +282,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    m_deferredDsdUri.clear();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
         playDsd(url, State::Playing);
         return;
@@ -289,7 +291,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     // Same after a pipeline error — GStreamer only guarantees recovery through
     // NULL, and a fresh playbin is the reliable way to leave the failed state
     // behind (READY alone can keep dead elements inside uridecodebin).
-    if (m_dsdActive || m_state == State::Error) {
+    if (m_dsdActive || m_state == State::Error || m_playbin == nullptr) {
         rebuildPipeline();
     }
     if (m_playbin == nullptr) {
@@ -317,12 +319,13 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    m_deferredDsdUri.clear();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
         playDsd(url, State::Paused);
         return;
     }
     // As in play(): a fresh playbin after native DSD or a pipeline error.
-    if (m_dsdActive || m_state == State::Error) {
+    if (m_dsdActive || m_state == State::Error || m_playbin == nullptr) {
         rebuildPipeline();
     }
     if (m_playbin == nullptr) {
@@ -437,6 +440,15 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
         emit errorOccurred(QStringLiteral("Native DSD playback requires a local file"));
         return;
     }
+    if (m_directCheck) {
+        const DirectDevice device = checkDirectDevice(!m_dsdDevice.isEmpty() ? m_dsdDevice : m_profile.device);
+        if (!device.available) {
+            deferDsdStart(url, targetState, device.label);
+            return;
+        }
+        m_dsdDevice = device.hwPath;
+    }
+    m_deferredDsdUri.clear();
 
     // Tear down whatever pipeline is live (playbin or an earlier DSD graph) and
     // build a fresh DSD passthrough graph for this file.
@@ -501,13 +513,15 @@ void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qi
         g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     }
 
-    if (mustWaitForOutput()) {
+    const bool direct = m_profile.mode == QStringLiteral("bit-perfect");
+    if (direct ? !prepareDirectOpen() : mustWaitForOutput()) {
         // Hold the source in READY, exactly like a soft pause, so the
-        // endpoint's return (or a later resume) opens it at this position.
+        // output's return (or a later resume) opens it at this position.
         m_softPaused = true;
         m_resumePositionMs = std::max<qint64>(0, positionMs);
         m_pendingSeekMs = -1;
         m_waitingForOutput = true;
+        m_waitingForDirect = direct;
         m_resumeOnOutput = targetState == State::Playing;
         finishTargetTransition();
         if (m_positionMs != m_resumePositionMs) {
@@ -519,6 +533,7 @@ void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qi
         return;
     }
     m_waitingForOutput = false;
+    m_waitingForDirect = false;
     m_resumeOnOutput = false;
     applyStreamTarget();
     beginTargetTransition(targetState);
@@ -632,19 +647,52 @@ void GStreamerPlaybackBackend::pauseInternal(bool release)
 
 void GStreamerPlaybackBackend::resume()
 {
+    if (!m_deferredDsdUri.isEmpty()) {
+        // playDsd() checks the device again and defers once more if absent.
+        const QString uri = std::exchange(m_deferredDsdUri, QString());
+        playDsd(QUrl::fromEncoded(uri.toUtf8()), State::Playing);
+        return;
+    }
     if (m_playbin == nullptr) {
         return;
     }
 
     if (m_softPaused) {
-        if (mustWaitForOutput()) {
+        const bool direct = m_profile.mode == QStringLiteral("bit-perfect") || m_dsdActive;
+        bool present = true;
+        if (m_dsdActive && m_directCheck) {
+            const DirectDevice device = checkDirectDevice(m_dsdDevice);
+            present = device.available;
+            m_directLabel = device.label;
+            if (present && device.hwPath != m_dsdDevice) {
+                // The card is back under another number: rebuild the DSD
+                // graph on it and resume at the held position.
+                QString uri;
+                {
+                    QMutexLocker locker(&m_mutex);
+                    uri = m_currentUri;
+                }
+                const qint64 resumeAt = m_resumePositionMs;
+                playDsd(QUrl::fromEncoded(uri.toUtf8()), State::Paused);
+                m_pendingSeekMs = resumeAt;
+                beginTargetTransition(State::Playing);
+                return;
+            }
+        } else if (direct) {
+            present = prepareDirectOpen();
+        } else {
+            present = !mustWaitForOutput();
+        }
+        if (!present) {
             m_waitingForOutput = true;
+            m_waitingForDirect = direct;
             m_resumeOnOutput = true;
             updateState(State::Buffering);
             publishOutputStatus();
             return;
         }
         m_waitingForOutput = false;
+        m_waitingForDirect = false;
         m_resumeOnOutput = false;
         m_softPaused = false;
         beginTargetTransition(State::Playing);
@@ -665,8 +713,10 @@ void GStreamerPlaybackBackend::resume()
 
 void GStreamerPlaybackBackend::stop()
 {
+    m_deferredDsdUri.clear();
     m_softPaused = false;
     m_waitingForOutput = false;
+    m_waitingForDirect = false;
     m_resumeOnOutput = false;
     m_pendingSeekMs = -1;
     m_lastRecoveryUri.clear();
@@ -1201,6 +1251,80 @@ QString GStreamerPlaybackBackend::sharedSinkFactory(const QString &sinkChoice)
     return {};
 }
 
+bool GStreamerPlaybackBackend::prepareDirectOpen()
+{
+    if (!m_directCheck) {
+        return true;
+    }
+    const DirectDevice device = checkDirectDevice(m_profile.device);
+    m_directLabel = device.label;
+    if (!device.available) {
+        return false;
+    }
+    if (m_audioSink != nullptr && m_playbin != nullptr && m_sinkFactory == QStringLiteral("alsasink")) {
+        gchar *current = nullptr;
+        g_object_get(G_OBJECT(m_audioSink), "device", &current, nullptr);
+        const bool moved = QString::fromUtf8(current) != device.hwPath;
+        g_free(current);
+        if (moved) {
+            gst_element_set_state(m_playbin, GST_STATE_NULL);
+            g_object_set(G_OBJECT(m_audioSink), "device", device.hwPath.toUtf8().constData(), nullptr);
+        }
+    }
+    m_profile.device = device.hwPath;
+    return true;
+}
+
+PlaybackBackend::DirectDevice GStreamerPlaybackBackend::checkDirectDevice(const QString &savedDevice) const
+{
+    DirectDevice device = m_directCheck(m_profile.deviceId, savedDevice);
+    if (device.label.isEmpty()) {
+        device.label = !m_profile.deviceLabel.isEmpty() ? m_profile.deviceLabel
+            : (!m_profile.deviceId.isEmpty() ? m_profile.deviceId : savedDevice);
+    }
+    return device;
+}
+
+void GStreamerPlaybackBackend::deferDsdStart(const QUrl &url, State targetState, const QString &label)
+{
+    // Leave nothing open on the old number, as playDsd() would.
+    finishTargetTransition();
+    clearSeekInFlight();
+    stopReadAhead();
+    removeAudioSinkProbe();
+    if (m_playbin != nullptr) {
+        gst_element_set_state(m_playbin, GST_STATE_NULL);
+        gst_object_unref(m_playbin);
+        m_playbin = nullptr;
+    }
+    releaseAudioSink();
+    m_dsdActive = false;
+    m_softPaused = false;
+    m_pendingSeekMs = -1;
+    resetTimeline();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri = uriForUrl(url);
+        m_playingUri = m_currentUri;
+        m_preparedUri.clear();
+        invalidateGaplessAdvanceLocked();
+    }
+    m_deferredDsdUri = uriForUrl(url);
+    m_directLabel = label;
+    m_waitingForOutput = true;
+    m_waitingForDirect = true;
+    m_resumeOnOutput = targetState == State::Playing;
+    updateState(m_resumeOnOutput ? State::Buffering : State::Paused);
+    publishOutputStatus();
+}
+
+void GStreamerPlaybackBackend::retryDirectDevice()
+{
+    if (m_waitingForOutput && m_waitingForDirect && m_resumeOnOutput) {
+        resume();
+    }
+}
+
 QVector<OutputEndpoint> GStreamerPlaybackBackend::sharedEndpoints(const QString &sinkChoice) const
 {
     const QString factory = sharedSinkFactory(sinkChoice);
@@ -1270,6 +1394,7 @@ void GStreamerPlaybackBackend::handleEndpointAdded(const QString &name)
     }
     if (m_waitingForOutput) {
         m_waitingForOutput = false;
+        m_waitingForDirect = false;
         const bool resumePlaying = std::exchange(m_resumeOnOutput, false);
         if (resumePlaying) {
             resume();
@@ -1394,9 +1519,13 @@ void GStreamerPlaybackBackend::confirmExternalMove()
 OutputStatus GStreamerPlaybackBackend::outputStatus() const
 {
     OutputStatus status;
-    if (m_dsdActive || m_profile.mode == QStringLiteral("bit-perfect")) {
-        status.route = OutputStatus::Route::Direct;
+    if (m_dsdActive || m_waitingForDirect || m_profile.mode == QStringLiteral("bit-perfect")) {
         status.transport = QStringLiteral("ALSA");
+        status.route = m_waitingForOutput && m_waitingForDirect ? OutputStatus::Route::Waiting
+                                                               : OutputStatus::Route::Direct;
+        if (status.route == OutputStatus::Route::Waiting) {
+            status.preferredLabel = m_directLabel;
+        }
         return status;
     }
     status.transport = transportLabel(m_sinkFactory);

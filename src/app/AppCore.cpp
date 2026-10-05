@@ -16,6 +16,8 @@
 #include "fs/LinkRoot.h"
 #include "ipc/IpcServer.h"
 #include "mpris/MprisService.h"
+#include "playback/AudioDeviceControl.h"
+#include "playback/DirectDeviceResolver.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
 #include "player/PlayerCore.h"
@@ -304,6 +306,20 @@ AppCore::AppCore(QObject *parent)
     }
     m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
     m_playback = m_player->backend();
+    // Every direct open asks which card the profile's identity names now. The
+    // resolver lives as long as playback does, window or not.
+    m_directDevices = new DirectDeviceResolver(this);
+    m_playback->setDirectDeviceCheck([this](const QString &stableId, const QString &savedDevice) {
+        const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(stableId, savedDevice);
+        PlaybackBackend::DirectDevice device;
+        device.available = target.status != AudioDeviceControl::DirectTarget::Status::Unavailable
+            && !target.hwPath.isEmpty();
+        device.hwPath = target.hwPath;
+        device.label = target.status == AudioDeviceControl::DirectTarget::Status::Resolved
+            ? target.description : QString();
+        return device;
+    });
+    connect(m_directDevices, &DirectDeviceResolver::cardsChanged, m_playback, &PlaybackBackend::retryDirectDevice);
     m_player->setPathResolver([this](const Track &track) {
         if (track.path.isEmpty()) {
             return QString();

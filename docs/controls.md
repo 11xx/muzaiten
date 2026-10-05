@@ -150,6 +150,18 @@ detected with the PulseAudio transport, which reports where its stream is
 linked; the PipeWire transport does not, so there a mixer move lasts until
 the next track opens a new stream.
 
+**Bit-perfect** output opens one ALSA card directly. A card picked from the
+list is remembered by its stable identity rather than its number (`hw:N`),
+which changes across reboots and replugs and can pass to another card. Before
+every open, retry, takeover or release, muzaiten looks the card up by that
+identity. While it is absent, playback waits at its position, as for a missing
+shared output, and resumes when the card returns under whatever number it now
+has; muzaiten never opens, takes over or releases the card that took its old
+number. The dialog lists an absent card as `(unavailable)` and keeps it
+selected. A device typed by hand (such as `hw:CARD=Name,DEV=0`), or saved
+before identities were recorded, is opened exactly as written. Native DSD
+playback uses the same card under the same rule.
+
 The line under both sides reports the transport in use (and why Auto chose
 it), where playback is going, and whether it is waiting or falling back. A
 waiting or falling-back output also shows in the status bar, and
