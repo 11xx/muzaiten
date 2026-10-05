@@ -143,8 +143,9 @@ another track meanwhile is respected. With **Play through the system output
 while it is missing** checked, playback continues on the system-managed output
 instead and moves back when the chosen one returns. When the output vanishes
 mid-track, the sound server can play a moment of audio elsewhere before
-playback pauses. A missing output stays selected in the dialog, marked
-`(unavailable)`; a fallback never replaces it.
+playback pauses. Choosing another output meanwhile continues the held track
+there, at its position, playing or paused as it was. A missing output stays
+selected in the dialog, marked `(unavailable)`; a fallback never replaces it.
 
 Moving muzaiten's stream to another output in a mixer takes effect at once
 for every stream that follows, including the next track and a sample-rate
