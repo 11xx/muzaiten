@@ -266,7 +266,10 @@ void PlayerCore::togglePlayPause()
         return;
     }
 
-    if (m_backend->state() == PlaybackBackend::State::Playing) {
+    // Buffering holds an intent to play (the output may be waiting to come
+    // back), so it toggles to a pause like audible playback does.
+    if (m_backend->state() == PlaybackBackend::State::Playing
+        || m_backend->state() == PlaybackBackend::State::Buffering) {
         m_backend->pause();
     } else {
         play();
