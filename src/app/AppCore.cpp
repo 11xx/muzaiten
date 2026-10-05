@@ -321,6 +321,7 @@ AppCore::AppCore(QObject *parent)
         return device;
     });
     connect(m_directDevices, &DirectDeviceResolver::cardsChanged, m_playback, &PlaybackBackend::retryDirectDevice);
+    connect(m_playback, &PlaybackBackend::sharedEndpointChosenExternally, this, &AppCore::saveAdoptedSharedEndpoint);
     // Apply the saved output before anything can start playback (IPC, MPRIS,
     // a tray start): the window may not exist yet, or ever. The window loads
     // the same profile and finds nothing to change.
@@ -999,6 +1000,15 @@ void AppCore::restoreSavedPlayback()
             m_playback->seek(positionMs);
         });
     }
+}
+
+void AppCore::saveAdoptedSharedEndpoint(const QString &name, const QString &label)
+{
+    // Only these two fields change; the rest of the saved profile stands.
+    PlaybackProfile profile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+    profile.sharedEndpoint = name;
+    profile.sharedEndpointLabel = label;
+    m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile));
 }
 
 void AppCore::updateMprisCapabilities()

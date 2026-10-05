@@ -193,6 +193,9 @@ public slots:
     // Called by MainWindow's resumePlaybackAt to resume scrobble state
     // after restoring a saved playback position.
     void resumeScrobblers(const Track &track, qint64 elapsedMs, bool playing);
+    // Save an output chosen in a mixer as the profile's shared output. Lives
+    // here, with playback, so the choice is kept with or without a window.
+    void saveAdoptedSharedEndpoint(const QString &name, const QString &label);
 
 private:
     QStringList m_storageWarnings;

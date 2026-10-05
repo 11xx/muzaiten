@@ -149,7 +149,7 @@ playback pauses. A missing output stays selected in the dialog, marked
 Moving muzaiten's stream to another output in a mixer takes effect at once
 for every stream that follows, including the next track and a sample-rate
 change, and a second later becomes the new choice, saved as if picked in the
-dialog. A move the sound server made because the output the stream was on
+dialog, also while muzaiten plays from the tray without its window. A move the sound server made because the output the stream was on
 disappeared is a fallback and never becomes the choice. Both transports
 see where the stream is linked: PulseAudio reports it, and with the PipeWire
 transport muzaiten follows its own stream's links in the PipeWire graph. A

@@ -1238,6 +1238,51 @@ private slots:
         window.m_playback->stop();
     }
 
+    // A mixer choice is saved whether or not a window exists: before the
+    // first window, after the window was released, and it is what a
+    // recreated window and a restarted app load.
+    void mixerChoiceIsSavedWithoutAWindow()
+    {
+        const auto savedEndpoint = [](AppCore &core) {
+            return QJsonDocument::fromJson(core.m_database->setting(QStringLiteral("playback.profile")).toUtf8())
+                .object().value(QStringLiteral("sharedEndpoint")).toString();
+        };
+        {
+            AppCore core;
+            PlaybackProfile profile;
+            profile.sharedEndpoint = QStringLiteral("desk_dac");
+            profile.releaseSinkOnPause = false;
+            core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile));
+
+            emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("virtual_mix"),
+                                                                  QStringLiteral("Virtual mix"));
+            QCOMPARE(savedEndpoint(core), QStringLiteral("virtual_mix"));
+            QCOMPARE(playbackProfileFromJson(core.m_database->setting(QStringLiteral("playback.profile")))
+                         .releaseSinkOnPause, false);
+
+            {
+                MainWindow window(&core);
+                QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("virtual_mix"));
+            }
+            // The window is gone; playback goes on and another move happens.
+            emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("headphones"),
+                                                                  QStringLiteral("Headphones"));
+            QCOMPARE(savedEndpoint(core), QStringLiteral("headphones"));
+            MainWindow recreated(&core);
+            QCOMPARE(recreated.m_playbackProfile.sharedEndpoint, QStringLiteral("headphones"));
+            QCOMPARE(recreated.m_playbackProfile.sharedEndpointLabel, QStringLiteral("Headphones"));
+
+            // With a window, its copy follows too.
+            emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("desk_dac"),
+                                                                  QStringLiteral("Desk DAC"));
+            QCOMPARE(recreated.m_playbackProfile.sharedEndpoint, QStringLiteral("desk_dac"));
+            QCOMPARE(savedEndpoint(core), QStringLiteral("desk_dac"));
+        }
+        AppCore restarted;
+        QCOMPARE(restarted.m_playback->outputStatus().preferredEndpoint, QStringLiteral("desk_dac"));
+        restarted.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
+    }
+
     void stopAfterTriggerCancelsDelayedResume()
     {
         QTemporaryDir audioRoot;
