@@ -6,6 +6,7 @@
 #include <QTimer>
 
 using GstElement = struct _GstElement;
+using GstEvent = struct _GstEvent;
 using GstMessage = struct _GstMessage;
 using GstPad = struct _GstPad;
 
@@ -51,6 +52,19 @@ private:
 
     void rebuildPipeline();
     bool configureSink();
+    void releaseAudioSink();
+    // The endpoint the next shared stream must request, or empty to leave the
+    // choice to the session manager. Never derived from the sink element's own
+    // memory of where its previous stream ended up.
+    QString streamTarget() const;
+    // Write streamTarget() into the sink while it has no open stream: setting
+    // the target on a live PulseAudio stream would move it instead.
+    void applyStreamTarget();
+    // Streaming-thread half of applyStreamTarget(): a format change reopens
+    // the PulseAudio stream inside the sink, so release it one step early and
+    // retarget before the sink reconnects.
+    static void retargetBeforeFormatChange(GstElement *sink, GstEvent *capsEvent,
+                                           const QByteArray &target);
     void poll();
     void pollBus();
     void pollPosition();
@@ -136,6 +150,15 @@ private:
     quint64 m_gaplessGeneration = 0;
     GstPad *m_audioSinkPad = nullptr;
     unsigned long m_audioSinkProbeId = 0;
+    // The playbin's audio sink (reference held) and the factory it came from.
+    GstElement *m_audioSink = nullptr;
+    QString m_sinkFactory;
+    // streamTarget() as the streaming thread reads it; guarded by m_mutex.
+    QByteArray m_streamTargetUtf8;
+    // A card returned from exclusive use is pinned for the first stream only:
+    // it dodges a transient default while the card's sink is rebuilt, and must
+    // not outlive that into a lasting choice.
+    QString m_handoffTarget;
     double m_volume = 1.0;
     QTimer m_transitionTimer;
 

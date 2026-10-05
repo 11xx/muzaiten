@@ -609,6 +609,15 @@ target_compile_features(test_gstreamer_playback PRIVATE cxx_std_26)
 add_test(NAME test_gstreamer_playback COMMAND test_gstreamer_playback)
 set_tests_properties(test_gstreamer_playback PROPERTIES ENVIRONMENT "MUZAITEN_DEMO_SILENT_AUDIO=1")
 
+add_executable(test_shared_output_routing
+    test_shared_output_routing.cpp
+    PrivateAudioGraph.h
+)
+target_include_directories(test_shared_output_routing PRIVATE ../src)
+target_link_libraries(test_shared_output_routing PRIVATE muzaiten_playback Qt6::Core Qt6::Test PkgConfig::GSTREAMER)
+target_compile_features(test_shared_output_routing PRIVATE cxx_std_26)
+add_test(NAME test_shared_output_routing COMMAND test_shared_output_routing)
+
 add_executable(test_ipc_server
     test_ipc_server.cpp
 )

@@ -114,6 +114,11 @@
 
 ### Fixed
 
+- Shared output keeps a mixer move (pavucontrol, Wiremix) for the tracks that
+  follow, and returns to an output that disappears and comes back, instead of
+  staying on whichever output the sound server fell back to. Every new stream
+  asked for the output its previous stream had ended up on, fallbacks
+  included, which overrode the session manager's memory of the move.
 - Very large libraries keep their search cache across restarts instead of
   rebuilding the index on every start. The cache rebuilds once after this
   update.
