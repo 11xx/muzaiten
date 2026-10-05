@@ -1337,6 +1337,65 @@ private slots:
         window.m_playback->stop();
     }
 
+    void delayedRestoreBelongsToItsStart_data()
+    {
+        QTest::addColumn<QString>("action");
+        QTest::newRow("manual next") << QStringLiteral("next");
+        QTest::newRow("newer output change") << QStringLiteral("output");
+        QTest::newRow("user seek") << QStringLiteral("seek");
+        QTest::newRow("user pause") << QStringLiteral("pause");
+    }
+
+    // An output change restarts the track and, after a settle delay, seeks it
+    // back to where it was. Whatever the user (or a newer output change) does
+    // in that delay must not have the old position forced onto it; a pause
+    // keeps the restored position.
+    void delayedRestoreBelongsToItsStart()
+    {
+        QFETCH(QString, action);
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QVector<Track> tracks;
+        for (const char *name : {"first.wav", "second.wav"}) {
+            Track track;
+            track.path = audioRoot.filePath(QString::fromLatin1(name));
+            track.durationMs = 20'000;
+            QVERIFY(writeSilentWav(track.path, 20));
+            tracks.append(track);
+        }
+        AppCore core;
+        MainWindow window(&core);
+        window.m_player->resetQueue(tracks, 0);
+
+        // As an output change does: restart the track, then restore 5 s.
+        window.applyOutputProfile(PlaybackProfile{}, QString(), -1, 0, 5'000, true, true);
+        QTest::qWait(150);
+        if (action == QStringLiteral("next")) {
+            window.m_player->next();
+        } else if (action == QStringLiteral("output")) {
+            // The newer change restarts from the top: nothing may seek it.
+            window.applyOutputProfile(PlaybackProfile{}, QString(), -1, 0, 0, true, true);
+        } else if (action == QStringLiteral("seek")) {
+            window.m_playback->seek(1'000);
+        } else {
+            window.m_playback->pause();
+        }
+        QTest::qWait(1'000);
+
+        if (action == QStringLiteral("next")) {
+            QCOMPARE(window.m_player->queueIndex(), 1);
+            QVERIFY2(window.m_playback->position() < 4'000, qPrintable(QString::number(window.m_playback->position())));
+            QVERIFY(core.mpris()->positionUsec() < 4'000'000);
+        } else if (action == QStringLiteral("pause")) {
+            QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Paused);
+            QVERIFY2(window.m_playback->position() >= 4'900, qPrintable(QString::number(window.m_playback->position())));
+        } else {
+            QCOMPARE(window.m_player->queueIndex(), 0);
+            QVERIFY2(window.m_playback->position() < 4'000, qPrintable(QString::number(window.m_playback->position())));
+        }
+        window.m_playback->stop();
+    }
+
     void stopAfterTriggerCancelsDelayedResume()
     {
         QTemporaryDir audioRoot;

@@ -77,6 +77,7 @@ void QtPlaybackBackend::play(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
     m_player->setSource(url);
     m_player->play();
 }
@@ -86,6 +87,7 @@ void QtPlaybackBackend::loadPaused(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
     m_player->setSource(url);
     m_player->pause();
 }
@@ -107,11 +109,13 @@ void QtPlaybackBackend::resume()
 
 void QtPlaybackBackend::stop()
 {
+    noteTransportRequest();
     m_player->stop();
 }
 
 void QtPlaybackBackend::seek(qint64 positionMs)
 {
+    noteTransportRequest();
     m_player->setPosition(positionMs);
 }
 
