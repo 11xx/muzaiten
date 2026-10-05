@@ -73,6 +73,7 @@
 
 #include "AudioDeviceFixtures.h"
 #include "playback/DirectDeviceResolver.h"
+#include "playback/PlaybackProfileJson.h"
 
 namespace {
 
@@ -1179,6 +1180,35 @@ private slots:
         core.m_playback->play(QUrl::fromLocalFile(audioPath));
         QCOMPARE(core.m_playback->state(), PlaybackBackend::State::Buffering);
         core.m_playback->stop();
+    }
+
+    // The saved output applies before any window exists (a tray start, an
+    // early IPC play); the window then loads the same profile.
+    void savedOutputAppliesBeforeTheWindow()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false}};
+        {
+            AppCore core;
+            MainWindow window(&core);
+            window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+            window.savePlaybackProfile();
+        }
+
+        {
+            AppCore core;
+            QCOMPARE(core.m_playback->outputStatus().route, OutputStatus::Route::Direct);
+            {
+                MainWindow window(&core);
+                QCOMPARE(window.m_playbackProfile.device, QStringLiteral("hw:3"));
+            }
+            PlaybackProfile shared;
+            shared.sharedEndpoint = QStringLiteral("desk_dac");
+            core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(shared));
+        }
+        AppCore core;
+        QCOMPARE(core.m_playback->outputStatus().preferredEndpoint, QStringLiteral("desk_dac"));
+        core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
     }
 
     void stopAfterTriggerCancelsDelayedResume()
