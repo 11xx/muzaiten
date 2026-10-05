@@ -19,6 +19,14 @@
 
 ### Added
 
+- Shared output can go to a chosen playback output, virtual ones included,
+  kept by its stable name: `Playback > Output profile…` separates the
+  transport from the output. While it is missing, playback waits at its
+  position and resumes when it returns, or optionally plays through the
+  system output until then; the choice is never replaced by a fallback. A
+  mixer move to another present output becomes the new choice. The dialog,
+  the status bar and `muzaitenctl status` report the transport actually in
+  use, where playback is going, and any wait or fallback.
 - Search combines every reading of Chinese polyphones across a title: typing
   `yueqing` finds 乐清, and a title can match different readings in different
   words without losing its established Japanese readings.

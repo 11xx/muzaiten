@@ -67,8 +67,9 @@ and are not restored after restart.
   completed work — running the analyzer again resumes where it stopped —
   and changing the power during a scan applies immediately by restarting
   the scan at the new level.
-- `Playback > Output profile…` — output device, software volume,
-  resampling, sink release on pause, preload. Native bit-perfect DSD
+- `Playback > Output profile…` — transport and output, direct device,
+  software volume, resampling, sink release on pause, read-ahead. Native
+  bit-perfect DSD
   (`.dsf`) needs a direct-capable device selected here with resampling
   off; with **Allow resampling** DSD decodes to PCM for shared output.
   See [Audio output](#audio-output) for how the destination is chosen.
@@ -122,6 +123,37 @@ When an output disappears, the sound server moves playback to another one.
 muzaiten never treats that fallback as a choice: the next stream it opens
 asks for no particular output, so the session manager can put playback back
 once the original output returns.
+
+In `Playback > Output profile…`, the **Shared** side has two separate
+choices. **Transport** is how muzaiten talks to the sound server: Auto uses
+GStreamer's PipeWire plugin when it is installed and PulseAudio otherwise;
+the ALSA transport cannot choose an output. **Output** is where shared audio
+goes: `System managed` (the behavior above), or one listed playback output,
+virtual outputs such as an equalizer included. A chosen output is kept by its
+stable name, so it survives being unplugged, switched off or renumbered, and
+other devices appearing or becoming the default do not move playback off it.
+It affects muzaiten only; system defaults are never changed.
+
+While a chosen output is missing, playback pauses at its position and resumes
+there when the output returns, if it was playing; pausing, seeking or picking
+another track meanwhile is respected. With **Play through the system output
+while it is missing** checked, playback continues on the system-managed output
+instead and moves back when the chosen one returns. When the output vanishes
+mid-track, the sound server can play a moment of audio elsewhere before
+playback pauses. A missing output stays selected in the dialog, marked
+`(unavailable)`; a fallback never replaces it.
+
+Moving muzaiten's stream to another output in a mixer while the chosen one
+is present makes that output the new choice, saved as if picked in the
+dialog. A move caused by the chosen output vanishing does not. This is
+detected with the PulseAudio transport, which reports where its stream is
+linked; the PipeWire transport does not, so there a mixer move lasts until
+the next track opens a new stream.
+
+The line under both sides reports the transport in use (and why Auto chose
+it), where playback is going, and whether it is waiting or falling back. A
+waiting or falling-back output also shows in the status bar, and
+`muzaitenctl status` reports it (see [cli.md](cli.md)).
 
 ## File explorers
 

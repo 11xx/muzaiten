@@ -5,6 +5,14 @@ talk to a running instance over its IPC socket (resolved from the same
 `MUZAITEN_*` environment as the app, so they target the matching instance).
 Every command supports `--json` for machine-readable output.
 
+`status` adds an `output:` line when the chosen output is missing (waiting,
+or playing through the system output) or cannot be used by the transport.
+`status --json` always carries an `output` object: `route` (`system`,
+`preferred`, `waiting`, `fallback`, `direct` or `unsupported`), `transport`,
+an optional `transport_note`, the `preferred` output's stable name, label and
+availability when one is chosen, and `current`, where the stream is linked,
+when the transport reports it.
+
 ## Transport and queue
 
 ```sh

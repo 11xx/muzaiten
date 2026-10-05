@@ -272,9 +272,14 @@ private slots:
         QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Late device"));
         QTest::qWait(500);
         QVERIFY(m_graph->streams().isEmpty());
+        // Another track picked while waiting replaces the held one.
+        backend.play(url("long-b"));
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QVERIFY(m_graph->streams().isEmpty());
 
         m_modules.insert(late, m_graph->addSink(late));
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+        QVERIFY(backend.m_playingUri.endsWith(QStringLiteral("long-b.wav")));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), late, 8000);
         QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 8000);
 

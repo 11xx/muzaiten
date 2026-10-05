@@ -968,6 +968,43 @@ private slots:
         QVERIFY(!window.m_playback->hasSource());
     }
 
+    void sharedEndpointPersistsAndIsSurfaced()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile.sharedEndpoint = QStringLiteral("desk_dac");
+        window.m_playbackProfile.sharedEndpointLabel = QStringLiteral("Desk DAC");
+        window.m_playbackProfile.sharedEndpointFallback = true;
+        window.savePlaybackProfile();
+        window.m_playbackProfile = PlaybackProfile{};
+        window.loadPlaybackProfile();
+        QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("desk_dac"));
+        QCOMPARE(window.m_playbackProfile.sharedEndpointLabel, QStringLiteral("Desk DAC"));
+        QVERIFY(window.m_playbackProfile.sharedEndpointFallback);
+
+        // The silent test sink cannot route to an endpoint: that is shown,
+        // in the status bar and over IPC, rather than quietly ignored.
+        QVERIFY(!window.m_outputIndicator->isHidden());
+        QCOMPARE(window.m_outputIndicator->text(), QStringLiteral("Output choice unsupported"));
+        const QJsonObject output = core.ipcStatus().value(QStringLiteral("output")).toObject();
+        QCOMPARE(output.value(QStringLiteral("route")).toString(), QStringLiteral("unsupported"));
+        QCOMPARE(output.value(QStringLiteral("preferred")).toString(), QStringLiteral("desk_dac"));
+
+        // A choice made in a mixer, as reported by the backend, is saved.
+        emit window.m_playback->sharedEndpointChosenExternally(QStringLiteral("virtual_mix"),
+                                                                QStringLiteral("Virtual mix"));
+        QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("virtual_mix"));
+        const QJsonObject saved = QJsonDocument::fromJson(
+            window.m_database->setting(QStringLiteral("playback.profile")).toUtf8()).object();
+        QCOMPARE(saved.value(QStringLiteral("sharedEndpoint")).toString(), QStringLiteral("virtual_mix"));
+        QCOMPARE(saved.value(QStringLiteral("sharedEndpointLabel")).toString(), QStringLiteral("Virtual mix"));
+
+        window.m_playbackProfile = PlaybackProfile{};
+        window.savePlaybackProfile();
+        window.loadPlaybackProfile();
+        QVERIFY(window.m_outputIndicator->isHidden());
+    }
+
     void stopAfterTriggerCancelsDelayedResume()
     {
         QTemporaryDir audioRoot;

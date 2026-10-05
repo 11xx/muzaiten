@@ -71,13 +71,39 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     m_sharedGroup->setToolTip(
         QStringLiteral("Mix with other apps through PipeWire/PulseAudio."));
     auto *sharedForm = new QFormLayout(m_sharedGroup);
+    // Output names can be long; let the choosers take the group's width.
+    sharedForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     m_sink = new QComboBox(m_sharedGroup);
     m_sink->addItem(QStringLiteral("Auto"),       QStringLiteral("auto"));
     m_sink->addItem(QStringLiteral("PipeWire"),   QStringLiteral("pipewire"));
     m_sink->addItem(QStringLiteral("PulseAudio"), QStringLiteral("pulse"));
     m_sink->addItem(QStringLiteral("ALSA"),       QStringLiteral("alsa"));
-    sharedForm->addRow(QStringLiteral("Sink"), m_sink);
+    m_sink->setToolTip(QStringLiteral("How muzaiten talks to the sound server. Auto uses PipeWire's "
+                                      "GStreamer plugin when installed, otherwise PulseAudio."));
+    sharedForm->addRow(QStringLiteral("Transport"), m_sink);
+
+    // Where shared audio goes: left to the system, or a preferred endpoint
+    // (physical or virtual) that is kept while it is missing.
+    m_endpointCombo = new QComboBox(m_sharedGroup);
+    m_endpointCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_endpointCombo->setMinimumContentsLength(24);
+    m_endpointCombo->addItem(QStringLiteral("System managed"), QString());
+    m_endpointCombo->setItemData(0,
+                                 QStringLiteral("The system chooses: its default output, or wherever "
+                                                "muzaiten was last moved in a mixer."),
+                                 Qt::ToolTipRole);
+    sharedForm->addRow(QStringLiteral("Output"), m_endpointCombo);
+
+    m_endpointFallback = new QCheckBox(QStringLiteral("Play through the system output while it is missing"),
+                                       m_sharedGroup);
+    m_endpointFallback->setToolTip(
+        QStringLiteral("Off: playback pauses at its position and resumes when the chosen output returns. "
+                       "On: playback continues on the system-managed output until then."));
+    sharedForm->addRow(QString(), m_endpointFallback);
+
+    connect(m_sink, &QComboBox::currentIndexChanged, this, [this]() { refreshEndpointControls(); });
+    connect(m_endpointCombo, &QComboBox::currentIndexChanged, this, [this]() { refreshEndpointControls(); });
 
     m_softwareVolume = new QCheckBox(QStringLiteral("App controls volume"), m_sharedGroup);
     m_softwareVolume->setToolTip(
@@ -155,6 +181,13 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
 
     modesRow->addWidget(m_bitPerfectGroup, 1);
     layout->addLayout(modesRow);
+
+    // What the output is doing right now, across both modes.
+    m_outputStatus = new QLabel(this);
+    m_outputStatus->setWordWrap(true);
+    m_outputStatus->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_outputStatus->setForegroundRole(QPalette::PlaceholderText);
+    layout->addWidget(m_outputStatus);
 
     // Seed the initial active mode before wiring exclusivity, so the toggled
     // handlers only fire on real user/setProfile changes.
@@ -389,6 +422,9 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     m_softwareVolume->setChecked(profile.sharedSoftwareVolume);
     m_allowResample->setChecked(profile.sharedAllowResample);
     m_releaseSinkOnPause->setChecked(profile.sharedReleaseSinkOnPause);
+    selectEndpoint(profile.sharedEndpoint, profile.sharedEndpointLabel);
+    m_endpointFallback->setChecked(profile.sharedEndpointFallback);
+    refreshEndpointControls();
 
     // Bit-perfect device: prefer the live hw:N for the remembered stable id (the
     // stored index may have drifted), falling back to the stored hw:N / text.
@@ -434,6 +470,10 @@ PlaybackProfile PlaybackProfileDialog::profile() const
     p.sharedSoftwareVolume      = m_softwareVolume->isChecked();
     p.sharedAllowResample       = m_allowResample->isChecked();
     p.sharedReleaseSinkOnPause  = m_releaseSinkOnPause->isChecked();
+    p.sharedEndpoint            = m_endpointCombo->currentData().toString();
+    p.sharedEndpointLabel       = p.sharedEndpoint.isEmpty()
+        ? QString() : m_endpointCombo->currentData(Qt::UserRole + 1).toString();
+    p.sharedEndpointFallback    = m_endpointFallback->isChecked();
 
     // Prefer the item data (hw:N); fall back to the edited text for manual entries.
     const QString devData = m_deviceCombo->currentData().toString();
@@ -465,4 +505,94 @@ PlaybackProfile PlaybackProfileDialog::profile() const
     p.autoReleaseTimeoutSec = m_autoReleaseTimeout->value();
 
     return p;
+}
+
+void PlaybackProfileDialog::setSharedEndpoints(const QVector<OutputEndpoint> &endpoints, bool supported)
+{
+    m_endpointsSupported = supported;
+    const QString selected = m_endpointCombo->currentData().toString();
+    const QString selectedLabel = m_endpointCombo->currentData(Qt::UserRole + 1).toString();
+    const QSignalBlocker blocker(m_endpointCombo);
+    while (m_endpointCombo->count() > 1) {
+        m_endpointCombo->removeItem(1);
+    }
+    for (const OutputEndpoint &endpoint : endpoints) {
+        const QString label = endpoint.label.isEmpty() ? endpoint.name : endpoint.label;
+        m_endpointCombo->addItem(label, endpoint.name);
+        const int row = m_endpointCombo->count() - 1;
+        m_endpointCombo->setItemData(row, label, Qt::UserRole + 1);
+        m_endpointCombo->setItemData(row, endpoint.name, Qt::ToolTipRole);
+    }
+    selectEndpoint(selected, selectedLabel);
+    refreshEndpointControls();
+}
+
+void PlaybackProfileDialog::selectEndpoint(const QString &name, const QString &label)
+{
+    const QSignalBlocker blocker(m_endpointCombo);
+    if (name.isEmpty()) {
+        m_endpointCombo->setCurrentIndex(0);
+        return;
+    }
+    int row = m_endpointCombo->findData(name);
+    if (row < 0) {
+        // A preference survives the endpoint's absence; show it rather than
+        // silently replacing it with whatever happens to be present.
+        const QString shown = label.isEmpty() ? name : label;
+        m_endpointCombo->addItem(QStringLiteral("%1 (unavailable)").arg(shown), name);
+        row = m_endpointCombo->count() - 1;
+        m_endpointCombo->setItemData(row, shown, Qt::UserRole + 1);
+        m_endpointCombo->setItemData(row, QStringLiteral("%1 is not present right now").arg(name),
+                                     Qt::ToolTipRole);
+    }
+    m_endpointCombo->setCurrentIndex(row);
+}
+
+void PlaybackProfileDialog::refreshEndpointControls()
+{
+    const bool transportRoutes = m_endpointsSupported && m_sink->currentData().toString() != QStringLiteral("alsa");
+    m_endpointCombo->setEnabled(transportRoutes);
+    m_endpointCombo->setToolTip(transportRoutes
+                                    ? QString()
+                                    : (m_endpointsSupported
+                                           ? QStringLiteral("The ALSA transport cannot choose an output.")
+                                           : QStringLiteral("This playback backend cannot choose an output.")));
+    m_endpointFallback->setEnabled(transportRoutes && !m_endpointCombo->currentData().toString().isEmpty());
+}
+
+void PlaybackProfileDialog::setOutputStatus(const OutputStatus &status)
+{
+    const auto named = [](const QString &label, const QString &name) {
+        return label.isEmpty() ? name : label;
+    };
+    QStringList lines;
+    if (status.route == OutputStatus::Route::Direct) {
+        lines << QStringLiteral("Playing directly to an ALSA device.");
+    } else {
+        QString transport = QStringLiteral("Using %1").arg(status.transport.isEmpty()
+                                                               ? QStringLiteral("no transport")
+                                                               : status.transport);
+        if (!status.transportNote.isEmpty()) {
+            transport += QStringLiteral(" (%1)").arg(status.transportNote);
+        }
+        lines << transport + QLatin1Char('.');
+        const QString preferred = named(status.preferredLabel, status.preferredEndpoint);
+        switch (status.route) {
+        case OutputStatus::Route::Waiting:
+            lines << QStringLiteral("Waiting for %1 to return.").arg(preferred);
+            break;
+        case OutputStatus::Route::Fallback:
+            lines << QStringLiteral("%1 is missing; playing through the system output.").arg(preferred);
+            break;
+        case OutputStatus::Route::Unsupported:
+            lines << QStringLiteral("This transport cannot choose an output; the system decides.");
+            break;
+        default:
+            break;
+        }
+        if (!status.currentEndpoint.isEmpty()) {
+            lines << QStringLiteral("Now playing to %1.").arg(named(status.currentLabel, status.currentEndpoint));
+        }
+    }
+    m_outputStatus->setText(lines.join(QLatin1Char(' ')));
 }

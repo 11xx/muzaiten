@@ -568,6 +568,9 @@ PlaybackProfile playbackProfileFromJson(const QString &json)
     profile.sharedReleaseSinkOnPause = root.value(QStringLiteral("sharedReleaseSinkOnPause"))
         .toBool(sharedActive ? profile.releaseSinkOnPause : true);
     profile.deviceId = root.value(QStringLiteral("deviceId")).toString(profile.deviceId);
+    profile.sharedEndpoint = root.value(QStringLiteral("sharedEndpoint")).toString();
+    profile.sharedEndpointLabel = root.value(QStringLiteral("sharedEndpointLabel")).toString();
+    profile.sharedEndpointFallback = root.value(QStringLiteral("sharedEndpointFallback")).toBool(false);
     profile.autoReleaseExclusiveDevice = root.value(QStringLiteral("autoReleaseExclusiveDevice"))
         .toBool(profile.autoReleaseExclusiveDevice);
     profile.autoReleaseTimeoutSec = std::clamp(
@@ -594,6 +597,9 @@ QString playbackProfileToJson(const PlaybackProfile &profile)
     root.insert(QStringLiteral("sharedAllowResample"), profile.sharedAllowResample);
     root.insert(QStringLiteral("sharedReleaseSinkOnPause"), profile.sharedReleaseSinkOnPause);
     root.insert(QStringLiteral("deviceId"), profile.deviceId);
+    root.insert(QStringLiteral("sharedEndpoint"), profile.sharedEndpoint);
+    root.insert(QStringLiteral("sharedEndpointLabel"), profile.sharedEndpointLabel);
+    root.insert(QStringLiteral("sharedEndpointFallback"), profile.sharedEndpointFallback);
     root.insert(QStringLiteral("autoReleaseExclusiveDevice"), profile.autoReleaseExclusiveDevice);
     root.insert(QStringLiteral("autoReleaseTimeoutSec"), profile.autoReleaseTimeoutSec);
     return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
@@ -798,6 +804,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_takeOverDeviceButton->setToolTip(
         QStringLiteral("Free the audio device from PipeWire and retry bit-perfect playback"));
     statusBar()->addPermanentWidget(m_takeOverDeviceButton);
+    m_outputIndicator = new QLabel(this);
+    m_outputIndicator->setVisible(false);
+    statusBar()->addPermanentWidget(m_outputIndicator);
     connect(m_takeOverDeviceButton, &QPushButton::clicked, this, [this]() {
         if (m_dsdTakeoverPromptActive) {
             resolveDsdTakeoverPrompt(/*accepted=*/true);
@@ -1479,9 +1488,13 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_rightSidebar, &RightSidebar::albumRequested, this, &MainWindow::jumpToTrackInfoAlbum);
     connect(m_playback, &PlaybackBackend::positionChanged, this, &MainWindow::updatePlaybackPosition);
     connect(m_playback, &PlaybackBackend::durationChanged, this, &MainWindow::updatePlaybackPosition);
+    connect(m_playback, &PlaybackBackend::outputStatusChanged, this, &MainWindow::updateOutputIndicator);
+    connect(m_playback, &PlaybackBackend::sharedEndpointChosenExternally, this, &MainWindow::adoptSharedEndpoint);
     connect(m_playback, &PlaybackBackend::stateChanged, this, [this](PlaybackBackend::State state) {
-        const bool playing = state == PlaybackBackend::State::Playing;
-        m_playerBar->setPlaying(playing);
+        // Buffering holds the intent to play (the output may be on its way
+        // back), so the button offers a pause.
+        m_playerBar->setPlaying(state == PlaybackBackend::State::Playing
+                                || state == PlaybackBackend::State::Buffering);
         // AppCore handles MPRIS, listen-tracker, and scrobbler state mirroring.
         schedulePlaybackStateSave(state != PlaybackBackend::State::Playing);
         if (state != PlaybackBackend::State::Error)
@@ -3818,7 +3831,9 @@ void MainWindow::savePlaybackState(bool force)
 
     const qint64 positionMs = m_savePlaybackPositionEnabled ? std::max<qint64>(0, m_playback->position()) : 0;
     const PlaybackBackend::State state = m_playback->state();
-    const QString stateName = playbackStateName(state);
+    // Waiting for an output keeps the intent to play across a restart.
+    const QString stateName = playbackStateName(state == PlaybackBackend::State::Buffering
+                                                    ? PlaybackBackend::State::Playing : state);
     const bool meaningfulPositionChange = std::llabs(positionMs - m_lastSavedPlaybackPositionMs) >= 5000;
     const bool stateChanged = stateName != m_lastSavedPlaybackState;
     const bool trackChanged = m_player->currentTrack().path != m_lastSavedPlaybackTrackPath;
@@ -3904,13 +3919,61 @@ void MainWindow::resumePlaybackAt(int queueIndex, qint64 positionMs, bool playin
 void MainWindow::configurePlaybackProfile()
 {
     PlaybackProfileDialog dialog(this);
+    const QString sharedChoice = m_playbackProfile.sharedSink.isEmpty()
+        ? QStringLiteral("auto") : m_playbackProfile.sharedSink;
+    dialog.setSharedEndpoints(m_playback->sharedEndpoints(sharedChoice), m_playback->supportsSharedEndpoint());
+    dialog.setOutputStatus(m_playback->outputStatus());
+    const QMetaObject::Connection statusUpdates = connect(
+        m_playback, &PlaybackBackend::outputStatusChanged, &dialog,
+        [this, &dialog]() { dialog.setOutputStatus(m_playback->outputStatus()); });
     dialog.setProfile(m_playbackProfile);
-    if (dialog.exec() != QDialog::Accepted) {
+    const int result = dialog.exec();
+    disconnect(statusUpdates);
+    if (result != QDialog::Accepted) {
         return;
     }
     const PlaybackProfile previous = m_playbackProfile;
     applyProfileTransition(previous, dialog.profile(),
                            dialog.releasedDeviceHw(), dialog.releasedSinkNodeId());
+}
+
+void MainWindow::updateOutputIndicator()
+{
+    const OutputStatus status = m_playback->outputStatus();
+    const QString preferred = status.preferredLabel.isEmpty() ? status.preferredEndpoint : status.preferredLabel;
+    QString text;
+    QString tip;
+    switch (status.route) {
+    case OutputStatus::Route::Waiting:
+        text = QStringLiteral("Waiting for %1").arg(preferred);
+        tip = QStringLiteral("Playback resumes when this output returns. Choose another in "
+                             "Playback > Output profile.");
+        break;
+    case OutputStatus::Route::Fallback:
+        text = QStringLiteral("%1 missing: system output").arg(preferred);
+        tip = QStringLiteral("Playing through the system-managed output until %1 returns.").arg(preferred);
+        break;
+    case OutputStatus::Route::Unsupported:
+        text = QStringLiteral("Output choice unsupported");
+        tip = QStringLiteral("%1 cannot route to %2; the system chooses the output.")
+                  .arg(status.transport, preferred);
+        break;
+    default:
+        break;
+    }
+    m_outputIndicator->setText(text);
+    m_outputIndicator->setToolTip(tip);
+    m_outputIndicator->setVisible(!text.isEmpty());
+}
+
+void MainWindow::adoptSharedEndpoint(const QString &name, const QString &label)
+{
+    // The backend already requests it; record it as the profile's choice.
+    m_playbackProfile.sharedEndpoint = name;
+    m_playbackProfile.sharedEndpointLabel = label;
+    savePlaybackProfile();
+    statusBar()->showMessage(QStringLiteral("Output set to %1, as chosen in a mixer")
+                                 .arg(label.isEmpty() ? name : label), 6000);
 }
 
 void MainWindow::applyProfileTransition(const PlaybackProfile &previous, const PlaybackProfile &next,

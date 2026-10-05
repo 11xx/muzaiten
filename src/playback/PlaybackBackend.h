@@ -117,6 +117,13 @@ public:
     // instead of silently ignoring it.
     virtual bool supportsSharedEndpoint() const { return false; }
     virtual OutputStatus outputStatus() const { return {}; }
+    // The endpoints a shared transport choice ("auto", "pipewire", ...) can
+    // reach right now, for choosing one.
+    virtual QVector<OutputEndpoint> sharedEndpoints(const QString &sinkChoice) const
+    {
+        Q_UNUSED(sinkChoice);
+        return {};
+    }
 
 signals:
     void stateChanged(PlaybackBackend::State state);
