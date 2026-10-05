@@ -122,6 +122,9 @@
 
 ### Fixed
 
+- Playback started before the window opens (from the tray, MPRIS or
+  `muzaitenctl`) uses the saved output profile instead of the default shared
+  output.
 - Bit-perfect and native DSD output no longer open, take over or release
   another sound card that has taken a missing card's number (`hw:N`). The
   chosen card is looked up by its identity before each use; while it is

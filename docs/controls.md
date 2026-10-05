@@ -132,7 +132,9 @@ goes: `System managed` (the behavior above), or one listed playback output,
 virtual outputs such as an equalizer included. A chosen output is kept by its
 stable name, so it survives being unplugged, switched off or renumbered, and
 other devices appearing or becoming the default do not move playback off it.
-It affects muzaiten only; system defaults are never changed.
+It affects muzaiten only; system defaults are never changed. The saved
+output applies from startup, including when muzaiten starts in the tray and
+plays before its window opens.
 
 While a chosen output is missing, playback pauses at its position and resumes
 there when the output returns, if it was playing; pausing, seeking or picking

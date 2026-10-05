@@ -127,6 +127,7 @@ set(MUZAITEN_SOURCES
     src/playback/DirectDeviceResolver.cpp
     src/playback/GStreamerPlaybackBackend.cpp
     src/playback/OutputEndpointMonitor.cpp
+    src/playback/PlaybackProfileJson.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/DirectoryWalker.cpp
     src/scanner/PathMetadataGuesser.cpp
@@ -283,6 +284,7 @@ set(MUZAITEN_HEADERS
     src/playback/DirectDeviceResolver.h
     src/playback/OutputEndpointMonitor.h
     src/playback/PlaybackBackend.h
+    src/playback/PlaybackProfileJson.h
     src/playback/PlaybackTypes.h
     src/playback/GStreamerPlaybackBackend.h
     src/playback/QtPlaybackBackend.h
@@ -498,6 +500,7 @@ set(MUZAITEN_PLAYBACK_SOURCES
     src/playback/OutputEndpointMonitor.cpp
     src/playback/OutputEndpointMonitor.h
     src/playback/PlaybackBackend.h
+    src/playback/PlaybackProfileJson.cpp
     src/playback/QtPlaybackBackend.cpp
 )
 

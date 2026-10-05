@@ -20,6 +20,7 @@
 #include "playback/DirectDeviceResolver.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
+#include "playback/PlaybackProfileJson.h"
 #include "player/PlayerCore.h"
 #include "reco/AffinityPool.h"
 #include "reco/ArtistRadio.h"
@@ -320,6 +321,19 @@ AppCore::AppCore(QObject *parent)
         return device;
     });
     connect(m_directDevices, &DirectDeviceResolver::cardsChanged, m_playback, &PlaybackBackend::retryDirectDevice);
+    // Apply the saved output before anything can start playback (IPC, MPRIS,
+    // a tray start): the window may not exist yet, or ever. The window loads
+    // the same profile and finds nothing to change.
+    {
+        PlaybackProfile profile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+        if (profile.mode == QStringLiteral("bit-perfect") && !profile.deviceId.isEmpty()) {
+            const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(profile.deviceId, profile.device);
+            if (target.status == AudioDeviceControl::DirectTarget::Status::Resolved) {
+                profile.device = target.hwPath;
+            }
+        }
+        m_playback->setProfile(profile);
+    }
     m_player->setPathResolver([this](const Track &track) {
         if (track.path.isEmpty()) {
             return QString();
