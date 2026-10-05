@@ -6,6 +6,7 @@
 #include <QTimer>
 
 class OutputEndpointMonitor;
+class PipeWireStreamWatch;
 
 using GstElement = struct _GstElement;
 using GstEvent = struct _GstEvent;
@@ -136,6 +137,9 @@ private:
     void clearRouteOverride();
     // Put an open stream back on the available preferred endpoint.
     void returnToPreferred();
+    // Move the open stream to |sink| without reopening it when the transport
+    // allows; otherwise reopen it there at its position.
+    void moveOpenStreamTo(const QString &sink);
     void setSinkTarget(const QByteArray &target);
     // m_directCheck for the profile's card; |savedDevice| is its last known
     // number. Fills in the saved label for an absent card.
@@ -219,6 +223,10 @@ private:
 
     OutputEndpointMonitor *m_endpoints = nullptr;
     QString m_monitoredFactory;
+    // Follows a native PipeWire stream's links; pulsesink reports its own.
+    // The node name is this backend's, kept across reconnects.
+    PipeWireStreamWatch *m_streamWatch = nullptr;
+    QString m_nativeNodeName;
     // Playback is held until the preferred endpoint returns, resuming then
     // only when the last transport intent was to play.
     bool m_waitingForOutput = false;

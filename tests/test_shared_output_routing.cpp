@@ -1,6 +1,8 @@
 #include "PrivateAudioGraph.h"
 
 #include <QDataStream>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QElapsedTimer>
 #include <QMutex>
 #include <QSignalSpy>
@@ -16,6 +18,7 @@
 #define private public
 #include "playback/GStreamerPlaybackBackend.h"
 #undef private
+#include "playback/PipeWireStreamWatch.h"
 
 namespace {
 
@@ -55,6 +58,39 @@ PlaybackProfile pulseProfile()
     profile.sharedSink = profile.sink;
     return profile;
 }
+
+// A profile on the named transport ("pulse" or "pipewire").
+PlaybackProfile transportProfile(const QString &transport)
+{
+    PlaybackProfile profile;
+    profile.sink = transport;
+    profile.sharedSink = transport;
+    return profile;
+}
+
+bool sinkInstalled(const char *factoryName)
+{
+    GstElementFactory *factory = gst_element_factory_find(factoryName);
+    if (factory == nullptr) {
+        return false;
+    }
+    gst_object_unref(factory);
+    return true;
+}
+
+// The native transport needs GStreamer's PipeWire plugin, which may be absent.
+#define SKIP_UNLESS_TRANSPORT(transport)                                                        \
+    if ((transport) == QStringLiteral("pipewire") && !sinkInstalled("pipewiresink")) {          \
+        QSKIP("GStreamer's PipeWire plugin (pipewiresink) is not installed");                    \
+    }
+
+// pipewiresink can wedge when a flushing seek follows its reconnect, as any
+// resume at a held position after a releasing pause does; a case built on
+// that cannot run reliably on the native transport.
+#define SKIP_NATIVE_HELD_POSITION_RESUME(transport)                                             \
+    if ((transport) == QStringLiteral("pipewire")) {                                            \
+        QSKIP("pipewiresink can wedge on a flushing seek right after it reconnects");            \
+    }
 
 } // namespace
 
@@ -257,10 +293,20 @@ private slots:
 
     // Playback waits for a missing preferred endpoint: it never opens
     // elsewhere, keeps its position, and resumes only if it was meant to play.
+    void missingPreferredEndpointWaits_data()
+    {
+        QTest::addColumn<QString>("transport");
+        QTest::newRow("pulse") << QStringLiteral("pulse");
+        QTest::newRow("native") << QStringLiteral("pipewire");
+    }
+
     void missingPreferredEndpointWaits()
     {
+        QFETCH(QString, transport);
+        SKIP_UNLESS_TRANSPORT(transport);
+        SKIP_NATIVE_HELD_POSITION_RESUME(transport);
         const QString late = QStringLiteral("muz_late_%1").arg(m_round);
-        PlaybackProfile profile = pulseProfile();
+        PlaybackProfile profile = transportProfile(transport);
         profile.sharedEndpoint = late;
         profile.sharedEndpointLabel = QStringLiteral("Late device");
         GStreamerPlaybackBackend backend;
@@ -311,11 +357,20 @@ private slots:
     // With fallback chosen, the system route plays while the preferred
     // endpoint is missing, and the stream returns when it comes back. The
     // fallback is never recorded as the preference.
+    void fallbackPlaysUntilPreferredReturns_data()
+    {
+        QTest::addColumn<QString>("transport");
+        QTest::newRow("pulse") << QStringLiteral("pulse");
+        QTest::newRow("native") << QStringLiteral("pipewire");
+    }
+
     void fallbackPlaysUntilPreferredReturns()
     {
+        QFETCH(QString, transport);
+        SKIP_UNLESS_TRANSPORT(transport);
         const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
         m_modules.insert(preferred, m_graph->addSink(preferred));
-        PlaybackProfile profile = pulseProfile();
+        PlaybackProfile profile = transportProfile(transport);
         profile.sharedEndpoint = preferred;
         profile.sharedEndpointFallback = true;
         GStreamerPlaybackBackend backend;
@@ -347,8 +402,11 @@ private slots:
     void endpointLostDuringStartup_data()
     {
         QTest::addColumn<bool>("fallback");
-        QTest::newRow("fallback") << true;
-        QTest::newRow("wait") << false;
+        QTest::addColumn<QString>("transport");
+        QTest::newRow("fallback, pulse") << true << QStringLiteral("pulse");
+        QTest::newRow("wait, pulse") << false << QStringLiteral("pulse");
+        QTest::newRow("fallback, native") << true << QStringLiteral("pipewire");
+        QTest::newRow("wait, native") << false << QStringLiteral("pipewire");
     }
 
     // The preferred endpoint vanishing while the stream is still starting
@@ -356,9 +414,11 @@ private slots:
     void endpointLostDuringStartup()
     {
         QFETCH(bool, fallback);
+        QFETCH(QString, transport);
+        SKIP_UNLESS_TRANSPORT(transport);
         const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
         m_modules.insert(preferred, m_graph->addSink(preferred));
-        PlaybackProfile profile = pulseProfile();
+        PlaybackProfile profile = transportProfile(transport);
         profile.sharedEndpoint = preferred;
         profile.sharedEndpointFallback = fallback;
         GStreamerPlaybackBackend backend;
@@ -422,8 +482,11 @@ private slots:
     void mixerMoveHoldsAtImmediateReopen_data()
     {
         QTest::addColumn<bool>("wiremix");
-        QTest::newRow("wiremix metadata move") << true;
-        QTest::newRow("pulse protocol move") << false;
+        QTest::addColumn<QString>("transport");
+        QTest::newRow("wiremix move, pulse") << true << QStringLiteral("pulse");
+        QTest::newRow("pulse protocol move, pulse") << false << QStringLiteral("pulse");
+        QTest::newRow("wiremix move, native") << true << QStringLiteral("pipewire");
+        QTest::newRow("pulse protocol move, native") << false << QStringLiteral("pipewire");
     }
 
     // A mixer move off the preferred endpoint holds for a stream opened the
@@ -432,9 +495,11 @@ private slots:
     void mixerMoveHoldsAtImmediateReopen()
     {
         QFETCH(bool, wiremix);
+        QFETCH(QString, transport);
+        SKIP_UNLESS_TRANSPORT(transport);
         const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
         m_modules.insert(preferred, m_graph->addSink(preferred));
-        PlaybackProfile profile = pulseProfile();
+        PlaybackProfile profile = transportProfile(transport);
         profile.sharedEndpoint = preferred;
         GStreamerPlaybackBackend backend;
         backend.setProfile(profile);
@@ -502,8 +567,11 @@ private slots:
     void forcedFallbackAtImmediateReopenIsNotAdopted_data()
     {
         QTest::addColumn<bool>("fallback");
-        QTest::newRow("fallback") << true;
-        QTest::newRow("wait") << false;
+        QTest::addColumn<QString>("transport");
+        QTest::newRow("fallback, pulse") << true << QStringLiteral("pulse");
+        QTest::newRow("wait, pulse") << false << QStringLiteral("pulse");
+        QTest::newRow("fallback, native") << true << QStringLiteral("pipewire");
+        QTest::newRow("wait, native") << false << QStringLiteral("pipewire");
     }
 
     // The preferred endpoint vanishes and a stream opens before the endpoint
@@ -512,9 +580,14 @@ private slots:
     void forcedFallbackAtImmediateReopenIsNotAdopted()
     {
         QFETCH(bool, fallback);
+        QFETCH(QString, transport);
+        SKIP_UNLESS_TRANSPORT(transport);
+        if (!fallback) {
+            SKIP_NATIVE_HELD_POSITION_RESUME(transport);
+        }
         const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
         m_modules.insert(preferred, m_graph->addSink(preferred));
-        PlaybackProfile profile = pulseProfile();
+        PlaybackProfile profile = transportProfile(transport);
         profile.sharedEndpoint = preferred;
         profile.sharedEndpointFallback = fallback;
         GStreamerPlaybackBackend backend;
@@ -543,6 +616,35 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 12000);
         QCOMPARE(adopted.count(), 0);
         backend.stop();
+    }
+
+    // The stream watch follows a native PipeWire stream, found by its node
+    // name, through a mixer move and its end.
+    void nativeStreamWatchFollowsLinks()
+    {
+        if (!PipeWireStreamWatch::supported()) {
+            QSKIP("built without PipeWire support");
+        }
+        if (QStandardPaths::findExecutable(QStringLiteral("pw-cat")).isEmpty()) {
+            QSKIP("pw-cat is not installed");
+        }
+        const QString name = QStringLiteral("muz-watch-%1").arg(m_round);
+        PipeWireStreamWatch watch;
+        QSignalSpy changed(&watch, &PipeWireStreamWatch::linkedSinkChanged);
+        QVERIFY(watch.start(name));
+        QProcess player;
+        player.start(QStringLiteral("pw-cat"),
+                     {QStringLiteral("--playback"), QStringLiteral("--target"), m_main,
+                      QStringLiteral("-P"), QStringLiteral("{ node.name = \"%1\" }").arg(name), path("long-a")});
+        QVERIFY(player.waitForStarted(3000));
+        QTRY_COMPARE_WITH_TIMEOUT(watch.linkedSink(), m_main, 8000);
+        m_graph->mixerMove(m_other);
+        QTRY_COMPARE_WITH_TIMEOUT(watch.linkedSink(), m_other, 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty() && changed.last().first().toString() == m_other, 3000);
+        player.kill();
+        player.waitForFinished(3000);
+        QTRY_COMPARE_WITH_TIMEOUT(watch.linkedSink(), QString(), 8000);
+        watch.stop();
     }
 
 private:

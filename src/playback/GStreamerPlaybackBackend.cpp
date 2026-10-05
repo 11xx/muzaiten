@@ -2,7 +2,9 @@
 
 #include "playback/AudioDeviceControl.h"
 #include "playback/OutputEndpointMonitor.h"
+#include "playback/PipeWireStreamWatch.h"
 
+#include <QCoreApplication>
 #include <QMutexLocker>
 #include <QtGlobal>
 
@@ -131,8 +133,12 @@ GstElement *makeSink(const PlaybackProfile &profile, QString *factory)
     if (profile.sink == QStringLiteral("pulse")) {
         return make("pulsesink");
     }
-    if (GstElement *sink = make("pipewiresink")) {
-        return sink;
+    // Auto takes the native transport only when this build can follow its
+    // stream: otherwise a mixer move would be undone by the next stream.
+    if (PipeWireStreamWatch::supported()) {
+        if (GstElement *sink = make("pipewiresink")) {
+            return sink;
+        }
     }
     if (GstElement *sink = make("pulsesink")) {
         return sink;
@@ -1101,6 +1107,27 @@ bool GStreamerPlaybackBackend::configureSink()
     m_sinkFactory = factory;
     // Requested by the first open, through applyStreamTarget().
     m_handoffTarget = sharedSinkTarget(m_profile);
+    if (m_sinkFactory == QStringLiteral("pipewiresink")) {
+        // Name the stream's node so its links can be followed.
+        if (m_nativeNodeName.isEmpty()) {
+            static int instances = 0;
+            m_nativeNodeName = QStringLiteral("muzaiten-output-%1-%2")
+                                   .arg(QCoreApplication::applicationPid())
+                                   .arg(++instances);
+        }
+        GstStructure *props = gst_structure_new("props", "node.name", G_TYPE_STRING,
+                                                m_nativeNodeName.toUtf8().constData(), nullptr);
+        g_object_set(G_OBJECT(m_audioSink), "stream-properties", props, nullptr);
+        gst_structure_free(props);
+        if (m_profile.mode == QStringLiteral("shared")) {
+            if (m_streamWatch == nullptr) {
+                m_streamWatch = new PipeWireStreamWatch(this);
+                connect(m_streamWatch, &PipeWireStreamWatch::linkedSinkChanged,
+                        this, &GStreamerPlaybackBackend::noteObservedRoute);
+            }
+            m_streamWatch->start(m_nativeNodeName);
+        }
+    }
     if (m_sinkFactory == QStringLiteral("pulsesink")) {
         // pulsesink announces every change to its stream (moves included) as
         // a current-device notification from the streaming thread.
@@ -1165,6 +1192,9 @@ void GStreamerPlaybackBackend::releaseAudioSink()
         m_audioSink = nullptr;
     }
     m_currentDeviceHandler = 0;
+    if (m_streamWatch != nullptr) {
+        m_streamWatch->stop();
+    }
     m_sinkFactory.clear();
     m_handoffTarget.clear();
     m_currentEndpoint.clear();
@@ -1277,7 +1307,10 @@ QString GStreamerPlaybackBackend::sharedSinkFactory(const QString &sinkChoice)
     if (sinkChoice == QStringLiteral("pulse")) {
         return available("pulsesink");
     }
-    for (const char *name : {"pipewiresink", "pulsesink", "autoaudiosink"}) {
+    if (PipeWireStreamWatch::supported() && factoryExists("pipewiresink")) {
+        return QStringLiteral("pipewiresink");
+    }
+    for (const char *name : {"pulsesink", "autoaudiosink"}) {
         if (factoryExists(name)) {
             return QString::fromLatin1(name);
         }
@@ -1430,6 +1463,10 @@ void GStreamerPlaybackBackend::handleEndpointAdded(const QString &name)
         m_waitingForOutput = false;
         m_waitingForDirect = false;
         const bool resumePlaying = std::exchange(m_resumeOnOutput, false);
+        if (!m_softPaused && m_playbin != nullptr) {
+            // A stream paused in place may sit where the server parked it.
+            moveOpenStreamTo(name);
+        }
         if (resumePlaying) {
             resume();
         } else {
@@ -1438,16 +1475,28 @@ void GStreamerPlaybackBackend::handleEndpointAdded(const QString &name)
         publishOutputStatus();
         return;
     }
-    // A fallback stream may be playing elsewhere: bring it back. pulsesink
-    // moves its live stream when given a target (and only records it when
-    // none is open); pipewiresink reads its target only when it connects.
+    // A fallback stream may be playing elsewhere: bring it back. (pulsesink
+    // only records a target while no stream is open.)
     if (m_sinkFactory == QStringLiteral("pulsesink")) {
         setSinkTarget(name.toUtf8());
-    } else if (m_playbin != nullptr && !m_softPaused
-               && (m_state == State::Playing || m_state == State::Paused)) {
-        reloadCurrentAtPosition(m_positionMs, m_state);
+    } else {
+        returnToPreferred();
     }
     publishOutputStatus();
+}
+
+void GStreamerPlaybackBackend::moveOpenStreamTo(const QString &sink)
+{
+    // pulsesink moves its live stream when given a target; a native stream
+    // is moved through the PipeWire metadata, as a mixer would. Only a stream
+    // that can be neither is reopened.
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
+        setSinkTarget(sink.toUtf8());
+    } else if (m_streamWatch == nullptr || !m_streamWatch->moveTo(sink)) {
+        if (m_state == State::Playing || m_state == State::Paused) {
+            reloadCurrentAtPosition(m_positionMs, m_state);
+        }
+    }
 }
 
 void GStreamerPlaybackBackend::handleEndpointRemoved(const QString &name)
@@ -1510,6 +1559,9 @@ QString GStreamerPlaybackBackend::currentRouteNow() const
         const QString current = QString::fromUtf8(device);
         g_free(device);
         return current;
+    }
+    if (m_sinkFactory == QStringLiteral("pipewiresink") && m_streamWatch != nullptr) {
+        return m_streamWatch->linkedSink();
     }
     return {};
 }
@@ -1579,13 +1631,7 @@ void GStreamerPlaybackBackend::returnToPreferred()
         || m_playbin == nullptr || m_softPaused || !(m_state == State::Playing || m_state == State::Paused)) {
         return;
     }
-    // pulsesink moves its live stream when given a target; pipewiresink reads
-    // its target only when it connects.
-    if (m_sinkFactory == QStringLiteral("pulsesink")) {
-        setSinkTarget(preferred.toUtf8());
-    } else {
-        reloadCurrentAtPosition(m_positionMs, m_state);
-    }
+    moveOpenStreamTo(preferred);
 }
 
 void GStreamerPlaybackBackend::confirmExternalMove()
@@ -1595,9 +1641,15 @@ void GStreamerPlaybackBackend::confirmExternalMove()
     if (candidate.isEmpty()) {
         return;
     }
+    if (m_endpoints == nullptr || !m_endpoints->running()) {
+        // Without the list of present sinks a deliberate move cannot be told
+        // from a forced one: keep following the stream where it went, but
+        // never make that the preference.
+        return;
+    }
     // Deliberate only if the sink the stream left is still there (a sink
     // that vanished pushed the stream away) and the new one is too.
-    const bool deliberate = preferredEndpointRoutable() && m_endpoints != nullptr && m_endpoints->running()
+    const bool deliberate = preferredEndpointRoutable()
         && m_endpoints->contains(from) && m_endpoints->contains(candidate);
     m_routeOverride.clear();
     m_overrideFrom.clear();
@@ -1635,9 +1687,14 @@ OutputStatus GStreamerPlaybackBackend::outputStatus() const
     }
     status.transport = transportLabel(m_sinkFactory);
     if (m_profile.sink == QStringLiteral("auto") && m_sinkFactory == QStringLiteral("pulsesink")) {
-        status.transportNote = QStringLiteral("the GStreamer PipeWire plugin is not installed");
+        status.transportNote = factoryExists("pipewiresink")
+            ? QStringLiteral("this build cannot follow PipeWire streams")
+            : QStringLiteral("the GStreamer PipeWire plugin is not installed");
     } else if (m_profile.sink == QStringLiteral("auto") && m_sinkFactory == QStringLiteral("autoaudiosink")) {
         status.transportNote = QStringLiteral("no GStreamer PipeWire or PulseAudio plugin is installed");
+    } else if (m_sinkFactory == QStringLiteral("pipewiresink")
+               && (m_streamWatch == nullptr || !m_streamWatch->running())) {
+        status.transportNote = QStringLiteral("mixer moves are not followed with this transport here");
     }
     // Only an open stream is linked anywhere.
     const bool streamOpen = !m_softPaused && (m_state == State::Playing || m_state == State::Paused);

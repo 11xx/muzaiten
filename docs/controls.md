@@ -126,7 +126,8 @@ once the original output returns.
 
 In `Playback > Output profile…`, the **Shared** side has two separate
 choices. **Transport** is how muzaiten talks to the sound server: Auto uses
-GStreamer's PipeWire plugin when it is installed and PulseAudio otherwise;
+GStreamer's PipeWire plugin when it is installed (and the build can follow
+PipeWire streams) and PulseAudio otherwise;
 the ALSA transport cannot choose an output. **Output** is where shared audio
 goes: `System managed` (the behavior above), or one listed playback output,
 virtual outputs such as an equalizer included. A chosen output is kept by its
@@ -149,10 +150,12 @@ Moving muzaiten's stream to another output in a mixer takes effect at once
 for every stream that follows, including the next track and a sample-rate
 change, and a second later becomes the new choice, saved as if picked in the
 dialog. A move the sound server made because the output the stream was on
-disappeared is a fallback and never becomes the choice. This is
-detected with the PulseAudio transport, which reports where its stream is
-linked; the PipeWire transport does not, so there a mixer move lasts until
-the next track opens a new stream.
+disappeared is a fallback and never becomes the choice. Both transports
+see where the stream is linked: PulseAudio reports it, and with the PipeWire
+transport muzaiten follows its own stream's links in the PipeWire graph. A
+build without PipeWire support cannot do the latter, so there Auto uses the
+PulseAudio transport, and an explicit PipeWire choice says in the status line
+that mixer moves are not followed.
 
 **Bit-perfect** output opens one ALSA card directly. A card picked from the
 list is remembered by its stable identity rather than its number (`hw:N`),
