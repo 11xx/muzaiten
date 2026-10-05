@@ -25,6 +25,11 @@
 
 namespace {
 
+// Item roles of the unavailable entry for an absent direct identity. Its
+// Qt::UserRole data stays empty so findData() on a hw path never lands on it.
+constexpr int kAbsentIdentityRole = Qt::UserRole + 1;
+constexpr int kAbsentDeviceRole = Qt::UserRole + 2;
+
 // Parse /proc/asound/cards and return {display label, hw:N} pairs.
 QVector<QPair<QString, QString>> enumerateAlsaCards()
 {
@@ -280,9 +285,8 @@ void PlaybackProfileDialog::setModeActive(bool bitPerfect)
 void PlaybackProfileDialog::populateDevices()
 {
     // Preserve the current selection (hw:N or typed text) across a rebuild.
-    const QString selected = m_deviceCombo->currentData().toString().isEmpty()
-        ? m_deviceCombo->currentText().trimmed()
-        : m_deviceCombo->currentData().toString();
+    const SelectedDevice current = selectedDevice();
+    const QString selected = current.stableId.isEmpty() ? current.hwPath : QString();
 
     // Map hw:N -> PipeWire hold state so we can flag busy cards in the list.
     QHash<QString, bool> held;
@@ -304,6 +308,13 @@ void PlaybackProfileDialog::populateDevices()
         }
     }
 
+    if (!m_absentDeviceId.isEmpty()) {
+        addAbsentDeviceEntry();
+        if (!current.stableId.isEmpty()) {
+            m_deviceCombo->setCurrentIndex(m_deviceCombo->count() - 1);
+        }
+    }
+
     if (!selected.isEmpty()) {
         const int devIndex = m_deviceCombo->findData(selected);
         if (devIndex >= 0)
@@ -311,6 +322,36 @@ void PlaybackProfileDialog::populateDevices()
         else
             m_deviceCombo->setCurrentText(selected);
     }
+}
+
+void PlaybackProfileDialog::addAbsentDeviceEntry()
+{
+    for (int row = m_deviceCombo->count() - 1; row >= 0; --row) {
+        if (!m_deviceCombo->itemData(row, kAbsentIdentityRole).toString().isEmpty()) {
+            m_deviceCombo->removeItem(row);
+        }
+    }
+    const QString label = m_savedDeviceLabel.isEmpty() ? m_absentDeviceId : m_savedDeviceLabel;
+    m_deviceCombo->addItem(QStringLiteral("%1 (unavailable)").arg(label), QString());
+    const int row = m_deviceCombo->count() - 1;
+    m_deviceCombo->setItemData(row, m_absentDeviceId, kAbsentIdentityRole);
+    m_deviceCombo->setItemData(row, m_savedDevice, kAbsentDeviceRole);
+    m_deviceCombo->setItemData(row, QStringLiteral("Not connected. muzaiten waits for this device rather than "
+                                                   "open another card that now has its number."),
+                               Qt::ToolTipRole);
+}
+
+PlaybackProfileDialog::SelectedDevice PlaybackProfileDialog::selectedDevice() const
+{
+    const int row = m_deviceCombo->currentIndex();
+    if (row >= 0 && m_deviceCombo->currentText() == m_deviceCombo->itemText(row)) {
+        const QString identity = m_deviceCombo->itemData(row, kAbsentIdentityRole).toString();
+        if (!identity.isEmpty()) {
+            return {m_deviceCombo->itemData(row, kAbsentDeviceRole).toString(), identity};
+        }
+    }
+    const QString itemHw = m_deviceCombo->currentData().toString();
+    return {itemHw.isEmpty() ? m_deviceCombo->currentText().trimmed() : itemHw, QString()};
 }
 
 void PlaybackProfileDialog::refreshDeviceStatus()
@@ -326,16 +367,16 @@ void PlaybackProfileDialog::refreshDeviceStatus()
         return;
     }
 
-    const QString hw = m_deviceCombo->currentData().toString().isEmpty()
-        ? m_deviceCombo->currentText().trimmed()
-        : m_deviceCombo->currentData().toString();
+    const SelectedDevice selected = selectedDevice();
     const std::optional<AudioDeviceControl::DeviceState> dev =
-        AudioDeviceControl::findByHwPath(hw);
+        AudioDeviceControl::findSelected(selected.stableId, selected.hwPath);
 
     if (!dev) {
-        // Either a manual hw: string with no matching PipeWire card, or nothing
-        // selected — nothing to take over.
-        m_deviceStatus->setText(QStringLiteral("PipeWire does not manage this device."));
+        // An absent remembered device, a manual hw: string with no matching
+        // PipeWire card, or nothing selected: nothing to take over.
+        m_deviceStatus->setText(selected.stableId.isEmpty()
+                                    ? QStringLiteral("PipeWire does not manage this device.")
+                                    : QStringLiteral("Not connected; playback waits for it."));
         m_deviceStatus->setStyleSheet(QString());
         m_deviceStatus->setEnabled(active);
         m_deviceAction->setVisible(false);
@@ -371,13 +412,12 @@ void PlaybackProfileDialog::refreshDeviceStatus()
 
 void PlaybackProfileDialog::toggleSelectedDeviceTakeover()
 {
-    const QString hw = m_deviceCombo->currentData().toString().isEmpty()
-        ? m_deviceCombo->currentText().trimmed()
-        : m_deviceCombo->currentData().toString();
+    const SelectedDevice selected = selectedDevice();
     const std::optional<AudioDeviceControl::DeviceState> dev =
-        AudioDeviceControl::findByHwPath(hw);
+        AudioDeviceControl::findSelected(selected.stableId, selected.hwPath);
     if (!dev)
         return;
+    const QString hw = dev->hwPath;
 
     const bool releasing = !dev->heldByPipeWire();
     const int oldSinkNodeId = releasing ? AudioDeviceControl::sinkNodeId(hw) : -1;
@@ -426,13 +466,23 @@ void PlaybackProfileDialog::setProfile(const PlaybackProfile &profile)
     m_endpointFallback->setChecked(profile.sharedEndpointFallback);
     refreshEndpointControls();
 
-    // Bit-perfect device: prefer the live hw:N for the remembered stable id (the
-    // stored index may have drifted), falling back to the stored hw:N / text.
+    // Direct device: the live hw:N of the remembered stable id (the stored
+    // index may have drifted). An absent identity is listed as unavailable
+    // and selected, never replaced by the card that now has its old number.
+    m_savedDevice = profile.device;
+    m_savedDeviceId = profile.deviceId;
+    m_savedDeviceLabel = profile.deviceLabel;
+    m_absentDeviceId.clear();
     QString device = profile.device;
     if (!profile.deviceId.isEmpty()) {
         if (const auto dev = AudioDeviceControl::findByStableId(profile.deviceId);
             dev && !dev->hwPath.isEmpty()) {
             device = dev->hwPath;
+        } else {
+            m_absentDeviceId = profile.deviceId;
+            addAbsentDeviceEntry();
+            m_deviceCombo->setCurrentIndex(m_deviceCombo->count() - 1);
+            device.clear();
         }
     }
     if (!device.isEmpty()) {
@@ -476,14 +526,23 @@ PlaybackProfile PlaybackProfileDialog::profile() const
     p.sharedEndpointFallback    = m_endpointFallback->isChecked();
 
     // Prefer the item data (hw:N); fall back to the edited text for manual entries.
-    const QString devData = m_deviceCombo->currentData().toString();
-    const QString device = devData.isEmpty() ? m_deviceCombo->currentText().trimmed() : devData;
+    const SelectedDevice selected = selectedDevice();
+    const QString device = selected.hwPath;
     // Persist the device's stable id (independent of the volatile hw:N) so it can
     // be re-resolved later regardless of which mode is active now.
-    if (!device.isEmpty()) {
+    if (!selected.stableId.isEmpty()) {
+        p.deviceId = selected.stableId;
+        p.deviceLabel = m_savedDeviceLabel;
+    } else if (!device.isEmpty()) {
         if (const auto dev = AudioDeviceControl::findByHwPath(device);
             dev && !dev->stableId.isEmpty()) {
             p.deviceId = dev->stableId;
+            p.deviceLabel = dev->description;
+        } else if (device == m_savedDevice && !AudioDeviceControl::toolingAvailable()) {
+            // The identity cannot be checked right now; an unchanged choice
+            // keeps it rather than turning into a manual entry.
+            p.deviceId = m_savedDeviceId;
+            p.deviceLabel = m_savedDeviceLabel;
         }
     }
 

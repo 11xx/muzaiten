@@ -42,10 +42,16 @@ struct PlaybackProfile {
     bool sharedSoftwareVolume = true;
     bool sharedAllowResample = false;
     bool sharedReleaseSinkOnPause = true;
-    // Stable identity of the bit-perfect device (PipeWire `device.name`, e.g.
-    // "alsa_card.usb-..."), used to re-resolve the volatile `device` (hw:N) on
-    // load — the index drifts across reboots / device launch order.
+    // Stable identity of the direct device (PipeWire `device.name`, e.g.
+    // "alsa_card.usb-..."). When set, it alone decides which card bit-perfect
+    // and native DSD output may open, take over or release: `device` (hw:N) is
+    // only the last place it was seen, re-resolved at each use, because the
+    // number drifts across reboots and replugs and can pass to another card.
+    // Empty for an entry typed by hand or saved before ids were recorded; such
+    // an entry opens its `device` string as given.
     QString deviceId;
+    // The direct device's description when chosen, shown while it is absent.
+    QString deviceLabel;
 
     // --- Shared output destination -------------------------------------------
     // Preferred shared playback endpoint: the stable name of a physical or

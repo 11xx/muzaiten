@@ -50,6 +50,7 @@ struct MainPanelTarget;
 class PlaybackBackend;
 class QTimer;
 class QLabel;
+class DirectDeviceResolver;
 class QProgressBar;
 class QPushButton;
 class QStackedWidget;
@@ -215,19 +216,24 @@ private:
     // so a shared sink aimed at the same card isn't left silent. Returns the hw
     // path it released (empty if it released nothing).
     QString releaseDeviceForProfileSwitch(const PlaybackProfile &previous, const PlaybackProfile &next,
-                                          int *previousSinkNodeId);
+                                          int *previousSinkNodeId, QString *releasedId = nullptr);
     // Build the new output sink and restore playback, but first wait (poll, ~10s
     // budget) for any cross-profile device-ownership change to settle — a card
     // takes a couple of seconds to change hands, and building the sink onto a
     // half-transitioned device plays silently or fails to preroll.
+    // |releasedId| is the returned card's stable id, when it has one.
     void applyOutputProfile(const PlaybackProfile &next, const QString &releasedHw,
                             int previousSinkNodeId, int queueIndex, qint64 positionMs,
-                            bool wasActive, bool wasPlaying);
+                            bool wasActive, bool wasPlaying, const QString &releasedId = QString());
     // Poll until the requested cross-server hand-off is truly usable (a new
     // shared sink after release, or no shared sink before direct ALSA open), or
-    // the ~10s budget elapses. Calls done immediately when already ready.
-    void waitForDeviceOwnership(const QString &hw, bool wantHeld, int previousSinkNodeId,
-                                std::function<void()> done);
+    // the ~10s budget elapses. Calls done immediately when already ready. With
+    // a stable id the card is followed by identity at every poll, so a card
+    // that vanishes or is renumbered meanwhile is never mistaken for another
+    // holding the same number. done is dropped when a newer output transition
+    // has started since, so it cannot restore an obsolete target.
+    void waitForDeviceOwnership(const QString &hw, const QString &stableId, bool wantHeld,
+                                int previousSinkNodeId, std::function<void()> done);
     void configurePlaybackResume();
     // A shared-mode PCM track can't reach a card we hold off for native DSD;
     // hand the card back, wait for PipeWire to rebuild its sink, then restart the
@@ -497,7 +503,12 @@ private:
     int m_dsdTakeoverSecondsRemaining = 0;
     QString m_pendingDsdTakeoverDevice;
     QString m_takenOverDsdDevice;
+    QString m_takenOverDsdDeviceId;
     int m_takenOverDsdRestoreProfile = -1;
+    DirectDeviceResolver *m_directDevices = nullptr;  // borrowed from AppCore
+    // Bumped by every output transition; delayed steps of an older one check
+    // it and stand down.
+    quint64 m_outputTransitionGeneration = 0;
     // Core engine pointers — borrowed from AppCore (non-owning)
     AppCore        *m_core = nullptr;
     PlayerCore     *m_player = nullptr;

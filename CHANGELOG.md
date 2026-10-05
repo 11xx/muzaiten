@@ -122,6 +122,13 @@
 
 ### Fixed
 
+- Bit-perfect and native DSD output no longer open, take over or release
+  another sound card that has taken a missing card's number (`hw:N`). The
+  chosen card is looked up by its identity before each use; while it is
+  missing, playback waits at its position and resumes when it returns, under
+  any number. The output dialog keeps an absent card selected instead of
+  replacing it with whichever card is listed. A device typed by hand is still
+  opened as written.
 - Shared output keeps a mixer move (pavucontrol, Wiremix) for the tracks that
   follow, and returns to an output that disappears and comes back, instead of
   staying on whichever output the sound server fell back to. Every new stream

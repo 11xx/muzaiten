@@ -6,6 +6,8 @@
 #include <QUrl>
 #include <QVector>
 
+#include <functional>
+
 // A shared playback endpoint as the sound server names it: `name` is the stable
 // identity (PipeWire node.name / PulseAudio sink name), `label` its description.
 struct OutputEndpoint {
@@ -117,6 +119,22 @@ public:
     // instead of silently ignoring it.
     virtual bool supportsSharedEndpoint() const { return false; }
     virtual OutputStatus outputStatus() const { return {}; }
+    // The direct (exclusive ALSA) device as resolved at the moment of opening
+    // it, from the profile's stable id and last known device string.
+    // Unavailable means the selected card is not present: the backend then
+    // waits rather than opening whatever holds its old number.
+    struct DirectDevice {
+        bool available = false;
+        QString hwPath;
+        QString label;
+    };
+    using DirectDeviceCheck = std::function<DirectDevice(const QString &stableId, const QString &savedDevice)>;
+    // Consulted before every direct open, retry and native DSD start.
+    virtual void setDirectDeviceCheck(DirectDeviceCheck check) { Q_UNUSED(check); }
+    // The cards may have changed: an open waiting for the direct device
+    // checks again.
+    virtual void retryDirectDevice() {}
+
     // The endpoints a shared transport choice ("auto", "pipewire", ...) can
     // reach right now, for choosing one.
     virtual QVector<OutputEndpoint> sharedEndpoints(const QString &sinkChoice) const

@@ -69,6 +69,11 @@
 #include <QUuid>
 #include <QtTest/QtTest>
 
+#include <QPushButton>
+
+#include "AudioDeviceFixtures.h"
+#include "playback/DirectDeviceResolver.h"
+
 namespace {
 
 bool writeSilentWav(const QString &path)
@@ -97,6 +102,19 @@ bool writeSilentWav(const QString &path)
         out << qint16{0};
     }
     return out.status() == QDataStream::Ok;
+}
+
+PlaybackProfile directProfile(const QString &stableId, const QString &hw)
+{
+    PlaybackProfile profile;
+    profile.mode = QStringLiteral("bit-perfect");
+    profile.sink = QStringLiteral("alsa");
+    profile.device = hw;
+    profile.deviceId = stableId;
+    profile.deviceLabel = QStringLiteral("Card A");
+    profile.softwareVolume = false;
+    profile.releaseSinkOnPause = true;
+    return profile;
 }
 
 QStringList trackPaths(const QVector<Track> &tracks)
@@ -1003,6 +1021,164 @@ private slots:
         window.savePlaybackProfile();
         window.loadPlaybackProfile();
         QVERIFY(window.m_outputIndicator->isHidden());
+    }
+
+    // The selected direct card is gone and another card now has its number:
+    // nothing may open, take over or release that other card, and playback
+    // waits visibly instead.
+    void directIdentityRefusesReusedNumber()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B")}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.savePlaybackProfile();
+        window.loadPlaybackProfile();
+        QCOMPARE(window.m_playbackProfile.device, QStringLiteral("hw:2"));
+
+        emit window.m_playback->errorOccurred(QStringLiteral("Device or resource busy"));
+        QVERIFY(window.m_takeOverDeviceButton->isHidden());
+        window.attemptDeviceTakeover();
+
+        Track track;
+        track.path = audioPath;
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->playAt(0);
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(window.m_playback->outputStatus().preferredLabel, QStringLiteral("Card A"));
+        QVERIFY(!window.m_outputIndicator->isHidden());
+        QCOMPARE(window.m_outputIndicator->text(), QStringLiteral("Waiting for Card A"));
+
+        window.applyProfileTransition(window.m_playbackProfile, window.m_playbackProfile.toSharedMode());
+        QVERIFY2(graph.profileSwitches.isEmpty(), "card B was switched");
+        window.m_playback->stop();
+    }
+
+    // The same card reconnected under another number is found again on the
+    // next check, without restarting or saving the profile.
+    void directIdentityRecoversAtNewNumber()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B")}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        Track track;
+        track.path = audioPath;
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->playAt(0);
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+
+        graph.cards.append({42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false});
+        emit window.m_directDevices->cardsChanged();
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), PlaybackBackend::State::Playing, 5000);
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::Direct);
+        QCOMPARE(core.directDevices()->resolve(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2")).hwPath,
+                 QStringLiteral("hw:3"));
+        QVERIFY(graph.profileSwitches.isEmpty());
+        window.m_playback->stop();
+    }
+
+    // The card is unplugged and another takes its number while a takeover
+    // waits for ownership: the wait must not act on the newcomer.
+    void identityChangeDuringOwnershipWaitIsCaught()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 2, QStringLiteral("alsa_card.a"), QStringLiteral("Card A")}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        Track track;
+        track.path = audioPath;
+        window.m_player->resetQueue({track}, 0);
+
+        const QList<QTimer *> existingTimers = window.findChildren<QTimer *>();
+        window.attemptDeviceTakeover();
+        const QVector<QPair<int, int>> takenOver{{42, 0}};
+        QCOMPARE(graph.profileSwitches, takenOver);
+        QTimer *wait = nullptr;
+        for (QTimer *timer : window.findChildren<QTimer *>()) {
+            if (!existingTimers.contains(timer) && timer->interval() == 1000) {
+                wait = timer;
+            }
+        }
+        QVERIFY(wait != nullptr);
+
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B"), false, false}};
+        window.m_directDevices->invalidate();
+        QVERIFY(QMetaObject::invokeMethod(wait, "timeout", Qt::DirectConnection));
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), PlaybackBackend::State::Buffering, 3000);
+        QCOMPARE(graph.profileSwitches, takenOver);
+        window.m_playback->stop();
+    }
+
+    // A delayed step of an output change that has since been superseded must
+    // not reinstate its profile.
+    void supersededOutputChangeStandsDown()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, true}};
+        AppCore core;
+        MainWindow window(&core);
+        const QList<QTimer *> existingTimers = window.findChildren<QTimer *>();
+        window.applyOutputProfile(directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:3")),
+                                  QString(), -1, -1, 0, false, false);
+        QTimer *wait = nullptr;
+        for (QTimer *timer : window.findChildren<QTimer *>()) {
+            if (!existingTimers.contains(timer) && timer->interval() == 1000) {
+                wait = timer;
+            }
+        }
+        QVERIFY(wait != nullptr);
+        window.applyOutputProfile(PlaybackProfile{}, QString(), -1, -1, 0, false, false);
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::System);
+        for (int tick = 0; tick < 10; ++tick) {
+            QVERIFY(QMetaObject::invokeMethod(wait, "timeout", Qt::DirectConnection));
+        }
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::System);
+    }
+
+    // Direct opens keep resolving the card after the window is gone while
+    // playback continues headless.
+    void directCheckOutlivesTheWindow()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("headless.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        {
+            MainWindow window(&core);
+        }
+        core.m_playback->setProfile(directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2")));
+        core.m_playback->play(QUrl::fromLocalFile(audioPath));
+        QTRY_COMPARE_WITH_TIMEOUT(core.m_playback->state(), PlaybackBackend::State::Playing, 5000);
+        graph.cards.clear();
+        core.directDevices()->invalidate();
+        core.m_playback->play(QUrl::fromLocalFile(audioPath));
+        QCOMPARE(core.m_playback->state(), PlaybackBackend::State::Buffering);
+        core.m_playback->stop();
     }
 
     void stopAfterTriggerCancelsDelayedResume()
