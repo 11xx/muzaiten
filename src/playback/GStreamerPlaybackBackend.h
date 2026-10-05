@@ -119,10 +119,23 @@ private:
     void handleEndpointRemoved(const QString &name);
     // Hold the loaded source, released, until the preferred endpoint returns.
     void waitForPreferredEndpoint();
-    // Re-read where the PulseAudio stream is linked; a move off an available
-    // preferred endpoint becomes a candidate deliberate choice.
+    // Where the open stream is linked right now, or empty when none is open
+    // or the transport cannot tell.
+    QString currentRouteNow() const;
+    // Re-read the route after the sink announced a change to its stream.
     void checkCurrentRoute();
+    // Account for the route the stream was seen on. A pinned stream found
+    // somewhere other than where it was asked to go was moved outside the
+    // app: the following streams ask for that sink at once, and the move
+    // becomes the preference once confirmExternalMove() finds it deliberate.
+    void noteObservedRoute(const QString &current);
+    // Read the route of a stream about to close, so a move made just before
+    // carries into the stream that replaces it.
+    void observeRouteBeforeClose();
     void confirmExternalMove();
+    void clearRouteOverride();
+    // Put an open stream back on the available preferred endpoint.
+    void returnToPreferred();
     void setSinkTarget(const QByteArray &target);
     // m_directCheck for the profile's card; |savedDevice| is its last known
     // number. Fills in the saved label for an absent card.
@@ -215,16 +228,19 @@ private:
     DirectDeviceCheck m_directCheck;
     QString m_directLabel;
     QString m_deferredDsdUri;
-    // Where the PulseAudio stream is linked, as last read.
+    // Where the open stream is linked, as last read.
     QString m_currentEndpoint;
     unsigned long m_currentDeviceHandler = 0;
     QTimer m_routeCheckTimer;
-    // A move off the preferred endpoint is adopted only if, after settling,
-    // the stream is still there and the preferred endpoint never went away.
+    // The sink a mixer moved a pinned stream to, requested by every stream
+    // until it is adopted as the preference or found to be a fallback; and
+    // the sink the stream left. A move is deliberate only if that sink is
+    // still present a second later: a sink that vanished forced the move.
+    QString m_routeOverride;
+    QString m_overrideFrom;
     QTimer m_externalMoveTimer;
-    QString m_externalMoveCandidate;
-    quint64 m_preferredRemovals = 0;
-    quint64 m_candidateRemovals = 0;
+    // The last route seen for the current pinned stream.
+    QString m_lastRoute;
     OutputStatus m_publishedStatus;
     double m_volume = 1.0;
     QTimer m_transitionTimer;

@@ -145,9 +145,11 @@ mid-track, the sound server can play a moment of audio elsewhere before
 playback pauses. A missing output stays selected in the dialog, marked
 `(unavailable)`; a fallback never replaces it.
 
-Moving muzaiten's stream to another output in a mixer while the chosen one
-is present makes that output the new choice, saved as if picked in the
-dialog. A move caused by the chosen output vanishing does not. This is
+Moving muzaiten's stream to another output in a mixer takes effect at once
+for every stream that follows, including the next track and a sample-rate
+change, and a second later becomes the new choice, saved as if picked in the
+dialog. A move the sound server made because the output the stream was on
+disappeared is a fallback and never becomes the choice. This is
 detected with the PulseAudio transport, which reports where its stream is
 linked; the PipeWire transport does not, so there a mixer move lasts until
 the next track opens a new stream.

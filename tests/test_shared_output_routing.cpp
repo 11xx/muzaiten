@@ -1,6 +1,7 @@
 #include "PrivateAudioGraph.h"
 
 #include <QDataStream>
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QSignalSpy>
 #include <QTimer>
@@ -415,6 +416,132 @@ private slots:
         backend.resume();
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_other, 8000);
         QCOMPARE(m_graph->requestedTarget(), m_other);
+        backend.stop();
+    }
+
+    void mixerMoveHoldsAtImmediateReopen_data()
+    {
+        QTest::addColumn<bool>("wiremix");
+        QTest::newRow("wiremix metadata move") << true;
+        QTest::newRow("pulse protocol move") << false;
+    }
+
+    // A mixer move off the preferred endpoint holds for a stream opened the
+    // very next moment, before any confirmation could run, and then becomes
+    // the preference.
+    void mixerMoveHoldsAtImmediateReopen()
+    {
+        QFETCH(bool, wiremix);
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = preferred;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        backend.play(url("long-a"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+
+        if (wiremix) {
+            m_graph->mixerMove(m_other);
+        } else {
+            m_graph->pulseMove(m_other);
+        }
+        // No event processing from here until the next stream is open.
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return m_graph->route() == m_other; }));
+        const int movedStream = m_graph->streamIndex();
+        backend.play(url("long-b"));
+        QVERIFY(PrivateAudioGraph::waitFor([&] {
+            return m_graph->streamIndex() >= 0 && m_graph->streamIndex() != movedStream;
+        }));
+        QCOMPARE(m_graph->requestedTarget(), m_other);
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return m_graph->route() == m_other; }));
+
+        QTRY_COMPARE_WITH_TIMEOUT(adopted.count(), 1, 5000);
+        QCOMPARE(adopted.first().at(0).toString(), m_other);
+        QCOMPARE(m_graph->route(), m_other);
+        backend.stop();
+    }
+
+    // The same when the move lands just before the next gapless track changes
+    // the sample rate, so the sink reopens its stream by itself while the
+    // owner thread is busy.
+    void mixerMoveHoldsAtImmediateFormatChange()
+    {
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = preferred;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        QElapsedTimer started;
+        started.start();
+        backend.play(url("short-8k"));
+        backend.prepareNext(url("long-16k"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(started.elapsed() >= 2300, 8000);
+
+        // From the move until the reopened stream is checked, the owner
+        // thread runs nothing: only the sink-side reopen can keep the move.
+        m_graph->mixerMove(m_other);
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return m_graph->route() == m_other; }));
+        const int movedStream = m_graph->streamIndex();
+        QVERIFY(PrivateAudioGraph::waitFor([&] {
+            return m_graph->streamIndex() >= 0 && m_graph->streamIndex() != movedStream;
+        }, 6000));
+        QCOMPARE(m_graph->requestedTarget(), m_other);
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return m_graph->route() == m_other; }));
+
+        QTRY_COMPARE_WITH_TIMEOUT(adopted.count(), 1, 5000);
+        QCOMPARE(backend.outputStatus().preferredEndpoint, m_other);
+        backend.stop();
+    }
+
+    void forcedFallbackAtImmediateReopenIsNotAdopted_data()
+    {
+        QTest::addColumn<bool>("fallback");
+        QTest::newRow("fallback") << true;
+        QTest::newRow("wait") << false;
+    }
+
+    // The preferred endpoint vanishes and a stream opens before the endpoint
+    // monitor has said so: the stream may briefly follow the fallback, but
+    // the fallback never becomes the preference.
+    void forcedFallbackAtImmediateReopenIsNotAdopted()
+    {
+        QFETCH(bool, fallback);
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = preferred;
+        profile.sharedEndpointFallback = fallback;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        backend.play(url("long-a"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+
+        m_graph->removeModule(m_modules.take(preferred));
+        QVERIFY(PrivateAudioGraph::waitFor([&] { return m_graph->route() == m_main; }));
+        backend.play(url("long-b"));
+
+        if (fallback) {
+            QTRY_COMPARE_WITH_TIMEOUT(backend.outputStatus().route, OutputStatus::Route::Fallback, 8000);
+            QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        } else {
+            QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Buffering, 8000);
+            QTRY_VERIFY_WITH_TIMEOUT(m_graph->streams().isEmpty(), 8000);
+        }
+        QTest::qWait(2000);
+        QCOMPARE(adopted.count(), 0);
+        QCOMPARE(backend.outputStatus().preferredEndpoint, preferred);
+
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 12000);
+        QCOMPARE(adopted.count(), 0);
         backend.stop();
     }
 

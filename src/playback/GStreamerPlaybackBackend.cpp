@@ -230,7 +230,16 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
     // read-ahead (and any other non-output tweak) must not tear down a playing
     // pipeline.  This keeps a settings change seamless for the user.
     const bool rebuild = (m_playbin == nullptr) || outputConfigDiffers(m_profile, profile);
+    if (rebuild) {
+        observeRouteBeforeClose();
+    }
+    const bool preferenceChanged = m_profile.mode != profile.mode
+        || m_profile.sharedEndpoint != profile.sharedEndpoint;
     m_profile = profile;
+    if (preferenceChanged) {
+        // A newer explicit choice replaces a mixer move not yet adopted.
+        clearRouteOverride();
+    }
     if (rebuild) {
         m_softPaused = false;
         m_pendingSeekMs = -1;
@@ -285,6 +294,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
         return;
     }
     m_deferredDsdUri.clear();
+    observeRouteBeforeClose();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
         playDsd(url, State::Playing);
         return;
@@ -322,6 +332,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
         return;
     }
     m_deferredDsdUri.clear();
+    observeRouteBeforeClose();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
         playDsd(url, State::Paused);
         return;
@@ -633,6 +644,7 @@ void GStreamerPlaybackBackend::pauseInternal(bool release)
         } else {
             m_resumePositionMs = std::max<qint64>(0, m_positionMs);
         }
+        observeRouteBeforeClose();
         m_softPaused = true;
         // READY releases the audio device but keeps the element graph intact
         // so re-preroll on resume is fast.  State messages from the
@@ -715,6 +727,7 @@ void GStreamerPlaybackBackend::resume()
 
 void GStreamerPlaybackBackend::stop()
 {
+    observeRouteBeforeClose();
     m_deferredDsdUri.clear();
     m_softPaused = false;
     m_waitingForOutput = false;
@@ -901,6 +914,7 @@ void GStreamerPlaybackBackend::reloadCurrentAtPosition(qint64 positionMs, State 
         return;
     }
     clearSeekInFlight();
+    observeRouteBeforeClose();
     // playbin only picks up a new uri from READY; this restarts the source
     // cleanly, which is exactly the point of the recovery.
     gst_element_set_state(m_playbin, GST_STATE_READY);
@@ -1154,9 +1168,8 @@ void GStreamerPlaybackBackend::releaseAudioSink()
     m_sinkFactory.clear();
     m_handoffTarget.clear();
     m_currentEndpoint.clear();
-    m_externalMoveCandidate.clear();
+    m_lastRoute.clear();
     m_routeCheckTimer.stop();
-    m_externalMoveTimer.stop();
 }
 
 QString GStreamerPlaybackBackend::streamTarget() const
@@ -1165,6 +1178,9 @@ QString GStreamerPlaybackBackend::streamTarget() const
         return {};
     }
     if (preferredEndpointRoutable()) {
+        if (!m_routeOverride.isEmpty() && endpointAvailable(m_routeOverride)) {
+            return m_routeOverride;
+        }
         // A missing preferred endpoint is never requested: the stream either
         // waits for it or, by choice, takes the session manager's route.
         return endpointAvailable(m_profile.sharedEndpoint) ? m_profile.sharedEndpoint : QString();
@@ -1176,6 +1192,7 @@ void GStreamerPlaybackBackend::applyStreamTarget()
 {
     const QString target = streamTarget();
     m_handoffTarget.clear();
+    m_lastRoute.clear();
     {
         // Reopens inside a running stream follow the lasting choice; the
         // one-shot hand-off target ends with the stream it opens.
@@ -1211,20 +1228,35 @@ void GStreamerPlaybackBackend::retargetBeforeFormatChange(GstElement *sink, GstE
     if (caps == nullptr || ring == nullptr) {
         return;
     }
+    QByteArray target;
+    {
+        QMutexLocker locker(&m_mutex);
+        target = m_streamTargetUtf8;
+    }
     if (gst_audio_ring_buffer_is_acquired(ring)) {
         if (ring->spec.caps != nullptr && gst_caps_is_equal(ring->spec.caps, caps)) {
             return;  // same format: the stream stays open
+        }
+        if (!target.isEmpty()) {
+            // A pinned stream may have been moved since it opened: the
+            // reopened one goes where it is now, and the owner thread
+            // accounts for the move.
+            gchar *device = nullptr;
+            g_object_get(G_OBJECT(sink), "current-device", &device, nullptr);
+            const QByteArray current(device != nullptr ? device : "");
+            g_free(device);
+            if (!current.isEmpty() && current != target) {
+                target = current;
+                QMetaObject::invokeMethod(this, [this, route = QString::fromUtf8(current)]() {
+                    noteObservedRoute(route);
+                }, Qt::QueuedConnection);
+            }
         }
         // The same steps the sink's setcaps performs right after this probe,
         // taken early so no stream exists when the target is written below.
         gst_audio_ring_buffer_pause(ring);
         gst_audio_ring_buffer_activate(ring, FALSE);
         gst_audio_ring_buffer_release(ring);
-    }
-    QByteArray target;
-    {
-        QMutexLocker locker(&m_mutex);
-        target = m_streamTargetUtf8;
     }
     QMutexLocker locker(&m_sinkTargetMutex);
     g_object_set(G_OBJECT(sink), "device", target.isEmpty() ? nullptr : target.constData(), nullptr);
@@ -1420,8 +1452,13 @@ void GStreamerPlaybackBackend::handleEndpointAdded(const QString &name)
 
 void GStreamerPlaybackBackend::handleEndpointRemoved(const QString &name)
 {
-    if (name == m_profile.sharedEndpoint) {
-        ++m_preferredRemovals;
+    if (!m_routeOverride.isEmpty()
+        && (name == m_routeOverride || name == m_overrideFrom || name == m_profile.sharedEndpoint)) {
+        // A sink vanished around a move: the move may have been forced.
+        clearRouteOverride();
+        if (name != m_profile.sharedEndpoint) {
+            returnToPreferred();
+        }
     }
     if (name != m_profile.sharedEndpoint || !preferredEndpointRoutable()) {
         publishOutputStatus();
@@ -1456,60 +1493,126 @@ void GStreamerPlaybackBackend::waitForPreferredEndpoint()
     pauseInternal(/*release=*/true);
 }
 
-void GStreamerPlaybackBackend::checkCurrentRoute()
+QString GStreamerPlaybackBackend::currentRouteNow() const
 {
-    QString current;
-    if (m_audioSink != nullptr && m_sinkFactory == QStringLiteral("pulsesink") && !m_softPaused) {
+    if (m_audioSink == nullptr || m_softPaused) {
+        return {};
+    }
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
         GstState state = GST_STATE_NULL;
         gst_element_get_state(m_audioSink, &state, nullptr, 0);
-        if (state >= GST_STATE_PAUSED) {
-            gchar *device = nullptr;
-            g_object_get(G_OBJECT(m_audioSink), "current-device", &device, nullptr);
-            current = QString::fromUtf8(device);
-            g_free(device);
+        if (state < GST_STATE_PAUSED) {
+            return {};
         }
+        // Asks the server, so a move made a moment ago is already visible.
+        gchar *device = nullptr;
+        g_object_get(G_OBJECT(m_audioSink), "current-device", &device, nullptr);
+        const QString current = QString::fromUtf8(device);
+        g_free(device);
+        return current;
     }
-    m_currentEndpoint = current;
+    return {};
+}
 
+void GStreamerPlaybackBackend::checkCurrentRoute()
+{
+    noteObservedRoute(currentRouteNow());
+}
+
+void GStreamerPlaybackBackend::observeRouteBeforeClose()
+{
+    const QString current = currentRouteNow();
+    if (!current.isEmpty()) {
+        noteObservedRoute(current);
+    }
+}
+
+void GStreamerPlaybackBackend::noteObservedRoute(const QString &current)
+{
+    m_currentEndpoint = current;
     QByteArray requested;
     {
         QMutexLocker locker(&m_mutex);
         requested = m_streamTargetUtf8;
     }
-    const QString preferred = m_profile.sharedEndpoint;
-    if (preferredEndpointRoutable() && !current.isEmpty() && current != preferred
-        && requested == preferred.toUtf8() && endpointAvailable(preferred)) {
-        if (m_externalMoveCandidate != current) {
-            m_externalMoveCandidate = current;
-            m_candidateRemovals = m_preferredRemovals;
-            m_externalMoveTimer.start();
-        }
-    } else {
-        m_externalMoveCandidate.clear();
-        m_externalMoveTimer.stop();
+    // Only a pinned stream stays where it was put unless someone moves it or
+    // its sink goes away; an unpinned one is the session manager's to route.
+    if (current.isEmpty() || requested.isEmpty() || !preferredEndpointRoutable()) {
+        publishOutputStatus();
+        return;
+    }
+    const QString asked = QString::fromUtf8(requested);
+    const QString from = m_lastRoute.isEmpty() ? asked : m_lastRoute;
+    m_lastRoute = current;
+    if (current == asked) {
+        publishOutputStatus();
+        return;
+    }
+    if (current == m_profile.sharedEndpoint) {
+        // Moved back onto the preference: nothing left to adopt.
+        clearRouteOverride();
+    } else if (current != m_routeOverride) {
+        m_routeOverride = current;
+        m_overrideFrom = from;
+        m_externalMoveTimer.start();
+    }
+    {
+        QMutexLocker locker(&m_mutex);
+        m_streamTargetUtf8 = current.toUtf8();
     }
     publishOutputStatus();
 }
 
+void GStreamerPlaybackBackend::clearRouteOverride()
+{
+    m_routeOverride.clear();
+    m_overrideFrom.clear();
+    m_externalMoveTimer.stop();
+    QMutexLocker locker(&m_mutex);
+    m_streamTargetUtf8 = streamTarget().toUtf8();
+}
+
+void GStreamerPlaybackBackend::returnToPreferred()
+{
+    const QString preferred = m_profile.sharedEndpoint;
+    if (!preferredEndpointRoutable() || !endpointAvailable(preferred) || m_currentEndpoint == preferred
+        || m_playbin == nullptr || m_softPaused || !(m_state == State::Playing || m_state == State::Paused)) {
+        return;
+    }
+    // pulsesink moves its live stream when given a target; pipewiresink reads
+    // its target only when it connects.
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
+        setSinkTarget(preferred.toUtf8());
+    } else {
+        reloadCurrentAtPosition(m_positionMs, m_state);
+    }
+}
+
 void GStreamerPlaybackBackend::confirmExternalMove()
 {
-    const QString candidate = std::exchange(m_externalMoveCandidate, QString());
+    const QString candidate = m_routeOverride;
+    const QString from = m_overrideFrom;
     if (candidate.isEmpty()) {
         return;
     }
-    checkCurrentRoute();
-    m_externalMoveCandidate.clear();
-    m_externalMoveTimer.stop();
-    const QString preferred = m_profile.sharedEndpoint;
-    if (m_currentEndpoint != candidate || m_preferredRemovals != m_candidateRemovals
-        || !preferredEndpointRoutable() || !endpointAvailable(preferred)
-        || (m_endpoints != nullptr && !m_endpoints->contains(candidate))) {
+    // Deliberate only if the sink the stream left is still there (a sink
+    // that vanished pushed the stream away) and the new one is too.
+    const bool deliberate = preferredEndpointRoutable() && m_endpoints != nullptr && m_endpoints->running()
+        && m_endpoints->contains(from) && m_endpoints->contains(candidate);
+    m_routeOverride.clear();
+    m_overrideFrom.clear();
+    if (!deliberate) {
+        {
+            QMutexLocker locker(&m_mutex);
+            m_streamTargetUtf8 = streamTarget().toUtf8();
+        }
+        returnToPreferred();
+        publishOutputStatus();
         return;
     }
-    // The preferred endpoint stayed present, so nothing forced this move:
-    // someone chose the other output. Request it from now on.
+    // Someone chose the other output. Request it from now on.
     m_profile.sharedEndpoint = candidate;
-    m_profile.sharedEndpointLabel = m_endpoints != nullptr ? m_endpoints->label(candidate) : QString();
+    m_profile.sharedEndpointLabel = m_endpoints->label(candidate);
     {
         QMutexLocker locker(&m_mutex);
         m_streamTargetUtf8 = candidate.toUtf8();
