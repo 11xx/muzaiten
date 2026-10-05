@@ -286,6 +286,7 @@ private slots:
         m_graph->removeModule(m_modules.take(late));
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Buffering, 8000);
         QTRY_VERIFY_WITH_TIMEOUT(m_graph->streams().isEmpty(), 8000);
+        QVERIFY(backend.outputStatus().currentEndpoint.isEmpty());
         const qint64 held = backend.position();
         QVERIFY2(held >= 1500, qPrintable(QString::number(held)));
 
@@ -323,9 +324,11 @@ private slots:
         backend.play(url("long-a"));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.outputStatus().currentEndpoint, preferred, 8000);
 
         m_graph->removeModule(m_modules.take(preferred));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.outputStatus().currentEndpoint, m_main, 8000);
         QTRY_COMPARE_WITH_TIMEOUT(backend.outputStatus().route, OutputStatus::Route::Fallback, 8000);
         QCOMPARE(backend.state(), PlaybackBackend::State::Playing);
         QTest::qWait(1500);

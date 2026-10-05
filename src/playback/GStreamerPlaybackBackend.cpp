@@ -1534,9 +1534,11 @@ OutputStatus GStreamerPlaybackBackend::outputStatus() const
     } else if (m_profile.sink == QStringLiteral("auto") && m_sinkFactory == QStringLiteral("autoaudiosink")) {
         status.transportNote = QStringLiteral("no GStreamer PipeWire or PulseAudio plugin is installed");
     }
-    status.currentEndpoint = m_currentEndpoint;
+    // Only an open stream is linked anywhere.
+    const bool streamOpen = !m_softPaused && (m_state == State::Playing || m_state == State::Paused);
+    status.currentEndpoint = streamOpen ? m_currentEndpoint : QString();
     if (m_endpoints != nullptr) {
-        status.currentLabel = m_endpoints->label(m_currentEndpoint);
+        status.currentLabel = m_endpoints->label(status.currentEndpoint);
     }
     if (m_profile.sharedEndpoint.isEmpty()) {
         status.route = OutputStatus::Route::System;
@@ -1881,6 +1883,7 @@ void GStreamerPlaybackBackend::updateState(State state)
         m_pollTimer.start();
     }
     emit stateChanged(m_state);
+    publishOutputStatus();
 }
 
 void GStreamerPlaybackBackend::resetTimeline(qint64 positionMs, qint64 durationMs)
