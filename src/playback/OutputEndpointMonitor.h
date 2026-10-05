@@ -44,4 +44,8 @@ private:
 
     GstDeviceProvider *m_provider = nullptr;
     QHash<QString, QString> m_endpoints;
+    // The current run, bumped by every start() and stop(). A device event
+    // queued by a provider run that has since ended is dropped on delivery,
+    // so it cannot change a newer run's list.
+    quint64 m_run = 0;
 };

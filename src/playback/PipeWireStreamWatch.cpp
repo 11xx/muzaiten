@@ -33,6 +33,7 @@ uint32_t idProperty(const spa_dict *props, const char *key)
 
 struct PipeWireStreamWatch::Impl {
     PipeWireStreamWatch *owner = nullptr;
+    quint64 run = 0;
     std::string streamName;
     pw_thread_loop *loop = nullptr;
     pw_context *context = nullptr;
@@ -74,10 +75,13 @@ struct PipeWireStreamWatch::Impl {
             }
             linked = route;
         }
-        // Delivered on the owner's thread; dropped if the owner is gone.
+        // Delivered on the owner's thread; dropped if the owner is gone or this
+        // run has ended there in the meantime.
         PipeWireStreamWatch *target = owner;
-        QMetaObject::invokeMethod(target, [target, route]() {
-            emit target->linkedSinkChanged(route);
+        QMetaObject::invokeMethod(target, [target, route, run = run]() {
+            if (run == target->m_run) {
+                emit target->linkedSinkChanged(route);
+            }
         }, Qt::QueuedConnection);
     }
 
@@ -151,6 +155,7 @@ bool PipeWireStreamWatch::start(const QString &nodeName)
     initializePipeWire();
     d = std::make_unique<Impl>();
     d->owner = this;
+    d->run = ++m_run;
     d->streamName = nodeName.toStdString();
     d->loop = pw_thread_loop_new("muzaiten-route", nullptr);
     if (d->loop != nullptr) {
@@ -176,6 +181,7 @@ bool PipeWireStreamWatch::start(const QString &nodeName)
 
 void PipeWireStreamWatch::stop()
 {
+    ++m_run;
     if (!d) {
         return;
     }
@@ -270,7 +276,10 @@ bool PipeWireStreamWatch::start(const QString &nodeName)
     return false;
 }
 
-void PipeWireStreamWatch::stop() {}
+void PipeWireStreamWatch::stop()
+{
+    ++m_run;
+}
 
 bool PipeWireStreamWatch::running() const
 {
