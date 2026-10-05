@@ -3821,9 +3821,18 @@ void MainWindow::resumePlaybackAt(int queueIndex, qint64 positionMs, bool playin
     // genuinely playing (checked in the settle timer below).
     const quint64 stopAfterTriggerGeneration = m_stopAfterTriggerGeneration;
     playQueueIndex(queueIndex, /*notifyScrobbler=*/false, /*startPaused=*/!playing);
-    QTimer::singleShot(settleDelayMs, this, [this, positionMs, playing,
-                                             stopAfterTriggerGeneration]() {
-        if (stopAfterTriggerGeneration != m_stopAfterTriggerGeneration) {
+    // The settle step belongs to this start: a newer track, seek, stop or
+    // output choice in the meantime supersedes it.
+    const quint64 transportRequests = m_playback->transportRequests();
+    const quint64 outputTransition = m_outputTransitionGeneration;
+    const QString trackPath = m_player->currentTrack().path;
+    const int startedIndex = m_player->queueIndex();
+    QTimer::singleShot(settleDelayMs, this, [this, positionMs, playing, stopAfterTriggerGeneration,
+                                             transportRequests, outputTransition, trackPath, startedIndex]() {
+        if (stopAfterTriggerGeneration != m_stopAfterTriggerGeneration
+            || transportRequests != m_playback->transportRequests()
+            || outputTransition != m_outputTransitionGeneration
+            || startedIndex != m_player->queueIndex() || trackPath != m_player->currentTrack().path) {
             return;
         }
         if (positionMs > 0) {

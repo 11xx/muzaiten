@@ -119,6 +119,12 @@ public:
     // instead of silently ignoring it.
     virtual bool supportsSharedEndpoint() const { return false; }
     virtual OutputStatus outputStatus() const { return {}; }
+    // Counts requests that set what plays and from where: starts, seeks, stops
+    // and output changes. A step delayed on behalf of one of them compares it
+    // to learn whether something newer was asked for since. Pausing and
+    // resuming leave what plays alone and are not counted.
+    quint64 transportRequests() const { return m_transportRequests; }
+
     // The direct (exclusive ALSA) device as resolved at the moment of opening
     // it, from the profile's stable id and last known device string.
     // Unavailable means the selected card is not present: the backend then
@@ -143,6 +149,9 @@ public:
         return {};
     }
 
+protected:
+    void noteTransportRequest() { ++m_transportRequests; }
+
 signals:
     void stateChanged(PlaybackBackend::State state);
     void positionChanged(qint64 positionMs);
@@ -157,4 +166,7 @@ signals:
     // stayed available: a deliberate choice made outside the app, which the
     // backend now requests in its place.
     void sharedEndpointChosenExternally(QString name, QString label);
+
+private:
+    quint64 m_transportRequests = 0;
 };

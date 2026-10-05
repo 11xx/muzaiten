@@ -124,6 +124,10 @@
 
 ### Fixed
 
+- After an output change (or a restart) puts the track back where it was,
+  skipping to another track, seeking, stopping or changing the output again
+  in the first moment is no longer overridden by that restore jumping to the
+  old position.
 - Playback started before the window opens (from the tray, MPRIS or
   `muzaitenctl`) uses the saved output profile instead of the default shared
   output.

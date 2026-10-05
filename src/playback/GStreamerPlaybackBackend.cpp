@@ -237,6 +237,7 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
     // pipeline.  This keeps a settings change seamless for the user.
     const bool rebuild = (m_playbin == nullptr) || outputConfigDiffers(m_profile, profile);
     if (rebuild) {
+        noteTransportRequest();
         observeRouteBeforeClose();
     }
     const bool preferenceChanged = m_profile.mode != profile.mode
@@ -299,6 +300,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
     m_deferredDsdUri.clear();
     observeRouteBeforeClose();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
@@ -337,6 +339,7 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
     m_deferredDsdUri.clear();
     observeRouteBeforeClose();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
@@ -733,6 +736,7 @@ void GStreamerPlaybackBackend::resume()
 
 void GStreamerPlaybackBackend::stop()
 {
+    noteTransportRequest();
     observeRouteBeforeClose();
     m_deferredDsdUri.clear();
     m_softPaused = false;
@@ -773,6 +777,7 @@ void GStreamerPlaybackBackend::stop()
 
 void GStreamerPlaybackBackend::seek(qint64 positionMs)
 {
+    noteTransportRequest();
     if (m_playbin == nullptr) {
         return;
     }

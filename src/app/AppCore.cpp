@@ -996,8 +996,13 @@ void AppCore::restoreSavedPlayback()
     }
     m_player->playAt(queueIndex, false, state != QStringLiteral("playing"), false);
     if (positionMs > 0) {
-        QTimer::singleShot(250, this, [this, positionMs]() {
-            m_playback->seek(positionMs);
+        // Only if nothing newer was asked of playback in the meantime.
+        const quint64 transportRequests = m_playback->transportRequests();
+        QTimer::singleShot(250, this, [this, positionMs, transportRequests, trackPath]() {
+            if (transportRequests == m_playback->transportRequests()
+                && m_player->currentTrack().path == trackPath) {
+                m_playback->seek(positionMs);
+            }
         });
     }
 }
