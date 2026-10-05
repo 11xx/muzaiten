@@ -16,8 +16,11 @@
 #include "fs/LinkRoot.h"
 #include "ipc/IpcServer.h"
 #include "mpris/MprisService.h"
+#include "playback/AudioDeviceControl.h"
+#include "playback/DirectDeviceResolver.h"
 #include "playback/GStreamerPlaybackBackend.h"
 #include "playback/PlaybackBackend.h"
+#include "playback/PlaybackProfileJson.h"
 #include "player/PlayerCore.h"
 #include "reco/AffinityPool.h"
 #include "reco/ArtistRadio.h"
@@ -304,6 +307,34 @@ AppCore::AppCore(QObject *parent)
     }
     m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
     m_playback = m_player->backend();
+    // Every direct open asks which card the profile's identity names now. The
+    // resolver lives as long as playback does, window or not.
+    m_directDevices = new DirectDeviceResolver(this);
+    m_playback->setDirectDeviceCheck([this](const QString &stableId, const QString &savedDevice) {
+        const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(stableId, savedDevice);
+        PlaybackBackend::DirectDevice device;
+        device.available = target.status != AudioDeviceControl::DirectTarget::Status::Unavailable
+            && !target.hwPath.isEmpty();
+        device.hwPath = target.hwPath;
+        device.label = target.status == AudioDeviceControl::DirectTarget::Status::Resolved
+            ? target.description : QString();
+        return device;
+    });
+    connect(m_directDevices, &DirectDeviceResolver::cardsChanged, m_playback, &PlaybackBackend::retryDirectDevice);
+    connect(m_playback, &PlaybackBackend::sharedEndpointChosenExternally, this, &AppCore::saveAdoptedSharedEndpoint);
+    // Apply the saved output before anything can start playback (IPC, MPRIS,
+    // a tray start): the window may not exist yet, or ever. The window loads
+    // the same profile and finds nothing to change.
+    {
+        PlaybackProfile profile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+        if (profile.mode == QStringLiteral("bit-perfect") && !profile.deviceId.isEmpty()) {
+            const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(profile.deviceId, profile.device);
+            if (target.status == AudioDeviceControl::DirectTarget::Status::Resolved) {
+                profile.device = target.hwPath;
+            }
+        }
+        m_playback->setProfile(profile);
+    }
     m_player->setPathResolver([this](const Track &track) {
         if (track.path.isEmpty()) {
             return QString();
@@ -965,10 +996,24 @@ void AppCore::restoreSavedPlayback()
     }
     m_player->playAt(queueIndex, false, state != QStringLiteral("playing"), false);
     if (positionMs > 0) {
-        QTimer::singleShot(250, this, [this, positionMs]() {
-            m_playback->seek(positionMs);
+        // Only if nothing newer was asked of playback in the meantime.
+        const quint64 transportRequests = m_playback->transportRequests();
+        QTimer::singleShot(250, this, [this, positionMs, transportRequests, trackPath]() {
+            if (transportRequests == m_playback->transportRequests()
+                && m_player->currentTrack().path == trackPath) {
+                m_playback->seek(positionMs);
+            }
         });
     }
+}
+
+void AppCore::saveAdoptedSharedEndpoint(const QString &name, const QString &label)
+{
+    // Only these two fields change; the rest of the saved profile stands.
+    PlaybackProfile profile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+    profile.sharedEndpoint = name;
+    profile.sharedEndpointLabel = label;
+    m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile));
 }
 
 void AppCore::updateMprisCapabilities()
@@ -1000,6 +1045,33 @@ QJsonObject AppCore::ipcStatus() const
     status.insert(QStringLiteral("radio"),
                   (m_player != nullptr && m_player->radioActive()) ? QStringLiteral("active")
                                                                    : QStringLiteral("inactive"));
+    if (m_playback != nullptr) {
+        const OutputStatus output = m_playback->outputStatus();
+        static const QHash<OutputStatus::Route, QString> routeNames{
+            {OutputStatus::Route::System, QStringLiteral("system")},
+            {OutputStatus::Route::Preferred, QStringLiteral("preferred")},
+            {OutputStatus::Route::Waiting, QStringLiteral("waiting")},
+            {OutputStatus::Route::Fallback, QStringLiteral("fallback")},
+            {OutputStatus::Route::Direct, QStringLiteral("direct")},
+            {OutputStatus::Route::Unsupported, QStringLiteral("unsupported")},
+        };
+        QJsonObject object{
+            {QStringLiteral("route"), routeNames.value(output.route)},
+            {QStringLiteral("transport"), output.transport},
+        };
+        if (!output.transportNote.isEmpty()) {
+            object.insert(QStringLiteral("transport_note"), output.transportNote);
+        }
+        if (!output.preferredEndpoint.isEmpty()) {
+            object.insert(QStringLiteral("preferred"), output.preferredEndpoint);
+            object.insert(QStringLiteral("preferred_label"), output.preferredLabel);
+            object.insert(QStringLiteral("preferred_available"), output.preferredAvailable);
+        }
+        if (!output.currentEndpoint.isEmpty()) {
+            object.insert(QStringLiteral("current"), output.currentEndpoint);
+        }
+        status.insert(QStringLiteral("output"), object);
+    }
     return status;
 }
 

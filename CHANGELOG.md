@@ -19,6 +19,16 @@
 
 ### Added
 
+- Shared output can go to a chosen playback output, virtual ones included,
+  kept by its stable name: `Playback > Output profile…` separates the
+  transport from the output. While it is missing, playback waits at its
+  position and resumes when it returns, or optionally plays through the
+  system output until then; the choice is never replaced by a fallback. A
+  mixer move to another output holds from the very next stream and becomes
+  the new choice, with the PulseAudio and the native PipeWire transport
+  alike (the latter needs a build with `libpipewire-0.3`). The dialog,
+  the status bar and `muzaitenctl status` report the transport actually in
+  use, where playback is going, and any wait or fallback.
 - Search combines every reading of Chinese polyphones across a title: typing
   `yueqing` finds 乐清, and a title can match different readings in different
   words without losing its established Japanese readings.
@@ -114,6 +124,25 @@
 
 ### Fixed
 
+- After an output change (or a restart) puts the track back where it was,
+  skipping to another track, seeking, stopping or changing the output again
+  in the first moment is no longer overridden by that restore jumping to the
+  old position.
+- Playback started before the window opens (from the tray, MPRIS or
+  `muzaitenctl`) uses the saved output profile instead of the default shared
+  output.
+- Bit-perfect and native DSD output no longer open, take over or release
+  another sound card that has taken a missing card's number (`hw:N`). The
+  chosen card is looked up by its identity before each use; while it is
+  missing, playback waits at its position and resumes when it returns, under
+  any number. The output dialog keeps an absent card selected instead of
+  replacing it with whichever card is listed. A device typed by hand is still
+  opened as written.
+- Shared output keeps a mixer move (pavucontrol, Wiremix) for the tracks that
+  follow, and returns to an output that disappears and comes back, instead of
+  staying on whichever output the sound server fell back to. Every new stream
+  asked for the output its previous stream had ended up on, fallbacks
+  included, which overrode the session manager's memory of the move.
 - Very large libraries keep their search cache across restarts instead of
   rebuilding the index on every start. The cache rebuilds once after this
   update.

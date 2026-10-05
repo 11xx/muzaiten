@@ -60,6 +60,7 @@ public:
     qint64 position() const override { return positionMs; }
     qint64 duration() const override { return durationMs; }
     void fail() { m_state = State::Error; }
+    void waitForOutput() { m_state = State::Buffering; }
     void onGaplessTrackAdvanced() override
     {
         if (!preparedUrls.isEmpty()) {
@@ -141,6 +142,7 @@ private slots:
     void allUnresolvableRepeatQueueStops();
     void nextAtEndDoesNotRestartCurrent();
     void playControlsRestartCurrentAfterBackendError();
+    void toggleWhileWaitingForOutputPauses();
     void gaplessAdvanceMovesIndexWithoutReveal();
     void finishedAtEndOfQueueStops();
     void trackFinishedEmittedOnBackendFinish();
@@ -431,6 +433,19 @@ void PlayerCoreTest::playControlsRestartCurrentAfterBackendError()
     m_core->togglePlayPause();
     QCOMPARE(m_backend->playedUrls.size(), 3);
     QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile("/a"));
+}
+
+void PlayerCoreTest::toggleWhileWaitingForOutputPauses()
+{
+    // Buffering carries an intent to play; toggling must withdraw it rather
+    // than ask the backend to resume again.
+    m_core->resetQueue(makeTracks({"/a"}));
+    m_core->playAt(0);
+    m_backend->waitForOutput();
+    m_core->togglePlayPause();
+    QCOMPARE(m_backend->pauseCalls, 1);
+    QCOMPARE(m_backend->state(), PlaybackBackend::State::Paused);
+    QCOMPARE(m_backend->playedUrls.size(), 1);
 }
 
 void PlayerCoreTest::gaplessAdvanceMovesIndexWithoutReveal()

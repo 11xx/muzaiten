@@ -33,6 +33,10 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 pkg_check_modules(Chromaprint REQUIRED IMPORTED_TARGET libchromaprint)
+# Optional: lets the native PipeWire transport follow its stream's links, so
+# a mixer move is kept for the next stream. Without it, Auto prefers the
+# PulseAudio transport, which reports moves itself.
+pkg_check_modules(PIPEWIRE IMPORTED_TARGET libpipewire-0.3)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-audio-1.0
@@ -124,7 +128,11 @@ set(MUZAITEN_SOURCES
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp
     src/playback/AudioDeviceControl.cpp
+    src/playback/DirectDeviceResolver.cpp
     src/playback/GStreamerPlaybackBackend.cpp
+    src/playback/OutputEndpointMonitor.cpp
+    src/playback/PipeWireStreamWatch.cpp
+    src/playback/PlaybackProfileJson.cpp
     src/playback/QtPlaybackBackend.cpp
     src/scanner/DirectoryWalker.cpp
     src/scanner/PathMetadataGuesser.cpp
@@ -278,7 +286,11 @@ set(MUZAITEN_HEADERS
     src/mpris/MprisService.h
     src/player/PlayerCore.h
     src/playback/AudioDeviceControl.h
+    src/playback/DirectDeviceResolver.h
+    src/playback/OutputEndpointMonitor.h
+    src/playback/PipeWireStreamWatch.h
     src/playback/PlaybackBackend.h
+    src/playback/PlaybackProfileJson.h
     src/playback/PlaybackTypes.h
     src/playback/GStreamerPlaybackBackend.h
     src/playback/QtPlaybackBackend.h
@@ -488,8 +500,15 @@ set(MUZAITEN_PLAYER_SOURCES
 
 set(MUZAITEN_PLAYBACK_SOURCES
     src/playback/AudioDeviceControl.cpp
+    src/playback/DirectDeviceResolver.cpp
+    src/playback/DirectDeviceResolver.h
     src/playback/GStreamerPlaybackBackend.cpp
+    src/playback/OutputEndpointMonitor.cpp
+    src/playback/OutputEndpointMonitor.h
+    src/playback/PipeWireStreamWatch.cpp
+    src/playback/PipeWireStreamWatch.h
     src/playback/PlaybackBackend.h
+    src/playback/PlaybackProfileJson.cpp
     src/playback/QtPlaybackBackend.cpp
 )
 
@@ -763,6 +782,10 @@ target_link_libraries(muzaiten_player PUBLIC muzaiten_core Qt6::Core)
 add_library(muzaiten_playback STATIC ${MUZAITEN_PLAYBACK_SOURCES})
 muzaiten_configure_library(muzaiten_playback)
 target_link_libraries(muzaiten_playback PUBLIC Qt6::Core PRIVATE Qt6::Multimedia PkgConfig::GSTREAMER)
+if(PIPEWIRE_FOUND)
+    target_link_libraries(muzaiten_playback PRIVATE PkgConfig::PIPEWIRE)
+    target_compile_definitions(muzaiten_playback PRIVATE MUZAITEN_HAVE_PIPEWIRE=1)
+endif()
 
 add_library(muzaiten_scanner STATIC ${MUZAITEN_SCANNER_SOURCES})
 muzaiten_configure_library(muzaiten_scanner)
