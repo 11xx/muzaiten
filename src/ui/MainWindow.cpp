@@ -3903,10 +3903,10 @@ void MainWindow::updateOutputIndicator()
 
 void MainWindow::adoptSharedEndpoint(const QString &name, const QString &label)
 {
-    // The backend already requests it; record it as the profile's choice.
+    // The backend already requests it and AppCore has saved it; keep this
+    // window's copy of the profile in step.
     m_playbackProfile.sharedEndpoint = name;
     m_playbackProfile.sharedEndpointLabel = label;
-    savePlaybackProfile();
     statusBar()->showMessage(QStringLiteral("Output set to %1, as chosen in a mixer")
                                  .arg(label.isEmpty() ? name : label), 6000);
 }

@@ -251,7 +251,7 @@ private:
     // Show, in the status bar, an output that is waiting, falling back, or
     // configured beyond what the transport can do; hidden otherwise.
     void updateOutputIndicator();
-    // Save a preferred endpoint chosen in a mixer as the profile's choice.
+    // Reflect a preferred endpoint chosen in a mixer in this window.
     void adoptSharedEndpoint(const QString &name, const QString &label);
     void scheduleHeldDeviceRelease(int delayMs);
     void updateDsdTakeoverPromptText();
