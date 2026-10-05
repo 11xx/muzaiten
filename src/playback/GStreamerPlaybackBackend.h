@@ -46,6 +46,9 @@ public:
     // The sink factory a shared transport choice ("auto", "pipewire",
     // "pulse", "alsa") resolves to with the installed plugins, or empty.
     static QString sharedSinkFactory(const QString &sinkChoice);
+    // The property through which a shared sink factory names the endpoint
+    // its stream asks for, or nullptr for sinks without one.
+    static const char *streamTargetProperty(const QString &factory);
 
 private:
     static void aboutToFinishCallback(GstElement *playbin, void *userData);

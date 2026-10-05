@@ -604,7 +604,7 @@ add_executable(test_gstreamer_playback
     test_gstreamer_playback.cpp
 )
 target_include_directories(test_gstreamer_playback PRIVATE ../src)
-target_link_libraries(test_gstreamer_playback PRIVATE muzaiten_player muzaiten_playback Qt6::Core Qt6::Test)
+target_link_libraries(test_gstreamer_playback PRIVATE muzaiten_player muzaiten_playback Qt6::Core Qt6::Test PkgConfig::GSTREAMER)
 target_compile_features(test_gstreamer_playback PRIVATE cxx_std_26)
 add_test(NAME test_gstreamer_playback COMMAND test_gstreamer_playback)
 set_tests_properties(test_gstreamer_playback PROPERTIES ENVIRONMENT "MUZAITEN_DEMO_SILENT_AUDIO=1")

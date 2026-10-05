@@ -1,4 +1,5 @@
 #include "playback/GStreamerPlaybackBackend.h"
+#include "playback/OutputEndpointMonitor.h"
 #include "playback/QtPlaybackBackend.h"
 #include "player/PlayerCore.h"
 
@@ -11,6 +12,8 @@
 #include <QtTest/QtTest>
 
 #include <cmath>
+
+#include <gst/gst.h>
 
 namespace {
 
@@ -60,6 +63,34 @@ private slots:
     void cleanupTestCase()
     {
         qunsetenv("MUZAITEN_DEMO_SILENT_AUDIO");
+    }
+
+    // What the native PipeWire transport is given, checked without needing
+    // its plugin: the endpoint goes in target-object and endpoints come from
+    // PipeWire's own device provider. Auto never claims a missing plugin.
+    void transportsNameEndpointsTheirOwnWay()
+    {
+        QCOMPARE(QByteArray(GStreamerPlaybackBackend::streamTargetProperty(QStringLiteral("pipewiresink"))),
+                 QByteArray("target-object"));
+        QCOMPARE(QByteArray(GStreamerPlaybackBackend::streamTargetProperty(QStringLiteral("pulsesink"))),
+                 QByteArray("device"));
+        QVERIFY(GStreamerPlaybackBackend::streamTargetProperty(QStringLiteral("alsasink")) == nullptr);
+        QCOMPARE(OutputEndpointMonitor::providerFor(QStringLiteral("pipewiresink")),
+                 QStringLiteral("pipewiredeviceprovider"));
+        QCOMPARE(OutputEndpointMonitor::providerFor(QStringLiteral("pulsesink")),
+                 QStringLiteral("pulsedeviceprovider"));
+        QVERIFY(OutputEndpointMonitor::providerFor(QStringLiteral("alsasink")).isEmpty());
+
+        gst_init(nullptr, nullptr);
+        GstElementFactory *native = gst_element_factory_find("pipewiresink");
+        const QString autoFactory = GStreamerPlaybackBackend::sharedSinkFactory(QStringLiteral("auto"));
+        if (native != nullptr) {
+            gst_object_unref(native);
+            QCOMPARE(autoFactory, QStringLiteral("pipewiresink"));
+        } else {
+            QVERIFY(GStreamerPlaybackBackend::sharedSinkFactory(QStringLiteral("pipewire")).isEmpty());
+            QVERIFY(autoFactory != QStringLiteral("pipewiresink"));
+        }
     }
 
     void outputStatusIsHonestAboutDestinations()

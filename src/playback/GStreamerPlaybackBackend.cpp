@@ -49,9 +49,9 @@ QString sharedSinkTarget(const PlaybackProfile &profile)
     return AudioDeviceControl::sinkNodeName(profile.device);
 }
 
-// The property through which a shared sink names the endpoint its stream asks
-// for, or nullptr for sinks without one.
-const char *streamTargetProperty(const QString &factory)
+} // namespace
+
+const char *GStreamerPlaybackBackend::streamTargetProperty(const QString &factory)
 {
     if (factory == QStringLiteral("pulsesink")) {
         return "device";
@@ -61,6 +61,8 @@ const char *streamTargetProperty(const QString &factory)
     }
     return nullptr;
 }
+
+namespace {
 
 QString transportLabel(const QString &factory)
 {
