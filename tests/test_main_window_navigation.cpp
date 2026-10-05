@@ -1211,6 +1211,33 @@ private slots:
         core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
     }
 
+    // Starting playback straight into a wait for the output must leave the
+    // queue it was started from intact.
+    void waitingStartKeepsTheQueue()
+    {
+        FakeAudioGraph graph;
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QJsonArray paths;
+        for (const char *name : {"one.wav", "two.wav", "three.wav"}) {
+            const QString path = audioRoot.filePath(QString::fromLatin1(name));
+            QVERIFY(writeSilentWav(path));
+            paths.append(path);
+        }
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        const QJsonObject reply = core.handleIpcCommand(
+            QStringLiteral("enqueue"), QJsonObject{{QStringLiteral("paths"), paths}, {QStringLiteral("play"), true}});
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(core.m_player->queue().size(), 3);
+        QTest::qWait(300);
+        QCOMPARE(core.m_player->queue().size(), 3);
+        QCOMPARE(core.m_player->queueIndex(), 0);
+        window.m_playback->stop();
+    }
+
     void stopAfterTriggerCancelsDelayedResume()
     {
         QTemporaryDir audioRoot;
