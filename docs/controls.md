@@ -71,6 +71,7 @@ and are not restored after restart.
   resampling, sink release on pause, preload. Native bit-perfect DSD
   (`.dsf`) needs a direct-capable device selected here with resampling
   off; with **Allow resampling** DSD decodes to PCM for shared output.
+  See [Audio output](#audio-output) for how the destination is chosen.
 - `Playback > Resume behavior…` — whether position and playback state are
   restored across launches.
 - `Radio > Anchor for new sessions` — choose `Stay near the starting song` or
@@ -107,6 +108,20 @@ Both scrobbling entries open one window with two tabs, `Scrobblers` and
   picked in one visit; the `Scrobbled` column, the summary, and the queue,
   retry and clear actions all apply to exactly what is picked. The choice
   lasts as long as the window.
+
+## Audio output
+
+**Shared** output plays through the system sound server (PipeWire, or
+PulseAudio). The session manager chooses the destination of every stream
+muzaiten opens: it follows the system default output and remembers where
+muzaiten was last moved in a mixer such as pavucontrol or Wiremix. A move
+made while a track plays holds for the tracks after it, including across
+pauses, sample-rate changes between tracks and error recovery.
+
+When an output disappears, the sound server moves playback to another one.
+muzaiten never treats that fallback as a choice: the next stream it opens
+asks for no particular output, so the session manager can put playback back
+once the original output returns.
 
 ## File explorers
 
