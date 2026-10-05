@@ -47,6 +47,19 @@ struct PlaybackProfile {
     // load — the index drifts across reboots / device launch order.
     QString deviceId;
 
+    // --- Shared output destination -------------------------------------------
+    // Preferred shared playback endpoint: the stable name of a physical or
+    // virtual sink (its PipeWire node.name, which is also its PulseAudio sink
+    // name). Empty leaves every route to the session manager. Independent of
+    // `device`/`deviceId`, which identify the direct card. Kept through mode
+    // switches like the other shared choices.
+    QString sharedEndpoint;
+    // The endpoint's description when it was chosen, shown while it is absent.
+    QString sharedEndpointLabel;
+    // While the preferred endpoint is missing: false pauses and waits for it;
+    // true plays through the session manager's route until it returns.
+    bool sharedEndpointFallback = false;
+
     // Return a copy forced to shared mode with every shared active field
     // restored from the cross-mode shadow memory above. Use this whenever an
     // exclusively-held card is handed back outside the profile dialog (the

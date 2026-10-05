@@ -4,6 +4,38 @@
 
 #include <QObject>
 #include <QUrl>
+#include <QVector>
+
+// A shared playback endpoint as the sound server names it: `name` is the stable
+// identity (PipeWire node.name / PulseAudio sink name), `label` its description.
+struct OutputEndpoint {
+    QString name;
+    QString label;
+};
+
+// Where output is going, for display. `currentEndpoint` is where the stream
+// is linked right now, when the transport can tell; it may differ from the
+// preference while a fallback is active.
+struct OutputStatus {
+    enum class Route {
+        System,      // the session manager chooses
+        Preferred,   // the preferred endpoint is present and requested
+        Waiting,     // the preferred output is missing; playback waits for it
+        Fallback,    // the preferred endpoint is missing; the system route plays
+        Direct,      // exclusive ALSA output
+        Unsupported  // a destination is configured that this transport cannot honor
+    };
+    Route route = Route::System;
+    QString transport;      // what renders shared audio, e.g. "PulseAudio"
+    QString transportNote;  // why that transport, when it is not the one asked for
+    QString preferredEndpoint;
+    QString preferredLabel;
+    bool preferredAvailable = false;
+    QString currentEndpoint;
+    QString currentLabel;
+
+    bool operator==(const OutputStatus &) const = default;
+};
 
 class PlaybackBackend : public QObject {
     Q_OBJECT
@@ -80,6 +112,12 @@ public:
     // DSD capability of this backend with the currently-installed plugins.
     virtual DsdSupport dsdSupport() const { return {}; }
 
+    // Whether this backend can route shared output to a chosen endpoint.
+    // Backends that cannot report the configured destination as Unsupported
+    // instead of silently ignoring it.
+    virtual bool supportsSharedEndpoint() const { return false; }
+    virtual OutputStatus outputStatus() const { return {}; }
+
 signals:
     void stateChanged(PlaybackBackend::State state);
     void positionChanged(qint64 positionMs);
@@ -89,4 +127,9 @@ signals:
     void finished();
     void errorOccurred(QString message);
     void technicalInfoChanged(QString text);
+    void outputStatusChanged();
+    // A mixer moved playback off the preferred endpoint while that endpoint
+    // stayed available: a deliberate choice made outside the app, which the
+    // backend now requests in its place.
+    void sharedEndpointChosenExternally(QString name, QString label);
 };

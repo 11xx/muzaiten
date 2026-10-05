@@ -1,4 +1,5 @@
 #include "playback/GStreamerPlaybackBackend.h"
+#include "playback/QtPlaybackBackend.h"
 #include "player/PlayerCore.h"
 
 #include <QDataStream>
@@ -59,6 +60,32 @@ private slots:
     void cleanupTestCase()
     {
         qunsetenv("MUZAITEN_DEMO_SILENT_AUDIO");
+    }
+
+    void outputStatusIsHonestAboutDestinations()
+    {
+        // The silent test sink cannot route to an endpoint: a configured one
+        // is reported as unsupported, never as honored.
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        backend.setProfile(profile);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::System);
+        QCOMPARE(backend.outputStatus().transport, QStringLiteral("silent"));
+        profile.sharedEndpoint = QStringLiteral("some_sink");
+        profile.sharedEndpointLabel = QStringLiteral("Some sink");
+        backend.setProfile(profile);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Unsupported);
+        QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Some sink"));
+
+        QtPlaybackBackend qtBackend;
+        QVERIFY(!qtBackend.supportsSharedEndpoint());
+        QSignalSpy info(&qtBackend, &PlaybackBackend::technicalInfoChanged);
+        qtBackend.setProfile(profile);
+        QCOMPARE(qtBackend.outputStatus().route, OutputStatus::Route::Unsupported);
+        QVERIFY(info.last().first().toString().contains(QStringLiteral("cannot choose an output")));
+        profile.sharedEndpoint.clear();
+        qtBackend.setProfile(profile);
+        QCOMPARE(qtBackend.outputStatus().route, OutputStatus::Route::System);
     }
 
     void shortSuccessorCannotCancelPendingHandoff()

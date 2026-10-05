@@ -130,7 +130,7 @@ public:
         QStringList command{QStringLiteral("pactl"), QStringLiteral("load-module"),
                             QStringLiteral("module-null-sink"), QStringLiteral("sink_name=") + name};
         if (!description.isEmpty()) {
-            command << QStringLiteral("sink_properties=device.description=\"%1\"").arg(description);
+            command << QStringLiteral("sink_properties=\"device.description='%1'\"").arg(description);
         }
         const QString module = run(command);
         waitFor([&] { return sinkNames().contains(name); });

@@ -122,6 +122,7 @@ private slots:
         QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
         backend.play(url("long-a"));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
 
         m_graph->removeModule(m_modules.take(m_main));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_other, 8000);
@@ -149,6 +150,7 @@ private slots:
         backend.play(url("short-8k"));
         backend.prepareNext(url("long-16k"));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
 
         m_graph->removeModule(m_modules.take(m_main));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_other, 8000);
@@ -186,6 +188,7 @@ private slots:
         QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
         backend.play(url("long-a"));
         QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
 
         if (wiremix) {
             m_graph->mixerMove(m_other);
@@ -206,6 +209,204 @@ private slots:
         QCOMPARE(m_graph->requestedTarget(), QString());
         QVERIFY(m_graph->carriesAudio(m_other));
         QCOMPARE(errors.count(), 0);
+        backend.stop();
+    }
+
+    // A preferred endpoint, here a virtual sink, is requested by every
+    // stream, whatever happens to the default output and to other devices.
+    void preferredEndpointHoldsThroughDeviceChurn()
+    {
+        const QString virtualSink = QStringLiteral("muz_virtual_%1").arg(m_round);
+        m_modules.insert(virtualSink, m_graph->addSink(virtualSink, QStringLiteral("Virtual mix")));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = virtualSink;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        QSignalSpy advanced(&backend, &PlaybackBackend::preparedTrackStarted);
+        backend.play(url("short-8k"));
+        backend.prepareNext(url("long-16k"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), virtualSink, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+        QCOMPARE(m_graph->requestedTarget(), virtualSink);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Preferred);
+        QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Virtual mix"));
+        QVERIFY(m_graph->carriesAudio(virtualSink));
+
+        // A new device becomes the default, and a capture-only one appears.
+        const QString newcomer = QStringLiteral("muz_new_%1").arg(m_round);
+        m_modules.insert(newcomer, m_graph->addSink(newcomer));
+        m_graph->setDefaultSink(newcomer);
+        m_modules.insert(QStringLiteral("source"),
+                         m_graph->run({QStringLiteral("pactl"), QStringLiteral("load-module"),
+                                       QStringLiteral("module-null-source"),
+                                       QStringLiteral("source_name=muz_capture_%1").arg(m_round)}));
+
+        // The next track has another sample rate, so the sink reopens.
+        const int firstStream = m_graph->streamIndex();
+        QTRY_COMPARE_WITH_TIMEOUT(advanced.count(), 1, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(m_graph->streamIndex() >= 0 && m_graph->streamIndex() != firstStream, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), virtualSink, 8000);
+        QCOMPARE(m_graph->requestedTarget(), virtualSink);
+        QCOMPARE(adopted.count(), 0);
+        QCOMPARE(errors.count(), 0);
+        backend.stop();
+    }
+
+    // Playback waits for a missing preferred endpoint: it never opens
+    // elsewhere, keeps its position, and resumes only if it was meant to play.
+    void missingPreferredEndpointWaits()
+    {
+        const QString late = QStringLiteral("muz_late_%1").arg(m_round);
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = late;
+        profile.sharedEndpointLabel = QStringLiteral("Late device");
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+
+        backend.play(url("long-a"));
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Waiting);
+        QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Late device"));
+        QTest::qWait(500);
+        QVERIFY(m_graph->streams().isEmpty());
+
+        m_modules.insert(late, m_graph->addSink(late));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), late, 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 8000);
+
+        m_graph->removeModule(m_modules.take(late));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Buffering, 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(m_graph->streams().isEmpty(), 8000);
+        const qint64 held = backend.position();
+        QVERIFY2(held >= 1500, qPrintable(QString::number(held)));
+
+        // Paused while waiting: the endpoint's return must not start playback.
+        backend.pause();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        m_modules.insert(late, m_graph->addSink(late));
+        QTest::qWait(1000);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        QVERIFY(m_graph->streams().isEmpty());
+
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), late, 8000);
+        QVERIFY2(backend.position() >= held - 250, qPrintable(QString::number(backend.position())));
+        QCOMPARE(backend.outputStatus().preferredEndpoint, late);
+        QCOMPARE(errors.count(), 0);
+        backend.stop();
+    }
+
+    // With fallback chosen, the system route plays while the preferred
+    // endpoint is missing, and the stream returns when it comes back. The
+    // fallback is never recorded as the preference.
+    void fallbackPlaysUntilPreferredReturns()
+    {
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = preferred;
+        profile.sharedEndpointFallback = true;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+        backend.play(url("long-a"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+
+        m_graph->removeModule(m_modules.take(preferred));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.outputStatus().route, OutputStatus::Route::Fallback, 8000);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Playing);
+        QTest::qWait(1500);
+
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.outputStatus().route, OutputStatus::Route::Preferred, 8000);
+        QTest::qWait(1500);
+        QCOMPARE(adopted.count(), 0);
+        QCOMPARE(backend.outputStatus().preferredEndpoint, preferred);
+        QCOMPARE(errors.count(), 0);
+        backend.stop();
+    }
+
+    void endpointLostDuringStartup_data()
+    {
+        QTest::addColumn<bool>("fallback");
+        QTest::newRow("fallback") << true;
+        QTest::newRow("wait") << false;
+    }
+
+    // The preferred endpoint vanishing while the stream is still starting
+    // must neither wedge the transport nor lose the intent to play.
+    void endpointLostDuringStartup()
+    {
+        QFETCH(bool, fallback);
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = preferred;
+        profile.sharedEndpointFallback = fallback;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        backend.play(url("long-a"));
+        m_graph->removeModule(m_modules.take(preferred));
+        if (fallback) {
+            QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 10000);
+            QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_main, 8000);
+        } else {
+            QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Buffering, 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(m_graph->streams().isEmpty(), 8000);
+        }
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 10000);
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        backend.stop();
+    }
+
+    void mixerMoveOffPreferredIsAdopted_data()
+    {
+        QTest::addColumn<bool>("wiremix");
+        QTest::newRow("wiremix metadata move") << true;
+        QTest::newRow("pulse protocol move") << false;
+    }
+
+    // Moving the stream off an available preferred endpoint in a mixer is a
+    // choice made outside the app; it becomes the preference.
+    void mixerMoveOffPreferredIsAdopted()
+    {
+        QFETCH(bool, wiremix);
+        const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
+        m_modules.insert(preferred, m_graph->addSink(preferred));
+        PlaybackProfile profile = pulseProfile();
+        profile.sharedEndpoint = preferred;
+        profile.releaseSinkOnPause = true;
+        GStreamerPlaybackBackend backend;
+        backend.setProfile(profile);
+        QSignalSpy adopted(&backend, &PlaybackBackend::sharedEndpointChosenExternally);
+        backend.play(url("long-a"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), preferred, 8000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 8000);
+
+        if (wiremix) {
+            m_graph->mixerMove(m_other);
+        } else {
+            m_graph->pulseMove(m_other);
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(adopted.count(), 1, 8000);
+        QCOMPARE(adopted.first().at(0).toString(), m_other);
+        QCOMPARE(backend.outputStatus().preferredEndpoint, m_other);
+
+        backend.pause();
+        QTRY_VERIFY_WITH_TIMEOUT(m_graph->streams().isEmpty(), 8000);
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(m_graph->route(), m_other, 8000);
+        QCOMPARE(m_graph->requestedTarget(), m_other);
         backend.stop();
     }
 

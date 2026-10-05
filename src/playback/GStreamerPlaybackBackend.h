@@ -5,6 +5,8 @@
 #include <QMutex>
 #include <QTimer>
 
+class OutputEndpointMonitor;
+
 using GstElement = struct _GstElement;
 using GstEvent = struct _GstEvent;
 using GstMessage = struct _GstMessage;
@@ -35,6 +37,12 @@ public:
     void onGaplessTrackAdvanced() override;
     void setOutputMode(OutputMode mode, const QString &dsdDevice = QString()) override;
     DsdSupport dsdSupport() const override;
+    bool supportsSharedEndpoint() const override { return true; }
+    OutputStatus outputStatus() const override;
+
+    // The sink factory a shared transport choice ("auto", "pipewire",
+    // "pulse", "alsa") resolves to with the installed plugins, or empty.
+    static QString sharedSinkFactory(const QString &sinkChoice);
 
 private:
     static void aboutToFinishCallback(GstElement *playbin, void *userData);
@@ -63,8 +71,7 @@ private:
     // Streaming-thread half of applyStreamTarget(): a format change reopens
     // the PulseAudio stream inside the sink, so release it one step early and
     // retarget before the sink reconnects.
-    static void retargetBeforeFormatChange(GstElement *sink, GstEvent *capsEvent,
-                                           const QByteArray &target);
+    void retargetBeforeFormatChange(GstElement *sink, GstEvent *capsEvent);
     void poll();
     void pollBus();
     void pollPosition();
@@ -94,6 +101,25 @@ private:
     bool tryRecoverFromStreamError();
     void handleSeekWatchdogTimeout();
     void clearSeekInFlight();
+    // --- Preferred shared endpoint -----------------------------------------
+    // Whether the profile names an endpoint this transport can request.
+    bool preferredEndpointRoutable() const;
+    // Present per the endpoint monitor; assumed present when nothing watches.
+    bool endpointAvailable(const QString &name) const;
+    // The preferred endpoint is missing and the profile waits for it.
+    bool mustWaitForOutput() const;
+    void updateEndpointMonitor();
+    void handleEndpointAdded(const QString &name);
+    void handleEndpointRemoved(const QString &name);
+    // Hold the loaded source, released, until the preferred endpoint returns.
+    void waitForPreferredEndpoint();
+    // Re-read where the PulseAudio stream is linked; a move off an available
+    // preferred endpoint becomes a candidate deliberate choice.
+    void checkCurrentRoute();
+    void confirmExternalMove();
+    void setSinkTarget(const QByteArray &target);
+    void publishOutputStatus();
+    void pauseInternal(bool release);
     void beginTargetTransition(State targetState);
     void finishTargetTransition();
     void handleTargetTransitionTimeout();
@@ -155,10 +181,31 @@ private:
     QString m_sinkFactory;
     // streamTarget() as the streaming thread reads it; guarded by m_mutex.
     QByteArray m_streamTargetUtf8;
+    // Serializes this backend's writes of the sink's target, which happen on
+    // the GUI thread and, for format reopens, on the streaming thread.
+    QMutex m_sinkTargetMutex;
     // A card returned from exclusive use is pinned for the first stream only:
     // it dodges a transient default while the card's sink is rebuilt, and must
     // not outlive that into a lasting choice.
     QString m_handoffTarget;
+
+    OutputEndpointMonitor *m_endpoints = nullptr;
+    QString m_monitoredFactory;
+    // Playback is held until the preferred endpoint returns, resuming then
+    // only when the last transport intent was to play.
+    bool m_waitingForOutput = false;
+    bool m_resumeOnOutput = false;
+    // Where the PulseAudio stream is linked, as last read.
+    QString m_currentEndpoint;
+    unsigned long m_currentDeviceHandler = 0;
+    QTimer m_routeCheckTimer;
+    // A move off the preferred endpoint is adopted only if, after settling,
+    // the stream is still there and the preferred endpoint never went away.
+    QTimer m_externalMoveTimer;
+    QString m_externalMoveCandidate;
+    quint64 m_preferredRemovals = 0;
+    quint64 m_candidateRemovals = 0;
+    OutputStatus m_publishedStatus;
     double m_volume = 1.0;
     QTimer m_transitionTimer;
 
