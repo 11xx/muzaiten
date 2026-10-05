@@ -77,13 +77,13 @@
 
 namespace {
 
-bool writeSilentWav(const QString &path)
+bool writeSilentWav(const QString &path, quint32 seconds = 1)
 {
     constexpr quint32 sampleRate = 8000;
     constexpr quint16 channels = 1;
     constexpr quint16 bitsPerSample = 16;
-    constexpr quint32 sampleCount = sampleRate;
-    constexpr quint32 dataBytes = sampleCount * channels * (bitsPerSample / 8);
+    const quint32 sampleCount = sampleRate * seconds;
+    const quint32 dataBytes = sampleCount * channels * (bitsPerSample / 8);
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
@@ -1281,6 +1281,60 @@ private slots:
         AppCore restarted;
         QCOMPARE(restarted.m_playback->outputStatus().preferredEndpoint, QStringLiteral("desk_dac"));
         restarted.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
+    }
+
+    void outputChangeWhileWaitingResumesHeldTrack_data()
+    {
+        QTest::addColumn<bool>("pausedWait");
+        QTest::newRow("waiting to play") << false;
+        QTest::newRow("paused while waiting") << true;
+    }
+
+    // Choosing another output while playback waits for a missing one picks
+    // up the held track at its held position, playing or paused as it was.
+    void outputChangeWhileWaitingResumesHeldTrack()
+    {
+        QFETCH(bool, pausedWait);
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("held.wav"));
+        QVERIFY(writeSilentWav(audioPath, 20));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:3"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        Track track;
+        track.path = audioPath;
+        track.durationMs = 20'000;
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->playAt(0);
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), PlaybackBackend::State::Playing, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_playback->position() >= 1500, 8000);
+
+        // The card goes away during a pause; resuming waits for it.
+        window.m_playback->pause();
+        graph.cards.clear();
+        core.directDevices()->invalidate();
+        window.m_playback->resume();
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+        const qint64 held = window.m_playback->position();
+        QVERIFY2(held >= 1500, qPrintable(QString::number(held)));
+        if (pausedWait) {
+            window.m_playback->pause();
+            QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Paused);
+        }
+
+        window.applyProfileTransition(window.m_playbackProfile, PlaybackProfile{});
+        const PlaybackBackend::State expected = pausedWait ? PlaybackBackend::State::Paused
+                                                           : PlaybackBackend::State::Playing;
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), expected, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_playback->position() >= held - 300, 5000);
+        QCOMPARE(window.m_player->currentTrack().path, audioPath);
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::System);
+        window.m_playback->stop();
     }
 
     void stopAfterTriggerCancelsDelayedResume()

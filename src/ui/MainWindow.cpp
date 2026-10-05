@@ -3925,13 +3925,16 @@ void MainWindow::applyProfileTransition(const PlaybackProfile &previous, const P
 
     // Capture what to resume after the output is rebuilt: the same track at the
     // same elapsed position and play/pause state it had before the switch.
+    // Buffering is a wait for a missing output with the intent to play, held
+    // at its position: choosing another output resumes it there. A paused
+    // wait reports Paused and stays paused.
     const PlaybackBackend::State priorState = m_playback->state();
     const int queueIndex = m_player->queueIndex();
     const qint64 positionMs = m_playback->position();
+    const bool wasPlaying = priorState == PlaybackBackend::State::Playing
+        || priorState == PlaybackBackend::State::Buffering;
     const bool wasActive = queueIndex >= 0
-        && (priorState == PlaybackBackend::State::Playing
-            || priorState == PlaybackBackend::State::Paused);
-    const bool wasPlaying = priorState == PlaybackBackend::State::Playing;
+        && (wasPlaying || priorState == PlaybackBackend::State::Paused);
     if (next.mode == QStringLiteral("bit-perfect") && wasActive) {
         m_profileTakeoverResumePending = true;
         m_profileTakeoverTrackPath = m_player->currentTrack().path;
