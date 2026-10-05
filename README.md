@@ -131,6 +131,8 @@ Setup, model provenance, CPU/CUDA choices, and refresh behavior:
 Dependencies: CMake 4.x, Ninja, a C++26 compiler, Qt 6.11+ (Core, DBus,
 Gui, Multimedia, Network, Widgets, Sql, Test), TagLib 2.x, GStreamer 1.x
 (audio + pbutils), zstd. Optional for DSD: `gst-plugins-bad` + `gst-libav`.
+Optional: `libpipewire-0.3`, so the native PipeWire transport can follow mixer
+moves (without it, Auto uses the PulseAudio transport).
 
 ```sh
 make build        # configure + compile (wraps CMake/Ninja)

@@ -24,7 +24,9 @@
   transport from the output. While it is missing, playback waits at its
   position and resumes when it returns, or optionally plays through the
   system output until then; the choice is never replaced by a fallback. A
-  mixer move to another present output becomes the new choice. The dialog,
+  mixer move to another output holds from the very next stream and becomes
+  the new choice, with the PulseAudio and the native PipeWire transport
+  alike (the latter needs a build with `libpipewire-0.3`). The dialog,
   the status bar and `muzaitenctl status` report the transport actually in
   use, where playback is going, and any wait or fallback.
 - Search combines every reading of Chinese polyphones across a title: typing

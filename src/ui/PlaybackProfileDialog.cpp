@@ -85,7 +85,8 @@ PlaybackProfileDialog::PlaybackProfileDialog(QWidget *parent)
     m_sink->addItem(QStringLiteral("PulseAudio"), QStringLiteral("pulse"));
     m_sink->addItem(QStringLiteral("ALSA"),       QStringLiteral("alsa"));
     m_sink->setToolTip(QStringLiteral("How muzaiten talks to the sound server. Auto uses PipeWire's "
-                                      "GStreamer plugin when installed, otherwise PulseAudio."));
+                                      "GStreamer plugin when it is installed and this build can follow "
+                                      "PipeWire streams, otherwise PulseAudio."));
     sharedForm->addRow(QStringLiteral("Transport"), m_sink);
 
     // Where shared audio goes: left to the system, or a preferred endpoint
