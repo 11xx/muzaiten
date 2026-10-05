@@ -69,15 +69,21 @@
 #include <QUuid>
 #include <QtTest/QtTest>
 
+#include <QPushButton>
+
+#include "AudioDeviceFixtures.h"
+#include "playback/DirectDeviceResolver.h"
+#include "playback/PlaybackProfileJson.h"
+
 namespace {
 
-bool writeSilentWav(const QString &path)
+bool writeSilentWav(const QString &path, quint32 seconds = 1)
 {
     constexpr quint32 sampleRate = 8000;
     constexpr quint16 channels = 1;
     constexpr quint16 bitsPerSample = 16;
-    constexpr quint32 sampleCount = sampleRate;
-    constexpr quint32 dataBytes = sampleCount * channels * (bitsPerSample / 8);
+    const quint32 sampleCount = sampleRate * seconds;
+    const quint32 dataBytes = sampleCount * channels * (bitsPerSample / 8);
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
@@ -97,6 +103,19 @@ bool writeSilentWav(const QString &path)
         out << qint16{0};
     }
     return out.status() == QDataStream::Ok;
+}
+
+PlaybackProfile directProfile(const QString &stableId, const QString &hw)
+{
+    PlaybackProfile profile;
+    profile.mode = QStringLiteral("bit-perfect");
+    profile.sink = QStringLiteral("alsa");
+    profile.device = hw;
+    profile.deviceId = stableId;
+    profile.deviceLabel = QStringLiteral("Card A");
+    profile.softwareVolume = false;
+    profile.releaseSinkOnPause = true;
+    return profile;
 }
 
 QStringList trackPaths(const QVector<Track> &tracks)
@@ -966,6 +985,415 @@ private slots:
             }
         }
         QVERIFY(!window.m_playback->hasSource());
+    }
+
+    void sharedEndpointPersistsAndIsSurfaced()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile.sharedEndpoint = QStringLiteral("desk_dac");
+        window.m_playbackProfile.sharedEndpointLabel = QStringLiteral("Desk DAC");
+        window.m_playbackProfile.sharedEndpointFallback = true;
+        window.savePlaybackProfile();
+        window.m_playbackProfile = PlaybackProfile{};
+        window.loadPlaybackProfile();
+        QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("desk_dac"));
+        QCOMPARE(window.m_playbackProfile.sharedEndpointLabel, QStringLiteral("Desk DAC"));
+        QVERIFY(window.m_playbackProfile.sharedEndpointFallback);
+
+        // The silent test sink cannot route to an endpoint: that is shown,
+        // in the status bar and over IPC, rather than quietly ignored.
+        QVERIFY(!window.m_outputIndicator->isHidden());
+        QCOMPARE(window.m_outputIndicator->text(), QStringLiteral("Output choice unsupported"));
+        const QJsonObject output = core.ipcStatus().value(QStringLiteral("output")).toObject();
+        QCOMPARE(output.value(QStringLiteral("route")).toString(), QStringLiteral("unsupported"));
+        QCOMPARE(output.value(QStringLiteral("preferred")).toString(), QStringLiteral("desk_dac"));
+
+        // A choice made in a mixer, as reported by the backend, is saved.
+        emit window.m_playback->sharedEndpointChosenExternally(QStringLiteral("virtual_mix"),
+                                                                QStringLiteral("Virtual mix"));
+        QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("virtual_mix"));
+        const QJsonObject saved = QJsonDocument::fromJson(
+            window.m_database->setting(QStringLiteral("playback.profile")).toUtf8()).object();
+        QCOMPARE(saved.value(QStringLiteral("sharedEndpoint")).toString(), QStringLiteral("virtual_mix"));
+        QCOMPARE(saved.value(QStringLiteral("sharedEndpointLabel")).toString(), QStringLiteral("Virtual mix"));
+
+        window.m_playbackProfile = PlaybackProfile{};
+        window.savePlaybackProfile();
+        window.loadPlaybackProfile();
+        QVERIFY(window.m_outputIndicator->isHidden());
+    }
+
+    // The selected direct card is gone and another card now has its number:
+    // nothing may open, take over or release that other card, and playback
+    // waits visibly instead.
+    void directIdentityRefusesReusedNumber()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B")}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.savePlaybackProfile();
+        window.loadPlaybackProfile();
+        QCOMPARE(window.m_playbackProfile.device, QStringLiteral("hw:2"));
+
+        emit window.m_playback->errorOccurred(QStringLiteral("Device or resource busy"));
+        QVERIFY(window.m_takeOverDeviceButton->isHidden());
+        window.attemptDeviceTakeover();
+
+        Track track;
+        track.path = audioPath;
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->playAt(0);
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(window.m_playback->outputStatus().preferredLabel, QStringLiteral("Card A"));
+        QVERIFY(!window.m_outputIndicator->isHidden());
+        QCOMPARE(window.m_outputIndicator->text(), QStringLiteral("Waiting for Card A"));
+
+        window.applyProfileTransition(window.m_playbackProfile, window.m_playbackProfile.toSharedMode());
+        QVERIFY2(graph.profileSwitches.isEmpty(), "card B was switched");
+        window.m_playback->stop();
+    }
+
+    // The same card reconnected under another number is found again on the
+    // next check, without restarting or saving the profile.
+    void directIdentityRecoversAtNewNumber()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B")}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        Track track;
+        track.path = audioPath;
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->playAt(0);
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+
+        graph.cards.append({42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false});
+        emit window.m_directDevices->cardsChanged();
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), PlaybackBackend::State::Playing, 5000);
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::Direct);
+        QCOMPARE(core.directDevices()->resolve(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2")).hwPath,
+                 QStringLiteral("hw:3"));
+        QVERIFY(graph.profileSwitches.isEmpty());
+        window.m_playback->stop();
+    }
+
+    // The card is unplugged and another takes its number while a takeover
+    // waits for ownership: the wait must not act on the newcomer.
+    void identityChangeDuringOwnershipWaitIsCaught()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 2, QStringLiteral("alsa_card.a"), QStringLiteral("Card A")}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        Track track;
+        track.path = audioPath;
+        window.m_player->resetQueue({track}, 0);
+
+        const QList<QTimer *> existingTimers = window.findChildren<QTimer *>();
+        window.attemptDeviceTakeover();
+        const QVector<QPair<int, int>> takenOver{{42, 0}};
+        QCOMPARE(graph.profileSwitches, takenOver);
+        QTimer *wait = nullptr;
+        for (QTimer *timer : window.findChildren<QTimer *>()) {
+            if (!existingTimers.contains(timer) && timer->interval() == 1000) {
+                wait = timer;
+            }
+        }
+        QVERIFY(wait != nullptr);
+
+        graph.cards = {{41, 2, QStringLiteral("alsa_card.b"), QStringLiteral("Card B"), false, false}};
+        window.m_directDevices->invalidate();
+        QVERIFY(QMetaObject::invokeMethod(wait, "timeout", Qt::DirectConnection));
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), PlaybackBackend::State::Buffering, 3000);
+        QCOMPARE(graph.profileSwitches, takenOver);
+        window.m_playback->stop();
+    }
+
+    // A delayed step of an output change that has since been superseded must
+    // not reinstate its profile.
+    void supersededOutputChangeStandsDown()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, true}};
+        AppCore core;
+        MainWindow window(&core);
+        const QList<QTimer *> existingTimers = window.findChildren<QTimer *>();
+        window.applyOutputProfile(directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:3")),
+                                  QString(), -1, -1, 0, false, false);
+        QTimer *wait = nullptr;
+        for (QTimer *timer : window.findChildren<QTimer *>()) {
+            if (!existingTimers.contains(timer) && timer->interval() == 1000) {
+                wait = timer;
+            }
+        }
+        QVERIFY(wait != nullptr);
+        window.applyOutputProfile(PlaybackProfile{}, QString(), -1, -1, 0, false, false);
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::System);
+        for (int tick = 0; tick < 10; ++tick) {
+            QVERIFY(QMetaObject::invokeMethod(wait, "timeout", Qt::DirectConnection));
+        }
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::System);
+    }
+
+    // Direct opens keep resolving the card after the window is gone while
+    // playback continues headless.
+    void directCheckOutlivesTheWindow()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("headless.wav"));
+        QVERIFY(writeSilentWav(audioPath));
+
+        AppCore core;
+        {
+            MainWindow window(&core);
+        }
+        core.m_playback->setProfile(directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2")));
+        core.m_playback->play(QUrl::fromLocalFile(audioPath));
+        QTRY_COMPARE_WITH_TIMEOUT(core.m_playback->state(), PlaybackBackend::State::Playing, 5000);
+        graph.cards.clear();
+        core.directDevices()->invalidate();
+        core.m_playback->play(QUrl::fromLocalFile(audioPath));
+        QCOMPARE(core.m_playback->state(), PlaybackBackend::State::Buffering);
+        core.m_playback->stop();
+    }
+
+    // The saved output applies before any window exists (a tray start, an
+    // early IPC play); the window then loads the same profile.
+    void savedOutputAppliesBeforeTheWindow()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false}};
+        {
+            AppCore core;
+            MainWindow window(&core);
+            window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+            window.savePlaybackProfile();
+        }
+
+        {
+            AppCore core;
+            QCOMPARE(core.m_playback->outputStatus().route, OutputStatus::Route::Direct);
+            {
+                MainWindow window(&core);
+                QCOMPARE(window.m_playbackProfile.device, QStringLiteral("hw:3"));
+            }
+            PlaybackProfile shared;
+            shared.sharedEndpoint = QStringLiteral("desk_dac");
+            core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(shared));
+        }
+        AppCore core;
+        QCOMPARE(core.m_playback->outputStatus().preferredEndpoint, QStringLiteral("desk_dac"));
+        core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
+    }
+
+    // Starting playback straight into a wait for the output must leave the
+    // queue it was started from intact.
+    void waitingStartKeepsTheQueue()
+    {
+        FakeAudioGraph graph;
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QJsonArray paths;
+        for (const char *name : {"one.wav", "two.wav", "three.wav"}) {
+            const QString path = audioRoot.filePath(QString::fromLatin1(name));
+            QVERIFY(writeSilentWav(path));
+            paths.append(path);
+        }
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:2"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        const QJsonObject reply = core.handleIpcCommand(
+            QStringLiteral("enqueue"), QJsonObject{{QStringLiteral("paths"), paths}, {QStringLiteral("play"), true}});
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(core.m_player->queue().size(), 3);
+        QTest::qWait(300);
+        QCOMPARE(core.m_player->queue().size(), 3);
+        QCOMPARE(core.m_player->queueIndex(), 0);
+        window.m_playback->stop();
+    }
+
+    // A mixer choice is saved whether or not a window exists: before the
+    // first window, after the window was released, and it is what a
+    // recreated window and a restarted app load.
+    void mixerChoiceIsSavedWithoutAWindow()
+    {
+        const auto savedEndpoint = [](AppCore &core) {
+            return QJsonDocument::fromJson(core.m_database->setting(QStringLiteral("playback.profile")).toUtf8())
+                .object().value(QStringLiteral("sharedEndpoint")).toString();
+        };
+        {
+            AppCore core;
+            PlaybackProfile profile;
+            profile.sharedEndpoint = QStringLiteral("desk_dac");
+            profile.releaseSinkOnPause = false;
+            core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile));
+
+            emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("virtual_mix"),
+                                                                  QStringLiteral("Virtual mix"));
+            QCOMPARE(savedEndpoint(core), QStringLiteral("virtual_mix"));
+            QCOMPARE(playbackProfileFromJson(core.m_database->setting(QStringLiteral("playback.profile")))
+                         .releaseSinkOnPause, false);
+
+            {
+                MainWindow window(&core);
+                QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("virtual_mix"));
+            }
+            // The window is gone; playback goes on and another move happens.
+            emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("headphones"),
+                                                                  QStringLiteral("Headphones"));
+            QCOMPARE(savedEndpoint(core), QStringLiteral("headphones"));
+            MainWindow recreated(&core);
+            QCOMPARE(recreated.m_playbackProfile.sharedEndpoint, QStringLiteral("headphones"));
+            QCOMPARE(recreated.m_playbackProfile.sharedEndpointLabel, QStringLiteral("Headphones"));
+
+            // With a window, its copy follows too.
+            emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("desk_dac"),
+                                                                  QStringLiteral("Desk DAC"));
+            QCOMPARE(recreated.m_playbackProfile.sharedEndpoint, QStringLiteral("desk_dac"));
+            QCOMPARE(savedEndpoint(core), QStringLiteral("desk_dac"));
+        }
+        AppCore restarted;
+        QCOMPARE(restarted.m_playback->outputStatus().preferredEndpoint, QStringLiteral("desk_dac"));
+        restarted.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
+    }
+
+    void outputChangeWhileWaitingResumesHeldTrack_data()
+    {
+        QTest::addColumn<bool>("pausedWait");
+        QTest::newRow("waiting to play") << false;
+        QTest::newRow("paused while waiting") << true;
+    }
+
+    // Choosing another output while playback waits for a missing one picks
+    // up the held track at its held position, playing or paused as it was.
+    void outputChangeWhileWaitingResumesHeldTrack()
+    {
+        QFETCH(bool, pausedWait);
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), false, false}};
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        const QString audioPath = audioRoot.filePath(QStringLiteral("held.wav"));
+        QVERIFY(writeSilentWav(audioPath, 20));
+
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:3"));
+        window.m_playback->setProfile(window.m_playbackProfile);
+        Track track;
+        track.path = audioPath;
+        track.durationMs = 20'000;
+        window.m_player->resetQueue({track}, 0);
+        window.m_player->playAt(0);
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), PlaybackBackend::State::Playing, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_playback->position() >= 1500, 8000);
+
+        // The card goes away during a pause; resuming waits for it.
+        window.m_playback->pause();
+        graph.cards.clear();
+        core.directDevices()->invalidate();
+        window.m_playback->resume();
+        QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Buffering);
+        const qint64 held = window.m_playback->position();
+        QVERIFY2(held >= 1500, qPrintable(QString::number(held)));
+        if (pausedWait) {
+            window.m_playback->pause();
+            QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Paused);
+        }
+
+        window.applyProfileTransition(window.m_playbackProfile, PlaybackProfile{});
+        const PlaybackBackend::State expected = pausedWait ? PlaybackBackend::State::Paused
+                                                           : PlaybackBackend::State::Playing;
+        QTRY_COMPARE_WITH_TIMEOUT(window.m_playback->state(), expected, 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_playback->position() >= held - 300, 5000);
+        QCOMPARE(window.m_player->currentTrack().path, audioPath);
+        QCOMPARE(window.m_playback->outputStatus().route, OutputStatus::Route::System);
+        window.m_playback->stop();
+    }
+
+    void delayedRestoreBelongsToItsStart_data()
+    {
+        QTest::addColumn<QString>("action");
+        QTest::newRow("manual next") << QStringLiteral("next");
+        QTest::newRow("newer output change") << QStringLiteral("output");
+        QTest::newRow("user seek") << QStringLiteral("seek");
+        QTest::newRow("user pause") << QStringLiteral("pause");
+    }
+
+    // An output change restarts the track and, after a settle delay, seeks it
+    // back to where it was. Whatever the user (or a newer output change) does
+    // in that delay must not have the old position forced onto it; a pause
+    // keeps the restored position.
+    void delayedRestoreBelongsToItsStart()
+    {
+        QFETCH(QString, action);
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QVector<Track> tracks;
+        for (const char *name : {"first.wav", "second.wav"}) {
+            Track track;
+            track.path = audioRoot.filePath(QString::fromLatin1(name));
+            track.durationMs = 20'000;
+            QVERIFY(writeSilentWav(track.path, 20));
+            tracks.append(track);
+        }
+        AppCore core;
+        MainWindow window(&core);
+        window.m_player->resetQueue(tracks, 0);
+
+        // As an output change does: restart the track, then restore 5 s.
+        window.applyOutputProfile(PlaybackProfile{}, QString(), -1, 0, 5'000, true, true);
+        QTest::qWait(150);
+        if (action == QStringLiteral("next")) {
+            window.m_player->next();
+        } else if (action == QStringLiteral("output")) {
+            // The newer change restarts from the top: nothing may seek it.
+            window.applyOutputProfile(PlaybackProfile{}, QString(), -1, 0, 0, true, true);
+        } else if (action == QStringLiteral("seek")) {
+            window.m_playback->seek(1'000);
+        } else {
+            window.m_playback->pause();
+        }
+        QTest::qWait(1'000);
+
+        if (action == QStringLiteral("next")) {
+            QCOMPARE(window.m_player->queueIndex(), 1);
+            QVERIFY2(window.m_playback->position() < 4'000, qPrintable(QString::number(window.m_playback->position())));
+            QVERIFY(core.mpris()->positionUsec() < 4'000'000);
+        } else if (action == QStringLiteral("pause")) {
+            QCOMPARE(window.m_playback->state(), PlaybackBackend::State::Paused);
+            QVERIFY2(window.m_playback->position() >= 4'900, qPrintable(QString::number(window.m_playback->position())));
+        } else {
+            QCOMPARE(window.m_player->queueIndex(), 0);
+            QVERIFY2(window.m_playback->position() < 4'000, qPrintable(QString::number(window.m_playback->position())));
+        }
+        window.m_playback->stop();
     }
 
     void stopAfterTriggerCancelsDelayedResume()

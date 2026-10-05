@@ -1,15 +1,20 @@
 #include "playback/GStreamerPlaybackBackend.h"
 
 #include "playback/AudioDeviceControl.h"
+#include "playback/OutputEndpointMonitor.h"
+#include "playback/PipeWireStreamWatch.h"
 
+#include <QCoreApplication>
 #include <QMutexLocker>
 #include <QtGlobal>
 
+#include <gst/audio/audio.h>
 #include <gst/gst.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <mutex>
+#include <utility>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -46,22 +51,52 @@ QString sharedSinkTarget(const PlaybackProfile &profile)
     return AudioDeviceControl::sinkNodeName(profile.device);
 }
 
-void setStringPropertyIfSupported(GstElement *element, const char *property, const QString &value)
+} // namespace
+
+const char *GStreamerPlaybackBackend::streamTargetProperty(const QString &factory)
 {
-    if (element == nullptr || value.isEmpty()) {
-        return;
+    if (factory == QStringLiteral("pulsesink")) {
+        return "device";
     }
-    GParamSpec *spec = g_object_class_find_property(G_OBJECT_GET_CLASS(element), property);
-    if (spec != nullptr && G_IS_PARAM_SPEC_STRING(spec)) {
-        const QByteArray utf8 = value.toUtf8();
-        g_object_set(G_OBJECT(element), property, utf8.constData(), nullptr);
+    if (factory == QStringLiteral("pipewiresink")) {
+        return "target-object";
     }
+    return nullptr;
 }
 
-GstElement *makeSink(const PlaybackProfile &profile)
+namespace {
+
+QString transportLabel(const QString &factory)
 {
-    const auto make = [](const char *name) -> GstElement * {
-        return factoryExists(name) ? gst_element_factory_make(name, nullptr) : nullptr;
+    if (factory == QStringLiteral("pipewiresink")) {
+        return QStringLiteral("PipeWire");
+    }
+    if (factory == QStringLiteral("pulsesink")) {
+        return QStringLiteral("PulseAudio");
+    }
+    if (factory == QStringLiteral("alsasink")) {
+        return QStringLiteral("ALSA");
+    }
+    if (factory == QStringLiteral("autoaudiosink")) {
+        return QStringLiteral("automatic sink");
+    }
+    if (factory == QStringLiteral("fakesink")) {
+        return QStringLiteral("silent");
+    }
+    return factory;
+}
+
+GstElement *makeSink(const PlaybackProfile &profile, QString *factory)
+{
+    const auto make = [factory](const char *name) -> GstElement * {
+        if (!factoryExists(name)) {
+            return nullptr;
+        }
+        GstElement *sink = gst_element_factory_make(name, nullptr);
+        if (sink != nullptr) {
+            *factory = QString::fromLatin1(name);
+        }
+        return sink;
     };
 
     // Demo-screen capture only emulates playback; never open a real device (it
@@ -84,34 +119,28 @@ GstElement *makeSink(const PlaybackProfile &profile)
         return sink;
     }
 
-    const QString target = sharedSinkTarget(profile);
-    GstElement *sink = nullptr;
+    // Shared sinks get their endpoint from applyStreamTarget() at each open.
     if (profile.sink == QStringLiteral("alsa")) {
-        sink = make("alsasink");
+        GstElement *sink = make("alsasink");
         if (sink != nullptr && !profile.device.isEmpty()) {
             g_object_set(G_OBJECT(sink), "device", profile.device.toUtf8().constData(), nullptr);
         }
         return sink;
     }
     if (profile.sink == QStringLiteral("pipewire")) {
-        sink = make("pipewiresink");
-        setStringPropertyIfSupported(sink, "target-object", target);
-        return sink;
+        return make("pipewiresink");
     }
     if (profile.sink == QStringLiteral("pulse")) {
-        sink = make("pulsesink");
-        setStringPropertyIfSupported(sink, "device", target);
-        return sink;
+        return make("pulsesink");
     }
-
-    sink = make("pipewiresink");
-    if (sink != nullptr) {
-        setStringPropertyIfSupported(sink, "target-object", target);
-        return sink;
+    // Auto takes the native transport only when this build can follow its
+    // stream: otherwise a mixer move would be undone by the next stream.
+    if (PipeWireStreamWatch::supported()) {
+        if (GstElement *sink = make("pipewiresink")) {
+            return sink;
+        }
     }
-    sink = make("pulsesink");
-    if (sink != nullptr) {
-        setStringPropertyIfSupported(sink, "device", target);
+    if (GstElement *sink = make("pulsesink")) {
         return sink;
     }
     return make("autoaudiosink");
@@ -177,6 +206,16 @@ GStreamerPlaybackBackend::GStreamerPlaybackBackend(QObject *parent)
             &QTimer::timeout,
             this,
             &GStreamerPlaybackBackend::handleSeekWatchdogTimeout);
+    // A move produces a burst of stream notifications; read the route once
+    // they settle.
+    m_routeCheckTimer.setSingleShot(true);
+    m_routeCheckTimer.setInterval(250);
+    connect(&m_routeCheckTimer, &QTimer::timeout, this, &GStreamerPlaybackBackend::checkCurrentRoute);
+    // Long enough for the endpoint monitor to report a removal that caused
+    // the move, so an automatic fallback is never taken for a choice.
+    m_externalMoveTimer.setSingleShot(true);
+    m_externalMoveTimer.setInterval(1000);
+    connect(&m_externalMoveTimer, &QTimer::timeout, this, &GStreamerPlaybackBackend::confirmExternalMove);
 }
 
 GStreamerPlaybackBackend::~GStreamerPlaybackBackend()
@@ -187,6 +226,7 @@ GStreamerPlaybackBackend::~GStreamerPlaybackBackend()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    releaseAudioSink();
     stopReadAhead();
 }
 
@@ -196,10 +236,23 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
     // read-ahead (and any other non-output tweak) must not tear down a playing
     // pipeline.  This keeps a settings change seamless for the user.
     const bool rebuild = (m_playbin == nullptr) || outputConfigDiffers(m_profile, profile);
+    if (rebuild) {
+        noteTransportRequest();
+        observeRouteBeforeClose();
+    }
+    const bool preferenceChanged = m_profile.mode != profile.mode
+        || m_profile.sharedEndpoint != profile.sharedEndpoint;
     m_profile = profile;
+    if (preferenceChanged) {
+        // A newer explicit choice replaces a mixer move not yet adopted.
+        clearRouteOverride();
+    }
     if (rebuild) {
         m_softPaused = false;
         m_pendingSeekMs = -1;
+        m_waitingForOutput = false;
+        m_waitingForDirect = false;
+        m_resumeOnOutput = false;
         finishTargetTransition();
         rebuildPipeline();
         // MainWindow owns transport restoration for output changes. It must
@@ -208,6 +261,8 @@ void GStreamerPlaybackBackend::setProfile(const PlaybackProfile &profile)
         // play/pause intent during shared ↔ bit-perfect transitions.
         return;
     }
+
+    publishOutputStatus();
 
     // Apply the read-ahead change live against the current source.
     if (m_profile.readAheadMb <= 0) {
@@ -234,7 +289,10 @@ bool GStreamerPlaybackBackend::outputConfigDiffers(const PlaybackProfile &a,
         || a.softwareVolume != b.softwareVolume
         || a.replayGain != b.replayGain
         || a.allowResample != b.allowResample
-        || a.releaseSinkOnPause != b.releaseSinkOnPause;
+        || a.releaseSinkOnPause != b.releaseSinkOnPause
+        || (a.mode == QStringLiteral("shared")
+            && (a.sharedEndpoint != b.sharedEndpoint
+                || a.sharedEndpointFallback != b.sharedEndpointFallback));
 }
 
 void GStreamerPlaybackBackend::play(const QUrl &url)
@@ -242,6 +300,9 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
+    m_deferredDsdUri.clear();
+    observeRouteBeforeClose();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
         playDsd(url, State::Playing);
         return;
@@ -250,7 +311,7 @@ void GStreamerPlaybackBackend::play(const QUrl &url)
     // Same after a pipeline error — GStreamer only guarantees recovery through
     // NULL, and a fresh playbin is the reliable way to leave the failed state
     // behind (READY alone can keep dead elements inside uridecodebin).
-    if (m_dsdActive || m_state == State::Error) {
+    if (m_dsdActive || m_state == State::Error || m_playbin == nullptr) {
         rebuildPipeline();
     }
     if (m_playbin == nullptr) {
@@ -278,12 +339,15 @@ void GStreamerPlaybackBackend::loadPaused(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
+    m_deferredDsdUri.clear();
+    observeRouteBeforeClose();
     if (m_pendingOutputMode == OutputMode::NativeDsd) {
         playDsd(url, State::Paused);
         return;
     }
     // As in play(): a fresh playbin after native DSD or a pipeline error.
-    if (m_dsdActive || m_state == State::Error) {
+    if (m_dsdActive || m_state == State::Error || m_playbin == nullptr) {
         rebuildPipeline();
     }
     if (m_playbin == nullptr) {
@@ -398,6 +462,15 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
         emit errorOccurred(QStringLiteral("Native DSD playback requires a local file"));
         return;
     }
+    if (m_directCheck) {
+        const DirectDevice device = checkDirectDevice(!m_dsdDevice.isEmpty() ? m_dsdDevice : m_profile.device);
+        if (!device.available) {
+            deferDsdStart(url, targetState, device.label);
+            return;
+        }
+        m_dsdDevice = device.hwPath;
+    }
+    m_deferredDsdUri.clear();
 
     // Tear down whatever pipeline is live (playbin or an earlier DSD graph) and
     // build a fresh DSD passthrough graph for this file.
@@ -421,6 +494,7 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    releaseAudioSink();
     m_dsdActive = false;
     resetTimeline();
 
@@ -440,6 +514,7 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
         m_preparedUri.clear();
         invalidateGaplessAdvanceLocked();
     }
+    publishOutputStatus();
     beginTargetTransition(targetState);
     gst_element_set_state(m_playbin, targetState == State::Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
     // As with playbin, the real transition (and any preroll failure) arrives over
@@ -460,6 +535,29 @@ void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qi
         g_object_set(G_OBJECT(m_playbin), "uri", uri.toUtf8().constData(), nullptr);
     }
 
+    const bool direct = m_profile.mode == QStringLiteral("bit-perfect");
+    if (direct ? !prepareDirectOpen() : mustWaitForOutput()) {
+        // Hold the source in READY, exactly like a soft pause, so the
+        // output's return (or a later resume) opens it at this position.
+        m_softPaused = true;
+        m_resumePositionMs = std::max<qint64>(0, positionMs);
+        m_pendingSeekMs = -1;
+        m_waitingForOutput = true;
+        m_waitingForDirect = direct;
+        m_resumeOnOutput = targetState == State::Playing;
+        finishTargetTransition();
+        if (m_positionMs != m_resumePositionMs) {
+            m_positionMs = m_resumePositionMs;
+            emit positionChanged(m_positionMs);
+        }
+        updateState(m_resumeOnOutput ? State::Buffering : State::Paused);
+        publishOutputStatus();
+        return;
+    }
+    m_waitingForOutput = false;
+    m_waitingForDirect = false;
+    m_resumeOnOutput = false;
+    applyStreamTarget();
     beginTargetTransition(targetState);
     if (targetState == State::Playing && positionMs > 0) {
         m_pendingSeekMs = positionMs;
@@ -501,6 +599,22 @@ void GStreamerPlaybackBackend::setGaplessStopPending(bool pending)
 
 void GStreamerPlaybackBackend::pause()
 {
+    if (m_waitingForOutput) {
+        // Nothing is open; only the intent for the endpoint's return changes.
+        m_resumeOnOutput = false;
+        updateState(State::Paused);
+        publishOutputStatus();
+        return;
+    }
+    // Native DSD holds the ALSA device exclusively, so pausing must release it
+    // (READY) just like bit-perfect — otherwise the card stays locked while idle.
+    pauseInternal(m_profile.mode == QStringLiteral("bit-perfect")
+                  || m_profile.releaseSinkOnPause
+                  || m_dsdActive);
+}
+
+void GStreamerPlaybackBackend::pauseInternal(bool release)
+{
     if (m_playbin == nullptr) {
         return;
     }
@@ -527,12 +641,6 @@ void GStreamerPlaybackBackend::pause()
         reloadCurrentAtPosition(handoffPositionMs, State::Paused);
     }
 
-    // Native DSD holds the ALSA device exclusively, so pausing must release it
-    // (READY) just like bit-perfect — otherwise the card stays locked while idle.
-    const bool release = (m_profile.mode == QStringLiteral("bit-perfect"))
-                         || m_profile.releaseSinkOnPause
-                         || m_dsdActive;
-
     if (release) {
         // Capture position before tearing down the pipeline. The query can fail
         // transiently (e.g. mid-flush); the polled position is then the best
@@ -545,6 +653,7 @@ void GStreamerPlaybackBackend::pause()
         } else {
             m_resumePositionMs = std::max<qint64>(0, m_positionMs);
         }
+        observeRouteBeforeClose();
         m_softPaused = true;
         // READY releases the audio device but keeps the element graph intact
         // so re-preroll on resume is fast.  State messages from the
@@ -552,7 +661,7 @@ void GStreamerPlaybackBackend::pause()
         // while m_softPaused is true.
         gst_element_set_state(m_playbin, GST_STATE_READY);
         finishTargetTransition();
-        updateState(State::Paused);
+        updateState(m_waitingForOutput && m_resumeOnOutput ? State::Buffering : State::Paused);
     } else if (handoffPositionMs < 0) {
         beginTargetTransition(State::Paused);
         gst_element_set_state(m_playbin, GST_STATE_PAUSED);
@@ -561,11 +670,53 @@ void GStreamerPlaybackBackend::pause()
 
 void GStreamerPlaybackBackend::resume()
 {
+    if (!m_deferredDsdUri.isEmpty()) {
+        // playDsd() checks the device again and defers once more if absent.
+        const QString uri = std::exchange(m_deferredDsdUri, QString());
+        playDsd(QUrl::fromEncoded(uri.toUtf8()), State::Playing);
+        return;
+    }
     if (m_playbin == nullptr) {
         return;
     }
 
     if (m_softPaused) {
+        const bool direct = m_profile.mode == QStringLiteral("bit-perfect") || m_dsdActive;
+        bool present = true;
+        if (m_dsdActive && m_directCheck) {
+            const DirectDevice device = checkDirectDevice(m_dsdDevice);
+            present = device.available;
+            m_directLabel = device.label;
+            if (present && device.hwPath != m_dsdDevice) {
+                // The card is back under another number: rebuild the DSD
+                // graph on it and resume at the held position.
+                QString uri;
+                {
+                    QMutexLocker locker(&m_mutex);
+                    uri = m_currentUri;
+                }
+                const qint64 resumeAt = m_resumePositionMs;
+                playDsd(QUrl::fromEncoded(uri.toUtf8()), State::Paused);
+                m_pendingSeekMs = resumeAt;
+                beginTargetTransition(State::Playing);
+                return;
+            }
+        } else if (direct) {
+            present = prepareDirectOpen();
+        } else {
+            present = !mustWaitForOutput();
+        }
+        if (!present) {
+            m_waitingForOutput = true;
+            m_waitingForDirect = direct;
+            m_resumeOnOutput = true;
+            updateState(State::Buffering);
+            publishOutputStatus();
+            return;
+        }
+        m_waitingForOutput = false;
+        m_waitingForDirect = false;
+        m_resumeOnOutput = false;
         m_softPaused = false;
         beginTargetTransition(State::Playing);
         // Re-preroll asynchronously: READY→PAUSED.  We must NOT block the GUI
@@ -574,6 +725,7 @@ void GStreamerPlaybackBackend::resume()
         // the seek and transitions to PLAYING once GST_MESSAGE_ASYNC_DONE shows
         // the pipeline has prerolled.
         m_pendingSeekMs = std::max<qint64>(0, m_resumePositionMs);
+        applyStreamTarget();
         gst_element_set_state(m_playbin, GST_STATE_PAUSED);
         return;
     }
@@ -584,7 +736,13 @@ void GStreamerPlaybackBackend::resume()
 
 void GStreamerPlaybackBackend::stop()
 {
+    noteTransportRequest();
+    observeRouteBeforeClose();
+    m_deferredDsdUri.clear();
     m_softPaused = false;
+    m_waitingForOutput = false;
+    m_waitingForDirect = false;
+    m_resumeOnOutput = false;
     m_pendingSeekMs = -1;
     m_lastRecoveryUri.clear();
     m_lastRecoveryPositionMs = -1;
@@ -614,10 +772,12 @@ void GStreamerPlaybackBackend::stop()
         emit durationChanged(0);
     }
     updateState(State::Stopped);
+    publishOutputStatus();
 }
 
 void GStreamerPlaybackBackend::seek(qint64 positionMs)
 {
+    noteTransportRequest();
     if (m_playbin == nullptr) {
         return;
     }
@@ -765,6 +925,7 @@ void GStreamerPlaybackBackend::reloadCurrentAtPosition(qint64 positionMs, State 
         return;
     }
     clearSeekInFlight();
+    observeRouteBeforeClose();
     // playbin only picks up a new uri from READY; this restarts the source
     // cleanly, which is exactly the point of the recovery.
     gst_element_set_state(m_playbin, GST_STATE_READY);
@@ -881,6 +1042,7 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    releaseAudioSink();
     // Whatever we just tore down, we are about to build a playbin, so the active
     // pipeline is no longer the native-DSD graph.
     m_dsdActive = false;
@@ -921,12 +1083,16 @@ void GStreamerPlaybackBackend::rebuildPipeline()
     }
     setVolume(m_volume);
     g_signal_connect(m_playbin, "about-to-finish", G_CALLBACK(GStreamerPlaybackBackend::aboutToFinishCallback), this);
-    emit technicalInfoChanged(QStringLiteral("GStreamer backend using %1").arg(playbinName));
+    updateEndpointMonitor();
+    publishOutputStatus();
+    emit technicalInfoChanged(QStringLiteral("GStreamer backend using %1 with %2")
+                                  .arg(playbinName, transportLabel(m_sinkFactory)));
 }
 
 bool GStreamerPlaybackBackend::configureSink()
 {
-    GstElement *sink = makeSink(m_profile);
+    QString factory;
+    GstElement *sink = makeSink(m_profile, &factory);
     if (sink == nullptr) {
         // Drive into Error (matching the playbin-missing and bus-error paths)
         // rather than letting playbin silently auto-plug its default sink — a
@@ -942,15 +1108,59 @@ bool GStreamerPlaybackBackend::configureSink()
     // before the first buffer of each source. It is therefore the authoritative
     // gapless boundary; position queries can fail or return no samples for an
     // arbitrary interval around a source switch.
+    m_audioSink = GST_ELEMENT(gst_object_ref_sink(sink));
+    m_sinkFactory = factory;
+    ++m_sinkRun;
+    // Requested by the first open, through applyStreamTarget().
+    m_handoffTarget = sharedSinkTarget(m_profile);
+    if (m_sinkFactory == QStringLiteral("pipewiresink")) {
+        // Name the stream's node so its links can be followed.
+        if (m_nativeNodeName.isEmpty()) {
+            static int instances = 0;
+            m_nativeNodeName = QStringLiteral("muzaiten-output-%1-%2")
+                                   .arg(QCoreApplication::applicationPid())
+                                   .arg(++instances);
+        }
+        GstStructure *props = gst_structure_new("props", "node.name", G_TYPE_STRING,
+                                                m_nativeNodeName.toUtf8().constData(), nullptr);
+        g_object_set(G_OBJECT(m_audioSink), "stream-properties", props, nullptr);
+        gst_structure_free(props);
+        if (m_profile.mode == QStringLiteral("shared")) {
+            if (m_streamWatch == nullptr) {
+                m_streamWatch = new PipeWireStreamWatch(this);
+                connect(m_streamWatch, &PipeWireStreamWatch::linkedSinkChanged,
+                        this, &GStreamerPlaybackBackend::noteObservedRoute);
+            }
+            m_streamWatch->start(m_nativeNodeName);
+        }
+    }
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
+        // pulsesink announces every change to its stream (moves included) as
+        // a current-device notification from the streaming thread.
+        const auto notify = +[](GObject *, GParamSpec *, gpointer userData) {
+            auto *self = static_cast<GStreamerPlaybackBackend *>(userData);
+            QMetaObject::invokeMethod(self, [self]() { self->m_routeCheckTimer.start(); }, Qt::QueuedConnection);
+        };
+        m_currentDeviceHandler = g_signal_connect(m_audioSink, "notify::current-device", G_CALLBACK(notify), this);
+    }
     m_audioSinkPad = gst_element_get_static_pad(sink, "sink");
     if (m_audioSinkPad != nullptr) {
-        const auto probe = +[](GstPad *, GstPadProbeInfo *info, gpointer userData) -> GstPadProbeReturn {
+        const auto probe = +[](GstPad *pad, GstPadProbeInfo *info, gpointer userData) -> GstPadProbeReturn {
             if ((GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) == 0) {
                 return GST_PAD_PROBE_OK;
             }
             GstEvent *event = gst_pad_probe_info_get_event(info);
-            if (event != nullptr && GST_EVENT_TYPE(event) == GST_EVENT_STREAM_START) {
-                static_cast<GStreamerPlaybackBackend *>(userData)->queueGaplessAdvanceFromSink();
+            if (event == nullptr) {
+                return GST_PAD_PROBE_OK;
+            }
+            auto *self = static_cast<GStreamerPlaybackBackend *>(userData);
+            if (GST_EVENT_TYPE(event) == GST_EVENT_STREAM_START) {
+                self->queueGaplessAdvanceFromSink();
+            } else if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
+                if (GstElement *element = gst_pad_get_parent_element(pad)) {
+                    self->retargetBeforeFormatChange(element, event);
+                    gst_object_unref(element);
+                }
             }
             return GST_PAD_PROBE_OK;
         };
@@ -976,6 +1186,564 @@ void GStreamerPlaybackBackend::removeAudioSinkProbe()
     gst_object_unref(m_audioSinkPad);
     m_audioSinkPad = nullptr;
     m_audioSinkProbeId = 0;
+}
+
+void GStreamerPlaybackBackend::releaseAudioSink()
+{
+    ++m_sinkRun;
+    if (m_audioSink != nullptr) {
+        if (m_currentDeviceHandler != 0) {
+            g_signal_handler_disconnect(m_audioSink, m_currentDeviceHandler);
+        }
+        gst_object_unref(m_audioSink);
+        m_audioSink = nullptr;
+    }
+    m_currentDeviceHandler = 0;
+    if (m_streamWatch != nullptr) {
+        m_streamWatch->stop();
+    }
+    m_sinkFactory.clear();
+    m_handoffTarget.clear();
+    m_currentEndpoint.clear();
+    m_lastRoute.clear();
+    m_routeCheckTimer.stop();
+}
+
+QString GStreamerPlaybackBackend::streamTarget() const
+{
+    if (m_profile.mode != QStringLiteral("shared")) {
+        return {};
+    }
+    if (preferredEndpointRoutable()) {
+        if (!m_routeOverride.isEmpty() && endpointAvailable(m_routeOverride)) {
+            return m_routeOverride;
+        }
+        // A missing preferred endpoint is never requested: the stream either
+        // waits for it or, by choice, takes the session manager's route.
+        return endpointAvailable(m_profile.sharedEndpoint) ? m_profile.sharedEndpoint : QString();
+    }
+    return m_handoffTarget;
+}
+
+void GStreamerPlaybackBackend::applyStreamTarget()
+{
+    const QString target = streamTarget();
+    m_handoffTarget.clear();
+    m_lastRoute.clear();
+    {
+        // Reopens inside a running stream follow the lasting choice; the
+        // one-shot hand-off target ends with the stream it opens.
+        QMutexLocker locker(&m_mutex);
+        m_streamTargetUtf8 = streamTarget().toUtf8();
+    }
+    // pulsesink records the sink each stream ended up on, fallbacks included,
+    // and would request it again on the next open. Overwrite that memory with
+    // the intended target (none: the session manager decides) every time.
+    setSinkTarget(target.toUtf8());
+}
+
+void GStreamerPlaybackBackend::setSinkTarget(const QByteArray &target)
+{
+    const char *property = streamTargetProperty(m_sinkFactory);
+    if (m_audioSink == nullptr || property == nullptr) {
+        return;
+    }
+    QMutexLocker locker(&m_sinkTargetMutex);
+    g_object_set(G_OBJECT(m_audioSink), property, target.isEmpty() ? nullptr : target.constData(), nullptr);
+}
+
+void GStreamerPlaybackBackend::retargetBeforeFormatChange(GstElement *sink, GstEvent *capsEvent)
+{
+    GstElementFactory *factory = gst_element_get_factory(sink);
+    if (factory == nullptr || !GST_IS_AUDIO_BASE_SINK(sink)
+        || g_strcmp0(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory)), "pulsesink") != 0) {
+        return;
+    }
+    GstCaps *caps = nullptr;
+    gst_event_parse_caps(capsEvent, &caps);
+    GstAudioRingBuffer *ring = GST_AUDIO_BASE_SINK(sink)->ringbuffer;
+    if (caps == nullptr || ring == nullptr) {
+        return;
+    }
+    QByteArray target;
+    {
+        QMutexLocker locker(&m_mutex);
+        target = m_streamTargetUtf8;
+    }
+    if (gst_audio_ring_buffer_is_acquired(ring)) {
+        if (ring->spec.caps != nullptr && gst_caps_is_equal(ring->spec.caps, caps)) {
+            return;  // same format: the stream stays open
+        }
+        if (!target.isEmpty()) {
+            // A pinned stream may have been moved since it opened: the
+            // reopened one goes where it is now, and the owner thread
+            // accounts for the move.
+            gchar *device = nullptr;
+            g_object_get(G_OBJECT(sink), "current-device", &device, nullptr);
+            const QByteArray current(device != nullptr ? device : "");
+            g_free(device);
+            if (!current.isEmpty() && current != target) {
+                target = current;
+                QMetaObject::invokeMethod(this, [this, route = QString::fromUtf8(current),
+                                                 run = m_sinkRun.load()]() {
+                    if (run == m_sinkRun.load()) {
+                        noteObservedRoute(route);
+                    }
+                }, Qt::QueuedConnection);
+            }
+        }
+        // The same steps the sink's setcaps performs right after this probe,
+        // taken early so no stream exists when the target is written below.
+        gst_audio_ring_buffer_pause(ring);
+        gst_audio_ring_buffer_activate(ring, FALSE);
+        gst_audio_ring_buffer_release(ring);
+    }
+    QMutexLocker locker(&m_sinkTargetMutex);
+    g_object_set(G_OBJECT(sink), "device", target.isEmpty() ? nullptr : target.constData(), nullptr);
+}
+
+QString GStreamerPlaybackBackend::sharedSinkFactory(const QString &sinkChoice)
+{
+    initializeGStreamer();
+    const auto available = [](const char *name) {
+        return factoryExists(name) ? QString::fromLatin1(name) : QString();
+    };
+    if (sinkChoice == QStringLiteral("alsa")) {
+        return available("alsasink");
+    }
+    if (sinkChoice == QStringLiteral("pipewire")) {
+        return available("pipewiresink");
+    }
+    if (sinkChoice == QStringLiteral("pulse")) {
+        return available("pulsesink");
+    }
+    if (PipeWireStreamWatch::supported() && factoryExists("pipewiresink")) {
+        return QStringLiteral("pipewiresink");
+    }
+    for (const char *name : {"pulsesink", "autoaudiosink"}) {
+        if (factoryExists(name)) {
+            return QString::fromLatin1(name);
+        }
+    }
+    return {};
+}
+
+bool GStreamerPlaybackBackend::prepareDirectOpen()
+{
+    if (!m_directCheck) {
+        return true;
+    }
+    const DirectDevice device = checkDirectDevice(m_profile.device);
+    m_directLabel = device.label;
+    if (!device.available) {
+        return false;
+    }
+    if (m_audioSink != nullptr && m_playbin != nullptr && m_sinkFactory == QStringLiteral("alsasink")) {
+        gchar *current = nullptr;
+        g_object_get(G_OBJECT(m_audioSink), "device", &current, nullptr);
+        const bool moved = QString::fromUtf8(current) != device.hwPath;
+        g_free(current);
+        if (moved) {
+            gst_element_set_state(m_playbin, GST_STATE_NULL);
+            g_object_set(G_OBJECT(m_audioSink), "device", device.hwPath.toUtf8().constData(), nullptr);
+        }
+    }
+    m_profile.device = device.hwPath;
+    return true;
+}
+
+PlaybackBackend::DirectDevice GStreamerPlaybackBackend::checkDirectDevice(const QString &savedDevice) const
+{
+    DirectDevice device = m_directCheck(m_profile.deviceId, savedDevice);
+    if (device.label.isEmpty()) {
+        device.label = !m_profile.deviceLabel.isEmpty() ? m_profile.deviceLabel
+            : (!m_profile.deviceId.isEmpty() ? m_profile.deviceId : savedDevice);
+    }
+    return device;
+}
+
+void GStreamerPlaybackBackend::deferDsdStart(const QUrl &url, State targetState, const QString &label)
+{
+    // Leave nothing open on the old number, as playDsd() would.
+    finishTargetTransition();
+    clearSeekInFlight();
+    stopReadAhead();
+    removeAudioSinkProbe();
+    if (m_playbin != nullptr) {
+        gst_element_set_state(m_playbin, GST_STATE_NULL);
+        gst_object_unref(m_playbin);
+        m_playbin = nullptr;
+    }
+    releaseAudioSink();
+    m_dsdActive = false;
+    m_softPaused = false;
+    m_pendingSeekMs = -1;
+    resetTimeline();
+    {
+        QMutexLocker locker(&m_mutex);
+        m_currentUri = uriForUrl(url);
+        m_playingUri = m_currentUri;
+        m_preparedUri.clear();
+        invalidateGaplessAdvanceLocked();
+    }
+    m_deferredDsdUri = uriForUrl(url);
+    m_directLabel = label;
+    m_waitingForOutput = true;
+    m_waitingForDirect = true;
+    m_resumeOnOutput = targetState == State::Playing;
+    updateState(m_resumeOnOutput ? State::Buffering : State::Paused);
+    publishOutputStatus();
+}
+
+void GStreamerPlaybackBackend::retryDirectDevice()
+{
+    if (m_waitingForOutput && m_waitingForDirect && m_resumeOnOutput) {
+        resume();
+    }
+}
+
+QVector<OutputEndpoint> GStreamerPlaybackBackend::sharedEndpoints(const QString &sinkChoice) const
+{
+    const QString factory = sharedSinkFactory(sinkChoice);
+    if (m_endpoints != nullptr && m_endpoints->running() && m_monitoredFactory == factory) {
+        return m_endpoints->endpoints();
+    }
+    QVector<OutputEndpoint> endpoints = OutputEndpointMonitor::probe(factory);
+    std::sort(endpoints.begin(), endpoints.end(), [](const OutputEndpoint &a, const OutputEndpoint &b) {
+        return a.label.localeAwareCompare(b.label) < 0;
+    });
+    return endpoints;
+}
+
+bool GStreamerPlaybackBackend::preferredEndpointRoutable() const
+{
+    return m_profile.mode == QStringLiteral("shared") && !m_dsdActive
+        && !m_profile.sharedEndpoint.isEmpty()
+        && streamTargetProperty(m_sinkFactory) != nullptr;
+}
+
+bool GStreamerPlaybackBackend::endpointAvailable(const QString &name) const
+{
+    return m_endpoints == nullptr || !m_endpoints->running() || m_endpoints->contains(name);
+}
+
+bool GStreamerPlaybackBackend::mustWaitForOutput() const
+{
+    return preferredEndpointRoutable() && !m_profile.sharedEndpointFallback
+        && !endpointAvailable(m_profile.sharedEndpoint);
+}
+
+void GStreamerPlaybackBackend::updateEndpointMonitor()
+{
+    // Only a preferred endpoint needs watching; the system route is the
+    // session manager's to follow.
+    const bool wanted = m_profile.mode == QStringLiteral("shared")
+        && !m_profile.sharedEndpoint.isEmpty()
+        && !OutputEndpointMonitor::providerFor(m_sinkFactory).isEmpty();
+    if (!wanted) {
+        if (m_endpoints != nullptr) {
+            m_endpoints->stop();
+        }
+        m_monitoredFactory.clear();
+        return;
+    }
+    if (m_endpoints == nullptr) {
+        m_endpoints = new OutputEndpointMonitor(this);
+        connect(m_endpoints, &OutputEndpointMonitor::endpointAdded,
+                this, &GStreamerPlaybackBackend::handleEndpointAdded);
+        connect(m_endpoints, &OutputEndpointMonitor::endpointRemoved,
+                this, &GStreamerPlaybackBackend::handleEndpointRemoved);
+    }
+    if (!m_endpoints->running() || m_monitoredFactory != m_sinkFactory) {
+        m_monitoredFactory = m_endpoints->start(m_sinkFactory) ? m_sinkFactory : QString();
+    }
+}
+
+void GStreamerPlaybackBackend::handleEndpointAdded(const QString &name)
+{
+    if (name != m_profile.sharedEndpoint || !preferredEndpointRoutable()) {
+        publishOutputStatus();
+        return;
+    }
+    {
+        QMutexLocker locker(&m_mutex);
+        m_streamTargetUtf8 = name.toUtf8();
+    }
+    if (m_waitingForOutput) {
+        m_waitingForOutput = false;
+        m_waitingForDirect = false;
+        const bool resumePlaying = std::exchange(m_resumeOnOutput, false);
+        if (!m_softPaused && m_playbin != nullptr) {
+            // A stream paused in place may sit where the server parked it.
+            moveOpenStreamTo(name);
+        }
+        if (resumePlaying) {
+            resume();
+        } else {
+            updateState(State::Paused);
+        }
+        publishOutputStatus();
+        return;
+    }
+    // A fallback stream may be playing elsewhere: bring it back. (pulsesink
+    // only records a target while no stream is open.)
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
+        setSinkTarget(name.toUtf8());
+    } else {
+        returnToPreferred();
+    }
+    publishOutputStatus();
+}
+
+void GStreamerPlaybackBackend::moveOpenStreamTo(const QString &sink)
+{
+    // pulsesink moves its live stream when given a target; a native stream
+    // is moved through the PipeWire metadata, as a mixer would. Only a stream
+    // that can be neither is reopened.
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
+        setSinkTarget(sink.toUtf8());
+    } else if (m_streamWatch == nullptr || !m_streamWatch->moveTo(sink)) {
+        if (m_state == State::Playing || m_state == State::Paused) {
+            reloadCurrentAtPosition(m_positionMs, m_state);
+        }
+    }
+}
+
+void GStreamerPlaybackBackend::handleEndpointRemoved(const QString &name)
+{
+    if (!m_routeOverride.isEmpty()
+        && (name == m_routeOverride || name == m_overrideFrom || name == m_profile.sharedEndpoint)) {
+        // A sink vanished around a move: the move may have been forced.
+        clearRouteOverride();
+        if (name != m_profile.sharedEndpoint) {
+            returnToPreferred();
+        }
+    }
+    if (name != m_profile.sharedEndpoint || !preferredEndpointRoutable()) {
+        publishOutputStatus();
+        return;
+    }
+    {
+        // Streams the sink reopens from now on take the system route.
+        QMutexLocker locker(&m_mutex);
+        m_streamTargetUtf8.clear();
+    }
+    if (!m_profile.sharedEndpointFallback) {
+        waitForPreferredEndpoint();
+    }
+    publishOutputStatus();
+}
+
+void GStreamerPlaybackBackend::waitForPreferredEndpoint()
+{
+    if (m_waitingForOutput || m_playbin == nullptr || !hasSource()) {
+        return;
+    }
+    if (m_softPaused) {
+        // Paused and released already; a resume will wait for the endpoint.
+        m_waitingForOutput = true;
+        m_resumeOnOutput = false;
+        return;
+    }
+    const bool wasPlaying = m_state == State::Playing
+        || (m_waitingForTargetState && m_targetState == State::Playing);
+    m_waitingForOutput = true;
+    m_resumeOnOutput = wasPlaying;
+    pauseInternal(/*release=*/true);
+}
+
+QString GStreamerPlaybackBackend::currentRouteNow() const
+{
+    if (m_audioSink == nullptr || m_softPaused) {
+        return {};
+    }
+    if (m_sinkFactory == QStringLiteral("pulsesink")) {
+        GstState state = GST_STATE_NULL;
+        gst_element_get_state(m_audioSink, &state, nullptr, 0);
+        if (state < GST_STATE_PAUSED) {
+            return {};
+        }
+        // Asks the server, so a move made a moment ago is already visible.
+        gchar *device = nullptr;
+        g_object_get(G_OBJECT(m_audioSink), "current-device", &device, nullptr);
+        const QString current = QString::fromUtf8(device);
+        g_free(device);
+        return current;
+    }
+    if (m_sinkFactory == QStringLiteral("pipewiresink") && m_streamWatch != nullptr) {
+        return m_streamWatch->linkedSink();
+    }
+    return {};
+}
+
+void GStreamerPlaybackBackend::checkCurrentRoute()
+{
+    noteObservedRoute(currentRouteNow());
+}
+
+void GStreamerPlaybackBackend::observeRouteBeforeClose()
+{
+    const QString current = currentRouteNow();
+    if (!current.isEmpty()) {
+        noteObservedRoute(current);
+    }
+}
+
+void GStreamerPlaybackBackend::noteObservedRoute(const QString &current)
+{
+    m_currentEndpoint = current;
+    QByteArray requested;
+    {
+        QMutexLocker locker(&m_mutex);
+        requested = m_streamTargetUtf8;
+    }
+    // Only a pinned stream stays where it was put unless someone moves it or
+    // its sink goes away; an unpinned one is the session manager's to route.
+    if (current.isEmpty() || requested.isEmpty() || !preferredEndpointRoutable()) {
+        publishOutputStatus();
+        return;
+    }
+    const QString asked = QString::fromUtf8(requested);
+    const QString from = m_lastRoute.isEmpty() ? asked : m_lastRoute;
+    m_lastRoute = current;
+    if (current == asked) {
+        publishOutputStatus();
+        return;
+    }
+    if (current == m_profile.sharedEndpoint) {
+        // Moved back onto the preference: nothing left to adopt.
+        clearRouteOverride();
+    } else if (current != m_routeOverride) {
+        m_routeOverride = current;
+        m_overrideFrom = from;
+        m_externalMoveTimer.start();
+    }
+    {
+        QMutexLocker locker(&m_mutex);
+        m_streamTargetUtf8 = current.toUtf8();
+    }
+    publishOutputStatus();
+}
+
+void GStreamerPlaybackBackend::clearRouteOverride()
+{
+    m_routeOverride.clear();
+    m_overrideFrom.clear();
+    m_externalMoveTimer.stop();
+    QMutexLocker locker(&m_mutex);
+    m_streamTargetUtf8 = streamTarget().toUtf8();
+}
+
+void GStreamerPlaybackBackend::returnToPreferred()
+{
+    const QString preferred = m_profile.sharedEndpoint;
+    if (!preferredEndpointRoutable() || !endpointAvailable(preferred) || m_currentEndpoint == preferred
+        || m_playbin == nullptr || m_softPaused || !(m_state == State::Playing || m_state == State::Paused)) {
+        return;
+    }
+    moveOpenStreamTo(preferred);
+}
+
+void GStreamerPlaybackBackend::confirmExternalMove()
+{
+    const QString candidate = m_routeOverride;
+    const QString from = m_overrideFrom;
+    if (candidate.isEmpty()) {
+        return;
+    }
+    if (m_endpoints == nullptr || !m_endpoints->running()) {
+        // Without the list of present sinks a deliberate move cannot be told
+        // from a forced one: keep following the stream where it went, but
+        // never make that the preference.
+        return;
+    }
+    // Deliberate only if the sink the stream left is still there (a sink
+    // that vanished pushed the stream away) and the new one is too.
+    const bool deliberate = preferredEndpointRoutable()
+        && m_endpoints->contains(from) && m_endpoints->contains(candidate);
+    m_routeOverride.clear();
+    m_overrideFrom.clear();
+    if (!deliberate) {
+        {
+            QMutexLocker locker(&m_mutex);
+            m_streamTargetUtf8 = streamTarget().toUtf8();
+        }
+        returnToPreferred();
+        publishOutputStatus();
+        return;
+    }
+    // Someone chose the other output. Request it from now on.
+    m_profile.sharedEndpoint = candidate;
+    m_profile.sharedEndpointLabel = m_endpoints->label(candidate);
+    {
+        QMutexLocker locker(&m_mutex);
+        m_streamTargetUtf8 = candidate.toUtf8();
+    }
+    emit sharedEndpointChosenExternally(candidate, m_profile.sharedEndpointLabel);
+    publishOutputStatus();
+}
+
+OutputStatus GStreamerPlaybackBackend::outputStatus() const
+{
+    OutputStatus status;
+    if (m_dsdActive || m_waitingForDirect || m_profile.mode == QStringLiteral("bit-perfect")) {
+        status.transport = QStringLiteral("ALSA");
+        status.route = m_waitingForOutput && m_waitingForDirect ? OutputStatus::Route::Waiting
+                                                               : OutputStatus::Route::Direct;
+        if (status.route == OutputStatus::Route::Waiting) {
+            status.preferredLabel = m_directLabel;
+        }
+        return status;
+    }
+    status.transport = transportLabel(m_sinkFactory);
+    if (m_profile.sink == QStringLiteral("auto") && m_sinkFactory == QStringLiteral("pulsesink")) {
+        status.transportNote = factoryExists("pipewiresink")
+            ? QStringLiteral("this build cannot follow PipeWire streams")
+            : QStringLiteral("the GStreamer PipeWire plugin is not installed");
+    } else if (m_profile.sink == QStringLiteral("auto") && m_sinkFactory == QStringLiteral("autoaudiosink")) {
+        status.transportNote = QStringLiteral("no GStreamer PipeWire or PulseAudio plugin is installed");
+    } else if (m_sinkFactory == QStringLiteral("pipewiresink")
+               && (m_streamWatch == nullptr || !m_streamWatch->running())) {
+        status.transportNote = QStringLiteral("mixer moves are not followed with this transport here");
+    }
+    // Only an open stream is linked anywhere.
+    const bool streamOpen = !m_softPaused && (m_state == State::Playing || m_state == State::Paused);
+    status.currentEndpoint = streamOpen ? m_currentEndpoint : QString();
+    if (m_endpoints != nullptr) {
+        status.currentLabel = m_endpoints->label(status.currentEndpoint);
+    }
+    if (m_profile.sharedEndpoint.isEmpty()) {
+        status.route = OutputStatus::Route::System;
+        return status;
+    }
+    status.preferredEndpoint = m_profile.sharedEndpoint;
+    status.preferredLabel = m_profile.sharedEndpointLabel;
+    if (m_endpoints != nullptr && m_endpoints->contains(m_profile.sharedEndpoint)) {
+        status.preferredLabel = m_endpoints->label(m_profile.sharedEndpoint);
+    }
+    if (!preferredEndpointRoutable()) {
+        status.route = OutputStatus::Route::Unsupported;
+        return status;
+    }
+    status.preferredAvailable = endpointAvailable(m_profile.sharedEndpoint);
+    if (m_waitingForOutput || (!status.preferredAvailable && !m_profile.sharedEndpointFallback)) {
+        status.route = OutputStatus::Route::Waiting;
+    } else if (!status.preferredAvailable) {
+        status.route = OutputStatus::Route::Fallback;
+    } else {
+        status.route = OutputStatus::Route::Preferred;
+    }
+    return status;
+}
+
+void GStreamerPlaybackBackend::publishOutputStatus()
+{
+    const OutputStatus status = outputStatus();
+    if (status == m_publishedStatus) {
+        return;
+    }
+    m_publishedStatus = status;
+    emit outputStatusChanged();
 }
 
 void GStreamerPlaybackBackend::queueGaplessAdvanceFromSink()
@@ -1287,6 +2055,7 @@ void GStreamerPlaybackBackend::updateState(State state)
         m_pollTimer.start();
     }
     emit stateChanged(m_state);
+    publishOutputStatus();
 }
 
 void GStreamerPlaybackBackend::resetTimeline(qint64 positionMs, qint64 durationMs)

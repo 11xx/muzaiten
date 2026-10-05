@@ -604,10 +604,36 @@ add_executable(test_gstreamer_playback
     test_gstreamer_playback.cpp
 )
 target_include_directories(test_gstreamer_playback PRIVATE ../src)
-target_link_libraries(test_gstreamer_playback PRIVATE muzaiten_player muzaiten_playback Qt6::Core Qt6::Test)
+target_link_libraries(test_gstreamer_playback PRIVATE muzaiten_player muzaiten_playback Qt6::Core Qt6::Test PkgConfig::GSTREAMER)
 target_compile_features(test_gstreamer_playback PRIVATE cxx_std_26)
 add_test(NAME test_gstreamer_playback COMMAND test_gstreamer_playback)
 set_tests_properties(test_gstreamer_playback PROPERTIES ENVIRONMENT "MUZAITEN_DEMO_SILENT_AUDIO=1")
+
+add_executable(test_audio_device_control
+    test_audio_device_control.cpp
+    AudioDeviceFixtures.h
+)
+target_include_directories(test_audio_device_control PRIVATE ../src)
+target_link_libraries(test_audio_device_control PRIVATE muzaiten_playback Qt6::Core Qt6::Test)
+target_compile_features(test_audio_device_control PRIVATE cxx_std_26)
+add_test(NAME test_audio_device_control COMMAND test_audio_device_control)
+
+add_executable(test_playback_profile_dialog
+    test_playback_profile_dialog.cpp
+)
+target_include_directories(test_playback_profile_dialog PRIVATE ../src)
+target_link_libraries(test_playback_profile_dialog PRIVATE muzaiten_ui_dialogs muzaiten_playback Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+target_compile_features(test_playback_profile_dialog PRIVATE cxx_std_26)
+add_test(NAME test_playback_profile_dialog COMMAND test_playback_profile_dialog)
+
+add_executable(test_shared_output_routing
+    test_shared_output_routing.cpp
+    PrivateAudioGraph.h
+)
+target_include_directories(test_shared_output_routing PRIVATE ../src)
+target_link_libraries(test_shared_output_routing PRIVATE muzaiten_playback Qt6::Core Qt6::Test PkgConfig::GSTREAMER)
+target_compile_features(test_shared_output_routing PRIVATE cxx_std_26)
+add_test(NAME test_shared_output_routing COMMAND test_shared_output_routing)
 
 add_executable(test_ipc_server
     test_ipc_server.cpp

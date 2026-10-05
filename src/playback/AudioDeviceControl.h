@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 #include <QVector>
 
+#include <functional>
 #include <optional>
 
 // Manual "takeover" of a sound card from the system audio server so a
@@ -40,6 +42,17 @@ struct DeviceState {
     }
 };
 
+// How this namespace reaches PipeWire: a graph snapshot (pw-dump JSON) and a
+// card profile switch (wpctl set-profile). Replaceable so tests run against
+// fixtures and never switch a real card.
+struct Tooling {
+    std::function<bool()> available;
+    std::function<std::optional<QByteArray>()> dump;
+    std::function<bool(int pwId, int profileIndex, QString *error)> setProfile;
+};
+// Install |tooling|; returns what it replaces.
+Tooling setTooling(Tooling tooling);
+
 // Whether the PipeWire tooling (pw-dump + wpctl) is present on this system.
 bool toolingAvailable();
 
@@ -53,6 +66,26 @@ std::optional<DeviceState> findByHwPath(const QString &hwPath);
 // Look up a card by its stable id (PipeWire `device.name`). Used to recover the
 // current hw:N for a remembered device after the index has drifted.
 std::optional<DeviceState> findByStableId(const QString &stableId);
+
+// The card a direct selection refers to right now. A selection with a stable
+// id names only the card that currently carries that id, wherever it is
+// numbered; its saved hw path is a cache and never authority, since another
+// card can take over that number. A selection without one (typed by hand, or
+// saved before ids were recorded) is looked up by its hw path.
+std::optional<DeviceState> findSelected(const QString &stableId, const QString &hwPath);
+
+// What a direct profile may open now.
+struct DirectTarget {
+    enum class Status {
+        Resolved,     // the stable id's card, at hwPath
+        Manual,       // no stable id: hwPath is the saved device string itself
+        Unavailable   // the stable id names no present card (or cannot be checked)
+    };
+    Status status = Status::Unavailable;
+    QString hwPath;
+    QString description;
+};
+DirectTarget resolveDirect(const QString &stableId, const QString &savedDevice);
 
 // Release `dev` from PipeWire (switch to the Off profile) so a direct ALSA
 // stream can open it. `error` is filled on failure.

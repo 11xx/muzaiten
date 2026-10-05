@@ -51,8 +51,25 @@ QtPlaybackBackend::QtPlaybackBackend(QObject *parent)
 
 void QtPlaybackBackend::setProfile(const PlaybackProfile &profile)
 {
-    Q_UNUSED(profile)
-    emit technicalInfoChanged(QStringLiteral("Qt Multimedia backend"));
+    m_profile = profile;
+    // Qt Multimedia always plays through the system's default output.
+    emit technicalInfoChanged(outputStatus().route == OutputStatus::Route::Unsupported
+                                  ? QStringLiteral("Qt Multimedia backend: cannot choose an output; "
+                                                   "playing through the system default")
+                                  : QStringLiteral("Qt Multimedia backend"));
+    emit outputStatusChanged();
+}
+
+OutputStatus QtPlaybackBackend::outputStatus() const
+{
+    OutputStatus status;
+    status.transport = QStringLiteral("Qt Multimedia");
+    status.preferredEndpoint = m_profile.mode == QStringLiteral("bit-perfect") ? QString() : m_profile.sharedEndpoint;
+    status.preferredLabel = status.preferredEndpoint.isEmpty() ? QString() : m_profile.sharedEndpointLabel;
+    const bool destinationConfigured = m_profile.mode == QStringLiteral("bit-perfect")
+        || !m_profile.sharedEndpoint.isEmpty();
+    status.route = destinationConfigured ? OutputStatus::Route::Unsupported : OutputStatus::Route::System;
+    return status;
 }
 
 void QtPlaybackBackend::play(const QUrl &url)
@@ -60,6 +77,7 @@ void QtPlaybackBackend::play(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
     m_player->setSource(url);
     m_player->play();
 }
@@ -69,6 +87,7 @@ void QtPlaybackBackend::loadPaused(const QUrl &url)
     if (url.isEmpty()) {
         return;
     }
+    noteTransportRequest();
     m_player->setSource(url);
     m_player->pause();
 }
@@ -90,11 +109,13 @@ void QtPlaybackBackend::resume()
 
 void QtPlaybackBackend::stop()
 {
+    noteTransportRequest();
     m_player->stop();
 }
 
 void QtPlaybackBackend::seek(qint64 positionMs)
 {
+    noteTransportRequest();
     m_player->setPosition(positionMs);
 }
 

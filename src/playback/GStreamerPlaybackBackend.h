@@ -5,7 +5,13 @@
 #include <QMutex>
 #include <QTimer>
 
+#include <atomic>
+
+class OutputEndpointMonitor;
+class PipeWireStreamWatch;
+
 using GstElement = struct _GstElement;
+using GstEvent = struct _GstEvent;
 using GstMessage = struct _GstMessage;
 using GstPad = struct _GstPad;
 
@@ -34,6 +40,18 @@ public:
     void onGaplessTrackAdvanced() override;
     void setOutputMode(OutputMode mode, const QString &dsdDevice = QString()) override;
     DsdSupport dsdSupport() const override;
+    bool supportsSharedEndpoint() const override { return true; }
+    OutputStatus outputStatus() const override;
+    QVector<OutputEndpoint> sharedEndpoints(const QString &sinkChoice) const override;
+    void setDirectDeviceCheck(DirectDeviceCheck check) override { m_directCheck = std::move(check); }
+    void retryDirectDevice() override;
+
+    // The sink factory a shared transport choice ("auto", "pipewire",
+    // "pulse", "alsa") resolves to with the installed plugins, or empty.
+    static QString sharedSinkFactory(const QString &sinkChoice);
+    // The property through which a shared sink factory names the endpoint
+    // its stream asks for, or nullptr for sinks without one.
+    static const char *streamTargetProperty(const QString &factory);
 
 private:
     static void aboutToFinishCallback(GstElement *playbin, void *userData);
@@ -51,6 +69,18 @@ private:
 
     void rebuildPipeline();
     bool configureSink();
+    void releaseAudioSink();
+    // The endpoint the next shared stream must request, or empty to leave the
+    // choice to the session manager. Never derived from the sink element's own
+    // memory of where its previous stream ended up.
+    QString streamTarget() const;
+    // Write streamTarget() into the sink while it has no open stream: setting
+    // the target on a live PulseAudio stream would move it instead.
+    void applyStreamTarget();
+    // Streaming-thread half of applyStreamTarget(): a format change reopens
+    // the PulseAudio stream inside the sink, so release it one step early and
+    // retarget before the sink reconnects.
+    void retargetBeforeFormatChange(GstElement *sink, GstEvent *capsEvent);
     void poll();
     void pollBus();
     void pollPosition();
@@ -80,6 +110,50 @@ private:
     bool tryRecoverFromStreamError();
     void handleSeekWatchdogTimeout();
     void clearSeekInFlight();
+    // --- Preferred shared endpoint -----------------------------------------
+    // Whether the profile names an endpoint this transport can request.
+    bool preferredEndpointRoutable() const;
+    // Present per the endpoint monitor; assumed present when nothing watches.
+    bool endpointAvailable(const QString &name) const;
+    // The preferred endpoint is missing and the profile waits for it.
+    bool mustWaitForOutput() const;
+    void updateEndpointMonitor();
+    void handleEndpointAdded(const QString &name);
+    void handleEndpointRemoved(const QString &name);
+    // Hold the loaded source, released, until the preferred endpoint returns.
+    void waitForPreferredEndpoint();
+    // Where the open stream is linked right now, or empty when none is open
+    // or the transport cannot tell.
+    QString currentRouteNow() const;
+    // Re-read the route after the sink announced a change to its stream.
+    void checkCurrentRoute();
+    // Account for the route the stream was seen on. A pinned stream found
+    // somewhere other than where it was asked to go was moved outside the
+    // app: the following streams ask for that sink at once, and the move
+    // becomes the preference once confirmExternalMove() finds it deliberate.
+    void noteObservedRoute(const QString &current);
+    // Read the route of a stream about to close, so a move made just before
+    // carries into the stream that replaces it.
+    void observeRouteBeforeClose();
+    void confirmExternalMove();
+    void clearRouteOverride();
+    // Put an open stream back on the available preferred endpoint.
+    void returnToPreferred();
+    // Move the open stream to |sink| without reopening it when the transport
+    // allows; otherwise reopen it there at its position.
+    void moveOpenStreamTo(const QString &sink);
+    void setSinkTarget(const QByteArray &target);
+    // m_directCheck for the profile's card; |savedDevice| is its last known
+    // number. Fills in the saved label for an absent card.
+    DirectDevice checkDirectDevice(const QString &savedDevice) const;
+    // Re-resolve the direct card before opening it; false when it is absent.
+    // A card found under another number is written into the sink, which is
+    // reopened since alsasink holds its PCM from READY.
+    bool prepareDirectOpen();
+    // Hold a native DSD start until its device is present.
+    void deferDsdStart(const QUrl &url, State targetState, const QString &label);
+    void publishOutputStatus();
+    void pauseInternal(bool release);
     void beginTargetTransition(State targetState);
     void finishTargetTransition();
     void handleTargetTransitionTimeout();
@@ -136,6 +210,51 @@ private:
     quint64 m_gaplessGeneration = 0;
     GstPad *m_audioSinkPad = nullptr;
     unsigned long m_audioSinkProbeId = 0;
+    // The playbin's audio sink (reference held) and the factory it came from.
+    GstElement *m_audioSink = nullptr;
+    QString m_sinkFactory;
+    // streamTarget() as the streaming thread reads it; guarded by m_mutex.
+    QByteArray m_streamTargetUtf8;
+    // Serializes this backend's writes of the sink's target, which happen on
+    // the GUI thread and, for format reopens, on the streaming thread.
+    QMutex m_sinkTargetMutex;
+    // A card returned from exclusive use is pinned for the first stream only:
+    // it dodges a transient default while the card's sink is rebuilt, and must
+    // not outlive that into a lasting choice.
+    QString m_handoffTarget;
+
+    OutputEndpointMonitor *m_endpoints = nullptr;
+    QString m_monitoredFactory;
+    // Follows a native PipeWire stream's links; pulsesink reports its own.
+    // The node name is this backend's, kept across reconnects.
+    PipeWireStreamWatch *m_streamWatch = nullptr;
+    QString m_nativeNodeName;
+    // Playback is held until the preferred endpoint returns, resuming then
+    // only when the last transport intent was to play.
+    bool m_waitingForOutput = false;
+    bool m_resumeOnOutput = false;
+    // The wait is for the direct card rather than a shared endpoint.
+    bool m_waitingForDirect = false;
+    DirectDeviceCheck m_directCheck;
+    QString m_directLabel;
+    QString m_deferredDsdUri;
+    // Where the open stream is linked, as last read.
+    QString m_currentEndpoint;
+    unsigned long m_currentDeviceHandler = 0;
+    QTimer m_routeCheckTimer;
+    // The sink a mixer moved a pinned stream to, requested by every stream
+    // until it is adopted as the preference or found to be a fallback; and
+    // the sink the stream left. A move is deliberate only if that sink is
+    // still present a second later: a sink that vanished forced the move.
+    QString m_routeOverride;
+    QString m_overrideFrom;
+    QTimer m_externalMoveTimer;
+    // The last route seen for the current pinned stream.
+    QString m_lastRoute;
+    // Bumped whenever the sink is created or released. A route the streaming
+    // thread queued for an older sink is dropped on delivery.
+    std::atomic<quint64> m_sinkRun{0};
+    OutputStatus m_publishedStatus;
     double m_volume = 1.0;
     QTimer m_transitionTimer;
 

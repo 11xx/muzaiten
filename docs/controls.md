@@ -67,10 +67,12 @@ and are not restored after restart.
   completed work — running the analyzer again resumes where it stopped —
   and changing the power during a scan applies immediately by restarting
   the scan at the new level.
-- `Playback > Output profile…` — output device, software volume,
-  resampling, sink release on pause, preload. Native bit-perfect DSD
+- `Playback > Output profile…` — transport and output, direct device,
+  software volume, resampling, sink release on pause, read-ahead. Native
+  bit-perfect DSD
   (`.dsf`) needs a direct-capable device selected here with resampling
   off; with **Allow resampling** DSD decodes to PCM for shared output.
+  See [Audio output](#audio-output) for how the destination is chosen.
 - `Playback > Resume behavior…` — whether position and playback state are
   restored across launches.
 - `Radio > Anchor for new sessions` — choose `Stay near the starting song` or
@@ -107,6 +109,71 @@ Both scrobbling entries open one window with two tabs, `Scrobblers` and
   picked in one visit; the `Scrobbled` column, the summary, and the queue,
   retry and clear actions all apply to exactly what is picked. The choice
   lasts as long as the window.
+
+## Audio output
+
+**Shared** output plays through the system sound server (PipeWire, or
+PulseAudio). The session manager chooses the destination of every stream
+muzaiten opens: it follows the system default output and remembers where
+muzaiten was last moved in a mixer such as pavucontrol or Wiremix. A move
+made while a track plays holds for the tracks after it, including across
+pauses, sample-rate changes between tracks and error recovery.
+
+When an output disappears, the sound server moves playback to another one.
+muzaiten never treats that fallback as a choice: the next stream it opens
+asks for no particular output, so the session manager can put playback back
+once the original output returns.
+
+In `Playback > Output profile…`, the **Shared** side has two separate
+choices. **Transport** is how muzaiten talks to the sound server: Auto uses
+GStreamer's PipeWire plugin when it is installed (and the build can follow
+PipeWire streams) and PulseAudio otherwise;
+the ALSA transport cannot choose an output. **Output** is where shared audio
+goes: `System managed` (the behavior above), or one listed playback output,
+virtual outputs such as an equalizer included. A chosen output is kept by its
+stable name, so it survives being unplugged, switched off or renumbered, and
+other devices appearing or becoming the default do not move playback off it.
+It affects muzaiten only; system defaults are never changed. The saved
+output applies from startup, including when muzaiten starts in the tray and
+plays before its window opens.
+
+While a chosen output is missing, playback pauses at its position and resumes
+there when the output returns, if it was playing; pausing, seeking or picking
+another track meanwhile is respected. With **Play through the system output
+while it is missing** checked, playback continues on the system-managed output
+instead and moves back when the chosen one returns. When the output vanishes
+mid-track, the sound server can play a moment of audio elsewhere before
+playback pauses. Choosing another output meanwhile continues the held track
+there, at its position, playing or paused as it was. A missing output stays
+selected in the dialog, marked `(unavailable)`; a fallback never replaces it.
+
+Moving muzaiten's stream to another output in a mixer takes effect at once
+for every stream that follows, including the next track and a sample-rate
+change, and a second later becomes the new choice, saved as if picked in the
+dialog, also while muzaiten plays from the tray without its window. A move the sound server made because the output the stream was on
+disappeared is a fallback and never becomes the choice. Both transports
+see where the stream is linked: PulseAudio reports it, and with the PipeWire
+transport muzaiten follows its own stream's links in the PipeWire graph. A
+build without PipeWire support cannot do the latter, so there Auto uses the
+PulseAudio transport, and an explicit PipeWire choice says in the status line
+that mixer moves are not followed.
+
+**Bit-perfect** output opens one ALSA card directly. A card picked from the
+list is remembered by its stable identity rather than its number (`hw:N`),
+which changes across reboots and replugs and can pass to another card. Before
+every open, retry, takeover or release, muzaiten looks the card up by that
+identity. While it is absent, playback waits at its position, as for a missing
+shared output, and resumes when the card returns under whatever number it now
+has; muzaiten never opens, takes over or releases the card that took its old
+number. The dialog lists an absent card as `(unavailable)` and keeps it
+selected. A device typed by hand (such as `hw:CARD=Name,DEV=0`), or saved
+before identities were recorded, is opened exactly as written. Native DSD
+playback uses the same card under the same rule.
+
+The line under both sides reports the transport in use (and why Auto chose
+it), where playback is going, and whether it is waiting or falling back. A
+waiting or falling-back output also shows in the status bar, and
+`muzaitenctl status` reports it (see [cli.md](cli.md)).
 
 ## File explorers
 

@@ -196,6 +196,22 @@ void printStatus(const QJsonObject &status)
     if (!quality.isEmpty()) {
         std::printf("%s\n", qPrintable(quality.join(QStringLiteral("  "))));
     }
+
+    // Only an output that needs attention earns a line.
+    const QJsonObject output = status.value(QStringLiteral("output")).toObject();
+    const QString route = output.value(QStringLiteral("route")).toString();
+    QString preferred = output.value(QStringLiteral("preferred_label")).toString();
+    if (preferred.isEmpty()) {
+        preferred = output.value(QStringLiteral("preferred")).toString();
+    }
+    if (route == QStringLiteral("waiting")) {
+        std::printf("output: waiting for %s\n", qPrintable(preferred));
+    } else if (route == QStringLiteral("fallback")) {
+        std::printf("output: %s missing, playing through the system output\n", qPrintable(preferred));
+    } else if (route == QStringLiteral("unsupported")) {
+        std::printf("output: %s cannot use the chosen output\n",
+                    qPrintable(output.value(QStringLiteral("transport")).toString()));
+    }
 }
 
 // Returns -1 on parse failure. Accepts "90", "1:30"; a leading +/- marks the

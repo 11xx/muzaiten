@@ -24,9 +24,11 @@ public:
     bool hasSource() const override;
     qint64 position() const override;
     qint64 duration() const override;
+    OutputStatus outputStatus() const override;
 
 private:
     QAudioOutput *m_audioOutput = nullptr;
     QMediaPlayer *m_player = nullptr;
     State m_state = State::Stopped;
+    PlaybackProfile m_profile;
 };

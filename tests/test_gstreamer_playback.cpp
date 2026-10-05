@@ -1,4 +1,6 @@
 #include "playback/GStreamerPlaybackBackend.h"
+#include "playback/OutputEndpointMonitor.h"
+#include "playback/QtPlaybackBackend.h"
 #include "player/PlayerCore.h"
 
 #include <QDataStream>
@@ -10,6 +12,8 @@
 #include <QtTest/QtTest>
 
 #include <cmath>
+
+#include <gst/gst.h>
 
 namespace {
 
@@ -59,6 +63,140 @@ private slots:
     void cleanupTestCase()
     {
         qunsetenv("MUZAITEN_DEMO_SILENT_AUDIO");
+    }
+
+    // What the native PipeWire transport is given, checked without needing
+    // its plugin: the endpoint goes in target-object and endpoints come from
+    // PipeWire's own device provider. Auto never claims a missing plugin.
+    void transportsNameEndpointsTheirOwnWay()
+    {
+        QCOMPARE(QByteArray(GStreamerPlaybackBackend::streamTargetProperty(QStringLiteral("pipewiresink"))),
+                 QByteArray("target-object"));
+        QCOMPARE(QByteArray(GStreamerPlaybackBackend::streamTargetProperty(QStringLiteral("pulsesink"))),
+                 QByteArray("device"));
+        QVERIFY(GStreamerPlaybackBackend::streamTargetProperty(QStringLiteral("alsasink")) == nullptr);
+        QCOMPARE(OutputEndpointMonitor::providerFor(QStringLiteral("pipewiresink")),
+                 QStringLiteral("pipewiredeviceprovider"));
+        QCOMPARE(OutputEndpointMonitor::providerFor(QStringLiteral("pulsesink")),
+                 QStringLiteral("pulsedeviceprovider"));
+        QVERIFY(OutputEndpointMonitor::providerFor(QStringLiteral("alsasink")).isEmpty());
+
+        gst_init(nullptr, nullptr);
+        GstElementFactory *native = gst_element_factory_find("pipewiresink");
+        const QString autoFactory = GStreamerPlaybackBackend::sharedSinkFactory(QStringLiteral("auto"));
+        if (native != nullptr) {
+            gst_object_unref(native);
+            QCOMPARE(autoFactory, QStringLiteral("pipewiresink"));
+        } else {
+            QVERIFY(GStreamerPlaybackBackend::sharedSinkFactory(QStringLiteral("pipewire")).isEmpty());
+            QVERIFY(autoFactory != QStringLiteral("pipewiresink"));
+        }
+    }
+
+    void outputStatusIsHonestAboutDestinations()
+    {
+        // The silent test sink cannot route to an endpoint: a configured one
+        // is reported as unsupported, never as honored.
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        backend.setProfile(profile);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::System);
+        QCOMPARE(backend.outputStatus().transport, QStringLiteral("silent"));
+        profile.sharedEndpoint = QStringLiteral("some_sink");
+        profile.sharedEndpointLabel = QStringLiteral("Some sink");
+        backend.setProfile(profile);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Unsupported);
+        QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Some sink"));
+
+        QtPlaybackBackend qtBackend;
+        QVERIFY(!qtBackend.supportsSharedEndpoint());
+        QSignalSpy info(&qtBackend, &PlaybackBackend::technicalInfoChanged);
+        qtBackend.setProfile(profile);
+        QCOMPARE(qtBackend.outputStatus().route, OutputStatus::Route::Unsupported);
+        QVERIFY(info.last().first().toString().contains(QStringLiteral("cannot choose an output")));
+        profile.sharedEndpoint.clear();
+        qtBackend.setProfile(profile);
+        QCOMPARE(qtBackend.outputStatus().route, OutputStatus::Route::System);
+    }
+
+    // A direct open asks which card is selected right now and waits while
+    // it is absent, resuming only the intent the user left it with.
+    void directOpenWaitsForItsCard()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("direct.wav"));
+        QVERIFY(writeToneWav(path, 440.0, 5000));
+
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.mode = QStringLiteral("bit-perfect");
+        profile.sink = QStringLiteral("alsa");
+        profile.device = QStringLiteral("hw:2");
+        profile.deviceId = QStringLiteral("alsa_card.a");
+        backend.setProfile(profile);
+        bool present = false;
+        int checks = 0;
+        backend.setDirectDeviceCheck([&](const QString &stableId, const QString &) {
+            if (stableId != QStringLiteral("alsa_card.a")) {
+                return PlaybackBackend::DirectDevice{};
+            }
+            ++checks;
+            PlaybackBackend::DirectDevice device;
+            device.available = present;
+            device.hwPath = present ? QStringLiteral("hw:3") : QString();
+            device.label = QStringLiteral("Card A");
+            return device;
+        });
+
+        backend.play(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Waiting);
+        QCOMPARE(backend.outputStatus().preferredLabel, QStringLiteral("Card A"));
+        backend.retryDirectDevice();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+
+        present = true;
+        backend.retryDirectDevice();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 5000);
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Direct);
+
+        // Bit-perfect pauses release the card, so a resume checks it again.
+        backend.pause();
+        present = false;
+        const int before = checks;
+        backend.resume();
+        QVERIFY(checks > before);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        backend.pause();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        present = true;
+        backend.retryDirectDevice();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 5000);
+        backend.stop();
+    }
+
+    void nativeDsdStartWaitsForItsCard()
+    {
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.deviceId = QStringLiteral("alsa_card.a");
+        backend.setProfile(profile);
+        backend.setDirectDeviceCheck([](const QString &, const QString &) {
+            return PlaybackBackend::DirectDevice{};
+        });
+        backend.setOutputMode(PlaybackBackend::OutputMode::NativeDsd, QStringLiteral("hw:2"));
+        backend.play(QUrl::fromLocalFile(QStringLiteral("/nonexistent/track.dsf")));
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QVERIFY(backend.hasSource());
+        QCOMPARE(backend.outputStatus().route, OutputStatus::Route::Waiting);
+        backend.resume();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        backend.stop();
+        QCOMPARE(backend.state(), PlaybackBackend::State::Stopped);
+        QVERIFY(!backend.hasSource());
     }
 
     void shortSuccessorCannotCancelPendingHandoff()
