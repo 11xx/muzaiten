@@ -279,8 +279,8 @@ Caveats:
 
 ## Local feature-pack format
 
-`muzaiten-features pack export|import FILE` exchanges existing scalar group
-rows without copying a database. Version 1 is UTF-8 NDJSON: one header object
+`muzaiten-features pack export|import FILE` exchanges existing scalar
+analysis between feature stores without copying a database. Version 1 is UTF-8 NDJSON: one header object
 on the first line, followed by exactly the declared number of record objects.
 Every line, including the last, ends in a newline. The header contains exactly:
 
@@ -290,7 +290,9 @@ Every line, including the last, ends in a newline. The header contains exactly:
 
 Each record contains exactly `decode_hash`, `extractor`, `version` and
 `scalars`. `decode_hash` is 64 lowercase SHA-256 hex digits for the source
-group's lexicographically first successful path. `extractor` and `version`
+group's representative, its lexicographically first successful path. The
+other three fields come from that file's own `file_features` row, so a record
+always describes the audio its hash names. `extractor` and `version`
 are nonempty ASCII tokens of at most 128 characters using letters, digits,
 hyphens, underscores and periods. The `scalars` object requires all nine
 columns: `tempo_bpm`, `loudness_lufs`, `loudness_std_db`,
@@ -307,9 +309,13 @@ UTF-8, malformed or truncated lines, invalid values and record-count
 disagreements are rejected before opening the store. A header count detects
 truncation at a complete record boundary.
 
-Export emits one record per successful group with a valid representative
-hash and a current `muzaiten-dsp` scalar row. Missing or stale rows are
-counted as skipped; export never invokes extraction. Ambiguous representative
+Export emits one record per content group whose representative has a current
+`muzaiten-dsp` row in `file_features`. It never exports the group row: a group
+keeps its id and row while its membership changes, so that row can hold an
+earlier representative's analysis. Groups whose representative row is missing
+or stale are counted as skipped, as are rows whose hash or values break the
+record rules above; those are also counted as `invalid`. Export never invokes
+extraction. Ambiguous representative
 hashes require repairing the identity store with refresh before export.
 Import requires an existing schema-5 store and performs no schema migration.
 Refresh identity first so the recipient's hashes describe its current audio.
@@ -335,8 +341,9 @@ Import also reports `destination_groups`, `destination_unmatched_groups`,
 `destination_files` and `destination_unmatched_files`. Unmatched groups have
 no compatible incoming representative record; unmatched files have no exact
 hash in a compatible incoming record, regardless of group membership.
-Export adds `exported` (would export during dry-run) and uses `skipped` for
-groups without exportable current rows.
+Export adds `exported` (would export during dry-run) and `invalid`, and uses
+`skipped` for groups without an exportable representative row; `invalid` is
+the subset of `skipped` whose local hash or values break the record rules.
 
 Version 1 has no optional identifier or embedding section. It excludes paths,
 filenames, file sizes, mtimes, analysis times, internal content-group IDs,

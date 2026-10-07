@@ -126,6 +126,18 @@ void validateToken(const QJsonValue &value)
     }
 }
 
+bool validScalar(const QString &key, const QJsonValue &scalar)
+{
+    if (scalar.isNull()) {
+        return true;
+    }
+    const double number = scalar.toDouble();
+    const bool unitInterval = key == QLatin1String("spectral_flatness_mean")
+        || key == QLatin1String("zero_crossing_rate") || key == QLatin1String("energy");
+    return scalar.isDouble() && std::isfinite(number)
+        && (key == QLatin1String("loudness_lufs") || number >= 0.0) && (!unitInterval || number <= 1.0);
+}
+
 void validateRecord(const QJsonObject &record)
 {
     exactKeys(record, {QStringLiteral("decode_hash"), QStringLiteral("extractor"),
@@ -143,15 +155,7 @@ void validateRecord(const QJsonObject &record)
     const QJsonObject scalars = value.toObject();
     exactKeys(scalars, QSet<QString>(scalarKeys.begin(), scalarKeys.end()));
     for (const QString &key : scalarKeys) {
-        const QJsonValue scalar = scalars.value(key);
-        if (scalar.isNull()) {
-            continue;
-        }
-        const double number = scalar.toDouble();
-        if (!scalar.isDouble() || !std::isfinite(number)
-            || (key != QLatin1String("loudness_lufs") && number < 0.0)
-            || ((key == QLatin1String("spectral_flatness_mean") || key == QLatin1String("zero_crossing_rate")
-                 || key == QLatin1String("energy")) && number > 1.0)) {
+        if (!validScalar(key, scalars.value(key))) {
             fail(2, QStringLiteral("Invalid scalar value: %1.").arg(key));
         }
     }
@@ -246,10 +250,15 @@ void execute(QSqlQuery &query)
     }
 }
 
+// A content group seen through its representative, the lexicographically first
+// successful path. `record` is that file's own per-file analysis, so its scalars
+// always describe the audio behind `hash`, whichever file filled the group row.
 struct Group {
     qint64 id;
     QString hash;
     bool hasFeatures;
+    bool hasAnalysis;
+    bool validAnalysis;
     QJsonObject record;
 };
 
@@ -263,33 +272,33 @@ QList<Group> loadGroups(QSqlDatabase db)
     }
     QSqlQuery query(db);
     query.prepare(QStringLiteral(
-        "SELECT r.content_group_id, f.decode_hash, feat.content_group_id, feat.extractor, feat.version, %1 "
+        "SELECT r.content_group_id, f.decode_hash, feat.content_group_id IS NOT NULL, ff.path IS NOT NULL, ff.extractor, ff.version, %1 "
         "FROM (SELECT content_group_id, MIN(path) AS path FROM files "
         "      WHERE status = 'ok' AND content_group_id IS NOT NULL GROUP BY content_group_id) r "
         "JOIN files f ON f.path = r.path "
         "LEFT JOIN features feat ON feat.content_group_id = r.content_group_id "
-        "ORDER BY f.decode_hash, r.content_group_id").arg(QStringLiteral("feat.") + scalarKeys.join(QStringLiteral(", feat."))));
+        "LEFT JOIN file_features ff ON ff.path = r.path "
+        "ORDER BY f.decode_hash, r.content_group_id").arg(QStringLiteral("ff.") + scalarKeys.join(QStringLiteral(", ff."))));
     execute(query);
     QList<Group> groups;
     while (query.next()) {
+        const QString hash = query.value(1).toString();
+        bool valid = validHash(hash);
         QJsonObject scalars;
         for (qsizetype i = 0; i < scalarKeys.size(); ++i) {
-            const QVariant value = query.value(static_cast<int>(i) + 5);
-            if (value.isNull()) {
-                scalars.insert(scalarKeys.at(i), QJsonValue(QJsonValue::Null));
-            } else {
+            const QVariant value = query.value(static_cast<int>(i) + 6);
+            QJsonValue scalar(QJsonValue::Null);
+            if (!value.isNull()) {
                 bool ok = false;
                 const double number = value.toDouble(&ok);
-                if (!ok || !std::isfinite(number)) {
-                    fail(4, QStringLiteral("Feature store contains an invalid scalar: %1.").arg(scalarKeys.at(i)));
-                }
-                scalars.insert(scalarKeys.at(i), number);
+                scalar = ok ? QJsonValue(number) : QJsonValue(QJsonValue::Undefined);
             }
+            valid = valid && validScalar(scalarKeys.at(i), scalar);
+            scalars.insert(scalarKeys.at(i), scalar);
         }
-        const QString hash = query.value(1).toString();
-        groups.append(Group{query.value(0).toLongLong(), hash, !query.value(2).isNull(),
-            {{QStringLiteral("decode_hash"), hash}, {QStringLiteral("extractor"), query.value(3).toString()},
-             {QStringLiteral("version"), query.value(4).toString()}, {QStringLiteral("scalars"), scalars}}});
+        groups.append(Group{query.value(0).toLongLong(), hash, query.value(2).toBool(), query.value(3).toBool(), valid,
+            {{QStringLiteral("decode_hash"), hash}, {QStringLiteral("extractor"), query.value(4).toString()},
+             {QStringLiteral("version"), query.value(5).toString()}, {QStringLiteral("scalars"), scalars}}});
     }
     return groups;
 }
@@ -445,12 +454,18 @@ QJsonObject run(QStringList arguments)
     int mismatched = 0;
     int incompatible = 0;
     int existing = 0;
+    int invalid = 0;
     int adopted = 0;
     if (operation == QLatin1String("export")) {
         QList<QJsonObject> records;
         QSet<QString> hashes;
         for (const Group &group : groups) {
-            if (!group.hasFeatures || !compatible(group.record) || !validHash(group.hash)) {
+            if (!group.hasAnalysis || !compatible(group.record)) {
+                ++skipped;
+                continue;
+            }
+            if (!group.validAnalysis) {
+                ++invalid;
                 ++skipped;
                 continue;
             }
@@ -463,6 +478,7 @@ QJsonObject run(QStringList arguments)
         writePack(path, records, replace, dryRun);
         report.insert(QStringLiteral("records"), records.size());
         report.insert(QStringLiteral("exported"), records.size());
+        report.insert(QStringLiteral("invalid"), invalid);
     } else {
         QHash<QString, QList<Group>> byHash;
         for (const Group &group : groups) {
@@ -529,7 +545,11 @@ QJsonObject run(QStringList arguments)
         out << contentsDescription() << '\n' << operation << (dryRun ? " preview" : "")
             << ": records=" << report.value(QStringLiteral("records")).toInt()
             << " adopted=" << adopted << " skipped=" << skipped << " mismatched=" << mismatched
-            << " incompatible=" << incompatible << " existing=" << existing << '\n';
+            << " incompatible=" << incompatible << " existing=" << existing;
+        if (operation == QLatin1String("export")) {
+            out << " invalid=" << invalid;
+        }
+        out << '\n';
         if (operation == QLatin1String("import")) {
             out << "Destination: groups=" << groups.size()
                 << " unmatched_groups=" << report.value(QStringLiteral("destination_unmatched_groups")).toInt()

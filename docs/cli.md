@@ -196,8 +196,11 @@ muzaiten-features pack import scalars.ndjson [--features PATH] [--dry-run] [--re
 data directory supplies `features.sqlite`. Both operations require an
 existing schema-5 store and use the native feature-writer lock. Run
 `muzaiten-features refresh --stage identity --no-semantic` before importing
-to establish current local audio hashes. Export reads existing current rows
-without analyzing audio, invoking a provider or using the network.
+to establish current local audio hashes. Export reads each group
+representative's own current per-file analysis, which identity refresh
+writes, without analyzing audio, invoking a provider or using the network.
+Groups without that analysis are skipped, and local rows whose hash or values
+fail pack validation are skipped and counted as `invalid`.
 
 `--dry-run` previews the fully validated operation without writing feature
 rows or a pack file. `--replace` permits overwriting an existing export

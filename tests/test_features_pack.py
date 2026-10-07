@@ -33,6 +33,10 @@ if EVIDENCE:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
 # CTest reports this exit status as a skip.
 SKIP = 77
+SCALAR_KEYS = ["tempo_bpm", "loudness_lufs", "loudness_std_db", "spectral_centroid_mean_hz",
+               "spectral_centroid_std_hz", "spectral_flatness_mean", "zero_crossing_rate",
+               "onset_rate_hz", "energy"]
+SCALARS = ", ".join(SCALAR_KEYS)
 
 
 def missing_tools():
@@ -296,18 +300,67 @@ class FeaturesPackTest(unittest.TestCase):
         with database(self.store) as db:
             self.assertEqual(db.execute("SELECT version FROM features").fetchone()[0], "muzaiten-dsp-v2")
 
-    def test_export_skips_missing_and_stale_rows(self):
-        destination = self.work / "fresh-only.ndjson"
-        empty = json.loads(pack(self.b, "export", destination).stdout)
-        self.assertEqual((empty["records"], empty["skipped"]), (0, 3))
-        no_op = json.loads(pack(self.b, "import", destination).stdout)
-        self.assertEqual(no_op["adopted"], 0)
+    def test_export_uses_the_representatives_own_analysis(self):
+        # A fingerprint-matched sibling at a lower path becomes the representative
+        # of a group whose current row still holds the original file's analysis.
+        root = self.work / "D"
+        (root / "audio").mkdir(parents=True)
+        shutil.copyfile(self.a / "audio/original.flac", root / "audio/original.flac")
+        create_library(root, [("original.flac", "")], "Electronic")
+        refresh(root)
+        sibling = root / "audio/0-reencoded.mp3"
+        shutil.copyfile(self.b / "audio/reencoded.mp3", sibling)
+        stat = sibling.stat()
+        with database(root / "data/library.sqlite") as db:
+            db.execute("INSERT INTO tracks VALUES(?, ?, ?, 0, '', ?, ?, ?, '')",
+                       (str(sibling), int(stat.st_mtime), stat.st_size, sibling.name, root.name, "Electronic"))
+        refresh(root)
+        with database(root / "data/features.sqlite") as db:
+            self.assertEqual(db.execute("SELECT COUNT(DISTINCT content_group_id) FROM files").fetchone()[0], 1)
+            group_row = db.execute(f"SELECT {SCALARS} FROM features").fetchone()
+            sibling_hash, original_hash = (
+                db.execute("SELECT decode_hash FROM files WHERE path=?", (str(path),)).fetchone()[0]
+                for path in (sibling, root / "audio/original.flac"))
+        with database(self.c / "data/features.sqlite") as oracle:
+            fresh = oracle.execute(f"SELECT {SCALARS} FROM features feat JOIN files f ON "
+                                   "f.content_group_id=feat.content_group_id WHERE f.decode_hash=?",
+                                   (sibling_hash,)).fetchone()
+        self.assertNotEqual(group_row, fresh, "the group row must still describe the original file")
+        exported = self.work / "representative.ndjson"
+        report = json.loads(pack(root, "export", exported).stdout)
+        self.assertEqual((report["exported"], report["skipped"]), (1, 0))
+        records = [json.loads(line) for line in exported.read_bytes().splitlines()[1:]]
+        self.assertEqual([record["decode_hash"] for record in records], [sibling_hash])
+        self.assertNotIn(original_hash.encode(), exported.read_bytes())
+        self.assertEqual(tuple(records[0]["scalars"][key] for key in SCALAR_KEYS), fresh)
+
+    def test_export_skips_and_counts_unusable_local_rows(self):
+        store = self.work / "unusable.sqlite"
+        shutil.copyfile(self.a / "data/features.sqlite", store)
+        destination = self.work / "unusable.ndjson"
+
+        def export():
+            report = json.loads(pack(self.a, "export", destination, "--replace", "--features", store).stdout)
+            return report["exported"], report["skipped"], report["invalid"]
+
+        with database(store) as db:
+            original_hash = db.execute("SELECT decode_hash FROM files WHERE path LIKE '%original.flac'").fetchone()[0]
+            db.execute("UPDATE file_features SET energy=9e999 WHERE path LIKE '%shared.wav'")
+            db.execute("UPDATE file_features SET spectral_flatness_mean=1.5 WHERE path LIKE '%source-only.wav'")
+        self.assertEqual(export(), (1, 2, 2))
+        self.assertEqual([json.loads(line) for line in destination.read_bytes().splitlines()[1:]],
+                         [line for line in self.lines[1:] if line["decode_hash"] == original_hash])
+        with database(store) as db:
+            db.execute("UPDATE file_features SET version='muzaiten-dsp-v1' WHERE path LIKE '%original.flac'")
+        self.assertEqual(export(), (0, 3, 2))
+        with database(store) as db:
+            db.execute("DELETE FROM file_features")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM features").fetchone()[0], 3)
+        self.assertEqual(export(), (0, 3, 0))
+        # Export needs only per-file analysis, which identity refresh writes.
+        identity_only = json.loads(pack(self.b, "export", destination, "--replace").stdout)
+        self.assertEqual((identity_only["exported"], identity_only["skipped"]), (3, 0))
         self.assertEqual(self.store.read_bytes(), self.baseline)
-        pack(self.b, "import", self.export)
-        with database(self.store) as db:
-            db.execute("UPDATE features SET version='muzaiten-dsp-v1'")
-        stale = json.loads(pack(self.b, "export", destination, "--replace").stdout)
-        self.assertEqual((stale["records"], stale["skipped"]), (0, 3))
 
     def test_null_scalar_result_remains_fresh(self):
         lines = json.loads(json.dumps(self.lines))

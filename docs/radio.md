@@ -229,9 +229,10 @@ feature phase refreshes them; stale rows never enter scoring.
 ### Local scalar feature packs
 
 `muzaiten-features pack` exchanges scalar analysis through a local
-`muzaiten-features-pack` v1 NDJSON file. Export uses existing current analysis;
-it never analyzes audio or generates embeddings. There are no accounts,
-uploads or network transport.
+`muzaiten-features-pack` v1 NDJSON file. Export writes each group
+representative's own current analysis under that file's decoded-audio hash; it
+never analyzes audio or generates embeddings. There are no accounts, uploads or
+network transport.
 
 ```sh
 muzaiten-features pack export scalars.ndjson --dry-run
