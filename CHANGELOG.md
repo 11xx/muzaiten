@@ -127,6 +127,9 @@
 
 ### Fixed
 
+- Feature refresh reports `"canceled": true` with exit 130 when a stop arrives
+  at the boundary between completed native analysis and semantic analysis.
+  Completed feature rows remain durable.
 - After an output change (or a restart) puts the track back where it was,
   skipping to another track, seeking, stopping or changing the output again
   in the first moment is no longer overridden by that restore jumping to the

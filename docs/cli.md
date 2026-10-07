@@ -147,6 +147,9 @@ version metadata is displayed as `unknown`; row versions remain the authority.
 Rates and ETAs are phase-local. Exit codes are 0 success/no-op, 2 invalid input,
 3 missing optional provider/model component, 4 operational failure, 5 lock
 busy, and 130 canceled.
+If a stop is observed immediately after native analysis completes, exit 130
+still carries `"canceled": true` in JSON and JSONL output. Native counters can
+describe a fully completed phase; its committed rows remain durable.
 
 Refresh JSON may include feature-fill counters when that phase ran:
 `feature_groups_processed`, `features_written` (includes NULL-scalar rows
