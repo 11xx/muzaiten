@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import importlib.util
 import io
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,6 +98,23 @@ class FoldHanRareTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = pathlib.Path(self.temporary.name)
         self.refs, self.predictions, self.args, self.reviewed = corpus(self.root)
+        # Synthetic pins are trusted only inside these in-process provenance fixtures.
+        self.registry = copy.deepcopy(rare.notice_terms.read_registry())
+        for source in self.registry["sources"].values():
+            source["pins"] = {key: self.refs.pins[key] for key in source["pins"]}
+        self.registry["sources"]["opencc"]["attribution"]["commit"] = self.refs.pins["opencc"]["revision"]
+        self.registry_path = self.root / "source-terms.json"
+        self.registry_path.write_text(json.dumps(self.registry), encoding="utf-8")
+        self.notice_root = self.root / "source-notices"
+        self.notice_root.mkdir()
+        self.scopes = {name: list(data.TIER_FILES) for name in self.registry["sources"]}
+        self.notice_root.joinpath("NOTICE").write_text(rare.notice_terms.render_notice(self.registry, self.scopes))
+        shutil.copytree(data.DEFAULT_AUTHORED_DIR / "licenses", self.notice_root / "licenses")
+        shutil.copytree(data.DEFAULT_AUTHORED_DIR / "licenses", self.root / "licenses")
+        for patcher in (mock.patch.object(rare.notice_terms, "REGISTRY", self.registry_path),
+                        mock.patch.object(data, "DEFAULT_AUTHORED_DIR", self.notice_root)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def refs_for(self, unihan, cns=None, opencc=None):
         fields = {name: {} for name in rare.FIELDS}
@@ -583,7 +602,8 @@ class FoldHanRareTests(unittest.TestCase):
         command = [sys.executable, str(ROOT / "tools/fold-han-rare.py"), "check", "--provenance", str(out / "tgh-provenance.tsv"),
                    "--reviewed", str(self.reviewed), str(out / "tgh.tsv"), *self.args]
         result = subprocess.run(command, text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("source terms unresolved", result.stdout)
         table = (out / "tgh.tsv").read_text(encoding="utf-8")
         self.assertIn("# complete\n", table)
         self.assertIn(self.refs.pins["unihan"]["sha256"], table)
@@ -742,18 +762,13 @@ class FoldHanRareTests(unittest.TestCase):
         notice.write_text(original)
         self.assertFalse(rare.check_provenance(table, sidecar, refs, predictions, set(), notice))
         for source in ("unihan", "cns", "opencc"):
-            lines = original.splitlines()
-            for i, line in enumerate(lines):
-                if line.startswith("# attribution: "):
-                    entry = json.loads(line.removeprefix("# attribution: "))
-                    if entry["reference"] == source:
-                        entry["files"].remove("tgh.tsv")
-                        lines[i] = "# attribution: " + rare.canonical(entry)
-            notice.write_text("\n".join(lines) + "\n")
+            scopes = copy.deepcopy(self.scopes)
+            scopes[source].remove("tgh.tsv")
+            notice.write_text(rare.notice_terms.render_notice(self.registry, scopes))
             findings = rare.check_provenance(table, sidecar, refs, predictions, set(), notice)
-            self.assertEqual([(f[4], f[5]) for f in findings],
-                             [(source, "NOTICE attribution missing or incomplete")])
-        for removed in ("UNICODE LICENSE V3", "COPYRIGHT AND PERMISSION NOTICE", "Taiwan Open Government Data License v1"):
+            self.assertEqual(len(findings), 1)
+            self.assertIn(source + ": NOTICE attribution outside table scope", findings[0][5])
+        for removed in ("© 2024 Unicode®, Inc.", "OGDL-Taiwan-1.0", "Apache-2.0"):
             notice.write_text(original.replace(removed, "absent"))
             self.assertTrue(rare.check_provenance(table, sidecar, refs, predictions, set(), notice))
         notice.unlink()
@@ -773,7 +788,8 @@ class FoldHanRareTests(unittest.TestCase):
             notice.write_text(original)
             self.assertEqual(rare.main(argv), 0)
             notice.write_text("\n".join(line for line in original.splitlines()
-                                        if not line.startswith('# attribution: {"reference":"cns"')) + "\n")
+                                        if not (line.startswith("# attribution: ") and
+                                                json.loads(line.removeprefix("# attribution: "))["reference"] == "cns")) + "\n")
             self.assertEqual(rare.main(argv), 1)
 
     def test_notice_rejects_missing_provider_and_duplicate_reference(self):
@@ -785,7 +801,7 @@ class FoldHanRareTests(unittest.TestCase):
         entry["provider"] = ""
         for text in (original.replace(line, "# attribution: " + rare.canonical(entry)), original + line + "\n"):
             notice.write_text(text)
-            self.assertEqual(rare.check_notice(pathlib.Path("tgh.tsv"), records, notice)[0][4], "invalid NOTICE")
+            self.assertEqual(rare.check_notice(pathlib.Path("tgh.tsv"), records, notice, self.refs.pins)[0][4], "invalid NOTICE")
 
     def test_cached_smoke_skips_absent_inputs_but_rejects_a_wrong_checksum(self):
         paths = {name: self.root / name for name in ("unihan", "cns-properties", "cns-mappings", "opencc")}
@@ -867,6 +883,8 @@ class FoldHanRareTests(unittest.TestCase):
 
     def test_integrated_checker_requires_provenance_and_uses_evidence_default(self):
         out, table, provenance = self.assemble_fixture()
+        shutil.copyfile(self.notice_root / "NOTICE", out / "NOTICE")
+        shutil.copytree(self.notice_root / "licenses", out / "licenses")
         sidecars = self.root / "provenance"
         sidecars.mkdir()
         (sidecars / "tgh.tsv").write_bytes(provenance.read_bytes())

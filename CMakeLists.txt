@@ -1019,6 +1019,8 @@ target_link_libraries(muzaiten-features PRIVATE
 # alike drop the binary plus a desktop entry, icon, and AppStream metadata into
 # the standard prefix.
 include(GNUInstallDirs)
+include(cmake/HanNotices.cmake)
+muzaiten_install_han_notices("${CMAKE_CURRENT_SOURCE_DIR}" "${Python3_EXECUTABLE}")
 
 install(TARGETS muzaiten muzaitenctl muzaiten-features
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

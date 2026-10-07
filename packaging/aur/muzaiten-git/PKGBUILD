@@ -7,7 +7,7 @@ epoch=1
 pkgdesc="Native music player for local libraries, with ratings and scrobbling"
 arch=('x86_64')
 url="https://github.com/11xx/muzaiten"
-license=('Unlicense')
+license=('Unlicense' 'Unicode-3.0')
 depends=('qt6-base' 'qt6-multimedia' 'taglib' 'chromaprint' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
 makedepends=('git' 'cmake' 'ninja' 'pkgconf')
 optdepends=('gst-plugins-good: extra audio decoders and sinks'
@@ -40,5 +40,7 @@ build() {
 
 package() {
     DESTDIR="$pkgdir" cmake --install build
-    install -Dm644 "$pkgname/UNLICENSE" "$pkgdir/usr/share/licenses/$pkgname/UNLICENSE"
+    if [[ -d "$pkgdir/usr/share/licenses/muzaiten" ]]; then
+        mv "$pkgdir/usr/share/licenses/muzaiten" "$pkgdir/usr/share/licenses/$pkgname"
+    fi
 }
