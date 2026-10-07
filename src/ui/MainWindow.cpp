@@ -1,4 +1,5 @@
 #include "ui/MainWindow.h"
+#include "ui/SemanticStatusProcess.h"
 
 #include <limits>
 
@@ -4693,10 +4694,8 @@ void MainWindow::stopSemanticStatusProcess()
         if (process->state() == QProcess::NotRunning) {
             process->deleteLater();
         } else {
-            // Reap canceled helpers asynchronously through application-owned lifetime.
             process->setParent(QCoreApplication::instance());
-            connect(process, &QProcess::started, process, &QProcess::kill);
-            process->kill();
+            static_cast<SemanticStatusProcess *>(process)->cancel();
         }
     }
 }
@@ -4752,7 +4751,7 @@ void MainWindow::startSemanticStatusRequest(bool forDownload)
     m_semanticStatusDialog = waiting;
     waiting->show();
 
-    auto *process = new QProcess(this);
+    auto *process = new SemanticStatusProcess(this);
     process->setObjectName(QStringLiteral("semantic.status.process"));
     m_semanticStatusProcess = process;
     auto *timeout = new QTimer(process);

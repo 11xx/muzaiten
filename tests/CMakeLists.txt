@@ -702,6 +702,26 @@ add_executable(test_main_window_navigation
     test_main_window_navigation.cpp
     ../resources/resources.qrc
 )
+add_executable(semantic_status_fixture
+    semantic_status_fixture.cpp
+    ../src/features/ProviderClient.cpp
+)
+target_include_directories(semantic_status_fixture PRIVATE ../src)
+target_link_libraries(semantic_status_fixture PRIVATE Qt6::Core)
+target_compile_features(semantic_status_fixture PRIVATE cxx_std_26)
+target_compile_options(semantic_status_fixture PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+add_dependencies(test_main_window_navigation semantic_status_fixture)
+add_executable(test_semantic_status_process test_semantic_status_process.cpp)
+target_include_directories(test_semantic_status_process PRIVATE ../src)
+target_link_libraries(test_semantic_status_process PRIVATE Qt6::Core Qt6::Test)
+target_compile_features(test_semantic_status_process PRIVATE cxx_std_26)
+target_compile_options(test_semantic_status_process PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
+add_dependencies(test_semantic_status_process semantic_status_fixture)
+add_test(NAME test_semantic_status_process COMMAND test_semantic_status_process)
 target_include_directories(test_main_window_navigation PRIVATE ../src)
 target_link_libraries(test_main_window_navigation PRIVATE muzaiten_app muzaiten_ui_app Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
 target_compile_features(test_main_window_navigation PRIVATE cxx_std_26)

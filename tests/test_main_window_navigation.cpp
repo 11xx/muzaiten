@@ -80,6 +80,7 @@
 #include <QPushButton>
 
 #include "AudioDeviceFixtures.h"
+#include "SemanticDescendantFixture.h"
 #include "playback/DirectDeviceResolver.h"
 #include "playback/PlaybackProfileJson.h"
 
@@ -641,6 +642,139 @@ private slots:
     {
         qunsetenv("MUZAITEN_STATE_ROOT");
         qunsetenv("MUZAITEN_DEMO_SILENT_AUDIO");
+    }
+
+    void semanticStatusDescendants_data()
+    {
+        QTest::addColumn<QString>("action");
+        for (const char *action : {"setup-cancel", "download-cancel", "timeout-setup",
+                                  "timeout-download", "destroy", "close", "provider-path",
+                                  "features-path", "replacement", "starting-cancel"}) {
+            QTest::newRow(action) << QString::fromLatin1(action);
+        }
+    }
+
+    void semanticStatusDescendants()
+    {
+#ifndef Q_OS_LINUX
+        QSKIP("Descendant wait-status evidence requires Linux child-subreaper support");
+#else
+        QFETCH(QString, action);
+        // A unique root per invocation: install() copies the helper binary and
+        // reads provider.json, so reusing a root would fail the second data row
+        // or trust a previous row's recorded PIDs.
+        SemanticDescendantFixture fixture(QDir(qEnvironmentVariable("MUZAITEN_STATE_ROOT"))
+                                              .filePath(QStringLiteral("descendants-%1").arg(
+                                                  QUuid::createUuid().toString(QUuid::WithoutBraces))));
+        QVERIFY(fixture.install());
+        const QByteArray savedStartLatch = qgetenv("MUZAITEN_SEMANTIC_FIXTURE_START_LATCH");
+        const auto restoreStartLatch = qScopeGuard([&]() {
+            if (savedStartLatch.isNull()) qunsetenv("MUZAITEN_SEMANTIC_FIXTURE_START_LATCH");
+            else qputenv("MUZAITEN_SEMANTIC_FIXTURE_START_LATCH", savedStartLatch);
+        });
+        if (action == QLatin1String("starting-cancel")) qputenv("MUZAITEN_SEMANTIC_FIXTURE_START_LATCH", "1");
+        const QVariant savedDataDir = qApp->property("muzaiten.dataDir");
+        const auto restoreDataDir = qScopeGuard([&]() { qApp->setProperty("muzaiten.dataDir", savedDataDir); });
+        std::unique_ptr<SemanticDescendantFixture> replacement;
+        AppCore core;
+        auto window = std::make_unique<MainWindow>(&core);
+        const bool forDownload = action != QLatin1String("setup-cancel")
+            && action != QLatin1String("timeout-setup");
+        if (forDownload) window->downloadSemanticModel();
+        else window->configureSemanticProvider();
+        QPointer<QProcess> helper = window->m_semanticStatusProcess;
+        QVERIFY(helper != nullptr);
+        const quint64 generation = window->m_semanticStatusGeneration;
+        if (action == QLatin1String("starting-cancel")) {
+            QCOMPARE(helper->state(), QProcess::Starting);
+            window->cancelSemanticStatusRequest();
+            QTRY_VERIFY_WITH_TIMEOUT(helper.isNull(), 2'000);
+            QVERIFY(!fixture.ready());
+            QVERIFY(fixture.sentinelAlive());
+            QVERIFY(fixture.recordResult(0, true, true));
+            return;
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(fixture.ready(), 2'000);
+        QTRY_VERIFY_WITH_TIMEOUT(!fixture.read(QStringLiteral("sentinel")).isEmpty(), 2'000);
+        QCOMPARE(fixture.read(QStringLiteral("provider")).value(QStringLiteral("ppid")).toInteger(),
+                 fixture.read(QStringLiteral("helper")).value(QStringLiteral("pid")).toInteger());
+        const qint64 helperPid =
+            fixture.read(QStringLiteral("helper")).value(QStringLiteral("pid")).toInteger();
+        QCOMPARE(fixture.read(QStringLiteral("helper")).value(QStringLiteral("pgid")).toInteger(), helperPid);
+        QCOMPARE(fixture.read(QStringLiteral("provider")).value(QStringLiteral("pgid")).toInteger(), helperPid);
+        QVERIFY(fixture.read(QStringLiteral("sentinel")).value(QStringLiteral("pgid")).toInteger() != helperPid);
+        QVERIFY(!fixture.providerExited());
+        QVERIFY(fixture.sentinelAlive());
+        bool heartbeat = false;
+        QTimer heartbeatContext;
+        QTimer::singleShot(0, &heartbeatContext, [&]() { heartbeat = true; });
+        QElapsedTimer elapsed;
+        elapsed.start();
+        if (action.startsWith(QLatin1String("timeout-"))) {
+            QCOMPARE(window->m_semanticStatusTimeout->interval(), 45'000);
+            window->m_semanticStatusTimeout->start(1);
+        } else if (action == QLatin1String("destroy")) {
+            window.reset();
+        } else if (action == QLatin1String("close")) {
+            window->close();
+        } else if (action == QLatin1String("provider-path")) {
+            QVERIFY(core.settings()->setSetting(QStringLiteral("analysis.semantic.providerPath"),
+                                                QStringLiteral("/isolated/changed-provider")));
+        } else if (action == QLatin1String("features-path")) {
+            qApp->setProperty("muzaiten.dataDir", fixture.root.filePath(QStringLiteral("other-data")));
+        } else if (action == QLatin1String("replacement")) {
+            replacement = std::make_unique<SemanticDescendantFixture>(fixture.root.filePath(QStringLiteral("replacement")));
+            QVERIFY(replacement->install());
+            window->configureSemanticProvider();
+        } else {
+            window->m_semanticStatusDialog->findChild<QDialogButtonBox *>()
+                ->button(QDialogButtonBox::Cancel)->click();
+        }
+        const qint64 actionMs = elapsed.elapsed();
+        while (elapsed.elapsed() < 1'500
+               && (!heartbeat || !helper.isNull() || !fixture.providerExited())) QTest::qWait(10);
+        const bool providerExited = fixture.providerExited();
+        QVERIFY(fixture.recordResult(elapsed.elapsed(), helper.isNull(), heartbeat, actionMs));
+        qInfo("Descendant cancellation %s: helper=%lld provider=%lld sentinel=%lld action=%lldms exit=%lldms reaped=%d status=%d",
+              qPrintable(action),
+              fixture.read(QStringLiteral("helper")).value(QStringLiteral("pid")).toInteger(),
+              fixture.read(QStringLiteral("provider")).value(QStringLiteral("pid")).toInteger(),
+              fixture.read(QStringLiteral("sentinel")).value(QStringLiteral("pid")).toInteger(),
+              actionMs, elapsed.elapsed(), int(providerExited), fixture.providerWaitStatus);
+        QVERIFY(heartbeat);
+        if (action != QLatin1String("replacement")) {
+            QVERIFY2(actionMs < 500, "Cancellation must return without waiting on the provider");
+        }
+        QVERIFY(helper.isNull());
+        QVERIFY2(providerExited, "The provider grandchild must exit and be reaped within 1500 ms");
+        QVERIFY(WIFSIGNALED(fixture.providerWaitStatus));
+        QCOMPARE(WTERMSIG(fixture.providerWaitStatus), SIGKILL);
+        QVERIFY(fixture.sentinelAlive());
+        QVERIFY(!QFile::exists(fixture.root.filePath(QStringLiteral("provider-release"))));
+        QVERIFY(!QFile::exists(fixture.root.filePath(QStringLiteral("download.json"))));
+        if (window != nullptr && !action.startsWith(QLatin1String("timeout-"))) {
+            QVERIFY(window->m_semanticStatusGeneration != generation);
+        }
+        if (replacement != nullptr) {
+            QTRY_VERIFY_WITH_TIMEOUT(replacement->ready(), 2'000);
+            const qint64 replacementHelperPid =
+                replacement->read(QStringLiteral("helper")).value(QStringLiteral("pid")).toInteger();
+            QCOMPARE(replacement->read(QStringLiteral("helper")).value(QStringLiteral("pgid")).toInteger(),
+                     replacementHelperPid);
+            QCOMPARE(replacement->read(QStringLiteral("provider")).value(QStringLiteral("pgid")).toInteger(),
+                     replacementHelperPid);
+            QVERIFY(!replacement->providerExited());
+            QVERIFY(replacement->sentinelAlive());
+            QPointer<QProcess> newHelper = window->m_semanticStatusProcess;
+            QVERIFY(newHelper != nullptr);
+            window->finishSemanticStatusRequest(generation, true, semanticStatusFixture(), {});
+            QCOMPARE(window->m_semanticStatusProcess, newHelper);
+            window->cancelSemanticStatusRequest();
+            QTRY_VERIFY_WITH_TIMEOUT(newHelper.isNull(), 1'500);
+            QTRY_VERIFY_WITH_TIMEOUT(replacement->providerExited(), 1'500);
+            QVERIFY(replacement->sentinelAlive());
+        }
+#endif
     }
 
     void semanticStatusHeartbeat_data()

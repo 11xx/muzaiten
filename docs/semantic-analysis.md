@@ -66,6 +66,13 @@ provider or analysis-store path, or a closed main window cancels pending
 status and consent. A timeout leaves setup choices available and prevents a
 model download until a successful check and explicit consent.
 
+On Linux and other Unix systems, each GUI status helper owns a separate process
+group. Cancellation terminates the helper and provider descendants that remain
+in that group, without waiting for them on the UI thread. A provider that creates
+another process group or session is outside this cancellation boundary.
+Non-Unix builds terminate only the status helper; descendant termination is
+not guaranteed there.
+
 ## Consent and model lifecycle
 
 Neither semantic scans nor text queries download weights. Use **Library > Audio

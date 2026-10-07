@@ -197,6 +197,10 @@
 
 ### Fixed
 
+- Canceling semantic provider setup or model-download preflight, reaching its
+  timeout, or closing the window terminates the helper's provider process group
+  on Unix systems. Cleanup remains asynchronous and preserves status output.
+
 - Semantic provider setup and model download check provider status in the
   background with a cancellable waiting dialog and a 45-second timeout.
   Superseded requests, changed paths, and closed windows discard pending
