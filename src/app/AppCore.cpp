@@ -333,8 +333,64 @@ AppCore::AppCore(QObject *parent)
                 profile.device = target.hwPath;
             }
         }
+        m_activePlaybackProfile = profile;
         m_playback->setProfile(profile);
     }
+    m_player->setPlaybackStartPlanner([this](const Track &track) {
+        PlayerCore::PlaybackStartPlan plan;
+        if (!isDsdTrack(track)) return plan;
+
+        const auto skip = [](const QString &reason) {
+            PlayerCore::PlaybackStartPlan rejected;
+            rejected.action = PlayerCore::PlaybackStartPlan::Action::Skip;
+            rejected.reason = reason;
+            return rejected;
+        };
+        const PlaybackBackend::DsdSupport support = m_playback->dsdSupport();
+        if (track.codec.compare(QStringLiteral("dff"), Qt::CaseInsensitive) == 0) {
+            return skip(QStringLiteral("DFF/DSDIFF playback isn't supported by the installed GStreamer plugins (DSF only)"));
+        }
+
+        const PlaybackProfile &profile = m_activePlaybackProfile;
+        if (profile.mode != QStringLiteral("bit-perfect") && profile.allowResample) {
+            if (support.pcmDecode) return plan;
+            return skip(QStringLiteral("DSD PCM playback needs gst-plugins-bad and gst-libav"));
+        }
+        if (!support.nativePassthrough) {
+            return skip(QStringLiteral("Native DSD playback needs gst-plugins-bad and gst-libav"));
+        }
+
+        QString device = profile.device;
+        if (profile.mode != QStringLiteral("bit-perfect")) {
+            if (profile.deviceId.isEmpty()) {
+                return skip(QStringLiteral("Choose a direct output device in Playback → Output profile before native DSD playback"));
+            }
+            const auto dev = AudioDeviceControl::findByStableId(profile.deviceId);
+            if (!dev || dev->hwPath.isEmpty()) {
+                return skip(QStringLiteral("The configured native DSD device is no longer available"));
+            }
+            device = dev->hwPath;
+            if (dev->heldByPipeWire() && !m_window) {
+                // The takeover prompt belongs to the window, so no headless
+                // start can wait for an answer that cannot arrive.
+                return skip(QStringLiteral("Open the window to approve native DSD device takeover"));
+            }
+            plan.device = device;
+            plan.action = dev->heldByPipeWire()
+                ? PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover
+                : PlayerCore::PlaybackStartPlan::Action::NativeDsd;
+            return plan;
+        }
+
+        if (device.isEmpty() && profile.deviceId.isEmpty()) {
+            return skip(QStringLiteral("Choose a bit-perfect output device before native DSD playback"));
+        }
+        const AudioDeviceControl::DirectTarget target =
+            m_directDevices->resolve(profile.deviceId, device);
+        plan.action = PlayerCore::PlaybackStartPlan::Action::NativeDsd;
+        plan.device = target.hwPath.isEmpty() ? device : target.hwPath;
+        return plan;
+    });
     m_player->setPathResolver([this](const Track &track) {
         if (track.path.isEmpty()) {
             return QString();
@@ -1009,11 +1065,30 @@ void AppCore::restoreSavedPlayback()
 
 void AppCore::saveAdoptedSharedEndpoint(const QString &name, const QString &label)
 {
-    // Only these two fields change; the rest of the saved profile stands.
-    PlaybackProfile profile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+    // A clean profile may have been changed by another store writer. A failed
+    // save leaves the running choice authoritative until this process exits.
+    PlaybackProfile profile = m_playbackProfileUnsaved ? m_activePlaybackProfile
+        : playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
     profile.sharedEndpoint = name;
     profile.sharedEndpointLabel = label;
-    m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile));
+    if (!saveActivePlaybackProfile(profile)) {
+        qWarning("muzaiten: could not save mixer-chosen output: %s", qPrintable(m_playbackProfileSaveError));
+    }
+}
+
+bool AppCore::saveActivePlaybackProfile(const PlaybackProfile &profile)
+{
+    // Playback and the next DSD start use the current choice even if the store
+    // cannot save it for a future process.
+    m_activePlaybackProfile = profile;
+    if (!m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile))) {
+        m_playbackProfileSaveError = m_database->lastError();
+        m_playbackProfileUnsaved = true;
+        return false;
+    }
+    m_playbackProfileSaveError.clear();
+    m_playbackProfileUnsaved = false;
+    return true;
 }
 
 void AppCore::updateMprisCapabilities()

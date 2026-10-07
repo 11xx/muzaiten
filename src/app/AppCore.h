@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Track.h"
+#include "playback/PlaybackTypes.h"
 #include "reco/RadioProfile.h"
 #include "reco/TrackScorer.h"
 #include "scrobble/ScrobbleBackfill.h"
@@ -71,6 +72,10 @@ public:
     IpcServer           *ipc() const;
     // Resolves the direct output card by identity; shared with the window.
     DirectDeviceResolver *directDevices() const { return m_directDevices; }
+    const PlaybackProfile &activePlaybackProfile() const { return m_activePlaybackProfile; }
+    void setActivePlaybackProfile(const PlaybackProfile &profile) { m_activePlaybackProfile = profile; }
+    bool saveActivePlaybackProfile(const PlaybackProfile &profile);
+    QString playbackProfileSaveError() const { return m_playbackProfileSaveError; }
     MainWindow          *window() const;
     QStringList storageWarnings() const { return m_storageWarnings; }
 
@@ -277,6 +282,9 @@ private:
     PlayerCore       *m_player = nullptr;
     PlaybackBackend  *m_playback = nullptr;
     DirectDeviceResolver *m_directDevices = nullptr;
+    PlaybackProfile m_activePlaybackProfile;
+    QString m_playbackProfileSaveError;
+    bool m_playbackProfileUnsaved = false;
     ListenTracker    *m_listenTracker = nullptr;
     PlayEventRecorder *m_playEventRecorder = nullptr;
     ListenBrainzHub  *m_listenBrainzHub = nullptr;

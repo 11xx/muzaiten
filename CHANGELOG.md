@@ -4,6 +4,10 @@
 
 ### Changed
 
+- DSD playback planning survives closing and reopening the window. A track
+  requiring device-takeover approval is skipped while the window is closed.
+  An output choice stays active for the process if saving it fails, with the
+  error shown in the window.
 - Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
   written with its traditional form (訏, 軏), and the reverse.
 

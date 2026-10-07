@@ -60,6 +60,8 @@
 #include <QScopeGuard>
 #include <QSet>
 #include <QStatusBar>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QSpinBox>
 #include <QSystemTrayIcon>
 #include <QTableView>
@@ -591,6 +593,82 @@ private slots:
         core.releaseWindow();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents();
+    }
+
+    void dsdPlannerSurvivesWindowRelease()
+    {
+        AppCore core;
+        core.m_window = new MainWindow(&core);
+        QPointer<MainWindow> released = core.window();
+        core.releaseWindow();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+        QVERIFY(released.isNull());
+
+        PlaybackProfile active = core.activePlaybackProfile();
+        active.allowResample = false;
+        core.setActivePlaybackProfile(active);
+        core.m_window = new MainWindow(&core);
+        QCOMPARE(core.window()->m_playbackProfile.allowResample, false);
+        core.releaseWindow();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+        QVERIFY(core.window() == nullptr);
+
+        const QString path = m_stateRoot.filePath(QStringLiteral("headless.dff"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("synthetic"), qint64{9});
+        file.close();
+
+        Track track;
+        track.path = path;
+        track.filename = QStringLiteral("headless.dff");
+        track.codec = QStringLiteral("dff");
+        QString skipReason;
+        connect(core.player(), &PlayerCore::trackStartSkipped, &core,
+                [&skipReason](const Track &, const QString &reason) { skipReason = reason; });
+        core.player()->appendTracks({track});
+        core.player()->playAt(0);
+        QVERIFY(skipReason.contains(QStringLiteral("DFF/DSDIFF")));
+    }
+
+    void outputChoiceRemainsActiveWhenStorageRejectsIt()
+    {
+        AppCore core;
+        const QString saved = core.database()->setting(QStringLiteral("playback.profile"));
+        QSqlDatabase library;
+        for (const QString &name : QSqlDatabase::connectionNames()) {
+            if (!name.startsWith(QStringLiteral("main-"))) continue;
+            const QSqlDatabase candidate = QSqlDatabase::database(name, false);
+            if (candidate.databaseName() == core.databasePath()) {
+                library = candidate;
+                break;
+            }
+        }
+        QVERIFY(library.isValid());
+        QSqlQuery query(library);
+        QVERIFY(query.exec(QStringLiteral("PRAGMA query_only=ON")));
+
+        PlaybackProfile active = core.activePlaybackProfile();
+        active.sharedEndpoint = QStringLiteral("synthetic-output");
+        active.allowResample = false;
+        QVERIFY(!core.saveActivePlaybackProfile(active));
+        QVERIFY(!core.playbackProfileSaveError().isEmpty());
+        QCOMPARE(core.activePlaybackProfile().sharedEndpoint, QStringLiteral("synthetic-output"));
+        QCOMPARE(core.database()->setting(QStringLiteral("playback.profile")), saved);
+        QVERIFY(query.exec(QStringLiteral("PRAGMA query_only=OFF")));
+
+        core.saveAdoptedSharedEndpoint(QStringLiteral("mixer-output"), QStringLiteral("Mixer"));
+        const PlaybackProfile stored = playbackProfileFromJson(
+            core.database()->setting(QStringLiteral("playback.profile")));
+        QCOMPARE(stored.sharedEndpoint, QStringLiteral("mixer-output"));
+        QCOMPARE(stored.allowResample, false);
+        QVERIFY(core.playbackProfileSaveError().isEmpty());
+
+        MainWindow window(&core);
+        QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("mixer-output"));
+        QCOMPARE(window.m_playbackProfile.allowResample, false);
     }
 
     void failedMixPreservesActiveRadioRefill()
