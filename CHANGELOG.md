@@ -2,26 +2,6 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Streaming search-index builds grow record and mask storage amortized across
-  batches, avoiding repeated copies of the existing index.
-- DSD playback planning survives closing and reopening the window. A track
-  requiring device-takeover approval is skipped while the window is closed.
-  An output choice stays active for the process if saving it fails, with the
-  error shown in the window.
-- Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
-  written with its traditional form (訏, 軏), and the reverse.
-
-### Fixed
-
-- Startup IPC commands retain their acknowledged queue changes, including
-  enqueue-and-play requests received while the window opens. Queue state is
-  restored before IPC and desktop media controls accept commands. Closing to
-  the tray keeps queue saves active, and reopening preserves the live queue,
-  its source, cursor, shuffle and radio state. Raises during window creation
-  share the same window.
-
 ### Developer tooling
 
 - Han generation and checks accept Python Unicode versions independently of
@@ -109,6 +89,8 @@
 
 ### Changed
 
+- Streaming search-index builds grow record and mask storage amortized across
+  batches, avoiding repeated copies of the existing index.
 - DSD playback planning survives closing and reopening the window. A track
   requiring device-takeover approval waits for the first window's prompt at
   startup and is skipped after the window has been closed to the tray. An
