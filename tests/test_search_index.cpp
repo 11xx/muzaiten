@@ -433,6 +433,8 @@ private slots:
             {"thai-artist-name", "ป๊อด ModernDog", "", "moderndog", true},
             {"thai-mark-known-gap", "ป๊อด ModernDog", "", "ป็อด", false},
             {"thai-different-mark-native", "ป็อด", "", "ป็อด", true},
+            {"thai-short-o-pop", "ป็อป", "", "pop", true},
+            {"thai-short-o-rock", "ร็อก", "", "rok", true},
             {"lao-native-partial", "ວຽງຈັນ", "", "ວຽງ", true},
             {"lao-standard", "ວຽງຈັນ", "", "viangchan", true},
             {"lao-french", "ວຽງຈັນ", "", "wiangjan", true},

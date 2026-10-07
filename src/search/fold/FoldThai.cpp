@@ -402,7 +402,12 @@ private:
             // ย after ไ is silent (ไทย thai).
             if (thai(i) == u'ย' && role(i) == ThaiRole::Consonant && !attachesToConsonant(i + 1)) ++i;
         } else if (above != ThaiVowel::Count) {
-            if ((above == ThaiVowel::A || above == ThaiVowel::O) && thai(i) == u'ว' && role(i) == ThaiRole::Consonant) {
+            if (above == ThaiVowel::O && thai(i) == u'อ' && role(i) == ThaiRole::Consonant
+                && isFinal(i + 1)) {
+                v = ThaiVowel::O;
+                needFinal = true;
+                ++i;
+            } else if ((above == ThaiVowel::A || above == ThaiVowel::O) && thai(i) == u'ว' && role(i) == ThaiRole::Consonant) {
                 v = ThaiVowel::UA;
                 ++i;
                 if (thai(i) == u'ะ') ++i;

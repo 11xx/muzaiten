@@ -153,7 +153,13 @@ Motörhead	motorhead	motoerhead
 ສະບາຍດີ	ສະບາຍດີ	sabaidi	sabaidee
 # Thai marks retain their written identity while their Latin readings differ.
 ป๊อด	ป๊อด	pot	pod
-ป็อด	ป็อด	poot	pood
+ป็อด	ป็อด	pot	pod
+ป็อป	ป็อป	pop	pop
+ร็อก	ร็อก	rok	rok
+ล็อก	ล็อก	lok	lok
+ก็	ก็	ko
+เป็น	เป็น	pen
+แข็ง	แข็ง	khaeng
 # Brahmic scripts keep their surface; readings are common (the inherent
 # vowel dropped where Hindi drops it), full, and ee/oo.
 नमस्ते	नमस्ते	namaste
