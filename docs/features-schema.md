@@ -302,8 +302,12 @@ Each value is a finite JSON number or `null`, preserving SQL NULL semantics.
 Numbers except loudness are nonnegative; flatness, zero-crossing rate and
 energy are at most 1. Units and interpretation match the group rows above.
 
-Files are limited to 64 MiB, 100,000 records and 16 KiB per line excluding
-the newline. Unknown or missing keys at every level, unknown format versions,
+Files are limited to 64 MiB and 16 KiB per line excluding the newline. The
+213,044-record guard derives from the shortest valid record line (315 bytes
+including its newline), so every valid pack within the byte cap fits the
+record guard. Export rejects an oversized pack without creating or replacing
+the destination; dry-run enforces the same limits.
+Unknown or missing keys at every level, unknown format versions,
 duplicate keys (including escaped spellings), duplicate hashes, invalid
 UTF-8, malformed or truncated lines, invalid values and record-count
 disagreements are rejected before opening the store. A header count detects

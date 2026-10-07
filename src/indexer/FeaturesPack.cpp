@@ -194,7 +194,7 @@ QList<QJsonObject> readPack(const QString &path)
     const QJsonValue count = header.value(QStringLiteral("records"));
     const double number = count.toDouble(-1);
     if (!count.isDouble() || number < 0 || number > FeaturesPack::MaximumRecords || std::floor(number) != number) {
-        fail(2, QStringLiteral("Pack record count must be an integer from 0 to 100000."));
+        fail(2, QStringLiteral("Pack record count must be an integer from 0 to %1.").arg(FeaturesPack::MaximumRecords));
     }
     QList<QJsonObject> records;
     QSet<QString> hashes;
@@ -313,7 +313,7 @@ bool compatible(const QJsonObject &record)
 void writePack(const QString &path, const QList<QJsonObject> &records, bool replace, bool dryRun)
 {
     if (records.size() > FeaturesPack::MaximumRecords) {
-        fail(2, QStringLiteral("Feature pack exceeds 100000 records."));
+        fail(2, QStringLiteral("Feature pack would exceed its size limits; nothing was written."));
     }
     const QFileInfo target(path);
     if (target.isSymLink() || (target.exists() && (!replace || !target.isFile()))) {
@@ -326,7 +326,7 @@ void writePack(const QString &path, const QList<QJsonObject> &records, bool repl
         validateRecord(record);
         const QByteArray line = QJsonDocument(record).toJson(QJsonDocument::Compact) + '\n';
         if (line.size() - 1 > FeaturesPack::MaximumLineBytes || bytes.size() + line.size() > FeaturesPack::MaximumBytes) {
-            fail(2, QStringLiteral("Feature pack exceeds byte limits."));
+            fail(2, QStringLiteral("Feature pack would exceed its size limits; nothing was written."));
         }
         bytes += line;
     }
@@ -383,8 +383,9 @@ Error::Error(int code, const QString &message) : std::runtime_error(message.toSt
 
 QString contentsDescription()
 {
-    return QStringLiteral("Contains scalar audio features and extractor versions. Taste and listening history are absent, "
-                          "but content hashes identify recordings. No paths, filenames, ratings, timestamps or embeddings.");
+    return QStringLiteral("Lists a content hash for every exported recording in this library; "
+                          "anyone with the same audio can tell you have it. "
+                          "No taste, history, paths, filenames, ratings, timestamps or embeddings.");
 }
 
 QJsonObject run(QStringList arguments)
@@ -457,6 +458,9 @@ QJsonObject run(QStringList arguments)
     int existing = 0;
     int invalid = 0;
     int adopted = 0;
+    if (!json) {
+        QTextStream(stdout) << contentsDescription() << Qt::endl;
+    }
     if (operation == QLatin1String("export")) {
         QList<QJsonObject> records;
         QSet<QString> hashes;
@@ -544,7 +548,7 @@ QJsonObject run(QStringList arguments)
         QTextStream(stdout) << QJsonDocument(report).toJson(QJsonDocument::Compact) << '\n';
     } else {
         QTextStream out(stdout);
-        out << contentsDescription() << '\n' << operation << (dryRun ? " preview" : "")
+        out << operation << (dryRun ? " preview" : "")
             << ": records=" << report.value(QStringLiteral("records")).toInt()
             << " adopted=" << adopted << " skipped=" << skipped << " mismatched=" << mismatched
             << " incompatible=" << incompatible << " existing=" << existing;

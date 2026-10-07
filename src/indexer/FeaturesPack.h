@@ -9,7 +9,9 @@
 namespace FeaturesPack {
 
 inline constexpr qint64 MaximumBytes = 64 * 1024 * 1024;
-inline constexpr int MaximumRecords = 100'000;
+// Shortest valid record line: one-character tokens, zero scalars, and newline.
+inline constexpr qint64 MinimumRecordBytes = 315;
+inline constexpr int MaximumRecords = static_cast<int>(MaximumBytes / MinimumRecordBytes);
 inline constexpr qint64 MaximumLineBytes = 16 * 1024;
 
 class Error final : public std::runtime_error {

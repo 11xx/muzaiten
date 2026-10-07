@@ -120,8 +120,10 @@ no accounts, uploads or network transport.
 account, upload or automatic pack generation. Export uses existing current
 scalar analysis and never invokes a semantic provider. Taste, history and
 ratings are absent, but decoded-audio content hashes identify recordings
-and can reveal which recordings a library contains. Review that disclosure
-before sharing a pack. Fingerprints and MusicBrainz identifiers are not
+and can reveal which recordings a library contains to anyone with the same
+audio. Plain export prints that disclosure before writing, and JSON reports
+include it in `contents`. Review it before sharing a pack.
+Fingerprints and MusicBrainz identifiers are not
 private; neither is included in v1.
 
 The header contains format, version and a record count. Each group record
@@ -136,8 +138,9 @@ for that key.
 
 The complete pack is validated before store access. Unknown versions or
 keys, duplicates, malformed/truncated JSON, invalid UTF-8 and values,
-incorrect counts, files over 64 MiB, more than 100,000 records and lines over
-16 KiB are rejected without changing the feature store. `--dry-run` previews
+incorrect counts, files over 64 MiB, more than 213,044 records and lines over
+16 KiB excluding the newline are rejected without changing the feature store.
+The record guard permits every valid pack within the byte cap. `--dry-run` previews
 the same adoption decisions without writing rows or export files. Import
 holds the native writer lock and commits all adopted rows in one transaction;
 operational write failures roll back that transaction. Current feature rows

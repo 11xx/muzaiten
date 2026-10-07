@@ -24,7 +24,9 @@
   compatible extractor versions. Import fills missing and stale rows, which
   saves decoding after a DSP-version upgrade, and replaces current rows only
   with `--replace`; rejected packs leave the feature store unchanged. Packs omit taste/history, paths, ratings and timestamps, but
-  identify recordings by content hash. Embeddings are excluded.
+  identify recordings by content hash, with a plain-text disclosure before
+  export writes. Files are bounded by 64 MiB and 16 KiB per line; the record
+  guard permits every valid pack within the byte cap. Embeddings are excluded.
 - Local radio tuning-profile export/import in `Radio > Customization…` and
   `muzaitenctl radio-weights`, preserving scoring weights and session decay
   in versioned JSON. Imports offer a preview and explicit replacement;

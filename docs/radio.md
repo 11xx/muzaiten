@@ -272,8 +272,10 @@ group rows from that analysis without decoding, so a pack adds nothing there.
 The exporting installation needs a completed refresh at the same DSP version.
 
 The pack contains scalar features and extractor versions. Taste, ratings and
-listening history are absent, but its content hashes identify recordings and
-can reveal library membership. Paths, filenames, timestamps, file sizes,
+listening history are absent, but anyone with the same audio can use its
+content hashes to identify recordings in the exporting library. Plain export
+prints this disclosure before writing, and JSON reports include it in
+`contents`. Paths, filenames, timestamps, file sizes,
 internal group IDs and embeddings are excluded. Fingerprints and MusicBrainz
 IDs are also excluded from v1; those identifiers must not be treated as private.
 See [features-schema.md](features-schema.md#local-feature-pack-format) for the

@@ -214,10 +214,14 @@ reported separately. Fingerprints and MusicBrainz IDs cannot authorize
 adoption. Adopted current rows are skipped by the next analysis; a DSP
 upgrade invalidates them normally.
 
-Plain and JSON output disclose that taste/history is absent but content
-hashes identify recordings. The strict v1 payload contains no paths,
-filenames, timestamps, ratings or embeddings. Files exceed neither 64 MiB,
-100,000 records nor 16 KiB per line. Export uses atomic file replacement;
+Plain export prints and flushes the recording-identification disclosure before
+writing; JSON reports include it in `contents`. Anyone with the same audio can
+identify recordings in the exporting library. The strict v1 payload contains
+no taste, history, paths, filenames, timestamps, ratings or embeddings.
+Files are limited to 64 MiB and 16 KiB per line excluding the newline, with
+a 213,044-record guard that permits every valid pack within the byte cap.
+Export rejects a pack past these limits without creating or replacing a file.
+Export uses atomic file replacement;
 import validates the entire file before store access and writes matching
 rows in one transaction. Exit codes are 0 success/no-op, 2 invalid input,
 4 operational failure and 5 writer lock busy. See
