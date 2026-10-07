@@ -125,8 +125,9 @@ before sharing a pack. Fingerprints and MusicBrainz identifiers are not
 private; neither is included in v1.
 
 The header contains format, version and a record count. Each group record
-contains its representative's exact decoded-audio hash, extractor/version
-and the nine scalar features. No paths, filenames, file sizes, mtimes,
+contains its representative's exact decoded-audio hash with that file's own
+extractor/version and nine scalar features, so the values always describe the
+audio the hash names. No paths, filenames, file sizes, mtimes,
 analysis times, internal group IDs, history, state, ratings, timestamps or
 embeddings are included. Import only adopts an exact local representative
 hash with the running binary's compatible extractor/version. Matching tags,
@@ -146,7 +147,8 @@ embeddings or modify listening state.
 
 Export uses atomic writes, requires `--replace` for an existing file and
 refuses symlink destinations or the feature database and its sidecars.
-Failed export writes retain an existing destination. See
+Failed export writes retain an existing destination. Local rows that fail the
+same validation are skipped and counted as invalid, never written to a pack. See
 [features-schema.md](features-schema.md#local-feature-pack-format) for
 exact payload keys and report counts.
 
