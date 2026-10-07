@@ -78,7 +78,10 @@ keeps its written form).
 Each variant family folds to a BMP common simplified form when a reference
 gives one, otherwise to a General Standard form, including astral forms.
 When neither exists, its BMP member remains the fold key and astral variants
-fold back to it.
+fold back to it. A family these rules leave without a single key, such as one
+with only astral members and no General Standard form, folds to its one member
+a reference names as a simplified form; otherwise it awaits a reviewed
+decision.
 
 The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
 `extb`, `extc` and `cns` after the four essential sets. A file declares full

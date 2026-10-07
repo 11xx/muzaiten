@@ -109,19 +109,32 @@ Direct families join through `kSimplifiedVariant`, `kTraditionalVariant`,
 Relation endpoints are NFC-normalized, which maps compatibility ideographs to
 their unified counterparts; a relation naming any other character outside the
 checker's ideograph blocks joins nothing. Tier membership lies within the same
-blocks. The
-target is an unambiguous BMP simplified candidate, otherwise an unambiguous
-`kTGH` member, otherwise an unambiguous BMP member. Preceding tiers establish
-authored/typed membership; the current tier and later tiers cannot change that
-baseline during an audit. Partial semantic links
+blocks.
+
+The family target comes from the first rule that applies: the family's BMP
+simplified members, otherwise its `kTGH` members, otherwise its BMP members.
+When that rule names one member, it is the target. When it names several, or no
+rule applies (an all-astral family without a `kTGH` member), the target is the
+family's only member named as a simplified form by `kSimplifiedVariant` or OpenCC.
+A family with none or several such members gives every member a blocking
+`family-target` finding.
+
+Preceding tiers establish authored/typed membership; the current tier and later
+tiers cannot change that baseline during an audit. Partial semantic links
 require an unauthored/non-`kTGH` source, an authored/`kTGH` target and a shared
-syllable. When several candidates pass, their score counts independent lineages
-that attest a shared syllable at both source and target: Unihan and CNS each count
-once, regardless of the number of Unihan fields. The unique highest score wins.
-A tied highest score produces a blocking `variant-guard` finding. A decider can
-select a tied candidate in the table and record its mapping provenance; the
-checker still emits the exact tied-choice finding until a reviewed row settles it.
-`kSpoofingVariant` is excluded. Mapping attestation names the relations along
+syllable. A link failing that guard joins nothing; it is recorded as a gap with
+reason `guard-failed:<field>`. When several candidates pass, their score counts
+independent lineages that attest a shared syllable at both source and target:
+Unihan and CNS each count once, regardless of the number of Unihan fields. The
+unique highest score wins. Tied candidates from one direct family join without
+a choice, since each gives the same target. A tie across families produces a
+blocking `variant-guard` finding listing each candidate and score, with
+`candidate→target` where the candidate's direct family target differs, such as
+`variant-guard:tied-lineages=櫓→橹:1 禾:1`. A decider settles it by writing the
+family target of one tied candidate (`橹`, not `櫓`) in the table's simplified
+column and recording its mapping provenance; the checker still emits the exact
+tied-choice finding until a reviewed row settles it. `kSpoofingVariant` is
+excluded. Mapping attestation names the relations along
 a deterministic shortest path, such as `unihan:kZVariant,opencc:TSCharacters`
 (sorted lexically). Unihan and OpenCC do not establish independent agreement;
 mapping basis is `single`, or `predicted` for an exact blind mapping guess.
@@ -167,7 +180,7 @@ the supplied sidecar agrees with a missing table row. Essential tables without
 the marker retain their authored-data checks.
 
 Exit status is 0 for no blocking findings, 1 for findings, 2 for invalid command
-inputs. Gap records are informational: withheld guesses cannot ship. Reviewed
+inputs. Gap records are informational: withheld guesses and guard-failed links cannot ship. Reviewed
 decisions use the existing five-column reviewed-row format and suppress only
 exact `(ideograph, kind, ours, reference)` findings. A reviewed decision must
 retain the factual attestation and prediction evidence; it is not a substitute

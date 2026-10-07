@@ -321,15 +321,50 @@ def ordered_readings(ch: str, refs: References, predictions: Predictions) -> tup
     return [records[value] for value in placed], issues
 
 
-def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]]]:
-    """Resolve direct families and partial links ranked by independent lineages."""
+def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None
+                    ) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]], dict[str, list[tuple[str, str]]]]:
+    """Resolve direct families, then join guarded partial links ranked by independent lineages.
+
+    Returns each joined member's target and relation path, blocking issues, and the
+    partial links the guard rejects, which join nothing."""
     graph = defaultdict(dict)
     simplified = set()
+    general = set(refs.fields.get("kTGH", {}))
     issues = defaultdict(list)
+    rejected = defaultdict(list)
 
     def edge(a: str, b: str, label: str):
         graph[a].setdefault(b, set()).add(label)
         graph[b].setdefault(a, set()).add(label)
+
+    def components():
+        """Yield each connected family, ordered by its least member."""
+        visited = set()
+        for start in sorted(graph):
+            if start in visited:
+                continue
+            component = set()
+            queue = [start]
+            while queue:
+                ch = queue.pop()
+                if ch not in component:
+                    component.add(ch)
+                    queue.extend(graph[ch])
+            visited.update(component)
+            yield component
+
+    def resolve(component: set[str]) -> tuple[str | None, set[str]]:
+        """Return the family target and the candidates of the first applicable rule.
+
+        The rules are a BMP simplified member, else a General Standard member, else a
+        BMP member. When they leave no unique target, the family's unique simplified
+        member is the target."""
+        bmp = {ch for ch in component if ord(ch) < 0x10000}
+        rule = bmp & simplified or component & general or bmp
+        for candidates in (rule, component & simplified):
+            if len(candidates) == 1:
+                return next(iter(candidates)), rule
+        return None, rule
 
     for field in DIRECT_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
@@ -339,57 +374,50 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     for ch, target in links(refs.opencc.items()):
         edge(ch, target, "opencc:TSCharacters")
         simplified.add(target)
-    typed = authored | set(refs.fields.get("kTGH", {}))
+    family = {}
+    for component in components():
+        target, _ = resolve(component)
+        for ch in component:
+            family[ch] = min(component), target
+
+    typed = authored | general
     partial = defaultdict(dict)
     for field in PARTIAL_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
             if target in graph.get(ch, {}):
                 continue
-            valid = (ch not in typed and target in typed
-                     and bool({syllable(r) for r in refs.attestations(ch)} & {syllable(r) for r in refs.attestations(target)}))
-            if valid:
+            if (ch not in typed and target in typed
+                    and {syllable(r) for r in refs.attestations(ch)} & {syllable(r) for r in refs.attestations(target)}):
                 partial[ch].setdefault(target, set()).add("unihan:" + field)
             else:
-                issues[ch].append("variant-guard:" + field + "=" + target)
-    for ch, targets in partial.items():
-        def lineage_syllables(member: str, lineage: str) -> set[str]:
-            return {syllable(value) for value, sources in refs.attestations(member).items() if lineage in sources}
+                rejected[ch].append((target, field))
 
+    def lineage_syllables(member: str, lineage: str) -> set[str]:
+        return {syllable(value) for value, sources in refs.attestations(member).items() if lineage in sources}
+
+    for ch, targets in partial.items():
         scores = {target: sum(bool(lineage_syllables(ch, lineage) & lineage_syllables(target, lineage))
                               for lineage in ("unihan", "cns")) for target in targets}
         maximum = max(scores.values())
         best = sorted(target for target, score in scores.items() if score == maximum)
-        if len(best) > 1:
-            issues[ch].append("variant-guard:tied-lineages=" + " ".join(f"{target}:{maximum}" for target in best))
-            target = (choices or {}).get(ch)
-            if target not in best:
-                continue
-        else:
-            target = best[0]
-        for label in targets[target]:
-            edge(ch, target, label)
+        joined = {target: family.get(target, (target, target)) for target in best}
+        if len({key for key, _ in joined.values()}) > 1:
+            issues[ch].append("variant-guard:tied-lineages=" + " ".join(
+                f"{target}:{maximum}" if joined[target][1] == target else f"{target}→{joined[target][1] or '-'}:{maximum}"
+                for target in best))
+            choice = (choices or {}).get(ch)
+            best = [target for target in best if choice and joined[target][1] == choice]
+        for target in best:
+            for label in targets[target]:
+                edge(ch, target, label)
 
     result = {}
-    visited = set()
-    for start in sorted(graph):
-        if start in visited:
-            continue
-        component = set()
-        queue = [start]
-        while queue:
-            ch = queue.pop()
-            if ch in component:
-                continue
-            component.add(ch)
-            queue.extend(graph[ch])
-        visited.update(component)
-        bmp = {ch for ch in component if ord(ch) < 0x10000}
-        choices = bmp & simplified or component & set(refs.fields.get("kTGH", {})) or bmp
-        if len(choices) != 1:
+    for component in components():
+        target, rule = resolve(component)
+        if target is None:
             for ch in component:
-                issues[ch].append("family-target:unresolved=" + " ".join(sorted(choices or component)))
+                issues[ch].append("family-target:unresolved=" + " ".join(sorted(rule or component)))
             continue
-        target = next(iter(choices))
         queue = deque([(target, ())])
         reached = {target}
         while queue:
@@ -401,7 +429,7 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
                 path = tuple(sorted(set(relations) | graph[ch][neighbor]))
                 result[neighbor] = (target, ",".join(path))
                 queue.append((neighbor, path))
-    return result, dict(issues)
+    return result, dict(issues), dict(rejected)
 
 
 def assemble(members: list[str], refs: References, predictions: Predictions, authored: set[str],
@@ -413,7 +441,7 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
     outside = set(predictions.rows) - set(members)
     if outside:
         raise ValueError("predictions outside tier: " + " ".join(sorted(outside)))
-    mappings, family_issues = family_mappings(refs, authored, mapping_choices)
+    mappings, family_issues, rejected = family_mappings(refs, authored, mapping_choices)
     rows, records, gaps, findings = [], [], [], []
     for ch in members:
         readings, issues = ordered_readings(ch, refs, predictions)
@@ -433,6 +461,7 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
                     gaps.append((ch, raw, normalized, prediction.batch, "unattested-syllable"))
             if prediction.simplified and prediction.simplified != target:
                 gaps.append((ch, prediction.simplified, prediction.simplified, prediction.batch, "unconfirmed-mapping"))
+        gaps.extend((ch, link, link, "-", "guard-failed:" + field) for link, field in rejected.get(ch, ()))
         passes = {p.normalized for p in predictions.rows.get(ch, ())}
         if len(passes) > 1:
             findings.append((ch, "provenance", text, "prediction-pass disagreement"))
