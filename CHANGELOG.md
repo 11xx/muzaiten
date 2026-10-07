@@ -4,6 +4,14 @@
 
 ### Developer tooling
 
+- Rare Han proposals assemble from checksum-pinned references with per-value
+  provenance. Marked tables audit evidence ordering, reviewed ties, family
+  mappings and NOTICE attribution; unmarked essential tables retain their
+  authored-data rules. The fourth family target rule applies only when BMP and
+  General Standard preferences are empty; unresolved families accept consistent
+  listed targets with provenance and exact reviewed rows. `tgh` defaults prefer
+  the decisive `kTGHZ2013` reading. Offline fixtures cover compatibility
+  endpoints, malformed reference readings and all cached rare tiers.
 - Han generation and checks accept Python Unicode versions independently of
   the pinned Unihan 16.0.0 reference, retaining runtime category filtering.
 - Han word tables accept any spelling and merge readings under simplified keys;

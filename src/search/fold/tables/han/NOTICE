@@ -10,6 +10,14 @@ record only input checksums. Verbatim decomposition inputs, prompts and raw
 responses require their own source-license determination before distribution;
 blind prediction, source pointers and checksums do not confer those rights.
 
+Attribution scope
+  The records below name the tables covered by each reference attribution.
+  Per-tier provenance sidecars identify the references each table actually uses.
+
+# attribution: {"reference":"unihan","provider":"Unicode, Inc.","source":"https://www.unicode.org/Public/","license":"Unicode-3.0","files":["tgh.tsv","big5-2.tsv","core.tsv","uro.tsv","exta.tsv","extb.tsv","extc.tsv","cns.tsv"]}
+# attribution: {"reference":"cns","provider":"CNS11643中文標準交換碼全字庫(簡稱全字庫), dataset 5961","source":"https://data.gov.tw/dataset/5961","license":"Taiwan Open Government Data License v1","files":["tgh.tsv","big5-2.tsv","core.tsv","uro.tsv","exta.tsv","extb.tsv","extc.tsv","cns.tsv"]}
+# attribution: {"reference":"opencc","provider":"The OpenCC contributors","source":"https://github.com/BYVoid/OpenCC","license":"Upstream source and license notices","files":["tgh.tsv","big5-2.tsv","core.tsv","uro.tsv","exta.tsv","extb.tsv","extc.tsv","cns.tsv"]}
+
 Unicode Unihan
   Provider: Unicode, Inc.
   Source: https://www.unicode.org/Public/
@@ -25,10 +33,12 @@ CNS 11643 full character set open dataset
   Archives: https://www.cns11643.gov.tw/opendata/Properties.zip
             https://www.cns11643.gov.tw/opendata/MapingTables.zip
   Source terms: https://data.gov.tw/license
-  These coordinates identify the checking and assembly reference. A distribution
-  containing CNS-derived rows must record the applicable terms and full dataset
-  attribution with those rows after a license decision for that corpus. Reference
-  metadata alone does not select a distribution license or establish compatibility.
+  License: Taiwan Open Government Data License v1 (attribution).
+  Attribution: CNS11643中文標準交換碼全字庫(簡稱全字庫), dataset 5961,
+  https://data.gov.tw/dataset/5961, under the Taiwan Open Government Data License v1,
+  https://data.gov.tw/license. Archive revisions and checksums are recorded in
+  each table's provenance headers. Reference metadata alone does not select a
+  distribution license or establish compatibility.
 
 OpenCC TSCharacters
   Provider: the OpenCC contributors.

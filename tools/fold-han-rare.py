@@ -7,6 +7,8 @@ import argparse
 import functools
 import hashlib
 import importlib.util
+import ipaddress
+import itertools
 import json
 import pathlib
 import re
@@ -38,7 +40,9 @@ PARTIAL_FIELDS = ("kSemanticVariant", "kSpecializedSemanticVariant")
 MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013")
 FIELDS = (*data.READING_FIELDS, *DIRECT_FIELDS, *PARTIAL_FIELDS, "kTGH", "kUnihanCore2020")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
-TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+/#:-]*\Z")
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+#:-]*\Z")
+SESSION_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)
+PATH_TOKEN = re.compile(r"(?:[A-Za-z]:)?(?:[.~]?[/\\]|[A-Za-z0-9_.~-]+[/\\])\S*")
 
 
 def canonical(value) -> str:
@@ -55,7 +59,7 @@ def keys(value: dict, expected: set[str], label: str) -> None:
 
 
 def coordinate(value: str, source: bool = False) -> None:
-    if not isinstance(value, str) or not value or re.search(r"\s|[\x00-\x1f]|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value, re.I):
+    if not isinstance(value, str) or not value or re.search(r"\s|[\x00-\x1f]", value) or SESSION_ID.search(value):
         raise ValueError("invalid portable source coordinate")
     if source:
         url = urlsplit(value)
@@ -63,8 +67,23 @@ def coordinate(value: str, source: bool = False) -> None:
             return
         if url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password:
             raise ValueError("source must be a public HTTP URL or fixture identifier")
-    elif not TOKEN.fullmatch(value):
+        host = url.hostname.lower().rstrip(".")
+        try:
+            public = ipaddress.ip_address(host).is_global
+        except ValueError:
+            public = ("." in host
+                      and not re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*", host)
+                      and not host.endswith((".localhost", ".local", ".internal", ".lan", ".home", ".home.arpa"))
+                      and host != "localhost")
+        if not public:
+            raise ValueError("source must name a public host")
+    elif not TOKEN.fullmatch(value) or ".." in value:
         raise ValueError("coordinate must be a portable identifier")
+
+
+def portable_text(value: str) -> None:
+    if PATH_TOKEN.search(value) or SESSION_ID.search(value):
+        raise ValueError("descriptive text must not contain paths or session identifiers")
 
 
 def source_pin(value: dict) -> None:
@@ -220,6 +239,8 @@ def read_predictions(paths: list[pathlib.Path]) -> Predictions:
             seen.add(ch)
             if confidence not in {"c", "g", "unknown"} or not basis:
                 raise ValueError(f"{path.name}:{number}: invalid confidence or empty stated basis")
+            for text in (component, basis, hint):
+                portable_text(text)
             if any(any(ord(c) < 32 for c in text) for text in columns):
                 raise ValueError(f"{path.name}:{number}: control character")
             if decomposition_sha != "-" and not SHA256.fullmatch(decomposition_sha):
@@ -294,26 +315,38 @@ def classify(ch: str, value: str, lineages: set[str], predictions: Predictions) 
     return Record(ch, value, "agreed" if len(lineages) == 2 else "single", sources, sources, 1, "-")
 
 
-def ordered_readings(ch: str, refs: References, predictions: Predictions) -> tuple[list[Record], list[tuple[str, str]]]:
+def ordered_readings(ch: str, refs: References, predictions: Predictions,
+                     choice: list[str] | None = None, tier: str | None = None
+                     ) -> tuple[list[Record], list[tuple[str, str]]]:
+    """Prefer the decisive tgh reading, then region and evidence precedence.
+
+    Reviewed permutations reorder only tied readings; their decision finding remains."""
     attestations = refs.attestations(ch)
     records = {value: classify(ch, value, sources, predictions) for value, sources in attestations.items()}
     mandarin = refs.mandarin(ch)
     candidates = [(p.batch, i, token) for p in predictions.rows.get(ch, ()) for i, token in enumerate(p.normalized)]
+    mainland = refs.mainland(ch)
+    tgh = [value for raw in refs.unihan_spellings(ch, ("kTGHZ2013",))
+           if (value := reference_reading(raw))] if tier == "tgh" else []
+    decisive = tgh[0] if tgh else None
 
-    def evidence(value: str):
+    def precedence(value: str):
         record = records[value]
         group = 0 if len(attestations[value]) == 2 else 1 if record.basis == "predicted" else 2
         model = min(((batch, i) for batch, i, token in candidates if syllable(token) == syllable(value)), default=("~", sys.maxsize))
-        return group, mandarin.index(value) if value in mandarin else sys.maxsize, model, value
+        return value != decisive, value not in mainland, group, mandarin.index(value) if value in mandarin else sys.maxsize, model
 
-    mainland = refs.mainland(ch)
-    placed = sorted(records, key=lambda value: (value not in mainland, evidence(value)))
-    issues = []
+    placed = sorted(records, key=lambda value: (precedence(value), value))
+    undecided = None
     cns_only = all(attested == {"cns"} for attested in attestations.values())
     if len(placed) > 1 and cns_only and not any(r.basis == "predicted" for r in records.values()):
-        issues.append((" ".join(placed), "CNS-only default requires a reviewed decision"))
-    elif len(placed) > 1 and (placed[0] in mainland) == (placed[1] in mainland) and evidence(placed[0])[:-1] == evidence(placed[1])[:-1]:
-        issues.append((" ".join(placed), "evidence-order tie requires a reviewed decision"))
+        undecided = "CNS-only default requires a reviewed decision"
+    elif len(placed) > 1 and precedence(placed[0]) == precedence(placed[1]):
+        undecided = "evidence-order tie requires a reviewed decision"
+    if (undecided and choice and sorted(choice) == sorted(placed)
+            and all(precedence(a) <= precedence(b) for a, b in itertools.pairwise(choice))):
+        placed = list(choice)
+    issues = [(" ".join(placed), undecided)] if undecided else []
     issues.extend((raw, f"unparseable {source} reading") for source, raw in refs.unparseable(ch))
     for rank, value in enumerate(placed, 1):
         r = records[value]
@@ -356,15 +389,18 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     def resolve(component: set[str]) -> tuple[str | None, set[str]]:
         """Return the family target and the candidates of the first applicable rule.
 
-        The rules are a BMP simplified member, else a General Standard member, else a
-        BMP member. When they leave no unique target, the family's unique simplified
-        member is the target."""
+        Only a family without BMP or General Standard members uses its unique
+        directly named simplified member as an automatic fallback."""
         bmp = {ch for ch in component if ord(ch) < 0x10000}
         rule = bmp & simplified or component & general or bmp
-        for candidates in (rule, component & simplified):
-            if len(candidates) == 1:
-                return next(iter(candidates)), rule
-        return None, rule
+        candidates = rule or component & simplified
+        return (next(iter(candidates)) if len(candidates) == 1 else None), rule
+
+    def family_choice(component: set[str], rule: set[str]) -> str | None:
+        requested = {choices[ch] for ch in component if ch in (choices or {})}
+        if len(requested) == 1 and requested <= (rule or component):
+            return next(iter(requested))
+        return None
 
     for field in DIRECT_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
@@ -376,7 +412,9 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
         simplified.add(target)
     family = {}
     for component in components():
-        target, _ = resolve(component)
+        target, rule = resolve(component)
+        if target is None:
+            target = family_choice(component, rule)
         for ch in component:
             family[ch] = min(component), target
 
@@ -417,7 +455,9 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
         if target is None:
             for ch in component:
                 issues[ch].append("family-target:unresolved=" + " ".join(sorted(rule or component)))
-            continue
+            target = family_choice(component, rule)
+            if target is None:
+                continue
         queue = deque([(target, ())])
         reached = {target}
         while queue:
@@ -433,7 +473,8 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
 
 
 def assemble(members: list[str], refs: References, predictions: Predictions, authored: set[str],
-             mapping_choices: dict[str, str] | None = None):
+             mapping_choices: dict[str, str] | None = None, reading_choices: dict[str, list[str]] | None = None,
+             tier: str | None = None):
     if len(members) != len(set(members)):
         raise ValueError("duplicate tier member")
     for ch in members:
@@ -444,7 +485,7 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
     mappings, family_issues, rejected = family_mappings(refs, authored, mapping_choices)
     rows, records, gaps, findings = [], [], [], []
     for ch in members:
-        readings, issues = ordered_readings(ch, refs, predictions)
+        readings, issues = ordered_readings(ch, refs, predictions, (reading_choices or {}).get(ch), tier)
         text = " ".join(r.value for r in readings) or "-"
         target, relations = mappings.get(ch, ("", ""))
         rows.append((ch, text, target))
@@ -496,7 +537,7 @@ def header(schema: str, refs: References, predictions: Predictions, authored: se
 
 
 def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: References, predictions: Predictions, authored: set[str]):
-    rows, records, gaps, findings = assemble(members, refs, predictions, authored)
+    rows, records, gaps, findings = assemble(members, refs, predictions, authored, tier=tier)
     counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
     out.mkdir(parents=True, exist_ok=True)
     common = header(PROVENANCE_SCHEMA, refs, predictions, authored)
@@ -551,8 +592,44 @@ def read_records(path: pathlib.Path) -> tuple[dict, list[Record]]:
     return headers, records
 
 
+def check_notice(table: pathlib.Path, records: list[Record], notice: pathlib.Path) -> list[tuple]:
+    """Require a scoped provider attribution for every reference used by the table."""
+    sources = {source.split(":", 1)[0] for record in records for source in record.attested_by.split(",")}
+    if not sources:
+        return []
+    try:
+        text = notice.read_text(encoding="utf-8")
+        attributions = {}
+        for line in text.splitlines():
+            if not line.startswith("# attribution: "):
+                continue
+            entry = json.loads(line.removeprefix("# attribution: "))
+            keys(entry, {"reference", "provider", "source", "license", "files"}, "NOTICE attribution")
+            name = entry["reference"]
+            if name not in {"unihan", "cns", "opencc"} or name in attributions:
+                raise ValueError("invalid or duplicate NOTICE reference")
+            coordinate(entry["source"], source=True)
+            if (not isinstance(entry["provider"], str) or not entry["provider"].strip()
+                    or not isinstance(entry["license"], str) or not entry["license"].strip()
+                    or not isinstance(entry["files"], list)
+                    or any(name not in data.TIER_FILES for name in entry["files"])):
+                raise ValueError("invalid NOTICE attribution")
+            attributions[name] = entry
+        required_licenses = {"unihan": "Unicode-3.0", "cns": "Taiwan Open Government Data License v1"}
+        missing = [source for source in sorted(sources)
+                   if source not in attributions or table.name not in attributions[source]["files"]
+                   or (source in required_licenses and attributions[source]["license"] != required_licenses[source])
+                   or (source == "unihan" and not all(part in text for part in
+                       ("UNICODE LICENSE V3", "COPYRIGHT AND PERMISSION NOTICE", "Copyright ©",
+                        "Permission is hereby granted", "THE DATA FILES AND SOFTWARE ARE PROVIDED")))]
+        return [(table.name, "-", "-", "provenance", source, "NOTICE attribution missing or incomplete")
+                for source in missing]
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return [(table.name, "-", "-", "provenance", "invalid NOTICE", str(exc))]
+
+
 def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: References, predictions: Predictions,
-                     authored: set[str]) -> list[tuple[str, str, str, str, str, str]]:
+                     authored: set[str], notice: pathlib.Path | None = None) -> list[tuple[str, str, str, str, str, str]]:
     def finding(ch: str, ours: str, reference: str, kind: str = "provenance"):
         return table.name, "-", ch, kind, ours, reference
 
@@ -588,22 +665,14 @@ def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: Refere
             raise ValueError("prediction contains an ideograph outside the tier")
         selected_predictions = Predictions({ch: values for ch, values in predictions.rows.items() if ch in observed}, predictions.inputs)
         mapping_choices = {ch: simple for ch, (_, simple) in observed.items() if simple}
-        proposed, expected, gaps, issues = assemble(members, refs, selected_predictions, authored, mapping_choices)
-        undecided_defaults = {ch for ch, kind, _, reference in issues
-                              if kind == "provenance" and reference == "CNS-only default requires a reviewed decision"}
-        for ch in undecided_defaults:
-            actual_order = observed[ch][0].split()
-            predicted_order = [r.value for r in expected if r.ch == ch and r.rank]
-            if len(actual_order) == len(predicted_order) and set(actual_order) == set(predicted_order):
-                expected = [Record(r.ch, r.value, r.basis, r.attested_by, r.tone_from,
-                                   actual_order.index(r.value) + 1, r.batch) if r.ch == ch and r.rank else r for r in expected]
-                proposed = [(key, observed[ch][0], simple) if key == ch else (key, text, simple) for key, text, simple in proposed]
-                issues = [(key, kind, observed[ch][0], reference) if key == ch and reference == "CNS-only default requires a reviewed decision"
-                          else (key, kind, ours, reference) for key, kind, ours, reference in issues]
+        reading_choices = {ch: text.split() for ch, (text, _) in observed.items() if text != "-"}
+        proposed, expected, gaps, issues = assemble(members, refs, selected_predictions, authored,
+                                                    mapping_choices, reading_choices, tier=table.stem)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return [finding("-", "invalid records", str(exc))]
 
     findings = [finding(ch, ours, reference, kind) for ch, kind, ours, reference in issues]
+    findings.extend(check_notice(table, expected + actual, notice or data.DEFAULT_AUTHORED_DIR / "NOTICE"))
     if headers.get("complete"):
         if table.stem not in tiers:
             findings.append(finding("-", table.stem, "unknown complete tier", "coverage"))
