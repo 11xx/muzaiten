@@ -1,4 +1,9 @@
+#include <QMutex>
+#include <QTimer>
+
+#define private public
 #include "playback/GStreamerPlaybackBackend.h"
+#undef private
 #include "playback/OutputEndpointMonitor.h"
 #include "playback/QtPlaybackBackend.h"
 #include "player/PlayerCore.h"
@@ -63,6 +68,145 @@ private slots:
     void cleanupTestCase()
     {
         qunsetenv("MUZAITEN_DEMO_SILENT_AUDIO");
+    }
+
+    void releasingPauseRestoresPositionOnTheCorrectSinkState_data()
+    {
+        QTest::addColumn<bool>("native");
+        QTest::newRow("native") << true;
+        QTest::newRow("other-sink") << false;
+    }
+
+    void releasingPauseRestoresPositionOnTheCorrectSinkState()
+    {
+        QFETCH(bool, native);
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("resume.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        struct Observation {
+            GstElement *pipeline = nullptr;
+            std::atomic<int> flushState{GST_STATE_NULL};
+            std::atomic<bool> muted{false};
+        } observation;
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = true;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 3000);
+        backend.pause();
+        const qint64 held = backend.m_resumePositionMs;
+        QVERIFY(held >= 1500);
+        GstState state = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &state, nullptr, 0);
+        QCOMPARE(state, GST_STATE_READY);
+        // The silent sink exercises transport ordering without a sound server.
+        if (native) {
+            backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        }
+        observation.pipeline = backend.m_playbin;
+        GstPad *pad = gst_element_get_static_pad(backend.m_audioSink, "sink");
+        gst_pad_add_probe(pad,
+                          static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_EVENT_FLUSH),
+                          [](GstPad *, GstPadProbeInfo *info, gpointer data) -> GstPadProbeReturn {
+                              auto *observed = static_cast<Observation *>(data);
+                              if (GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) == GST_EVENT_FLUSH_START) {
+                                  GstState current = GST_STATE_NULL;
+                                  gst_element_get_state(observed->pipeline, &current, nullptr, 0);
+                                  observed->flushState.store(current);
+                                  gboolean muted = FALSE;
+                                  g_object_get(G_OBJECT(observed->pipeline), "mute", &muted, nullptr);
+                                  observed->muted.store(muted);
+                              }
+                              return GST_PAD_PROBE_OK;
+                          }, &observation, nullptr);
+        gst_object_unref(pad);
+        QSignalSpy positions(&backend, &PlaybackBackend::positionChanged);
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= held + 300, 3000);
+        QCOMPARE(observation.flushState.load(), native ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+        QCOMPARE(observation.muted.load(), native);
+        for (const auto &position : positions) {
+            QVERIFY(position.first().toLongLong() >= held - 250);
+        }
+        gboolean muted = TRUE;
+        g_object_get(G_OBJECT(backend.m_playbin), "mute", &muted, nullptr);
+        QVERIFY(!muted);
+        QVERIFY(backend.m_profile.releaseSinkOnPause);
+        backend.stop();
+    }
+
+    void nativeRestoreKeepsTheLatestPauseAndSeekIntent_data()
+    {
+        QTest::addColumn<bool>("release");
+        QTest::newRow("release") << true;
+        QTest::newRow("keep-open") << false;
+    }
+
+    void nativeRestoreKeepsTheLatestPauseAndSeekIntent()
+    {
+        QFETCH(bool, release);
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("intent.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = release;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        backend.reloadCurrentAtPosition(5000, PlaybackBackend::State::Playing);
+        backend.seek(6000);
+        backend.pause();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Paused, 3000);
+        QVERIFY(std::abs(backend.position() - 6000) < 250);
+        GstState state = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &state, nullptr, 0);
+        QCOMPARE(state, release ? GST_STATE_READY : GST_STATE_PAUSED);
+        QTest::qWait(200);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Paused);
+        QVERIFY(std::abs(backend.position() - 6000) < 250);
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > 6300, 3000);
+        backend.stop();
+        gboolean muted = TRUE;
+        g_object_get(G_OBJECT(backend.m_playbin), "mute", &muted, nullptr);
+        QVERIFY(!muted);
+    }
+
+    void nativeRestoreCanReloadPausedAndCancelForAnotherTrack()
+    {
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("reload.wav"));
+        const QString next = dir.filePath(QStringLiteral("next.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        QVERIFY(writeToneWav(next, 660.0, 30'000));
+        GStreamerPlaybackBackend backend;
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        backend.prepareNext(QUrl::fromLocalFile(next));
+        backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        backend.reloadCurrentAtPosition(5000, PlaybackBackend::State::Paused);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Paused, 3000);
+        QVERIFY(std::abs(backend.position() - 5000) < 250);
+        QVERIFY(backend.m_preparedUri.endsWith(QStringLiteral("next.wav")));
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        backend.pause();
+        backend.resume();
+        backend.stop();
+        backend.play(QUrl::fromLocalFile(next));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > 300, 3000);
+        QVERIFY(backend.position() < 3000);
+        gboolean muted = TRUE;
+        g_object_get(G_OBJECT(backend.m_playbin), "mute", &muted, nullptr);
+        QVERIFY(!muted);
+        backend.stop();
     }
 
     // What the native PipeWire transport is given, checked without needing

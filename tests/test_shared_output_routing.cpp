@@ -85,14 +85,6 @@ bool sinkInstalled(const char *factoryName)
         QSKIP("GStreamer's PipeWire plugin (pipewiresink) is not installed");                    \
     }
 
-// pipewiresink can wedge when a flushing seek follows its reconnect, as any
-// resume at a held position after a releasing pause does; a case built on
-// that cannot run reliably on the native transport.
-#define SKIP_NATIVE_HELD_POSITION_RESUME(transport)                                             \
-    if ((transport) == QStringLiteral("pipewire")) {                                            \
-        QSKIP("pipewiresink can wedge on a flushing seek right after it reconnects");            \
-    }
-
 } // namespace
 
 // Exercises the real GStreamer backend and pulsesink against a private
@@ -305,7 +297,6 @@ private slots:
     {
         QFETCH(QString, transport);
         SKIP_UNLESS_TRANSPORT(transport);
-        SKIP_NATIVE_HELD_POSITION_RESUME(transport);
         const QString late = QStringLiteral("muz_late_%1").arg(m_round);
         PlaybackProfile profile = transportProfile(transport);
         profile.sharedEndpoint = late;
@@ -583,9 +574,6 @@ private slots:
         QFETCH(bool, fallback);
         QFETCH(QString, transport);
         SKIP_UNLESS_TRANSPORT(transport);
-        if (!fallback) {
-            SKIP_NATIVE_HELD_POSITION_RESUME(transport);
-        }
         const QString preferred = QStringLiteral("muz_pref_%1").arg(m_round);
         m_modules.insert(preferred, m_graph->addSink(preferred));
         PlaybackProfile profile = transportProfile(transport);

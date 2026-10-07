@@ -98,6 +98,8 @@ private:
     // Issue a flushing seek and arm the in-flight bookkeeping (watchdog +
     // coalescing). Callers must have ruled out the soft-pause/handoff cases.
     void issueSeek(qint64 positionMs);
+    void queuePositionRestore(qint64 positionMs);
+    void clearNativePositionRestore();
     // Deterministic recovery: drop the pipeline to READY and reload the audible
     // uri at |positionMs|, preserving the prepared gapless next. Used when a
     // seek lands in the undefined about-to-finish window or never completes.
@@ -264,6 +266,10 @@ private:
     qint64 m_resumePositionMs = 0;
     // Pending seek to apply once the pipeline prerolls after a soft-pause resume.
     qint64 m_pendingSeekMs = -1;
+    // Native reconnects activate the buffer pool in PLAYING before seeking.
+    // Keep that activation silent until the held position has prerolled.
+    bool m_nativePositionRestore = false;
+    bool m_nativeRestoreRelease = false;
 
     // Seek coalescing: flushing seeks must not stack — a burst (slider scrub)
     // issued into a pipeline that hasn't finished the previous flush can wedge
