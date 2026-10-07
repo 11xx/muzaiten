@@ -129,7 +129,7 @@ LoadResult streamRecords(const std::function<void(const Search::SearchRecord &)>
             [&](Search::SearchRecord record) {
                 ++result.trackCount;
                 sink(record);
-            }, &current);
+            }, &current, Search::IndexCache::ReadMode::Ephemeral);
         if (ok) {
             result.ok = true;
             result.usedCache = true;

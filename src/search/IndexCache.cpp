@@ -120,20 +120,19 @@ QString readString(QDataStream &s)
     return v;
 }
 
-// Re-intern the high-repetition fields through `pool` (one buffer per distinct
-// value), mirroring how the live build dedups them — otherwise every cached row
-// would hold its own copy of the artist/album strings.
-SearchRecord readRecord(QDataStream &s, QHash<QString, QString> &pool)
+// Retained indexes share high-repetition strings. Ephemeral readers discard
+// records as they stream, so they do not need a pool of every distinct value.
+SearchRecord readRecord(QDataStream &s, QHash<QString, QString> *pool)
 {
-    const auto intern = [&pool](const QString &v) {
-        if (v.isEmpty()) {
+    const auto intern = [pool](const QString &v) {
+        if (pool == nullptr || v.isEmpty()) {
             return v;
         }
-        const auto it = pool.constFind(v);
-        if (it != pool.constEnd()) {
+        const auto it = pool->constFind(v);
+        if (it != pool->constEnd()) {
             return it.value();
         }
-        pool.insert(v, v);
+        pool->insert(v, v);
         return v;
     };
 
@@ -322,7 +321,8 @@ std::unique_ptr<PreparedWrite> prepare(
 }
 
 bool forEachRecord(const QString &path, CacheSignature *outSignature,
-                   const std::function<void(SearchRecord)> &sink, const CacheSignature *expected)
+                   const std::function<void(SearchRecord)> &sink,
+                   const CacheSignature *expected, ReadMode mode)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) return false;
@@ -342,6 +342,7 @@ bool forEachRecord(const QString &path, CacheSignature *outSignature,
     if (s.status() != QDataStream::Ok) return false;
     quint64 seen = 0;
     QHash<QString, QString> pool;
+    QHash<QString, QString> *internPool = mode == ReadMode::Interned ? &pool : nullptr;
     while (true) {
         quint32 count = 0;
         s >> count;
@@ -360,7 +361,7 @@ bool forEachRecord(const QString &path, CacheSignature *outSignature,
         QDataStream chunk(raw);
         chunk.setVersion(kDataStreamVersion);
         for (quint32 i = 0; i < count; ++i) {
-            SearchRecord rec = readRecord(chunk, pool);
+            SearchRecord rec = readRecord(chunk, internPool);
             if (chunk.status() != QDataStream::Ok) return false;
             sink(std::move(rec));
         }

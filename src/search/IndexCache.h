@@ -107,9 +107,13 @@ Loaded read(const QString &path);
 // (some records may already have been sunk on a mid-stream failure). When
 // `outSignature` is non-null it receives the stored signature. `expected`, when
 // provided, is checked on the same open file before any records are emitted.
+// Ephemeral mode leaves repeated strings independent for consumers that discard
+// each record as it arrives. Readers retaining all records use shared interning.
+enum class ReadMode { Interned, Ephemeral };
 bool forEachRecord(const QString &path, CacheSignature *outSignature,
                    const std::function<void(SearchRecord)> &sink,
-                   const CacheSignature *expected = nullptr);
+                   const CacheSignature *expected = nullptr,
+                   ReadMode mode = ReadMode::Interned);
 
 } // namespace IndexCache
 } // namespace Search

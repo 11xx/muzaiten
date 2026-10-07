@@ -164,6 +164,27 @@ private slots:
         QCOMPARE(stored, signature());
         QCOMPARE(streamed.size(), original.size());
         for (int i = 0; i < count; ++i) equal(streamed[i], original[i]);
+        if (count > 1) {
+            QVERIFY(streamed[0].artistName.constData() == streamed[1].artistName.constData());
+        }
+        QVector<SearchRecord> ephemeral;
+        QVERIFY(IndexCache::forEachRecord(path, nullptr,
+            [&ephemeral](SearchRecord r) { ephemeral.push_back(std::move(r)); },
+            &signatureValue, IndexCache::ReadMode::Ephemeral));
+        QCOMPARE(ephemeral.size(), original.size());
+        for (int i = 0; i < count; ++i) equal(ephemeral[i], original[i]);
+        if (count > 1) {
+            QVERIFY(ephemeral[0].artistName.constData() != ephemeral[1].artistName.constData());
+        }
+
+        CacheSignature stale = signatureValue;
+        ++stale.contentRevision;
+        int staleRows = 0;
+        QVERIFY(!IndexCache::forEachRecord(path, nullptr,
+            [&staleRows](SearchRecord) { ++staleRows; },
+            &stale, IndexCache::ReadMode::Ephemeral));
+        QCOMPARE(staleRows, 0);
+
         const auto loaded = IndexCache::read(path);
         QVERIFY(loaded.ok);
         QCOMPARE(loaded.signature, signature());
@@ -306,7 +327,14 @@ private slots:
         }
         QVERIFY(chunkOffset > totalOffset);
         QVERIFY(replace(path, data));
-        QVERIFY(!IndexCache::forEachRecord(path, nullptr, [](SearchRecord) {}));
+        int internedRows = 0;
+        QVERIFY(!IndexCache::forEachRecord(path, nullptr,
+            [&internedRows](SearchRecord) { ++internedRows; }));
+        int ephemeralRows = 0;
+        QVERIFY(!IndexCache::forEachRecord(path, nullptr,
+            [&ephemeralRows](SearchRecord) { ++ephemeralRows; },
+            nullptr, IndexCache::ReadMode::Ephemeral));
+        QCOMPARE(ephemeralRows, internedRows);
         QVERIFY(!IndexCache::read(path).ok);
     }
 

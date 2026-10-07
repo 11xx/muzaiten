@@ -18,7 +18,7 @@ endfunction()
 add_muzaiten_test(test_rating test_rating.cpp)
 add_executable(test_index_cache test_index_cache.cpp)
 target_include_directories(test_index_cache PRIVATE ../src)
-target_link_libraries(test_index_cache PRIVATE muzaiten_db muzaiten_search Qt6::Core Qt6::Test)
+target_link_libraries(test_index_cache PRIVATE muzaiten_search muzaiten_db Qt6::Core Qt6::Test)
 target_compile_features(test_index_cache PRIVATE cxx_std_26)
 add_test(NAME test_index_cache COMMAND test_index_cache)
 
@@ -85,7 +85,7 @@ target_link_libraries(test_search_cli PRIVATE
     Qt6::Test
 )
 target_compile_features(test_search_cli PRIVATE cxx_std_26)
-add_dependencies(test_search_cli muzaitenctl)
+add_dependencies(test_search_cli muzaitenctl muzaiten-features)
 add_test(NAME test_search_cli COMMAND test_search_cli)
 
 add_executable(test_playlist_database
