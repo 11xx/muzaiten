@@ -59,6 +59,13 @@ locations, then `PATH`. `muzaiten-features status --json` reports the accepted
 path and source. The GUI's provider setup dialog can select a custom executable
 or reset to automatic discovery.
 
+Provider setup and model download check status asynchronously. The waiting
+dialog has a **Cancel** button and a 45-second timeout; playback and the main
+window remain responsive. A later setup or download request, a changed
+provider or analysis-store path, or a closed main window cancels pending
+status and consent. A timeout leaves setup choices available and prevents a
+model download until a successful check and explicit consent.
+
 ## Consent and model lifecycle
 
 Neither semantic scans nor text queries download weights. Use **Library > Audio

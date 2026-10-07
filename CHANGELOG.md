@@ -181,6 +181,11 @@
 
 ### Fixed
 
+- Semantic provider setup and model download check provider status in the
+  background with a cancellable waiting dialog and a 45-second timeout.
+  Superseded requests, changed paths, and closed windows discard pending
+  status and download consent.
+
 - Native PipeWire playback restores its held position after reconnecting without
   a flushing seek during PAUSED preroll, which can hang the sink. Reconnecting
   stays silent until the position is restored, shows new seek targets immediately,

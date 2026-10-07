@@ -46,6 +46,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileDialog>
 #include <QFontMetrics>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -60,6 +61,7 @@
 #include <QLocalSocket>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QScopeGuard>
 #include <QSet>
 #include <QStatusBar>
@@ -176,6 +178,128 @@ QJsonObject ipcRequest(AppCore &core, const QString &command, const QJsonObject 
     deadline.start();
     loop.exec();
     return QJsonDocument::fromJson(socket.readLine()).object();
+}
+
+QString navigationStateTemplate()
+{
+    const QString evidenceRoot = qEnvironmentVariable("MUZAITEN_TEST_EVIDENCE_DIR");
+    return QDir(evidenceRoot.isEmpty() ? QDir::tempPath() : evidenceRoot)
+        .filePath(QStringLiteral("navigation-XXXXXX"));
+}
+
+bool writeFixtureFile(const QString &path, const QByteArray &bytes)
+{
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(bytes) == bytes.size();
+}
+
+QJsonObject readFixtureObject(const QString &path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject{};
+}
+
+QJsonObject semanticStatusFixture(bool audioOnly = true, bool conversion = false)
+{
+    QJsonObject model{
+        {QStringLiteral("source"), QStringLiteral("https://example.org/model")},
+        {QStringLiteral("license"), QStringLiteral("CC0-1.0")},
+        {QStringLiteral("approximate_bytes"), 790'000'000},
+        {QStringLiteral("converted_approximate_bytes"), conversion ? 900'000'000 : 790'000'000},
+        {QStringLiteral("cache_path"), QStringLiteral("/isolated/model-cache")},
+        {QStringLiteral("sha256"), QString(64, QLatin1Char('a'))},
+    };
+    if (audioOnly) model.insert(QStringLiteral("audio_component_approximate_bytes"), 285'000'000);
+    return {{QStringLiteral("state"), QStringLiteral("provider-ready")},
+            {QStringLiteral("provider_path"), QStringLiteral("/isolated/provider")},
+            {QStringLiteral("provider_source"), QStringLiteral("saved")},
+            {QStringLiteral("provider"), QJsonObject{{QStringLiteral("model"), model}}}};
+}
+
+class DelayedSemanticStatusFixture final {
+public:
+    DelayedSemanticStatusFixture()
+        : root(QDir(qEnvironmentVariable("MUZAITEN_STATE_ROOT")).filePath(QStringLiteral("semantic-helper")))
+        , binary(QDir(root).filePath(QStringLiteral("muzaiten-features")))
+        , savedPath(qgetenv("PATH"))
+    {
+    }
+
+    ~DelayedSemanticStatusFixture() { qputenv("PATH", savedPath); }
+
+    bool install()
+    {
+        if (!QDir().mkpath(root)) return false;
+        const QByteArray script = R"PY(#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+import time
+
+root = pathlib.Path(__file__).resolve().parent
+args = sys.argv[1:]
+
+def record_json(path, value):
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value))
+    temporary.replace(path)
+
+if args[0] == "status":
+    request = json.loads((root / "request.json").read_text())
+    gate = root / request["id"]
+    gate.mkdir(exist_ok=True)
+    record_json(gate / "started.json", {"args": args})
+    while not (gate / "release").exists():
+        time.sleep(0.01)
+    print(request["stdout"], flush=True)
+    sys.exit(request["exit_code"])
+if args[:2] == ["model", "download"]:
+    record_json(root / "download.json", {"args": args})
+    print(json.dumps({"event": "progress", "completed": 1, "total": 1}), flush=True)
+    sys.exit(0)
+sys.exit(2)
+)PY";
+        if (!writeFixtureFile(binary, script)
+            || !QFile::setPermissions(binary, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner)) return false;
+        qputenv("PATH", root.toUtf8() + ':' + savedPath);
+        return prepare(QStringLiteral("first"));
+    }
+
+    bool prepare(const QString &id, const QJsonObject &semantic = semanticStatusFixture(),
+                 int exitCode = 0, bool malformed = false)
+    {
+        const QString output = malformed ? QStringLiteral("invalid JSON")
+            : QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("semantic"), semantic}})
+                                    .toJson(QJsonDocument::Compact));
+        return writeFixtureFile(QDir(root).filePath(QStringLiteral("request.json")),
+            QJsonDocument(QJsonObject{{QStringLiteral("id"), id}, {QStringLiteral("stdout"), output},
+                                      {QStringLiteral("exit_code"), exitCode}}).toJson());
+    }
+
+    QString startedPath(const QString &id = QStringLiteral("first")) const
+    {
+        return QDir(root).filePath(id + QStringLiteral("/started.json"));
+    }
+
+    bool release(const QString &id = QStringLiteral("first")) const
+    {
+        return QDir().mkpath(QDir(root).filePath(id))
+            && writeFixtureFile(QDir(root).filePath(id + QStringLiteral("/release")), {});
+    }
+
+    QString downloadPath() const { return QDir(root).filePath(QStringLiteral("download.json")); }
+
+    const QString root;
+    const QString binary;
+    const QByteArray savedPath;
+};
+
+QAbstractButton *messageButton(QMessageBox *box, const QString &text)
+{
+    for (QAbstractButton *button : box->buttons()) {
+        if (button->text() == text) return button;
+    }
+    return nullptr;
 }
 
 class WindowConstructionProbe final : public QObject {
@@ -501,6 +625,10 @@ private slots:
     void init()
     {
         QVERIFY(m_stateRoot.isValid());
+        if (!qEnvironmentVariableIsEmpty("MUZAITEN_TEST_EVIDENCE_DIR")) {
+            m_stateRoot.setAutoRemove(false);
+            qInfo("Retained fixture: %s", qPrintable(m_stateRoot.path()));
+        }
         QString testName = QString::fromLatin1(QTest::currentTestFunction());
         if (qstrlen(QTest::currentDataTag()) > 0) testName += QLatin1Char('/') + QString::fromLatin1(QTest::currentDataTag());
         const QString testStateRoot = m_stateRoot.filePath(testName);
@@ -513,6 +641,368 @@ private slots:
     {
         qunsetenv("MUZAITEN_STATE_ROOT");
         qunsetenv("MUZAITEN_DEMO_SILENT_AUDIO");
+    }
+
+    void semanticStatusHeartbeat_data()
+    {
+        QTest::addColumn<bool>("forDownload");
+        QTest::newRow("setup") << false;
+        QTest::newRow("download") << true;
+    }
+
+    void semanticStatusHeartbeat()
+    {
+        QFETCH(bool, forDownload);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        AppCore core;
+        MainWindow window(&core);
+        QCOMPARE(window.resolveMuzaitenIndexBinary(), fixture.binary);
+        bool heartbeat = false;
+        QTimer::singleShot(0, &window, [&]() { heartbeat = true; });
+        if (forDownload) window.downloadSemanticModel();
+        else window.configureSemanticProvider();
+        QVERIFY(window.m_semanticStatusProcess != nullptr);
+        QCOMPARE(window.m_semanticStatusTimeout->interval(), 45'000);
+        auto *waiting = window.m_semanticStatusDialog.data();
+        QVERIFY(waiting != nullptr && waiting->isVisible());
+        QCOMPARE(waiting->objectName(), QStringLiteral("semantic.status.waiting"));
+        QVERIFY(waiting->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Cancel) != nullptr);
+        QTRY_VERIFY(heartbeat);
+        QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+        QVERIFY(!QFileInfo::exists(QDir(fixture.root).filePath(QStringLiteral("first/release"))));
+        QVERIFY(window.m_semanticStatusProcess != nullptr);
+        QCOMPARE(readFixtureObject(fixture.startedPath()).value(QStringLiteral("args")).toArray(),
+                 (QJsonArray{QStringLiteral("status"), QStringLiteral("--features"),
+                             core.featuresPath(), QStringLiteral("--json")}));
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+        QVERIFY(fixture.release());
+        const QString resultName = forDownload ? QStringLiteral("semantic.model.consent")
+                                               : QStringLiteral("semantic.provider.setup");
+        QTRY_VERIFY(window.m_semanticStatusDialog != nullptr
+                    && window.m_semanticStatusDialog->objectName() == resultName);
+        QVERIFY(window.m_semanticStatusProcess == nullptr);
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+        window.cancelSemanticStatusRequest();
+        QTRY_VERIFY(window.findChildren<QProcess *>(QStringLiteral("semantic.status.process")).isEmpty());
+    }
+
+    void semanticStatusSetupResults_data()
+    {
+        QTest::addColumn<QString>("outcome");
+        for (const char *outcome : {"success", "exit-error", "malformed", "timeout", "failed-start"}) {
+            QTest::newRow(outcome) << QString::fromLatin1(outcome);
+        }
+    }
+
+    void semanticStatusSetupResults()
+    {
+        QFETCH(QString, outcome);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        QVERIFY(fixture.prepare(QStringLiteral("first"), semanticStatusFixture(),
+                                outcome == QLatin1String("exit-error") ? 7 : 0,
+                                outcome == QLatin1String("malformed")));
+        if (outcome == QLatin1String("failed-start")) {
+            QVERIFY(writeFixtureFile(fixture.binary, "#!/nonexistent-semantic-interpreter\n"));
+        }
+        AppCore core;
+        QVERIFY(core.settings()->setSetting(QStringLiteral("analysis.semantic.providerPath"),
+                                            QStringLiteral("/configured/provider")));
+        MainWindow window(&core);
+        window.configureSemanticProvider();
+        QPointer<QProcess> process = window.m_semanticStatusProcess;
+        if (outcome != QLatin1String("failed-start")) {
+            QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+            if (outcome == QLatin1String("timeout")) {
+                QCOMPARE(window.m_semanticStatusTimeout->interval(), 45'000);
+                QVERIFY(QMetaObject::invokeMethod(window.m_semanticStatusTimeout.data(), "timeout", Qt::DirectConnection));
+            } else {
+                QVERIFY(fixture.release());
+            }
+        }
+        QTRY_VERIFY(window.m_semanticStatusDialog != nullptr
+                    && window.m_semanticStatusDialog->objectName() == QLatin1String("semantic.provider.setup"));
+        auto *box = qobject_cast<QMessageBox *>(window.m_semanticStatusDialog.data());
+        QVERIFY(box != nullptr);
+        const bool success = outcome == QLatin1String("success");
+        QCOMPARE(box->text(), success ? QStringLiteral("provider-ready")
+                                     : QStringLiteral("Provider status unavailable"));
+        QVERIFY(box->informativeText().contains(QStringLiteral("Configured path: /configured/provider")));
+        QVERIFY(box->informativeText().contains(success ? QStringLiteral("Resolved path: /isolated/provider")
+                                                       : QStringLiteral("Resolved path: none")));
+        QVERIFY(box->informativeText().contains(success ? QStringLiteral("Discovery source: saved")
+                                                       : QStringLiteral("Discovery source: none")));
+        if (outcome == QLatin1String("timeout")) {
+            QVERIFY(box->informativeText().contains(QStringLiteral("timed out after 45 seconds")));
+        }
+        if (outcome == QLatin1String("failed-start")) {
+            QVERIFY(box->informativeText().contains(QStringLiteral("Could not start")));
+        }
+        QVERIFY(!box->informativeText().contains(QChar(0x2014)));
+        QVERIFY(box->detailedText().contains(QStringLiteral("uv tool install 'muzaiten-features-clap[model]'")));
+        QVERIFY(messageButton(box, QStringLiteral("Choose executable…")) != nullptr);
+        auto *automatic = messageButton(box, QStringLiteral("Use automatic discovery"));
+        QVERIFY(automatic != nullptr);
+        QTRY_VERIFY(process.isNull());
+        automatic->click();
+        QVERIFY(core.settings()->setting(QStringLiteral("analysis.semantic.providerPath")).isEmpty());
+        QVERIFY(!window.m_semanticStatusPathTimer->isActive());
+    }
+
+    void semanticStatusSetupExecutableChoice_data()
+    {
+        QTest::addColumn<bool>("supersede");
+        QTest::newRow("save") << false;
+        QTest::newRow("superseded-picker") << true;
+    }
+
+    void semanticStatusSetupExecutableChoice()
+    {
+        QFETCH(bool, supersede);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        AppCore core;
+        MainWindow window(&core);
+        window.configureSemanticProvider();
+        QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+        QVERIFY(fixture.release());
+        QTRY_VERIFY(window.m_semanticStatusDialog != nullptr
+                    && window.m_semanticStatusDialog->objectName() == QLatin1String("semantic.provider.setup"));
+        auto *box = qobject_cast<QMessageBox *>(window.m_semanticStatusDialog.data());
+        QVERIFY(box != nullptr);
+        auto *choose = messageButton(box, QStringLiteral("Choose executable…"));
+        QVERIFY(choose != nullptr);
+        choose->click();
+        auto *picker = qobject_cast<QFileDialog *>(window.m_semanticStatusDialog.data());
+        QVERIFY(picker != nullptr);
+        if (supersede) {
+            QVERIFY(fixture.prepare(QStringLiteral("second")));
+            window.downloadSemanticModel();
+            emit picker->fileSelected(fixture.binary);
+            QVERIFY(core.settings()->setting(QStringLiteral("analysis.semantic.providerPath")).isEmpty());
+            QVERIFY(window.m_semanticStatusProcess != nullptr);
+            window.cancelSemanticStatusRequest();
+        } else {
+            picker->selectFile(fixture.binary);
+            QVERIFY(QMetaObject::invokeMethod(picker, "accept", Qt::DirectConnection));
+            QCOMPARE(core.settings()->setting(QStringLiteral("analysis.semantic.providerPath")), fixture.binary);
+            QVERIFY(!window.m_semanticStatusPathTimer->isActive());
+        }
+    }
+
+    void semanticStatusDownloadConsent_data()
+    {
+        QTest::addColumn<bool>("offerAudio");
+        QTest::addColumn<bool>("conversion");
+        QTest::addColumn<QString>("components");
+        QTest::newRow("full-bundle") << true << false << QStringLiteral("full");
+        QTest::newRow("audio-bundle") << true << false << QStringLiteral("audio");
+        QTest::newRow("conversion") << true << true << QStringLiteral("full");
+        QTest::newRow("legacy-provider") << false << false << QStringLiteral("full");
+    }
+
+    void semanticStatusDownloadConsent()
+    {
+        QFETCH(bool, offerAudio);
+        QFETCH(bool, conversion);
+        QFETCH(QString, components);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        QVERIFY(fixture.prepare(QStringLiteral("first"), semanticStatusFixture(offerAudio, conversion)));
+        AppCore core;
+        MainWindow window(&core);
+        window.downloadSemanticModel();
+        QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+        QVERIFY(fixture.release());
+        QTRY_VERIFY(window.m_semanticStatusDialog != nullptr
+                    && window.m_semanticStatusDialog->objectName() == QLatin1String("semantic.model.consent"));
+        auto *box = qobject_cast<QMessageBox *>(window.m_semanticStatusDialog.data());
+        QVERIFY(box != nullptr);
+        const QString consent = box->text();
+        QVERIFY(consent.contains(QStringLiteral("Source: https://example.org/model")));
+        QVERIFY(consent.contains(QStringLiteral("License: CC0-1.0")));
+        QVERIFY(consent.contains(QStringLiteral("Download size: about 790 MB")));
+        QCOMPARE(consent.contains(QStringLiteral("Conversion adds about 900 MB")), conversion);
+        QCOMPARE(consent.contains(QStringLiteral("Audio only: about 285 MB")), offerAudio);
+        QVERIFY(consent.contains(QStringLiteral("Cache: /isolated/model-cache")));
+        QVERIFY(consent.contains(QStringLiteral("SHA-256: ") + QString(64, QLatin1Char('a'))));
+        QVERIFY(!consent.contains(QChar(0x2014)));
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+        auto *button = offerAudio ? messageButton(box, components == QLatin1String("audio")
+                ? QStringLiteral("Audio only") : QStringLiteral("Full model"))
+            : box->button(QMessageBox::Yes);
+        QVERIFY(button != nullptr);
+        button->click();
+        QTRY_VERIFY(QFileInfo::exists(fixture.downloadPath()));
+        QCOMPARE(readFixtureObject(fixture.downloadPath()).value(QStringLiteral("args")).toArray(),
+                 (QJsonArray{QStringLiteral("model"), QStringLiteral("download"),
+                             QStringLiteral("--components"), components, QStringLiteral("--progress=jsonl")}));
+        QTRY_VERIFY(window.m_semanticModelProcess == nullptr);
+        QCOMPARE(window.statusBar()->currentMessage(), QStringLiteral("Semantic model is ready"));
+        QVERIFY(!window.m_semanticStatusPathTimer->isActive());
+    }
+
+    void semanticStatusDownloadFailures_data()
+    {
+        QTest::addColumn<QString>("outcome");
+        for (const char *outcome : {"no-model", "exit-error", "malformed", "timeout", "failed-start"}) {
+            QTest::newRow(outcome) << QString::fromLatin1(outcome);
+        }
+    }
+
+    void semanticStatusDownloadFailures()
+    {
+        QFETCH(QString, outcome);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        QVERIFY(fixture.prepare(QStringLiteral("first"), {},
+                                outcome == QLatin1String("exit-error") ? 7 : 0,
+                                outcome == QLatin1String("malformed")));
+        if (outcome == QLatin1String("failed-start")) {
+            QVERIFY(writeFixtureFile(fixture.binary, "#!/nonexistent-semantic-interpreter\n"));
+        }
+        AppCore core;
+        MainWindow window(&core);
+        window.downloadSemanticModel();
+        QPointer<QProcess> process = window.m_semanticStatusProcess;
+        if (outcome != QLatin1String("failed-start")) {
+            QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+            if (outcome == QLatin1String("timeout")) {
+                QVERIFY(QMetaObject::invokeMethod(window.m_semanticStatusTimeout.data(), "timeout", Qt::DirectConnection));
+            } else {
+                QVERIFY(fixture.release());
+            }
+        }
+        QTRY_VERIFY(window.m_semanticStatusProcess == nullptr);
+        QVERIFY(window.m_semanticStatusDialog == nullptr);
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+        QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("open Semantic provider setup")));
+        if (outcome == QLatin1String("timeout")) {
+            QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("timed out after 45 seconds")));
+        }
+        QTRY_VERIFY(process.isNull());
+        QVERIFY(!window.m_semanticStatusPathTimer->isActive());
+    }
+
+    void semanticStatusPathWatchCancels_data()
+    {
+        QTest::addColumn<bool>("atConsent");
+        QTest::newRow("preflight") << false;
+        QTest::newRow("consent") << true;
+    }
+
+    void semanticStatusPathWatchCancels()
+    {
+        QFETCH(bool, atConsent);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        AppCore core;
+        MainWindow window(&core);
+        window.downloadSemanticModel();
+        const quint64 generation = window.m_semanticStatusGeneration;
+        QPointer<QProcess> process = window.m_semanticStatusProcess;
+        QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+        if (atConsent) {
+            QVERIFY(fixture.release());
+            QTRY_VERIFY(window.m_semanticStatusDialog != nullptr
+                        && window.m_semanticStatusDialog->objectName() == QLatin1String("semantic.model.consent"));
+        }
+        QVERIFY(core.settings()->setSetting(QStringLiteral("analysis.semantic.providerPath"),
+                                            QStringLiteral("/changed/provider")));
+        QTRY_VERIFY(window.m_semanticStatusGeneration != generation);
+        QVERIFY(window.m_semanticStatusDialog == nullptr);
+        QVERIFY(window.m_semanticStatusProcess == nullptr);
+        QVERIFY(!window.m_semanticStatusPathTimer->isActive());
+        QVERIFY(fixture.release());
+        QTRY_VERIFY(process.isNull());
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+    }
+
+    void semanticStatusStaleDownload_data()
+    {
+        QTest::addColumn<bool>("atConsent");
+        QTest::addColumn<QString>("action");
+        for (bool atConsent : {false, true}) {
+            for (const char *action : {"cancel", "setup", "download", "provider-path", "features-path",
+                                       "binary-path", "close", "destroy"}) {
+                const QByteArray tag = QByteArray(atConsent ? "consent-" : "preflight-") + action;
+                QTest::newRow(tag.constData()) << atConsent << QString::fromLatin1(action);
+            }
+        }
+    }
+
+    void semanticStatusStaleDownload()
+    {
+        QFETCH(bool, atConsent);
+        QFETCH(QString, action);
+        DelayedSemanticStatusFixture fixture;
+        QVERIFY(fixture.install());
+        const QVariant savedDataDir = qApp->property("muzaiten.dataDir");
+        const auto restoreDataDir = qScopeGuard([&]() { qApp->setProperty("muzaiten.dataDir", savedDataDir); });
+        AppCore core;
+        auto window = std::make_unique<MainWindow>(&core);
+        window->downloadSemanticModel();
+        const quint64 oldGeneration = window->m_semanticStatusGeneration;
+        QPointer<QProcess> oldProcess = window->m_semanticStatusProcess;
+        QTRY_VERIFY(QFileInfo::exists(fixture.startedPath()));
+        QPointer<QAbstractButton> staleAccept;
+        if (atConsent) {
+            QVERIFY(fixture.release());
+            QTRY_VERIFY(window->m_semanticStatusDialog != nullptr
+                        && window->m_semanticStatusDialog->objectName() == QLatin1String("semantic.model.consent"));
+            auto *box = qobject_cast<QMessageBox *>(window->m_semanticStatusDialog.data());
+            QVERIFY(box != nullptr);
+            staleAccept = messageButton(box, QStringLiteral("Full model"));
+            QVERIFY(staleAccept != nullptr);
+        }
+        if (action == QLatin1String("cancel")) {
+            if (atConsent) window->m_semanticStatusDialog->reject();
+            else window->m_semanticStatusDialog->findChild<QDialogButtonBox *>()
+                ->button(QDialogButtonBox::Cancel)->click();
+        } else if (action == QLatin1String("setup") || action == QLatin1String("download")) {
+            QVERIFY(fixture.prepare(QStringLiteral("second")));
+            if (action == QLatin1String("setup")) window->configureSemanticProvider();
+            else window->downloadSemanticModel();
+        } else if (action == QLatin1String("provider-path")) {
+            QVERIFY(core.settings()->setSetting(QStringLiteral("analysis.semantic.providerPath"),
+                                                QStringLiteral("/changed/provider")));
+        } else if (action == QLatin1String("features-path")) {
+            qApp->setProperty("muzaiten.dataDir", QDir(fixture.root).filePath(QStringLiteral("other-data")));
+        } else if (action == QLatin1String("binary-path")) {
+            QVERIFY(QFile::rename(fixture.binary, fixture.binary + QStringLiteral(".retired")));
+        } else if (action == QLatin1String("close")) {
+            window->close();
+        } else {
+            window.reset();
+        }
+        if (staleAccept != nullptr) staleAccept->click();
+        QVERIFY(fixture.release());
+        if (window != nullptr) {
+            // Exercise an obsolete completion even when cancellation killed the helper first.
+            window->finishSemanticStatusRequest(oldGeneration, true, semanticStatusFixture(), {});
+            QTRY_VERIFY(window->m_semanticStatusGeneration != oldGeneration);
+        }
+        QTRY_VERIFY(oldProcess.isNull());
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+        if (action == QLatin1String("setup") || action == QLatin1String("download")) {
+            QTRY_VERIFY(QFileInfo::exists(fixture.startedPath(QStringLiteral("second"))));
+            QVERIFY(window->m_semanticStatusProcess != nullptr);
+            QVERIFY(fixture.release(QStringLiteral("second")));
+            const QString expected = action == QLatin1String("setup") ? QStringLiteral("semantic.provider.setup")
+                                                                     : QStringLiteral("semantic.model.consent");
+            QTRY_VERIFY(window->m_semanticStatusDialog != nullptr
+                        && window->m_semanticStatusDialog->objectName() == expected);
+            window->cancelSemanticStatusRequest();
+        } else if (window != nullptr) {
+            QVERIFY(window->m_semanticStatusDialog == nullptr);
+            QVERIFY(window->m_semanticStatusProcess == nullptr);
+        }
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
+        if (window != nullptr) {
+            QVERIFY(window->findChildren<QProcess *>(QStringLiteral("semantic.status.process")).isEmpty());
+        }
     }
 
     void constructsAndNavigatesEveryMainView()
@@ -3375,7 +3865,7 @@ private slots:
     }
 
 private:
-    QTemporaryDir m_stateRoot;
+    QTemporaryDir m_stateRoot{navigationStateTemplate()};
 };
 
 QTEST_MAIN(MainWindowNavigationTest)

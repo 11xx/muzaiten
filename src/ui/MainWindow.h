@@ -35,6 +35,7 @@ class AlbumGrid;
 class ArtistSidebar;
 class FileExplorerView;
 class QCloseEvent;
+class QDialog;
 class QEvent;
 class QImage;
 class ListenBrainzHub;
@@ -272,6 +273,16 @@ private:
     void showAnalysisStatus();
     void configureSemanticProvider();
     void downloadSemanticModel();
+    void startSemanticStatusRequest(bool forDownload);
+    void cancelSemanticStatusRequest();
+    void stopSemanticStatusProcess();
+    bool semanticStatusRequestCurrent(quint64 generation) const;
+    void finishSemanticStatusRequest(quint64 generation, bool forDownload,
+                                     const QJsonObject &semantic, const QString &error);
+    void showSemanticProviderSetup(quint64 generation, const QJsonObject &status,
+                                   const QString &error);
+    void showSemanticModelConsent(quint64 generation, const QJsonObject &semantic);
+    void startSemanticModelDownload(const QString &binary, const QString &components);
     void showDuplicateCopies();
     void startAudioAnalysis();
     void cancelAudioAnalysis();
@@ -571,6 +582,14 @@ private:
     // no elapsed field, so the GUI keeps its own.
     QElapsedTimer m_audioAnalysisRunClock;
     QProcess *m_semanticModelProcess = nullptr;
+    quint64 m_semanticStatusGeneration = 0;
+    QPointer<QProcess> m_semanticStatusProcess;
+    QPointer<QTimer> m_semanticStatusTimeout;
+    QPointer<QDialog> m_semanticStatusDialog;
+    QTimer *m_semanticStatusPathTimer = nullptr;
+    QString m_semanticStatusBinary;
+    QString m_semanticStatusFeaturesPath;
+    QString m_semanticStatusProviderPath;
     QThread *m_mpdImportThread = nullptr;
     MpdImportWorker *m_mpdImportWorker = nullptr;
     QThread *m_dropImportThread = nullptr;

@@ -67,6 +67,14 @@ and are not restored after restart.
   completed work — running the analyzer again resumes where it stopped —
   and changing the power during a scan applies immediately by restarting
   the scan at the new level.
+  `Semantic provider setup…` and `Download semantic model…` show a cancellable
+  waiting dialog while checking provider status, with a 45-second timeout.
+  Playback and the main window remain responsive during the check. Starting
+  another setup or download request, changing a provider or analysis-store
+  path, or closing the main window cancels pending status and consent.
+  A model download starts only after confirming its source, license, size,
+  cache location, and checksum; providers that report an audio-only size
+  also offer `Audio only` beside `Full model`.
 - `Playback > Output profile…` — transport and output, direct device,
   software volume, resampling, sink release on pause, read-ahead. Native
   bit-perfect DSD
