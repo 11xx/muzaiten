@@ -17,6 +17,7 @@
 #include "ipc/IpcSocket.h"
 #include "reco/GenreCuration.h"
 #include "reco/RadioProfile.h"
+#include "reco/RadioProfileExchange.h"
 #include "reco/TrackScorer.h"
 #include "reco/WeightLearner.h"
 #include "reco/WeightLearnerData.h"
@@ -93,6 +94,10 @@ void printUsage()
         "                          curate radio-only ignored folded genres (works offline)\n"
         "  radio-weights get | set <json> | save <name> | apply <name> | list | remove <name>\n"
         "                          inspect and curate radio scoring weights (works offline)\n"
+        "  radio-weights export <file> [--profile <name>] [--allow-learned] [--replace]\n"
+        "                          export name, origin, weights and session decay to a local JSON file\n"
+        "  radio-weights import <file> [--dry-run] [--replace]\n"
+        "                          preview or import a local tuning profile without selecting it\n"
         "  radio-learn [--dry-run] [--min-samples N]\n"
         "                          suggest a learned radio-weight profile from local telemetry\n"
         "  genre-alias set <alias> <canonical> | remove <alias> | list\n"
@@ -759,6 +764,39 @@ bool loadRadioProfiles(RadioProfileStore *profiles)
     return profiles->load(legacyWeights);
 }
 
+bool loadRadioProfilesForExchange(RadioProfileStore *profiles)
+{
+    if (QFileInfo::exists(RadioProfileStore::storagePath())) {
+        return profiles->load();
+    }
+    QByteArray legacyWeights;
+    const QString libraryPath = QDir(AppPaths::dataDir()).filePath(QStringLiteral("library.sqlite"));
+    if (QFile::exists(libraryPath)) {
+        const QString connection = QStringLiteral("radio-profile-exchange-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        bool opened = false;
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+            db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+            db.setDatabaseName(libraryPath);
+            opened = db.open();
+            if (opened) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("SELECT value FROM app_settings WHERE key = ?"));
+                query.addBindValue(QString::fromLatin1(kRadioScoringWeightsKey));
+                if (query.exec() && query.next()) {
+                    legacyWeights = query.value(0).toString().toUtf8();
+                }
+            }
+        }
+        QSqlDatabase::removeDatabase(connection);
+        if (!opened) {
+            return false;
+        }
+    }
+    return profiles->load(legacyWeights, false);
+}
+
 QByteArray activeWeightsJson(const RadioProfileStore &profiles)
 {
     return TrackScorer::weightsToJson(profiles.activeProfile().weights);
@@ -930,6 +968,7 @@ int runRadioLearn(QStringList arguments, bool json)
         profileName = QStringLiteral("learned-%1").arg(QDate::currentDate().toString(QStringLiteral("yyyyMMdd")));
         RadioProfile learnedProfile = profiles.activeProfile();
         learnedProfile.weights = learned.suggestedWeights;
+        learnedProfile.origin = RadioProfile::Origin::Learned;
         if (!profiles.saveProfile(profileName, learnedProfile) || !profiles.save()) {
             return fail(QStringLiteral("could not save radio profile"));
         }
@@ -964,12 +1003,106 @@ int runRadioLearn(QStringList arguments, bool json)
     return 0;
 }
 
+int runRadioProfileExchange(const QString &verb, QStringList arguments, bool json)
+{
+    const bool exporting = verb == QLatin1String("export");
+    bool dryRun = false;
+    bool replace = false;
+    bool allowLearned = false;
+    QString profileName;
+    QStringList files;
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString word = arguments.at(i);
+        if (word == QLatin1String("--replace")) {
+            replace = true;
+        } else if (!exporting && word == QLatin1String("--dry-run")) {
+            dryRun = true;
+        } else if (exporting && word == QLatin1String("--allow-learned")) {
+            allowLearned = true;
+        } else if (exporting && word == QLatin1String("--profile")) {
+            if (++i >= arguments.size() || arguments.at(i).trimmed().isEmpty()
+                || arguments.at(i).startsWith(QLatin1String("--"))) {
+                return fail(QStringLiteral("radio-weights export --profile needs a profile name"));
+            }
+            profileName = arguments.at(i);
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("unknown radio-weights %1 option: %2").arg(verb, word));
+        } else {
+            files.append(word);
+        }
+    }
+    if (files.size() != 1 || files.first().isEmpty()) {
+        return fail(QStringLiteral("radio-weights %1 needs exactly one local file").arg(verb));
+    }
+    RadioProfile profile;
+    QString error;
+    if (!exporting && !RadioProfileExchange::read(files.first(), &profile, &error)) {
+        return fail(error);
+    }
+    RadioProfileStore profiles;
+    if (!loadRadioProfilesForExchange(&profiles)) {
+        return fail(QStringLiteral("could not load radio profiles"));
+    }
+    bool exists = false;
+    if (exporting) {
+        if (profileName.isEmpty()) {
+            profileName = profiles.activeProfileName();
+        }
+        const auto it = std::find_if(profiles.profiles().cbegin(), profiles.profiles().cend(),
+                                    [&profileName](const RadioProfile &entry) { return entry.name == profileName; });
+        if (it == profiles.profiles().cend()) {
+            return fail(QStringLiteral("radio-weights profile not found: %1").arg(profileName));
+        }
+        profile = *it;
+        if (!RadioProfileExchange::write(files.first(), profile, allowLearned, replace, &error)) {
+            return fail(error);
+        }
+    } else {
+        exists = std::any_of(profiles.profiles().cbegin(), profiles.profiles().cend(),
+                             [&profile](const RadioProfile &entry) { return entry.name == profile.name; });
+        if (!profiles.importProfile(profile, replace, dryRun, &error)) {
+            return fail(error);
+        }
+    }
+    QByteArray preview;
+    RadioProfileExchange::encode(profile, true, &preview, &error);
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    if (json) {
+        out << QString::fromUtf8(QJsonDocument(QJsonObject{
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("action"), verb},
+            {QStringLiteral("dry_run"), dryRun},
+            {QStringLiteral("requires_replace"), !exporting && exists},
+            {QStringLiteral("contents"), RadioProfileExchange::contentsDescription()},
+            {QStringLiteral("profile"), QJsonDocument::fromJson(preview).object()},
+        }).toJson(QJsonDocument::Compact)) << '\n';
+    } else {
+        out << "radio-weights: " << (exporting ? "exported " : dryRun ? "preview " : "imported ")
+            << profile.name << '\n' << RadioProfileExchange::contentsDescription() << '\n';
+        out << QString::fromUtf8(preview);
+        if (profile.origin == RadioProfile::Origin::Unknown) {
+            out << "Unknown origin is exported as learned to preserve the taste warning.\n";
+        }
+        if (!exporting) {
+            out << (dryRun ? "Dry run: no profile saved.\n" : "Active profile selection is unchanged.\n");
+            if (exists && dryRun) {
+                out << "A profile with this name exists; import requires --replace.\n";
+            }
+        }
+    }
+    return 0;
+}
+
 int runRadioWeights(QStringList arguments, bool json)
 {
     if (arguments.isEmpty()) {
         return fail(QStringLiteral("radio-weights needs a verb: get, set, save, apply, list, or remove"));
     }
     const QString verb = arguments.takeFirst();
+    if (verb == QLatin1String("export") || verb == QLatin1String("import")) {
+        return runRadioProfileExchange(verb, arguments, json);
+    }
     const QSet<QString> validVerbs{
         QStringLiteral("get"),
         QStringLiteral("set"),

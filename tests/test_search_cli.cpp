@@ -4,6 +4,7 @@
 #include "db/Database.h"
 #include "reco/WeightLearnerData.h"
 #include "reco/RadioProfile.h"
+#include "reco/RadioProfileExchange.h"
 #include "scrobble/ListenHistoryStore.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
@@ -716,9 +717,102 @@ private slots:
             return profile.name == saved.value(QStringLiteral("profile")).toString();
         });
         QVERIFY(learned != profiles.profiles().cend());
+        QCOMPARE(learned->origin, RadioProfile::Origin::Learned);
         QCOMPARE(learned->weights.genreWeight,
                  saved.value(QStringLiteral("suggested")).toObject()
                      .value(QStringLiteral("genreWeight")).toDouble());
+    }
+
+    void radioProfileExchangeUsesLocalFiles()
+    {
+        const QString ctl = muzaitenCtlPath();
+        QVERIFY(QFileInfo::exists(ctl));
+        QTemporaryDir isolated;
+        QVERIFY(isolated.isValid());
+        const QString sender = isolated.filePath(QStringLiteral("sender"));
+        const QString recipient = isolated.filePath(QStringLiteral("recipient"));
+        const QString input = isolated.filePath(QStringLiteral("profile.json"));
+        RadioProfile profile = RadioProfileStore::defaultProfile();
+        profile.name = QStringLiteral("Evening");
+        profile.weights.audioWeight = 4.25;
+        profile.sessionDecay = {14, 1.0, 0.3, 0.6};
+        QString error;
+        QVERIFY(RadioProfileExchange::write(input, profile, false, false, &error));
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        for (const QString &key : {QStringLiteral("MUZAITEN_CONFIG_DIR"), QStringLiteral("MUZAITEN_DATA_DIR"),
+                                  QStringLiteral("MUZAITEN_STATE_DIR"), QStringLiteral("MUZAITEN_CACHE_DIR"),
+                                  QStringLiteral("MUZAITEN_DEV_STATE")}) {
+            environment.remove(key);
+        }
+        QByteArray output;
+        QByteArray stderrOutput;
+        const auto run = [&](const QString &root, const QStringList &arguments) {
+            QProcess process;
+            QProcessEnvironment env = environment;
+            env.insert(QStringLiteral("MUZAITEN_STATE_ROOT"), root);
+            process.setProcessEnvironment(env);
+            process.start(ctl, QStringList{QStringLiteral("--json"), QStringLiteral("radio-weights")} + arguments);
+            if (!process.waitForFinished(10000) || process.exitStatus() != QProcess::NormalExit) {
+                return -1;
+            }
+            output = process.readAllStandardOutput();
+            stderrOutput = process.readAllStandardError();
+            return process.exitCode();
+        };
+        const auto bytes = [](const QString &path) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly)) {
+                return QByteArray{};
+            }
+            return file.readAll();
+        };
+        const QString storage = recipient + QStringLiteral("/config/radio-profiles.json");
+        QCOMPARE(run(recipient, {QStringLiteral("import"), input, QStringLiteral("--dry-run")}), 0);
+        QVERIFY(!QFile::exists(storage));
+        QCOMPARE(QJsonDocument::fromJson(output).object().value(QStringLiteral("profile")).toObject(),
+                 QJsonDocument::fromJson(bytes(input)).object());
+        QCOMPARE(run(sender, {QStringLiteral("import"), input}), 0);
+        const QString exported = isolated.filePath(QStringLiteral("export.json"));
+        QCOMPARE(run(sender, {QStringLiteral("export"), exported, QStringLiteral("--profile"), profile.name}), 0);
+        QCOMPARE(run(recipient, {QStringLiteral("import"), exported}), 0);
+        const QByteArray before = bytes(storage);
+        QCOMPARE(run(recipient, {QStringLiteral("import"), exported}), 1);
+        QCOMPARE(bytes(storage), before);
+        QCOMPARE(run(recipient, {QStringLiteral("import"), exported, QStringLiteral("--dry-run")}), 0);
+        QVERIFY(QJsonDocument::fromJson(output).object().value(QStringLiteral("requires_replace")).toBool());
+        QCOMPARE(bytes(storage), before);
+        QCOMPARE(run(recipient, {QStringLiteral("import"), exported, QStringLiteral("--replace")}), 0);
+        const QString roundTrip = isolated.filePath(QStringLiteral("roundtrip.json"));
+        QCOMPARE(run(recipient, {QStringLiteral("export"), roundTrip, QStringLiteral("--profile"), profile.name}), 0);
+        QCOMPARE(bytes(exported), bytes(roundTrip));
+        QCOMPARE(run(recipient, {QStringLiteral("export"), roundTrip, QStringLiteral("--profile"), profile.name}), 1);
+        QCOMPARE(run(recipient, {QStringLiteral("export"), roundTrip, QStringLiteral("--profile"), profile.name,
+                                 QStringLiteral("--replace")}), 0);
+        const QByteArray after = bytes(storage);
+        for (const QByteArray &invalid : {QByteArray("{"), QByteArray(RadioProfileExchange::MaximumBytes + 1, ' ')}) {
+            const QString badPath = isolated.filePath(QStringLiteral("rejected.json"));
+            QFile file(badPath);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QCOMPARE(file.write(invalid), invalid.size());
+            file.close();
+            QCOMPARE(run(recipient, {QStringLiteral("import"), badPath}), 1);
+            QCOMPARE(bytes(storage), after);
+        }
+        profile.origin = RadioProfile::Origin::Learned;
+        profile.name = QStringLiteral("Learned");
+        QVERIFY(RadioProfileExchange::write(input, profile, true, true, &error));
+        QCOMPARE(run(sender, {QStringLiteral("import"), input}), 0);
+        const QString learned = isolated.filePath(QStringLiteral("learned.json"));
+        QCOMPARE(run(sender, {QStringLiteral("export"), learned, QStringLiteral("--profile"), profile.name}), 1);
+        QVERIFY(stderrOutput.contains("--allow-learned"));
+        QVERIFY(!QFile::exists(learned));
+        QCOMPARE(run(sender, {QStringLiteral("export"), learned, QStringLiteral("--profile"), profile.name,
+                             QStringLiteral("--allow-learned")}), 0);
+        QCOMPARE(run(recipient, {QStringLiteral("import"), learned}), 0);
+        const QString learnedRoundTrip = isolated.filePath(QStringLiteral("learned-roundtrip.json"));
+        QCOMPARE(run(recipient, {QStringLiteral("export"), learnedRoundTrip, QStringLiteral("--profile"), profile.name,
+                                QStringLiteral("--allow-learned")}), 0);
+        QCOMPARE(bytes(learned), bytes(learnedRoundTrip));
     }
 
     void radioWeightCommandsUseProfilesAndMigrateLegacyWeights()

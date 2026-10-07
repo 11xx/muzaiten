@@ -33,6 +33,8 @@ muzaitenctl raise             # show and focus the window
 muzaitenctl start-radio <path> | stop-radio
 muzaitenctl radio-weights get | set '<json>'      # active profile weights
 muzaitenctl radio-weights save <n> | apply <n> | list | remove <n>
+muzaitenctl radio-weights export <file> [--profile <name>] [--allow-learned] [--replace]
+muzaitenctl radio-weights import <file> [--dry-run] [--replace]
 muzaitenctl radio-learn [--dry-run] [--min-samples N]
 muzaitenctl radio-genre ignore <genre> | unignore <genre> | list
 muzaitenctl genre-alias set <alias> <canonical> | remove <alias> | list
@@ -46,6 +48,22 @@ profile, `save` snapshots it under a name, `apply` selects a profile, and
 next starts. `radio-learn` is suggestion-only: it saves a
 `learned-YYYYMMDD` profile and never changes the active profile. See
 [radio.md](radio.md) for the full engine guide.
+
+`export` writes a canonical `muzaiten-radio-profile` version 1 JSON file with
+the name, origin, weights and session decay, using the active profile unless
+`--profile` names another. Learned or unknown-origin profiles require
+`--allow-learned` because their tuning can reveal listening taste; unknown
+origins are exported as learned. Existing export files require `--replace`.
+
+`import --dry-run` prints the validated profile and whether a same-name local
+profile exists, without writing or migrating stores. `import` saves it without
+selecting it; a same-name profile requires `--replace`. These subverbs print
+the contents they exchange. With `--json`, they return `ok`, `action`,
+`dry_run`, `requires_replace`, `contents` and a `profile` object containing the
+full exchange payload. `requires_replace` reports a name collision on import;
+it is false on export. Existing radio-weight verbs retain their output shapes.
+Files exceeding 64 KiB or failing strict format validation are refused without
+changing the recipient store. No network or running app is needed.
 
 ## Search and audio analysis
 

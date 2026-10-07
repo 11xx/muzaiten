@@ -1690,6 +1690,15 @@ bool AppCore::resetActiveRadioProfile()
     return m_radioProfileStore.save();
 }
 
+bool AppCore::importRadioProfile(const RadioProfile &profile, bool replace, QString *error)
+{
+    if (!m_radioProfileStore.importProfile(profile, replace, false, error)) {
+        return false;
+    }
+    applyActiveRadioProfile();
+    return true;
+}
+
 void AppCore::recordRadioPicks(const QVector<Track> &picks)
 {
     if (m_listenHistory == nullptr || m_radioSession == nullptr || picks.isEmpty()) {

@@ -185,6 +185,7 @@ public:
     bool renameActiveRadioProfile(const QString &name);
     bool deleteActiveRadioProfile();
     bool resetActiveRadioProfile();
+    bool importRadioProfile(const RadioProfile &profile, bool replace, QString *error);
 
 signals:
     // Emitted on every backfill progress/finished/failed update, so the

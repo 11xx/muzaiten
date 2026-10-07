@@ -1,12 +1,16 @@
 #include "ui/RadioCustomizationDialog.h"
 
 #include "app/AppCore.h"
+#include "reco/RadioProfileExchange.h"
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -18,6 +22,7 @@
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QTimer>
+#include <QTextEdit>
 #include <QVBoxLayout>
 
 namespace {
@@ -54,6 +59,18 @@ RadioCustomizationDialog::RadioCustomizationDialog(AppCore *core, QWidget *paren
     profileRow->addWidget(duplicate);
     profileRow->addWidget(remove);
     layout->addLayout(profileRow);
+
+    auto *exchangeRow = new QHBoxLayout;
+    auto *exportButton = new QPushButton(QStringLiteral("Export…"), this);
+    auto *importButton = new QPushButton(QStringLiteral("Import…"), this);
+    exportButton->setToolTip(RadioProfileExchange::contentsDescription());
+    importButton->setToolTip(QStringLiteral("Preview a local tuning profile before importing. Existing profiles require explicit replace."));
+    exchangeRow->addWidget(exportButton);
+    exchangeRow->addWidget(importButton);
+    exchangeRow->addStretch();
+    layout->addLayout(exchangeRow);
+    connect(exportButton, &QPushButton::clicked, this, &RadioCustomizationDialog::exportProfile);
+    connect(importButton, &QPushButton::clicked, this, &RadioCustomizationDialog::importProfile);
 
     auto *scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
@@ -189,6 +206,99 @@ RadioCustomizationDialog::RadioCustomizationDialog(AppCore *core, QWidget *paren
     connect(m_ratingFloor, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
             [this](double) { previewEdits(); });
 
+    m_revertBaseline = m_core->activeRadioProfile();
+    reloadProfile();
+}
+
+void RadioCustomizationDialog::exportProfile()
+{
+    const RadioProfile profile = m_core->activeRadioProfile();
+    const bool tasteBearing = profile.origin != RadioProfile::Origin::Manual;
+    QString disclosure = QStringLiteral("Profile: %1\n\n").arg(profile.name)
+        + RadioProfileExchange::contentsDescription();
+    if (tasteBearing) {
+        disclosure += QStringLiteral("\n\nThis profile is learned from listening or has an unknown origin. "
+                                     "Its tuning can reveal listening taste. Export it with origin learned?");
+    } else {
+        disclosure += QStringLiteral("\n\nExport the manual profile \"%1\"?").arg(profile.name);
+    }
+    if (QMessageBox::question(this, QStringLiteral("Export radio profile"), disclosure,
+                              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export radio profile"),
+        QStringLiteral("radio-profile.json"), QStringLiteral("Radio profile JSON (*.json)"), nullptr,
+        QFileDialog::DontConfirmOverwrite);
+    if (path.isEmpty()) {
+        return;
+    }
+    const QFileInfo file(path);
+    const bool replace = file.exists() || file.isSymLink();
+    if (replace && QMessageBox::question(this, QStringLiteral("Replace export file"),
+        QStringLiteral("Replace the existing file \"%1\"?").arg(file.fileName()),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+    }
+    QString error;
+    if (!RadioProfileExchange::write(path, profile, tasteBearing, replace, &error)) {
+        QMessageBox::warning(this, QStringLiteral("Export radio profile"), error);
+    }
+}
+
+void RadioCustomizationDialog::importProfile()
+{
+    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Import radio profile"),
+        {}, QStringLiteral("Radio profile JSON (*.json)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    RadioProfile profile;
+    QString error;
+    if (!RadioProfileExchange::read(path, &profile, &error)) {
+        QMessageBox::warning(this, QStringLiteral("Import radio profile"), error);
+        return;
+    }
+    bool exists = false;
+    for (const RadioProfile &entry : m_core->radioProfiles()) {
+        exists = exists || entry.name == profile.name;
+    }
+    QDialog preview(this);
+    preview.setWindowTitle(QStringLiteral("Import radio profile preview"));
+    preview.resize(540, 620);
+    auto *layout = new QVBoxLayout(&preview);
+    auto *description = new QLabel(RadioProfileExchange::contentsDescription()
+        + QStringLiteral("\n\nThe active profile selection stays the same. Replacing the active profile applies its tuning live."), &preview);
+    description->setWordWrap(true);
+    layout->addWidget(description);
+    if (profile.origin == RadioProfile::Origin::Learned) {
+        auto *warning = new QLabel(QStringLiteral("Learned tuning can reveal the sender's listening taste."), &preview);
+        warning->setWordWrap(true);
+        layout->addWidget(warning);
+    }
+    QByteArray bytes;
+    RadioProfileExchange::encode(profile, true, &bytes, &error);
+    auto *contents = new QTextEdit(&preview);
+    contents->setReadOnly(true);
+    contents->setPlainText(QString::fromUtf8(bytes));
+    layout->addWidget(contents, 1);
+    auto *replace = new QCheckBox(QStringLiteral("Replace existing profile \"%1\"").arg(profile.name), &preview);
+    replace->setVisible(exists);
+    layout->addWidget(replace);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, &preview);
+    QPushButton *importButton = buttons->addButton(QStringLiteral("Import"), QDialogButtonBox::AcceptRole);
+    importButton->setEnabled(!exists);
+    connect(replace, &QCheckBox::toggled, importButton, &QPushButton::setEnabled);
+    connect(buttons, &QDialogButtonBox::accepted, &preview, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &preview, &QDialog::reject);
+    layout->addWidget(buttons);
+    if (preview.exec() != QDialog::Accepted) {
+        return;
+    }
+    flushPreview();
+    if (!m_core->importRadioProfile(profile, replace->isChecked(), &error)) {
+        QMessageBox::warning(this, QStringLiteral("Import radio profile"), error);
+        return;
+    }
     m_revertBaseline = m_core->activeRadioProfile();
     reloadProfile();
 }

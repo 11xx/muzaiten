@@ -32,6 +32,8 @@ private:
     void updateHistoryButtons();
     void createProfile(bool duplicateActive);
     void renameProfile();
+    void exportProfile();
+    void importProfile();
 
     AppCore *m_core = nullptr;
     QComboBox *m_profiles = nullptr;
