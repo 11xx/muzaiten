@@ -188,8 +188,12 @@ anonymity, and an imported aggregate cannot prove its source support floor.
 Genre labels are library tags: curate them before exporting. No file is
 automatically generated or exported. Every CLI export/preview requires
 `--opt-in`, with no saved consent. GUI export starts with a deliberate preview
-action and writes only after **Export these contents…**; that exact preview
-is the written file. Nothing is uploaded or transmitted by the exchange UI.
+action and writes only after **Export these contents…**; that exact preview is
+the written file. A new export file is published atomically by hard-linking a
+completed sibling file. On filesystems without hard links, such as FAT and
+exFAT drives and many network mounts, it is created exclusively instead and
+removed if writing fails. Neither path overwrites a file that appears after
+the preview. Nothing is uploaded or transmitted by the exchange UI.
 
 Import validates and previews before writes. Unknown keys or versions,
 duplicate keys, invalid UTF-8, incomplete JSON, nonfinite/out-of-range values,

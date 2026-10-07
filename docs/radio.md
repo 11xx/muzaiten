@@ -251,14 +251,17 @@ removal/replacement does not invalidate it. Track, artist and seedless sessions
 remain compatible. Names stay in `radio-taste-seeds.json` in the configuration
 directory and in local session state; they are absent from exchange files.
 
-The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB. Unknown keys,
-versions, duplicate keys, invalid shares, unordered/out-of-range/nonfinite
-quartiles, invalid UTF-8 and incomplete inputs are rejected before import
-changes. Existing export files and same-name seeds require `--replace`.
-Writes are atomic. The app supplies no transport, accounts, URLs or automatic
-export. Aggregates still reveal library taste; suppression is not anonymity,
-and a distribution shift in a synthetic fixture does not establish a universal
-listening preference. See [data-safety.md](data-safety.md#aggregate-taste-profile-files).
+The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB. Unknown
+keys, versions, duplicate keys, invalid shares,
+unordered/out-of-range/nonfinite quartiles, invalid UTF-8 and incomplete
+inputs are rejected before import changes. Existing export files and same-name
+seeds require `--replace`. Writes are atomic; on filesystems without hard
+links, such as FAT and exFAT drives, a new export file is instead created
+exclusively and removed if the write fails. The app supplies no transport,
+accounts, URLs or automatic export. Aggregates still reveal library taste;
+suppression is not anonymity, and a distribution shift in a synthetic fixture
+does not establish a universal listening preference. See
+[data-safety.md](data-safety.md#aggregate-taste-profile-files).
 
 ## Genre curation
 
