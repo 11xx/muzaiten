@@ -145,6 +145,8 @@
 
 ### Changed
 
+- CLI search streams a fresh saved index without retaining every distinct
+  artist and album string in an intern pool for the entire cache read.
 - Fuzzy GUI searches count matches hidden by exclusions without scoring every
   hidden candidate. The hidden-count label keeps its space while a new query
   runs and follows the current palette.

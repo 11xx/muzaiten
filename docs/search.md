@@ -379,7 +379,10 @@ picker** over the whole library — multi-line rows, romaji matches kanji,
 `Enter` queues the selection and `Alt+Enter` plays it. Piped or without fzf,
 a bare `search` dumps the whole library as TSV. First run builds the cache
 (a few seconds); later runs reuse a fresh cache. Stale caches are rebuilt for
-normal CLI searches and the picker without requiring `--refresh`.
+normal CLI searches and the picker without requiring `--refresh`. A warm CLI
+cache read emits each row and releases its repeated metadata strings as
+it goes; rebuilding a missing or stale cache holds the records until it has
+written the replacement file.
 
 `--cache-info` resolves the cache without displaying library contents. Its
 `muzaiten-search-cache/1` report includes `reason`, `used_cache`, `rebuilt`,

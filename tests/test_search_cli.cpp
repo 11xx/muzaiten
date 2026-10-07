@@ -20,6 +20,7 @@
 #include <QLockFile>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QStandardPaths>
 #include <QSet>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -447,9 +448,11 @@ private slots:
         // all (from the cache), and again when forced to rebuild from the DB.
         int fromCache = 0;
         bool sawSanshin = false;
+        QVector<Search::SearchRecord> cachedRecords;
         const SearchCli::LoadResult cached = SearchCli::streamRecords(
             [&](const Search::SearchRecord &r) {
                 ++fromCache;
+                cachedRecords.push_back(r);
                 if (r.normTitle.contains(QStringLiteral("sanshin"))) {
                     sawSanshin = true;
                 }
@@ -461,11 +464,208 @@ private slots:
         QVERIFY(sawSanshin); // folded norm survived the streaming deserialize
 
         int fromDb = 0;
+        QVector<Search::SearchRecord> rebuiltRecords;
         const SearchCli::LoadResult rebuilt = SearchCli::streamRecords(
-            [&](const Search::SearchRecord &) { ++fromDb; }, /*forceRefresh=*/true);
+            [&](const Search::SearchRecord &r) {
+                ++fromDb;
+                rebuiltRecords.push_back(r);
+            }, /*forceRefresh=*/true);
         QVERIFY(rebuilt.ok);
         QVERIFY(rebuilt.rebuilt);
         QCOMPARE(fromDb, 3);
+        QCOMPARE(cachedRecords.size(), rebuiltRecords.size());
+        for (qsizetype i = 0; i < cachedRecords.size(); ++i) {
+            const Search::SearchRecord &a = cachedRecords[i];
+            const Search::SearchRecord &b = rebuiltRecords[i];
+#define COMPARE_STREAMED_FIELD(field) QCOMPARE(a.field, b.field)
+            COMPARE_STREAMED_FIELD(title);
+            COMPARE_STREAMED_FIELD(artistName);
+            COMPARE_STREAMED_FIELD(albumArtistName);
+            COMPARE_STREAMED_FIELD(albumTitle);
+            COMPARE_STREAMED_FIELD(date);
+            COMPARE_STREAMED_FIELD(filename);
+            COMPARE_STREAMED_FIELD(path);
+            COMPARE_STREAMED_FIELD(normTitle);
+            COMPARE_STREAMED_FIELD(normArtist);
+            COMPARE_STREAMED_FIELD(normAlbumArtist);
+            COMPARE_STREAMED_FIELD(normAlbum);
+            COMPARE_STREAMED_FIELD(normFilename);
+            COMPARE_STREAMED_FIELD(normPath);
+            COMPARE_STREAMED_FIELD(durationMs);
+            COMPARE_STREAMED_FIELD(rating0To100);
+            COMPARE_STREAMED_FIELD(sampleRateHz);
+            COMPARE_STREAMED_FIELD(bitrateKbps);
+            COMPARE_STREAMED_FIELD(channels);
+            COMPARE_STREAMED_FIELD(bitDepth);
+            COMPARE_STREAMED_FIELD(codec);
+            COMPARE_STREAMED_FIELD(trackNumber);
+            COMPARE_STREAMED_FIELD(discNumber);
+            COMPARE_STREAMED_FIELD(fileMtime);
+            COMPARE_STREAMED_FIELD(fileSize);
+            COMPARE_STREAMED_FIELD(source);
+#undef COMPARE_STREAMED_FIELD
+        }
+    }
+
+    void cliOutputMatchesWarmCacheAndRefresh()
+    {
+        const auto runSearch = [](const QStringList &arguments, QByteArray &output, QString &failure) {
+            QProcess process;
+            process.setProgram(muzaitenCtlPath());
+            process.setArguments(arguments);
+            process.start();
+            if (!process.waitForFinished(10000)) {
+                process.kill();
+                process.waitForFinished();
+                failure = process.errorString();
+                return false;
+            }
+            output = process.readAllStandardOutput();
+            if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+                failure = QString::fromUtf8(process.readAllStandardError());
+                return false;
+            }
+            return true;
+        };
+
+        QByteArray warmTsv;
+        QByteArray refreshedTsv;
+        QString failure;
+        QVERIFY2(runSearch({QStringLiteral("search")}, warmTsv, failure), qPrintable(failure));
+        QVERIFY2(runSearch({QStringLiteral("search"), QStringLiteral("--refresh")}, refreshedTsv, failure),
+                 qPrintable(failure));
+        QCOMPARE(warmTsv, refreshedTsv);
+
+        QByteArray warmJson;
+        QByteArray refreshedJson;
+        QVERIFY2(runSearch({QStringLiteral("--json"), QStringLiteral("search")}, warmJson, failure),
+                 qPrintable(failure));
+        QVERIFY2(runSearch({QStringLiteral("--json"), QStringLiteral("search"), QStringLiteral("--refresh")},
+                           refreshedJson, failure), qPrintable(failure));
+        QCOMPARE(warmJson, refreshedJson);
+    }
+
+    void fzfRecordsMatchWarmCacheAndRefresh()
+    {
+        const QString ctlPath = muzaitenCtlPath();
+        const QString scriptPath = QStandardPaths::findExecutable(QStringLiteral("script"));
+        QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
+        if (scriptPath.isEmpty()) QSKIP("util-linux script is needed for the fzf PTY fixture");
+
+        const QString fakeBin = m_temp.path() + QStringLiteral("/fake-bin");
+        QVERIFY(QDir().mkpath(fakeBin));
+        QFile fakeFzf(QDir(fakeBin).filePath(QStringLiteral("fzf")));
+        QVERIFY(fakeFzf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        const QByteArray fakeFzfSource =
+            QByteArrayLiteral("#!/bin/sh\nexec /usr/bin/cat > \"$MUZAITEN_FZF_CAPTURE\"\n");
+        QCOMPARE(fakeFzf.write(fakeFzfSource), static_cast<qint64>(fakeFzfSource.size()));
+        fakeFzf.close();
+        QVERIFY(fakeFzf.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                                       | QFile::ReadGroup | QFile::ExeGroup
+                                       | QFile::ReadOther | QFile::ExeOther));
+
+        const auto capturePicker = [&](const QString &capturePath, bool refresh, QString &failure) {
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert(QStringLiteral("PATH"), fakeBin + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+            env.insert(QStringLiteral("MUZAITEN_FZF_CAPTURE"), capturePath);
+
+            QProcess process;
+            process.setProgram(scriptPath);
+            process.setArguments({QStringLiteral("--quiet"), QStringLiteral("--return"),
+                QStringLiteral("--command"),
+                QStringLiteral("\"%1\" search%2").arg(ctlPath,
+                    refresh ? QStringLiteral(" --refresh") : QString()),
+                QStringLiteral("/dev/null")});
+            process.setProcessEnvironment(env);
+            process.start();
+            if (!process.waitForFinished(10000)) {
+                process.kill();
+                process.waitForFinished();
+                failure = process.errorString();
+                return false;
+            }
+            if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+                failure = QString::fromUtf8(process.readAllStandardError());
+                return false;
+            }
+            return QFileInfo::exists(capturePath);
+        };
+
+        QByteArray warm;
+        QByteArray refreshed;
+        QString failure;
+        const QString warmPath = m_temp.path() + QStringLiteral("/fzf-warm.bin");
+        const QString refreshedPath = m_temp.path() + QStringLiteral("/fzf-refreshed.bin");
+        QVERIFY2(capturePicker(warmPath, false, failure), qPrintable(failure));
+        QFile warmFile(warmPath);
+        QVERIFY(warmFile.open(QIODevice::ReadOnly));
+        warm = warmFile.readAll();
+        QVERIFY2(capturePicker(refreshedPath, true, failure), qPrintable(failure));
+        QFile refreshedFile(refreshedPath);
+        QVERIFY(refreshedFile.open(QIODevice::ReadOnly));
+        refreshed = refreshedFile.readAll();
+        QVERIFY(!warm.isEmpty());
+        QCOMPARE(warm, refreshed);
+    }
+
+    void streamRecordsStopsAfterCorruptCacheOutput()
+    {
+        QFile cache(SearchCli::cachePath());
+        QVERIFY(cache.open(QIODevice::ReadOnly));
+        QByteArray bytes = cache.readAll();
+        QVERIFY(!bytes.isEmpty());
+        cache.close();
+
+        bytes.append('x');
+        QVERIFY(cache.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(cache.write(bytes), static_cast<qint64>(bytes.size()));
+        cache.close();
+
+        int rows = 0;
+        const SearchCli::LoadResult corrupt = SearchCli::streamRecords(
+            [&rows](const Search::SearchRecord &) { ++rows; }, /*forceRefresh=*/false);
+        QVERIFY(!corrupt.ok);
+        QVERIFY(!corrupt.usedCache);
+        QVERIFY(!corrupt.rebuilt);
+        QCOMPARE(corrupt.trackCount, 3);
+        QCOMPARE(rows, 3);
+        QCOMPARE(corrupt.error, QStringLiteral("Search cache is corrupt; retry with --refresh"));
+
+        int refreshedRows = 0;
+        const SearchCli::LoadResult refreshed = SearchCli::streamRecords(
+            [&refreshedRows](const Search::SearchRecord &) { ++refreshedRows; }, /*forceRefresh=*/true);
+        QVERIFY(refreshed.ok);
+        QVERIFY(refreshed.rebuilt);
+        QCOMPARE(refreshedRows, 3);
+    }
+
+    void streamRecordsRebuildsStaleCacheWithoutDuplicateRows()
+    {
+        const QString dbPath = SearchCli::libraryDbPath();
+        {
+            Database db(QStringLiteral("cli-stream-stale-%1")
+                .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY2(db.open(dbPath), qPrintable(db.lastError()));
+            QVERIFY2(db.upsertTrack(makeTrack(m_temp.path(), QStringLiteral("04.flac"),
+                                              QStringLiteral("Fourth"), 20)),
+                     qPrintable(db.lastError()));
+        }
+
+        QVector<Search::SearchRecord> records;
+        const SearchCli::LoadResult stale = SearchCli::streamRecords(
+            [&records](const Search::SearchRecord &record) { records.push_back(record); },
+            /*forceRefresh=*/false);
+        QVERIFY2(stale.ok, qPrintable(stale.error));
+        QVERIFY(stale.wasStale);
+        QVERIFY(stale.rebuilt);
+        QVERIFY(!stale.usedCache);
+        QCOMPARE(stale.trackCount, 4);
+        QCOMPARE(records.size(), 4);
+        const auto fourthCount = std::count_if(records.cbegin(), records.cend(),
+                                               [](const Search::SearchRecord &record) {
+            return record.title == QStringLiteral("Fourth");
+        });
+        QCOMPARE(static_cast<int>(fourthCount), 1);
     }
 
     void clearCacheRemovesFile()
@@ -551,9 +751,24 @@ private slots:
         const QString ctlPath = muzaitenCtlPath();
         QVERIFY2(QFileInfo::exists(ctlPath), qPrintable(ctlPath));
 
+        const QString isolatedDataDir = m_temp.path() + QStringLiteral("/no-embedder-data");
+        QDir().mkpath(isolatedDataDir);
+        {
+            Database db(QStringLiteral("semantic-no-embedder-%1")
+                .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QVERIFY2(db.open(QDir(isolatedDataDir).filePath(QStringLiteral("library.sqlite"))),
+                     qPrintable(db.lastError()));
+        }
+        QString fixtureError;
+        QVERIFY2(createSemanticFeatureFixture(
+                     QDir(isolatedDataDir).filePath(QStringLiteral("features.sqlite")), {}, &fixtureError),
+                 qPrintable(fixtureError));
+
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert(QStringLiteral("PATH"), m_temp.path() + QStringLiteral("/empty-bin"));
         env.insert(QStringLiteral("MUZAITEN_STATE_DIR"), m_temp.path() + QStringLiteral("/state"));
+        env.insert(QStringLiteral("MUZAITEN_DATA_DIR"), isolatedDataDir);
+        env.insert(QStringLiteral("MUZAITEN_CACHE_DIR"), m_temp.path() + QStringLiteral("/empty-cache"));
         env.insert(QStringLiteral("XDG_DATA_HOME"), m_temp.path() + QStringLiteral("/empty-xdg"));
         env.insert(QStringLiteral("UV_TOOL_BIN_DIR"), m_temp.path() + QStringLiteral("/empty-bin"));
         env.remove(QStringLiteral("MUZAITEN_FEATURES_CLAP"));
