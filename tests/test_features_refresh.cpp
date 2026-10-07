@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -42,6 +43,8 @@ private slots:
     void incrementalRescanPreservesFeatureRows();
     void featurePhaseProgressAndStaleDenom();
     void featurePhaseCancelPreservesWrittenRows();
+    void lateNativeCompletionCancelReportsCanceled_data();
+    void lateNativeCompletionCancelReportsCanceled();
     void schemaV3StoreUpgradesInPlaceKeepingFeatureRows();
     void interruptedSemanticMigrationResumesWithoutDuplicateRows();
     void providerStatusAllowsSlowModelInspection();
@@ -432,23 +435,25 @@ QStringList featureRows(QSqlDatabase &db)
 int fileRowCount(const QString &featuresPath)
 {
     QString connectionName;
-    QSqlDatabase db = openReadOnly(featuresPath, &connectionName);
-    if (!db.open()) {
-        const QByteArray message = db.lastError().text().toUtf8();
-        QTest::qFail(message.constData(), __FILE__, __LINE__);
-        QSqlDatabase::removeDatabase(connectionName);
-        return 0;
+    int count = 0;
+    {
+        QSqlDatabase db = openReadOnly(featuresPath, &connectionName);
+        if (!db.open()) {
+            const QByteArray message = db.lastError().text().toUtf8();
+            QTest::qFail(message.constData(), __FILE__, __LINE__);
+        } else {
+            {
+                QSqlQuery query(db);
+                if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM files")) || !query.next()) {
+                    const QByteArray message = query.lastError().text().toUtf8();
+                    QTest::qFail(message.constData(), __FILE__, __LINE__);
+                } else {
+                    count = query.value(0).toInt();
+                }
+            }
+            db.close();
+        }
     }
-    QSqlQuery query(db);
-    if (!query.exec(QStringLiteral("SELECT COUNT(*) FROM files")) || !query.next()) {
-        const QByteArray message = query.lastError().text().toUtf8();
-        QTest::qFail(message.constData(), __FILE__, __LINE__);
-        db.close();
-        QSqlDatabase::removeDatabase(connectionName);
-        return 0;
-    }
-    const int count = query.value(0).toInt();
-    db.close();
     QSqlDatabase::removeDatabase(connectionName);
     return count;
 }
@@ -1443,236 +1448,278 @@ void IndexerScanTest::featurePhaseProgressAndStaleDenom()
     }
 }
 
-void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
+namespace {
+
+constexpr int kCopyCancelItems = 4;
+
+QString cancellationFixtureTemplate()
 {
-    requireTool(QStringLiteral("ffmpeg"));
-    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+    const QString evidenceRoot = qEnvironmentVariable("MUZAITEN_TEST_EVIDENCE_DIR");
+    const QString root = evidenceRoot.isEmpty() ? QDir::tempPath() : evidenceRoot;
+    return QDir(root).filePath(QStringLiteral("%1-%2-XXXXXX")
+        .arg(QString::fromLatin1(QTest::currentTestFunction()),
+             QString::fromLatin1(QTest::currentDataTag())));
+}
 
-    QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    const QString audioDirPath = dir.filePath(QStringLiteral("audio"));
-    QVERIFY(QDir().mkpath(audioDirPath));
-    const QDir audioDir(audioDirPath);
+void retainCancellationFixture(QTemporaryDir &dir)
+{
+    if (!qEnvironmentVariableIsEmpty("MUZAITEN_TEST_EVIDENCE_DIR")) {
+        dir.setAutoRemove(false);
+        qInfo("Retained fixture: %s", qPrintable(dir.path()));
+    }
+}
 
-    // More than the 25-item progress cadence guarantees a non-final progress
-    // line even when an optimized analyzer finishes the corpus in under two
-    // seconds. Differently-duration reps keep the groups distinct.
-    constexpr int kFeatureCancelItems = 32;
+void recordCancellationEvidence(const QTemporaryDir &dir, const QString &name,
+                                const QByteArray &bytes)
+{
+    if (dir.autoRemove()) {
+        return;
+    }
+    QFile file(dir.filePath(name));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(bytes), bytes.size());
+}
+
+void snapshotCancellationStore(const QTemporaryDir &dir, const QString &name)
+{
+    if (!dir.autoRemove()) {
+        QVERIFY(QFile::copy(dir.filePath(QStringLiteral("features.sqlite")), dir.filePath(name)));
+    }
+}
+
+QStringList featureCopyArguments(const QTemporaryDir &dir, const QString &output)
+{
+    return {
+        QStringLiteral("refresh"),
+        QStringLiteral("--library"), dir.filePath(QStringLiteral("library.sqlite")),
+        QStringLiteral("--features"), dir.filePath(QStringLiteral("features.sqlite")),
+        QStringLiteral("--state"), dir.filePath(QStringLiteral("state.sqlite")),
+        QStringLiteral("--stage"), QStringLiteral("features"),
+        QStringLiteral("--jobs"), QStringLiteral("2"),
+        QStringLiteral("--no-semantic"), output,
+    };
+}
+
+void prepareFeatureCopyFixture(const QTemporaryDir &dir)
+{
+    const QString audioPath = dir.filePath(QStringLiteral("audio"));
+    QVERIFY(QDir().mkpath(audioPath));
     QStringList paths;
-    for (int index = 0; index < kFeatureCancelItems; ++index) {
-        const QString path = audioDir.filePath(QStringLiteral("feat-cancel-%1.wav").arg(index));
-        // Long enough to exercise real decoding/DSP without making the test's
-        // cancellation trigger depend on wall-clock speed.
-        const int duration = 20 + index * 3;
-        if (index % 3 == 0) {
-            ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
-                    QStringLiteral("anoisesrc=color=pink:duration=%1:amplitude=0.2:sample_rate=44100")
-                        .arg(duration),
-                    path});
-        } else if (index % 3 == 1) {
-            ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
-                    QStringLiteral(
-                        "aevalsrc=(lt(mod(t\\,%1)\\,0.002))*0.9:duration=%2:sample_rate=44100")
-                        .arg(QString::number(0.35 + 0.05 * (index % 4), 'f', 2))
-                        .arg(duration),
-                    path});
-        } else {
-            ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
-                    QStringLiteral("sine=frequency=%1:duration=%2:sample_rate=44100")
-                        .arg(220 + index * 37)
-                        .arg(duration),
-                    path});
-        }
+    for (int index = 0; index < kCopyCancelItems; ++index) {
+        const QString path = QDir(audioPath).filePath(QStringLiteral("copy-%1.wav").arg(index));
+        // Duration buckets keep each synthetic tone in a distinct group.
+        ffmpeg({QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("sine=frequency=%1:duration=%2:sample_rate=44100")
+                    .arg(220 + index * 37).arg(20 + index * 3), path});
         paths.push_back(path);
     }
+    createLibrary(dir.filePath(QStringLiteral("library.sqlite")), paths);
+    QStringList setupArgs = featureCopyArguments(dir, QStringLiteral("--json"));
+    setupArgs[setupArgs.indexOf(QStringLiteral("--stage")) + 1] = QStringLiteral("all");
+    const QJsonObject setup = runIndexer(setupArgs);
+    recordCancellationEvidence(dir, QStringLiteral("setup.json"), QJsonDocument(setup).toJson());
+    QCOMPARE(setup.value(QStringLiteral("scanned")).toInt(), kCopyCancelItems);
+    QCOMPARE(setup.value(QStringLiteral("featured_fresh")).toInt(), kCopyCancelItems);
 
-    const QString library = dir.filePath(QStringLiteral("library.sqlite"));
-    const QString features = dir.filePath(QStringLiteral("features.sqlite"));
-    createLibrary(library, paths);
-
-    const QStringList identityArgs{
-        QStringLiteral("refresh"),
-        QStringLiteral("--library"),
-        library,
-        QStringLiteral("--features"),
-        features,
-        QStringLiteral("--jobs"),
-        QStringLiteral("1"),
-        QStringLiteral("--json"),
-        QStringLiteral("--stage"),
-        QStringLiteral("identity"),
-    };
-    const QJsonObject first = runIndexer(identityArgs);
-    QCOMPARE(first.value(QStringLiteral("scanned")).toInt(), kFeatureCancelItems);
-
-    runIndexer({
-        QStringLiteral("refresh"),
-        QStringLiteral("--library"),
-        library,
-        QStringLiteral("--features"),
-        features,
-        QStringLiteral("--jobs"),
-        QStringLiteral("2"),
-        QStringLiteral("--json"),
-        QStringLiteral("--stage"),
-        QStringLiteral("features"),
-    });
-
-    int featureCountBefore = 0;
+    const QString connectionName = QStringLiteral("copy-cancel-%1")
+        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
     {
-        QString connectionName;
-        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(dir.filePath(QStringLiteral("features.sqlite")));
         QVERIFY(db.open());
-        QSqlQuery count(db);
-        QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM features")));
-        QVERIFY(count.next());
-        featureCountBefore = count.value(0).toInt();
-        db.close();
-        QSqlDatabase::removeDatabase(connectionName);
+        QSqlQuery query(db);
+        query.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM (SELECT MIN(path) AS path FROM files "
+            "WHERE status='ok' AND content_group_id IS NOT NULL GROUP BY content_group_id) reps "
+            "JOIN file_features ff ON ff.path=reps.path WHERE ff.version=?"));
+        query.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+        QVERIFY(query.exec());
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), kCopyCancelItems);
+        QVERIFY(query.exec(QStringLiteral("UPDATE features SET version='0'")));
     }
-    QVERIFY2(featureCountBefore >= 2,
-             qPrintable(QStringLiteral("need multiple feature rows, got %1").arg(featureCountBefore)));
+    QSqlDatabase::removeDatabase(connectionName);
+    // Missing source paths make a decode fallback fail, so success proves the
+    // durable group writes came from the fresh per-file cache.
+    QVERIFY(QDir().rename(audioPath, dir.filePath(QStringLiteral("input-audio"))));
+    snapshotCancellationStore(dir, QStringLiteral("before.sqlite"));
+}
 
-    {
-        QString connectionName =
-            QStringLiteral("feature-cancel-stale-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-        {
-            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
-            db.setDatabaseName(features);
-            QVERIFY(db.open());
-            // Force every group stale without wiping row structure: version older.
-            QSqlQuery stale(db);
-            QVERIFY2(stale.exec(QStringLiteral("UPDATE features SET version = '0'")),
-                     qPrintable(stale.lastError().text()));
-            db.close();
-        }
-        QSqlDatabase::removeDatabase(connectionName);
-    }
-
+void cancelAtCheckpoint(const QTemporaryDir &dir, const QByteArray &checkpoint,
+                        const QString &output, QByteArray &stdoutBytes)
+{
     QProcess process;
-    process.setReadChannel(QProcess::StandardOutput);
-    process.start(muzaitenIndexPath(), {
-                                           QStringLiteral("refresh"),
-                                           QStringLiteral("--library"),
-                                           library,
-                                           QStringLiteral("--features"),
-                                           features,
-                                           QStringLiteral("--stage"),
-                                           QStringLiteral("features"),
-                                           QStringLiteral("--jobs"),
-                                           QStringLiteral("2"),
-                                           QStringLiteral("--progress=jsonl"),
-                                       });
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("MUZAITEN_TEST_CHECKPOINT"), QString::fromLatin1(checkpoint));
+    process.setProcessEnvironment(environment);
+    process.setReadChannel(QProcess::StandardError);
+    const QString fixture = QDir(QCoreApplication::applicationDirPath())
+        .filePath(QStringLiteral("features_cancel_fixture"));
+    process.start(fixture, featureCopyArguments(dir, output));
     QVERIFY2(process.waitForStarted(5000), qPrintable(process.errorString()));
 
+    QByteArray stderrBytes;
+    const QByteArray marker = "checkpoint " + checkpoint + '\n';
     QElapsedTimer timer;
     timer.start();
-    bool sawLiveProgress = false;
-    QByteArray progressBytes;
-    // Wait for nonzero mid-phase progress (cadence ≥2s or ≥25), then stop.
-    const QRegularExpression midProgress(
-        QStringLiteral("\"completed\":([1-9]\\d*).*\"event\":\"progress\".*\"total\":(\\d+)"));
-    while (timer.elapsed() < 180'000 && process.state() != QProcess::NotRunning && !sawLiveProgress) {
-        if (process.waitForReadyRead(200)) {
-            progressBytes += process.readAllStandardOutput();
-            QRegularExpressionMatchIterator it =
-                midProgress.globalMatch(QString::fromUtf8(progressBytes));
-            while (it.hasNext()) {
-                const QRegularExpressionMatch match = it.next();
-                const int n = match.captured(1).toInt();
-                const int m = match.captured(2).toInt();
-                if (n > 0 && n < m) {
-                    sawLiveProgress = true;
-                    break;
-                }
-            }
-        }
+    while (timer.elapsed() < 5000 && process.state() != QProcess::NotRunning
+           && !stderrBytes.contains(marker)) {
+        process.waitForReadyRead(100);
+        stderrBytes += process.readAllStandardError();
     }
-    QVERIFY2(sawLiveProgress, qPrintable(QString::fromUtf8(progressBytes)));
+    stdoutBytes += process.readAllStandardOutput();
+    if (!stderrBytes.contains(marker)) {
+        recordCancellationEvidence(dir, QStringLiteral("cancel.stdout"), stdoutBytes);
+        recordCancellationEvidence(dir, QStringLiteral("cancel.stderr"), stderrBytes);
+        QFAIL(qPrintable(QString::fromUtf8(stderrBytes + stdoutBytes)));
+    }
     process.terminate();
-    QVERIFY2(process.waitForFinished(180'000), qPrintable(process.errorString()));
-    progressBytes += process.readAllStandardOutput();
+    const bool finished = process.waitForFinished(5000);
+    stdoutBytes += process.readAllStandardOutput();
+    stderrBytes += process.readAllStandardError();
+    recordCancellationEvidence(dir, QStringLiteral("cancel.stdout"), stdoutBytes);
+    recordCancellationEvidence(dir, QStringLiteral("cancel.stderr"), stderrBytes);
+    QVERIFY2(finished, qPrintable(process.errorString()));
     QCOMPARE(process.exitStatus(), QProcess::NormalExit);
     QCOMPARE(process.exitCode(), 130);
+    snapshotCancellationStore(dir, QStringLiteral("canceled.sqlite"));
+}
 
-    const QJsonObject canceledPayload = parseJsonlResult(progressBytes);
-    // With per-file scalar rows fresh, this refresh runs on the SQL copy
-    // path: the mid-phase progress line at the 25-item cadence gives the
-    // terminate() above a real window because every copy is an autocommit
-    // write with a stopRequested() check between rows. The assertions below
-    // therefore pin cancel/durability/resume semantics for copies too.
-    QVERIFY2(canceledPayload.value(QStringLiteral("canceled")).toBool(),
-             qPrintable(QString::fromUtf8(progressBytes)));
-    const int writtenOnCancel = canceledPayload.value(QStringLiteral("features_written")).toInt();
-    QVERIFY(writtenOnCancel >= 1);
-    QVERIFY(writtenOnCancel < featureCountBefore);
-    QVERIFY(canceledPayload.value(QStringLiteral("feature_groups_processed")).toInt()
-            >= writtenOnCancel);
-    QCOMPARE(canceledPayload.value(QStringLiteral("featured_fresh")).toInt(), writtenOnCancel);
-    QCOMPARE(canceledPayload.value(QStringLiteral("featured_stale")).toInt(),
-             featureCountBefore - writtenOnCancel);
-
-    int freshAfterCancel = 0;
-    int staleAfterCancel = 0;
+void checkFeatureInventory(const QTemporaryDir &dir, int freshCount, int staleCount)
+{
+    QString connectionName;
     {
-        QString connectionName;
-        QSqlDatabase db = openReadOnly(features, &connectionName);
+        QSqlDatabase db = openReadOnly(dir.filePath(QStringLiteral("features.sqlite")), &connectionName);
         QVERIFY(db.open());
-        QSqlQuery fresh(db);
-        fresh.prepare(QStringLiteral("SELECT COUNT(*) FROM features WHERE version = ?"));
-        fresh.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
-        QVERIFY(fresh.exec());
-        QVERIFY(fresh.next());
-        freshAfterCancel = fresh.value(0).toInt();
-        QSqlQuery stale(db);
-        QVERIFY(stale.exec(QStringLiteral("SELECT COUNT(*) FROM features WHERE version = '0'")));
-        QVERIFY(stale.next());
-        staleAfterCancel = stale.value(0).toInt();
-        db.close();
-        QSqlDatabase::removeDatabase(connectionName);
+        QSqlQuery query(db);
+        query.prepare(QStringLiteral("SELECT COUNT(*) FROM features WHERE version=?"));
+        query.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
+        QVERIFY(query.exec());
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), freshCount);
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM features WHERE version='0'")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), staleCount);
     }
-    QCOMPARE(freshAfterCancel, writtenOnCancel);
-    QCOMPARE(staleAfterCancel, featureCountBefore - writtenOnCancel);
+    QSqlDatabase::removeDatabase(connectionName);
+}
 
-    QByteArray resumeStderr;
-    const QJsonObject resume = runIndexer({
-        QStringLiteral("refresh"),
-        QStringLiteral("--library"),
-        library,
-        QStringLiteral("--features"),
-        features,
-        QStringLiteral("--stage"),
-        QStringLiteral("features"),
-        QStringLiteral("--jobs"),
-        QStringLiteral("2"),
-        QStringLiteral("--progress=jsonl"),
-    }, &resumeStderr);
-    const QString resumeLog = QString::fromUtf8(resumeStderr);
+void checkCancellationJsonl(const QByteArray &bytes, int completed)
+{
+    QString requestId;
+    int terminalEvents = 0;
+    int lastCompleted = -1;
+    for (const QByteArray &line : bytes.trimmed().split('\n')) {
+        const QJsonObject event = parseJsonObject(line);
+        QCOMPARE(event.value(QStringLiteral("protocol_version")).toInt(), 1);
+        const QString id = event.value(QStringLiteral("request_id")).toString();
+        QVERIFY(!id.isEmpty());
+        if (requestId.isEmpty()) {
+            requestId = id;
+        }
+        QCOMPARE(id, requestId);
+        // A result is terminal; diagnostics never enter the JSONL stream.
+        QCOMPARE(terminalEvents, 0);
+        const QString type = event.value(QStringLiteral("event")).toString();
+        QVERIFY(type == QLatin1String("phase") || type == QLatin1String("progress")
+                || type == QLatin1String("result"));
+        if (type == QLatin1String("progress")) {
+            QCOMPARE(event.value(QStringLiteral("phase")).toString(), QStringLiteral("scalar-features"));
+            QCOMPARE(event.value(QStringLiteral("unit")).toString(), QStringLiteral("groups"));
+            QCOMPARE(event.value(QStringLiteral("total")).toInt(), kCopyCancelItems);
+            lastCompleted = event.value(QStringLiteral("completed")).toInt();
+        } else if (type == QLatin1String("result")) {
+            ++terminalEvents;
+        }
+    }
+    QCOMPARE(terminalEvents, 1);
+    QCOMPARE(lastCompleted, completed);
+}
+
+} // namespace
+
+void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
+{
+    QVERIFY(!QStandardPaths::findExecutable(QStringLiteral("ffmpeg")).isEmpty());
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+    QTemporaryDir dir(cancellationFixtureTemplate());
+    QVERIFY(dir.isValid());
+    retainCancellationFixture(dir);
+    prepareFeatureCopyFixture(dir);
+    QVERIFY(!QTest::currentTestFailed());
+
+    QByteArray progressBytes;
+    cancelAtCheckpoint(dir, "feature-copy:1", QStringLiteral("--progress=jsonl"), progressBytes);
+    QVERIFY(!QTest::currentTestFailed());
+    checkCancellationJsonl(progressBytes, 1);
+    const QJsonObject canceled = parseJsonlResult(progressBytes);
+    QVERIFY2(canceled.value(QStringLiteral("canceled")).toBool(), progressBytes.constData());
+    const int written = canceled.value(QStringLiteral("features_written")).toInt();
+    QCOMPARE(written, 1);
+    QVERIFY(written < kCopyCancelItems);
+    QCOMPARE(canceled.value(QStringLiteral("feature_groups_processed")).toInt(), written);
+    QCOMPARE(canceled.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+    QCOMPARE(canceled.value(QStringLiteral("featured_fresh")).toInt(), written);
+    QCOMPARE(canceled.value(QStringLiteral("featured_stale")).toInt(), kCopyCancelItems - written);
+    checkFeatureInventory(dir, written, kCopyCancelItems - written);
+    QVERIFY(!QTest::currentTestFailed());
+
+    QByteArray resumeBytes;
+    const QJsonObject resume = runIndexer(featureCopyArguments(dir, QStringLiteral("--progress=jsonl")),
+                                         &resumeBytes);
+    recordCancellationEvidence(dir, QStringLiteral("resume.jsonl"), resumeBytes);
+    snapshotCancellationStore(dir, QStringLiteral("resumed.sqlite"));
+    const QString resumeLog = QString::fromUtf8(resumeBytes);
     const qsizetype resumeFeatures = resumeLog.indexOf(QStringLiteral("\"phase\":\"features\""));
     QVERIFY2(resumeFeatures >= 0, qPrintable(resumeLog));
     const QRegularExpression zeroProgress(
         QStringLiteral("\"completed\":0.*\"event\":\"progress\".*\"total\":(\\d+)"));
     const QRegularExpressionMatch match = zeroProgress.match(resumeLog.mid(resumeFeatures));
     QVERIFY2(match.hasMatch(), qPrintable(resumeLog));
-    QCOMPARE(match.captured(1).toInt(), staleAfterCancel);
-    QCOMPARE(resume.value(QStringLiteral("feature_groups_processed")).toInt(), staleAfterCancel);
+    QCOMPARE(match.captured(1).toInt(), kCopyCancelItems - written);
+    QCOMPARE(resume.value(QStringLiteral("feature_groups_processed")).toInt(), kCopyCancelItems - written);
+    QCOMPARE(resume.value(QStringLiteral("features_written")).toInt(), kCopyCancelItems - written);
+    QCOMPARE(resume.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
     QCOMPARE(resume.value(QStringLiteral("canceled")).toBool(), false);
-    QCOMPARE(resume.value(QStringLiteral("featured_fresh")).toInt(), featureCountBefore);
+    QCOMPARE(resume.value(QStringLiteral("featured_fresh")).toInt(), kCopyCancelItems);
     QCOMPARE(resume.value(QStringLiteral("featured_stale")).toInt(), 0);
+    checkFeatureInventory(dir, kCopyCancelItems, 0);
+}
 
-    {
-        QString connectionName;
-        QSqlDatabase db = openReadOnly(features, &connectionName);
-        QVERIFY(db.open());
-        QSqlQuery fresh(db);
-        fresh.prepare(QStringLiteral("SELECT COUNT(*) FROM features WHERE version = ?"));
-        fresh.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
-        QVERIFY(fresh.exec());
-        QVERIFY(fresh.next());
-        QCOMPARE(fresh.value(0).toInt(), featureCountBefore);
-        db.close();
-        QSqlDatabase::removeDatabase(connectionName);
+void IndexerScanTest::lateNativeCompletionCancelReportsCanceled_data()
+{
+    QTest::addColumn<QString>("output");
+    QTest::newRow("json") << QStringLiteral("--json");
+    QTest::newRow("jsonl") << QStringLiteral("--progress=jsonl");
+}
+
+void IndexerScanTest::lateNativeCompletionCancelReportsCanceled()
+{
+    QFETCH(QString, output);
+    QVERIFY(!QStandardPaths::findExecutable(QStringLiteral("ffmpeg")).isEmpty());
+    QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
+    QTemporaryDir dir(cancellationFixtureTemplate());
+    QVERIFY(dir.isValid());
+    retainCancellationFixture(dir);
+    prepareFeatureCopyFixture(dir);
+    QVERIFY(!QTest::currentTestFailed());
+
+    QByteArray bytes;
+    cancelAtCheckpoint(dir, "native-complete:0", output, bytes);
+    QVERIFY(!QTest::currentTestFailed());
+    if (output == QLatin1String("--progress=jsonl")) {
+        checkCancellationJsonl(bytes, kCopyCancelItems);
     }
+    const QJsonObject result = output == QLatin1String("--json")
+        ? parseJsonObject(bytes) : parseJsonlResult(bytes);
+    QVERIFY2(result.value(QStringLiteral("canceled")).toBool(), bytes.constData());
+    QCOMPARE(result.value(QStringLiteral("features_written")).toInt(), kCopyCancelItems);
+    QCOMPARE(result.value(QStringLiteral("feature_groups_processed")).toInt(), kCopyCancelItems);
+    QCOMPARE(result.value(QStringLiteral("feature_groups_failed")).toInt(), 0);
+    QCOMPARE(result.value(QStringLiteral("featured_fresh")).toInt(), kCopyCancelItems);
+    QCOMPARE(result.value(QStringLiteral("featured_stale")).toInt(), 0);
+    QVERIFY(!result.contains(QStringLiteral("semantic")));
+    checkFeatureInventory(dir, kCopyCancelItems, 0);
 }
 
 void IndexerScanTest::schemaV3StoreUpgradesInPlaceKeepingFeatureRows()

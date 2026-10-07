@@ -2257,6 +2257,9 @@ FeatureFillResult ensureFeatureRows(QSqlDatabase &database,
         ++result.processed;
         ++result.written;
         maybeEmit(result.processed == result.total);
+#ifdef MUZAITEN_FEATURES_TEST_CHECKPOINTS
+        featuresTestCheckpoint("feature-copy", result.written);
+#endif
     }
     const int copiesDone = result.processed;
 
@@ -2881,7 +2884,11 @@ int runRefresh(const RefreshOptions &options)
     }
 
     QJsonObject result = runNativeRefresh(options);
+#ifdef MUZAITEN_FEATURES_TEST_CHECKPOINTS
+    featuresTestCheckpoint("native-complete", 0);
+#endif
     if (result.value(QStringLiteral("canceled")).toBool() || stopRequested()) {
+        result.insert(QStringLiteral("canceled"), true);
         emitTerminalResult(result, options.json, options.progress);
         return 130;
     }

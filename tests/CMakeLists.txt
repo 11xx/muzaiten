@@ -229,10 +229,19 @@ target_compile_features(bench_queue_state PRIVATE cxx_std_26)
 add_executable(test_features_refresh
     test_features_refresh.cpp
 )
+add_executable(features_cancel_fixture features_cancel_fixture.cpp)
+target_include_directories(features_cancel_fixture PRIVATE ../src)
+target_link_libraries(features_cancel_fixture PRIVATE
+    muzaiten_core muzaiten_dsp muzaiten_features Qt6::Core Qt6::Sql PkgConfig::Chromaprint
+)
+target_compile_features(features_cancel_fixture PRIVATE cxx_std_26)
+target_compile_options(features_cancel_fixture PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
+)
 target_include_directories(test_features_refresh PRIVATE ../src)
 target_link_libraries(test_features_refresh PRIVATE Qt6::Core Qt6::Sql Qt6::Test)
 target_compile_features(test_features_refresh PRIVATE cxx_std_26)
-add_dependencies(test_features_refresh muzaiten-features)
+add_dependencies(test_features_refresh muzaiten-features features_cancel_fixture)
 add_test(NAME test_features_refresh COMMAND test_features_refresh)
 
 add_executable(test_quality_rank
