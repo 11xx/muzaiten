@@ -31,8 +31,9 @@
   listed targets with provenance and exact reviewed rows. `tgh` defaults prefer
   the decisive `kTGHZ2013` reading. Offline fixtures cover compatibility
   endpoints, malformed reference readings and all cached rare tiers.
-- Han generation and checks accept Python Unicode versions independently of
-  the pinned Unihan 16.0.0 reference, retaining runtime category filtering.
+- Han generation and checks use pinned Unihan 18.0.0 independently of Python's
+  Unicode version, retaining runtime category filtering. Generated headers
+  record the reference hash and Python Unicode database used for coverage.
 - Han word tables accept any spelling and merge readings under simplified keys;
   data checks flag redundant rows and readings at joined keys.
 - A fold regression sweep compares search fold readings against a base

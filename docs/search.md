@@ -110,15 +110,15 @@ Other ideographs with Unihan data read from Unicode's Unihan database:
 `tools/fold-han-data.py` generates `src/search/fold/unihan/han_pinyin.tsv`
 and `han_simplified.tsv` from a pinned Unihan release, leaving out the
 authored ideographs (Unicode License v3, see `UNICODE-LICENSE.txt` there).
-The generator and checker validate the archive hash for Unihan 16.0.0,
-independently of Python's `unicodedata.unidata_version`. Generated keys must
-lie in the tool's ideograph blocks and have category `Lo` in the running
-Python's Unicode database; reference entries for unrecognized characters are
-excluded. Generation is byte-repeatable with the same reference, authored
-tables, and runtime categories. The TSV headers identify the Unihan version, source URL and archive checksum.
-The scoped [Han NOTICE](../src/search/fold/tables/han/NOTICE) retains the exact
-archive copyright notice; binary installs include it and the complete Unicode
-license under `share/licenses/muzaiten/`.
+The generator and checker pin Unihan 18.0.0 and verify its archive hash,
+independently of Python's Unicode version. Generated keys must lie in the
+tool's ideograph blocks and have category `Lo` in the running Python's Unicode
+database; reference entries for unrecognized characters are excluded.
+Generation is byte-repeatable with the same reference, authored tables and
+runtime categories. The TSV headers record both Unicode versions and the
+source URL and hash. The scoped [Han NOTICE](../src/search/fold/tables/han/NOTICE)
+retains the exact archive copyright notice; binary installs include it and the
+complete Unicode license under `share/licenses/muzaiten/`.
 `tools/fold-han-data.py check` compares the authored tables with Unihan and
 Taiwan's CNS 11643 open data for reading attestation,
 including the exact tone of every reading across simplified and traditional
